@@ -1,0 +1,9 @@
+{
+  "op": 10,
+  "d": {
+    "heartbeat_interval": 41250,
+    "_trace": ["[\"gateway-prd-us-east1-c-6w69\",{\"micros\":0.0}]"]
+  },
+  "s": null,
+  "t": null
+}
