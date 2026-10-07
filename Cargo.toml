@@ -20,6 +20,9 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "h
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 rustls-platform-verifier = "0.7"
+# The same aws-lc-rs build rustls uses; remote auth needs its RSA-OAEP directly.
+aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio-util = { version = "0.7", default-features = false }
 base64 = "0.23"
 zeroize = "1.9"

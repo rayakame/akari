@@ -102,6 +102,80 @@ confirmation:
 Either token goes to `POST /auth/authorize-ip {token}` (204), and then the login is sent
 again. The reference says no new CAPTCHA should be needed then.
 
+## QR code
+
+`QrLogin` runs the [desktop side of remote
+authentication](https://docs.discord.food/remote-authentication/desktop) in a background
+task. The UI reads events with `next()`: `Code`, `Scanned`, `CancelledOnPhone`, `Captcha`
+and `Done`.
+
+### The remote auth gateway
+
+Akari connects to `wss://remote-auth-gateway.discord.gg/?v=2`. The version parameter is
+required; v1 is discontinued. The gateway rejects connections without an `Origin` of
+`https://discord.com` (or the ptb or canary origins). Akari also sends its `User-Agent`,
+and uses the same rustls config as everything else. Packets are flat JSON objects with a
+string `op`:
+
+| Direction | `op` | Fields | What Akari does |
+|---|---|---|---|
+| ← | `hello` | `heartbeat_interval`, `timeout_ms` | Starts heartbeating and sends `init` |
+| → | `init` | `encoded_public_key` | SPKI DER of a fresh RSA-2048 key, standard base64 |
+| ← | `nonce_proof` | `encrypted_nonce` | Decrypts the nonce |
+| → | `nonce_proof` | `nonce` | The decrypted nonce, base64url without padding |
+| ← | `pending_remote_init` | `fingerprint` | Checks it, then emits `Code { url: "https://discord.com/ra/<fingerprint>" }` |
+| ← | `pending_ticket` | `encrypted_user_payload` | Emits `Scanned` |
+| ← | `pending_login` | `ticket` | Exchanges the ticket for the token |
+| ← | `cancel` | | Emits `CancelledOnPhone` and starts over |
+| → / ← | `heartbeat` / `heartbeat_ack` | | As on the main gateway |
+
+Before January 2026 the nonce proof was the SHA-256 of the nonce; now it's the nonce
+itself (commit `c97d05b508` in the reference's repository). The fingerprint is the
+base64url (no padding) SHA-256 of our SPKI DER. The reference's own example pair confirms
+this, and Akari's tests check against it. If the fingerprint doesn't match, Akari closes
+the connection and starts over, as the reference recommends.
+
+All three ciphertexts (nonce, user payload, token) are RSA-OAEP with SHA-256 as both the
+hash and the MGF1 hash, with no label. Akari uses aws-lc-rs for the RSA work: rustls
+already builds it, and the `rsa` crate has an unpatched timing advisory (RUSTSEC-2023-0071).
+Every session generates a new key on a blocking thread, so every new connection shows a
+new QR code. The decrypted nonce and token are zeroed after use.
+
+The user payload is `id:discriminator:avatar:username`, with `0` for no avatar. Akari
+splits it into at most four parts, so a colon in the username survives.
+
+### Ticket exchange
+
+`POST /users/@me/remote-auth/login {ticket}` (unauthenticated, with the fingerprint)
+returns `{encrypted_token}`. Like any endpoint it can demand a CAPTCHA: `QrLogin` then
+emits `Captcha`, waits for `solve_captcha` and retries with the `X-Captcha-*` headers.
+The ticket's lifetime isn't documented.
+
+### Sessions end and restart
+
+| Event | Close code | Akari |
+|---|---|---|
+| Finished or cancelled | 1000 | After `pending_login` or `cancel`; anything else is a failure, since the reference says 1000 can also mean a protocol error |
+| Session timed out | 4003 | Starts over at once; the UI shows the new code. The example `timeout_ms` is about 2.4 minutes |
+| Handshake failure | 4002 | Failure |
+| Decode error | 4001 | Failure. The reference's prose still calls 4001 the handshake failure (left over from before the codes were swapped in December 2024), so both count the same |
+| Invalid version | 4000 | Failure |
+| No heartbeat ACK, broken connection | none | Failure before a code was shown, otherwise starts over |
+
+A failure means the session never got as far as showing a code. Akari retries at once,
+then with a backoff of 0.5 to 1 s. After three failures in a row, `next()` returns the
+last error: `Network` for a connection error, otherwise `RemoteAuth`.
+
+Events wait in a queue instead of a channel, so the session keeps heartbeating while the
+UI isn't reading. A new code replaces one that hasn't been read yet, so only the newest
+code ever reaches the UI. `cancel()` or dropping the `QrLogin` closes the connection.
+
+### Side by side with the password form
+
+Both flows use the same `DiscordClient`, and so share its fingerprint. They don't share
+any other state: cancelling one doesn't affect the other. The UI cancels the other flow
+once one of them returns a token.
+
 ## Errors
 
 `LoginError` is typed, and its messages never contain secrets:

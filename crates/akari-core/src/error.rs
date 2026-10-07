@@ -65,6 +65,25 @@ impl TransportError {
     pub(crate) fn tls(err: rustls::Error) -> Self {
         Self::new(TransportErrorKind::Tls, err)
     }
+
+    pub(crate) fn from_tungstenite(err: tokio_tungstenite::tungstenite::Error) -> Self {
+        use tokio_tungstenite::tungstenite::Error;
+
+        let kind = match &err {
+            Error::Io(_) | Error::ConnectionClosed | Error::AlreadyClosed => {
+                TransportErrorKind::Connect
+            }
+            Error::Tls(_) => TransportErrorKind::Tls,
+            Error::Http(_)
+            | Error::HttpFormat(_)
+            | Error::Protocol(_)
+            | Error::Capacity(_)
+            | Error::Utf8(_)
+            | Error::AttackAttempt => TransportErrorKind::Protocol,
+            _ => TransportErrorKind::Other,
+        };
+        Self::new(kind, err)
+    }
 }
 
 #[cfg(test)]

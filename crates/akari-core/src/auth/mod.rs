@@ -3,10 +3,12 @@
 mod captcha;
 mod error;
 mod password;
+mod remote;
 
 pub use captcha::CaptchaChallenge;
 pub use error::{LoginError, LogoutError};
 pub use password::{LoginStep, MfaChallenge, MfaMethod, NewLocation, PasswordLogin};
+pub use remote::{QrEvent, QrLogin, ScannedUser};
 
 use crate::Token;
 use crate::model::{Snowflake, UserMarker};

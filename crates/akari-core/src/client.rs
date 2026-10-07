@@ -6,7 +6,7 @@ use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use tokio::sync::OnceCell;
 
-use crate::auth::{LogoutError, PasswordLogin};
+use crate::auth::{LogoutError, PasswordLogin, QrLogin};
 use crate::error::TransportError;
 use crate::model::{Snowflake, UserMarker};
 use crate::properties::ClientProperties;
@@ -23,6 +23,8 @@ pub struct DiscordClient {
 }
 
 struct Inner {
+    tls: Arc<rustls::ClientConfig>,
+    endpoints: Endpoints,
     properties: ClientProperties,
     rest: RestClient,
     fingerprint: OnceCell<String>,
@@ -97,6 +99,8 @@ impl DiscordClient {
         })?;
         Ok(Self {
             inner: Arc::new(Inner {
+                tls: Arc::new(tls),
+                endpoints,
                 properties,
                 rest,
                 fingerprint: OnceCell::new(),
@@ -112,6 +116,12 @@ impl DiscordClient {
     /// Starts an email/password login. Several logins can run at the same time.
     pub fn password_login(&self) -> PasswordLogin {
         PasswordLogin::new(self.clone())
+    }
+
+    /// Starts a QR code login in the background; must be called inside a Tokio runtime.
+    /// It can run next to a password login.
+    pub fn qr_login(&self) -> QrLogin {
+        QrLogin::start(self.clone())
     }
 
     pub async fn save_token(
@@ -164,6 +174,14 @@ impl DiscordClient {
 
     pub(crate) fn rest(&self) -> &RestClient {
         &self.inner.rest
+    }
+
+    pub(crate) fn tls(&self) -> Arc<rustls::ClientConfig> {
+        self.inner.tls.clone()
+    }
+
+    pub(crate) fn endpoints(&self) -> &Endpoints {
+        &self.inner.endpoints
     }
 
     pub(crate) async fn fingerprint(&self) -> Option<&str> {
