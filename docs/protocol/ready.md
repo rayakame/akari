@@ -64,7 +64,7 @@ Guilds can be unavailable for user accounts too, during an outage or when geo-re
 ([unavailable guild](https://docs.discord.food/gateway/gateway-events#unavailable-guild-object)).
 They become `GatewayGuild::Unavailable`.
 
-Open points, all **unverified**:
+Open points (questions about the reference are **unverified**):
 
 - The gateway guild table doesn't list `id`. We read the top-level `id` for unavailable
   guilds and `properties.id` otherwise. A guild that fails to parse takes its ID from the
@@ -74,6 +74,10 @@ Open points, all **unverified**:
 - Whether `merged_members` has an entry for an unavailable guild. The fixture assumes an
   empty list, which keeps the arrays aligned.
 - `recipient_ids` vs `recipient_id`: see [models.md](models.md#channel).
+- Roles are parsed strictly, so one broken role makes its whole guild unavailable. If that
+  shows up in real traffic, the alternative is to skip broken roles, mark the guild as
+  degraded (for example an `incomplete_roles` flag on `AvailableGuild`) and compute its
+  permissions conservatively. Not implemented.
 
 ## When parts of READY don't parse
 
