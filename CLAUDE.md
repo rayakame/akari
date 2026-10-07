@@ -29,6 +29,9 @@ Reference notes on Discord's layout, behavior and shortcuts live in `docs/ui/`.
 
 ## Repository layout
 
+This is the intended layout; most of it does not exist yet. The crates are empty
+skeletons, and each app folder contains only a README.
+
 | Path | Contents |
 |---|---|
 | `crates/akari-core` | Discord gateway (WebSocket, zlib-stream), REST with rate limit handling, models, state store, SQLite disk cache |
@@ -90,8 +93,8 @@ Decided up front; changing them later is expensive.
   `[lints] workspace = true`; `akari-cli` allows `clippy::unwrap_used` and
   `clippy::expect_used` in `main.rs`.
 - The toolchain is pinned in `rust-toolchain.toml` (exact version, rustfmt, clippy,
-  iOS and Android targets) and `rust-version` in `Cargo.toml` matches it. Bump both
-  together; CI installs the toolchain from the file.
+  rust-src, iOS and Android targets) and `rust-version` in `Cargo.toml` matches it.
+  Bump both together; CI installs the toolchain from the file.
 - Errors via `thiserror`, logging via `tracing`.
 - `cargo fmt`, `cargo clippy -- -D warnings` and `cargo test` must pass.
 - **Most important rule:** commits, pull requests and branch names carry no AI or tool
@@ -106,10 +109,11 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 
-# Cross-target checks (CI runs them; once crates compile C code, locally they need
-# the Apple SDK / Android NDK). rust-toolchain.toml installs both targets.
+# Cross-target checks (CI runs them; rust-toolchain.toml installs both targets).
+# Locally, the iOS check needs the iOS SDK (full Xcode) once crates compile C code.
+# cargo-ndk always needs an Android NDK: ANDROID_NDK_HOME or Android Studio's SDK.
 cargo check --workspace --exclude akari-cli --target aarch64-apple-ios
-cargo ndk -t arm64-v8a check --workspace --exclude akari-cli  # needs cargo-ndk and ANDROID_NDK_HOME
+cargo ndk -t arm64-v8a check --workspace --exclude akari-cli  # needs cargo-ndk
 
 # Banned dependencies (needs cargo-deny)
 cargo deny check bans
