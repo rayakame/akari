@@ -57,9 +57,11 @@ apps/linux ──► akari-core, akari-markdown   (later, as a workspace member)
 - `akari-core` has no UI dependencies and does not depend on `akari-markdown`: it
   stores raw message content, and consumers parse it for display.
 - `akari-core` emits fine-grained events/diffs, never whole lists.
-- `akari_core::model` is the wire layer: it mirrors what Discord sends and nothing else.
-  UIs never see wire models and the SQLite cache never stores them; a state layer converts
-  them into its own memory-efficient types. Wire types carry no UI or storage concerns.
+- The wire layer (`akari_core::model` and the payload types in `akari_core::gateway`)
+  mirrors what Discord sends and nothing else. UIs never see wire structs and the SQLite
+  cache never stores them; a state layer converts them into its own memory-efficient types.
+  Value types (`Snowflake<M>` with its markers, `Timestamp`, `Permissions`) are shared
+  vocabulary the state layer may reuse.
 - `akari-ffi` contains bindings only; logic belongs in `akari-core` or `akari-markdown`.
 - Swift and Kotlin apps reach Rust only through `akari-ffi`; the Linux app links the
   crates directly.

@@ -10,12 +10,20 @@ with fake IDs and names.
 
 ## Wire layer only
 
-`akari_core::model` mirrors what Discord sends and nothing else. Its types are never handed
-to a UI and never stored in the SQLite cache. A later state layer in `akari-core` will have
-its own memory-efficient types and convert from the wire models, so wire types carry no UI
-or storage concerns: no display helpers, no cache keys, no derives for storage. The module
-is `pub` for now because `gateway::decode` returns these types and the integration tests
-read them; the boundary is a rule, not yet enforced by visibility.
+`akari_core::model` and the payload types in `akari_core::gateway` (`Ready`,
+`GatewayGuild`, `Hello` and so on) mirror what Discord sends and nothing else. They are
+never handed to a UI and never stored in the SQLite cache. A later state layer in
+`akari-core` will have its own memory-efficient types and convert from the wire models, so
+wire types carry no UI or storage concerns: no display helpers, no cache keys, no derives
+for storage. The modules are `pub` for now because `gateway::decode` returns these types
+and the integration tests read them; the boundary is a rule, not yet enforced by
+visibility.
+
+Value types are the exception: `Snowflake<M>` with its markers, `Timestamp` and
+`Permissions` are shared vocabulary the state layer may reuse, so its IDs stay typed too.
+`Snowflake` wraps a plain `u64` because the wire format can carry ID 0 (reportedly in read
+states; **unverified**). Whether the state layer wants a `NonZeroU64`-backed ID for 8-byte
+`Option`s is its own decision.
 
 ## Conventions
 
