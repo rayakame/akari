@@ -408,7 +408,14 @@ impl PasswordLogin {
                 flow.step = Step::NewLocation(NewLocation::Email);
                 return Ok(LoginStep::NewLocation(NewLocation::Email));
             }
-            Err(RestError::Api(api)) if api.code == 70007 => {
+            // Phone logins are E.164 numbers; for an email login, 70007 isn't about this login.
+            Err(RestError::Api(api))
+                if api.code == 70007
+                    && flow
+                        .credentials
+                        .as_ref()
+                        .is_some_and(|credentials| credentials.login.expose().starts_with('+')) =>
+            {
                 flow.step = Step::NewLocation(NewLocation::Phone);
                 return Ok(LoginStep::NewLocation(NewLocation::Phone));
             }

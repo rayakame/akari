@@ -64,10 +64,39 @@ pub struct QrLogin {
 // new code can replace one the UI hasn't shown yet.
 #[derive(Default)]
 struct Shared {
-    events: Mutex<VecDeque<Result<QrEvent, LoginError>>>,
+    queue: Mutex<Queue>,
     notify: Notify,
-    finished: AtomicBool,
     awaiting_captcha: AtomicBool,
+}
+
+// `finished` shares the lock with the events, so a reader never sees the end before the
+// last event.
+#[derive(Default)]
+struct Queue {
+    events: VecDeque<Result<QrEvent, LoginError>>,
+    finished: bool,
+}
+
+enum Taken {
+    Event(Result<QrEvent, LoginError>),
+    Finished,
+    Empty,
+}
+
+// Ends the login when the task stops, also by panicking, so `next()` never waits forever.
+struct Ending(Arc<Shared>);
+
+impl Drop for Ending {
+    fn drop(&mut self) {
+        let mut queue = self.0.lock();
+        if !queue.finished {
+            let err = LoginError::RemoteAuth("the QR code login stopped unexpectedly".to_owned());
+            queue.events.push_back(Err(err));
+            queue.finished = true;
+        }
+        drop(queue);
+        self.0.notify.notify_waiters();
+    }
 }
 
 const QR_PREFIX: &str = "https://discord.com/ra/";
@@ -104,11 +133,10 @@ impl QrLogin {
             let notified = self.shared.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if let Some(event) = self.shared.pop() {
-                return event;
-            }
-            if self.shared.finished.load(Ordering::Acquire) {
-                return Err(LoginError::NoPendingStep);
+            match self.shared.take() {
+                Taken::Event(event) => return event,
+                Taken::Finished => return Err(LoginError::NoPendingStep),
+                Taken::Empty => {}
             }
             tokio::select! {
                 () = self.cancel.cancelled() => return Err(LoginError::Cancelled),
@@ -146,32 +174,40 @@ impl Drop for QrLogin {
 impl fmt::Debug for QrLogin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("QrLogin")
-            .field("finished", &self.shared.finished.load(Ordering::Acquire))
+            .field("finished", &self.shared.lock().finished)
             .field("cancelled", &self.cancel.is_cancelled())
             .finish_non_exhaustive()
     }
 }
 
 impl Shared {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Queue> {
+        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn push(&self, event: Result<QrEvent, LoginError>) {
-        let mut events = self.events.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut queue = self.lock();
         if matches!(event, Ok(QrEvent::Code { .. })) {
-            events.retain(|queued| !matches!(queued, Ok(QrEvent::Code { .. })));
+            queue
+                .events
+                .retain(|queued| !matches!(queued, Ok(QrEvent::Code { .. })));
         }
-        events.push_back(event);
-        drop(events);
+        queue.events.push_back(event);
+        drop(queue);
         self.notify.notify_waiters();
     }
 
-    fn pop(&self) -> Option<Result<QrEvent, LoginError>> {
-        self.events
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .pop_front()
+    fn take(&self) -> Taken {
+        let mut queue = self.lock();
+        match queue.events.pop_front() {
+            Some(event) => Taken::Event(event),
+            None if queue.finished => Taken::Finished,
+            None => Taken::Empty,
+        }
     }
 
     fn finish(&self) {
-        self.finished.store(true, Ordering::Release);
+        self.lock().finished = true;
         self.notify.notify_waiters();
     }
 }
@@ -210,6 +246,7 @@ struct ExchangeResponse {
 
 impl Task {
     async fn run(mut self) {
+        let _ending = Ending(self.shared.clone());
         let mut failures = 0;
         loop {
             match self.session().await {
@@ -442,8 +479,8 @@ impl Session {
     }
 
     fn closed(&self, code: Option<u16>) -> Outcome {
+        // A timeout (4003) after the code was shown is the normal end of a code's life.
         match code {
-            Some(4003) => Outcome::End(End::Restart { failure: None }),
             Some(code) => self.lost(&format!("the gateway closed the connection ({code})")),
             None => self.lost("the connection broke"),
         }
@@ -461,5 +498,59 @@ async fn sleep_until(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => std::future::pending().await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn login() -> QrLogin {
+        let (solutions, _) = mpsc::channel(1);
+        QrLogin {
+            shared: Arc::new(Shared::default()),
+            solutions,
+            cancel: CancellationToken::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn events_queued_before_the_end_are_still_delivered() {
+        let qr = login();
+        qr.shared.push(Err(LoginError::Expired));
+        qr.shared.finish();
+
+        assert!(matches!(qr.next().await, Err(LoginError::Expired)));
+        assert!(matches!(qr.next().await, Err(LoginError::NoPendingStep)));
+    }
+
+    #[tokio::test]
+    async fn a_task_that_panics_still_ends_the_login() {
+        let qr = login();
+        let shared = qr.shared.clone();
+
+        let task = tokio::spawn(async move {
+            let _ending = Ending(shared);
+            panic!("the QR task broke");
+        });
+
+        assert!(task.await.is_err());
+        assert!(matches!(qr.next().await, Err(LoginError::RemoteAuth(_))));
+        assert!(matches!(qr.next().await, Err(LoginError::NoPendingStep)));
+    }
+
+    #[tokio::test]
+    async fn a_task_that_ends_normally_adds_no_error() {
+        let qr = login();
+        let shared = qr.shared.clone();
+
+        {
+            let _ending = Ending(shared.clone());
+            shared.push(Err(LoginError::Expired));
+            shared.finish();
+        }
+
+        assert!(matches!(qr.next().await, Err(LoginError::Expired)));
+        assert!(matches!(qr.next().await, Err(LoginError::NoPendingStep)));
     }
 }

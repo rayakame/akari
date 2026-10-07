@@ -36,7 +36,6 @@ pub fn properties() -> ClientProperties {
     ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs))
 }
 
-// Hands out the fingerprint fp.1.
 pub async fn rest_server() -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

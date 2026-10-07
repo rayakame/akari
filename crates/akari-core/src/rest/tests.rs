@@ -319,3 +319,30 @@ async fn captcha_solutions_go_in_headers() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn absurd_rate_limit_delays_count_as_unknown() {
+    let from_body = error_for(
+        ResponseTemplate::new(429).set_body_json(json!({"retry_after": 1e300, "global": false})),
+    )
+    .await;
+    let from_header = error_for(
+        ResponseTemplate::new(429)
+            .insert_header("retry-after", "1e300")
+            .set_body_string("<html></html>"),
+    )
+    .await;
+
+    for err in [from_body, from_header] {
+        assert!(
+            matches!(
+                err,
+                RestError::RateLimited {
+                    retry_after: None,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+    }
+}

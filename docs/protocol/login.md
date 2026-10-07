@@ -97,7 +97,10 @@ confirmation:
   official client, so the user pastes the address (or just the token) into Akari:
   `confirm_new_location` accepts `#token=…`, `?token=…` or a bare token.
 - **Phone login**: error `70007`, and Discord texts a code.
-  `POST /phone-verifications/verify {phone, code}` returns `{token}`.
+  `POST /phone-verifications/verify {phone, code}` returns `{token}`. Akari only treats
+  70007 as this step when the login is an E.164 number (starts with `+`). For an email
+  login it comes back as `LoginError::Discord`, since it can't be about verifying that
+  login's phone number.
 
 Either token goes to `POST /auth/authorize-ip {token}` (204), and then the login is sent
 again. The reference says no new CAPTCHA should be needed then.
@@ -156,7 +159,7 @@ The ticket's lifetime isn't documented.
 | Event | Close code | Akari |
 |---|---|---|
 | Finished or cancelled | 1000 | After `pending_login` or `cancel`; anything else is a failure, since the reference says 1000 can also mean a protocol error |
-| Session timed out | 4003 | Starts over at once; the UI shows the new code. The example `timeout_ms` is about 2.4 minutes |
+| Session timed out | 4003 | After a code was shown: starts over at once, and the UI shows the new code. The example `timeout_ms` is about 2.4 minutes. Before any code: a failure |
 | Handshake failure | 4002 | Failure |
 | Decode error | 4001 | Failure. The reference's prose still calls 4001 the handshake failure (left over from before the codes were swapped in December 2024), so both count the same |
 | Invalid version | 4000 | Failure |
@@ -168,7 +171,9 @@ last error: `Network` for a connection error, otherwise `RemoteAuth`.
 
 Events wait in a queue instead of a channel, so the session keeps heartbeating while the
 UI isn't reading. A new code replaces one that hasn't been read yet, so only the newest
-code ever reaches the UI. `cancel()` or dropping the `QrLogin` closes the connection.
+code ever reaches the UI. `cancel()` or dropping the `QrLogin` closes the connection. If
+the background task ever stops unexpectedly, `next()` returns `RemoteAuth` instead of
+waiting forever.
 
 ### Side by side with the password form
 

@@ -97,7 +97,6 @@ impl Session {
             .unwrap_or_else(|err| panic!("send failed: {err}"));
     }
 
-    // Answers heartbeats on the way; None once the client closed.
     pub async fn recv(&mut self) -> Option<Value> {
         loop {
             let message = timeout(WAIT, self.ws.next())
@@ -122,7 +121,6 @@ impl Session {
         }
     }
 
-    // False if the client closed meanwhile.
     pub async fn pump(&mut self, duration: Duration) -> bool {
         match timeout(duration, self.recv()).await {
             Err(_) => true,

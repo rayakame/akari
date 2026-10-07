@@ -105,8 +105,7 @@ fn rate_limited(headers: &HeaderMap, body: Option<&ErrorBody>) -> RestError {
     let retry_after = body
         .and_then(|body| body.retry_after)
         .or_else(|| header("retry-after").and_then(|value| value.parse().ok()))
-        .filter(|seconds: &f64| seconds.is_finite() && *seconds >= 0.0)
-        .map(Duration::from_secs_f64);
+        .and_then(|seconds: f64| Duration::try_from_secs_f64(seconds).ok());
     let global = body
         .and_then(|body| body.global)
         .unwrap_or_else(|| header("x-ratelimit-global") == Some("true"));

@@ -301,3 +301,23 @@ async fn an_unread_login_keeps_heartbeating_and_keeps_only_the_newest_code() {
         "older codes were still queued"
     );
 }
+
+#[tokio::test]
+async fn timeouts_before_any_code_count_as_failures() {
+    let rest = support::rest_server().await;
+    let mut gateway = RemoteAuthServer::start().await;
+    let qr = support::client(&rest, &gateway).qr_login();
+
+    for _ in 0..3 {
+        let mut session = gateway.accept().await;
+        session.hello(30_000).await;
+        assert!(session.recv().await.is_some());
+        session.close(4003).await;
+    }
+
+    let result = tokio::time::timeout(Duration::from_secs(5), qr.next()).await;
+    assert!(
+        matches!(result, Ok(Err(LoginError::RemoteAuth(_)))),
+        "{result:?}"
+    );
+}

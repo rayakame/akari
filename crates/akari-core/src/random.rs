@@ -1,4 +1,4 @@
-/// A uniformly distributed `f64` in `[0, 1)`, for jitter.
+// Uniform in [0, 1), for jitter.
 pub(crate) fn unit() -> f64 {
     let mut bytes = [0; 8];
     // Only fails without any OS entropy source; zero jitter is harmless then.

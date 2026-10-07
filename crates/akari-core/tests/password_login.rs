@@ -697,3 +697,25 @@ async fn debug_output_never_contains_secrets() {
         }
     }
 }
+
+#[tokio::test]
+async fn phone_verification_on_an_email_login_is_an_error_not_a_step() {
+    let server = server().await;
+    Mock::given(path("/api/v9/auth/login"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "code": 70007,
+            "message": "You need to verify your phone number in order to perform this action.",
+        })))
+        .mount(&server)
+        .await;
+
+    let result = client(&server)
+        .password_login()
+        .submit("me@example.com", password())
+        .await;
+
+    assert!(
+        matches!(result, Err(LoginError::Discord { code: 70007, .. })),
+        "{result:?}"
+    );
+}
