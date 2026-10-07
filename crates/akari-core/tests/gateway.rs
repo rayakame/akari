@@ -293,6 +293,35 @@ fn broken_member_is_skipped() {
 }
 
 #[test]
+fn null_lists_count_as_empty() {
+    let ready = ready_with(|payload| {
+        let data = &mut payload["d"];
+        for list in ["users", "private_channels", "merged_members"] {
+            data[list] = Value::Null;
+        }
+        data["guilds"][0]["channels"] = Value::Null;
+        data["guilds"][0]["threads"] = Value::Null;
+    });
+
+    assert!(ready.users.is_empty());
+    assert!(ready.private_channels.is_empty());
+    assert!(ready.merged_members.is_empty());
+    let GatewayGuild::Available(lab) = &ready.guilds[0] else {
+        panic!("guild became unavailable");
+    };
+    assert!(lab.channels.is_empty());
+    assert!(lab.threads.is_empty());
+}
+
+#[test]
+fn null_member_list_keeps_alignment() {
+    let ready = ready_with(|payload| payload["d"]["merged_members"][0] = Value::Null);
+
+    assert_eq!(ready.merged_members.len(), ready.guilds.len());
+    assert!(ready.merged_members[0].is_empty());
+}
+
+#[test]
 fn guild_with_sparse_properties_stays_available() {
     let ready = ready_with(|payload| {
         let guild = &mut payload["d"]["guilds"][0];

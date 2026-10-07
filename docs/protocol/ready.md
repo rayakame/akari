@@ -88,6 +88,7 @@ failing:
 | A private channel | Skipped |
 | A member in `merged_members` | Skipped; the outer list keeps one entry per guild |
 | An entry in `users` | Skipped; whatever refers to that ID shows an unknown user |
+| `null` instead of one of these lists, or of a member list | Treated as empty; `merged_members` keeps one entry per guild |
 
 Each case logs a `tracing` warning with the entry's ID and the serde error, which can quote
 a value from the payload. Roles stay strict, because a missing role would silently change

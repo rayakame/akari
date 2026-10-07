@@ -15,18 +15,22 @@ where
     D: Deserializer<'de>,
     T: DeserializeOwned,
 {
-    let entries = Vec::<&'de RawValue>::deserialize(deserializer)?;
-    Ok(parse_valid(entries))
+    let entries = Option::<Vec<&'de RawValue>>::deserialize(deserializer)?;
+    Ok(parse_valid(entries.unwrap_or_default()))
 }
 
-// The outer list stays strict so it keeps its alignment with another list.
+// The outer list never drops an entry, so it stays aligned with another list.
 pub(super) fn skip_invalid_in_each<'de, D, T>(deserializer: D) -> Result<Vec<Vec<T>>, D::Error>
 where
     D: Deserializer<'de>,
     T: DeserializeOwned,
 {
-    let lists = Vec::<Vec<&'de RawValue>>::deserialize(deserializer)?;
-    Ok(lists.into_iter().map(parse_valid).collect())
+    let lists = Option::<Vec<Option<Vec<&'de RawValue>>>>::deserialize(deserializer)?;
+    Ok(lists
+        .unwrap_or_default()
+        .into_iter()
+        .map(|list| parse_valid(list.unwrap_or_default()))
+        .collect())
 }
 
 fn parse_valid<T: DeserializeOwned>(entries: Vec<&RawValue>) -> Vec<T> {
