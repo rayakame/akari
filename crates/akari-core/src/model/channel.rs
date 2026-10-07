@@ -2,9 +2,7 @@ use serde::Deserialize;
 
 use super::int_enum::int_enum;
 use super::permissions::Permissions;
-use super::snowflake::{
-    ChannelMarker, GenericMarker, GuildMarker, MessageMarker, Snowflake, UserMarker,
-};
+use super::snowflake::{ChannelMarker, GenericMarker, GuildMarker, Snowflake, UserMarker};
 use super::timestamp::Timestamp;
 use super::user::User;
 
@@ -22,8 +20,8 @@ pub struct Channel {
     pub topic: Option<String>,
     #[serde(default)]
     pub nsfw: bool,
-    /// May point to a message that no longer exists.
-    pub last_message_id: Option<Snowflake<MessageMarker>>,
+    /// The last message, or the last thread in forum and media channels; may no longer exist.
+    pub last_message_id: Option<Snowflake<GenericMarker>>,
     pub last_pin_timestamp: Option<Timestamp>,
     /// Slowmode in seconds.
     pub rate_limit_per_user: Option<u32>,

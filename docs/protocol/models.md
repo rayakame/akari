@@ -103,7 +103,9 @@ Source: [channel object](https://docs.discord.food/resources/channel#channel-str
 - Permission overwrites: `allow` and `deny` are permission strings, `type` is 0 for a role
   and 1 for a member
   ([permission overwrite](https://docs.discord.food/resources/channel#permission-overwrite-structure)).
-- `last_message_id` may point to a message that no longer exists.
+- `last_message_id` is a `Snowflake<GenericMarker>`: in forum and media channels it is the
+  last thread created, in directory channels the last entry, otherwise the last message. It
+  may point to something that no longer exists.
 - `thread_metadata.create_timestamp` is missing for threads created before 2022-01-09
   ([thread metadata](https://docs.discord.food/resources/channel#thread-metadata-structure)).
 - Not modeled: forum and media fields (`available_tags`, `applied_tags`,

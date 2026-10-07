@@ -1,10 +1,11 @@
 use std::collections::{BTreeSet, HashSet};
 
 use akari_core::model::{
-    Channel, ChannelMarker, ChannelType, CurrentUser, Guild, GuildMarker, GuildMember, Message,
-    MessageNotificationLevel, MessageReferenceType, MessageType, NsfwLevel, OverwriteType,
-    PartialEmoji, PermissionOverwrite, Permissions, PremiumTier, PremiumType, ReactionCountDetails,
-    Role, RoleColors, RoleMarker, Snowflake, StickerFormatType, Timestamp, User, UserMarker,
+    Channel, ChannelMarker, ChannelType, CurrentUser, GenericMarker, Guild, GuildMarker,
+    GuildMember, Message, MessageNotificationLevel, MessageReferenceType, MessageType, NsfwLevel,
+    OverwriteType, PartialEmoji, PermissionOverwrite, Permissions, PremiumTier, PremiumType,
+    ReactionCountDetails, Role, RoleColors, RoleMarker, Snowflake, StickerFormatType, Timestamp,
+    User, UserMarker,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -217,6 +218,20 @@ fn thread_parses() {
     assert_eq!(metadata.auto_archive_duration, 1440);
     assert_eq!(metadata.archive_timestamp.unix_millis(), 1_709_281_800_250);
     assert_eq!(metadata.invitable, None);
+}
+
+#[test]
+fn forum_last_message_id_holds_a_thread_id() {
+    let forum: Channel = parse(
+        r#"{"id": "300000000000000030", "type": 15, "last_message_id": "300000000000000031"}"#,
+    );
+    let last: Option<Snowflake<GenericMarker>> = forum.last_message_id;
+
+    assert_eq!(forum.kind, ChannelType::GuildForum);
+    assert_eq!(
+        last.map(Snowflake::cast::<ChannelMarker>),
+        Some(Snowflake::new(300_000_000_000_000_031))
+    );
 }
 
 #[test]
