@@ -1,4 +1,7 @@
-use akari_core::model::{CurrentUser, Permissions, PremiumType, Snowflake, Timestamp, User};
+use akari_core::model::{
+    Channel, ChannelType, CurrentUser, OverwriteType, PermissionOverwrite, Permissions,
+    PremiumType, Snowflake, Timestamp, User,
+};
 use serde::de::DeserializeOwned;
 
 #[track_caller]
@@ -117,4 +120,75 @@ fn current_user_with_only_required_fields_parses() {
     assert_eq!(me.nsfw_allowed, None);
     assert!(!me.verified);
     assert_eq!(me.flags, 0);
+}
+
+#[test]
+fn guild_text_channel_parses() {
+    let channel: Channel = parse(include_str!("fixtures/channel_guild_text.json"));
+
+    assert_eq!(channel.id, Snowflake(300_000_000_000_000_002));
+    assert_eq!(channel.kind, ChannelType::GuildText);
+    assert_eq!(channel.guild_id, Some(Snowflake(200_000_000_000_000_001)));
+    assert_eq!(channel.parent_id, Some(Snowflake(300_000_000_000_000_001)));
+    assert_eq!(channel.name.as_deref(), Some("general"));
+    assert_eq!(channel.topic.as_deref(), Some("Anything goes"));
+    assert_eq!(channel.position, Some(1));
+    assert_eq!(channel.rate_limit_per_user, Some(2));
+    assert_eq!(
+        channel.last_pin_timestamp.map(Timestamp::unix_millis),
+        Some(1_676_625_748_000)
+    );
+    assert_eq!(
+        channel.permission_overwrites,
+        [
+            PermissionOverwrite {
+                id: Snowflake(200_000_000_000_000_001),
+                kind: OverwriteType::Role,
+                allow: Permissions(0),
+                deny: Permissions(2048),
+            },
+            PermissionOverwrite {
+                id: Snowflake(100_000_000_000_000_002),
+                kind: OverwriteType::Member,
+                allow: Permissions(2048),
+                deny: Permissions(0),
+            },
+        ]
+    );
+}
+
+#[test]
+fn dm_channel_parses() {
+    let channel: Channel = parse(include_str!("fixtures/channel_dm.json"));
+
+    assert_eq!(channel.kind, ChannelType::Dm);
+    assert_eq!(channel.guild_id, None);
+    assert_eq!(channel.name, None);
+    assert_eq!(channel.position, None);
+    assert_eq!(channel.recipients.len(), 1);
+    assert_eq!(channel.recipients[0].username, "mira");
+    assert!(channel.recipient_ids.is_empty());
+    assert!(!channel.is_message_request);
+}
+
+#[test]
+fn thread_parses() {
+    let channel: Channel = parse(include_str!("fixtures/channel_thread.json"));
+
+    assert_eq!(channel.kind, ChannelType::PublicThread);
+    assert_eq!(channel.parent_id, Some(Snowflake(300_000_000_000_000_002)));
+    assert_eq!(channel.owner_id, Some(Snowflake(100_000_000_000_000_002)));
+    assert_eq!(channel.message_count, Some(12));
+    let metadata = channel.thread_metadata.unwrap();
+    assert!(!metadata.archived);
+    assert_eq!(metadata.auto_archive_duration, 1440);
+    assert_eq!(metadata.archive_timestamp.unix_millis(), 1_709_281_800_250);
+    assert_eq!(metadata.invitable, None);
+}
+
+#[test]
+fn unknown_channel_type_is_kept() {
+    let channel: Channel = parse(r#"{"id": "300000000000000099", "type": 99}"#);
+
+    assert_eq!(channel.kind, ChannelType::Unknown(99));
 }

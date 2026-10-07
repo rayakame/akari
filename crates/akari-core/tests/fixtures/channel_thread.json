@@ -1,0 +1,22 @@
+{
+  "id": "300000000000000020",
+  "guild_id": "200000000000000001",
+  "parent_id": "300000000000000002",
+  "owner_id": "100000000000000002",
+  "name": "Release checklist",
+  "type": 11,
+  "last_message_id": "400000000000000030",
+  "message_count": 12,
+  "member_count": 3,
+  "rate_limit_per_user": 0,
+  "flags": 0,
+  "thread_metadata": {
+    "archived": false,
+    "auto_archive_duration": 1440,
+    "archive_timestamp": "2024-03-01T08:30:00.250000+00:00",
+    "locked": false,
+    "create_timestamp": "2024-03-01T08:30:00.250000+00:00"
+  },
+  "total_message_sent": 12,
+  "applied_tags": []
+}

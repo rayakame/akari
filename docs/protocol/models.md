@@ -68,3 +68,30 @@ Sources: [user object](https://docs.discord.food/resources/user#user-structure),
 - Not modeled: `collectibles`, `display_name_styles`, `premium_state`, `bio`, `pronouns`,
   `purchased_flags`, `premium_usage_flags`. `email` and `phone` are left out on purpose, so
   personal data can't reach logs through `Debug`.
+
+## Channel
+
+Source: [channel object](https://docs.discord.food/resources/channel#channel-structure).
+
+- One `Channel` struct covers every channel type, as the reference does. Which fields are
+  set depends on `kind`: DMs have `recipients` and no `guild_id`, `name` or `position`;
+  group DMs add `name`, `icon` and `owner_id`; threads have `parent_id`, `owner_id` and
+  `thread_metadata`. The reference has no per-type table; this comes from its examples.
+- `ChannelType` follows the [channel type table](https://docs.discord.food/resources/channel#channel-type).
+  The removed types 7–9 fall into `Unknown`. Thread types 10–12 need API v9 or later.
+- `recipients` vs `recipient_ids`: with `DEDUPE_USER_OBJECTS`, READY replaces recipient
+  user objects with IDs. Footnote 6 of the
+  [Ready structure](https://docs.discord.food/gateway/gateway-events#ready-structure)
+  calls the field `recipient_ids`, the
+  [capability table](https://docs.discord.food/gateway/using-gateway#list-of-capabilities)
+  says `recipient_id`, and the channel table lists neither. We parse `recipient_ids` as an
+  array. **Unverified.**
+- Permission overwrites: `allow` and `deny` are permission strings, `type` is 0 for a role
+  and 1 for a member
+  ([permission overwrite](https://docs.discord.food/resources/channel#permission-overwrite-structure)).
+- `last_message_id` may point to a message that no longer exists.
+- `thread_metadata.create_timestamp` is missing for threads created before 2022-01-09
+  ([thread metadata](https://docs.discord.food/resources/channel#thread-metadata-structure)).
+- Not modeled: forum and media fields (`available_tags`, `applied_tags`,
+  `default_reaction_emoji`, sort order, layout), voice fields (`rtc_region`,
+  `video_quality_mode`, `status`), group DM `nicks`, `safety_warnings`, the thread `member`.
