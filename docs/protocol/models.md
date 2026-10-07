@@ -95,3 +95,39 @@ Source: [channel object](https://docs.discord.food/resources/channel#channel-str
 - Not modeled: forum and media fields (`available_tags`, `applied_tags`,
   `default_reaction_emoji`, sort order, layout), voice fields (`rtc_region`,
   `video_quality_mode`, `status`), group DM `nicks`, `safety_warnings`, the thread `member`.
+
+## Guild
+
+Sources: [guild object](https://docs.discord.food/resources/guild#guild-structure),
+[role](https://docs.discord.food/resources/guild#role-structure),
+[guild member](https://docs.discord.food/resources/guild#guild-member-structure).
+
+- `Guild` is the guild object without `roles`, `emojis`, `stickers` and
+  `premium_subscription_count`. That is what READY puts in a gateway guild's `properties`
+  under `CLIENT_STATE_V2` (see [ready.md](ready.md)); the rest sits next to it.
+- Only `id` and `name` are required; a guild is meaningless without them. Everything else
+  has a default, so one missing field can't make a whole guild unavailable in READY:
+  `owner_id` and `afk_timeout` become `None` (the reference documents no default for the
+  timeout), `preferred_locale` becomes `en-US` (its documented default), the notification
+  level `AllMessages`, the NSFW level `Default` and the boost tier `None`.
+- `features` stays `Vec<String>`. The [feature list](https://docs.discord.food/resources/guild#guild-features)
+  is "subject to arbitrary change", and payloads still carry removed features such as
+  `THREADS_ENABLED`.
+- The reference marks `owner_configured_content_level`,
+  `premium_progress_bar_enabled_user_updated_at` and `official_message_color` as required,
+  but its example guild omits them. None of them is modeled.
+- `MessageNotificationLevel` 2 and 3 only occur in user guild settings
+  ([notification level](https://docs.discord.food/resources/guild#message-notification-level)).
+- Roles require only `id`, `position` and `permissions`. `name` defaults to empty,
+  `hoist`, `managed` and `mentionable` to `false`, and colors to 0.
+- `colors` supersedes the deprecated `color`, but the role in the reference's example
+  guild has no `colors`, so it is an `Option`. `tags` isn't modeled yet. A tag key that is
+  present with a `null` value means `true`, and a missing key means `false`
+  ([role tags](https://docs.discord.food/resources/guild#role-tags-structure)), so it will
+  need a custom deserializer.
+- Members: `user` is missing on the member inside MESSAGE_CREATE, and deduplicated READY
+  payloads replace it with `user_id`. `GuildMember` carries both as `Option`. `joined_at`
+  is an `Option` too, as a precaution, although the reference marks it required.
+- Not modeled: emojis, stickers, soundboard sounds, verification and MFA levels, the
+  explicit content filter, system channel flags, member `avatar_decoration_data`,
+  `collectibles`, `display_name_styles`, `bio`, `unusual_dm_activity_until`, `permissions`.

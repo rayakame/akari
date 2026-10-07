@@ -1,6 +1,7 @@
 use akari_core::model::{
-    Channel, ChannelType, CurrentUser, OverwriteType, PermissionOverwrite, Permissions,
-    PremiumType, Snowflake, Timestamp, User,
+    Channel, ChannelType, CurrentUser, Guild, GuildMember, MessageNotificationLevel, NsfwLevel,
+    OverwriteType, PermissionOverwrite, Permissions, PremiumTier, PremiumType, Role, RoleColors,
+    Snowflake, Timestamp, User,
 };
 use serde::de::DeserializeOwned;
 
@@ -191,4 +192,117 @@ fn unknown_channel_type_is_kept() {
     let channel: Channel = parse(r#"{"id": "300000000000000099", "type": 99}"#);
 
     assert_eq!(channel.kind, ChannelType::Unknown(99));
+}
+
+#[test]
+fn guild_properties_parse() {
+    let guild: Guild = parse(include_str!("fixtures/guild.json"));
+
+    assert_eq!(guild.id, Snowflake(200_000_000_000_000_001));
+    assert_eq!(guild.name, "Akari Lab");
+    assert_eq!(guild.owner_id, Some(Snowflake(100_000_000_000_000_001)));
+    assert_eq!(
+        guild.features,
+        [
+            "COMMUNITY",
+            "NEWS",
+            "THREADS_ENABLED",
+            "SOME_FUTURE_FEATURE"
+        ]
+    );
+    assert_eq!(guild.afk_timeout, Some(300));
+    assert_eq!(
+        guild.system_channel_id,
+        Some(Snowflake(300_000_000_000_000_002))
+    );
+    assert_eq!(guild.preferred_locale, "en-US");
+    assert_eq!(
+        guild.default_message_notifications,
+        MessageNotificationLevel::OnlyMentions
+    );
+    assert_eq!(guild.nsfw_level, NsfwLevel::Default);
+    assert_eq!(guild.premium_tier, PremiumTier::Tier1);
+}
+
+#[test]
+fn guild_with_only_required_fields_parses() {
+    let guild: Guild = parse(r#"{"id": "200000000000000001", "name": "Akari Lab"}"#);
+
+    assert_eq!(guild.owner_id, None);
+    assert_eq!(guild.afk_timeout, None);
+    assert_eq!(guild.preferred_locale, "en-US");
+    assert_eq!(
+        guild.default_message_notifications,
+        MessageNotificationLevel::AllMessages
+    );
+    assert_eq!(guild.nsfw_level, NsfwLevel::Default);
+    assert_eq!(guild.premium_tier, PremiumTier::None);
+    assert!(guild.features.is_empty());
+}
+
+#[test]
+fn role_parses() {
+    let role: Role = parse(include_str!("fixtures/role.json"));
+
+    assert_eq!(role.id, Snowflake(500_000_000_000_000_002));
+    assert_eq!(role.name, "Moderators");
+    assert_eq!(role.permissions, Permissions(1_099_511_627_775));
+    assert_eq!(role.position, 3);
+    assert!(role.hoist);
+    assert_eq!(role.unicode_emoji.as_deref(), Some("\u{2B50}"));
+    assert_eq!(
+        role.colors,
+        Some(RoleColors {
+            primary_color: 3_447_003,
+            secondary_color: Some(16_759_788),
+            tertiary_color: None,
+        })
+    );
+}
+
+#[test]
+fn role_with_only_required_fields_parses() {
+    let role: Role =
+        parse(r#"{"id": "200000000000000001", "position": 0, "permissions": "104324673"}"#);
+
+    assert_eq!(role.name, "");
+    assert_eq!(role.colors, None);
+    assert!(!role.hoist);
+    assert!(!role.managed);
+    assert!(!role.mentionable);
+    assert_eq!(role.permissions, Permissions(104_324_673));
+}
+
+#[test]
+fn guild_member_parses() {
+    let member: GuildMember = parse(include_str!("fixtures/guild_member.json"));
+
+    assert_eq!(
+        member.user.map(|user| user.id),
+        Some(Snowflake(100_000_000_000_000_002))
+    );
+    assert_eq!(member.user_id, None);
+    assert_eq!(member.nick.as_deref(), Some("Mimi"));
+    assert_eq!(member.roles, [Snowflake(500_000_000_000_000_002)]);
+    assert_eq!(
+        member.joined_at.map(Timestamp::unix_millis),
+        Some(1_704_110_400_000)
+    );
+    assert_eq!(
+        member.premium_since.map(Timestamp::unix_millis),
+        Some(1_709_281_800_250)
+    );
+    assert_eq!(member.communication_disabled_until, None);
+    assert_eq!(member.flags, 2);
+}
+
+#[test]
+fn deduplicated_member_parses() {
+    let member: GuildMember = parse(
+        r#"{"user_id": "100000000000000001", "roles": [],
+            "joined_at": "2024-01-01T12:00:00.000000+00:00", "flags": 0}"#,
+    );
+
+    assert_eq!(member.user, None);
+    assert_eq!(member.user_id, Some(Snowflake(100_000_000_000_000_001)));
 }

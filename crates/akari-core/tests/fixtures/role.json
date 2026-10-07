@@ -1,0 +1,20 @@
+{
+  "id": "500000000000000002",
+  "name": "Moderators",
+  "description": null,
+  "permissions": "1099511627775",
+  "position": 3,
+  "color": 3447003,
+  "colors": {
+    "primary_color": 3447003,
+    "secondary_color": 16759788,
+    "tertiary_color": null
+  },
+  "hoist": true,
+  "managed": false,
+  "mentionable": true,
+  "icon": null,
+  "unicode_emoji": "⭐",
+  "flags": 0,
+  "tags": {}
+}
