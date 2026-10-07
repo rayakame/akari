@@ -20,6 +20,9 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "h
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 rustls-platform-verifier = "0.7"
+tokio-util = { version = "0.7", default-features = false }
+base64 = "0.23"
+zeroize = "1.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -29,6 +32,7 @@ zstd = { version = "0.14", default-features = false }
 uniffi = "0.32"
 thiserror = "2"
 tracing = "0.1"
+wiremock = "0.6"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
