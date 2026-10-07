@@ -1,10 +1,15 @@
-use serde::Deserialize;
+use serde::de::{self, Deserialize, Deserializer};
+use serde_json::value::RawValue;
 
+use super::lenient::{IdOnly, skip_invalid};
 use crate::model::{Channel, Guild, Role, Snowflake, Timestamp};
 
 /// A guild in READY or GUILD_CREATE.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "RawGatewayGuild")]
+///
+/// A guild that fails to parse becomes `Unavailable` instead of failing the whole payload.
+/// Decodes only from JSON text (`serde_json::from_str`/`from_slice`), not from a
+/// `serde_json::Value`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GatewayGuild {
     Available(Box<AvailableGuild>),
     /// Down because of an outage, or blocked in the user's region.
@@ -41,7 +46,7 @@ pub struct UnavailableGuild {
     pub geo_restricted: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 struct RawGatewayGuild {
     id: Option<Snowflake>,
     #[serde(default)]
@@ -49,9 +54,9 @@ struct RawGatewayGuild {
     #[serde(default)]
     geo_restricted: bool,
     properties: Option<Guild>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     channels: Vec<Channel>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     threads: Vec<Channel>,
     #[serde(default)]
     roles: Vec<Role>,
@@ -87,5 +92,29 @@ impl TryFrom<RawGatewayGuild> for GatewayGuild {
             large: raw.large,
             premium_subscription_count: raw.premium_subscription_count,
         })))
+    }
+}
+
+impl<'de> Deserialize<'de> for GatewayGuild {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = <&RawValue>::deserialize(deserializer)?;
+        let parsed = serde_json::from_str::<RawGatewayGuild>(raw.get())
+            .map_err(|err| err.to_string())
+            .and_then(|guild| Self::try_from(guild).map_err(str::to_owned));
+        match parsed {
+            Ok(guild) => Ok(guild),
+            Err(err) => {
+                let IdOnly { id } = serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
+                tracing::warn!(
+                    guild_id = id.0,
+                    error = %err,
+                    "guild failed to parse, treating it as unavailable"
+                );
+                Ok(Self::Unavailable(UnavailableGuild {
+                    id,
+                    geo_restricted: false,
+                }))
+            }
+        }
     }
 }

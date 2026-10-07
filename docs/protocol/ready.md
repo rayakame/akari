@@ -56,8 +56,8 @@ With `CLIENT_STATE_V2`, a
 keeps `channels`, `threads`, `roles`, `emojis`, `stickers`, `member_count`, `joined_at`,
 `large` and `premium_subscription_count` at the top level, and the guild object's own
 fields in `properties`. `GatewayGuild::Available` holds `properties` as a `Guild`. A guild
-without `properties` that isn't marked unavailable is an error: Identify didn't request
-`CLIENT_STATE_V2`.
+without `properties` that isn't marked unavailable means Identify didn't request
+`CLIENT_STATE_V2`; it is treated like any guild that fails to parse (see below).
 
 Guilds can be unavailable for user accounts too, during an outage or when geo-restricted:
 `{id, unavailable: true}`, sometimes with `geo_restricted`, `name` and `icon`
@@ -73,3 +73,46 @@ Open points, all **unverified**:
 - Whether `merged_members` has an entry for an unavailable guild. The fixture assumes an
   empty list, which keeps the arrays aligned.
 - `recipient_ids` vs `recipient_id`: see [models.md](models.md#channel).
+
+## When parts of READY don't parse
+
+A third-party client can't control when Discord changes a payload, and one unexpected
+value must not lock the user out. Below the top level, decoding degrades instead of
+failing:
+
+| Part | On a parse error |
+|---|---|
+| A guild | Becomes `GatewayGuild::Unavailable` with its `id`, so `merged_members` stays aligned |
+| A guild channel or thread | Skipped |
+| A private channel | Skipped |
+| A member in `merged_members` | Skipped; the outer list keeps one entry per guild |
+| An entry in `users` | Skipped; whatever refers to that ID shows an unknown user |
+
+Each case logs a `tracing` warning with the entry's ID and the serde error, which can quote
+a value from the payload. Roles stay strict, because a missing role would silently change
+computed permissions: a broken role makes its guild unavailable. Errors in `user`,
+`session_id`, `resume_gateway_url` or the envelope still fail READY, as does a broken
+guild without a top-level `id`.
+
+These parts are parsed from borrowed raw JSON, so `GatewayGuild` and `Ready` decode from
+JSON text only (`serde_json::from_str`/`from_slice`), not from a `serde_json::Value`. Each
+guild is scanned twice: once as raw JSON, then into the model.
+
+## Checking a real READY
+
+The fixture is assembled, not captured. To check the models against a real payload, save
+a decompressed READY gateway message (the whole `{"op": 0, "t": "READY", …}` object)
+received with the capabilities above, then run the ignored test:
+
+```sh
+AKARI_READY_FIXTURE=/path/outside/the/repo/ready.json \
+  cargo test -p akari-core --test gateway -- --ignored captured_ready_decodes_completely
+```
+
+It fails if a guild that the payload doesn't mark unavailable decodes as unavailable, or if
+any user, private channel, member, guild channel or thread is skipped. Its failure messages
+name guild IDs, nothing else from the payload.
+
+A captured READY contains secrets (`analytics_token`, `auth_session_id_hash`, possibly
+`auth_token`) and personal data. Keep it outside the repository, never commit or share it,
+and delete it when you're done.

@@ -2,6 +2,7 @@
 
 mod guild;
 mod hello;
+mod lenient;
 mod payload;
 mod ready;
 

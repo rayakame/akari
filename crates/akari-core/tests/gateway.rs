@@ -1,7 +1,11 @@
 use akari_core::gateway::{
     DecodeError, DispatchEvent, GatewayEvent, GatewayGuild, Hello, Ready, UnavailableGuild, decode,
 };
-use akari_core::model::{ChannelType, PremiumType, Snowflake, Timestamp};
+use akari_core::model::{
+    ChannelType, MessageNotificationLevel, NsfwLevel, Permissions, PremiumTier, PremiumType,
+    Snowflake, Timestamp,
+};
+use serde_json::Value;
 
 #[track_caller]
 fn decode_ok(json: &str) -> GatewayEvent {
@@ -17,6 +21,14 @@ fn ready_from(json: &str) -> (u64, Ready) {
         } => (seq, *ready),
         other => panic!("expected READY, got {other:?}"),
     }
+}
+
+#[track_caller]
+fn ready_with(edit: impl FnOnce(&mut Value)) -> Ready {
+    let mut payload: Value = serde_json::from_str(include_str!("fixtures/ready.json"))
+        .unwrap_or_else(|err| panic!("fixture is not JSON: {err}"));
+    edit(&mut payload);
+    ready_from(&payload.to_string()).1
 }
 
 #[test]
@@ -176,4 +188,196 @@ fn ready_members_and_private_channels_decode() {
     assert_eq!(group.kind, ChannelType::GroupDm);
     assert_eq!(group.name.as_deref(), Some("Weekend plans"));
     assert_eq!(group.recipient_ids.len(), 2);
+}
+
+#[test]
+fn broken_guild_becomes_unavailable() {
+    let ready = ready_with(|payload| payload["d"]["guilds"][0]["properties"]["name"] = 5.into());
+
+    assert_eq!(
+        ready.guilds[0],
+        GatewayGuild::Unavailable(UnavailableGuild {
+            id: Snowflake(200_000_000_000_000_001),
+            geo_restricted: false,
+        })
+    );
+    assert_eq!(ready.guilds.len(), ready.merged_members.len());
+}
+
+#[test]
+fn guild_without_properties_becomes_unavailable() {
+    let ready = ready_with(|payload| {
+        payload["d"]["guilds"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("properties");
+    });
+
+    assert!(matches!(ready.guilds[0], GatewayGuild::Unavailable(_)));
+    assert_eq!(ready.guilds[0].id(), Snowflake(200_000_000_000_000_001));
+}
+
+#[test]
+fn broken_channel_is_skipped() {
+    let ready =
+        ready_with(|payload| payload["d"]["guilds"][0]["channels"][1]["id"] = "general".into());
+
+    let GatewayGuild::Available(lab) = &ready.guilds[0] else {
+        panic!("guild became unavailable");
+    };
+    let ids: Vec<_> = lab.channels.iter().map(|channel| channel.id).collect();
+    assert_eq!(
+        ids,
+        [
+            Snowflake(300_000_000_000_000_001),
+            Snowflake(300_000_000_000_000_003)
+        ]
+    );
+}
+
+#[test]
+fn broken_private_channel_is_skipped() {
+    let ready = ready_with(|payload| payload["d"]["private_channels"][0]["type"] = "dm".into());
+
+    assert_eq!(ready.private_channels.len(), 1);
+    assert_eq!(ready.private_channels[0].kind, ChannelType::GroupDm);
+}
+
+#[test]
+fn broken_user_is_skipped() {
+    let ready = ready_with(|payload| payload["d"]["users"][1]["username"] = Value::Null);
+
+    let ids: Vec<_> = ready.users.iter().map(|user| user.id).collect();
+    assert_eq!(ids, [Snowflake(100_000_000_000_000_002)]);
+}
+
+#[test]
+fn broken_current_user_is_still_an_error() {
+    let mut payload: Value = serde_json::from_str(include_str!("fixtures/ready.json")).unwrap();
+    payload["d"]["user"]["id"] = Value::Null;
+
+    assert!(matches!(
+        decode(payload.to_string().as_bytes()),
+        Err(DecodeError::Json(_))
+    ));
+}
+
+#[test]
+fn broken_member_is_skipped() {
+    let ready =
+        ready_with(|payload| payload["d"]["merged_members"][0][0]["roles"] = "moderators".into());
+
+    assert_eq!(ready.merged_members.len(), ready.guilds.len());
+    assert!(ready.merged_members[0].is_empty());
+    assert!(matches!(ready.guilds[0], GatewayGuild::Available(_)));
+}
+
+#[test]
+fn guild_with_sparse_properties_stays_available() {
+    let ready = ready_with(|payload| {
+        let guild = &mut payload["d"]["guilds"][0];
+        let properties = guild["properties"].as_object_mut().unwrap();
+        for field in [
+            "owner_id",
+            "afk_timeout",
+            "preferred_locale",
+            "default_message_notifications",
+            "nsfw_level",
+            "premium_tier",
+            "features",
+            "icon",
+            "description",
+        ] {
+            properties.remove(field);
+        }
+        for role in guild["roles"].as_array_mut().unwrap() {
+            let role = role.as_object_mut().unwrap();
+            for field in [
+                "name",
+                "color",
+                "colors",
+                "hoist",
+                "managed",
+                "mentionable",
+                "flags",
+            ] {
+                role.remove(field);
+            }
+        }
+    });
+
+    let GatewayGuild::Available(lab) = &ready.guilds[0] else {
+        panic!("guild became unavailable");
+    };
+    let properties = &lab.properties;
+    assert_eq!(properties.name, "Akari \u{2728} Lab");
+    assert_eq!(properties.owner_id, None);
+    assert_eq!(properties.afk_timeout, None);
+    assert_eq!(properties.preferred_locale, "en-US");
+    assert_eq!(
+        properties.default_message_notifications,
+        MessageNotificationLevel::AllMessages
+    );
+    assert_eq!(properties.nsfw_level, NsfwLevel::Default);
+    assert_eq!(properties.premium_tier, PremiumTier::None);
+    assert!(properties.features.is_empty());
+    assert_eq!(lab.roles.len(), 2);
+    assert_eq!(lab.roles[1].name, "");
+    assert!(!lab.roles[1].hoist);
+    assert_eq!(lab.roles[1].permissions, Permissions(1_099_511_627_775));
+}
+
+#[test]
+#[ignore = "needs AKARI_READY_FIXTURE, see docs/protocol/ready.md"]
+fn captured_ready_decodes_completely() {
+    let path = std::env::var("AKARI_READY_FIXTURE")
+        .expect("AKARI_READY_FIXTURE must point to a captured READY message");
+    let json = std::fs::read_to_string(&path).expect("AKARI_READY_FIXTURE is not readable");
+    let raw: Value = serde_json::from_str(&json).expect("AKARI_READY_FIXTURE is not JSON");
+    let (_, ready) = ready_from(&json);
+
+    let data = &raw["d"];
+    let empty = Vec::new();
+    let list = |value: &Value| value.as_array().unwrap_or(&empty).len();
+    assert_eq!(
+        ready.users.len(),
+        list(&data["users"]),
+        "users were skipped"
+    );
+    assert_eq!(
+        ready.private_channels.len(),
+        list(&data["private_channels"]),
+        "private channels were skipped"
+    );
+
+    let raw_guilds = data["guilds"].as_array().unwrap_or(&empty);
+    assert_eq!(ready.guilds.len(), raw_guilds.len());
+    for (guild, raw_guild) in ready.guilds.iter().zip(raw_guilds) {
+        let id = guild.id().0;
+        match guild {
+            GatewayGuild::Available(guild) => {
+                let channels = list(&raw_guild["channels"]);
+                let threads = list(&raw_guild["threads"]);
+                assert_eq!(
+                    guild.channels.len(),
+                    channels,
+                    "channels of guild {id} were skipped"
+                );
+                assert_eq!(
+                    guild.threads.len(),
+                    threads,
+                    "threads of guild {id} were skipped"
+                );
+            }
+            GatewayGuild::Unavailable(_) => {
+                assert_eq!(raw_guild["unavailable"], true, "guild {id} failed to parse");
+            }
+        }
+    }
+
+    let raw_members = data["merged_members"].as_array().unwrap_or(&empty);
+    assert_eq!(ready.merged_members.len(), raw_members.len());
+    for (members, raw) in ready.merged_members.iter().zip(raw_members) {
+        assert_eq!(members.len(), list(raw), "members were skipped");
+    }
 }
