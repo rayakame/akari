@@ -1,0 +1,96 @@
+{
+  "id": "400000000000000001",
+  "type": 0,
+  "content": "Release notes are up <@100000000000000001> 🎉\nSee the embed.",
+  "channel_id": "300000000000000002",
+  "author": {
+    "id": "100000000000000002",
+    "username": "mira",
+    "global_name": "Mira",
+    "avatar": "0123456789abcdef0123456789abcdef",
+    "avatar_decoration_data": null,
+    "discriminator": "0",
+    "public_flags": 64,
+    "primary_guild": null
+  },
+  "attachments": [
+    {
+      "id": "600000000000000001",
+      "filename": "screenshot.png",
+      "size": 48213,
+      "url": "https://cdn.discordapp.com/attachments/300000000000000002/600000000000000001/screenshot.png",
+      "proxy_url": "https://media.discordapp.net/attachments/300000000000000002/600000000000000001/screenshot.png",
+      "width": 1280,
+      "height": 720,
+      "content_type": "image/png",
+      "placeholder": "3PcNNYSFeXh/d3eld0iHZoZgVwh2",
+      "placeholder_version": 1,
+      "content_scan_version": 2
+    }
+  ],
+  "embeds": [
+    {
+      "type": "rich",
+      "title": "Akari 0.1",
+      "description": "First build",
+      "url": "https://example.invalid/releases/0.1",
+      "color": 5793266,
+      "timestamp": "2024-03-01T08:30:00.250000+00:00",
+      "footer": { "text": "Akari" },
+      "author": { "name": "Release Bot", "url": "https://example.invalid" },
+      "thumbnail": {
+        "url": "https://example.invalid/icon.png",
+        "proxy_url": "https://images-ext-1.discordapp.net/external/0/https/example.invalid/icon.png",
+        "width": 128,
+        "height": 128,
+        "flags": 0
+      },
+      "fields": [
+        { "name": "Platform", "value": "macOS", "inline": true },
+        { "name": "Size", "value": "4 MB" }
+      ],
+      "content_scan_version": 2
+    }
+  ],
+  "mentions": [
+    {
+      "id": "100000000000000001",
+      "username": "akari_tester",
+      "global_name": "Akari Tester",
+      "avatar": null,
+      "avatar_decoration_data": null,
+      "discriminator": "0",
+      "public_flags": 64,
+      "primary_guild": null
+    }
+  ],
+  "mention_roles": [],
+  "pinned": false,
+  "mention_everyone": false,
+  "tts": false,
+  "timestamp": "2024-03-01T08:30:00.250000+00:00",
+  "edited_timestamp": null,
+  "flags": 0,
+  "components": [],
+  "sticker_items": [
+    { "id": "700000000000000001", "name": "wave", "format_type": 1 }
+  ],
+  "reactions": [
+    {
+      "emoji": { "id": null, "name": "👍" },
+      "count": 3,
+      "count_details": { "burst": 1, "normal": 2 },
+      "burst_colors": ["#f0ca59", "#4c704f"],
+      "me_burst": false,
+      "me": true
+    },
+    {
+      "emoji": { "id": "800000000000000001", "name": "akari_wave", "animated": true },
+      "count": 1,
+      "count_details": { "burst": 0, "normal": 1 },
+      "burst_colors": [],
+      "me_burst": false,
+      "me": false
+    }
+  ]
+}

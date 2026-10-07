@@ -131,3 +131,38 @@ Sources: [guild object](https://docs.discord.food/resources/guild#guild-structur
 - Not modeled: emojis, stickers, soundboard sounds, verification and MFA levels, the
   explicit content filter, system channel flags, member `avatar_decoration_data`,
   `collectibles`, `display_name_styles`, `bio`, `unusual_dm_activity_until`, `permissions`.
+
+## Message
+
+Sources: [message object](https://docs.discord.food/resources/message#message-structure),
+[MESSAGE_CREATE extra fields](https://docs.discord.food/gateway/gateway-events#message-object-extra-fields).
+
+- One `Message` struct parses REST responses and MESSAGE_CREATE/MESSAGE_UPDATE. The
+  gateway adds `guild_id`, `member` (without `user`), `channel_type` and a `member` key on
+  each mention; only `guild_id` and `member` are modeled.
+- Everything except `id`, `channel_id`, `author`, `timestamp` and `type` falls back to a
+  default when missing.
+- `author` isn't a real user when `webhook_id` is set. Webhook authors have discriminator
+  `"0000"`.
+- `referenced_message` has three states (footnote 5 of the message table): a missing key
+  means Discord didn't try to fetch it, `null` means the message was deleted, and an
+  object is the referenced message. The model uses `Option<Option<Box<Message>>>`.
+- `message_reference.type` is 0 (`DEFAULT`) when missing; 1 (`FORWARD`) comes with
+  `message_snapshots`, which isn't modeled yet
+  ([message reference](https://docs.discord.food/resources/message#message-reference-structure)).
+- `MessageType` has every type of the
+  [message type table](https://docs.discord.food/resources/message#message-type) that
+  isn't struck out. The removed types 13, 33, 34, 43, 45, 56, 57 and 63 fall into
+  `Unknown`.
+- Embed `type` stays a string: 15 kinds are documented, and some are system-only
+  ([embed type](https://docs.discord.food/resources/message#embed-type)). `image`,
+  `thumbnail` and `video` share one media structure.
+- Reactions: `count` is normal and burst reactions together, and `burst_colors` are hex
+  strings like `"#f0ca59"`
+  ([reaction](https://docs.discord.food/resources/message#reaction-structure)). A deleted
+  custom emoji has `name: null`.
+- `nonce` (an integer or a string) isn't modeled; matching our sends to their echoes comes
+  with the REST client.
+- Not modeled: `message_snapshots`, `thread`, `components`, `poll`, `call`, `activity`,
+  `application`, `interaction_metadata`, `resolved`, `role_subscription_data`, `stickers`,
+  `mention_channels`, `potions`, `shared_client_theme`.

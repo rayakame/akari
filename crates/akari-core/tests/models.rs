@@ -1,9 +1,11 @@
 use akari_core::model::{
-    Channel, ChannelType, CurrentUser, Guild, GuildMember, MessageNotificationLevel, NsfwLevel,
-    OverwriteType, PermissionOverwrite, Permissions, PremiumTier, PremiumType, Role, RoleColors,
-    Snowflake, Timestamp, User,
+    Channel, ChannelType, CurrentUser, Guild, GuildMember, Message, MessageNotificationLevel,
+    MessageReferenceType, MessageType, NsfwLevel, OverwriteType, PartialEmoji, PermissionOverwrite,
+    Permissions, PremiumTier, PremiumType, ReactionCountDetails, Role, RoleColors, Snowflake,
+    StickerFormatType, Timestamp, User,
 };
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 #[track_caller]
 fn parse<T: DeserializeOwned>(json: &str) -> T {
@@ -305,4 +307,130 @@ fn deduplicated_member_parses() {
 
     assert_eq!(member.user, None);
     assert_eq!(member.user_id, Some(Snowflake(100_000_000_000_000_001)));
+}
+
+#[test]
+fn message_parses() {
+    let message: Message = parse(include_str!("fixtures/message.json"));
+
+    assert_eq!(message.id, Snowflake(400_000_000_000_000_001));
+    assert_eq!(message.channel_id, Snowflake(300_000_000_000_000_002));
+    assert_eq!(message.kind, MessageType::Default);
+    assert_eq!(message.author.username, "mira");
+    assert_eq!(
+        message.content,
+        "Release notes are up <@100000000000000001> \u{1F389}\nSee the embed."
+    );
+    assert_eq!(message.timestamp.unix_millis(), 1_709_281_800_250);
+    assert_eq!(message.edited_timestamp, None);
+    assert_eq!(message.mentions[0].id, Snowflake(100_000_000_000_000_001));
+    assert_eq!(message.guild_id, None);
+    assert_eq!(message.member, None);
+    assert_eq!(message.referenced_message, None);
+
+    let attachment = &message.attachments[0];
+    assert_eq!(attachment.filename, "screenshot.png");
+    assert_eq!(attachment.size, 48_213);
+    assert_eq!(
+        (attachment.width, attachment.height),
+        (Some(1280), Some(720))
+    );
+    assert_eq!(attachment.content_type.as_deref(), Some("image/png"));
+
+    let embed = &message.embeds[0];
+    assert_eq!(embed.kind.as_deref(), Some("rich"));
+    assert_eq!(embed.color, Some(5_793_266));
+    assert_eq!(
+        embed.footer.as_ref().map(|footer| footer.text.as_str()),
+        Some("Akari")
+    );
+    assert_eq!(
+        embed.thumbnail.as_ref().and_then(|media| media.width),
+        Some(128)
+    );
+    assert_eq!(embed.fields.len(), 2);
+    assert!(embed.fields[0].inline);
+    assert!(!embed.fields[1].inline);
+
+    let [thumbs_up, custom] = &message.reactions[..] else {
+        panic!("expected two reactions, got {:?}", message.reactions);
+    };
+    assert_eq!(
+        thumbs_up.emoji,
+        PartialEmoji {
+            id: None,
+            name: Some("\u{1F44D}".to_owned()),
+            animated: false,
+        }
+    );
+    assert_eq!(
+        thumbs_up.count_details,
+        ReactionCountDetails {
+            normal: 2,
+            burst: 1
+        }
+    );
+    assert!(thumbs_up.me);
+    assert_eq!(custom.emoji.id, Some(Snowflake(800_000_000_000_000_001)));
+    assert!(custom.emoji.animated);
+
+    assert_eq!(message.sticker_items[0].format_type, StickerFormatType::Png);
+}
+
+#[test]
+fn reply_parses() {
+    let message: Message = parse(include_str!("fixtures/message_reply.json"));
+
+    assert_eq!(message.kind, MessageType::Reply);
+    assert_eq!(
+        message.edited_timestamp.map(Timestamp::unix_millis),
+        Some(1_709_281_920_000)
+    );
+    let reference = message.message_reference.unwrap();
+    assert_eq!(reference.kind, MessageReferenceType::Default);
+    assert_eq!(
+        reference.message_id,
+        Some(Snowflake(400_000_000_000_000_001))
+    );
+    let replied_to = message.referenced_message.unwrap().unwrap();
+    assert_eq!(replied_to.content, "Release notes are up");
+}
+
+#[test]
+fn reply_to_deleted_message_parses() {
+    let mut value: Value = parse(include_str!("fixtures/message_reply.json"));
+    value["referenced_message"] = Value::Null;
+    let message: Message = serde_json::from_value(value).unwrap();
+
+    assert_eq!(message.referenced_message, Some(None));
+}
+
+#[test]
+fn reply_without_referenced_message_parses() {
+    let mut value: Value = parse(include_str!("fixtures/message_reply.json"));
+    value.as_object_mut().unwrap().remove("referenced_message");
+    let message: Message = serde_json::from_value(value).unwrap();
+
+    assert_eq!(message.referenced_message, None);
+    assert!(message.message_reference.is_some());
+}
+
+#[test]
+fn gateway_message_parses() {
+    let message: Message = parse(include_str!("fixtures/message_create.json"));
+
+    assert_eq!(message.guild_id, Some(Snowflake(200_000_000_000_000_001)));
+    let member = message.member.unwrap();
+    assert_eq!(member.user, None);
+    assert_eq!(member.nick.as_deref(), Some("Mimi"));
+    assert_eq!(message.mentions[0].id, Snowflake(100_000_000_000_000_001));
+}
+
+#[test]
+fn unknown_message_type_is_kept() {
+    let mut value: Value = parse(include_str!("fixtures/message.json"));
+    value["type"] = 999.into();
+    let message: Message = serde_json::from_value(value).unwrap();
+
+    assert_eq!(message.kind, MessageType::Unknown(999));
 }
