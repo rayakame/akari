@@ -8,6 +8,12 @@ The main reference is [Discord Userdoccers](https://docs.discord.food). These no
 don't copy it. They record what Akari relies on, the decisions we made, and the gaps or
 surprises we found.
 
+## Files
+
+- [gateway.md](gateway.md): payload envelope, opcodes, Hello
+- [ready.md](ready.md): READY, gateway capabilities, gateway guilds
+- [models.md](models.md): users, guilds, channels and messages, and how they map to Rust
+
 ## Conventions
 
 - One file per topic, e.g. `gateway.md`, `rate-limits.md`, `read-states.md`.

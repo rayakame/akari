@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 
 use super::hello::Hello;
+use super::ready::Ready;
 
 /// A message received from the gateway.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +26,7 @@ pub enum GatewayEvent {
 /// The event inside a dispatch.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DispatchEvent {
+    Ready(Box<Ready>),
     /// An event Akari doesn't parse yet, by name.
     Other(String),
 }
@@ -74,6 +76,9 @@ pub fn decode(input: &[u8]) -> Result<GatewayEvent, DecodeError> {
     })
 }
 
-fn decode_dispatch(name: String, _data: &RawValue) -> Result<DispatchEvent, DecodeError> {
-    Ok(DispatchEvent::Other(name))
+fn decode_dispatch(name: String, data: &RawValue) -> Result<DispatchEvent, DecodeError> {
+    Ok(match name.as_str() {
+        "READY" => DispatchEvent::Ready(Box::new(serde_json::from_str(data.get())?)),
+        _ => DispatchEvent::Other(name),
+    })
 }
