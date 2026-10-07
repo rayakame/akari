@@ -24,8 +24,13 @@ may be `null` with `?` before the type
   `deny_unknown_fields`.
 - Only the fields Akari needs are modeled. Each section lists what is left out.
 - The models only implement `Deserialize`; nothing is sent back to Discord yet.
-- **Snowflakes** (`Snowflake`) are strings, but also parse from JSON integers: when an ID
-  was sent as an integer, Discord can echo it back as one
+- **Snowflakes** (`Snowflake<M>`) are typed by what they identify: `Snowflake<UserMarker>`,
+  `Snowflake<GuildMarker>`, `Snowflake<ChannelMarker>` and so on, so a channel ID can't be
+  passed where a guild ID is expected. Permission overwrites, whose ID is a role or a
+  member depending on `type`, use `Snowflake<GenericMarker>`; `Snowflake::cast` converts
+  deliberately, for example a guild ID into its `@everyone` role ID. On the wire IDs are
+  strings, but they also parse from JSON integers: when an ID was sent as an integer,
+  Discord can echo it back as one
   ([ID serialization](https://docs.discord.food/reference#id-serialization)).
 - **Timestamps** (`Timestamp`) are RFC 3339 strings with no or six fractional digits, such
   as `2023-02-17T19:52:19.184000+00:00`

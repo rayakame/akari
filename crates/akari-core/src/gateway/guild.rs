@@ -2,7 +2,7 @@ use serde::de::{self, Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
 use super::lenient::{IdOnly, skip_invalid};
-use crate::model::{Channel, Guild, Role, Snowflake, Timestamp};
+use crate::model::{Channel, Guild, GuildMarker, Role, Snowflake, Timestamp};
 
 /// A guild in READY or GUILD_CREATE.
 ///
@@ -17,7 +17,7 @@ pub enum GatewayGuild {
 }
 
 impl GatewayGuild {
-    pub fn id(&self) -> Snowflake {
+    pub fn id(&self) -> Snowflake<GuildMarker> {
         match self {
             Self::Available(guild) => guild.properties.id,
             Self::Unavailable(guild) => guild.id,
@@ -42,13 +42,13 @@ pub struct AvailableGuild {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnavailableGuild {
-    pub id: Snowflake,
+    pub id: Snowflake<GuildMarker>,
     pub geo_restricted: bool,
 }
 
 #[derive(serde::Deserialize)]
 struct RawGatewayGuild {
-    id: Option<Snowflake>,
+    id: Option<Snowflake<GuildMarker>>,
     #[serde(default)]
     unavailable: bool,
     #[serde(default)]
@@ -106,7 +106,7 @@ impl<'de> Deserialize<'de> for GatewayGuild {
             Err(err) => {
                 let IdOnly { id } = serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
                 tracing::warn!(
-                    guild_id = id.0,
+                    guild_id = id.get(),
                     error = %err,
                     "guild failed to parse, treating it as unavailable"
                 );

@@ -1,8 +1,10 @@
+use std::collections::{BTreeSet, HashSet};
+
 use akari_core::model::{
-    Channel, ChannelType, CurrentUser, Guild, GuildMember, Message, MessageNotificationLevel,
-    MessageReferenceType, MessageType, NsfwLevel, OverwriteType, PartialEmoji, PermissionOverwrite,
-    Permissions, PremiumTier, PremiumType, ReactionCountDetails, Role, RoleColors, Snowflake,
-    StickerFormatType, Timestamp, User,
+    Channel, ChannelMarker, ChannelType, CurrentUser, Guild, GuildMarker, GuildMember, Message,
+    MessageNotificationLevel, MessageReferenceType, MessageType, NsfwLevel, OverwriteType,
+    PartialEmoji, PermissionOverwrite, Permissions, PremiumTier, PremiumType, ReactionCountDetails,
+    Role, RoleColors, RoleMarker, Snowflake, StickerFormatType, Timestamp, User, UserMarker,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -13,26 +15,42 @@ fn parse<T: DeserializeOwned>(json: &str) -> T {
 }
 
 #[test]
-fn snowflakes_parse_from_strings_and_integers() {
+fn ids_parse_from_strings_and_integers() {
     assert_eq!(
-        parse::<Snowflake>(r#""100000000000000001""#),
-        Snowflake(100_000_000_000_000_001)
+        parse::<Snowflake<UserMarker>>(r#""100000000000000001""#),
+        Snowflake::new(100_000_000_000_000_001)
     );
-    assert_eq!(parse::<Snowflake>("373"), Snowflake(373));
+    assert_eq!(parse::<Snowflake<GuildMarker>>("373").get(), 373);
     assert_eq!(
-        parse::<Snowflake>(r#""18446744073709551615""#),
-        Snowflake(u64::MAX)
+        parse::<Snowflake<ChannelMarker>>(r#""18446744073709551615""#).get(),
+        u64::MAX
     );
 }
 
 #[test]
-fn values_that_are_not_snowflakes_are_rejected() {
+fn values_that_are_not_ids_are_rejected() {
     for json in [r#""abc""#, r#""""#, "-1", "1.5", "null"] {
         assert!(
-            serde_json::from_str::<Snowflake>(json).is_err(),
+            serde_json::from_str::<Snowflake<UserMarker>>(json).is_err(),
             "{json} parsed"
         );
     }
+}
+
+#[test]
+fn ids_are_ordered_hashable_and_castable() {
+    let guild: Snowflake<GuildMarker> = Snowflake::new(200_000_000_000_000_001);
+    let everyone: Snowflake<RoleMarker> = guild.cast();
+    assert_eq!(everyone.get(), guild.get());
+
+    let sorted: BTreeSet<Snowflake<UserMarker>> =
+        [Snowflake::new(3), Snowflake::new(1), Snowflake::new(2)].into();
+    assert_eq!(
+        sorted.into_iter().map(Snowflake::get).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    let unique: HashSet<Snowflake<UserMarker>> = [Snowflake::new(1), Snowflake::new(1)].into();
+    assert_eq!(unique.len(), 1);
 }
 
 #[test]
@@ -66,7 +84,7 @@ fn permissions_parse_from_strings() {
 fn user_parses() {
     let user: User = parse(include_str!("fixtures/user.json"));
 
-    assert_eq!(user.id, Snowflake(100_000_000_000_000_002));
+    assert_eq!(user.id, Snowflake::new(100_000_000_000_000_002));
     assert_eq!(user.username, "mira");
     assert_eq!(user.discriminator, "0");
     assert_eq!(user.global_name.as_deref(), Some("Mira"));
@@ -78,12 +96,12 @@ fn user_parses() {
     assert_eq!(user.public_flags, 64);
     assert!(!user.bot);
     let decoration = user.avatar_decoration_data.unwrap();
-    assert_eq!(decoration.sku_id, Snowflake(900_000_000_000_000_001));
+    assert_eq!(decoration.sku_id, Snowflake::new(900_000_000_000_000_001));
     assert_eq!(decoration.expires_at, None);
     let tag = user.primary_guild.unwrap();
     assert_eq!(
         tag.identity_guild_id,
-        Some(Snowflake(200_000_000_000_000_001))
+        Some(Snowflake::new(200_000_000_000_000_001))
     );
     assert_eq!(tag.tag.as_deref(), Some("AKRI"));
 }
@@ -106,7 +124,7 @@ fn webhook_author_without_optional_fields_parses() {
 fn current_user_parses() {
     let me: CurrentUser = parse(include_str!("fixtures/current_user.json"));
 
-    assert_eq!(me.user.id, Snowflake(100_000_000_000_000_001));
+    assert_eq!(me.user.id, Snowflake::new(100_000_000_000_000_001));
     assert_eq!(me.user.username, "akari_tester");
     assert_eq!(me.premium_type, PremiumType::Tier2);
     assert_eq!(me.nsfw_allowed, Some(true));
@@ -129,10 +147,16 @@ fn current_user_with_only_required_fields_parses() {
 fn guild_text_channel_parses() {
     let channel: Channel = parse(include_str!("fixtures/channel_guild_text.json"));
 
-    assert_eq!(channel.id, Snowflake(300_000_000_000_000_002));
+    assert_eq!(channel.id, Snowflake::new(300_000_000_000_000_002));
     assert_eq!(channel.kind, ChannelType::GuildText);
-    assert_eq!(channel.guild_id, Some(Snowflake(200_000_000_000_000_001)));
-    assert_eq!(channel.parent_id, Some(Snowflake(300_000_000_000_000_001)));
+    assert_eq!(
+        channel.guild_id,
+        Some(Snowflake::new(200_000_000_000_000_001))
+    );
+    assert_eq!(
+        channel.parent_id,
+        Some(Snowflake::new(300_000_000_000_000_001))
+    );
     assert_eq!(channel.name.as_deref(), Some("general"));
     assert_eq!(channel.topic.as_deref(), Some("Anything goes"));
     assert_eq!(channel.position, Some(1));
@@ -145,13 +169,13 @@ fn guild_text_channel_parses() {
         channel.permission_overwrites,
         [
             PermissionOverwrite {
-                id: Snowflake(200_000_000_000_000_001),
+                id: Snowflake::new(200_000_000_000_000_001),
                 kind: OverwriteType::Role,
                 allow: Permissions(0),
                 deny: Permissions(2048),
             },
             PermissionOverwrite {
-                id: Snowflake(100_000_000_000_000_002),
+                id: Snowflake::new(100_000_000_000_000_002),
                 kind: OverwriteType::Member,
                 allow: Permissions(2048),
                 deny: Permissions(0),
@@ -179,8 +203,14 @@ fn thread_parses() {
     let channel: Channel = parse(include_str!("fixtures/channel_thread.json"));
 
     assert_eq!(channel.kind, ChannelType::PublicThread);
-    assert_eq!(channel.parent_id, Some(Snowflake(300_000_000_000_000_002)));
-    assert_eq!(channel.owner_id, Some(Snowflake(100_000_000_000_000_002)));
+    assert_eq!(
+        channel.parent_id,
+        Some(Snowflake::new(300_000_000_000_000_002))
+    );
+    assert_eq!(
+        channel.owner_id,
+        Some(Snowflake::new(100_000_000_000_000_002))
+    );
     assert_eq!(channel.message_count, Some(12));
     let metadata = channel.thread_metadata.unwrap();
     assert!(!metadata.archived);
@@ -200,9 +230,12 @@ fn unknown_channel_type_is_kept() {
 fn guild_properties_parse() {
     let guild: Guild = parse(include_str!("fixtures/guild.json"));
 
-    assert_eq!(guild.id, Snowflake(200_000_000_000_000_001));
+    assert_eq!(guild.id, Snowflake::new(200_000_000_000_000_001));
     assert_eq!(guild.name, "Akari Lab");
-    assert_eq!(guild.owner_id, Some(Snowflake(100_000_000_000_000_001)));
+    assert_eq!(
+        guild.owner_id,
+        Some(Snowflake::new(100_000_000_000_000_001))
+    );
     assert_eq!(
         guild.features,
         [
@@ -215,7 +248,7 @@ fn guild_properties_parse() {
     assert_eq!(guild.afk_timeout, Some(300));
     assert_eq!(
         guild.system_channel_id,
-        Some(Snowflake(300_000_000_000_000_002))
+        Some(Snowflake::new(300_000_000_000_000_002))
     );
     assert_eq!(guild.preferred_locale, "en-US");
     assert_eq!(
@@ -246,7 +279,7 @@ fn guild_with_only_required_fields_parses() {
 fn role_parses() {
     let role: Role = parse(include_str!("fixtures/role.json"));
 
-    assert_eq!(role.id, Snowflake(500_000_000_000_000_002));
+    assert_eq!(role.id, Snowflake::new(500_000_000_000_000_002));
     assert_eq!(role.name, "Moderators");
     assert_eq!(role.permissions, Permissions(1_099_511_627_775));
     assert_eq!(role.position, 3);
@@ -281,11 +314,11 @@ fn guild_member_parses() {
 
     assert_eq!(
         member.user.map(|user| user.id),
-        Some(Snowflake(100_000_000_000_000_002))
+        Some(Snowflake::new(100_000_000_000_000_002))
     );
     assert_eq!(member.user_id, None);
     assert_eq!(member.nick.as_deref(), Some("Mimi"));
-    assert_eq!(member.roles, [Snowflake(500_000_000_000_000_002)]);
+    assert_eq!(member.roles, [Snowflake::new(500_000_000_000_000_002)]);
     assert_eq!(
         member.joined_at.map(Timestamp::unix_millis),
         Some(1_704_110_400_000)
@@ -306,15 +339,18 @@ fn deduplicated_member_parses() {
     );
 
     assert_eq!(member.user, None);
-    assert_eq!(member.user_id, Some(Snowflake(100_000_000_000_000_001)));
+    assert_eq!(
+        member.user_id,
+        Some(Snowflake::new(100_000_000_000_000_001))
+    );
 }
 
 #[test]
 fn message_parses() {
     let message: Message = parse(include_str!("fixtures/message.json"));
 
-    assert_eq!(message.id, Snowflake(400_000_000_000_000_001));
-    assert_eq!(message.channel_id, Snowflake(300_000_000_000_000_002));
+    assert_eq!(message.id, Snowflake::new(400_000_000_000_000_001));
+    assert_eq!(message.channel_id, Snowflake::new(300_000_000_000_000_002));
     assert_eq!(message.kind, MessageType::Default);
     assert_eq!(message.author.username, "mira");
     assert_eq!(
@@ -323,7 +359,10 @@ fn message_parses() {
     );
     assert_eq!(message.timestamp.unix_millis(), 1_709_281_800_250);
     assert_eq!(message.edited_timestamp, None);
-    assert_eq!(message.mentions[0].id, Snowflake(100_000_000_000_000_001));
+    assert_eq!(
+        message.mentions[0].id,
+        Snowflake::new(100_000_000_000_000_001)
+    );
     assert_eq!(message.guild_id, None);
     assert_eq!(message.member, None);
     assert_eq!(message.referenced_message, None);
@@ -371,7 +410,10 @@ fn message_parses() {
         }
     );
     assert!(thumbs_up.me);
-    assert_eq!(custom.emoji.id, Some(Snowflake(800_000_000_000_000_001)));
+    assert_eq!(
+        custom.emoji.id,
+        Some(Snowflake::new(800_000_000_000_000_001))
+    );
     assert!(custom.emoji.animated);
 
     assert_eq!(message.sticker_items[0].format_type, StickerFormatType::Png);
@@ -390,7 +432,7 @@ fn reply_parses() {
     assert_eq!(reference.kind, MessageReferenceType::Default);
     assert_eq!(
         reference.message_id,
-        Some(Snowflake(400_000_000_000_000_001))
+        Some(Snowflake::new(400_000_000_000_000_001))
     );
     let replied_to = message.referenced_message.unwrap().unwrap();
     assert_eq!(replied_to.content, "Release notes are up");
@@ -419,11 +461,17 @@ fn reply_without_referenced_message_parses() {
 fn gateway_message_parses() {
     let message: Message = parse(include_str!("fixtures/message_create.json"));
 
-    assert_eq!(message.guild_id, Some(Snowflake(200_000_000_000_000_001)));
+    assert_eq!(
+        message.guild_id,
+        Some(Snowflake::new(200_000_000_000_000_001))
+    );
     let member = message.member.unwrap();
     assert_eq!(member.user, None);
     assert_eq!(member.nick.as_deref(), Some("Mimi"));
-    assert_eq!(message.mentions[0].id, Snowflake(100_000_000_000_000_001));
+    assert_eq!(
+        message.mentions[0].id,
+        Snowflake::new(100_000_000_000_000_001)
+    );
 }
 
 #[test]

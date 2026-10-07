@@ -1,12 +1,12 @@
 use serde::Deserialize;
 
 use super::int_enum::int_enum;
-use super::snowflake::Snowflake;
+use super::snowflake::{GuildMarker, SkuMarker, Snowflake, UserMarker};
 
 /// Another user as Discord sends them in messages, DMs and member lists.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct User {
-    pub id: Snowflake,
+    pub id: Snowflake<UserMarker>,
     pub username: String,
     /// `"0"` for users on the new username system.
     #[serde(default)]
@@ -47,7 +47,7 @@ pub struct CurrentUser {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct AvatarDecorationData {
     pub asset: String,
-    pub sku_id: Snowflake,
+    pub sku_id: Snowflake<SkuMarker>,
     /// Unix seconds, not an ISO 8601 string.
     pub expires_at: Option<i64>,
 }
@@ -55,7 +55,7 @@ pub struct AvatarDecorationData {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PrimaryGuild {
     pub identity_enabled: Option<bool>,
-    pub identity_guild_id: Option<Snowflake>,
+    pub identity_guild_id: Option<Snowflake<GuildMarker>>,
     pub tag: Option<String>,
     pub badge: Option<String>,
 }

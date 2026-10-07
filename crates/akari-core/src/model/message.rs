@@ -2,17 +2,20 @@ use serde::{Deserialize, Deserializer};
 
 use super::guild::GuildMember;
 use super::int_enum::int_enum;
-use super::snowflake::Snowflake;
+use super::snowflake::{
+    AttachmentMarker, ChannelMarker, EmojiMarker, GuildMarker, MessageMarker, RoleMarker,
+    Snowflake, StickerMarker, WebhookMarker,
+};
 use super::timestamp::Timestamp;
 use super::user::User;
 
 /// A message from REST or from MESSAGE_CREATE / MESSAGE_UPDATE.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Message {
-    pub id: Snowflake,
-    pub channel_id: Snowflake,
+    pub id: Snowflake<MessageMarker>,
+    pub channel_id: Snowflake<ChannelMarker>,
     /// Only in gateway events, and only for guild messages.
-    pub guild_id: Option<Snowflake>,
+    pub guild_id: Option<Snowflake<GuildMarker>>,
     /// Not a real user when `webhook_id` is set.
     pub author: User,
     /// The author's membership without `user`; only in gateway events for guild messages.
@@ -28,7 +31,7 @@ pub struct Message {
     #[serde(default)]
     pub mentions: Vec<User>,
     #[serde(default)]
-    pub mention_roles: Vec<Snowflake>,
+    pub mention_roles: Vec<Snowflake<RoleMarker>>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
     #[serde(default)]
@@ -39,7 +42,7 @@ pub struct Message {
     pub sticker_items: Vec<StickerItem>,
     #[serde(default)]
     pub pinned: bool,
-    pub webhook_id: Option<Snowflake>,
+    pub webhook_id: Option<Snowflake<WebhookMarker>>,
     #[serde(rename = "type")]
     pub kind: MessageType,
     #[serde(default)]
@@ -60,7 +63,7 @@ where
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Attachment {
-    pub id: Snowflake,
+    pub id: Snowflake<AttachmentMarker>,
     pub filename: String,
     pub title: Option<String>,
     /// Alt text.
@@ -171,7 +174,7 @@ pub struct ReactionCountDetails {
 /// A Unicode emoji (no `id`) or a custom emoji. A deleted custom emoji has no `name`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PartialEmoji {
-    pub id: Option<Snowflake>,
+    pub id: Option<Snowflake<EmojiMarker>>,
     pub name: Option<String>,
     #[serde(default)]
     pub animated: bool,
@@ -182,14 +185,14 @@ pub struct PartialEmoji {
 pub struct MessageReference {
     #[serde(rename = "type", default)]
     pub kind: MessageReferenceType,
-    pub message_id: Option<Snowflake>,
-    pub channel_id: Option<Snowflake>,
-    pub guild_id: Option<Snowflake>,
+    pub message_id: Option<Snowflake<MessageMarker>>,
+    pub channel_id: Option<Snowflake<ChannelMarker>>,
+    pub guild_id: Option<Snowflake<GuildMarker>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct StickerItem {
-    pub id: Snowflake,
+    pub id: Snowflake<StickerMarker>,
     pub name: String,
     pub format_type: StickerFormatType,
 }

@@ -2,17 +2,19 @@ use serde::Deserialize;
 
 use super::int_enum::int_enum;
 use super::permissions::Permissions;
-use super::snowflake::Snowflake;
+use super::snowflake::{
+    ChannelMarker, GenericMarker, GuildMarker, MessageMarker, Snowflake, UserMarker,
+};
 use super::timestamp::Timestamp;
 use super::user::User;
 
 /// A guild channel, thread, DM or group DM. Which fields are set depends on `kind`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Channel {
-    pub id: Snowflake,
+    pub id: Snowflake<ChannelMarker>,
     #[serde(rename = "type")]
     pub kind: ChannelType,
-    pub guild_id: Option<Snowflake>,
+    pub guild_id: Option<Snowflake<GuildMarker>>,
     pub position: Option<i32>,
     #[serde(default)]
     pub permission_overwrites: Vec<PermissionOverwrite>,
@@ -21,7 +23,7 @@ pub struct Channel {
     #[serde(default)]
     pub nsfw: bool,
     /// May point to a message that no longer exists.
-    pub last_message_id: Option<Snowflake>,
+    pub last_message_id: Option<Snowflake<MessageMarker>>,
     pub last_pin_timestamp: Option<Timestamp>,
     /// Slowmode in seconds.
     pub rate_limit_per_user: Option<u32>,
@@ -32,13 +34,13 @@ pub struct Channel {
     pub recipients: Vec<User>,
     /// Replaces `recipients` in deduplicated READY payloads.
     #[serde(default)]
-    pub recipient_ids: Vec<Snowflake>,
+    pub recipient_ids: Vec<Snowflake<UserMarker>>,
     /// Group DM icon hash.
     pub icon: Option<String>,
     /// Owner of a group DM or thread.
-    pub owner_id: Option<Snowflake>,
+    pub owner_id: Option<Snowflake<UserMarker>>,
     /// The category of a guild channel, or the parent channel of a thread.
-    pub parent_id: Option<Snowflake>,
+    pub parent_id: Option<Snowflake<ChannelMarker>>,
     pub thread_metadata: Option<ThreadMetadata>,
     pub message_count: Option<u32>,
     pub member_count: Option<u32>,
@@ -53,7 +55,7 @@ pub struct Channel {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PermissionOverwrite {
     /// A role ID or a user ID, depending on `kind`.
-    pub id: Snowflake,
+    pub id: Snowflake<GenericMarker>,
     #[serde(rename = "type")]
     pub kind: OverwriteType,
     #[serde(default)]

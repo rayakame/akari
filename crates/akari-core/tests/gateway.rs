@@ -118,14 +118,14 @@ fn ready_decodes() {
         ready.resume_gateway_url,
         "wss://gateway-us-east1-b.discord.gg"
     );
-    assert_eq!(ready.user.user.id, Snowflake(100_000_000_000_000_001));
+    assert_eq!(ready.user.user.id, Snowflake::new(100_000_000_000_000_001));
     assert_eq!(ready.user.premium_type, PremiumType::None);
     let user_ids: Vec<_> = ready.users.iter().map(|user| user.id).collect();
     assert_eq!(
         user_ids,
         [
-            Snowflake(100_000_000_000_000_002),
-            Snowflake(100_000_000_000_000_003)
+            Snowflake::new(100_000_000_000_000_002),
+            Snowflake::new(100_000_000_000_000_003)
         ]
     );
 }
@@ -141,7 +141,7 @@ fn ready_guilds_decode() {
     else {
         panic!("unexpected guilds: {:?}", ready.guilds);
     };
-    assert_eq!(lab.properties.id, Snowflake(200_000_000_000_000_001));
+    assert_eq!(lab.properties.id, Snowflake::new(200_000_000_000_000_001));
     assert_eq!(lab.properties.name, "Akari \u{2728} Lab");
     assert_eq!(lab.member_count, Some(3));
     assert_eq!(lab.premium_subscription_count, 2);
@@ -163,7 +163,7 @@ fn ready_guilds_decode() {
     assert_eq!(
         down,
         &UnavailableGuild {
-            id: Snowflake(200_000_000_000_000_002),
+            id: Snowflake::new(200_000_000_000_000_002),
             geo_restricted: false,
         }
     );
@@ -175,7 +175,7 @@ fn ready_members_and_private_channels_decode() {
 
     assert_eq!(ready.merged_members.len(), ready.guilds.len());
     let me = &ready.merged_members[0][0];
-    assert_eq!(me.user_id, Some(Snowflake(100_000_000_000_000_001)));
+    assert_eq!(me.user_id, Some(Snowflake::new(100_000_000_000_000_001)));
     assert_eq!(me.nick.as_deref(), Some("Tester"));
     assert!(ready.merged_members[1].is_empty());
 
@@ -183,7 +183,7 @@ fn ready_members_and_private_channels_decode() {
         panic!("unexpected private channels: {:?}", ready.private_channels);
     };
     assert_eq!(dm.kind, ChannelType::Dm);
-    assert_eq!(dm.recipient_ids, [Snowflake(100_000_000_000_000_002)]);
+    assert_eq!(dm.recipient_ids, [Snowflake::new(100_000_000_000_000_002)]);
     assert!(dm.recipients.is_empty());
     assert_eq!(group.kind, ChannelType::GroupDm);
     assert_eq!(group.name.as_deref(), Some("Weekend plans"));
@@ -197,7 +197,7 @@ fn broken_guild_becomes_unavailable() {
     assert_eq!(
         ready.guilds[0],
         GatewayGuild::Unavailable(UnavailableGuild {
-            id: Snowflake(200_000_000_000_000_001),
+            id: Snowflake::new(200_000_000_000_000_001),
             geo_restricted: false,
         })
     );
@@ -214,7 +214,10 @@ fn guild_without_properties_becomes_unavailable() {
     });
 
     assert!(matches!(ready.guilds[0], GatewayGuild::Unavailable(_)));
-    assert_eq!(ready.guilds[0].id(), Snowflake(200_000_000_000_000_001));
+    assert_eq!(
+        ready.guilds[0].id(),
+        Snowflake::new(200_000_000_000_000_001)
+    );
 }
 
 #[test]
@@ -229,8 +232,8 @@ fn broken_channel_is_skipped() {
     assert_eq!(
         ids,
         [
-            Snowflake(300_000_000_000_000_001),
-            Snowflake(300_000_000_000_000_003)
+            Snowflake::new(300_000_000_000_000_001),
+            Snowflake::new(300_000_000_000_000_003)
         ]
     );
 }
@@ -248,7 +251,7 @@ fn broken_user_is_skipped() {
     let ready = ready_with(|payload| payload["d"]["users"][1]["username"] = Value::Null);
 
     let ids: Vec<_> = ready.users.iter().map(|user| user.id).collect();
-    assert_eq!(ids, [Snowflake(100_000_000_000_000_002)]);
+    assert_eq!(ids, [Snowflake::new(100_000_000_000_000_002)]);
 }
 
 #[test]
@@ -353,7 +356,7 @@ fn captured_ready_decodes_completely() {
     let raw_guilds = data["guilds"].as_array().unwrap_or(&empty);
     assert_eq!(ready.guilds.len(), raw_guilds.len());
     for (guild, raw_guild) in ready.guilds.iter().zip(raw_guilds) {
-        let id = guild.id().0;
+        let id = guild.id().get();
         match guild {
             GatewayGuild::Available(guild) => {
                 let channels = list(&raw_guild["channels"]);

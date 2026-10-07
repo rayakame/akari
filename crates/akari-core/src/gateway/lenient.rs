@@ -3,11 +3,11 @@ use std::any::type_name;
 use serde::de::{Deserialize, DeserializeOwned, Deserializer};
 use serde_json::value::RawValue;
 
-use crate::model::Snowflake;
+use crate::model::{GenericMarker, GuildMarker, Snowflake};
 
 #[derive(serde::Deserialize)]
 pub(super) struct IdOnly {
-    pub(super) id: Snowflake,
+    pub(super) id: Snowflake<GuildMarker>,
 }
 
 pub(super) fn skip_invalid<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -51,10 +51,10 @@ fn parse_valid<T: DeserializeOwned>(entries: Vec<&RawValue>) -> Vec<T> {
 fn entry_id(entry: &RawValue) -> Option<u64> {
     #[derive(serde::Deserialize)]
     struct Ids {
-        id: Option<Snowflake>,
-        user_id: Option<Snowflake>,
+        id: Option<Snowflake<GenericMarker>>,
+        user_id: Option<Snowflake<GenericMarker>>,
     }
 
     let ids: Ids = serde_json::from_str(entry.get()).ok()?;
-    ids.id.or(ids.user_id).map(|id| id.0)
+    ids.id.or(ids.user_id).map(Snowflake::get)
 }
