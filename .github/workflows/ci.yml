@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Without arguments, rustup installs the toolchain pinned in rust-toolchain.toml.
+      - run: rustup toolchain install
+      - run: cargo fmt --all --check
+
+  clippy-test:
+    name: clippy + test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  ios:
+    name: check aarch64-apple-ios
+    # aws-lc-sys needs the Apple SDK, which only macOS runners have.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --exclude akari-cli --target aarch64-apple-ios --locked
+
+  android:
+    name: check aarch64-linux-android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk@4.1.2
+      # cargo-ndk finds the runner's preinstalled NDK through ANDROID_NDK_HOME.
+      - run: cargo ndk -t arm64-v8a check --workspace --exclude akari-cli --locked
+
+  deny:
+    name: cargo-deny bans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The action installs the toolchain from rust-toolchain.toml on its own.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans

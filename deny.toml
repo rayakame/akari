@@ -1,0 +1,7 @@
+[bans]
+deny = [
+    { crate = "openssl", reason = "TLS must be rustls on every platform" },
+    { crate = "openssl-sys", reason = "TLS must be rustls on every platform" },
+    { crate = "native-tls", reason = "TLS must be rustls on every platform" },
+    { crate = "ring", reason = "aws-lc-rs must stay the only rustls crypto provider" },
+]

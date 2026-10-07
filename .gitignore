@@ -1,0 +1,37 @@
+# Rust
+target/
+
+# Secrets: tokens must never be committed
+.env
+.env.*
+!.env.example
+.envrc
+*.token
+token.txt
+tokens/
+
+# Local caches hold real messages
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# macOS
+.DS_Store
+
+# Xcode / SwiftPM
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.build/
+.swiftpm/
+
+# Gradle / Android
+.gradle/
+apps/android/**/build/
+local.properties
+.cxx/
+.externalNativeBuild/

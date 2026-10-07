@@ -1,0 +1,11 @@
+[package]
+name = "akari-core"
+description = "Discord gateway, REST client, state store and SQLite cache for Akari"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

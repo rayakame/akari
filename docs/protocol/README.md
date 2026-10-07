@@ -1,0 +1,17 @@
+# Protocol notes
+
+Notes on the Discord user-account API as Akari uses it: the gateway (connecting,
+identify and resume, zlib-stream compression, opcodes, events), REST (endpoints, rate
+limits, error codes), data models, and observed behavior the reference doesn't cover.
+
+The main reference is [Discord Userdoccers](https://docs.discord.food). These notes
+don't copy it. They record what Akari relies on, the decisions we made, and the gaps or
+surprises we found.
+
+## Conventions
+
+- One file per topic, e.g. `gateway.md`, `rate-limits.md`, `read-states.md`.
+- Link the relevant docs.discord.food page for every claim, or say how it was observed.
+- Mark anything not yet confirmed against real traffic as **unverified**.
+- Never include tokens, cookies, real user/guild/channel IDs, message content or other
+  personal data. Use obviously fake values in examples.
