@@ -67,7 +67,8 @@ They become `GatewayGuild::Unavailable`.
 Open points, all **unverified**:
 
 - The gateway guild table doesn't list `id`. We read the top-level `id` for unavailable
-  guilds and `properties.id` otherwise.
+  guilds and `properties.id` otherwise. A guild that fails to parse takes its ID from the
+  top level, or from `properties` if there is none.
 - `data_mode` is `full`, `partial` or `unavailable`. `partial` only happens when Identify
   sends `client_state.guild_versions`, which Akari doesn't do yet, so it isn't handled.
 - Whether `merged_members` has an entry for an unavailable guild. The fixture assumes an
@@ -92,7 +93,7 @@ Each case logs a `tracing` warning with the entry's ID and the serde error, whic
 a value from the payload. Roles stay strict, because a missing role would silently change
 computed permissions: a broken role makes its guild unavailable. Errors in `user`,
 `session_id`, `resume_gateway_url` or the envelope still fail READY, as does a broken
-guild without a top-level `id`.
+guild with no readable `id` at the top level or in `properties`.
 
 These parts are parsed from borrowed raw JSON, so `GatewayGuild` and `Ready` decode from
 JSON text only (`serde_json::from_str`/`from_slice`), not from a `serde_json::Value`. Each

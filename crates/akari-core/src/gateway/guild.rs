@@ -104,7 +104,13 @@ impl<'de> Deserialize<'de> for GatewayGuild {
         match parsed {
             Ok(guild) => Ok(guild),
             Err(err) => {
-                let IdOnly { id } = serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
+                let ids: GuildIds = serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
+                let id = ids
+                    .id
+                    .or(ids.properties.map(|properties| properties.id))
+                    .ok_or_else(|| {
+                        de::Error::custom(format!("guild without an id failed to parse: {err}"))
+                    })?;
                 tracing::warn!(
                     guild_id = id.get(),
                     error = %err,
@@ -117,4 +123,11 @@ impl<'de> Deserialize<'de> for GatewayGuild {
             }
         }
     }
+}
+
+// The gateway guild table doesn't document a top-level `id`, so `properties.id` backs it up.
+#[derive(serde::Deserialize)]
+struct GuildIds {
+    id: Option<Snowflake<GuildMarker>>,
+    properties: Option<IdOnly>,
 }
