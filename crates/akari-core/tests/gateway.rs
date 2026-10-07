@@ -424,8 +424,12 @@ fn captured_ready_decodes_completely() {
         }
     }
 
+    assert_eq!(
+        ready.merged_members.len(),
+        ready.guilds.len(),
+        "merged_members is not aligned with guilds"
+    );
     let raw_members = data["merged_members"].as_array().unwrap_or(&empty);
-    assert_eq!(ready.merged_members.len(), raw_members.len());
     for (members, raw) in ready.merged_members.iter().zip(raw_members) {
         assert_eq!(members.len(), list(raw), "members were skipped");
     }

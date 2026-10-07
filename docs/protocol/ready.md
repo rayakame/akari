@@ -111,9 +111,11 @@ AKARI_READY_FIXTURE=/path/outside/the/repo/ready.json \
   cargo test -p akari-core --test gateway -- --ignored captured_ready_decodes_completely
 ```
 
-It fails if a guild that the payload doesn't mark unavailable decodes as unavailable, or if
-any user, private channel, member, guild channel or thread is skipped. Its failure messages
-name guild IDs, nothing else from the payload.
+It fails if a guild that the payload doesn't mark unavailable decodes as unavailable, if
+`merged_members` doesn't have one entry per guild, or if any user, private channel, member,
+guild channel or thread is skipped. Its own messages name only guild IDs, but when a strict
+part of READY fails, the panic shows serde's error, which can quote a value from the
+payload. Check the output before sharing it.
 
 A captured READY contains secrets (`analytics_token`, `auth_session_id_hash`, possibly
 `auth_token`) and personal data. Keep it outside the repository, never commit or share it,
