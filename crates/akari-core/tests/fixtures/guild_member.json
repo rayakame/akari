@@ -1,0 +1,24 @@
+{
+  "avatar": null,
+  "banner": null,
+  "communication_disabled_until": null,
+  "unusual_dm_activity_until": null,
+  "flags": 2,
+  "joined_at": "2024-01-01T12:00:00.000000+00:00",
+  "nick": "Mimi",
+  "pending": false,
+  "premium_since": "2024-03-01T08:30:00.250000+00:00",
+  "roles": ["500000000000000002"],
+  "user": {
+    "id": "100000000000000002",
+    "username": "mira",
+    "global_name": "Mira",
+    "avatar": "0123456789abcdef0123456789abcdef",
+    "discriminator": "0",
+    "public_flags": 64,
+    "avatar_decoration_data": null,
+    "primary_guild": null
+  },
+  "mute": false,
+  "deaf": false
+}

@@ -29,12 +29,12 @@ Reference notes on Discord's layout, behavior and shortcuts live in `docs/ui/`.
 
 ## Repository layout
 
-This is the intended layout; most of it does not exist yet. The crates are empty
-skeletons, and each app folder contains only a README.
+This is the intended layout. So far `akari-core` has the wire models and gateway decoding;
+the other crates are still empty skeletons, and each app folder contains only a README.
 
 | Path | Contents |
 |---|---|
-| `crates/akari-core` | Discord gateway (WebSocket, zlib-stream), REST with rate limit handling, models, state store, SQLite disk cache |
+| `crates/akari-core` | Discord gateway (WebSocket, zstd-stream), REST with rate limit handling, models, state store, SQLite disk cache |
 | `crates/akari-markdown` | Discord-flavored markdown parser |
 | `crates/akari-ffi` | UniFFI bindings only (Swift for macOS/iOS, Kotlin for Android) |
 | `crates/akari-cli` | Terminal test client for developing the core |
@@ -57,6 +57,11 @@ apps/linux ──► akari-core, akari-markdown   (later, as a workspace member)
 - `akari-core` has no UI dependencies and does not depend on `akari-markdown`: it
   stores raw message content, and consumers parse it for display.
 - `akari-core` emits fine-grained events/diffs, never whole lists.
+- The wire layer (`akari_core::model` and the payload types in `akari_core::gateway`)
+  mirrors what Discord sends and nothing else. UIs never see wire structs and the SQLite
+  cache never stores them; a state layer converts them into its own memory-efficient types.
+  Value types (`Snowflake<M>` with its markers, `Timestamp`, `Permissions`) are shared
+  vocabulary the state layer may reuse.
 - `akari-ffi` contains bindings only; logic belongs in `akari-core` or `akari-markdown`.
 - Swift and Kotlin apps reach Rust only through `akari-ffi`; the Linux app links the
   crates directly.

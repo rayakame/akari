@@ -1,0 +1,153 @@
+{
+  "op": 0,
+  "s": 1,
+  "t": "READY",
+  "d": {
+    "v": 9,
+    "_trace": ["[\"gateway-prd-us-east1-c-0000\",{\"micros\":0.0}]"],
+    "user": {
+      "id": "100000000000000001",
+      "username": "akari_tester",
+      "global_name": "Akari Tester",
+      "avatar": null,
+      "discriminator": "0",
+      "public_flags": 64,
+      "flags": 96,
+      "purchased_flags": 0,
+      "premium_usage_flags": 0,
+      "banner": null,
+      "accent_color": null,
+      "bio": "",
+      "pronouns": "",
+      "nsfw_allowed": true,
+      "mfa_enabled": false,
+      "premium": false,
+      "premium_type": 0,
+      "avatar_decoration_data": null,
+      "primary_guild": null,
+      "email": "tester@example.invalid",
+      "verified": true,
+      "phone": null,
+      "age_verification_status": 1,
+      "desktop": true,
+      "mobile": false
+    },
+    "users": [
+      {
+        "id": "100000000000000002",
+        "username": "mira",
+        "global_name": "Mira",
+        "avatar": "0123456789abcdef0123456789abcdef",
+        "discriminator": "0",
+        "public_flags": 64,
+        "avatar_decoration_data": null,
+        "primary_guild": null
+      },
+      {
+        "id": "100000000000000003",
+        "username": "jun",
+        "global_name": null,
+        "avatar": null,
+        "discriminator": "0",
+        "public_flags": 0,
+        "avatar_decoration_data": null,
+        "primary_guild": null
+      }
+    ],
+    "guilds": [
+      {
+        "id": "200000000000000001",
+        "data_mode": "full",
+        "joined_at": "2024-01-01T12:00:00.000000+00:00",
+        "large": false,
+        "lazy": true,
+        "member_count": 3,
+        "premium_subscription_count": 2,
+        "properties": {
+          "id": "200000000000000001",
+          "name": "Akari \u2728 Lab",
+          "icon": "00000000000000000000000000000001",
+          "banner": null,
+          "splash": null,
+          "description": null,
+          "owner_id": "100000000000000001",
+          "afk_channel_id": null,
+          "afk_timeout": 300,
+          "verification_level": 1,
+          "default_message_notifications": 1,
+          "explicit_content_filter": 2,
+          "features": ["COMMUNITY", "NEWS"],
+          "mfa_level": 0,
+          "system_channel_id": "300000000000000002",
+          "system_channel_flags": 0,
+          "rules_channel_id": null,
+          "vanity_url_code": null,
+          "premium_tier": 1,
+          "preferred_locale": "en-US",
+          "nsfw": false,
+          "nsfw_level": 0
+        },
+        "channels": [
+          { "id": "300000000000000001", "type": 4, "name": "Text Channels", "position": 0, "flags": 0, "parent_id": null, "permission_overwrites": [] },
+          { "id": "300000000000000002", "type": 0, "name": "general", "position": 1, "flags": 0, "parent_id": "300000000000000001", "permission_overwrites": [], "topic": null, "nsfw": false, "rate_limit_per_user": 0, "last_message_id": "400000000000000003" },
+          { "id": "300000000000000003", "type": 2, "name": "Voice", "position": 2, "flags": 0, "parent_id": null, "permission_overwrites": [], "bitrate": 64000, "user_limit": 0, "rtc_region": null, "status": null }
+        ],
+        "threads": [
+          {
+            "id": "300000000000000020",
+            "type": 11,
+            "name": "Release checklist",
+            "guild_id": "200000000000000001",
+            "parent_id": "300000000000000002",
+            "owner_id": "100000000000000002",
+            "last_message_id": "400000000000000030",
+            "message_count": 12,
+            "member_count": 3,
+            "rate_limit_per_user": 0,
+            "flags": 0,
+            "thread_metadata": { "archived": false, "auto_archive_duration": 1440, "archive_timestamp": "2024-03-01T08:30:00.250000+00:00", "locked": false },
+            "member": { "join_timestamp": "2024-03-01T08:30:00.250000+00:00", "flags": 1, "muted": false, "mute_config": null }
+          }
+        ],
+        "roles": [
+          { "id": "200000000000000001", "name": "@everyone", "description": null, "permissions": "104324673", "position": 0, "color": 0, "colors": { "primary_color": 0, "secondary_color": null, "tertiary_color": null }, "hoist": false, "managed": false, "mentionable": false, "icon": null, "unicode_emoji": null, "flags": 0 },
+          { "id": "500000000000000002", "name": "Moderators", "description": null, "permissions": "1099511627775", "position": 1, "color": 3447003, "colors": { "primary_color": 3447003, "secondary_color": null, "tertiary_color": null }, "hoist": true, "managed": false, "mentionable": true, "icon": null, "unicode_emoji": null, "flags": 0 }
+        ],
+        "emojis": [],
+        "stickers": [],
+        "stage_instances": [],
+        "guild_scheduled_events": []
+      },
+      { "id": "200000000000000002", "unavailable": true }
+    ],
+    "merged_members": [
+      [
+        { "user_id": "100000000000000001", "roles": ["500000000000000002"], "nick": "Tester", "avatar": null, "banner": null, "joined_at": "2024-01-01T12:00:00.000000+00:00", "premium_since": null, "communication_disabled_until": null, "deaf": false, "mute": false, "pending": false, "flags": 0 }
+      ],
+      []
+    ],
+    "private_channels": [
+      { "id": "300000000000000010", "type": 1, "last_message_id": "400000000000000020", "flags": 0, "recipient_ids": ["100000000000000002"], "is_message_request": false, "is_message_request_timestamp": null, "is_spam": false, "safety_warnings": [] },
+      { "id": "300000000000000011", "type": 3, "name": "Weekend plans", "icon": null, "owner_id": "100000000000000001", "last_message_id": "400000000000000021", "flags": 0, "recipient_ids": ["100000000000000002", "100000000000000003"], "blocked_user_warning_dismissed": false }
+    ],
+    "relationships": [],
+    "read_state": { "entries": [], "partial": false, "version": 0 },
+    "user_guild_settings": { "entries": [], "partial": false, "version": 0 },
+    "user_settings_proto": "",
+    "notification_settings": { "flags": 16 },
+    "sessions": [],
+    "connected_accounts": [],
+    "experiments": [[1234567890, 0, 1, -1, 0, 0, 0, 0]],
+    "guild_experiments": [],
+    "geo_ordered_rtc_regions": ["us-east", "us-central"],
+    "consents": { "personalization": { "consented": false } },
+    "tutorial": null,
+    "country_code": "XX",
+    "api_code_version": 1,
+    "explicit_content_scan_version": 2,
+    "session_id": "0123456789abcdef0123456789abcdef",
+    "session_type": "normal",
+    "static_client_session_id": "00000000-0000-0000-0000-000000000000",
+    "resume_gateway_url": "wss://gateway-us-east1-b.discord.gg"
+  }
+}

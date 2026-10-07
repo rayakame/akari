@@ -1,12 +1,18 @@
 # Protocol notes
 
 Notes on the Discord user-account API as Akari uses it: the gateway (connecting,
-identify and resume, zlib-stream compression, opcodes, events), REST (endpoints, rate
+identify and resume, zstd-stream compression, opcodes, events), REST (endpoints, rate
 limits, error codes), data models, and observed behavior the reference doesn't cover.
 
 The main reference is [Discord Userdoccers](https://docs.discord.food). These notes
 don't copy it. They record what Akari relies on, the decisions we made, and the gaps or
 surprises we found.
+
+## Files
+
+- [gateway.md](gateway.md): payload envelope, opcodes, Hello
+- [ready.md](ready.md): READY, gateway capabilities, gateway guilds
+- [models.md](models.md): users, guilds, channels and messages, and how they map to Rust
 
 ## Conventions
 

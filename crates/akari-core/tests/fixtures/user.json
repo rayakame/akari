@@ -1,0 +1,23 @@
+{
+  "id": "100000000000000002",
+  "username": "mira",
+  "global_name": "Mira",
+  "avatar": "0123456789abcdef0123456789abcdef",
+  "discriminator": "0",
+  "public_flags": 64,
+  "banner": null,
+  "accent_color": 5793266,
+  "avatar_decoration_data": {
+    "sku_id": "900000000000000001",
+    "asset": "a_00112233445566778899aabbccddeeff",
+    "expires_at": null
+  },
+  "collectibles": null,
+  "display_name_styles": null,
+  "primary_guild": {
+    "identity_guild_id": "200000000000000001",
+    "identity_enabled": true,
+    "tag": "AKRI",
+    "badge": "ffeeddccbbaa99887766554433221100"
+  }
+}

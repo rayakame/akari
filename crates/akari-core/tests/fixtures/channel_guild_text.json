@@ -1,0 +1,20 @@
+{
+  "id": "300000000000000002",
+  "guild_id": "200000000000000001",
+  "name": "general",
+  "type": 0,
+  "position": 1,
+  "flags": 0,
+  "permission_overwrites": [
+    { "id": "200000000000000001", "type": 0, "allow": "0", "deny": "2048" },
+    { "id": "100000000000000002", "type": 1, "allow": "2048", "deny": "0" }
+  ],
+  "rate_limit_per_user": 2,
+  "nsfw": false,
+  "topic": "Anything goes",
+  "last_message_id": "400000000000000009",
+  "parent_id": "300000000000000001",
+  "last_pin_timestamp": "2023-02-17T09:22:28+00:00",
+  "default_auto_archive_duration": 10080,
+  "default_thread_rate_limit_per_user": 0
+}
