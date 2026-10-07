@@ -37,6 +37,14 @@ thiserror = "2"
 tracing = "0.1"
 wiremock = "0.6"
 
+# akari-cli only
+clap = { version = "4.6", features = ["derive"] }
+keyring = "4.2"
+qrcode = { version = "0.14", default-features = false }
+rpassword = "7.5"
+# Without "tracing-log": tungstenite logs whole frames, the token included, through `log`.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
+
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"

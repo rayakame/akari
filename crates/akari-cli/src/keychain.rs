@@ -1,0 +1,97 @@
+use akari_core::model::{Snowflake, UserMarker};
+use akari_core::{Token, TokenStore, TokenStoreError};
+use keyring::Entry;
+
+const SERVICE: &str = "akari-cli";
+const CURRENT_ACCOUNT: &str = "current-account";
+
+pub struct KeychainStore;
+
+impl TokenStore for KeychainStore {
+    fn load(&self, account: Snowflake<UserMarker>) -> Result<Option<Token>, TokenStoreError> {
+        read(&account.get().to_string()).map(|token| token.map(Token::new))
+    }
+
+    fn save(&self, account: Snowflake<UserMarker>, token: &Token) -> Result<(), TokenStoreError> {
+        entry(&account.get().to_string())?
+            .set_password(token.expose())
+            .map_err(storage_error)
+    }
+
+    fn delete(&self, account: Snowflake<UserMarker>) -> Result<(), TokenStoreError> {
+        remove(&account.get().to_string())
+    }
+}
+
+impl KeychainStore {
+    pub fn current_account(&self) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError> {
+        Ok(read(CURRENT_ACCOUNT)?
+            .and_then(|id| id.parse().ok())
+            .map(Snowflake::new))
+    }
+
+    pub fn set_current_account(
+        &self,
+        account: Snowflake<UserMarker>,
+    ) -> Result<(), TokenStoreError> {
+        entry(CURRENT_ACCOUNT)?
+            .set_password(&account.get().to_string())
+            .map_err(storage_error)
+    }
+
+    pub fn clear_current_account(&self) -> Result<(), TokenStoreError> {
+        remove(CURRENT_ACCOUNT)
+    }
+}
+
+fn entry(user: &str) -> Result<Entry, TokenStoreError> {
+    Entry::new(SERVICE, user).map_err(storage_error)
+}
+
+fn read(user: &str) -> Result<Option<String>, TokenStoreError> {
+    match entry(user)?.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(err) => Err(storage_error(err)),
+    }
+}
+
+fn remove(user: &str) -> Result<(), TokenStoreError> {
+    match entry(user)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(storage_error(err)),
+    }
+}
+
+fn storage_error(err: keyring::Error) -> TokenStoreError {
+    match err {
+        keyring::Error::NoStorageAccess(_) => TokenStoreError::Unavailable,
+        // These carry the stored bytes, which may be a token.
+        keyring::Error::BadEncoding(_) | keyring::Error::BadDataFormat(..) => {
+            TokenStoreError::Backend("the stored entry is unreadable".to_owned())
+        }
+        err => TokenStoreError::Backend(err.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use akari_core::TokenStoreError;
+
+    use super::*;
+
+    #[test]
+    fn unreadable_entries_never_quote_their_bytes() {
+        let err = storage_error(keyring::Error::BadEncoding(b"secret-token".to_vec()));
+
+        assert!(!err.to_string().contains("secret-token"));
+        assert!(!format!("{err:?}").contains("secret-token"));
+    }
+
+    #[test]
+    fn locked_stores_are_unavailable() {
+        let err = storage_error(keyring::Error::NoStorageAccess("locked".into()));
+
+        assert!(matches!(err, TokenStoreError::Unavailable));
+    }
+}
