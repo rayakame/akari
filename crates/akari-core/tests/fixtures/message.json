@@ -1,7 +1,7 @@
 {
   "id": "400000000000000001",
   "type": 0,
-  "content": "Release notes are up <@100000000000000001> 🎉\nSee the embed.",
+  "content": "Release notes are up <@100000000000000001> \ud83c\udf89\nSee the embed.",
   "channel_id": "300000000000000002",
   "author": {
     "id": "100000000000000002",
@@ -77,7 +77,7 @@
   ],
   "reactions": [
     {
-      "emoji": { "id": null, "name": "👍" },
+      "emoji": { "id": null, "name": "\ud83d\udc4d" },
       "count": 3,
       "count_details": { "burst": 1, "normal": 2 },
       "burst_colors": ["#f0ca59", "#4c704f"],
