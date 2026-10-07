@@ -8,6 +8,15 @@ Everything here is **unverified** against real traffic. The fixtures in
 `crates/akari-core/tests/fixtures/` are built from the reference's tables and examples,
 with fake IDs and names.
 
+## Wire layer only
+
+`akari_core::model` mirrors what Discord sends and nothing else. Its types are never handed
+to a UI and never stored in the SQLite cache. A later state layer in `akari-core` will have
+its own memory-efficient types and convert from the wire models, so wire types carry no UI
+or storage concerns: no display helpers, no cache keys, no derives for storage. The module
+is `pub` for now because `gateway::decode` returns these types and the integration tests
+read them; the boundary is a rule, not yet enforced by visibility.
+
 ## Conventions
 
 The reference marks a field that may be absent with `?` after the name, and a field that
@@ -171,3 +180,18 @@ Sources: [message object](https://docs.discord.food/resources/message#message-st
 - Not modeled: `message_snapshots`, `thread`, `components`, `poll`, `call`, `activity`,
   `application`, `interaction_metadata`, `resolved`, `role_subscription_data`, `stickers`,
   `mention_channels`, `potions`, `shared_client_theme`.
+
+## Open points
+
+Not implemented yet; each belongs to a later milestone.
+
+- **Partial update models.** Update events may omit fields the full models require. The
+  reference says GUILD_MEMBER_UPDATE includes optional fields "only if changed"
+  ([guild member update](https://docs.discord.food/gateway/gateway-events#guild-member-update-structure)).
+  MESSAGE_UPDATE, GUILD_UPDATE and the other updates need checking against real traffic,
+  and probably their own models with every field optional instead of reusing `Message` or
+  `Guild`.
+- **Bitflag types.** Flags and `Permissions` are raw `u64`. They should become `bitflags`
+  types built with `from_bits_retain`, so bits Akari doesn't know yet survive.
+- **`Serialize` for outgoing payloads.** Identify, heartbeats, message sends and every other
+  payload Akari sends need `Serialize`; the models are deserialize-only today.
