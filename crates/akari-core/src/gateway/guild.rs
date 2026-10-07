@@ -1,7 +1,7 @@
 use serde::de::{self, Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
-use super::lenient::{IdOnly, skip_invalid};
+use super::lenient::skip_invalid;
 use crate::model::{Channel, Guild, GuildMarker, Role, Snowflake, Timestamp};
 
 /// A guild in READY or GUILD_CREATE.
@@ -104,13 +104,9 @@ impl<'de> Deserialize<'de> for GatewayGuild {
         match parsed {
             Ok(guild) => Ok(guild),
             Err(err) => {
-                let ids: GuildIds = serde_json::from_str(raw.get()).map_err(de::Error::custom)?;
-                let id = ids
-                    .id
-                    .or(ids.properties.map(|properties| properties.id))
-                    .ok_or_else(|| {
-                        de::Error::custom(format!("guild without an id failed to parse: {err}"))
-                    })?;
+                let id = fallback_id(raw).ok_or_else(|| {
+                    de::Error::custom(format!("guild without an id failed to parse: {err}"))
+                })?;
                 tracing::warn!(
                     guild_id = id.get(),
                     error = %err,
@@ -126,8 +122,19 @@ impl<'de> Deserialize<'de> for GatewayGuild {
 }
 
 // The gateway guild table doesn't document a top-level `id`, so `properties.id` backs it up.
-#[derive(serde::Deserialize)]
-struct GuildIds {
-    id: Option<Snowflake<GuildMarker>>,
-    properties: Option<IdOnly>,
+fn fallback_id(raw: &RawValue) -> Option<Snowflake<GuildMarker>> {
+    #[derive(serde::Deserialize)]
+    struct TopLevel {
+        id: Snowflake<GuildMarker>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Nested {
+        properties: TopLevel,
+    }
+
+    serde_json::from_str::<TopLevel>(raw.get())
+        .map(|guild| guild.id)
+        .or_else(|_| serde_json::from_str::<Nested>(raw.get()).map(|guild| guild.properties.id))
+        .ok()
 }

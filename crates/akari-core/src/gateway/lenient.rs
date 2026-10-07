@@ -3,12 +3,7 @@ use std::any::type_name;
 use serde::de::{Deserialize, DeserializeOwned, Deserializer};
 use serde_json::value::RawValue;
 
-use crate::model::{GenericMarker, GuildMarker, Snowflake};
-
-#[derive(serde::Deserialize)]
-pub(super) struct IdOnly {
-    pub(super) id: Snowflake<GuildMarker>,
-}
+use crate::model::{GenericMarker, Snowflake};
 
 pub(super) fn skip_invalid<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where

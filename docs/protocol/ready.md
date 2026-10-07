@@ -68,7 +68,7 @@ Open points, all **unverified**:
 
 - The gateway guild table doesn't list `id`. We read the top-level `id` for unavailable
   guilds and `properties.id` otherwise. A guild that fails to parse takes its ID from the
-  top level, or from `properties` if there is none.
+  top level, or from `properties` if the top level has no readable `id`.
 - `data_mode` is `full`, `partial` or `unavailable`. `partial` only happens when Identify
   sends `client_state.guild_versions`, which Akari doesn't do yet, so it isn't handled.
 - Whether `merged_members` has an entry for an unavailable guild. The fixture assumes an

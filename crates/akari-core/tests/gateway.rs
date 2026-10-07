@@ -222,6 +222,28 @@ fn broken_guild_without_top_level_id_becomes_unavailable() {
 }
 
 #[test]
+fn broken_properties_id_falls_back_to_the_top_level_id() {
+    let without_id = ready_with(|payload| {
+        payload["d"]["guilds"][0]["properties"]
+            .as_object_mut()
+            .unwrap()
+            .remove("id");
+    });
+    let malformed_id =
+        ready_with(|payload| payload["d"]["guilds"][0]["properties"]["id"] = "abc".into());
+
+    for ready in [without_id, malformed_id] {
+        assert_eq!(
+            ready.guilds[0],
+            GatewayGuild::Unavailable(UnavailableGuild {
+                id: Snowflake::new(200_000_000_000_000_001),
+                geo_restricted: false,
+            })
+        );
+    }
+}
+
+#[test]
 fn guild_without_properties_becomes_unavailable() {
     let ready = ready_with(|payload| {
         payload["d"]["guilds"][0]
