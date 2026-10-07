@@ -24,6 +24,8 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
+# Default features add a legacy-format decoder and a dictionary builder Akari doesn't need.
+zstd = { version = "0.14", default-features = false }
 uniffi = "0.32"
 thiserror = "2"
 tracing = "0.1"

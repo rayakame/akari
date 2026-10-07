@@ -1,7 +1,7 @@
 # Protocol notes
 
 Notes on the Discord user-account API as Akari uses it: the gateway (connecting,
-identify and resume, zlib-stream compression, opcodes, events), REST (endpoints, rate
+identify and resume, zstd-stream compression, opcodes, events), REST (endpoints, rate
 limits, error codes), data models, and observed behavior the reference doesn't cover.
 
 The main reference is [Discord Userdoccers](https://docs.discord.food). These notes

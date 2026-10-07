@@ -34,7 +34,7 @@ the other crates are still empty skeletons, and each app folder contains only a 
 
 | Path | Contents |
 |---|---|
-| `crates/akari-core` | Discord gateway (WebSocket, zlib-stream), REST with rate limit handling, models, state store, SQLite disk cache |
+| `crates/akari-core` | Discord gateway (WebSocket, zstd-stream), REST with rate limit handling, models, state store, SQLite disk cache |
 | `crates/akari-markdown` | Discord-flavored markdown parser |
 | `crates/akari-ffi` | UniFFI bindings only (Swift for macOS/iOS, Kotlin for Android) |
 | `crates/akari-cli` | Terminal test client for developing the core |

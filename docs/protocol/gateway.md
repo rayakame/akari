@@ -56,7 +56,24 @@ Identify doesn't have to wait for Hello
 
 ## Encoding and compression
 
-`decode` takes plain JSON. With `compress=zlib-stream`, inflate first: one inflate context
-per connection, and a message is complete once the buffer ends in `00 00 ff ff`
-([zlib-stream](https://docs.discord.food/gateway/using-gateway#zlib-stream-compression)).
-ETF isn't supported.
+`decode` takes plain JSON. The gateway connection will request transport compression with
+`compress=zstd-stream` in the connection URL
+([query string params](https://docs.discord.food/gateway/using-gateway#query-string-params)).
+The reference lists it next to `zlib-stream` without limiting it to bots; **unverified**
+against real traffic. Decompression itself belongs to the gateway connection milestone; the
+`zstd` crate is pinned in the workspace for it.
+
+How zstd-stream works
+([zstd-stream](https://docs.discord.food/gateway/using-gateway#zstd-stream-compression)):
+
+- One zstd decompression context stays alive for the lifetime of the connection.
+- Each WebSocket message is exactly one gateway message, so the WebSocket message boundary
+  is the message boundary; there is no end marker to look for.
+- A message doesn't end the zstd frame. Call `ZSTD_decompressStream` repeatedly until all
+  of the message's data has been processed; it won't necessarily return 0, because the
+  frame stays open.
+
+The alternative, which Akari doesn't use, is
+[zlib-stream](https://docs.discord.food/gateway/using-gateway#zlib-stream-compression): one
+inflate context per connection, and a message is complete once the buffer ends in
+`00 00 ff ff`. ETF isn't supported.
