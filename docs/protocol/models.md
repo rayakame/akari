@@ -35,3 +35,36 @@ may be `null` with `?` before the type
   highest documented bit is `1 << 53`, so `u64` is enough for now
   ([permissions](https://docs.discord.food/topics/permissions)).
 - **Flags** are JSON integers and stay raw `u64`. User flags already reach bit 51.
+- **Integer enums** (channel type, message type, …) get an `Unknown(u16)` variant, so a
+  value Discord adds later doesn't fail the payload around it. The reference lists removed
+  values that still turn up, and new ones keep appearing.
+- **String enums** that Discord extends often (embed type, guild features) stay `String`.
+
+## User
+
+Sources: [user object](https://docs.discord.food/resources/user#user-structure),
+[partial user](https://docs.discord.food/resources/user#partial-user-structure).
+
+- `User` is the partial user: message authors, mentions, DM recipients, members and
+  READY's `users`. `CurrentUser` is the full user object READY sends as `user`. It
+  flattens a `User` and adds `premium_type`, `nsfw_allowed`, `mfa_enabled`, `verified`
+  and `flags`.
+- READY's `user` is parsed strictly, so a failure there fails READY. `CurrentUser`
+  therefore requires only `id` and `username`, which every user object has. Everything
+  else falls back to a default; `premium_type` becomes `None` (no Nitro).
+- `discriminator` defaults to an empty string: recipients of an invite's channel carry only
+  `id`, `username` and `avatar`
+  ([partial channel](https://docs.discord.food/resources/channel#partial-channel-structure)).
+  Migrated users have `"0"`, webhook authors `"0000"`.
+- `avatar_decoration_data.expires_at` is Unix seconds, not ISO 8601
+  ([avatar decoration data](https://docs.discord.food/resources/user#avatar-decoration-data-structure)).
+- `primary_guild` is the guild tag shown next to the name. Its fields are `null` until the
+  user reaffirms their identity after a tag change
+  ([primary guild](https://docs.discord.food/resources/user#primary-guild-structure)).
+- `PremiumType`: 0 none, 1 Nitro Classic, 2 Nitro, 3 Nitro Basic
+  ([premium type](https://docs.discord.food/resources/user#premium-type)).
+- The reference marks `age_verification_status` as required, but its own example user
+  doesn't have it. It isn't modeled.
+- Not modeled: `collectibles`, `display_name_styles`, `premium_state`, `bio`, `pronouns`,
+  `purchased_flags`, `premium_usage_flags`. `email` and `phone` are left out on purpose, so
+  personal data can't reach logs through `Debug`.

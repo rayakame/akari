@@ -1,4 +1,4 @@
-use akari_core::model::{Permissions, Snowflake, Timestamp};
+use akari_core::model::{CurrentUser, Permissions, PremiumType, Snowflake, Timestamp, User};
 use serde::de::DeserializeOwned;
 
 #[track_caller]
@@ -54,4 +54,67 @@ fn permissions_parse_from_strings() {
         parse::<Permissions>(r#""110917634608832""#),
         Permissions(110_917_634_608_832)
     );
+}
+
+#[test]
+fn user_parses() {
+    let user: User = parse(include_str!("fixtures/user.json"));
+
+    assert_eq!(user.id, Snowflake(100_000_000_000_000_002));
+    assert_eq!(user.username, "mira");
+    assert_eq!(user.discriminator, "0");
+    assert_eq!(user.global_name.as_deref(), Some("Mira"));
+    assert_eq!(
+        user.avatar.as_deref(),
+        Some("0123456789abcdef0123456789abcdef")
+    );
+    assert_eq!(user.accent_color, Some(5_793_266));
+    assert_eq!(user.public_flags, 64);
+    assert!(!user.bot);
+    let decoration = user.avatar_decoration_data.unwrap();
+    assert_eq!(decoration.sku_id, Snowflake(900_000_000_000_000_001));
+    assert_eq!(decoration.expires_at, None);
+    let tag = user.primary_guild.unwrap();
+    assert_eq!(
+        tag.identity_guild_id,
+        Some(Snowflake(200_000_000_000_000_001))
+    );
+    assert_eq!(tag.tag.as_deref(), Some("AKRI"));
+}
+
+#[test]
+fn webhook_author_without_optional_fields_parses() {
+    let user: User = parse(
+        r#"{"id": "100000000000000099", "username": "Release Bot", "avatar": null,
+            "discriminator": "0000", "bot": true}"#,
+    );
+
+    assert_eq!(user.global_name, None);
+    assert_eq!(user.avatar, None);
+    assert_eq!(user.primary_guild, None);
+    assert_eq!(user.public_flags, 0);
+    assert!(user.bot);
+}
+
+#[test]
+fn current_user_parses() {
+    let me: CurrentUser = parse(include_str!("fixtures/current_user.json"));
+
+    assert_eq!(me.user.id, Snowflake(100_000_000_000_000_001));
+    assert_eq!(me.user.username, "akari_tester");
+    assert_eq!(me.premium_type, PremiumType::Tier2);
+    assert_eq!(me.nsfw_allowed, Some(true));
+    assert!(me.mfa_enabled);
+    assert!(me.verified);
+    assert_eq!(me.flags, 96);
+}
+
+#[test]
+fn current_user_with_only_required_fields_parses() {
+    let me: CurrentUser = parse(r#"{"id": "100000000000000001", "username": "akari_tester"}"#);
+
+    assert_eq!(me.premium_type, PremiumType::None);
+    assert_eq!(me.nsfw_allowed, None);
+    assert!(!me.verified);
+    assert_eq!(me.flags, 0);
 }
