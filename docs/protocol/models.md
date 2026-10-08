@@ -12,18 +12,21 @@ with fake IDs and names.
 
 `akari_core::model` and the payload types in `akari_core::gateway` (`Ready`,
 `GatewayGuild`, `Hello` and so on) mirror what Discord sends and nothing else. They are
-never handed to a UI and never stored in the SQLite cache. A later state layer in
-`akari-core` will have its own memory-efficient types and convert from the wire models, so
-wire types carry no UI or storage concerns: no display helpers, no cache keys, no derives
-for storage. The modules are `pub` for now because `gateway::decode` returns these types
+never handed to a UI and never stored in the SQLite cache. The state layer
+(`akari_core::state`, see [dispatches.md](dispatches.md#the-state-store)) has its own
+memory-efficient types and converts from the wire models, so wire types carry no UI or
+storage concerns: no display helpers, no cache keys, no derives for storage. The modules are `pub` for now because `gateway::decode` returns these types
 and the integration tests read them; the boundary is a rule, not yet enforced by
 visibility.
 
-Value types are the exception: `Snowflake<M>` with its markers, `Timestamp` and
-`Permissions` are shared vocabulary the state layer may reuse, so its IDs stay typed too.
-`Snowflake` wraps a plain `u64` because the wire format can carry ID 0 (reportedly in read
-states; **unverified**). Whether the state layer wants a `NonZeroU64`-backed ID for 8-byte
-`Option`s is its own decision.
+Value types are the exception: `Snowflake<M>` with its markers and the ID aliases
+(`UserId`, `GuildId`, `ChannelId`, `MessageId`, …), `Timestamp`, `Permissions` and the
+integer enums (`ChannelType`, `MessageType`, `OverwriteType`, `PremiumType`,
+`MessageReferenceType`, `StickerFormatType`) are shared vocabulary the state layer reuses,
+so its IDs stay typed too. `Snowflake` wraps a plain `u64` because the wire format can carry
+ID 0 (reportedly in read states; **unverified**). The state layer keeps it: a
+`NonZeroU64`-backed ID would save 8 bytes per `Option` (about 100 KB at 10,000 channels) but
+needs a second ID type.
 
 ## Conventions
 
@@ -55,7 +58,8 @@ may be `null` with `?` before the type
   `Timestamp::unix_millis` returns milliseconds since the Unix epoch.
 - **Permissions** (`Permissions`) are decimal strings because they outgrow 53 bits. The
   highest documented bit is `1 << 53`, so `u64` is enough for now
-  ([permissions](https://docs.discord.food/topics/permissions)).
+  ([permissions](https://docs.discord.food/topics/permissions)). `Permissions` has
+  constants for the bits Akari uses and the bit operators; unknown bits are kept.
 - **Flags** are JSON integers and stay raw `u64`. User flags already reach bit 51.
 - **Integer enums** (channel type, message type, …) get an `Unknown(u16)` variant, so a
   value Discord adds later doesn't fail the payload around it. The reference lists removed
@@ -161,11 +165,16 @@ Sources: [guild object](https://docs.discord.food/resources/guild#guild-structur
 Sources: [message object](https://docs.discord.food/resources/message#message-structure),
 [MESSAGE_CREATE extra fields](https://docs.discord.food/gateway/gateway-events#message-object-extra-fields).
 
-- One `Message` struct parses REST responses and MESSAGE_CREATE/MESSAGE_UPDATE. The
-  gateway adds `guild_id`, `member` (without `user`), `channel_type` and a `member` key on
-  each mention; only `guild_id` and `member` are modeled.
+- One `Message` struct parses REST responses and MESSAGE_CREATE. MESSAGE_UPDATE has its
+  own partial model (see [dispatches.md](dispatches.md#partial-updates)). The gateway adds
+  `guild_id`, `member` (without `user`), `channel_type` and a `member` key on each mention;
+  only `guild_id` and `member` are modeled.
 - Everything except `id`, `channel_id`, `author`, `timestamp` and `type` falls back to a
   default when missing.
+- `attachments`, `embeds`, `mentions`, `mention_roles`, `sticker_items` and `reactions` skip
+  entries that fail to parse, so one odd embed doesn't drop the whole message. Like gateway
+  guilds, a `Message` therefore decodes from JSON text only (`serde_json::from_str`/
+  `from_slice`), not from a `serde_json::Value`.
 - `author` isn't a real user when `webhook_id` is set. Webhook authors have discriminator
   `"0000"`.
 - `referenced_message` has three states (footnote 5 of the message table): a missing key
@@ -195,13 +204,8 @@ Sources: [message object](https://docs.discord.food/resources/message#message-st
 
 Not implemented yet; each belongs to a later milestone.
 
-- **Partial update models.** Update events may omit fields the full models require. The
-  reference says GUILD_MEMBER_UPDATE includes optional fields "only if changed"
-  ([guild member update](https://docs.discord.food/gateway/gateway-events#guild-member-update-structure)).
-  MESSAGE_UPDATE, GUILD_UPDATE and the other updates need checking against real traffic,
-  and probably their own models with every field optional instead of reusing `Message` or
-  `Guild`.
-- **Bitflag types.** Flags and `Permissions` are raw `u64`. They should become `bitflags`
-  types built with `from_bits_retain`, so bits Akari doesn't know yet survive.
+- **Bitflag types.** Flags are raw `u64`, and `Permissions` only has constants for the bits
+  Akari uses. Both could become `bitflags` types built with `from_bits_retain`, so bits
+  Akari doesn't know yet survive.
 - **`Serialize` for outgoing payloads.** Identify, heartbeats, message sends and every other
   payload Akari sends need `Serialize`; the models are deserialize-only today.
