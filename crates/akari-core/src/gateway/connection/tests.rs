@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use serde_json::json;
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout};
 
 use super::fake::{FakeConnection, FakeGateway, WAIT};
 use super::*;
@@ -688,4 +688,32 @@ async fn an_unreachable_resume_url_falls_back_to_the_gateway() {
         fallback.handshake(60_000).await,
         json!({"op": 6, "d": {"token": TOKEN, "session_id": SESSION, "seq": 4}})
     );
+}
+
+#[tokio::test]
+async fn reconnecting_after_disconnect_still_waits_out_an_invalid_session() {
+    let mut fake = FakeGateway::start().await;
+    let wait = Duration::from_secs(1);
+    let gateway = start_with(
+        &fake,
+        Timing {
+            invalid_session_min: wait,
+            invalid_session_max: wait,
+            ..timing()
+        },
+    );
+    let mut connection = connected(&mut fake, &gateway, 60_000).await;
+
+    let sent = Instant::now();
+    connection.send(json!({"op": 9, "d": false})).await;
+    assert!(matches!(
+        next(&gateway).await,
+        ConnectionEvent::Reconnecting { .. }
+    ));
+    gateway.disconnect();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    gateway.connect().unwrap();
+
+    fake.accept().await;
+    assert!(sent.elapsed() >= wait, "{:?}", sent.elapsed());
 }

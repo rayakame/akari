@@ -75,8 +75,9 @@ fn broken(message: &'static str) -> DisconnectReason {
 
 impl Task {
     pub(super) async fn run(mut self) {
-        let mut wait = None;
-        while self.idle(wait.take()).await {
+        let mut backoff = None;
+        let mut floor = None;
+        while self.idle(backoff.take(), floor.take()).await {
             match self.connection().await {
                 End::Closed => break,
                 End::Idle => {}
@@ -88,16 +89,17 @@ impl Task {
                 End::Reconnect {
                     resume,
                     reason,
-                    floor,
+                    floor: floor_wait,
                     healthy,
                 } => {
                     if !resume {
                         self.session.forget();
                     }
+                    let now = Instant::now();
                     let delay = self
                         .retry
                         .delay(healthy, &self.timing, random::unit())
-                        .max(floor);
+                        .max(floor_wait);
                     let resume = self.session.can_resume();
                     tracing::info!(?reason, resume, ?delay, "reconnecting to the gateway");
                     self.emit(ConnectionEvent::Reconnecting {
@@ -105,24 +107,31 @@ impl Task {
                         delay,
                         reason,
                     });
-                    wait = Some(Instant::now() + delay);
+                    backoff = Some(now + delay);
+                    floor = (!floor_wait.is_zero()).then(|| now + floor_wait);
                 }
             }
         }
     }
 
-    async fn idle(&mut self, mut until: Option<Instant>) -> bool {
+    async fn idle(&mut self, mut backoff: Option<Instant>, floor: Option<Instant>) -> bool {
         loop {
-            match *self.mode.borrow_and_update() {
+            let until = match *self.mode.borrow_and_update() {
                 Mode::Closed => return false,
-                // connect() after disconnect() skips any backoff still pending.
-                Mode::Idle => until = None,
+                // connect() after disconnect() skips any backoff still pending, but op 9's
+                // wait still applies.
+                Mode::Idle => {
+                    backoff = None;
+                    None
+                }
                 Mode::Connected => {
+                    let until = backoff.max(floor);
                     if until.is_none_or(|until| Instant::now() >= until) {
                         return true;
                     }
+                    until
                 }
-            }
+            };
             let sleep = sleep_until(until.unwrap_or_else(Instant::now));
             tokio::select! {
                 changed = self.mode.changed() => {
