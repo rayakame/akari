@@ -65,7 +65,7 @@ pub(crate) fn compute(
         permissions &= Permissions::VIEW_CHANNEL | Permissions::READ_MESSAGE_HISTORY;
     }
 
-    if channel.thread.is_some() {
+    if channel.is_thread() {
         permissions &= !Permissions::SEND_MESSAGES;
         if permissions.contains(Permissions::SEND_MESSAGES_IN_THREADS) {
             permissions |= Permissions::SEND_MESSAGES;

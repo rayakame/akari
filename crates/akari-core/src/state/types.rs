@@ -113,6 +113,16 @@ pub struct Channel {
     pub flags: u64,
 }
 
+impl Channel {
+    /// Announcement, public and private threads.
+    pub fn is_thread(&self) -> bool {
+        matches!(
+            self.kind,
+            ChannelType::NewsThread | ChannelType::PublicThread | ChannelType::PrivateThread
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PermissionOverwrite {
