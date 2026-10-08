@@ -3,12 +3,14 @@
 mod apply;
 mod convert;
 mod events;
+mod order;
 mod permissions;
 mod store;
 mod types;
 mod windows;
 
 pub use events::{ConnectionState, StoreEvent};
+pub use order::display_order;
 pub use store::{Store, Subscription};
 pub use types::*;
 pub use windows::MessageWindow;

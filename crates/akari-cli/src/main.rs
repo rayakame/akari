@@ -5,6 +5,8 @@ mod connect;
 mod host;
 mod keychain;
 mod login;
+mod messages;
+mod session;
 
 use std::error::Error;
 use std::process::ExitCode;
@@ -16,6 +18,7 @@ use clap::{Args, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::keychain::KeychainStore;
+use crate::messages::SessionCommand;
 
 /// Terminal test client for akari-core.
 #[derive(Parser)]
@@ -33,6 +36,8 @@ enum Command {
     Logout,
     /// Connect to the gateway with the stored login and print a summary of READY.
     Connect(ConnectArgs),
+    #[command(flatten)]
+    Session(SessionCommand),
 }
 
 #[derive(Args)]
@@ -89,6 +94,7 @@ async fn main() -> ExitCode {
             };
             connect::run(&client, &store, options).await
         }
+        Command::Session(command) => messages::run(&client, &store, command).await,
     }
 }
 
@@ -107,4 +113,27 @@ fn report(err: &dyn Error) -> String {
         source = cause.source();
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limits_outside_1_to_100_are_refused() {
+        for limit in ["0", "101"] {
+            assert!(Cli::try_parse_from(["akari-cli", "read", "1", "--limit", limit]).is_err());
+        }
+        assert!(Cli::try_parse_from(["akari-cli", "read", "1", "--limit", "100"]).is_ok());
+    }
+
+    #[test]
+    fn send_joins_the_words_of_its_text() {
+        let cli = Cli::try_parse_from(["akari-cli", "send", "1", "hello", "there"]).unwrap();
+
+        let Command::Session(SessionCommand::Send { text, .. }) = cli.command else {
+            panic!("expected send");
+        };
+        assert_eq!(text.join(" "), "hello there");
+    }
 }
