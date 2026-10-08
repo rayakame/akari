@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+reviews:
+  auto_title_placeholder: "@ai"
+  high_level_summary: true
+  high_level_summary_placeholder: "@ai"
+  pre_merge_checks:
+    docstrings:
+      # Doc comments are for public API only, so coverage would fail on every PR.
+      mode: "off"
