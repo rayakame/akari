@@ -15,6 +15,8 @@ use crate::{DiscordClient, Token};
 
 const MESSAGES: &str = "channels/{}/messages";
 const RATE_LIMIT_RETRIES: u32 = 3;
+// Longer waits, such as slowmode, fail so the UI can say so instead of showing a pending message.
+const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(10);
 
 /// A request on behalf of an account that Discord didn't fulfil.
 #[derive(Debug, thiserror::Error)]
@@ -115,7 +117,7 @@ impl AccountRest {
         Self {
             client,
             token,
-            limiter: RateLimiter::default(),
+            limiter: RateLimiter::new(MAX_RATE_LIMIT_WAIT),
             retry_delay,
             unauthorized: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -205,10 +207,15 @@ impl AccountRest {
             let request = build()?;
             let permit = match &permit {
                 Some(held) => {
-                    held.renew().await;
+                    held.renew().await.map_err(too_long)?;
                     held
                 }
-                None => permit.insert(self.limiter.acquire(route.clone()).await),
+                None => permit.insert(
+                    self.limiter
+                        .acquire(route.clone())
+                        .await
+                        .map_err(too_long)?,
+                ),
             };
             // The wait for the route can be long; the account may have closed meanwhile.
             self.usable()?;
@@ -241,6 +248,12 @@ impl AccountRest {
                 _ => return Err(RestError::from_response(status, &headers, &body).into()),
             }
         }
+    }
+}
+
+fn too_long(wait: Duration) -> RequestError {
+    RequestError::RateLimited {
+        retry_after: Some(wait),
     }
 }
 

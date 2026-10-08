@@ -172,10 +172,10 @@ impl Limits {
 
 // One per token. Requests on one route key run one at a time, in the order they asked;
 // a permit holds its route until dropped.
-#[derive(Default)]
 pub(crate) struct RateLimiter {
     lanes: Mutex<HashMap<RouteKey, Arc<tokio::sync::Mutex<()>>>>,
     limits: Mutex<Limits>,
+    max_wait: Duration,
 }
 
 pub(crate) struct Permit<'a> {
@@ -185,7 +185,16 @@ pub(crate) struct Permit<'a> {
 }
 
 impl RateLimiter {
-    pub(crate) async fn acquire(&self, route: RouteKey) -> Permit<'_> {
+    // A request that would wait longer for a limit fails with the wait instead.
+    pub(crate) fn new(max_wait: Duration) -> Self {
+        Self {
+            lanes: Mutex::default(),
+            limits: Mutex::default(),
+            max_wait,
+        }
+    }
+
+    pub(crate) async fn acquire(&self, route: RouteKey) -> Result<Permit<'_>, Duration> {
         let lane = {
             let mut lanes = self.lanes.lock().unwrap_or_else(PoisonError::into_inner);
             // tokio's Mutex is fair, so waiters on one route start in the order they came.
@@ -193,24 +202,28 @@ impl RateLimiter {
             lanes.entry(route.clone()).or_default().clone()
         };
         let guard = lane.lock_owned().await;
-        self.reserve(&route).await;
-        Permit {
+        self.reserve(&route).await?;
+        Ok(Permit {
             limiter: self,
             route,
             _lane: guard,
-        }
+        })
     }
 
-    async fn reserve(&self, route: &RouteKey) {
+    async fn reserve(&self, route: &RouteKey) -> Result<(), Duration> {
         loop {
+            let now = Instant::now();
             let wait = self
                 .limits
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .reserve(route, Instant::now());
+                .reserve(route, now);
             match wait {
+                Some(at) if at.duration_since(now) > self.max_wait => {
+                    return Err(at.duration_since(now));
+                }
                 Some(at) => sleep_until(at).await,
-                None => break,
+                None => return Ok(()),
             }
         }
     }
@@ -218,8 +231,8 @@ impl RateLimiter {
 
 impl Permit<'_> {
     /// Waits until the route may start again, so a retry goes before later requests.
-    pub(crate) async fn renew(&self) {
-        self.limiter.reserve(&self.route).await;
+    pub(crate) async fn renew(&self) -> Result<(), Duration> {
+        self.limiter.reserve(&self.route).await
     }
 
     pub(crate) fn finish(&self, limits: &ResponseLimits) {

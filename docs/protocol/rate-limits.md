@@ -40,6 +40,10 @@ their 429s are reported to the caller.
   `X-RateLimit-Reset-After`, else `Retry-After`; the reference doesn't say which wins
   when they disagree. A 429 with none of them isn't retried, and the caller gets
   `RequestError::RateLimited`.
+- **At most 10 s of waiting.** A request that would wait longer for a pause or a bucket
+  reset, such as a send in slowmode (**unverified** whether slowmode answers 429), fails
+  at once with `RequestError::RateLimited { retry_after }` instead, so a UI can say how
+  long to wait and a send shows as failed rather than pending.
 - **502 and 504** are retried once after 1 s.
 - **A 401** marks the token as rejected: every later request fails at once with
   `RequestError::Unauthorized` instead of adding to the invalid-request count, and the
@@ -54,6 +58,6 @@ their 429s are reported to the caller.
 - `X-RateLimit-Scope: shared` 429s, which "are not counted against you", are handled
   like per-route ones.
 - 202 "unavailable resources" responses with their own `retry_after`.
-- Closing doesn't cut a wait short: a request queued behind a long pause fails with
-  `RequestError::Closed` only once the pause is over.
+- Closing doesn't cut a wait short: a request waiting for its route fails with
+  `RequestError::Closed` only once the wait is over (at most 10 s).
 - The `HIGH_GLOBAL_RATE_LIMIT` user flag, which raises the global limit to 1,200 per second.

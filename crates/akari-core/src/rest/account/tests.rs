@@ -239,6 +239,36 @@ async fn retries_stop_after_three() {
 }
 
 #[tokio::test]
+async fn a_long_rate_limit_fails_instead_of_waiting() {
+    let server = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .respond_with(rate_limited(Some(60.0)))
+        .mount(&server)
+        .await;
+    let rest = rest(&server).await;
+
+    let first = tokio::time::timeout(
+        Duration::from_secs(2),
+        rest.list_messages(channel(), Query::Latest, 3),
+    )
+    .await
+    .expect("waited for the rate limit");
+    let second = rest.list_messages(channel(), Query::Latest, 3).await;
+
+    for result in [first, second] {
+        assert!(
+            matches!(
+                result,
+                Err(RequestError::RateLimited { retry_after: Some(wait) })
+                    if wait > Duration::from_secs(50)
+            ),
+            "{result:?}"
+        );
+    }
+    assert_eq!(requests(&server).await.len(), 1);
+}
+
+#[tokio::test]
 async fn a_502_is_retried_once() {
     let server = MockServer::start().await;
     Mock::given(path(MESSAGES))

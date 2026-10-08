@@ -7,6 +7,7 @@ use tokio::time::{Duration, Instant, timeout};
 use super::*;
 
 const SECOND: Duration = Duration::from_secs(1);
+const HOUR: Duration = Duration::from_secs(3600);
 
 fn route(method: Method, channel: u64) -> RouteKey {
     RouteKey::new(method, "channels/{}/messages", channel)
@@ -26,13 +27,13 @@ fn limited(retry_after: Duration, global: bool) -> ResponseLimits {
 }
 
 async fn starts_within(limiter: &RateLimiter, route: RouteKey, wait: Duration) -> bool {
-    timeout(wait, limiter.acquire(route)).await.is_ok()
+    matches!(timeout(wait, limiter.acquire(route)).await, Ok(Ok(_)))
 }
 
 #[tokio::test(start_paused = true)]
 async fn requests_on_one_route_run_one_at_a_time_in_order() {
-    let limiter = Arc::new(RateLimiter::default());
-    let first = limiter.acquire(send(1)).await;
+    let limiter = Arc::new(RateLimiter::new(HOUR));
+    let first = limiter.acquire(send(1)).await.unwrap();
     let order = Arc::new(std::sync::Mutex::new(Vec::new()));
     let active = Arc::new(AtomicUsize::new(0));
     let most = Arc::new(AtomicUsize::new(0));
@@ -41,7 +42,7 @@ async fn requests_on_one_route_run_one_at_a_time_in_order() {
         let (limiter, order, active, most) =
             (limiter.clone(), order.clone(), active.clone(), most.clone());
         tasks.push(tokio::spawn(async move {
-            let permit = limiter.acquire(send(1)).await;
+            let permit = limiter.acquire(send(1)).await.unwrap();
             let now = active.fetch_add(1, Ordering::SeqCst) + 1;
             most.fetch_max(now, Ordering::SeqCst);
             order.lock().unwrap().push(index);
@@ -63,38 +64,42 @@ async fn requests_on_one_route_run_one_at_a_time_in_order() {
 
 #[tokio::test(start_paused = true)]
 async fn a_slow_load_never_blocks_a_send_in_the_same_channel() {
-    let limiter = RateLimiter::default();
-    let _loading = limiter.acquire(route(Method::Get, 1)).await;
+    let limiter = RateLimiter::new(HOUR);
+    let _loading = limiter.acquire(route(Method::Get, 1)).await.unwrap();
 
     assert!(starts_within(&limiter, send(1), Duration::from_millis(1)).await);
 }
 
 #[tokio::test(start_paused = true)]
 async fn different_channels_run_in_parallel() {
-    let limiter = RateLimiter::default();
-    let _first = limiter.acquire(send(1)).await;
+    let limiter = RateLimiter::new(HOUR);
+    let _first = limiter.acquire(send(1)).await.unwrap();
 
     assert!(starts_within(&limiter, send(2), Duration::from_millis(1)).await);
 }
 
 #[tokio::test(start_paused = true)]
 async fn known_limits_wait_for_the_reset() {
-    let limiter = RateLimiter::default();
+    let limiter = RateLimiter::new(HOUR);
     let started = Instant::now();
-    limiter.acquire(send(1)).await.finish(&ResponseLimits {
-        remaining: Some(0),
-        reset_after: Some(2 * SECOND),
-        ..ResponseLimits::default()
-    });
+    limiter
+        .acquire(send(1))
+        .await
+        .unwrap()
+        .finish(&ResponseLimits {
+            remaining: Some(0),
+            reset_after: Some(2 * SECOND),
+            ..ResponseLimits::default()
+        });
 
-    let _next = limiter.acquire(send(1)).await;
+    let _next = limiter.acquire(send(1)).await.unwrap();
 
     assert!(started.elapsed() >= 2 * SECOND, "{:?}", started.elapsed());
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_shared_bucket_header_joins_two_routes() {
-    let limiter = RateLimiter::default();
+    let limiter = RateLimiter::new(HOUR);
     let other = RouteKey::new(Method::Get, "channels/{}/pins", 1);
     let bucket = |remaining, reset_after| ResponseLimits {
         bucket: Some("shared".to_owned()),
@@ -105,27 +110,29 @@ async fn a_shared_bucket_header_joins_two_routes() {
     limiter
         .acquire(other.clone())
         .await
+        .unwrap()
         .finish(&bucket(5, SECOND));
     let started = Instant::now();
     limiter
         .acquire(send(1))
         .await
+        .unwrap()
         .finish(&bucket(0, 2 * SECOND));
 
-    let _next = limiter.acquire(other).await;
+    let _next = limiter.acquire(other).await.unwrap();
 
     assert!(started.elapsed() >= 2 * SECOND, "{:?}", started.elapsed());
 }
 
 #[tokio::test(start_paused = true)]
 async fn never_more_than_50_requests_in_any_second() {
-    let limiter = Arc::new(RateLimiter::default());
+    let limiter = Arc::new(RateLimiter::new(HOUR));
     let starts = Arc::new(std::sync::Mutex::new(Vec::new()));
     let tasks: Vec<_> = (0..200)
         .map(|channel| {
             let (limiter, starts) = (limiter.clone(), starts.clone());
             tokio::spawn(async move {
-                let permit = limiter.acquire(send(channel)).await;
+                let permit = limiter.acquire(send(channel)).await.unwrap();
                 starts.lock().unwrap().push(Instant::now());
                 permit.finish(&ResponseLimits::default());
             })
@@ -149,40 +156,42 @@ async fn never_more_than_50_requests_in_any_second() {
 
 #[tokio::test(start_paused = true)]
 async fn a_route_429_pauses_only_that_route() {
-    let limiter = RateLimiter::default();
+    let limiter = RateLimiter::new(HOUR);
     let started = Instant::now();
     limiter
         .acquire(send(1))
         .await
+        .unwrap()
         .finish(&limited(3 * SECOND, false));
 
     assert!(starts_within(&limiter, send(2), Duration::from_millis(1)).await);
-    let _again = limiter.acquire(send(1)).await;
+    let _again = limiter.acquire(send(1)).await.unwrap();
     assert!(started.elapsed() >= 3 * SECOND, "{:?}", started.elapsed());
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_global_429_pauses_every_route() {
-    let limiter = RateLimiter::default();
+    let limiter = RateLimiter::new(HOUR);
     let started = Instant::now();
     limiter
         .acquire(send(1))
         .await
+        .unwrap()
         .finish(&limited(3 * SECOND, true));
 
-    let _other = limiter.acquire(send(2)).await;
+    let _other = limiter.acquire(send(2)).await.unwrap();
 
     assert!(started.elapsed() >= 3 * SECOND, "{:?}", started.elapsed());
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_retry_keeps_its_place_on_the_route() {
-    let limiter = Arc::new(RateLimiter::default());
-    let permit = limiter.acquire(send(1)).await;
+    let limiter = Arc::new(RateLimiter::new(HOUR));
+    let permit = limiter.acquire(send(1)).await.unwrap();
     let waiting = tokio::spawn({
         let limiter = limiter.clone();
         async move {
-            let _later = limiter.acquire(send(1)).await;
+            let _later = limiter.acquire(send(1)).await.unwrap();
         }
     });
     tokio::task::yield_now().await;
@@ -190,16 +199,32 @@ async fn a_retry_keeps_its_place_on_the_route() {
     permit.finish(&limited(SECOND, false));
     let renewed = timeout(2 * SECOND, permit.renew()).await;
 
-    assert!(renewed.is_ok());
+    assert!(matches!(renewed, Ok(Ok(()))));
     assert!(!waiting.is_finished());
     drop(permit);
     waiting.await.unwrap();
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_wait_past_the_limit_fails_at_once() {
+    let limiter = RateLimiter::new(10 * SECOND);
+    limiter
+        .acquire(send(1))
+        .await
+        .unwrap()
+        .finish(&limited(60 * SECOND, false));
+
+    let refused = timeout(Duration::from_millis(1), limiter.acquire(send(1))).await;
+    let other = timeout(Duration::from_millis(1), limiter.acquire(send(2))).await;
+
+    assert!(matches!(refused, Ok(Err(wait)) if wait > 50 * SECOND));
+    assert!(matches!(other, Ok(Ok(_))));
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_dropped_permit_frees_its_route() {
-    let limiter = RateLimiter::default();
-    drop(limiter.acquire(send(1)).await);
+    let limiter = RateLimiter::new(HOUR);
+    drop(limiter.acquire(send(1)).await.unwrap());
 
     assert!(starts_within(&limiter, send(1), Duration::from_millis(1)).await);
 }
