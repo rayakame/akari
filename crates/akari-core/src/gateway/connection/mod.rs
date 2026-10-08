@@ -55,7 +55,6 @@ pub(crate) enum Mode {
 }
 
 /// What a [`Gateway`] reports, in order.
-#[derive(Debug)]
 #[non_exhaustive]
 pub enum ConnectionEvent {
     /// A dispatch in Discord's order. `Ready` starts a new session, which makes anything an
@@ -125,6 +124,27 @@ pub enum SendError {
     TooLarge,
     #[error("the gateway connection is closed")]
     Closed,
+}
+
+impl fmt::Debug for ConnectionEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Dispatch(event) => f.debug_tuple("Dispatch").field(event).finish(),
+            Self::Reconnecting {
+                resume,
+                delay,
+                reason,
+            } => f
+                .debug_struct("Reconnecting")
+                .field("resume", resume)
+                .field("delay", delay)
+                .field("reason", reason)
+                .finish(),
+            // The raw JSON holds secrets such as analytics_token.
+            #[cfg(feature = "capture")]
+            Self::CapturedReady(raw) => write!(f, "CapturedReady(<{} bytes>)", raw.len()),
+        }
+    }
 }
 
 impl Gateway {

@@ -650,3 +650,14 @@ async fn commands_fail_fast_during_the_close_handshake() {
 
     assert_eq!(result, Ok(Err(SendError::NotConnected)));
 }
+
+#[cfg(feature = "capture")]
+#[test]
+fn a_captured_ready_debugs_as_its_size() {
+    let raw = br#"{"d":{"analytics_token":"secret-analytics"}}"#.to_vec();
+    let size = raw.len();
+
+    let debug = format!("{:?}", ConnectionEvent::CapturedReady(raw));
+
+    assert_eq!(debug, format!("CapturedReady(<{size} bytes>)"));
+}
