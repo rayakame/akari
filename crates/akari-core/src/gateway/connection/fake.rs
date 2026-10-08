@@ -234,6 +234,10 @@ impl TokenStore for NoStore {
 }
 
 pub(crate) fn client_for(gateway: String) -> DiscordClient {
+    client_with(gateway, Endpoints::default().api)
+}
+
+pub(crate) fn client_with(gateway: String, api: String) -> DiscordClient {
     let host = HostInfo {
         os: DesktopOs::MacOs,
         os_version: "25.0.0".to_owned(),
@@ -243,6 +247,7 @@ pub(crate) fn client_for(gateway: String) -> DiscordClient {
     let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
     let endpoints = Endpoints {
         gateway,
+        api,
         allow_plaintext: true,
         ..Endpoints::default()
     };

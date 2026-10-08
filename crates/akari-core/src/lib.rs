@@ -22,5 +22,6 @@ mod ws;
 pub use account::Account;
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{JsonError, JsonErrorKind, TransportError, TransportErrorKind};
+pub use rest::RequestError;
 pub use secret::{Secret, Token};
 pub use token_store::{TokenStore, TokenStoreError};
