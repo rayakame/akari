@@ -61,6 +61,20 @@ struct ErrorBody {
 }
 
 impl RestError {
+    // For logs: names the error without anything from the response body.
+    pub(crate) fn summary(&self) -> String {
+        match self {
+            Self::Transport(err) => format!("network error: {err}"),
+            Self::RateLimited { .. } => "rate limited".to_owned(),
+            Self::Captcha(_) => "captcha required".to_owned(),
+            Self::Suspended => "account suspended".to_owned(),
+            Self::Api(api) => format!("Discord error {}", api.code),
+            Self::UnexpectedStatus { status } => format!("unexpected status {status}"),
+            Self::InvalidBody => "unexpected response body".to_owned(),
+            Self::InvalidRequest => "invalid request".to_owned(),
+        }
+    }
+
     pub(super) fn from_response(status: u16, headers: &HeaderMap, body: &[u8]) -> Self {
         let parsed: Option<ErrorBody> = serde_json::from_slice(body).ok();
         if status == 429 {

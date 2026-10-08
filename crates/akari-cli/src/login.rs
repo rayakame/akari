@@ -2,9 +2,10 @@ use std::io::{self, BufRead as _, IsTerminal as _, Write as _};
 use std::process::ExitCode;
 
 use akari_core::auth::{
-    LoginError, LoginStep, LoginSuccess, MfaChallenge, MfaMethod, NewLocation, PasswordLogin,
-    QrEvent,
+    LoginError, LoginStep, LoginSuccess, LogoutError, MfaChallenge, MfaMethod, NewLocation,
+    PasswordLogin, QrEvent,
 };
+use akari_core::model::{Snowflake, UserMarker};
 use akari_core::{DiscordClient, Secret};
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
@@ -159,6 +160,35 @@ async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuc
         eprintln!("Logged in, but couldn't store the token: {}", report(&err));
         return ExitCode::FAILURE;
     }
+    let previous = match store.current_account() {
+        Ok(previous) => previous,
+        Err(err) => {
+            eprintln!(
+                "Logged in, but couldn't read the keychain: {}",
+                report(&err)
+            );
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Some(previous) = replaced_account(previous, success.user_id) {
+        let id = previous.get();
+        match client.logout(previous).await {
+            Ok(()) | Err(LogoutError::NotLoggedIn) => {
+                println!("Logged out the previous account (user {id}).");
+            }
+            Err(LogoutError::Storage(err)) => {
+                eprintln!(
+                    "Couldn't remove the previous account's token (user {id}): {}",
+                    report(&err)
+                );
+            }
+            Err(err) => println!(
+                "Removed the previous account's token (user {id}), but Discord didn't confirm \
+                 its logout: {}",
+                report(&err)
+            ),
+        }
+    }
     if let Err(err) = store.set_current_account(success.user_id) {
         eprintln!(
             "Logged in, but couldn't remember the account: {}",
@@ -173,6 +203,14 @@ async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuc
     ExitCode::SUCCESS
 }
 
+// akari-cli keeps one account, so logging in as someone else replaces the stored one.
+fn replaced_account(
+    previous: Option<Snowflake<UserMarker>>,
+    new: Snowflake<UserMarker>,
+) -> Option<Snowflake<UserMarker>> {
+    previous.filter(|previous| *previous != new)
+}
+
 fn prompt(label: &str) -> Option<String> {
     print!("{label}");
     let _ = io::stdout().flush();
@@ -184,5 +222,22 @@ fn prompt(label: &str) -> Option<String> {
             eprintln!("Couldn't read the input: {err}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use akari_core::model::Snowflake;
+
+    use super::replaced_account;
+
+    #[test]
+    fn only_a_different_previous_account_is_replaced() {
+        let old = Snowflake::new(1);
+        let new = Snowflake::new(2);
+
+        assert_eq!(replaced_account(Some(old), new), Some(old));
+        assert_eq!(replaced_account(Some(new), new), None);
+        assert_eq!(replaced_account(None, new), None);
     }
 }

@@ -346,3 +346,32 @@ async fn absurd_rate_limit_delays_count_as_unknown() {
         );
     }
 }
+
+#[test]
+fn summaries_name_the_error_without_response_data() {
+    let captcha = RestError::Captcha(Box::new(crate::auth::CaptchaChallenge {
+        service: "hcaptcha".to_owned(),
+        sitekey: Some("site".to_owned()),
+        rqdata: Some("rqdata-secret".to_owned()),
+        rqtoken: Some("rqtoken-secret".to_owned()),
+        session_id: Some("session-secret".to_owned()),
+        should_serve_invisible: false,
+    }));
+    let api = RestError::Api(ApiError {
+        status: 400,
+        code: 50035,
+        message: "message-secret".to_owned(),
+        field_errors: vec![FieldError {
+            path: "login".to_owned(),
+            code: "INVALID_LOGIN".to_owned(),
+            message: "field-secret".to_owned(),
+        }],
+    });
+
+    assert_eq!(captcha.summary(), "captcha required");
+    assert_eq!(api.summary(), "Discord error 50035");
+    assert_eq!(
+        RestError::UnexpectedStatus { status: 503 }.summary(),
+        "unexpected status 503"
+    );
+}

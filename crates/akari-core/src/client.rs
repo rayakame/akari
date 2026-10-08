@@ -199,7 +199,7 @@ impl DiscordClient {
                     .rest
                     .get_json("experiments", &RequestExtras::default())
                     .await
-                    .map_err(|err| format!("{err:?}"))?;
+                    .map_err(|err| err.summary())?;
                 experiments
                     .fingerprint
                     .ok_or_else(|| "no fingerprint in the response".to_owned())
