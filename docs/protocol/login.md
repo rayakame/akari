@@ -67,8 +67,10 @@ finishes, so dropping a call's future (a cancelled UI task, a timeout) doesn't l
 ticket or a verification token.
 
 `cancel()` stops the running request and makes every later call return `Cancelled`. It
-forgets the login, password, ticket and tokens right away, unless a running step holds the
-flow. In that case they are cleared when that step finishes, or by the next call.
+drops the login, password, MFA ticket and any pending code or verification token at once:
+they are kept apart from the step state, so a running, stalled or dropped step can't hold
+on to them. A request that was already sent keeps its own copy of the body until it ends
+(see below on zeroing).
 
 ### Two-factor authentication
 

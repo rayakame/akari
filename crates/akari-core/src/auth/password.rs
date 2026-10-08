@@ -1,5 +1,6 @@
 use std::fmt;
 use std::future::Future;
+use std::sync::PoisonError;
 
 use percent_encoding::percent_decode_str;
 use reqwest::Url;
@@ -71,18 +72,23 @@ pub enum NewLocation {
 pub struct PasswordLogin {
     client: DiscordClient,
     flow: Mutex<Flow>,
+    // Apart from the flow, so cancel() can drop them even while a step holds the flow.
+    secrets: std::sync::Mutex<Secrets>,
     cancel: CancellationToken,
 }
 
 #[derive(Default)]
 struct Flow {
-    credentials: Option<Credentials>,
     step: Step,
 }
 
-struct Credentials {
-    login: Secret,
-    password: Secret,
+#[derive(Default)]
+struct Secrets {
+    login: Option<Secret>,
+    password: Option<Secret>,
+    ticket: Option<Secret>,
+    // The MFA code, SMS verification code or authorize-ip token the pending request sends.
+    pending: Option<Secret>,
 }
 
 #[derive(Default)]
@@ -100,7 +106,6 @@ enum Step {
 
 #[derive(Clone)]
 struct Mfa {
-    ticket: Secret,
     login_instance_id: Option<String>,
     user_id: Snowflake<UserMarker>,
     challenge: MfaChallenge,
@@ -109,17 +114,10 @@ struct Mfa {
 #[derive(Clone)]
 enum Request {
     Login,
-    Mfa {
-        mfa: Mfa,
-        method: MfaMethod,
-        code: Secret,
-    },
+    Mfa { mfa: Mfa, method: MfaMethod },
     SendSms(Mfa),
-    AuthorizeIp {
-        token: Secret,
-        kind: NewLocation,
-    },
-    VerifyPhone(Secret),
+    AuthorizeIp { kind: NewLocation },
+    VerifyPhone,
 }
 
 #[derive(Deserialize)]
@@ -156,6 +154,7 @@ impl PasswordLogin {
         Self {
             client,
             flow: Mutex::new(Flow::default()),
+            secrets: std::sync::Mutex::new(Secrets::default()),
             cancel: CancellationToken::new(),
         }
     }
@@ -166,10 +165,11 @@ impl PasswordLogin {
         if matches!(flow.step, Step::Done) {
             return Err(LoginError::NoPendingStep);
         }
-        flow.credentials = Some(Credentials {
-            login: Secret::new(login.to_owned()),
-            password,
-        });
+        *self.secrets() = Secrets {
+            login: Some(Secret::new(login.to_owned())),
+            password: Some(password),
+            ..Secrets::default()
+        };
         flow.step = Step::Idle;
         self.run(&mut flow, Request::Login, None).await
     }
@@ -206,7 +206,8 @@ impl PasswordLogin {
     ) -> Result<LoginStep, LoginError> {
         let mut flow = self.lock()?;
         let mfa = Self::pending_mfa(&flow)?;
-        self.run(&mut flow, Request::Mfa { mfa, method, code }, None)
+        self.secrets().pending = Some(code);
+        self.run(&mut flow, Request::Mfa { mfa, method }, None)
             .await
     }
 
@@ -218,15 +219,9 @@ impl PasswordLogin {
             return Err(LoginError::NoPendingStep);
         };
         let token = verification_token(link_or_token).ok_or(LoginError::InvalidVerificationLink)?;
-        self.run(
-            &mut flow,
-            Request::AuthorizeIp {
-                token: Secret::new(token),
-                kind,
-            },
-            None,
-        )
-        .await
+        self.secrets().pending = Some(Secret::new(token));
+        self.run(&mut flow, Request::AuthorizeIp { kind }, None)
+            .await
     }
 
     /// Confirms the login location with the code Discord texted to the phone number used as
@@ -236,24 +231,36 @@ impl PasswordLogin {
         if !matches!(flow.step, Step::NewLocation(NewLocation::Phone)) {
             return Err(LoginError::NoPendingStep);
         }
-        self.run(&mut flow, Request::VerifyPhone(code), None).await
+        self.secrets().pending = Some(code);
+        self.run(&mut flow, Request::VerifyPhone, None).await
     }
 
     /// Stops a running step and ends the flow; every later call returns
-    /// [`LoginError::Cancelled`].
+    /// [`LoginError::Cancelled`]. The login, password, ticket and codes are dropped at once.
     pub fn cancel(&self) {
         self.cancel.cancel();
+        self.forget();
+    }
+
+    fn forget(&self) {
+        *self.secrets() = Secrets::default();
         if let Ok(mut flow) = self.flow.try_lock() {
             *flow = Flow::default();
         }
     }
 
+    fn secrets(&self) -> std::sync::MutexGuard<'_, Secrets> {
+        self.secrets.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    // A value is only missing once cancel() dropped it.
+    fn secret(&self, pick: fn(&Secrets) -> &Option<Secret>) -> Result<Secret, LoginError> {
+        pick(&self.secrets()).clone().ok_or(LoginError::Cancelled)
+    }
+
     fn lock(&self) -> Result<MutexGuard<'_, Flow>, LoginError> {
         if self.cancel.is_cancelled() {
-            // cancel() can't clear a flow a running step holds; the next call catches up.
-            if let Ok(mut flow) = self.flow.try_lock() {
-                *flow = Flow::default();
-            }
+            self.forget();
             return Err(LoginError::Cancelled);
         }
         self.flow.try_lock().map_err(|_| LoginError::Busy)
@@ -280,6 +287,7 @@ impl PasswordLogin {
         let result = self.run_chain(flow, request, captcha).await;
         if self.cancel.is_cancelled() {
             *flow = Flow::default();
+            *self.secrets() = Secrets::default();
         }
         result
     }
@@ -303,10 +311,9 @@ impl PasswordLogin {
             let rest = self.client.rest();
             request = match request {
                 Request::Login => {
-                    let credentials = flow.credentials.as_ref().ok_or(LoginError::NoPendingStep)?;
                     let body = json!({
-                        "login": credentials.login.expose(),
-                        "password": credentials.password.expose(),
+                        "login": self.secret(|s| &s.login)?.expose(),
+                        "password": self.secret(|s| &s.password)?.expose(),
                         "undelete": false,
                     });
                     let response = self
@@ -314,8 +321,11 @@ impl PasswordLogin {
                         .await?;
                     return self.after_login(flow, response);
                 }
-                Request::Mfa { mfa, method, code } => {
-                    let mut body = json!({"ticket": mfa.ticket.expose(), "code": code.expose()});
+                Request::Mfa { mfa, method } => {
+                    let mut body = json!({
+                        "ticket": self.secret(|s| &s.ticket)?.expose(),
+                        "code": self.secret(|s| &s.pending)?.expose(),
+                    });
                     if let Some(instance) = &mfa.login_instance_id {
                         body["login_instance_id"] = json!(instance);
                     }
@@ -323,17 +333,17 @@ impl PasswordLogin {
                         .guard(rest.post_json::<_, TokenResponse>(method.path(), &body, &extras))
                         .await?;
                     return match response {
-                        Ok(response) => Ok(Self::done(flow, mfa.user_id, response.token, false)),
+                        Ok(response) => Ok(self.done(flow, mfa.user_id, response.token, false)),
                         Err(RestError::Captcha(challenge)) => Ok(Self::captcha(
                             flow,
-                            Request::Mfa { mfa, method, code },
+                            Request::Mfa { mfa, method },
                             *challenge,
                         )),
-                        Err(err) => Err(Self::back_to_mfa(flow, mfa, err)),
+                        Err(err) => Err(self.back_to_mfa(flow, mfa, err)),
                     };
                 }
                 Request::SendSms(mut mfa) => {
-                    let body = json!({"ticket": mfa.ticket.expose()});
+                    let body = json!({"ticket": self.secret(|s| &s.ticket)?.expose()});
                     let response = self
                         .guard(rest.post_json::<_, SmsResponse>(
                             "auth/mfa/sms/send",
@@ -351,18 +361,21 @@ impl PasswordLogin {
                         Err(RestError::Captcha(challenge)) => {
                             Ok(Self::captcha(flow, Request::SendSms(mfa), *challenge))
                         }
-                        Err(err) => Err(Self::back_to_mfa(flow, mfa, err)),
+                        Err(err) => Err(self.back_to_mfa(flow, mfa, err)),
                     };
                 }
-                Request::AuthorizeIp { token, kind } => {
-                    let body = json!({"token": token.expose()});
+                Request::AuthorizeIp { kind } => {
+                    let body = json!({"token": self.secret(|s| &s.pending)?.expose()});
                     match self
                         .guard(rest.post("auth/authorize-ip", &body, &extras))
                         .await?
                     {
-                        Ok(()) => Request::Login,
+                        Ok(()) => {
+                            self.secrets().pending = None;
+                            Request::Login
+                        }
                         Err(RestError::Captcha(challenge)) => {
-                            let retry = Request::AuthorizeIp { token, kind };
+                            let retry = Request::AuthorizeIp { kind };
                             return Ok(Self::captcha(flow, retry, *challenge));
                         }
                         Err(err) => {
@@ -371,9 +384,11 @@ impl PasswordLogin {
                         }
                     }
                 }
-                Request::VerifyPhone(code) => {
-                    let credentials = flow.credentials.as_ref().ok_or(LoginError::NoPendingStep)?;
-                    let body = json!({"phone": credentials.login.expose(), "code": code.expose()});
+                Request::VerifyPhone => {
+                    let body = json!({
+                        "phone": self.secret(|s| &s.login)?.expose(),
+                        "code": self.secret(|s| &s.pending)?.expose(),
+                    });
                     let response = self
                         .guard(rest.post_json::<_, TokenResponse>(
                             "phone-verifications/verify",
@@ -382,12 +397,14 @@ impl PasswordLogin {
                         ))
                         .await?;
                     match response {
-                        Ok(response) => Request::AuthorizeIp {
-                            token: Secret::new(response.token),
-                            kind: NewLocation::Phone,
-                        },
+                        Ok(response) => {
+                            self.secrets().pending = Some(Secret::new(response.token));
+                            Request::AuthorizeIp {
+                                kind: NewLocation::Phone,
+                            }
+                        }
                         Err(RestError::Captcha(challenge)) => {
-                            return Ok(Self::captcha(flow, Request::VerifyPhone(code), *challenge));
+                            return Ok(Self::captcha(flow, Request::VerifyPhone, *challenge));
                         }
                         Err(err) => {
                             flow.step = Step::NewLocation(NewLocation::Phone);
@@ -420,10 +437,11 @@ impl PasswordLogin {
             // Phone logins are E.164 numbers; for an email login, 70007 isn't about this login.
             Err(RestError::Api(api))
                 if api.code == 70007
-                    && flow
-                        .credentials
+                    && self
+                        .secrets()
+                        .login
                         .as_ref()
-                        .is_some_and(|credentials| credentials.login.expose().starts_with('+')) =>
+                        .is_some_and(|login| login.expose().starts_with('+')) =>
             {
                 flow.step = Step::NewLocation(NewLocation::Phone);
                 return Ok(LoginStep::NewLocation(NewLocation::Phone));
@@ -441,7 +459,7 @@ impl PasswordLogin {
                 .required_actions
                 .iter()
                 .any(|action| action == "update_password");
-            return Ok(Self::done(flow, user_id, token, update));
+            return Ok(self.done(flow, user_id, token, update));
         }
         let Some(ticket) = response.ticket.filter(|_| response.mfa) else {
             return Err(LoginError::UnexpectedResponse);
@@ -460,8 +478,8 @@ impl PasswordLogin {
             webauthn_options: response.webauthn,
             sms_sent_to: None,
         };
+        self.secrets().ticket = Some(Secret::new(ticket));
         flow.step = Step::Mfa(Mfa {
-            ticket: Secret::new(ticket),
             login_instance_id: response.login_instance_id,
             user_id,
             challenge: challenge.clone(),
@@ -470,12 +488,13 @@ impl PasswordLogin {
     }
 
     fn done(
+        &self,
         flow: &mut Flow,
         user_id: Snowflake<UserMarker>,
         token: String,
         password_update_required: bool,
     ) -> LoginStep {
-        flow.credentials = None;
+        *self.secrets() = Secrets::default();
         flow.step = Step::Done;
         LoginStep::Done(LoginSuccess {
             user_id,
@@ -492,10 +511,13 @@ impl PasswordLogin {
         LoginStep::Captcha(challenge)
     }
 
-    fn back_to_mfa(flow: &mut Flow, mfa: Mfa, err: RestError) -> LoginError {
+    fn back_to_mfa(&self, flow: &mut Flow, mfa: Mfa, err: RestError) -> LoginError {
         let err = LoginError::from_rest(err);
         flow.step = match err {
-            LoginError::Expired => Step::Idle,
+            LoginError::Expired => {
+                self.secrets().ticket = None;
+                Step::Idle
+            }
             _ => Step::Mfa(mfa),
         };
         err
@@ -587,13 +609,23 @@ mod tests {
         }
     }
 
-    async fn slow_login() -> (MockServer, PasswordLogin) {
+    // Login answers with MFA; the code request then hangs.
+    async fn slow_mfa_login() -> (MockServer, PasswordLogin) {
         let server = MockServer::start().await;
         Mock::given(path("/api/v9/experiments"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"fingerprint": "f"})))
             .mount(&server)
             .await;
         Mock::given(path("/api/v9/auth/login"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "user_id": "100000000000000001",
+                "mfa": true,
+                "totp": true,
+                "ticket": "ticket-secret",
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(path("/api/v9/auth/mfa/totp"))
             .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(10)))
             .mount(&server)
             .await;
@@ -611,30 +643,68 @@ mod tests {
         };
         let client =
             DiscordClient::with_endpoints(properties, Arc::new(NoStore), endpoints).unwrap();
-        (server, client.password_login())
+        let login = client.password_login();
+        login
+            .submit("me@example.com", Secret::new("hunter2".to_owned()))
+            .await
+            .unwrap();
+        (server, login)
+    }
+
+    #[track_caller]
+    fn assert_no_secrets(login: &PasswordLogin) {
+        let secrets = login.secrets();
+        assert!(secrets.login.is_none());
+        assert!(secrets.password.is_none());
+        assert!(secrets.ticket.is_none());
+        assert!(secrets.pending.is_none());
     }
 
     #[tokio::test]
-    async fn cancel_forgets_credentials_even_when_the_step_was_dropped() {
-        let (_server, login) = slow_login().await;
+    async fn steps_can_be_spawned() {
+        fn spawnable<T: Send>(_: T) {}
+        let (_server, login) = slow_mfa_login().await;
+
+        spawnable(login.submit("me@example.com", Secret::new("x".to_owned())));
+        spawnable(login.solve_captcha("x".to_owned()));
+        spawnable(login.submit_mfa(MfaMethod::Totp, Secret::new("x".to_owned())));
+        spawnable(login.send_mfa_sms());
+        spawnable(login.confirm_new_location("x"));
+        spawnable(login.verify_phone(Secret::new("x".to_owned())));
+    }
+
+    #[tokio::test]
+    async fn cancel_after_a_dropped_step_forgets_the_secrets() {
+        let (_server, login) = slow_mfa_login().await;
+        let running = tokio::time::timeout(
+            Duration::from_millis(100),
+            login.submit_mfa(MfaMethod::Totp, Secret::new("123456".to_owned())),
+        )
+        .await;
+        assert!(running.is_err());
+
+        login.cancel();
+
+        assert_no_secrets(&login);
+    }
+
+    #[tokio::test]
+    async fn cancel_during_a_step_that_is_then_dropped_forgets_the_secrets() {
+        let (_server, login) = slow_mfa_login().await;
         {
-            let submit = login.submit("me@example.com", Secret::new("hunter2".to_owned()));
-            tokio::pin!(submit);
-            let running = tokio::time::timeout(Duration::from_millis(100), &mut submit).await;
+            let step = login.submit_mfa(MfaMethod::Totp, Secret::new("123456".to_owned()));
+            tokio::pin!(step);
+            let running = tokio::time::timeout(Duration::from_millis(100), &mut step).await;
             assert!(running.is_err());
-            // The running step holds the lock, so cancel() can't clear the flow itself.
+            // The running step holds the flow, so cancel() can't reach the flow itself.
             login.cancel();
         }
 
+        assert_no_secrets(&login);
         assert!(matches!(
-            login
-                .submit("me@example.com", Secret::new("x".to_owned()))
-                .await,
+            login.send_mfa_sms().await,
             Err(LoginError::Cancelled)
         ));
-        let flow = login.flow.try_lock().unwrap();
-        assert!(flow.credentials.is_none());
-        assert!(matches!(flow.step, Step::Idle));
     }
 
     #[test]
