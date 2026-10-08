@@ -86,3 +86,11 @@ configuration. It can pass its own `ClientBuild` to `ClientProperties::desktop`,
 the public fields of the result before creating the `DiscordClient`. The `DiscordClient`
 then sends those values everywhere: in Identify, `X-Super-Properties`, `User-Agent` and
 `X-Discord-Locale`.
+
+## Mobile clients (later)
+
+`ClientProperties` only models the desktop client (`DesktopOs`). The iOS and Android apps
+will need their own identity when they come: the properties of the official mobile
+clients (`os: "iOS"` / `"Android"`, their `browser`, `client_version`, device fields) and
+the HTTP headers those clients send. Presenting a mobile app as a desktop client would
+stand out to the same anti-abuse systems this identity exists for.

@@ -20,6 +20,12 @@ carries the client headers from [client-properties.md](client-properties.md):
 `User-Agent`, `X-Super-Properties` and `X-Discord-Locale`. Authenticated requests carry
 the bare token in `Authorization`, with no `Bearer` prefix.
 
+The REST client only speaks HTTPS and never follows redirects, so the `Authorization`
+header can't be sent anywhere a response points to. A redirect reaches the caller as an
+unexpected status. Response bodies are capped at 4 MiB; a larger one ends the request
+with `UnexpectedResponse`. Plain `http://` and `ws://` endpoints need
+`Endpoints::allow_plaintext`, which only local test servers set.
+
 Requests before login also carry `X-Fingerprint`
 ([fingerprints](https://docs.discord.food/authentication#fingerprints)). The fingerprint
 comes from `GET /experiments`, which returns one when the request has neither
@@ -56,8 +62,13 @@ address or an E.164 phone number. A success returns `{user_id, token, user_setti
 A step that fails with a recoverable error stays pending. For example, a wrong MFA code
 (`InvalidMfaCode`) keeps the MFA step, and a wrong password lets the UI submit again. A
 second call while one is running returns `Busy`. A call no step is waiting for returns
-`NoPendingStep`. `cancel()` stops the running request, forgets the credentials, and makes
-every later call return `Cancelled`.
+`NoPendingStep`. A pending step stays in the flow until the request that answers it
+finishes, so dropping a call's future (a cancelled UI task, a timeout) doesn't lose the MFA
+ticket or a verification token.
+
+`cancel()` stops the running request and makes every later call return `Cancelled`. It
+forgets the login, password, ticket and tokens right away, unless a running step holds the
+flow. In that case they are cleared when that step finishes, or by the next call.
 
 ### Two-factor authentication
 
@@ -83,7 +94,9 @@ The solution goes back with the same request, retried with the `X-Captcha-Key` h
 plus `X-Captcha-Rqtoken` and `X-Captcha-Session-Id` when the challenge had them. The
 reference calls the old `captcha_key`/`captcha_rqtoken` body fields deprecated, so Akari
 never sends them. A rejected solution returns another challenge. `PasswordLogin` replays
-whichever request asked: login, MFA, SMS, authorize-ip or phone verification.
+whichever request asked: login, MFA, SMS, authorize-ip or phone verification. While a
+CAPTCHA is pending for an MFA request, `submit_mfa` and `send_mfa_sms` still work with the
+same ticket.
 
 ### New login location
 
@@ -95,7 +108,8 @@ confirmation:
   response. Akari treats a form error on `login` with the code
   `ACCOUNT_LOGIN_VERIFICATION_EMAIL` as this case (**unverified**). The link opens the
   official client, so the user pastes the address (or just the token) into Akari:
-  `confirm_new_location` accepts `#token=…`, `?token=…` or a bare token.
+  `confirm_new_location` accepts `#token=…`, `?token=…` or a bare token, also when the
+  pasted address lacks `https://` or the token is percent-encoded.
 - **Phone login**: error `70007`, and Discord texts a code.
   `POST /phone-verifications/verify {phone, code}` returns `{token}`. Akari only treats
   70007 as this step when the login is an E.164 number (starts with `+`). For an email
@@ -110,15 +124,16 @@ again. The reference says no new CAPTCHA should be needed then.
 `QrLogin` runs the [desktop side of remote
 authentication](https://docs.discord.food/remote-authentication/desktop) in a background
 task. The UI reads events with `next()`: `Code`, `Scanned`, `CancelledOnPhone`, `Captcha`
-and `Done`.
+and `Done`. `DiscordClient::qr_login` spawns that task on the current Tokio runtime and
+returns `LoginError::NoRuntime` when there is none.
 
 ### The remote auth gateway
 
 Akari connects to `wss://remote-auth-gateway.discord.gg/?v=2`. The version parameter is
 required; v1 is discontinued. The gateway rejects connections without an `Origin` of
 `https://discord.com` (or the ptb or canary origins). Akari also sends its `User-Agent`,
-and uses the same rustls config as everything else. Packets are flat JSON objects with a
-string `op`:
+and uses the same rustls config as everything else. Packets are flat JSON objects under
+1 KiB, so the connection refuses messages and frames over 16 KiB. Each has a string `op`:
 
 | Direction | `op` | Fields | What Akari does |
 |---|---|---|---|
@@ -127,7 +142,7 @@ string `op`:
 | ← | `nonce_proof` | `encrypted_nonce` | Decrypts the nonce |
 | → | `nonce_proof` | `nonce` | The decrypted nonce, base64url without padding |
 | ← | `pending_remote_init` | `fingerprint` | Checks it, then emits `Code { url: "https://discord.com/ra/<fingerprint>" }` |
-| ← | `pending_ticket` | `encrypted_user_payload` | Emits `Scanned` |
+| ← | `pending_ticket` | `encrypted_user_payload` | Emits `Scanned`; an unreadable payload restarts the session |
 | ← | `pending_login` | `ticket` | Exchanges the ticket for the token |
 | ← | `cancel` | | Emits `CancelledOnPhone` and starts over |
 | → / ← | `heartbeat` / `heartbeat_ack` | | As on the main gateway |
@@ -166,15 +181,21 @@ The ticket's lifetime isn't documented.
 | No heartbeat ACK, broken connection | none | Failure before a code was shown, otherwise starts over |
 | No `hello` within 10 s | none | Failure; without `hello` there is no heartbeat to notice a silent connection |
 
-A failure means the session never got as far as showing a code. Akari retries at once,
-then with a backoff of 0.5 to 1 s. After three failures in a row, `next()` returns the
-last error: `Network` for a connection error, otherwise `RemoteAuth`.
+A failure means the session never got as far as showing a code. After three failures in a
+row, `next()` returns the last error: `Network` for a connection error, otherwise
+`RemoteAuth`.
+
+A session that lived its normal few minutes starts over at once. One that ended within
+30 s, whether it failed or showed a code, starts over with backoff: at once the first time,
+then after 0.5–1 s, 1–2 s and so on, up to 30 s. That way a gateway that drops every code
+right away can't make Akari reconnect in a tight loop with a new RSA key each time.
 
 Events wait in a queue instead of a channel, so the session keeps heartbeating while the
 UI isn't reading. A new code replaces one that hasn't been read yet, so only the newest
-code ever reaches the UI. `cancel()` or dropping the `QrLogin` closes the connection. If
-the background task ever stops unexpectedly, `next()` returns `RemoteAuth` instead of
-waiting forever.
+code ever reaches the UI. The queue holds at most eight events and drops the oldest. The
+end of the login (`Done` or an error) is always the newest event, so it is never dropped.
+`cancel()` or dropping the `QrLogin` closes the connection. If the background task ever
+stops unexpectedly, `next()` returns `RemoteAuth` instead of waiting forever.
 
 ### Side by side with the password form
 
@@ -198,7 +219,7 @@ once one of them returns a token.
 | 40333, 403 + 10008, 403 without JSON | `Blocked`: Cloudflare or anti-abuse |
 | 429 | `RateLimited { retry_after, global }`, from `retry_after` (float seconds) in the body or the `Retry-After` header |
 | Any other JSON error | `Discord { code, message }` |
-| No JSON, unexpected body | `UnexpectedResponse` |
+| No JSON, unexpected body, redirect, body over 4 MiB | `UnexpectedResponse` |
 
 `retry_after` is `None` when neither the body nor the headers give a delay. The reference
 says not to retry such a 429 automatically. Akari never retries login requests on its own.
@@ -213,6 +234,13 @@ and Akari registers none. The token is deleted even when Discord can't be reache
 counts as logged out, since the session is gone either way. Only `LogoutError::Storage`
 means the token is still stored.
 
+`DiscordClient::end_session(token)` sends the same request for a token that isn't in the
+store, such as one a new login just replaced. Neither call can end a session Discord
+doesn't hear about. When Discord can't confirm the logout, the host should tell the user
+that the session may still be active, and that it can be ended under User Settings →
+Devices in an official client. akari-cli does this, and it also ends a replaced token's
+session after logging in again, so no live session is left behind a deleted token.
+
 ## Token storage
 
 `TokenStore` is implemented by the host: Keychain on Apple platforms, Android Keystore,
@@ -223,7 +251,11 @@ through `spawn_blocking`.
 ## Keeping secrets out of logs
 
 - `Token` and `Secret` print `<redacted>` in `Debug`, have no `Display`, and zero their
-  memory on drop. Login steps and flows never print credentials, tickets or tokens.
+  memory on drop. Login steps and flows never print credentials, tickets or tokens, and
+  neither do the CAPTCHA solution and per-request headers.
+- Zeroing covers `Token`, `Secret` and the decrypted remote auth buffers only. The JSON
+  request bodies built from them and reqwest's response buffers are ordinary copies that
+  aren't zeroed. This is accepted: they live only for the length of one request.
 - Error messages never quote response bodies; a failed parse of a body that may hold a
   token reports only `UnexpectedResponse`. Transport errors keep their source but strip
   its URL.
