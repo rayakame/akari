@@ -31,9 +31,7 @@ impl TokenStore for KeychainStore {
 
 impl Accounts for KeychainStore {
     fn current_account(&self) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError> {
-        Ok(read(CURRENT_ACCOUNT)?
-            .and_then(|id| id.parse().ok())
-            .map(Snowflake::new))
+        parse_account(read(CURRENT_ACCOUNT)?)
     }
 
     fn set_current_account(&self, account: Snowflake<UserMarker>) -> Result<(), TokenStoreError> {
@@ -47,6 +45,18 @@ impl KeychainStore {
     pub fn clear_current_account(&self) -> Result<(), TokenStoreError> {
         remove(CURRENT_ACCOUNT)
     }
+}
+
+// A present but unreadable entry is an error, not "logged out": the token it points to
+// would otherwise become unreachable.
+fn parse_account(value: Option<String>) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError> {
+    value
+        .map(|id| {
+            id.parse().map(Snowflake::new).map_err(|_| {
+                TokenStoreError::Backend("the current-account entry is unreadable".to_owned())
+            })
+        })
+        .transpose()
 }
 
 fn entry(user: &str) -> Result<Entry, TokenStoreError> {
@@ -91,6 +101,19 @@ mod tests {
 
         assert!(!err.to_string().contains("secret-token"));
         assert!(!format!("{err:?}").contains("secret-token"));
+    }
+
+    #[test]
+    fn current_account_entries_parse_or_fail_loudly() {
+        assert_eq!(parse_account(None).unwrap(), None);
+        assert_eq!(
+            parse_account(Some("100000000000000001".to_owned())).unwrap(),
+            Some(Snowflake::new(100_000_000_000_000_001))
+        );
+        assert!(matches!(
+            parse_account(Some("not-an-id".to_owned())),
+            Err(TokenStoreError::Backend(_))
+        ));
     }
 
     #[test]
