@@ -24,7 +24,9 @@ impl Account {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
         let gateway = Arc::new(Gateway::start(client, token, timing)?);
         let store = Store::new(limits);
-        runtime.spawn(pump(gateway.clone(), store.clone()));
+        // Built before the task starts, so it runs even if the task is never polled.
+        let finish = Finish::new(gateway.clone(), store.clone());
+        runtime.spawn(pump(finish));
         Ok(Self { gateway, store })
     }
 
@@ -60,6 +62,35 @@ impl Account {
     }
 }
 
+// Closes the account however the pump ends: normally, by a panic, or because the runtime
+// shut down and dropped the task. Without it, subscribers would wait forever.
+pub(crate) struct Finish {
+    gateway: Arc<Gateway>,
+    store: Store,
+    ended: Option<Option<Arc<GatewayError>>>,
+}
+
+impl Finish {
+    pub(crate) fn new(gateway: Arc<Gateway>, store: Store) -> Self {
+        Self {
+            gateway,
+            store,
+            ended: None,
+        }
+    }
+}
+
+impl Drop for Finish {
+    fn drop(&mut self) {
+        let error = self.ended.take().unwrap_or_else(|| {
+            self.gateway.close();
+            Some(Arc::new(GatewayError::Stopped))
+        });
+        self.store.set_connection(ConnectionState::Closed { error });
+        self.store.finish();
+    }
+}
+
 impl Drop for Account {
     fn drop(&mut self) {
         self.gateway.close();
@@ -76,16 +107,16 @@ impl fmt::Debug for Account {
 
 // The gateway buffers its events and the store never waits for subscribers, so nothing
 // here waits on a consumer.
-async fn pump(gateway: Arc<Gateway>, store: Store) {
+async fn pump(mut finish: Finish) {
+    let gateway = finish.gateway.clone();
     let error = loop {
         match gateway.next().await {
-            Ok(event) => on_event(&store, event, &|| gateway.wants_connection()),
+            Ok(event) => on_event(&finish.store, event, &|| gateway.wants_connection()),
             Err(GatewayError::Closed) => break None,
             Err(error) => break Some(Arc::new(error)),
         }
     };
-    store.set_connection(ConnectionState::Closed { error });
-    store.finish();
+    finish.ended = Some(error);
 }
 
 // Queued events mustn't make a disconnected account look connected. disconnect() idles the

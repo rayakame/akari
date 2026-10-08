@@ -372,3 +372,79 @@ async fn an_undecodable_ready_closes_without_quoting_it() {
     assert!(!shown.contains("leak-me"), "{shown}");
     assert!(shown.contains("line 1"), "{shown}");
 }
+
+fn stopped(state: &ConnectionState) -> bool {
+    matches!(state, ConnectionState::Closed { error: Some(error) } if matches!(**error, GatewayError::Stopped))
+}
+
+fn drain(subscription: &Subscription) -> Vec<String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mut events = Vec::new();
+        while let Some(event) = timeout(WAIT, subscription.next())
+            .await
+            .expect("the subscription never ended")
+        {
+            events.push(describe(&event));
+        }
+        events
+    })
+}
+
+#[test]
+fn a_runtime_shutdown_closes_the_account() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (account, subscription) = runtime.block_on(async {
+        let account = Account::start(
+            crate::gateway::fake::client_for("ws://127.0.0.1:9/".to_owned()),
+            Token::new(TOKEN.to_owned()),
+            timing(),
+            DEFAULT_LIMITS,
+        )
+        .unwrap();
+        let subscription = account.store().subscribe();
+        (account, subscription)
+    });
+
+    drop(runtime);
+
+    assert_eq!(drain(&subscription), ["Closed(Stopped)"]);
+    assert!(stopped(&account.store().connection()));
+}
+
+#[test]
+fn a_panicking_task_still_closes_the_account() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (account, subscription, finish) = runtime.block_on(async {
+        let account = Account::start(
+            crate::gateway::fake::client_for("ws://127.0.0.1:9/".to_owned()),
+            Token::new(TOKEN.to_owned()),
+            timing(),
+            DEFAULT_LIMITS,
+        )
+        .unwrap();
+        let subscription = account.store().subscribe();
+        let finish = Finish::new(account.gateway.clone(), account.store().clone());
+        (account, subscription, finish)
+    });
+
+    let task = runtime.spawn(async move {
+        let _finish = finish;
+        panic!("the pump broke");
+    });
+    let result = runtime.block_on(task);
+
+    assert!(result.is_err_and(|err| err.is_panic()));
+    assert_eq!(drain(&subscription), ["Closed(Stopped)"]);
+    assert!(stopped(&account.store().connection()));
+    assert!(account.connect().is_err());
+}

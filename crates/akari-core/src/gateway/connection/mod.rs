@@ -115,6 +115,10 @@ pub enum GatewayError {
     Closed,
     #[error("a gateway connection needs a Tokio runtime")]
     NoRuntime,
+    /// A background task stopped before the connection was closed, e.g. because the Tokio
+    /// runtime shut down.
+    #[error("the connection's background task stopped")]
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

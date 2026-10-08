@@ -127,6 +127,10 @@ and applies each event.
   reading never holds up the store, and a warning is logged at 10,000 unread events and
   every doubling. Subscribe first, then read: an event may describe a change the read
   already shows, and applying it again is harmless.
+- **The account's task** ends the store's subscriptions however it stops. After
+  `close()` or a fatal gateway error the connection state is `Closed` with that error; if
+  the task panics or the Tokio runtime shuts down first, it is `Closed` with
+  `GatewayError::Stopped` and the gateway is closed too.
 - **A new session** (READY after a failed resume) is compared with the old state, and only
   the differences become events, followed by `Ready`. A guild that is added, removed or
   goes down implies its channels. RESUMED changes nothing.
