@@ -751,3 +751,24 @@ fn a_new_session_drops_the_windows_of_channels_that_are_gone() {
     );
     assert_eq!(message_ids(&state, GENERAL), None);
 }
+
+#[test]
+fn a_repeated_guild_create_keeps_its_windows_and_member() {
+    let mut state = ready_state();
+    apply(&mut state, "GUILD_CREATE", guild_create(G3));
+    let welcome = 300_000_000_000_000_031;
+    state.view_channel(Snowflake::new(welcome), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(10, welcome));
+    let mut without_member = guild_create(G3);
+    without_member["members"] = json!([]);
+
+    let repeated = apply(&mut state, "GUILD_CREATE", guild_create(G3));
+    let memberless = apply(&mut state, "GUILD_CREATE", without_member);
+    let live = apply(&mut state, "MESSAGE_CREATE", message(11, welcome));
+
+    assert!(repeated.is_empty(), "{repeated:?}");
+    assert!(memberless.is_empty(), "{memberless:?}");
+    assert_eq!(live, ["MessageInserted(11)"]);
+    assert_eq!(message_ids(&state, welcome), Some(vec![10, 11]));
+    assert!(state.current_member(Snowflake::new(G3)).is_some());
+}

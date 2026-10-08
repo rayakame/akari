@@ -410,7 +410,10 @@ impl State {
                 }
                 let old = self.entities.guild_channels(id);
                 push_channel_changes(&old, &next.channels, |_| false, events);
-                self.remove_guild_data(id);
+                for channel in old.keys().filter(|id| !next.channels.contains_key(id)) {
+                    self.entities.channels.remove(channel);
+                    self.windows.drop_channel(*channel);
+                }
             }
             None => events.push(StoreEvent::GuildAdded(after)),
         }
