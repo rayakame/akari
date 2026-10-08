@@ -1,6 +1,6 @@
 const FIRST_WARNING: usize = 10_000;
 
-pub(super) struct Backlog {
+pub(crate) struct Backlog {
     next_warning: usize,
 }
 
@@ -13,7 +13,7 @@ impl Default for Backlog {
 }
 
 impl Backlog {
-    pub(super) fn warns_at(&mut self, buffered: usize) -> bool {
+    pub(crate) fn warns_at(&mut self, buffered: usize) -> bool {
         if buffered < FIRST_WARNING {
             self.next_warning = FIRST_WARNING;
             return false;

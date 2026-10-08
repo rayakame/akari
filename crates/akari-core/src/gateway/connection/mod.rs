@@ -1,4 +1,3 @@
-mod backlog;
 mod task;
 
 #[cfg(test)]
@@ -15,11 +14,11 @@ use std::time::Duration;
 
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
-use self::backlog::Backlog;
 use self::task::Task;
 use super::outgoing::{GatewayCommand, MAX_PAYLOAD};
 use super::payload::{DecodeError, DispatchEvent};
 use super::session::{Retry, Session, Timing};
+use crate::backlog::Backlog;
 use crate::error::TransportError;
 use crate::{DiscordClient, Token};
 

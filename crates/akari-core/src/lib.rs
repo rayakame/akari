@@ -1,6 +1,7 @@
 //! Discord gateway, REST client, state store and SQLite disk cache for Akari.
 
 pub mod auth;
+mod backlog;
 mod backoff;
 mod client;
 mod error;
