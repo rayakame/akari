@@ -107,11 +107,18 @@ connection. Following
 
 - The first heartbeat goes out after a random delay of up to one interval, then one per
   interval. A heartbeat carries the last `s`, or `null` before the first dispatch.
+- An interval below 1 s is raised to 1 s, so the heartbeat reserve can never take the whole
+  send budget (see [Limits](#limits)).
 - Op 1 from Discord is answered right away, without moving the regular schedule.
 - If the previous heartbeat wasn't acknowledged by the time the next one is due, the
   connection is a zombie: Akari closes it with 4000 and resumes on a new one.
 - Without Hello within 20 s, Akari closes the connection (4000) and tries again.
-- After a device sleep, the late timer sends one heartbeat, not a burst.
+- Timers run on tokio's `Instant`, a monotonic clock that stops while the device sleeps
+  (macOS, iOS, Linux, Android). After a wake the schedule simply continues; no late
+  heartbeat fires. A socket that died during the sleep is noticed only when a heartbeat
+  goes unacknowledged, up to about two intervals later, and until then `send()` reports
+  success for writes into the dead socket. Hosts should call `disconnect()` before the
+  device suspends and `connect()` after it wakes; see [Not implemented yet](#not-implemented-yet).
 
 ## Identify
 
@@ -139,6 +146,11 @@ From [resuming](https://docs.discord.food/gateway/using-gateway#resuming):
   (`{token, session_id, seq}`) goes to `resume_gateway_url`, but only over `wss://`: the
   token is never sent in plaintext. Any other URL is ignored, and resuming goes through
   `Endpoints::gateway`.
+- If two connection attempts in a row on `resume_gateway_url` end before Hello (connecting
+  fails, no Hello, or the connection drops first), Akari resumes through
+  `Endpoints::gateway` instead. Failures there keep resuming, since an Identify would need
+  the same server; Discord answering with op 9 (either `d`) or 4003/4007/4009 starts a new
+  session.
 - `seq` is the last `s` received. Once Akari decides to close a connection, it reads no
   further messages; their sequence numbers aren't counted, so the resume replays them
   instead of losing them.
@@ -147,6 +159,8 @@ From [resuming](https://docs.discord.food/gateway/using-gateway#resuming):
   `true`, otherwise forget the session and identify on `Endpoints::gateway`. The reference
   is inconsistent here: its Invalid Session note allows staying on the connection, its
   resuming section says to disconnect. Akari reconnects, like twilight and discord.js.
+  `disconnect()` followed by `connect()` skips a pending backoff but still waits out op 9's
+  1–5 s.
 - The first reconnect after a drop is immediate; repeated ones back off exponentially up to
   60 s, with jitter. The count starts over after a connection that stayed ready for 30 s.
 - Closing with 1000 or 1001 invalidates the session; any other code keeps it resumable for
@@ -208,12 +222,15 @@ What Akari does when Discord closes the connection, per the
 - After a fatal error, `next()` returns it once, then `GatewayError::Closed`.
 - `send(command)` resolves once the command is written. Without a ready session (before
   READY or RESUMED, while reconnecting, after `disconnect()`) it fails at once with
-  `SendError::NotConnected`; nothing is queued across connections.
+  `SendError::NotConnected`; nothing is queued across connections. After `close()` it
+  returns `SendError::Closed`, also while the close handshake is still running.
 - `close()` and dropping the `Gateway` close the socket with 1000, which ends the session.
   Without a socket, after `disconnect()` or between reconnects, there's nothing to send 1000
   on: Discord keeps the session until it times out after a few minutes. `disconnect()`
   closes with 4000 and keeps `session_id` and `seq`; the next `connect()` resumes. A later
-  pause/resume API for mobile backgrounding maps onto these two calls.
+  pause/resume API for mobile backgrounding maps onto these two calls. A `close()` during a
+  reconnect cuts that connection's close handshake short and ends the gateway without
+  another `Reconnecting`.
 - The `capture` feature, which only akari-cli enables, adds
   `Gateway::capture_next_ready()`: the next READY arrives once more as
   `ConnectionEvent::CapturedReady` with its raw JSON, also when it then fails to decode. See
@@ -252,3 +269,6 @@ presence update, is **unverified**.
 - READY_SUPPLEMENTAL, op 14 guild subscriptions, voice states, presence activities.
 - `GET /gateway` with a cached URL, and persisting a session across launches for a fast
   resume after a cold start.
+- A pause/resume API for suspend and wake. Open point: on suspend it has to
+  `disconnect()` and on wake `connect()`, because the gateway's own timers don't notice a
+  sleep (see [Heartbeat](#heartbeat)).
