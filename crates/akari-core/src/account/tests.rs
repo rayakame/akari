@@ -1180,6 +1180,67 @@ async fn a_retried_send_keeps_its_place_before_later_sends() {
 }
 
 #[tokio::test]
+async fn a_cancelled_send_leaves_the_message_failed() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]).delayed(Duration::from_millis(500));
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let cancelled = tokio::time::timeout(
+        Duration::from_millis(100),
+        account.send_message(general(), "hello".to_owned()),
+    )
+    .await;
+
+    assert!(cancelled.is_err());
+    let deliveries: Vec<Delivery> = outbox(&account)
+        .into_iter()
+        .map(|(_, delivery)| delivery)
+        .collect();
+    assert_eq!(deliveries, [Delivery::Failed]);
+}
+
+#[tokio::test]
+async fn a_send_shows_at_once_and_goes_out_even_if_the_jump_fails() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]).delayed(Duration::from_millis(300));
+    sends.mount(&server).await;
+    mock_page(&server, ("around", "20"), page(&[19, 20, 21])).await;
+    {
+        use wiremock::matchers::{path, query_param};
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("limit", "50"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(500).set_delay(Duration::from_millis(300)),
+            )
+            .mount(&server)
+            .await;
+    }
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+    account
+        .load_messages(
+            general(),
+            MessageLoad::Around {
+                id: Snowflake::new(20),
+                limit: 3,
+            },
+        )
+        .await
+        .unwrap();
+
+    let (sent, shown) = tokio::join!(account.send_message(general(), "hello".to_owned()), async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        outbox(&account)
+    });
+
+    assert!(sent.is_ok(), "{sent:?}");
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(sends.bodies().len(), 1);
+}
+
+#[tokio::test]
 async fn sending_in_a_detached_window_jumps_to_the_present() {
     let mut fake = FakeGateway::start().await;
     let server = wiremock::MockServer::start().await;
@@ -1204,7 +1265,7 @@ async fn sending_in_a_detached_window_jumps_to_the_present() {
         .await
         .unwrap();
 
-    let requests: Vec<(String, String)> = server
+    let mut requests: Vec<(String, String)> = server
         .received_requests()
         .await
         .unwrap()
@@ -1216,6 +1277,7 @@ async fn sending_in_a_detached_window_jumps_to_the_present() {
             )
         })
         .collect();
+    requests.sort();
     assert_eq!(
         requests,
         [

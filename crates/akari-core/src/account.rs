@@ -87,6 +87,22 @@ impl Nonces {
     }
 }
 
+// A send dropped before Discord answered, e.g. by a cancelled task, stays retryable instead of
+// pending forever.
+struct Unanswered<'a> {
+    store: &'a Store,
+    channel: ChannelId,
+    pending: Option<MessageId>,
+}
+
+impl Drop for Unanswered<'_> {
+    fn drop(&mut self) {
+        if let Some(pending) = self.pending {
+            self.store.fail_message(self.channel, pending);
+        }
+    }
+}
+
 fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -188,26 +204,19 @@ impl Shared {
         }
     }
 
-    // Discord jumps to the present before sending; a stale window just waits for its refresh.
-    async fn prepare_send(self: &Arc<Self>, channel: ChannelId) -> Result<(), RequestError> {
-        match self.store.messages(channel) {
-            None => self.view(channel),
-            Some(window) if !window.latest => {
-                self.load(channel, LoadKind::Latest, JUMP_LIMIT).await?;
-            }
-            Some(_) => {}
-        }
-        Ok(())
-    }
-
     async fn deliver(
         &self,
         channel: ChannelId,
         pending: MessageId,
         content: String,
     ) -> Result<MessageId, RequestError> {
+        let mut unanswered = Unanswered {
+            store: &self.store,
+            channel,
+            pending: Some(pending),
+        };
         let body = CreateMessage::new(content, pending.get().to_string());
-        match self.rest.create_message(channel, &body).await {
+        let delivered = match self.rest.create_message(channel, &body).await {
             Ok(message) => {
                 let id = message.id;
                 self.store.confirm_message(channel, pending, message);
@@ -218,7 +227,9 @@ impl Shared {
                 self.failed(&err);
                 Err(err)
             }
-        }
+        };
+        unanswered.pending = None;
+        delivered
     }
 
     async fn send_status(&self, new_session: bool) {
@@ -351,7 +362,10 @@ impl Account {
         if content.trim().is_empty() {
             return Err(RequestError::InvalidRequest);
         }
-        shared.prepare_send(channel).await?;
+        let window = shared.store.messages(channel);
+        if window.is_none() {
+            shared.view(channel);
+        }
         let now = now_millis();
         let pending = shared.nonces.next(now);
         let message = Message::pending(
@@ -362,6 +376,18 @@ impl Account {
             now,
         );
         shared.store.queue_message(channel, Arc::new(message));
+        // Like the official client, a detached window jumps to the present; a stale one waits
+        // for its refresh. The send doesn't wait for the jump.
+        if window.is_some_and(|window| !window.latest) {
+            let (jumped, delivered) = tokio::join!(
+                shared.load(channel, LoadKind::Latest, JUMP_LIMIT),
+                shared.deliver(channel, pending, content),
+            );
+            if let Err(err) = jumped {
+                tracing::debug!(error = %err, "couldn't jump to the present before sending");
+            }
+            return delivered;
+        }
         shared.deliver(channel, pending, content).await
     }
 
