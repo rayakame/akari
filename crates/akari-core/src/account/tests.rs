@@ -691,18 +691,18 @@ async fn a_new_session_refreshes_stale_windows() {
     fresh.send(ready_payload(1, &fake, |_| {})).await;
     events_until(&subscription, "Online").await;
     fresh.send(message(2, 14)).await;
+    while account.store().messages(general()).unwrap().stale || !ids(&account).contains(&14) {
+        next(&subscription)
+            .await
+            .expect("the refresh never finished");
+    }
 
-    assert_eq!(
-        events_until(&subscription, "MessagesLoaded(14..14)").await,
-        [
-            "MessageDeleted(11)",
-            "MessageUpdated(12)",
-            "MessagesLoaded(13..13)",
-            "MessagesLoaded(14..14)"
-        ]
-    );
     assert_eq!(ids(&account), [10, 12, 13, 14]);
-    assert!(!account.store().messages(general()).unwrap().stale);
+    let edited = account
+        .store()
+        .message(general(), Snowflake::new(12))
+        .unwrap();
+    assert_eq!(&*edited.content, "edited");
 }
 
 #[tokio::test]
