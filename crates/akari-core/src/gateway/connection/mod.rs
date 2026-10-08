@@ -219,8 +219,9 @@ impl Gateway {
         });
     }
 
-    /// Ends the session (close code 1000). `next()` returns [`GatewayError::Closed`] once
-    /// the socket is closed.
+    /// Ends the session: an open socket is closed with code 1000, while a session kept by
+    /// [`Gateway::disconnect`] times out on Discord's side. `next()` returns
+    /// [`GatewayError::Closed`] once the socket is closed.
     pub fn close(&self) {
         self.control.send_if_modified(|mode| {
             let open = *mode != Mode::Closed;

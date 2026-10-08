@@ -181,9 +181,10 @@ What Akari does when Discord closes the connection, per the
   ([rate limiting](https://docs.discord.food/gateway/using-gateway#rate-limiting)). Akari
   counts every send in a sliding 60 s window. Heartbeats, Identify and Resume always go
   out; commands get what's left after a reserve of `ceil(60 s / heartbeat_interval) + 4`
-  (6 at the usual 41.25 s, leaving 114 per minute). Commands over the budget wait; they are
-  never dropped. The reference doesn't say whether heartbeats count, so Akari assumes they
-  do.
+  (6 at the usual 41.25 s). That leaves at most 114 commands per minute, a few less while
+  the window also holds heartbeats and Identify. Commands over the budget wait for room; if
+  the connection drops meanwhile, they fail with `SendError::NotConnected`. The reference
+  doesn't say whether heartbeats count, so Akari assumes they do.
 - **Payload size:** a payload over 15 KiB gets the connection closed with 4002
   ([sending events](https://docs.discord.food/gateway/using-gateway#sending-events)), so
   `send()` refuses it with `SendError::TooLarge`.
@@ -208,8 +209,10 @@ What Akari does when Discord closes the connection, per the
 - `send(command)` resolves once the command is written. Without a ready session (before
   READY or RESUMED, while reconnecting, after `disconnect()`) it fails at once with
   `SendError::NotConnected`; nothing is queued across connections.
-- `close()` and dropping the `Gateway` end the session with 1000. `disconnect()` closes
-  with 4000 and keeps `session_id` and `seq`; the next `connect()` resumes. A later
+- `close()` and dropping the `Gateway` close the socket with 1000, which ends the session.
+  Without a socket, after `disconnect()` or between reconnects, there's nothing to send 1000
+  on: Discord keeps the session until it times out after a few minutes. `disconnect()`
+  closes with 4000 and keeps `session_id` and `seq`; the next `connect()` resumes. A later
   pause/resume API for mobile backgrounding maps onto these two calls.
 - The `capture` feature, which only akari-cli enables, adds
   `Gateway::capture_next_ready()`: the next READY arrives once more as
