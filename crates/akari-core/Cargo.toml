@@ -35,7 +35,7 @@ insecure-test-endpoints = []
 
 [dev-dependencies]
 akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 tracing-subscriber.workspace = true
 wiremock.workspace = true
 

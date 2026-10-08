@@ -1,4 +1,7 @@
 mod error;
+// Account requests (next) will be the first callers outside tests.
+#[cfg_attr(not(test), allow(dead_code))]
+mod ratelimit;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{RequestBuilder, Url};
