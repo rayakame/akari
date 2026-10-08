@@ -1,4 +1,6 @@
 use std::sync::Arc;
+#[cfg(feature = "capture")]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -14,7 +16,7 @@ use super::{ConnectionEvent, DisconnectReason, GatewayError, Mode, Outgoing, Sen
 use crate::error::{TransportError, TransportErrorKind};
 use crate::gateway::decompress::{DecompressError, ZstdStream};
 use crate::gateway::outgoing;
-use crate::gateway::payload::{DispatchEvent, GatewayEvent, decode};
+use crate::gateway::payload::{DecodeError, DispatchEvent, GatewayEvent, decode};
 use crate::gateway::session::{
     AfterClose, Connection, Handshake, Retry, Session, Tick, Timing, after_close,
     invalid_session_floor,
@@ -37,6 +39,8 @@ pub(super) struct Task {
     pub(super) buffered: Arc<AtomicUsize>,
     pub(super) backlog: Backlog,
     pub(super) outgoing: mpsc::Receiver<Outgoing>,
+    #[cfg(feature = "capture")]
+    pub(super) capture: Arc<AtomicBool>,
     pub(super) session: Session,
     pub(super) retry: Retry,
 }
@@ -247,23 +251,25 @@ impl Task {
         message: Option<Result<Message, tungstenite::Error>>,
     ) -> Option<Exit> {
         let event = match message {
-            Some(Ok(Message::Binary(data))) => match zstd.decompress(&data, decode) {
-                Ok(event) => event,
-                // Fatal: a resume would replay the same message.
-                Err(DecompressError::TooLarge { limit }) => {
-                    let end = End::Fatal(GatewayError::MessageTooLarge { limit });
-                    return Some((end, Some(NORMAL)));
+            Some(Ok(Message::Binary(data))) => {
+                match zstd.decompress(&data, |json| self.decode(json)) {
+                    Ok(event) => event,
+                    // Fatal: a resume would replay the same message.
+                    Err(DecompressError::TooLarge { limit }) => {
+                        let end = End::Fatal(GatewayError::MessageTooLarge { limit });
+                        return Some((end, Some(NORMAL)));
+                    }
+                    Err(DecompressError::Zstd(err)) => {
+                        tracing::warn!(error = %err, "the gateway's zstd stream broke");
+                        return Some((
+                            self.lost(link, DisconnectReason::Decompress),
+                            Some(RESUMABLE),
+                        ));
+                    }
                 }
-                Err(DecompressError::Zstd(err)) => {
-                    tracing::warn!(error = %err, "the gateway's zstd stream broke");
-                    return Some((
-                        self.lost(link, DisconnectReason::Decompress),
-                        Some(RESUMABLE),
-                    ));
-                }
-            },
+            }
             // Without transport compression, or if Discord ignores the request for it.
-            Some(Ok(Message::Text(text))) => decode(text.as_bytes()),
+            Some(Ok(Message::Text(text))) => self.decode(text.as_bytes()),
             Some(Ok(Message::Close(frame))) => {
                 let code = frame.map(|frame| u16::from(frame.code));
                 return Some((self.closed(link, code), None));
@@ -406,6 +412,15 @@ impl Task {
         .await;
     }
 
+    fn decode(&mut self, json: &[u8]) -> Result<GatewayEvent, DecodeError> {
+        let event = decode(json);
+        #[cfg(feature = "capture")]
+        if is_ready(&event) && self.capture.swap(false, Ordering::AcqRel) {
+            self.emit(ConnectionEvent::CapturedReady(json.to_vec()));
+        }
+        event
+    }
+
     fn emit(&mut self, event: ConnectionEvent) {
         self.send(Ok(event));
     }
@@ -417,5 +432,18 @@ impl Task {
             tracing::warn!(buffered, "gateway events are piling up unread");
         }
         let _ = self.events.send(event);
+    }
+}
+
+// Also a READY that fails to decode: that's the one worth checking.
+#[cfg(feature = "capture")]
+fn is_ready(event: &Result<GatewayEvent, DecodeError>) -> bool {
+    match event {
+        Ok(GatewayEvent::Dispatch {
+            event: DispatchEvent::Ready(_),
+            ..
+        }) => true,
+        Ok(_) => false,
+        Err(err) => err.dispatch().is_some_and(|(_, name)| name == "READY"),
     }
 }

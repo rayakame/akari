@@ -8,6 +8,8 @@ mod tests;
 
 use std::fmt;
 use std::sync::Arc;
+#[cfg(feature = "capture")]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -28,6 +30,8 @@ pub struct Gateway {
     events: Mutex<mpsc::UnboundedReceiver<Result<ConnectionEvent, GatewayError>>>,
     buffered: Arc<AtomicUsize>,
     outgoing: mpsc::Sender<Outgoing>,
+    #[cfg(feature = "capture")]
+    capture: Arc<AtomicBool>,
 }
 
 const COMMAND_QUEUE: usize = 16;
@@ -63,6 +67,10 @@ pub enum ConnectionEvent {
         delay: Duration,
         reason: DisconnectReason,
     },
+    /// READY as received, decompressed, before it is decoded. Holds personal data and
+    /// secrets such as `analytics_token`.
+    #[cfg(feature = "capture")]
+    CapturedReady(Vec<u8>),
 }
 
 /// Why a connection dropped.
@@ -130,6 +138,8 @@ impl Gateway {
         let (events, receiver) = mpsc::unbounded_channel();
         let buffered = Arc::new(AtomicUsize::new(0));
         let (outgoing, commands) = mpsc::channel(COMMAND_QUEUE);
+        #[cfg(feature = "capture")]
+        let capture = Arc::new(AtomicBool::new(false));
         let task = Task {
             client,
             token,
@@ -139,6 +149,8 @@ impl Gateway {
             buffered: buffered.clone(),
             backlog: Backlog::default(),
             outgoing: commands,
+            #[cfg(feature = "capture")]
+            capture: capture.clone(),
             session: Session::default(),
             retry: Retry::default(),
         };
@@ -148,6 +160,8 @@ impl Gateway {
             events: Mutex::new(receiver),
             buffered,
             outgoing,
+            #[cfg(feature = "capture")]
+            capture,
         })
     }
 
@@ -211,6 +225,12 @@ impl Gateway {
     /// it is written.
     pub async fn send(&self, command: GatewayCommand) -> Result<(), SendError> {
         self.send_payload(command.to_payload()).await
+    }
+
+    /// Delivers the next READY's raw JSON as [`ConnectionEvent::CapturedReady`].
+    #[cfg(feature = "capture")]
+    pub fn capture_next_ready(&self) {
+        self.capture.store(true, Ordering::Release);
     }
 
     pub(crate) async fn send_payload(&self, payload: String) -> Result<(), SendError> {

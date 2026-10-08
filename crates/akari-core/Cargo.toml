@@ -27,12 +27,16 @@ zeroize.workspace = true
 zstd.workspace = true
 
 [features]
+# Hands out the raw READY for checking the models against real traffic. Only akari-cli
+# enables it; apps build with `-p akari-ffi`, so workspace feature unification can't add it.
+capture = []
 # Lets Endpoints point at http:// and ws:// test servers. Only the test suites enable it.
 insecure-test-endpoints = []
 
 [dev-dependencies]
 akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing-subscriber.workspace = true
 wiremock.workspace = true
 
 [lints]

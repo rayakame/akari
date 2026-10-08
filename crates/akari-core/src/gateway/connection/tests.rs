@@ -581,3 +581,52 @@ async fn the_rate_limit_leaves_room_for_heartbeats() {
         "no heartbeat while commands were held back"
     );
 }
+
+#[cfg(feature = "capture")]
+#[tokio::test]
+async fn an_armed_capture_delivers_the_raw_ready_first() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    gateway.capture_next_ready();
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+
+    connection.ready(1, SESSION, &fake.resume_url()).await;
+
+    match next(&gateway).await {
+        ConnectionEvent::CapturedReady(raw) => {
+            let raw: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+            assert_eq!(raw["t"], "READY");
+            assert_eq!(raw["d"]["session_id"], SESSION);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(
+        next(&gateway).await,
+        ConnectionEvent::Dispatch(DispatchEvent::Ready(_))
+    ));
+}
+
+#[cfg(feature = "capture")]
+#[tokio::test]
+async fn a_capture_keeps_a_ready_that_fails_to_decode() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    gateway.capture_next_ready();
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+    let mut ready: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/ready.json")).unwrap();
+    ready["d"]["user"]["id"] = serde_json::Value::Null;
+
+    connection.send(ready).await;
+
+    assert!(matches!(
+        next(&gateway).await,
+        ConnectionEvent::CapturedReady(_)
+    ));
+    assert!(matches!(
+        next_error(&gateway).await,
+        GatewayError::InvalidReady(_)
+    ));
+}
