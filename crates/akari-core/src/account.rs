@@ -109,9 +109,23 @@ impl fmt::Debug for Account {
 // here waits on a consumer.
 async fn pump(mut finish: Finish) {
     let gateway = finish.gateway.clone();
+    let connecting = || gateway.wants_connection();
     let error = loop {
         match gateway.next().await {
-            Ok(event) => on_event(&finish.store, event, &|| gateway.wants_connection()),
+            // A large READY takes milliseconds to convert; that mustn't hold a runtime worker.
+            Ok(ConnectionEvent::Dispatch(DispatchEvent::Ready(ready))) => {
+                let store = finish.store.clone();
+                match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
+                    Ok(next) => {
+                        finish.store.replace(next);
+                        finish
+                            .store
+                            .set_connection_if(ConnectionState::Online, connecting);
+                    }
+                    Err(_) => break Some(Arc::new(GatewayError::Stopped)),
+                }
+            }
+            Ok(event) => on_event(&finish.store, event, &connecting),
             Err(GatewayError::Closed) => break None,
             Err(error) => break Some(Arc::new(error)),
         }

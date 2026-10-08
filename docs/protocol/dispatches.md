@@ -119,8 +119,9 @@ and applies each event.
 
 - **Reads** are synchronous from any thread and return `Arc` snapshots that later changes
   never touch. The state sits behind a `RwLock`. Writes are a few map operations. A READY
-  is converted before the write lock is taken, so readers don't wait for the conversion;
-  comparing a later session with the old state does happen under the lock.
+  is converted on a blocking thread before the write lock is taken, so neither readers nor
+  a runtime worker wait for the conversion; comparing a later session with the old state
+  does happen under the lock.
 - **Events** (`StoreEvent`) carry the new value for added and updated things, and IDs for
   removed ones; never lists. They are sent while the write lock is held, so they arrive in
   the order of the changes. Each subscriber has an unbounded queue: a subscriber that stops

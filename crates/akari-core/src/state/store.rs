@@ -11,7 +11,7 @@ use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{MessageWindow, WindowLimits};
 use crate::backlog::Backlog;
-use crate::gateway::DispatchEvent;
+use crate::gateway::{DispatchEvent, Ready};
 use crate::model::{ChannelId, GuildId, MessageId, Permissions, UserId};
 
 /// An account's state, kept current by its gateway connection. Cheap to clone. Reads
@@ -25,6 +25,8 @@ struct Shared {
     inner: RwLock<Inner>,
     #[cfg(test)]
     park: std::sync::Mutex<Option<Park>>,
+    #[cfg(test)]
+    ready_thread: std::sync::Mutex<Option<std::thread::ThreadId>>,
 }
 
 #[cfg(test)]
@@ -126,6 +128,8 @@ impl Store {
                 }),
                 #[cfg(test)]
                 park: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                ready_thread: std::sync::Mutex::new(None),
             }),
         }
     }
@@ -153,14 +157,29 @@ impl Store {
     pub(crate) fn apply(&self, event: DispatchEvent) {
         match event {
             DispatchEvent::Ready(ready) => {
-                // Converting a large READY takes milliseconds; readers mustn't wait for it.
-                let next = Entities::from_ready(*ready);
-                #[cfg(test)]
-                self.park();
-                self.write(|inner, events| inner.state.replace(next, events));
+                let next = self.prepare_ready(*ready);
+                self.replace(next);
             }
             event => self.write(|inner, events| inner.state.apply(event, events)),
         }
+    }
+
+    // Converting a large READY takes milliseconds; readers mustn't wait for it, so it
+    // happens before the write lock is taken.
+    pub(crate) fn prepare_ready(&self, ready: Ready) -> Entities {
+        let next = Entities::from_ready(ready);
+        #[cfg(test)]
+        {
+            if let Ok(mut thread) = self.shared.ready_thread.lock() {
+                *thread = Some(std::thread::current().id());
+            }
+            self.park();
+        }
+        next
+    }
+
+    pub(crate) fn replace(&self, next: Entities) {
+        self.write(|inner, events| inner.state.replace(next, events));
     }
 
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
@@ -291,6 +310,15 @@ impl Store {
 
     pub fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.read(|inner| inner.state.message(channel, id))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ready_thread(&self) -> Option<std::thread::ThreadId> {
+        self.shared
+            .ready_thread
+            .lock()
+            .ok()
+            .and_then(|thread| *thread)
     }
 
     #[cfg(test)]

@@ -448,3 +448,17 @@ fn a_panicking_task_still_closes_the_account() {
     assert!(stopped(&account.store().connection()));
     assert!(account.connect().is_err());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn ready_is_converted_off_the_runtime() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+
+    let _connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+
+    let converted = account.store().ready_thread();
+    assert!(converted.is_some());
+    assert_ne!(converted, Some(std::thread::current().id()));
+}
