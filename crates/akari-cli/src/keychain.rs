@@ -7,6 +7,12 @@ const CURRENT_ACCOUNT: &str = "current-account";
 
 pub struct KeychainStore;
 
+// The token store plus the one account akari-cli treats as logged in.
+pub trait Accounts: TokenStore {
+    fn current_account(&self) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError>;
+    fn set_current_account(&self, account: Snowflake<UserMarker>) -> Result<(), TokenStoreError>;
+}
+
 impl TokenStore for KeychainStore {
     fn load(&self, account: Snowflake<UserMarker>) -> Result<Option<Token>, TokenStoreError> {
         read(&account.get().to_string()).map(|token| token.map(Token::new))
@@ -23,22 +29,21 @@ impl TokenStore for KeychainStore {
     }
 }
 
-impl KeychainStore {
-    pub fn current_account(&self) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError> {
+impl Accounts for KeychainStore {
+    fn current_account(&self) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError> {
         Ok(read(CURRENT_ACCOUNT)?
             .and_then(|id| id.parse().ok())
             .map(Snowflake::new))
     }
 
-    pub fn set_current_account(
-        &self,
-        account: Snowflake<UserMarker>,
-    ) -> Result<(), TokenStoreError> {
+    fn set_current_account(&self, account: Snowflake<UserMarker>) -> Result<(), TokenStoreError> {
         entry(CURRENT_ACCOUNT)?
             .set_password(&account.get().to_string())
             .map_err(storage_error)
     }
+}
 
+impl KeychainStore {
     pub fn clear_current_account(&self) -> Result<(), TokenStoreError> {
         remove(CURRENT_ACCOUNT)
     }

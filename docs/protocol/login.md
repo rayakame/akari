@@ -164,6 +164,7 @@ The ticket's lifetime isn't documented.
 | Decode error | 4001 | Failure. The reference's prose still calls 4001 the handshake failure (left over from before the codes were swapped in December 2024), so both count the same |
 | Invalid version | 4000 | Failure |
 | No heartbeat ACK, broken connection | none | Failure before a code was shown, otherwise starts over |
+| No `hello` within 10 s | none | Failure; without `hello` there is no heartbeat to notice a silent connection |
 
 A failure means the session never got as far as showing a code. Akari retries at once,
 then with a backoff of 0.5 to 1 s. After three failures in a row, `next()` returns the

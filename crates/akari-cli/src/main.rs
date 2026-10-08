@@ -15,7 +15,7 @@ use akari_core::properties::{ClientBuild, ClientProperties};
 use clap::{Args, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use crate::keychain::KeychainStore;
+use crate::keychain::{Accounts as _, KeychainStore};
 
 /// Terminal test client for akari-core.
 #[derive(Parser)]

@@ -100,12 +100,17 @@ impl Drop for Ending {
 }
 
 const QR_PREFIX: &str = "https://discord.com/ra/";
+const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_FAILURES: u32 = 3;
 const RETRY_BASE: Duration = Duration::from_secs(1);
 const RETRY_MAX: Duration = Duration::from_secs(30);
 
 impl QrLogin {
     pub(crate) fn start(client: DiscordClient) -> Self {
+        Self::start_with(client, HELLO_TIMEOUT)
+    }
+
+    fn start_with(client: DiscordClient, hello_timeout: Duration) -> Self {
         let shared = Arc::new(Shared::default());
         let cancel = CancellationToken::new();
         let (solutions, receiver) = mpsc::channel(1);
@@ -114,6 +119,7 @@ impl QrLogin {
             shared: shared.clone(),
             cancel: cancel.clone(),
             solutions: receiver,
+            hello_timeout,
         };
         tokio::spawn(task.run());
         Self {
@@ -217,6 +223,7 @@ struct Task {
     shared: Arc<Shared>,
     cancel: CancellationToken,
     solutions: mpsc::Receiver<String>,
+    hello_timeout: Duration,
 }
 
 enum End {
@@ -234,6 +241,8 @@ enum Outcome {
 
 struct Session {
     key: RemoteAuthKey,
+    // Until hello arrives there is no heartbeat, so this bounds a silent connection.
+    hello_deadline: Instant,
     heartbeat: Option<Heartbeat>,
     code_shown: bool,
     user: Option<ScannedUser>,
@@ -297,6 +306,7 @@ impl Task {
 
         let mut session = Session {
             key,
+            hello_deadline: Instant::now() + self.hello_timeout,
             heartbeat: None,
             code_shown: false,
             user: None,
@@ -311,15 +321,18 @@ impl Task {
 
     async fn drive(&mut self, socket: &mut WsStream, session: &mut Session) -> Outcome {
         loop {
-            let deadline = session.heartbeat.as_ref().map(Heartbeat::deadline);
+            let deadline = match &session.heartbeat {
+                Some(heartbeat) => heartbeat.deadline(),
+                None => session.hello_deadline,
+            };
             let message = tokio::select! {
                 biased;
                 () = self.cancel.cancelled() => return Outcome::End(End::Cancelled),
-                () = sleep_until(deadline) => {
-                    let beat = match &mut session.heartbeat {
-                        Some(heartbeat) => heartbeat.poll(Instant::now()),
-                        None => Beat::NotYet,
+                () = tokio::time::sleep_until(deadline) => {
+                    let Some(heartbeat) = &mut session.heartbeat else {
+                        return session.lost("the gateway didn't say hello");
                     };
+                    let beat = heartbeat.poll(Instant::now());
                     match beat {
                         Beat::Send if send(socket, &ClientPacket::Heartbeat).await => {}
                         Beat::NotYet => {}
@@ -494,13 +507,6 @@ async fn send(socket: &mut WsStream, packet: &ClientPacket<'_>) -> bool {
     }
 }
 
-async fn sleep_until(deadline: Option<Instant>) {
-    match deadline {
-        Some(deadline) => tokio::time::sleep_until(deadline).await,
-        None => std::future::pending().await,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -512,6 +518,63 @@ mod tests {
             solutions,
             cancel: CancellationToken::new(),
         }
+    }
+
+    struct NoStore;
+
+    impl crate::TokenStore for NoStore {
+        fn load(&self, _: Snowflake<UserMarker>) -> Result<Option<Token>, crate::TokenStoreError> {
+            Ok(None)
+        }
+        fn save(&self, _: Snowflake<UserMarker>, _: &Token) -> Result<(), crate::TokenStoreError> {
+            Ok(())
+        }
+        fn delete(&self, _: Snowflake<UserMarker>) -> Result<(), crate::TokenStoreError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_gateway_that_never_says_hello_fails_the_session() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (connections, mut accepted) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                if let Ok(socket) = tokio_tungstenite::accept_async(stream).await {
+                    let _ = connections.send(socket);
+                }
+            }
+        });
+        let host = crate::properties::HostInfo {
+            os: crate::properties::DesktopOs::Linux,
+            os_version: "6.8.0".to_owned(),
+            arch: crate::properties::Arch::X64,
+            system_locale: "en-US".to_owned(),
+        };
+        let properties = crate::properties::ClientProperties::desktop(
+            &host,
+            &crate::properties::ClientBuild::current(crate::properties::DesktopOs::Linux),
+        );
+        let endpoints = crate::Endpoints {
+            remote_auth: format!("ws://{address}/?v=2"),
+            ..crate::Endpoints::default()
+        };
+        let client =
+            DiscordClient::with_endpoints(properties, Arc::new(NoStore), endpoints).unwrap();
+
+        let qr = QrLogin::start_with(client, Duration::from_millis(50));
+        let result = tokio::time::timeout(Duration::from_secs(5), qr.next()).await;
+
+        assert!(
+            matches!(result, Ok(Err(LoginError::RemoteAuth(_)))),
+            "{result:?}"
+        );
+        let mut silent = Vec::new();
+        while let Ok(socket) = accepted.try_recv() {
+            silent.push(socket);
+        }
+        assert_eq!(silent.len(), MAX_FAILURES as usize);
     }
 
     #[tokio::test]

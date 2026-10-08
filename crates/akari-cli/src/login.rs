@@ -10,9 +10,7 @@ use akari_core::{DiscordClient, Secret};
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 
-use akari_core::TokenStore as _;
-
-use crate::keychain::KeychainStore;
+use crate::keychain::{Accounts, KeychainStore};
 use crate::report;
 
 const CAPTCHA_HELP: &str = "Discord wants a captcha for this login, which akari-cli can't show.";
@@ -157,7 +155,7 @@ fn show_code(url: &str) {
     println!("The code renews itself every few minutes. Ctrl+C cancels.");
 }
 
-async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuccess) -> ExitCode {
+async fn finish<S: Accounts>(client: &DiscordClient, store: &S, success: LoginSuccess) -> ExitCode {
     let previous = match store.current_account() {
         Ok(previous) => previous,
         Err(err) => {
@@ -241,9 +239,113 @@ fn prompt(label: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use akari_core::model::Snowflake;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
-    use super::replaced_account;
+    use akari_core::model::Snowflake;
+    use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
+    use akari_core::{Token, TokenStore, TokenStoreError};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct FakeAccounts {
+        tokens: Mutex<HashMap<u64, String>>,
+        current: Mutex<Option<u64>>,
+        selecting_fails: bool,
+    }
+
+    impl FakeAccounts {
+        fn token(&self, account: u64) -> Option<String> {
+            self.tokens.lock().unwrap().get(&account).cloned()
+        }
+    }
+
+    impl TokenStore for FakeAccounts {
+        fn load(&self, account: Snowflake<UserMarker>) -> Result<Option<Token>, TokenStoreError> {
+            Ok(self.token(account.get()).map(Token::new))
+        }
+        fn save(
+            &self,
+            account: Snowflake<UserMarker>,
+            token: &Token,
+        ) -> Result<(), TokenStoreError> {
+            self.tokens
+                .lock()
+                .unwrap()
+                .insert(account.get(), token.expose().to_owned());
+            Ok(())
+        }
+        fn delete(&self, account: Snowflake<UserMarker>) -> Result<(), TokenStoreError> {
+            self.tokens.lock().unwrap().remove(&account.get());
+            Ok(())
+        }
+    }
+
+    impl Accounts for FakeAccounts {
+        fn current_account(&self) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError> {
+            Ok(self.current.lock().unwrap().map(Snowflake::new))
+        }
+        fn set_current_account(
+            &self,
+            account: Snowflake<UserMarker>,
+        ) -> Result<(), TokenStoreError> {
+            if self.selecting_fails {
+                return Err(TokenStoreError::Unavailable);
+            }
+            *self.current.lock().unwrap() = Some(account.get());
+            Ok(())
+        }
+    }
+
+    fn client(store: Arc<FakeAccounts>) -> DiscordClient {
+        let host = HostInfo {
+            os: DesktopOs::MacOs,
+            os_version: "25.0.0".to_owned(),
+            arch: Arch::Arm64,
+            system_locale: "en-US".to_owned(),
+        };
+        let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
+        DiscordClient::new(properties, store).unwrap()
+    }
+
+    fn login_as(account: u64) -> LoginSuccess {
+        LoginSuccess {
+            user_id: Snowflake::new(account),
+            token: Token::new("new-token".to_owned()),
+            password_update_required: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn logging_in_again_as_the_current_account_keeps_its_token() {
+        let store = Arc::new(FakeAccounts {
+            current: Mutex::new(Some(1)),
+            selecting_fails: true,
+            ..FakeAccounts::default()
+        });
+
+        let code = finish(&client(store.clone()), &*store, login_as(1)).await;
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(store.token(1).as_deref(), Some("new-token"));
+    }
+
+    #[tokio::test]
+    async fn a_switch_that_cant_be_selected_leaves_the_previous_account() {
+        let store = Arc::new(FakeAccounts {
+            tokens: Mutex::new(HashMap::from([(1, "old-token".to_owned())])),
+            current: Mutex::new(Some(1)),
+            selecting_fails: true,
+        });
+
+        let code = finish(&client(store.clone()), &*store, login_as(2)).await;
+
+        assert_eq!(code, ExitCode::FAILURE);
+        assert_eq!(store.token(1).as_deref(), Some("old-token"));
+        assert_eq!(store.token(2), None);
+        assert_eq!(*store.current.lock().unwrap(), Some(1));
+    }
 
     #[test]
     fn only_a_different_previous_account_is_replaced() {
