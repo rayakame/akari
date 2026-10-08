@@ -156,10 +156,6 @@ fn show_code(url: &str) {
 }
 
 async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuccess) -> ExitCode {
-    if let Err(err) = client.save_token(success.user_id, &success.token).await {
-        eprintln!("Logged in, but couldn't store the token: {}", report(&err));
-        return ExitCode::FAILURE;
-    }
     let previous = match store.current_account() {
         Ok(previous) => previous,
         Err(err) => {
@@ -170,6 +166,8 @@ async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuc
             return ExitCode::FAILURE;
         }
     };
+    // The previous account goes first: if its token can't be removed, nothing changes and
+    // no token is left behind without a current-account entry pointing to it.
     if let Some(previous) = replaced_account(previous, success.user_id) {
         let id = previous.get();
         match client.logout(previous).await {
@@ -178,9 +176,11 @@ async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuc
             }
             Err(LogoutError::Storage(err)) => {
                 eprintln!(
-                    "Couldn't remove the previous account's token (user {id}): {}",
+                    "Couldn't remove the previous account's token (user {id}), so the new \
+                     login wasn't stored: {}",
                     report(&err)
                 );
+                return ExitCode::FAILURE;
             }
             Err(err) => println!(
                 "Removed the previous account's token (user {id}), but Discord didn't confirm \
@@ -188,6 +188,10 @@ async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuc
                 report(&err)
             ),
         }
+    }
+    if let Err(err) = client.save_token(success.user_id, &success.token).await {
+        eprintln!("Logged in, but couldn't store the token: {}", report(&err));
+        return ExitCode::FAILURE;
     }
     if let Err(err) = store.set_current_account(success.user_id) {
         eprintln!(
