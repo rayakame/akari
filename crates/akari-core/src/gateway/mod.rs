@@ -11,6 +11,8 @@ mod limiter;
 mod outgoing;
 mod payload;
 mod ready;
+#[allow(dead_code)]
+mod session;
 
 pub use guild::{AvailableGuild, GatewayGuild, UnavailableGuild};
 pub use hello::Hello;
