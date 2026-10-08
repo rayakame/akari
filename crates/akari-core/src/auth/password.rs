@@ -105,6 +105,7 @@ struct Mfa {
     challenge: MfaChallenge,
 }
 
+#[derive(Clone)]
 enum Request {
     Login,
     Mfa {
@@ -175,20 +176,18 @@ impl PasswordLogin {
     /// Retries the request that asked for the CAPTCHA, with its solution.
     pub async fn solve_captcha(&self, solution: String) -> Result<LoginStep, LoginError> {
         let mut flow = self.lock()?;
-        match std::mem::take(&mut flow.step) {
-            Step::Captcha { retry, challenge } => {
-                let solution = CaptchaSolution {
-                    key: Secret::new(solution),
-                    rqtoken: challenge.rqtoken,
-                    session_id: challenge.session_id,
-                };
-                self.run(&mut flow, retry, Some(solution)).await
-            }
-            other => {
-                flow.step = other;
-                Err(LoginError::NoPendingStep)
-            }
-        }
+        // The step stays in the flow until the request finishes, so dropping this future
+        // can't lose the MFA ticket or a verification token.
+        let Step::Captcha { retry, challenge } = &flow.step else {
+            return Err(LoginError::NoPendingStep);
+        };
+        let retry = retry.clone();
+        let solution = CaptchaSolution {
+            key: Secret::new(solution),
+            rqtoken: challenge.rqtoken.clone(),
+            session_id: challenge.session_id.clone(),
+        };
+        self.run(&mut flow, retry, Some(solution)).await
     }
 
     /// Texts a code to the account's phone. Returns the MFA step again, with
@@ -250,14 +249,23 @@ impl PasswordLogin {
 
     fn lock(&self) -> Result<MutexGuard<'_, Flow>, LoginError> {
         if self.cancel.is_cancelled() {
+            // cancel() can't clear a flow a running step holds; the next call catches up.
+            if let Ok(mut flow) = self.flow.try_lock() {
+                *flow = Flow::default();
+            }
             return Err(LoginError::Cancelled);
         }
         self.flow.try_lock().map_err(|_| LoginError::Busy)
     }
 
+    // A captcha on an MFA request still leaves the ticket usable for another code.
     fn pending_mfa(flow: &Flow) -> Result<Mfa, LoginError> {
         match &flow.step {
-            Step::Mfa(mfa) => Ok(mfa.clone()),
+            Step::Mfa(mfa)
+            | Step::Captcha {
+                retry: Request::Mfa { mfa, .. } | Request::SendSms(mfa),
+                ..
+            } => Ok(mfa.clone()),
             _ => Err(LoginError::NoPendingStep),
         }
     }
@@ -269,7 +277,7 @@ impl PasswordLogin {
         captcha: Option<CaptchaSolution>,
     ) -> Result<LoginStep, LoginError> {
         let result = self.run_chain(flow, request, captcha).await;
-        if matches!(result, Err(LoginError::Cancelled)) {
+        if self.cancel.is_cancelled() {
             *flow = Flow::default();
         }
         result
@@ -544,7 +552,80 @@ fn verification_token(input: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::verification_token;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use serde_json::json;
+    use wiremock::matchers::path;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
+    use crate::{Endpoints, TokenStore, TokenStoreError};
+
+    struct NoStore;
+
+    impl TokenStore for NoStore {
+        fn load(&self, _: Snowflake<UserMarker>) -> Result<Option<Token>, TokenStoreError> {
+            Ok(None)
+        }
+        fn save(&self, _: Snowflake<UserMarker>, _: &Token) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+        fn delete(&self, _: Snowflake<UserMarker>) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+    }
+
+    async fn slow_login() -> (MockServer, PasswordLogin) {
+        let server = MockServer::start().await;
+        Mock::given(path("/api/v9/experiments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"fingerprint": "f"})))
+            .mount(&server)
+            .await;
+        Mock::given(path("/api/v9/auth/login"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(10)))
+            .mount(&server)
+            .await;
+        let host = HostInfo {
+            os: DesktopOs::Linux,
+            os_version: "6.8.0".to_owned(),
+            arch: Arch::X64,
+            system_locale: "en-US".to_owned(),
+        };
+        let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::Linux));
+        let endpoints = Endpoints {
+            api: format!("{}/api/v9/", server.uri()),
+            allow_plaintext: true,
+            ..Endpoints::default()
+        };
+        let client =
+            DiscordClient::with_endpoints(properties, Arc::new(NoStore), endpoints).unwrap();
+        (server, client.password_login())
+    }
+
+    #[tokio::test]
+    async fn cancel_forgets_credentials_even_when_the_step_was_dropped() {
+        let (_server, login) = slow_login().await;
+        {
+            let submit = login.submit("me@example.com", Secret::new("hunter2".to_owned()));
+            tokio::pin!(submit);
+            let running = tokio::time::timeout(Duration::from_millis(100), &mut submit).await;
+            assert!(running.is_err());
+            // The running step holds the lock, so cancel() can't clear the flow itself.
+            login.cancel();
+        }
+
+        assert!(matches!(
+            login
+                .submit("me@example.com", Secret::new("x".to_owned()))
+                .await,
+            Err(LoginError::Cancelled)
+        ));
+        let flow = login.flow.try_lock().unwrap();
+        assert!(flow.credentials.is_none());
+        assert!(matches!(flow.step, Step::Idle));
+    }
 
     #[test]
     fn verification_tokens_come_from_links_or_stand_alone() {

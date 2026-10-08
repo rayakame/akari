@@ -720,3 +720,73 @@ async fn phone_verification_on_an_email_login_is_an_error_not_a_step() {
         "{result:?}"
     );
 }
+
+async fn mount_captcha_on_mfa(server: &MockServer) {
+    mount_mfa_login(server).await;
+    Mock::given(path("/api/v9/auth/mfa/totp"))
+        .and(header("x-captcha-key", "slow"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"token": "token.slow"}))
+                .set_delay(Duration::from_secs(10)),
+        )
+        .mount(server)
+        .await;
+    Mock::given(path("/api/v9/auth/mfa/totp"))
+        .and(header("x-captcha-key", "fast"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token": "token.fast"})))
+        .mount(server)
+        .await;
+    Mock::given(path("/api/v9/auth/mfa/totp"))
+        .respond_with(captcha_response())
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn a_dropped_captcha_answer_keeps_the_step() {
+    let server = server().await;
+    mount_captcha_on_mfa(&server).await;
+    let login = client(&server).password_login();
+    login.submit("me@example.com", password()).await.unwrap();
+    let step = login
+        .submit_mfa(MfaMethod::Totp, Secret::new("123456".to_owned()))
+        .await
+        .unwrap();
+    assert!(matches!(step, LoginStep::Captcha(_)), "{step:?}");
+
+    let dropped = tokio::time::timeout(
+        Duration::from_millis(100),
+        login.solve_captcha("slow".to_owned()),
+    )
+    .await;
+    assert!(dropped.is_err(), "the slow answer should still be running");
+
+    expect_done(
+        login.solve_captcha("fast".to_owned()).await.unwrap(),
+        "token.fast",
+    );
+}
+
+#[tokio::test]
+async fn the_mfa_ticket_survives_a_dropped_captcha_answer() {
+    let server = server().await;
+    mount_captcha_on_mfa(&server).await;
+    let login = client(&server).password_login();
+    login.submit("me@example.com", password()).await.unwrap();
+    login
+        .submit_mfa(MfaMethod::Totp, Secret::new("123456".to_owned()))
+        .await
+        .unwrap();
+
+    let _ = tokio::time::timeout(
+        Duration::from_millis(100),
+        login.solve_captcha("slow".to_owned()),
+    )
+    .await;
+    let step = login
+        .submit_mfa(MfaMethod::Totp, Secret::new("654321".to_owned()))
+        .await;
+
+    assert!(matches!(step, Ok(LoginStep::Captcha(_))), "{step:?}");
+}
