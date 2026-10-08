@@ -10,6 +10,16 @@ publish.workspace = true
 [dependencies]
 akari-core.workspace = true
 akari-markdown.workspace = true
+clap.workspace = true
+keyring.workspace = true
+qrcode.workspace = true
+rpassword.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
+wiremock.workspace = true
 
 [lints]
 workspace = true

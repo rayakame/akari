@@ -29,8 +29,10 @@ Reference notes on Discord's layout, behavior and shortcuts live in `docs/ui/`.
 
 ## Repository layout
 
-This is the intended layout. So far `akari-core` has the wire models and gateway decoding;
-the other crates are still empty skeletons, and each app folder contains only a README.
+This is the intended layout. So far `akari-core` has the wire models, gateway decoding, the
+shared `DiscordClient` with both login flows (email/password and QR code) and the token
+storage trait, and `akari-cli` can log in and out; `akari-markdown` and `akari-ffi` are
+still empty skeletons, and each app folder contains only a README.
 
 | Path | Contents |
 |---|---|

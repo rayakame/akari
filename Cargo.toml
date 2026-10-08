@@ -20,6 +20,13 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "h
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 rustls-platform-verifier = "0.7"
+# The same aws-lc-rs build rustls uses; remote auth needs its RSA-OAEP directly.
+aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tokio-util = { version = "0.7", default-features = false }
+base64 = "0.23"
+percent-encoding = "2.3"
+zeroize = "1.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -29,6 +36,15 @@ zstd = { version = "0.14", default-features = false }
 uniffi = "0.32"
 thiserror = "2"
 tracing = "0.1"
+wiremock = "0.6"
+
+# akari-cli only
+clap = { version = "4.6", features = ["derive"] }
+keyring = "4.2"
+qrcode = { version = "0.14", default-features = false }
+rpassword = "7.5"
+# Without "tracing-log": tungstenite logs whole frames, the token included, through `log`.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
