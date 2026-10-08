@@ -6,6 +6,8 @@ mod guild;
 mod hello;
 mod lenient;
 #[cfg_attr(not(test), allow(dead_code))]
+mod limiter;
+#[cfg_attr(not(test), allow(dead_code))]
 mod outgoing;
 mod payload;
 mod ready;
