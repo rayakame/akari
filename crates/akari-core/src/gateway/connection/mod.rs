@@ -1,7 +1,7 @@
 mod task;
 
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 #[cfg(test)]
 mod tests;
 
@@ -257,6 +257,11 @@ impl Gateway {
     /// it is written.
     pub async fn send(&self, command: GatewayCommand) -> Result<(), SendError> {
         self.send_payload(command.to_payload()).await
+    }
+
+    // Whether connect() was called and neither disconnect() nor close() since.
+    pub(crate) fn wants_connection(&self) -> bool {
+        *self.control.borrow() == Mode::Connected
     }
 
     /// Delivers the next READY's raw JSON as [`ConnectionEvent::CapturedReady`].

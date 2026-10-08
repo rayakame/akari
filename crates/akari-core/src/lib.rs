@@ -1,5 +1,6 @@
 //! Discord gateway, REST client, state store and SQLite disk cache for Akari.
 
+mod account;
 pub mod auth;
 mod backlog;
 mod backoff;
@@ -18,6 +19,7 @@ mod tls;
 pub mod token_store;
 mod ws;
 
+pub use account::Account;
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{TransportError, TransportErrorKind};
 pub use secret::{Secret, Token};

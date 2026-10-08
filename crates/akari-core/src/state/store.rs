@@ -163,11 +163,23 @@ impl Store {
         }
     }
 
+    // Closed is final.
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
         self.write(|inner, events| {
-            if !same(&inner.connection, &connection) {
+            let closed = matches!(inner.connection, ConnectionState::Closed { .. });
+            if !closed && !same(&inner.connection, &connection) {
                 inner.connection = connection.clone();
                 events.push(StoreEvent::Connection(connection));
+            }
+        });
+    }
+
+    // Already connected or closed accounts stay as they are.
+    pub(crate) fn begin_connecting(&self) {
+        self.write(|inner, events| {
+            if matches!(inner.connection, ConnectionState::Offline) {
+                inner.connection = ConnectionState::Connecting;
+                events.push(StoreEvent::Connection(ConnectionState::Connecting));
             }
         });
     }

@@ -12,6 +12,8 @@ mod payload;
 mod ready;
 pub(crate) mod session;
 
+#[cfg(test)]
+pub(crate) use connection::fake;
 pub use connection::{ConnectionEvent, DisconnectReason, Gateway, GatewayError, SendError};
 pub use dispatch::{
     ChannelDelete, GuildDelete, GuildRoleDelete, GuildRoleEvent, MessageDelete, MessageDeleteBulk,

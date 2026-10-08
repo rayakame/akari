@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::events::StoreEvent;
 use super::permissions::compute;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
-use super::windows::{DEFAULT_LIMITS, MessageWindow, WindowLimits, Windows};
+use super::windows::{MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
@@ -174,8 +174,9 @@ pub(crate) struct State {
 }
 
 impl State {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self::with_limits(DEFAULT_LIMITS)
+        Self::with_limits(super::windows::DEFAULT_LIMITS)
     }
 
     pub(crate) fn with_limits(limits: WindowLimits) -> Self {
