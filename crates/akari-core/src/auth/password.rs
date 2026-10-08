@@ -1,6 +1,7 @@
 use std::fmt;
 use std::future::Future;
 
+use percent_encoding::percent_decode_str;
 use reqwest::Url;
 use serde::Deserialize;
 use serde_json::json;
@@ -530,21 +531,30 @@ impl fmt::Debug for PasswordLogin {
 
 fn verification_token(input: &str) -> Option<String> {
     let input = input.trim();
-    let token = match Url::parse(input) {
-        Ok(url) => url
+    let link = Url::parse(input).ok().or_else(|| {
+        // A pasted address may lack its scheme; a bare token has no slash.
+        if input.contains('/') {
+            Url::parse(&format!("https://{input}")).ok()
+        } else {
+            None
+        }
+    });
+    let token = match link {
+        Some(url) => url
             .fragment()
             .and_then(|fragment| {
                 fragment
                     .split('&')
                     .find_map(|pair| pair.strip_prefix("token="))
-                    .map(str::to_owned)
+                    .and_then(|token| percent_decode_str(token).decode_utf8().ok())
+                    .map(|token| token.into_owned())
             })
             .or_else(|| {
                 url.query_pairs()
                     .find(|(key, _)| key == "token")
                     .map(|(_, value)| value.into_owned())
             })?,
-        Err(_) => input.to_owned(),
+        None => input.to_owned(),
     };
     let plausible = !token.is_empty() && token.chars().all(|c| c.is_ascii_graphic());
     plausible.then_some(token)
@@ -625,6 +635,23 @@ mod tests {
         let flow = login.flow.try_lock().unwrap();
         assert!(flow.credentials.is_none());
         assert!(matches!(flow.step, Step::Idle));
+    }
+
+    #[test]
+    fn verification_links_may_omit_the_scheme_and_be_percent_encoded() {
+        assert_eq!(
+            verification_token("discord.com/authorize-ip#token=abc.def").as_deref(),
+            Some("abc.def")
+        );
+        assert_eq!(
+            verification_token("https://discord.com/authorize-ip#token=a%2Eb%3Dc").as_deref(),
+            Some("a.b=c")
+        );
+        assert_eq!(
+            verification_token("discord.com/authorize-ip?token=x%2Dy").as_deref(),
+            Some("x-y")
+        );
+        assert_eq!(verification_token("discord.com/authorize-ip"), None);
     }
 
     #[test]

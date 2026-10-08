@@ -25,6 +25,7 @@ aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sy
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio-util = { version = "0.7", default-features = false }
 base64 = "0.23"
+percent-encoding = "2.3"
 zeroize = "1.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
