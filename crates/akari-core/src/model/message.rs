@@ -8,6 +8,7 @@ use super::snowflake::{
 };
 use super::timestamp::Timestamp;
 use super::user::User;
+use crate::lenient::skip_invalid;
 
 /// A message from REST or from MESSAGE_CREATE / MESSAGE_UPDATE.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -28,17 +29,17 @@ pub struct Message {
     pub tts: bool,
     #[serde(default)]
     pub mention_everyone: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub mentions: Vec<User>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub mention_roles: Vec<Snowflake<RoleMarker>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub attachments: Vec<Attachment>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub embeds: Vec<Embed>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub reactions: Vec<Reaction>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub sticker_items: Vec<StickerItem>,
     #[serde(default)]
     pub pinned: bool,

@@ -1,7 +1,7 @@
 use serde::de::{self, Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
-use super::lenient::skip_invalid;
+use crate::lenient::{JsonErrorSummary, skip_invalid};
 use crate::model::{Channel, Guild, GuildMarker, Role, Snowflake, Timestamp};
 
 /// A guild in READY or GUILD_CREATE.
@@ -99,7 +99,7 @@ impl<'de> Deserialize<'de> for GatewayGuild {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = <&RawValue>::deserialize(deserializer)?;
         let parsed = serde_json::from_str::<RawGatewayGuild>(raw.get())
-            .map_err(|err| err.to_string())
+            .map_err(|err| JsonErrorSummary(&err).to_string())
             .and_then(|guild| Self::try_from(guild).map_err(str::to_owned));
         match parsed {
             Ok(guild) => Ok(guild),

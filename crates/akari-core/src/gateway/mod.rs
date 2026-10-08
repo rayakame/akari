@@ -4,7 +4,6 @@ mod connection;
 mod decompress;
 mod guild;
 mod hello;
-mod lenient;
 mod limiter;
 mod outgoing;
 mod payload;

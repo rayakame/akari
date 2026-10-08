@@ -457,7 +457,7 @@ fn reply_parses() {
 fn reply_to_deleted_message_parses() {
     let mut value: Value = parse(include_str!("fixtures/message_reply.json"));
     value["referenced_message"] = Value::Null;
-    let message: Message = serde_json::from_value(value).unwrap();
+    let message: Message = parse(&value.to_string());
 
     assert_eq!(message.referenced_message, Some(None));
 }
@@ -466,7 +466,7 @@ fn reply_to_deleted_message_parses() {
 fn reply_without_referenced_message_parses() {
     let mut value: Value = parse(include_str!("fixtures/message_reply.json"));
     value.as_object_mut().unwrap().remove("referenced_message");
-    let message: Message = serde_json::from_value(value).unwrap();
+    let message: Message = parse(&value.to_string());
 
     assert_eq!(message.referenced_message, None);
     assert!(message.message_reference.is_some());
@@ -493,7 +493,46 @@ fn gateway_message_parses() {
 fn unknown_message_type_is_kept() {
     let mut value: Value = parse(include_str!("fixtures/message.json"));
     value["type"] = 999.into();
-    let message: Message = serde_json::from_value(value).unwrap();
+    let message: Message = parse(&value.to_string());
 
     assert_eq!(message.kind, MessageType::Unknown(999));
+}
+
+#[test]
+fn broken_list_entries_drop_only_themselves() {
+    let mut value: Value = parse(include_str!("fixtures/message.json"));
+    value["embeds"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"type": "rich", "color": "red"}));
+    value["attachments"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"id": "600000000000000002"}));
+    value["mentions"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"id": "100000000000000009"}));
+    value["mention_roles"] = serde_json::json!(["500000000000000002", "not-an-id"]);
+    value["sticker_items"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"id": "1"}));
+    value["reactions"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"emoji": {}}));
+
+    let message: Message = parse(&value.to_string());
+
+    assert_eq!(message.embeds.len(), 1);
+    assert_eq!(message.embeds[0].title.as_deref(), Some("Akari 0.1"));
+    assert_eq!(message.attachments.len(), 1);
+    assert_eq!(message.mentions.len(), 1);
+    assert_eq!(
+        message.mention_roles,
+        [Snowflake::new(500_000_000_000_000_002)]
+    );
+    assert_eq!(message.sticker_items.len(), 1);
+    assert_eq!(message.reactions.len(), 2);
 }

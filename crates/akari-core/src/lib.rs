@@ -6,6 +6,7 @@ mod client;
 mod error;
 pub mod gateway;
 mod heartbeat;
+mod lenient;
 pub mod model;
 pub mod properties;
 mod random;
