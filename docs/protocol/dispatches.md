@@ -34,10 +34,11 @@ USER_UPDATE decode into their own models (`GuildUpdate`, `ChannelUpdate`, `Messa
   clears the value.
 - A list that is present replaces the whole list.
 
-The reference documents most of these as full objects: GUILD_UPDATE is "a guild object",
-CHANNEL_UPDATE and THREAD_UPDATE "a channel object", USER_UPDATE "a user object". MESSAGE_UPDATE
-has been documented as a full message object since 2024-07 (the reference's commit "Message
-updates are no longer partial" removed the note that updates "may contain only a subset").
+The reference documents most of these as full objects: GUILD_UPDATE is "a guild
+object", CHANNEL_UPDATE and THREAD_UPDATE "a channel object", USER_UPDATE "a user object".
+MESSAGE_UPDATE has been documented as a full message object since 2024-07 (the reference's
+commit "Message updates are no longer partial" removed the note that updates "may contain
+only a subset").
 GUILD_MEMBER_UPDATE includes its optional fields "only if changed"
 ([guild member update](https://docs.discord.food/gateway/gateway-events#guild-member-update)).
 Merging is correct either way. The one risk is a full object that leaves out a nullable key

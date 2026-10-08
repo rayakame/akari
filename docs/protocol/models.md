@@ -15,9 +15,9 @@ with fake IDs and names.
 never handed to a UI and never stored in the SQLite cache. The state layer
 (`akari_core::state`, see [dispatches.md](dispatches.md#the-state-store)) has its own
 memory-efficient types and converts from the wire models, so wire types carry no UI or
-storage concerns: no display helpers, no cache keys, no derives for storage. The modules are `pub` for now because `gateway::decode` returns these types
-and the integration tests read them; the boundary is a rule, not yet enforced by
-visibility.
+storage concerns: no display helpers, no cache keys, no derives for storage. The modules
+are `pub` for now because `gateway::decode` returns these types and the integration tests
+read them; the boundary is a rule, not yet enforced by visibility.
 
 Value types are the exception: `Snowflake<M>` with its markers and the ID aliases
 (`UserId`, `GuildId`, `ChannelId`, `MessageId`, …), `Timestamp`, `Permissions` and the

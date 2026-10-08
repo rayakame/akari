@@ -15,7 +15,8 @@ pub enum StoreEvent {
     CurrentUserUpdated(Arc<CurrentUser>),
     /// A DM or group DM recipient changed.
     UserUpdated(Arc<User>),
-    /// The user joined the guild or it is available again; its channels can be read.
+    /// The user joined the guild or it is available again; its channels, threads and the
+    /// current user's member can be read.
     GuildAdded(Arc<Guild>),
     /// Settings or roles changed. Role changes can change channel permissions.
     GuildUpdated(Arc<Guild>),
