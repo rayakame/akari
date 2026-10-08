@@ -583,11 +583,11 @@ impl State {
         &mut self,
         ticket: LoadTicket,
         page: Vec<model::Message>,
-        limit: usize,
+        reached_end: bool,
         events: &mut Vec<StoreEvent>,
     ) {
         self.windows
-            .finish_load(ticket, page, &self.entities.users, limit, events);
+            .finish_load(ticket, page, &self.entities.users, reached_end, events);
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {

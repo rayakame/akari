@@ -449,7 +449,7 @@ impl Harness {
         let mut events = Vec::new();
         let page = ids.iter().map(|id| wire(*id)).collect();
         self.windows
-            .finish_load(ticket, page, &self.users, limit, &mut events);
+            .finish_load(ticket, page, &self.users, ids.len() < limit, &mut events);
         describe(&events)
     }
 
@@ -460,8 +460,9 @@ impl Harness {
         limit: usize,
     ) -> Vec<String> {
         let mut events = Vec::new();
+        let reached_end = page.len() < limit;
         self.windows
-            .finish_load(ticket, page, &self.users, limit, &mut events);
+            .finish_load(ticket, page, &self.users, reached_end, &mut events);
         describe(&events)
     }
 

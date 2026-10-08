@@ -39,10 +39,14 @@ where
         .collect())
 }
 
-// A JSON array whose entries that fail to parse are skipped and logged.
-pub(crate) fn parse_list<T: DeserializeOwned>(json: &[u8]) -> Result<Vec<T>, serde_json::Error> {
+// A JSON array whose entries that fail to parse are skipped and logged, with the number of
+// entries it had.
+pub(crate) fn parse_list<T: DeserializeOwned>(
+    json: &[u8],
+) -> Result<(Vec<T>, usize), serde_json::Error> {
     let entries: Vec<&RawValue> = serde_json::from_slice(json)?;
-    Ok(parse_valid(entries))
+    let count = entries.len();
+    Ok((parse_valid(entries), count))
 }
 
 fn parse_valid<T: DeserializeOwned>(entries: Vec<&RawValue>) -> Vec<T> {

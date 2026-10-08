@@ -131,7 +131,8 @@ async fn a_page_comes_back_oldest_first() {
         .await
         .list_messages(channel(), Query::Latest, 3)
         .await
-        .unwrap();
+        .unwrap()
+        .messages;
 
     assert_eq!(
         messages
@@ -156,13 +157,14 @@ async fn a_broken_message_in_a_page_is_skipped() {
         .mount(&server)
         .await;
 
-    let messages = rest(&server)
+    let page = rest(&server)
         .await
         .list_messages(channel(), Query::Latest, 3)
         .await
         .unwrap();
 
-    assert_eq!(messages.len(), 2);
+    assert_eq!(page.messages.len(), 2);
+    assert_eq!(page.received, 3);
 }
 
 #[tokio::test]
@@ -182,7 +184,8 @@ async fn a_429_is_retried_after_its_retry_after() {
         .await
         .list_messages(channel(), Query::Latest, 3)
         .await
-        .unwrap();
+        .unwrap()
+        .messages;
 
     assert_eq!(messages.len(), 3);
     assert_eq!(requests(&server).await.len(), 2);

@@ -9,7 +9,7 @@ use crate::gateway::{
     SendError,
 };
 use crate::model::{ChannelId, GuildId, MessageId};
-use crate::rest::{AccountRest, CreateMessage, Query, RequestError};
+use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{ConnectionState, Cursor, LoadKind, Message, Store, WindowLimits};
 use crate::{DiscordClient, Token};
 
@@ -113,8 +113,9 @@ impl Shared {
             Cursor::Around(id) => Query::Around(id),
         };
         match self.rest.list_messages(channel, query, limit).await {
-            Ok(page) => {
-                self.store.finish_load(ticket, page, usize::from(limit));
+            Ok(Page { messages, received }) => {
+                let reached_end = received < usize::from(limit);
+                self.store.finish_load(ticket, messages, reached_end);
                 Ok(())
             }
             Err(err) => {

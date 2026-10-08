@@ -94,6 +94,13 @@ impl CreateMessage {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct Page {
+    pub(crate) messages: Vec<model::Message>,
+    // Skipped messages count too: a short page means the end is reached.
+    pub(crate) received: usize,
+}
+
 pub(crate) struct AccountRest {
     client: DiscordClient,
     token: Token,
@@ -139,7 +146,7 @@ impl AccountRest {
         channel: ChannelId,
         query: Query,
         limit: u8,
-    ) -> Result<Vec<model::Message>, RequestError> {
+    ) -> Result<Page, RequestError> {
         let cursor = match query {
             Query::Latest => String::new(),
             Query::Before(id) => format!("&before={}", id.get()),
@@ -151,10 +158,10 @@ impl AccountRest {
         let body = self
             .send(route, || self.request(HttpMethod::GET, &path))
             .await?;
-        let mut messages: Vec<model::Message> =
+        let (mut messages, received): (Vec<model::Message>, usize) =
             parse_list(&body).map_err(|_| RequestError::UnexpectedResponse)?;
         messages.sort_by_key(|message| message.id);
-        Ok(messages)
+        Ok(Page { messages, received })
     }
 
     // Retries send the same body, so the nonce stays the same.

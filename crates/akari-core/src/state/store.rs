@@ -216,8 +216,13 @@ impl Store {
         ticket
     }
 
-    pub(crate) fn finish_load(&self, ticket: LoadTicket, page: Vec<model::Message>, limit: usize) {
-        self.write(|inner, events| inner.state.finish_load(ticket, page, limit, events));
+    pub(crate) fn finish_load(
+        &self,
+        ticket: LoadTicket,
+        page: Vec<model::Message>,
+        reached_end: bool,
+    ) {
+        self.write(|inner, events| inner.state.finish_load(ticket, page, reached_end, events));
     }
 
     pub(crate) fn abort_load(&self, ticket: LoadTicket) {

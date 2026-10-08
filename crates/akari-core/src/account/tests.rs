@@ -635,6 +635,31 @@ async fn older_pages_use_the_windows_first_message() {
 }
 
 #[tokio::test]
+async fn a_broken_message_doesnt_end_the_history() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let _connection = online(&mut fake, &account).await;
+    mock_page(&server, ("limit", "3"), page(&[10, 11, 12])).await;
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 3 })
+        .await
+        .unwrap();
+    server.reset().await;
+    let mut broken = page(&[7, 8, 9]);
+    broken[1]["author"] = json!({"username": "no id"});
+    mock_page(&server, ("before", "10"), broken).await;
+
+    account
+        .load_messages(general(), MessageLoad::Older { limit: 3 })
+        .await
+        .unwrap();
+
+    assert_eq!(ids(&account), [7, 9, 10, 11, 12]);
+    assert!(!account.store().messages(general()).unwrap().oldest);
+}
+
+#[tokio::test]
 async fn a_new_session_refreshes_stale_windows() {
     let mut fake = FakeGateway::start().await;
     let server = wiremock::MockServer::start().await;

@@ -577,7 +577,7 @@ impl Windows {
         ticket: LoadTicket,
         page: Vec<model::Message>,
         users: &HashMap<UserId, Arc<User>>,
-        limit: usize,
+        reached_end: bool,
         events: &mut Vec<StoreEvent>,
     ) {
         let window_limit = self.limits.messages;
@@ -605,7 +605,6 @@ impl Windows {
             window.settle(channel_id, window_limit, events);
             return;
         }
-        let reached_end = page.len() < limit;
         let mut page: Vec<Arc<Message>> = page
             .into_iter()
             .map(|message| {

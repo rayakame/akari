@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub use account::RequestError;
-pub(crate) use account::{AccountRest, CreateMessage, Query};
+pub(crate) use account::{AccountRest, CreateMessage, Page, Query};
 #[cfg(test)]
 pub(crate) use error::FieldError;
 pub(crate) use error::{ApiError, RestError};
