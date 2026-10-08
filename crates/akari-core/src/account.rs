@@ -3,7 +3,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::gateway::session::Timing;
-use crate::gateway::{ConnectionEvent, DispatchEvent, Gateway, GatewayError};
+use crate::gateway::{
+    ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, PresenceStatus,
+    SendError,
+};
 use crate::model::{ChannelId, MessageId};
 use crate::rest::{AccountRest, CreateMessage, Query, RequestError};
 use crate::state::{ConnectionState, Cursor, LoadKind, Message, Store, WindowLimits};
@@ -55,6 +58,15 @@ pub(crate) struct Shared {
     store: Store,
     rest: AccountRest,
     nonces: Nonces,
+    status: Mutex<Status>,
+}
+
+// A new session starts at `unknown`, so the chosen status is sent after every READY; after
+// RESUMED only if it didn't go out before.
+#[derive(Default)]
+struct Status {
+    chosen: Option<PresenceStatus>,
+    sent: bool,
 }
 
 // Like the official client: a snowflake of the current time, strictly increasing, so it
@@ -150,6 +162,40 @@ impl Shared {
         }
     }
 
+    async fn send_status(&self, new_session: bool) {
+        let status = {
+            let mut status = self.status.lock().unwrap_or_else(PoisonError::into_inner);
+            if new_session {
+                status.sent = false;
+            }
+            if status.sent {
+                return;
+            }
+            status.chosen
+        };
+        let Some(status) = status else {
+            return;
+        };
+        if self.send_presence(status).await.is_ok() {
+            self.mark_sent(status);
+        }
+    }
+
+    pub(crate) async fn send(&self, command: GatewayCommand) -> Result<(), SendError> {
+        self.gateway.send(command).await
+    }
+
+    async fn send_presence(&self, status: PresenceStatus) -> Result<(), SendError> {
+        self.send(GatewayCommand::UpdatePresence { status }).await
+    }
+
+    fn mark_sent(&self, sent: PresenceStatus) {
+        let mut status = self.status.lock().unwrap_or_else(PoisonError::into_inner);
+        if status.chosen == Some(sent) {
+            status.sent = true;
+        }
+    }
+
     async fn refresh_stale(&self) {
         for channel in self.store.stale_channels() {
             let refreshed = self.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
@@ -179,6 +225,7 @@ impl Account {
             store: Store::new(limits),
             rest,
             nonces: Nonces::default(),
+            status: Mutex::default(),
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
@@ -277,6 +324,23 @@ impl Account {
     pub fn discard_message(&self, channel: ChannelId, pending: MessageId) {
         self.shared.store.discard_message(channel, pending);
     }
+
+    /// Sets this session's status now if online, and again after every new session.
+    pub async fn set_status(&self, status: PresenceStatus) -> Result<(), SendError> {
+        *self
+            .shared
+            .status
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Status {
+            chosen: Some(status),
+            sent: false,
+        };
+        if matches!(self.shared.store.connection(), ConnectionState::Online) {
+            self.shared.send_presence(status).await?;
+            self.shared.mark_sent(status);
+        }
+        Ok(())
+    }
 }
 
 // Closes the account however the pump ends: normally, by a panic, or because the runtime
@@ -342,9 +406,20 @@ async fn pump(mut finish: Finish) {
                             .set_connection_if(ConnectionState::Online, connecting);
                         let refresh = shared.clone();
                         tokio::spawn(async move { refresh.refresh_stale().await });
+                        let status = shared.clone();
+                        tokio::spawn(async move { status.send_status(true).await });
                     }
                     Err(_) => break Some(Arc::new(GatewayError::Stopped)),
                 }
+            }
+            Ok(ConnectionEvent::Dispatch(DispatchEvent::Resumed)) => {
+                on_event(
+                    &shared.store,
+                    ConnectionEvent::Dispatch(DispatchEvent::Resumed),
+                    &connecting,
+                );
+                let status = shared.clone();
+                tokio::spawn(async move { status.send_status(false).await });
             }
             Ok(event) => on_event(&shared.store, event, &connecting),
             Err(GatewayError::Closed) => break None,

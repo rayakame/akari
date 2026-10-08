@@ -6,6 +6,7 @@ use tokio::time::timeout;
 
 use super::*;
 use crate::gateway::fake::{FakeConnection, FakeGateway, WAIT, client, timing};
+use crate::gateway::{GatewayCommand, PresenceStatus};
 use crate::model::Snowflake;
 use crate::state::{DEFAULT_LIMITS, Delivery, StoreEvent, Subscription};
 
@@ -1227,4 +1228,97 @@ fn nonces_are_unique_and_increasing() {
 
     assert!(seen.windows(2).all(|pair| pair[0] < pair[1]));
     assert_eq!(seen[0], MessageId::from_unix_millis(now, 0).get());
+}
+
+async fn next_command(connection: &mut FakeConnection) -> Option<Value> {
+    let payload = timeout(Duration::from_millis(500), connection.recv())
+        .await
+        .ok()??;
+    Some(payload)
+}
+
+#[tokio::test]
+async fn set_status_sends_now_when_online() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+
+    account
+        .set_status(PresenceStatus::DoNotDisturb)
+        .await
+        .unwrap();
+
+    let command = next_command(&mut connection)
+        .await
+        .expect("no presence update");
+    assert_eq!(command["op"], 3);
+    assert_eq!(command["d"]["status"], "dnd");
+}
+
+#[tokio::test]
+async fn set_status_while_offline_waits_for_the_next_session() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+
+    account.set_status(PresenceStatus::Idle).await.unwrap();
+    let mut connection = online(&mut fake, &account).await;
+
+    let command = next_command(&mut connection)
+        .await
+        .expect("no presence update");
+    assert_eq!(command["op"], 3);
+    assert_eq!(command["d"]["status"], "idle");
+}
+
+#[tokio::test]
+async fn the_status_is_sent_again_after_a_new_session_but_not_after_a_resume() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.set_status(PresenceStatus::Invisible).await.unwrap();
+    assert_eq!(next_command(&mut connection).await.unwrap()["op"], 3);
+
+    connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh.send(ready_payload(1, &fake, |_| {})).await;
+    let again = next_command(&mut fresh)
+        .await
+        .expect("no presence update after READY");
+    fresh.close(4000).await;
+    let mut resumed = fake.accept().await;
+    assert_eq!(resumed.handshake(60_000).await["op"], 6);
+    resumed.dispatch(2, "RESUMED").await;
+
+    assert_eq!(again["d"]["status"], "invisible");
+    assert!(
+        next_command(&mut resumed).await.is_none(),
+        "a resume sent the status again"
+    );
+}
+
+#[tokio::test]
+async fn gateway_commands_reach_the_gateway() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+
+    account
+        .shared
+        .send(GatewayCommand::UpdatePresence {
+            status: PresenceStatus::Online,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        next_command(&mut connection).await.unwrap()["d"]["status"],
+        "online"
+    );
 }
