@@ -247,8 +247,9 @@ What Akari does when Discord closes the connection, per the
 `{since: 0, activities: [], status, afk: false}`. The statuses a client can send are
 `online`, `idle`, `dnd` and `invisible`
 ([Status Type](https://docs.discord.food/resources/presence#status-type)); `unknown` is only
-for Identify. `akari-cli connect --status <status>` sends it after every READY, because a
-new session starts with `unknown` again.
+for Identify. A new session starts with `unknown` again, so `Account::set_status` remembers
+the chosen status and sends it after every READY; after RESUMED only if it didn't go out
+before. `akari-cli connect --status <status>` does the same on a bare `Gateway`.
 
 Observed on 2026-10-08 with `akari-cli connect --keep-open`, watched from a second account:
 
@@ -260,6 +261,34 @@ Observed on 2026-10-08 with `akari-cli connect --keep-open`, watched from a seco
   account showed as online with the mobile indicator the whole time, and `--status dnd`
   had no visible effect: another session's status can override Akari's. See the open
   point under [Not implemented yet](#not-implemented-yet).
+
+## Guild subscriptions
+
+Op 37 (Guild Subscriptions Bulk) is only a row in the reference's
+[opcode table](https://docs.discord.food/gateway/opcodes-and-close-codes#gateway-opcodes); its payload is
+undocumented. Akari sends what open-source clients (discord.py-self) and the official
+client are observed to send when a guild is opened:
+
+```json
+{"op": 37, "d": {"subscriptions": {"200000000000000001": {"typing": true, "activities": true, "threads": true}}}}
+```
+
+- `GatewayCommand::SubscribeGuilds { guilds }`. Only keys that are present are updated;
+  Akari sends no member list ranges (`channels`) and no `members`.
+- `Account` subscribes a guild the first time one of its channels is viewed or loaded
+  while online, and sends all of them again after every READY (the guilds with a viewed
+  channel) and after RESUMED (the same, plus guilds viewed while reconnecting), like the
+  official client. A guild viewed while offline is subscribed after the next READY or
+  RESUMED.
+- The payload is split into several commands so each stays under 15 KiB, the official
+  client's limit, below the gateway's 16 KiB.
+- Without a subscription, guilds over the large threshold get no MESSAGE_CREATE, UPDATE or
+  DELETE ([Identify](https://docs.discord.food/gateway/gateway-events#identify-structure)).
+  discord.py-self reports that guilds under 75,000 members are subscribed automatically,
+  which contradicts that; **unverified**.
+- The first subscription to a guild may bring a GUILD_CREATE for it, which the store
+  applies as a replacement, and `threads: true` brings THREAD_LIST_SYNC, which isn't
+  decoded yet.
 
 ## Keeping the token out of logs
 
@@ -278,7 +307,7 @@ Observed on 2026-10-08 with `akari-cli connect --keep-open`, watched from a seco
 - Op 40 (QoS Heartbeat) and op 41 (Update Time Spent Session ID). The reference recommends
   both and the official client is believed to send them; the effect of their absence on
   anti-abuse is **unverified**.
-- READY_SUPPLEMENTAL, op 14 guild subscriptions, voice states, presence activities.
+- Op 14 member list subscriptions, voice states, presence activities.
 - `GET /gateway` with a cached URL, and persisting a session across launches for a fast
   resume after a cold start.
 - Status across several sessions. When a user has several sessions with a presence,

@@ -32,9 +32,11 @@ Reference notes on Discord's layout, behavior and shortcuts live in `docs/ui/`.
 This is the intended layout. So far `akari-core` has the wire models, gateway decoding, the
 shared `DiscordClient` with both login flows (email/password and QR code), the token
 storage trait, the gateway connection (zstd-stream, heartbeats, resume, rate-limited
-sends) and the state store (`akari_core::state`) with `Account`, which keeps it current
-from the gateway; `akari-cli` can log in, log out and connect. `akari-markdown` and
-`akari-ffi` are still empty skeletons, and each app folder contains only a README.
+sends), the state store (`akari_core::state`) and `Account`, which keeps the store current
+from the gateway, loads message history and sends messages over rate-limited REST;
+`akari-cli` can log in, log out, connect, list guilds and channels, and read, send and tail
+messages. `akari-markdown` and `akari-ffi` are still empty skeletons, and each app folder
+contains only a README.
 
 | Path | Contents |
 |---|---|
