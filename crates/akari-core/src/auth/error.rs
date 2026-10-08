@@ -67,7 +67,8 @@ impl LoginError {
             RestError::Captcha(_)
             | RestError::UnexpectedStatus { .. }
             | RestError::InvalidBody
-            | RestError::InvalidRequest => Self::UnexpectedResponse,
+            | RestError::InvalidRequest
+            | RestError::TooLarge => Self::UnexpectedResponse,
         }
     }
 
@@ -141,7 +142,8 @@ impl LogoutError {
             RestError::Captcha(_)
             | RestError::Suspended
             | RestError::UnexpectedStatus { .. }
-            | RestError::InvalidBody => Self::UnexpectedResponse,
+            | RestError::InvalidBody
+            | RestError::TooLarge => Self::UnexpectedResponse,
         })
     }
 }

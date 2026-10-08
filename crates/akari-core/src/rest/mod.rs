@@ -28,6 +28,9 @@ pub(crate) struct RequestExtras<'a> {
     pub(crate) captcha: Option<&'a CaptchaSolution>,
 }
 
+// Login responses are a few KiB; anything near this is not Discord.
+const MAX_BODY: usize = 4 * 1024 * 1024;
+
 #[derive(Clone)]
 pub(crate) struct CaptchaSolution {
     pub(crate) key: Secret,
@@ -162,16 +165,23 @@ impl RestClient {
     }
 
     async fn execute(&self, request: RequestBuilder) -> Result<impl AsRef<[u8]>, RestError> {
-        let response = request
-            .send()
-            .await
-            .map_err(|err| RestError::Transport(TransportError::from_reqwest(err)))?;
+        let transport = |err| RestError::Transport(TransportError::from_reqwest(err));
+        let mut response = request.send().await.map_err(transport)?;
         let status = response.status();
         let headers = response.headers().clone();
-        let body = response
-            .bytes()
-            .await
-            .map_err(|err| RestError::Transport(TransportError::from_reqwest(err)))?;
+        if response
+            .content_length()
+            .is_some_and(|len| len > MAX_BODY as u64)
+        {
+            return Err(RestError::TooLarge);
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(transport)? {
+            if body.len() + chunk.len() > MAX_BODY {
+                return Err(RestError::TooLarge);
+            }
+            body.extend_from_slice(&chunk);
+        }
         if status.is_success() {
             Ok(body)
         } else {

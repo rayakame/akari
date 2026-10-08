@@ -25,6 +25,7 @@ pub(crate) enum RestError {
     // Carries no serde message: it can quote the body, which may hold a token.
     InvalidBody,
     InvalidRequest,
+    TooLarge,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +73,7 @@ impl RestError {
             Self::UnexpectedStatus { status } => format!("unexpected status {status}"),
             Self::InvalidBody => "unexpected response body".to_owned(),
             Self::InvalidRequest => "invalid request".to_owned(),
+            Self::TooLarge => "response too large".to_owned(),
         }
     }
 

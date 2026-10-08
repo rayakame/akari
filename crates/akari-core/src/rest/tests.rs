@@ -447,3 +447,14 @@ fn request_extras_never_show_their_values() {
         assert!(!output.contains(secret), "{output}");
     }
 }
+
+#[tokio::test]
+async fn oversized_bodies_are_refused() {
+    let huge = vec![b'a'; 5 * 1024 * 1024];
+    let success = error_for(ResponseTemplate::new(200).set_body_bytes(huge.clone())).await;
+    let failure = error_for(ResponseTemplate::new(400).set_body_bytes(huge)).await;
+
+    for err in [success, failure] {
+        assert!(matches!(err, RestError::TooLarge), "{err:?}");
+    }
+}
