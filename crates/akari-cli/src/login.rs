@@ -172,7 +172,9 @@ async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuc
         eprintln!("Logged in, but couldn't store the token: {}", report(&err));
         return ExitCode::FAILURE;
     }
-    if let Err(err) = store.set_current_account(success.user_id) {
+    if previous != Some(success.user_id)
+        && let Err(err) = store.set_current_account(success.user_id)
+    {
         eprintln!(
             "Logged in, but couldn't remember the account: {}",
             report(&err)
