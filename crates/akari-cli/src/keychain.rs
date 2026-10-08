@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use akari_core::model::{Snowflake, UserMarker};
 use akari_core::{Token, TokenStore, TokenStoreError};
 use keyring::Entry;
@@ -11,6 +13,22 @@ pub struct KeychainStore;
 pub trait Accounts: TokenStore {
     fn current_account(&self) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError>;
     fn set_current_account(&self, account: Snowflake<UserMarker>) -> Result<(), TokenStoreError>;
+    fn clear_current_account(&self) -> Result<(), TokenStoreError>;
+}
+
+// Keychain calls can block or show a system dialog, so they run off the async runtime.
+pub async fn off_runtime<S: Accounts, T: Send + 'static>(
+    store: &Arc<S>,
+    call: impl FnOnce(&S) -> Result<T, TokenStoreError> + Send + 'static,
+) -> Result<T, TokenStoreError> {
+    let store = Arc::clone(store);
+    tokio::task::spawn_blocking(move || call(&store))
+        .await
+        .unwrap_or_else(|_| {
+            Err(TokenStoreError::Backend(
+                "the keychain call panicked".to_owned(),
+            ))
+        })
 }
 
 impl TokenStore for KeychainStore {
@@ -39,10 +57,8 @@ impl Accounts for KeychainStore {
             .set_password(&account.get().to_string())
             .map_err(storage_error)
     }
-}
 
-impl KeychainStore {
-    pub fn clear_current_account(&self) -> Result<(), TokenStoreError> {
+    fn clear_current_account(&self) -> Result<(), TokenStoreError> {
         remove(CURRENT_ACCOUNT)
     }
 }

@@ -1,5 +1,6 @@
 use std::io::{self, BufRead as _, IsTerminal as _, Write as _};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use akari_core::auth::{
     LoginError, LoginStep, LoginSuccess, LogoutError, MfaChallenge, MfaMethod, NewLocation,
@@ -10,13 +11,13 @@ use akari_core::{DiscordClient, Secret};
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 
-use crate::keychain::{Accounts, KeychainStore};
+use crate::keychain::{Accounts, KeychainStore, off_runtime};
 use crate::report;
 
 const CAPTCHA_HELP: &str = "Discord wants a captcha for this login, which akari-cli can't show.";
 const MFA_TRIES: usize = 3;
 
-pub async fn password(client: &DiscordClient, store: &KeychainStore) -> ExitCode {
+pub async fn password(client: &DiscordClient, store: &Arc<KeychainStore>) -> ExitCode {
     let flow = client.password_login();
     let Some(login) = prompt("Email or phone number: ") else {
         return ExitCode::FAILURE;
@@ -105,7 +106,7 @@ fn method_name(method: MfaMethod) -> &'static str {
     }
 }
 
-pub async fn qr(client: &DiscordClient, store: &KeychainStore) -> ExitCode {
+pub async fn qr(client: &DiscordClient, store: &Arc<KeychainStore>) -> ExitCode {
     let flow = match client.qr_login() {
         Ok(flow) => flow,
         Err(err) => {
@@ -161,8 +162,13 @@ fn show_code(url: &str) {
     println!("The code renews itself every few minutes. Ctrl+C cancels.");
 }
 
-async fn finish<S: Accounts>(client: &DiscordClient, store: &S, success: LoginSuccess) -> ExitCode {
-    let previous = match store.current_account() {
+async fn finish<S: Accounts>(
+    client: &DiscordClient,
+    store: &Arc<S>,
+    success: LoginSuccess,
+) -> ExitCode {
+    let id = success.user_id;
+    let previous = match off_runtime(store, |store| store.current_account()).await {
         Ok(previous) => previous,
         Err(err) => {
             eprintln!(
@@ -172,53 +178,136 @@ async fn finish<S: Accounts>(client: &DiscordClient, store: &S, success: LoginSu
             return ExitCode::FAILURE;
         }
     };
-    if let Err(err) = client.save_token(success.user_id, &success.token).await {
+    // Logging in again as the same account replaces its token; that old session ends below.
+    let replaced_token = if previous == Some(id) {
+        client
+            .load_token(id)
+            .await
+            .ok()
+            .flatten()
+            .filter(|token| *token != success.token)
+    } else {
+        None
+    };
+    if let Err(err) = client.save_token(id, &success.token).await {
         eprintln!("Logged in, but couldn't store the token: {}", report(&err));
         return ExitCode::FAILURE;
     }
-    if previous != Some(success.user_id)
-        && let Err(err) = store.set_current_account(success.user_id)
+    if previous != Some(id)
+        && let Err(err) = off_runtime(store, move |store| store.set_current_account(id)).await
     {
         eprintln!(
             "Logged in, but couldn't remember the account: {}",
             report(&err)
         );
         // Without the current-account entry nothing would find this token again.
-        let _ = store.delete(success.user_id);
+        discard(client, store, &success).await;
         return ExitCode::FAILURE;
     }
-    println!("Logged in as user {}.", success.user_id.get());
+    println!("Logged in as user {}.", id.get());
     if success.password_update_required {
         println!("Discord asks you to change your password in the official app.");
     }
+    if let Some(old) = replaced_token
+        && let Err(err) = client.end_session(&old).await
+    {
+        eprintln!(
+            "Couldn't end this account's previous session. {}",
+            session_may_be_active(&err)
+        );
+    }
 
     // Only once the new account is complete: a failure here leaves at most the old entry.
-    let Some(previous) = replaced_account(previous, success.user_id) else {
+    let Some(previous) = replaced_account(previous, id) else {
         return ExitCode::SUCCESS;
     };
-    let id = previous.get();
+    let previous_id = previous.get();
     match client.logout(previous).await {
         Ok(()) | Err(LogoutError::NotLoggedIn) => {
-            println!("Logged out the previous account (user {id}).");
+            println!("Logged out the previous account (user {previous_id}).");
             ExitCode::SUCCESS
         }
         Err(LogoutError::Storage(err)) => {
             eprintln!(
                 "Couldn't remove the previous account's token: {}. Delete the keychain entry \
-                 \"akari-cli\" / \"{id}\" by hand.",
+                 \"akari-cli\" / \"{previous_id}\" by hand.",
                 report(&err)
             );
             ExitCode::FAILURE
         }
         Err(err) => {
-            println!(
-                "Removed the previous account's token (user {id}), but Discord didn't confirm \
-                 its logout: {}",
-                report(&err)
+            eprintln!(
+                "Removed the previous account's token (user {previous_id}). {}",
+                session_may_be_active(&err)
             );
             ExitCode::SUCCESS
         }
     }
+}
+
+// Undoes a login that can't be kept: ends its session first, so no live session is left
+// behind a deleted token.
+async fn discard<S: Accounts>(client: &DiscordClient, store: &Arc<S>, success: &LoginSuccess) {
+    if let Err(err) = client.end_session(&success.token).await {
+        eprintln!(
+            "Couldn't end the new session. {}",
+            session_may_be_active(&err)
+        );
+    }
+    let id = success.user_id;
+    if let Err(err) = off_runtime(store, move |store| store.delete(id)).await {
+        eprintln!(
+            "Couldn't remove the new token: {}. Delete the keychain entry \"akari-cli\" / \
+             \"{}\" by hand.",
+            report(&err),
+            id.get()
+        );
+    }
+}
+
+pub async fn logout<S: Accounts>(client: &DiscordClient, store: &Arc<S>) -> ExitCode {
+    let account = match off_runtime(store, |store| store.current_account()).await {
+        Ok(Some(account)) => account,
+        Ok(None) => {
+            println!("Not logged in.");
+            return ExitCode::SUCCESS;
+        }
+        Err(err) => {
+            eprintln!("Couldn't read the keychain: {}", report(&err));
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = client.logout(account).await;
+    if let Err(LogoutError::Storage(err)) = &result {
+        eprintln!("Couldn't remove the stored token: {}", report(err));
+        return ExitCode::FAILURE;
+    }
+    if let Err(err) = off_runtime(store, |store| store.clear_current_account()).await {
+        eprintln!("Couldn't update the keychain: {}", report(&err));
+        return ExitCode::FAILURE;
+    }
+    match result {
+        Ok(()) => {
+            println!("Logged out.");
+            ExitCode::SUCCESS
+        }
+        Err(LogoutError::NotLoggedIn) => {
+            println!("Not logged in.");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Removed the stored token. {}", session_may_be_active(&err));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn session_may_be_active(err: &LogoutError) -> String {
+    format!(
+        "Discord didn't confirm the logout ({}), so the session may still be active. End it in \
+         Discord under User Settings → Devices.",
+        report(err)
+    )
 }
 
 // akari-cli keeps one account, so logging in as someone else replaces the stored one.
@@ -246,11 +335,14 @@ fn prompt(label: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::time::Duration;
 
     use akari_core::model::Snowflake;
     use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
-    use akari_core::{Token, TokenStore, TokenStoreError};
+    use akari_core::{Endpoints, Token, TokenStore, TokenStoreError};
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
 
@@ -259,9 +351,20 @@ mod tests {
         tokens: Mutex<HashMap<u64, String>>,
         current: Mutex<Option<u64>>,
         selecting_fails: bool,
+        deleting_fails: bool,
+        // When set, current_account waits for a signal another task sends.
+        signal: Option<Mutex<mpsc::Receiver<()>>>,
     }
 
     impl FakeAccounts {
+        fn with(account: u64, token: &str) -> Self {
+            Self {
+                tokens: Mutex::new(HashMap::from([(account, token.to_owned())])),
+                current: Mutex::new(Some(account)),
+                ..Self::default()
+            }
+        }
+
         fn token(&self, account: u64) -> Option<String> {
             self.tokens.lock().unwrap().get(&account).cloned()
         }
@@ -283,6 +386,9 @@ mod tests {
             Ok(())
         }
         fn delete(&self, account: Snowflake<UserMarker>) -> Result<(), TokenStoreError> {
+            if self.deleting_fails {
+                return Err(TokenStoreError::Unavailable);
+            }
             self.tokens.lock().unwrap().remove(&account.get());
             Ok(())
         }
@@ -290,6 +396,13 @@ mod tests {
 
     impl Accounts for FakeAccounts {
         fn current_account(&self) -> Result<Option<Snowflake<UserMarker>>, TokenStoreError> {
+            if let Some(signal) = &self.signal {
+                signal
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .map_err(|_| TokenStoreError::Backend("blocked the runtime".to_owned()))?;
+            }
             Ok(self.current.lock().unwrap().map(Snowflake::new))
         }
         fn set_current_account(
@@ -302,9 +415,13 @@ mod tests {
             *self.current.lock().unwrap() = Some(account.get());
             Ok(())
         }
+        fn clear_current_account(&self) -> Result<(), TokenStoreError> {
+            *self.current.lock().unwrap() = None;
+            Ok(())
+        }
     }
 
-    fn client(store: Arc<FakeAccounts>) -> DiscordClient {
+    fn client(server: &MockServer, store: Arc<FakeAccounts>) -> DiscordClient {
         let host = HostInfo {
             os: DesktopOs::MacOs,
             os_version: "25.0.0".to_owned(),
@@ -312,7 +429,22 @@ mod tests {
             system_locale: "en-US".to_owned(),
         };
         let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
-        DiscordClient::new(properties, store).unwrap()
+        let endpoints = Endpoints {
+            api: format!("{}/api/v9/", server.uri()),
+            allow_plaintext: true,
+            ..Endpoints::default()
+        };
+        DiscordClient::with_endpoints(properties, store, endpoints).unwrap()
+    }
+
+    async fn expect_logout(server: &MockServer, token: &str) {
+        Mock::given(method("POST"))
+            .and(path("/api/v9/auth/logout"))
+            .and(header("authorization", token))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(server)
+            .await;
     }
 
     fn login_as(account: u64) -> LoginSuccess {
@@ -323,36 +455,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn logging_in_again_as_the_current_account_keeps_its_token() {
-        let store = Arc::new(FakeAccounts {
-            current: Mutex::new(Some(1)),
-            selecting_fails: true,
-            ..FakeAccounts::default()
-        });
-
-        let code = finish(&client(store.clone()), &*store, login_as(1)).await;
-
-        assert_eq!(code, ExitCode::SUCCESS);
-        assert_eq!(store.token(1).as_deref(), Some("new-token"));
-    }
-
-    #[tokio::test]
-    async fn a_switch_that_cant_be_selected_leaves_the_previous_account() {
-        let store = Arc::new(FakeAccounts {
-            tokens: Mutex::new(HashMap::from([(1, "old-token".to_owned())])),
-            current: Mutex::new(Some(1)),
-            selecting_fails: true,
-        });
-
-        let code = finish(&client(store.clone()), &*store, login_as(2)).await;
-
-        assert_eq!(code, ExitCode::FAILURE);
-        assert_eq!(store.token(1).as_deref(), Some("old-token"));
-        assert_eq!(store.token(2), None);
-        assert_eq!(*store.current.lock().unwrap(), Some(1));
-    }
-
     #[test]
     fn only_a_different_previous_account_is_replaced() {
         let old = Snowflake::new(1);
@@ -361,5 +463,92 @@ mod tests {
         assert_eq!(replaced_account(Some(old), new), Some(old));
         assert_eq!(replaced_account(Some(new), new), None);
         assert_eq!(replaced_account(None, new), None);
+    }
+
+    #[tokio::test]
+    async fn logging_in_again_ends_the_old_session_and_keeps_the_new_token() {
+        let server = MockServer::start().await;
+        expect_logout(&server, "old-token").await;
+        let store = Arc::new(FakeAccounts {
+            selecting_fails: true,
+            ..FakeAccounts::with(1, "old-token")
+        });
+
+        let code = finish(&client(&server, store.clone()), &store, login_as(1)).await;
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert_eq!(store.token(1).as_deref(), Some("new-token"));
+    }
+
+    #[tokio::test]
+    async fn a_switch_that_cant_be_selected_ends_the_new_session() {
+        let server = MockServer::start().await;
+        expect_logout(&server, "new-token").await;
+        let store = Arc::new(FakeAccounts {
+            selecting_fails: true,
+            ..FakeAccounts::with(1, "old-token")
+        });
+
+        let code = finish(&client(&server, store.clone()), &store, login_as(2)).await;
+
+        assert_eq!(code, ExitCode::FAILURE);
+        assert_eq!(store.token(1).as_deref(), Some("old-token"));
+        assert_eq!(store.token(2), None);
+        assert_eq!(*store.current.lock().unwrap(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn the_new_session_ends_even_when_its_token_cant_be_deleted() {
+        let server = MockServer::start().await;
+        expect_logout(&server, "new-token").await;
+        let store = Arc::new(FakeAccounts {
+            selecting_fails: true,
+            deleting_fails: true,
+            ..FakeAccounts::with(1, "old-token")
+        });
+
+        let code = finish(&client(&server, store.clone()), &store, login_as(2)).await;
+
+        assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn keychain_calls_run_off_the_runtime_thread() {
+        let server = MockServer::start().await;
+        let (send, receive) = mpsc::channel();
+        let store = Arc::new(FakeAccounts {
+            signal: Some(Mutex::new(receive)),
+            ..FakeAccounts::default()
+        });
+        let signal = tokio::spawn(async move { send.send(()) });
+
+        let code = finish(&client(&server, store.clone()), &store, login_as(1)).await;
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(signal.await.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn logout_without_discord_deletes_locally_and_warns() {
+        let server = MockServer::start().await;
+        Mock::given(path("/api/v9/auth/logout"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let store = Arc::new(FakeAccounts::with(1, "old-token"));
+
+        let code = logout(&client(&server, store.clone()), &store).await;
+
+        assert_eq!(code, ExitCode::FAILURE);
+        assert_eq!(store.token(1), None);
+        assert_eq!(*store.current.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn the_warning_says_where_to_end_the_session() {
+        let warning = session_may_be_active(&LogoutError::UnexpectedResponse);
+
+        assert!(warning.contains("may still be active"), "{warning}");
+        assert!(warning.contains("Devices"), "{warning}");
     }
 }
