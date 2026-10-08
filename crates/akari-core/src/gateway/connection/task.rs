@@ -354,7 +354,7 @@ impl Task {
                         link.ready(Instant::now());
                     }
                     DispatchEvent::Resumed => link.ready(Instant::now()),
-                    DispatchEvent::Other(_) => {}
+                    _ => {}
                 }
                 self.emit(ConnectionEvent::Dispatch(event));
             }

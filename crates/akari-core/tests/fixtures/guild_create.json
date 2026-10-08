@@ -1,0 +1,54 @@
+{
+  "id": "200000000000000003",
+  "joined_at": "2026-10-08T12:00:00.000000+00:00",
+  "large": false,
+  "member_count": 3,
+  "premium_subscription_count": 0,
+  "data_mode": "full",
+  "properties": {
+    "id": "200000000000000003",
+    "name": "Garden",
+    "icon": "a_0123456789abcdef0123456789abcdef",
+    "banner": null,
+    "splash": null,
+    "description": null,
+    "owner_id": "100000000000000002",
+    "features": [],
+    "afk_channel_id": null,
+    "afk_timeout": 300,
+    "system_channel_id": "300000000000000031",
+    "rules_channel_id": null,
+    "vanity_url_code": null,
+    "preferred_locale": "en-US",
+    "default_message_notifications": 1,
+    "nsfw_level": 0,
+    "premium_tier": 0
+  },
+  "roles": [
+    { "id": "200000000000000003", "name": "@everyone", "permissions": "1024", "position": 0, "color": 0, "hoist": false, "managed": false, "mentionable": false, "flags": 0 }
+  ],
+  "emojis": [],
+  "stickers": [],
+  "channels": [
+    { "id": "300000000000000031", "type": 0, "name": "welcome", "position": 0, "permission_overwrites": [], "parent_id": null, "topic": null, "nsfw": false, "rate_limit_per_user": 0, "last_message_id": null, "flags": 0 }
+  ],
+  "threads": [],
+  "members": [
+    {
+      "user": { "id": "100000000000000001", "username": "akari_tester", "global_name": "Akari Tester", "avatar": null, "discriminator": "0", "public_flags": 0 },
+      "roles": [],
+      "nick": null,
+      "avatar": null,
+      "joined_at": "2026-10-08T12:00:00.000000+00:00",
+      "premium_since": null,
+      "deaf": false,
+      "mute": false,
+      "pending": false,
+      "flags": 0
+    }
+  ],
+  "presences": [],
+  "voice_states": [],
+  "stage_instances": [],
+  "guild_scheduled_events": []
+}

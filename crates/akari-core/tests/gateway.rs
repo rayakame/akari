@@ -1,5 +1,6 @@
 use akari_core::gateway::{
-    DecodeError, DispatchEvent, GatewayEvent, GatewayGuild, Hello, Ready, UnavailableGuild, decode,
+    ChannelDelete, DecodeError, DispatchEvent, GatewayEvent, GatewayGuild, GuildDelete,
+    GuildRoleDelete, Hello, MessageDelete, MessageDeleteBulk, Ready, UnavailableGuild, decode,
 };
 use akari_core::model::{
     ChannelType, MessageNotificationLevel, NsfwLevel, Permissions, PremiumTier, PremiumType,
@@ -466,4 +467,476 @@ fn captured_ready_decodes_completely() {
     for (members, raw) in ready.merged_members.iter().zip(raw_members) {
         assert_eq!(members.len(), list(raw), "members were skipped");
     }
+}
+
+#[track_caller]
+fn dispatch(name: &str, data: &str) -> DispatchEvent {
+    match decode_ok(&format!(
+        r#"{{"op": 0, "s": 7, "t": "{name}", "d": {data}}}"#
+    )) {
+        GatewayEvent::Dispatch { seq: 7, event } => event,
+        other => panic!("expected a dispatch, got {other:?}"),
+    }
+}
+
+#[track_caller]
+fn edited(fixture: &str, edit: impl FnOnce(&mut Value)) -> String {
+    let mut value: Value =
+        serde_json::from_str(fixture).unwrap_or_else(|err| panic!("fixture is not JSON: {err}"));
+    edit(&mut value);
+    value.to_string()
+}
+
+#[test]
+fn ready_supplemental_decodes() {
+    let DispatchEvent::ReadySupplemental(supplemental) = dispatch(
+        "READY_SUPPLEMENTAL",
+        include_str!("fixtures/ready_supplemental.json"),
+    ) else {
+        panic!("expected READY_SUPPLEMENTAL");
+    };
+
+    assert_eq!(
+        supplemental
+            .guilds
+            .iter()
+            .map(|guild| guild.id)
+            .collect::<Vec<_>>(),
+        [
+            Snowflake::new(200_000_000_000_000_001),
+            Snowflake::new(200_000_000_000_000_002)
+        ]
+    );
+    assert_eq!(supplemental.merged_members.len(), 2);
+    assert_eq!(
+        supplemental.merged_members[0][0].user_id,
+        Some(Snowflake::new(100_000_000_000_000_002))
+    );
+    assert!(supplemental.merged_members[1].is_empty());
+    assert_eq!(supplemental.lazy_private_channels.len(), 1);
+    assert_eq!(
+        supplemental.lazy_private_channels[0].recipients[0].username,
+        "sol"
+    );
+}
+
+#[test]
+fn ready_supplemental_without_lazy_channels_decodes() {
+    let data = edited(include_str!("fixtures/ready_supplemental.json"), |value| {
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("lazy_private_channels");
+    });
+
+    let DispatchEvent::ReadySupplemental(supplemental) = dispatch("READY_SUPPLEMENTAL", &data)
+    else {
+        panic!("expected READY_SUPPLEMENTAL");
+    };
+
+    assert!(supplemental.lazy_private_channels.is_empty());
+}
+
+#[test]
+fn guild_create_decodes_like_a_ready_guild() {
+    let DispatchEvent::GuildCreate(guild) =
+        dispatch("GUILD_CREATE", include_str!("fixtures/guild_create.json"))
+    else {
+        panic!("expected GUILD_CREATE");
+    };
+    let GatewayGuild::Available(guild) = *guild else {
+        panic!("expected an available guild");
+    };
+
+    assert_eq!(guild.properties.name, "Garden");
+    assert_eq!(guild.channels.len(), 1);
+    assert_eq!(guild.roles.len(), 1);
+    assert_eq!(guild.member_count, Some(3));
+    let member = &guild.members[0];
+    assert_eq!(
+        member.user.as_ref().map(|user| user.id),
+        Some(Snowflake::new(100_000_000_000_000_001))
+    );
+}
+
+#[test]
+fn an_unavailable_guild_create_decodes() {
+    let event = dispatch(
+        "GUILD_CREATE",
+        r#"{"id": "200000000000000003", "unavailable": true}"#,
+    );
+
+    assert_eq!(
+        event,
+        DispatchEvent::GuildCreate(Box::new(GatewayGuild::Unavailable(UnavailableGuild {
+            id: Snowflake::new(200_000_000_000_000_003),
+            geo_restricted: false,
+        })))
+    );
+}
+
+#[test]
+fn guild_update_is_partial() {
+    let DispatchEvent::GuildUpdate(update) = dispatch(
+        "GUILD_UPDATE",
+        r#"{"id": "200000000000000001", "name": "Renamed"}"#,
+    ) else {
+        panic!("expected GUILD_UPDATE");
+    };
+
+    assert_eq!(update.id, Snowflake::new(200_000_000_000_000_001));
+    assert_eq!(update.name.as_deref(), Some("Renamed"));
+    assert_eq!(update.icon, None);
+    assert_eq!(update.owner_id, None);
+    assert_eq!(update.roles, None);
+}
+
+#[test]
+fn a_full_guild_update_separates_null_from_missing() {
+    let DispatchEvent::GuildUpdate(update) =
+        dispatch("GUILD_UPDATE", include_str!("fixtures/guild_update.json"))
+    else {
+        panic!("expected GUILD_UPDATE");
+    };
+
+    assert_eq!(update.name.as_deref(), Some("Akari Lab"));
+    assert_eq!(update.icon, Some(None));
+    assert_eq!(
+        update.banner,
+        Some(Some("0123456789abcdef0123456789abcdef".to_owned()))
+    );
+    assert_eq!(update.roles.as_ref().map(Vec::len), Some(2));
+}
+
+#[test]
+fn a_guild_update_reads_properties_too() {
+    let event = dispatch(
+        "GUILD_UPDATE",
+        r#"{"id": "200000000000000001", "properties": {"id": "200000000000000001", "name": "Nested", "icon": null}}"#,
+    );
+    let DispatchEvent::GuildUpdate(update) = event else {
+        panic!("expected GUILD_UPDATE");
+    };
+
+    assert_eq!(update.name.as_deref(), Some("Nested"));
+    assert_eq!(update.icon, Some(None));
+}
+
+#[test]
+fn guild_delete_tells_leaving_from_an_outage() {
+    let left = dispatch("GUILD_DELETE", r#"{"id": "200000000000000001"}"#);
+    let down = dispatch(
+        "GUILD_DELETE",
+        r#"{"id": "200000000000000001", "unavailable": true}"#,
+    );
+
+    let id = Snowflake::new(200_000_000_000_000_001);
+    assert_eq!(
+        left,
+        DispatchEvent::GuildDelete(GuildDelete {
+            id,
+            unavailable: false
+        })
+    );
+    assert_eq!(
+        down,
+        DispatchEvent::GuildDelete(GuildDelete {
+            id,
+            unavailable: true
+        })
+    );
+}
+
+#[test]
+fn role_events_decode() {
+    let created = dispatch(
+        "GUILD_ROLE_CREATE",
+        r#"{"guild_id": "200000000000000001", "role": {"id": "500000000000000003", "name": "Helpers", "permissions": "2048", "position": 2}}"#,
+    );
+    let deleted = dispatch(
+        "GUILD_ROLE_DELETE",
+        r#"{"guild_id": "200000000000000001", "role_id": "500000000000000003"}"#,
+    );
+
+    let DispatchEvent::GuildRoleCreate(created) = created else {
+        panic!("expected GUILD_ROLE_CREATE");
+    };
+    assert_eq!(created.guild_id, Snowflake::new(200_000_000_000_000_001));
+    assert_eq!(created.role.name, "Helpers");
+    assert_eq!(created.role.permissions, Permissions(2048));
+    assert_eq!(
+        deleted,
+        DispatchEvent::GuildRoleDelete(GuildRoleDelete {
+            guild_id: Snowflake::new(200_000_000_000_000_001),
+            role_id: Snowflake::new(500_000_000_000_000_003),
+        })
+    );
+    assert!(matches!(
+        dispatch(
+            "GUILD_ROLE_UPDATE",
+            r#"{"guild_id": "200000000000000001", "role": {"id": "500000000000000003", "permissions": "0", "position": 2}}"#,
+        ),
+        DispatchEvent::GuildRoleUpdate(_)
+    ));
+}
+
+#[test]
+fn guild_member_update_separates_missing_from_null() {
+    let fixture = include_str!("fixtures/guild_member_update.json");
+    let DispatchEvent::GuildMemberUpdate(missing) = dispatch("GUILD_MEMBER_UPDATE", fixture) else {
+        panic!("expected GUILD_MEMBER_UPDATE");
+    };
+    let cleared = edited(fixture, |value| value["nick"] = Value::Null);
+    let DispatchEvent::GuildMemberUpdate(cleared) = dispatch("GUILD_MEMBER_UPDATE", &cleared)
+    else {
+        panic!("expected GUILD_MEMBER_UPDATE");
+    };
+
+    assert_eq!(missing.guild_id, Snowflake::new(200_000_000_000_000_001));
+    assert_eq!(missing.user.id, Snowflake::new(100_000_000_000_000_001));
+    assert_eq!(missing.nick, None);
+    assert_eq!(cleared.nick, Some(None));
+    assert_eq!(
+        missing.roles.as_deref(),
+        Some(&[Snowflake::new(500_000_000_000_000_002)][..])
+    );
+    assert!(matches!(
+        missing.communication_disabled_until,
+        Some(Some(_))
+    ));
+}
+
+#[test]
+fn channel_create_decodes_a_dm_with_recipients() {
+    let DispatchEvent::ChannelCreate(channel) = dispatch(
+        "CHANNEL_CREATE",
+        include_str!("fixtures/channel_create_dm.json"),
+    ) else {
+        panic!("expected CHANNEL_CREATE");
+    };
+
+    assert_eq!(channel.kind, ChannelType::Dm);
+    assert_eq!(channel.recipients[0].username, "ren");
+}
+
+#[test]
+fn channel_update_is_partial() {
+    let DispatchEvent::ChannelUpdate(update) =
+        dispatch("CHANNEL_UPDATE", r#"{"id": "300000000000000002"}"#)
+    else {
+        panic!("expected CHANNEL_UPDATE");
+    };
+
+    assert_eq!(update.id, Snowflake::new(300_000_000_000_000_002));
+    assert_eq!(update.name, None);
+    assert_eq!(update.topic, None);
+    assert_eq!(update.permission_overwrites, None);
+}
+
+#[test]
+fn a_full_channel_update_separates_null_from_missing() {
+    let DispatchEvent::ChannelUpdate(update) = dispatch(
+        "CHANNEL_UPDATE",
+        include_str!("fixtures/channel_update.json"),
+    ) else {
+        panic!("expected CHANNEL_UPDATE");
+    };
+
+    assert_eq!(update.kind, Some(ChannelType::GuildText));
+    assert_eq!(update.name, Some(Some("general-chat".to_owned())));
+    assert_eq!(update.topic, Some(None));
+    assert_eq!(
+        update.parent_id,
+        Some(Some(Snowflake::new(300_000_000_000_000_001)))
+    );
+    assert_eq!(update.rate_limit_per_user, Some(5));
+    assert_eq!(update.permission_overwrites.as_ref().map(Vec::len), Some(1));
+}
+
+#[test]
+fn channel_delete_decodes_a_partial_dm() {
+    let event = dispatch(
+        "CHANNEL_DELETE",
+        r#"{"id": "300000000000000010", "type": 1}"#,
+    );
+
+    assert_eq!(
+        event,
+        DispatchEvent::ChannelDelete(ChannelDelete {
+            id: Snowflake::new(300_000_000_000_000_010),
+            guild_id: None,
+            parent_id: None,
+        })
+    );
+}
+
+#[test]
+fn thread_create_and_update_decode() {
+    let DispatchEvent::ThreadCreate(thread) =
+        dispatch("THREAD_CREATE", include_str!("fixtures/thread_create.json"))
+    else {
+        panic!("expected THREAD_CREATE");
+    };
+    let archived = edited(include_str!("fixtures/thread_create.json"), |value| {
+        value["thread_metadata"]["archived"] = true.into();
+    });
+    let DispatchEvent::ThreadUpdate(update) = dispatch("THREAD_UPDATE", &archived) else {
+        panic!("expected THREAD_UPDATE");
+    };
+
+    assert_eq!(thread.kind, ChannelType::PublicThread);
+    assert_eq!(thread.name.as_deref(), Some("Bug triage"));
+    assert_eq!(update.thread_metadata.map(|meta| meta.archived), Some(true));
+}
+
+#[test]
+fn thread_delete_decodes_its_four_fields() {
+    let event = dispatch(
+        "THREAD_DELETE",
+        r#"{"id": "300000000000000021", "guild_id": "200000000000000001", "parent_id": "300000000000000002", "type": 11}"#,
+    );
+
+    assert_eq!(
+        event,
+        DispatchEvent::ThreadDelete(ChannelDelete {
+            id: Snowflake::new(300_000_000_000_000_021),
+            guild_id: Some(Snowflake::new(200_000_000_000_000_001)),
+            parent_id: Some(Snowflake::new(300_000_000_000_000_002)),
+        })
+    );
+}
+
+#[test]
+fn message_create_decodes() {
+    let DispatchEvent::MessageCreate(message) = dispatch(
+        "MESSAGE_CREATE",
+        include_str!("fixtures/message_create.json"),
+    ) else {
+        panic!("expected MESSAGE_CREATE");
+    };
+
+    assert_eq!(message.id, Snowflake::new(400_000_000_000_000_003));
+    assert_eq!(message.content, "hi");
+}
+
+#[test]
+fn message_update_is_partial() {
+    let DispatchEvent::MessageUpdate(update) = dispatch(
+        "MESSAGE_UPDATE",
+        r#"{"id": "400000000000000001", "channel_id": "300000000000000002", "embeds": []}"#,
+    ) else {
+        panic!("expected MESSAGE_UPDATE");
+    };
+
+    assert_eq!(update.id, Snowflake::new(400_000_000_000_000_001));
+    assert_eq!(update.channel_id, Snowflake::new(300_000_000_000_000_002));
+    assert_eq!(update.content, None);
+    assert_eq!(update.edited_timestamp, None);
+    assert_eq!(update.embeds.as_ref().map(Vec::len), Some(0));
+    assert_eq!(update.author, None);
+}
+
+#[test]
+fn a_full_message_update_decodes() {
+    let DispatchEvent::MessageUpdate(update) = dispatch(
+        "MESSAGE_UPDATE",
+        include_str!("fixtures/message_update.json"),
+    ) else {
+        panic!("expected MESSAGE_UPDATE");
+    };
+
+    assert!(update.content.as_deref().unwrap().ends_with("(fixed link)"));
+    assert!(matches!(update.edited_timestamp, Some(Some(_))));
+    assert_eq!(update.embeds.as_ref().map(Vec::len), Some(1));
+    assert_eq!(
+        update.author.as_ref().map(|author| author.id),
+        Some(Snowflake::new(100_000_000_000_000_002))
+    );
+}
+
+#[test]
+fn a_broken_embed_in_a_message_update_drops_only_the_embed() {
+    let data = edited(include_str!("fixtures/message_update.json"), |value| {
+        value["embeds"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"color": "red"}));
+    });
+
+    let DispatchEvent::MessageUpdate(update) = dispatch("MESSAGE_UPDATE", &data) else {
+        panic!("expected MESSAGE_UPDATE");
+    };
+
+    assert_eq!(update.embeds.as_ref().map(Vec::len), Some(1));
+}
+
+#[test]
+fn message_delete_and_bulk_delete_decode() {
+    let single = dispatch(
+        "MESSAGE_DELETE",
+        r#"{"id": "400000000000000001", "channel_id": "300000000000000002", "guild_id": "200000000000000001"}"#,
+    );
+    let bulk = dispatch(
+        "MESSAGE_DELETE_BULK",
+        r#"{"ids": ["400000000000000001", "400000000000000002"], "channel_id": "300000000000000010"}"#,
+    );
+
+    assert_eq!(
+        single,
+        DispatchEvent::MessageDelete(MessageDelete {
+            id: Snowflake::new(400_000_000_000_000_001),
+            channel_id: Snowflake::new(300_000_000_000_000_002),
+            guild_id: Some(Snowflake::new(200_000_000_000_000_001)),
+        })
+    );
+    assert_eq!(
+        bulk,
+        DispatchEvent::MessageDeleteBulk(MessageDeleteBulk {
+            ids: vec![
+                Snowflake::new(400_000_000_000_000_001),
+                Snowflake::new(400_000_000_000_000_002)
+            ],
+            channel_id: Snowflake::new(300_000_000_000_000_010),
+            guild_id: None,
+        })
+    );
+}
+
+#[test]
+fn user_update_decodes() {
+    let DispatchEvent::UserUpdate(update) =
+        dispatch("USER_UPDATE", include_str!("fixtures/user_update.json"))
+    else {
+        panic!("expected USER_UPDATE");
+    };
+
+    assert_eq!(update.id, Snowflake::new(100_000_000_000_000_001));
+    assert_eq!(update.global_name, Some(Some("Akari".to_owned())));
+    assert_eq!(update.premium_type, Some(PremiumType::Tier2));
+    assert_eq!(update.mfa_enabled, Some(true));
+    assert!(!format!("{update:?}").contains("example.invalid"));
+}
+
+#[test]
+fn a_dispatch_with_a_broken_payload_is_a_dispatch_error() {
+    let data = edited(include_str!("fixtures/message_create.json"), |value| {
+        value.as_object_mut().unwrap().remove("author");
+    });
+
+    let err =
+        decode(format!(r#"{{"op": 0, "s": 8, "t": "MESSAGE_CREATE", "d": {data}}}"#).as_bytes())
+            .unwrap_err();
+
+    assert!(
+        matches!(&err, DecodeError::Dispatch { seq: 8, event, .. } if event == "MESSAGE_CREATE"),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn unknown_dispatches_stay_other() {
+    assert_eq!(
+        dispatch("TYPING_START", r#"{"channel_id": "300000000000000002"}"#),
+        DispatchEvent::Other("TYPING_START".to_owned())
+    );
 }

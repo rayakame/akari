@@ -1,0 +1,19 @@
+{
+  "id": "100000000000000001",
+  "username": "akari_tester",
+  "global_name": "Akari",
+  "avatar": "a_0123456789abcdef0123456789abcdef",
+  "discriminator": "0",
+  "public_flags": 0,
+  "flags": 0,
+  "banner": null,
+  "accent_color": null,
+  "bio": "",
+  "premium_type": 2,
+  "mfa_enabled": true,
+  "verified": true,
+  "email": "tester@example.invalid",
+  "phone": null,
+  "locale": "en-US",
+  "nsfw_allowed": true
+}

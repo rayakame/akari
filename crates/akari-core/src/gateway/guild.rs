@@ -2,7 +2,7 @@ use serde::de::{self, Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
 use crate::lenient::{JsonErrorSummary, skip_invalid};
-use crate::model::{Channel, Guild, GuildMarker, Role, Snowflake, Timestamp};
+use crate::model::{Channel, Guild, GuildMarker, GuildMember, Role, Snowflake, Timestamp};
 
 /// A guild in READY or GUILD_CREATE.
 ///
@@ -33,6 +33,9 @@ pub struct AvailableGuild {
     /// Only threads the user has joined.
     pub threads: Vec<Channel>,
     pub roles: Vec<Role>,
+    /// GUILD_CREATE's members: the current user's on join. Empty in READY, which has
+    /// `merged_members` instead.
+    pub members: Vec<GuildMember>,
     pub member_count: Option<u32>,
     pub joined_at: Option<Timestamp>,
     pub large: bool,
@@ -60,6 +63,8 @@ struct RawGatewayGuild {
     threads: Vec<Channel>,
     #[serde(default)]
     roles: Vec<Role>,
+    #[serde(default, deserialize_with = "skip_invalid")]
+    members: Vec<GuildMember>,
     member_count: Option<u32>,
     joined_at: Option<Timestamp>,
     #[serde(default)]
@@ -87,6 +92,7 @@ impl TryFrom<RawGatewayGuild> for GatewayGuild {
             channels: raw.channels,
             threads: raw.threads,
             roles: raw.roles,
+            members: raw.members,
             member_count: raw.member_count,
             joined_at: raw.joined_at,
             large: raw.large,

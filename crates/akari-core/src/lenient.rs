@@ -15,6 +15,16 @@ where
     Ok(parse_valid(entries.unwrap_or_default()))
 }
 
+// For partial updates: a missing or `null` list means "unchanged".
+pub(crate) fn skip_invalid_option<'de, D, T>(deserializer: D) -> Result<Option<Vec<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let entries = Option::<Vec<&'de RawValue>>::deserialize(deserializer)?;
+    Ok(entries.map(parse_valid))
+}
+
 // The outer list never drops an entry, so it stays aligned with another list.
 pub(crate) fn skip_invalid_in_each<'de, D, T>(deserializer: D) -> Result<Vec<Vec<T>>, D::Error>
 where
