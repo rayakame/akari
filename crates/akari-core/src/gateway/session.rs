@@ -10,6 +10,8 @@ use crate::backoff;
 use crate::heartbeat::{Beat, Heartbeat};
 
 const API_VERSION: &str = "9";
+// A shorter interval would let the heartbeat reserve eat the whole send budget.
+const MIN_HEARTBEAT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone)]
 pub(crate) struct Timing {
@@ -170,7 +172,7 @@ impl Connection {
 
     // True only for the first Hello: a second Identify gets the connection closed (4005).
     pub(crate) fn hello(&mut self, hello: &Hello, now: Instant, jitter: f64) -> bool {
-        let interval = Duration::from_millis(hello.heartbeat_interval);
+        let interval = Duration::from_millis(hello.heartbeat_interval).max(MIN_HEARTBEAT);
         self.heartbeat = Some(Heartbeat::start(interval, now, jitter));
         self.limiter.reserve_for(interval);
         !std::mem::replace(&mut self.handshake_sent, true)
@@ -367,6 +369,19 @@ mod tests {
         assert!(connection.hello(&hello(40_000), start, 0.0));
         assert_eq!(connection.tick(start), Tick::Heartbeat);
         assert!(!connection.hello(&hello(40_000), start, 0.0));
+    }
+
+    #[test]
+    fn a_tiny_heartbeat_interval_is_clamped_to_a_second() {
+        let timing = Timing::default();
+        let start = Instant::now();
+        let mut connection = Connection::new(start, &timing);
+        connection.hello(&hello(0), start, 0.0);
+
+        assert_eq!(connection.tick(start), Tick::Heartbeat);
+        connection.acked();
+        assert_eq!(connection.deadline(), start + Duration::from_secs(1));
+        assert!(connection.limiter.allows_command(start));
     }
 
     #[test]

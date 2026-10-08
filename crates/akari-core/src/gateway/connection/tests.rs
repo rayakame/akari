@@ -142,23 +142,23 @@ async fn an_unread_consumer_never_stalls_the_connection() {
     let mut fake = FakeGateway::start().await;
     let gateway = start(&fake);
     let mut connection = fake.accept().await;
-    connection.handshake(50).await;
+    connection.handshake(1000).await;
     connection.ready(1, SESSION, &fake.resume_url()).await;
     for seq in 2..=501 {
         connection.dispatch(seq, "TYPING_START").await;
     }
 
     connection
-        .pump_until(WAIT, |connection, _| {
+        .pump_until(Duration::from_secs(20), |connection, _| {
             last_heartbeat(connection) == Some(&json!(501))
         })
         .await;
     let before = connection.heartbeats.len();
-    let unexpected = connection.pump(Duration::from_millis(500)).await;
+    let unexpected = connection.pump(Duration::from_millis(3500)).await;
 
     assert!(unexpected.is_empty(), "{unexpected:?}");
     assert_eq!(connection.close_code, None);
-    assert!(connection.heartbeats.len() >= before + 3);
+    assert!(connection.heartbeats.len() >= before + 2);
     assert_eq!(gateway.buffered.load(Ordering::Relaxed), 501);
     assert!(matches!(
         next(&gateway).await,
