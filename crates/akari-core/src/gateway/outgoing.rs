@@ -45,7 +45,6 @@ impl GatewayCommand {
         }
     }
 
-    // One command per batch of guilds that fits in a payload.
     pub(crate) fn subscribe_guilds(guilds: &[GuildId]) -> Vec<Self> {
         let mut commands = Vec::new();
         let mut batch = Vec::new();
@@ -70,7 +69,7 @@ impl GatewayCommand {
 
 // `{"op":37,"d":{"subscriptions":{}}}` and `"":{"typing":true,"activities":true,"threads":true},`
 const EMPTY_SUBSCRIPTIONS: usize = 34;
-const SUBSCRIPTION_ENTRY: usize = 53;
+const SUBSCRIPTION_ENTRY: usize = 52;
 
 #[derive(Serialize)]
 struct Subscriptions {

@@ -48,7 +48,7 @@ pub enum StoreEvent {
         message_id: MessageId,
     },
     /// Discord confirmed a pending message: drop `pending_id`'s row. `message` is in the
-    /// window if it is at the present; otherwise it comes with the next refresh.
+    /// window if it is at the present; otherwise it comes with a later load.
     MessageReplaced {
         channel_id: ChannelId,
         pending_id: MessageId,

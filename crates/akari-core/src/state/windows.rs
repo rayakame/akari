@@ -94,8 +94,12 @@ impl Window {
         self.holding > 0 || (self.stale && self.latest)
     }
 
-    // Once no load holds them, held messages join a live window or are dropped.
-    fn settle(&mut self, channel_id: ChannelId, limit: usize, events: &mut Vec<StoreEvent>) {
+    fn release_or_drop_held(
+        &mut self,
+        channel_id: ChannelId,
+        limit: usize,
+        events: &mut Vec<StoreEvent>,
+    ) {
         if self.appends_live() {
             self.release_held(channel_id, limit, events);
         } else if !self.holds_live() {
@@ -187,7 +191,6 @@ impl Window {
         self.trim(channel_id, limit, End::Older, events);
     }
 
-    // Where a confirmed or live message goes: the visible window, the held ones, or nowhere.
     fn place(
         &mut self,
         channel_id: ChannelId,
@@ -532,8 +535,8 @@ impl Windows {
         }
     }
 
-    // None if there's nothing to load: no window, a live window for Newer, a fresh one for
-    // Refresh.
+    // None if there's nothing to load: no window, one at the present for Newer, a fresh one
+    // for Refresh.
     pub(crate) fn begin_load(
         &mut self,
         channel: ChannelId,
@@ -571,7 +574,6 @@ impl Windows {
         })
     }
 
-    // The page as Discord sent it; it is sorted here.
     pub(crate) fn finish_load(
         &mut self,
         ticket: LoadTicket,
@@ -602,7 +604,7 @@ impl Windows {
             Cursor::Latest | Cursor::Around(_) => false,
         };
         if moved {
-            window.settle(channel_id, window_limit, events);
+            window.release_or_drop_held(channel_id, window_limit, events);
             return;
         }
         let mut page: Vec<Arc<Message>> = page
@@ -688,7 +690,7 @@ impl Windows {
                 window.trim(channel_id, window_limit, End::Older, events);
             }
         }
-        window.settle(channel_id, window_limit, events);
+        window.release_or_drop_held(channel_id, window_limit, events);
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {
@@ -707,7 +709,7 @@ impl Windows {
             window.latest = false;
             events.push(StoreEvent::MessagesStale { channel_id });
         }
-        window.settle(channel_id, limit, events);
+        window.release_or_drop_held(channel_id, limit, events);
     }
 
     pub(crate) fn update(

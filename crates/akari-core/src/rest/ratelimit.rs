@@ -185,7 +185,6 @@ pub(crate) struct Permit<'a> {
 }
 
 impl RateLimiter {
-    // A request that would wait longer for a limit fails with the wait instead.
     pub(crate) fn new(max_wait: Duration) -> Self {
         Self {
             lanes: Mutex::default(),
@@ -197,10 +196,10 @@ impl RateLimiter {
     pub(crate) async fn acquire(&self, route: RouteKey) -> Result<Permit<'_>, Duration> {
         let lane = {
             let mut lanes = self.lanes.lock().unwrap_or_else(PoisonError::into_inner);
-            // tokio's Mutex is fair, so waiters on one route start in the order they came.
             lanes.retain(|_, lane| Arc::strong_count(lane) > 1);
             lanes.entry(route.clone()).or_default().clone()
         };
+        // tokio's Mutex is fair, so waiters on one route start in the order they came.
         let guard = lane.lock_owned().await;
         self.reserve(&route).await?;
         Ok(Permit {

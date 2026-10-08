@@ -41,7 +41,8 @@ pub enum RequestError {
     Network(#[source] TransportError),
     #[error("unexpected response from Discord")]
     UnexpectedResponse,
-    /// Empty content, or a channel or message the store doesn't know.
+    /// Empty content, a send before the account is online, a retry of a message that isn't
+    /// failed, or a token that isn't a valid header value.
     #[error("invalid request")]
     InvalidRequest,
     /// The account is closed.

@@ -169,7 +169,7 @@ async fn tail(session: &Session, channel: ChannelId, interrupts: &mut Signal) ->
         eprintln!("(a large server: live messages arrive through Akari's guild subscription)");
     }
     let mut shown = HashSet::new();
-    if let Some(code) = jump_to_present(session, channel, &mut shown, Change::Loaded).await {
+    if let Err(code) = jump_to_present(session, channel, &mut shown, Change::Loaded).await {
         return code;
     }
     println!("-- live, Ctrl+C to stop --");
@@ -222,7 +222,7 @@ async fn tail(session: &Session, channel: ChannelId, interrupts: &mut Signal) ->
                     .is_some_and(|window| window.stale && !window.latest);
                 if detached {
                     println!("(missed too much while away, showing the latest messages)");
-                    if let Some(code) =
+                    if let Err(code) =
                         jump_to_present(session, channel, &mut shown, Change::New).await
                     {
                         return code;
@@ -242,19 +242,18 @@ async fn tail(session: &Session, channel: ChannelId, interrupts: &mut Signal) ->
     }
 }
 
-// Loads the latest messages and prints those not shown yet; `Some` ends the command.
 async fn jump_to_present(
     session: &Session,
     channel: ChannelId,
     shown: &mut HashSet<MessageId>,
     change: Change,
-) -> Option<ExitCode> {
+) -> Result<(), ExitCode> {
     let load = MessageLoad::Latest {
         limit: TAIL_BACKLOG,
     };
     if let Err(err) = session.account.load_messages(channel, load).await {
         eprintln!("Couldn't load the messages: {}", report(&err));
-        return Some(ExitCode::FAILURE);
+        return Err(ExitCode::FAILURE);
     }
     let messages = session
         .account
@@ -267,7 +266,7 @@ async fn jump_to_present(
             println!("{}", marked(change, &line(&message)));
         }
     }
-    None
+    Ok(())
 }
 
 fn line(message: &Message) -> String {

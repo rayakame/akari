@@ -31,16 +31,19 @@ can't get a hole. The limit is clamped to 1–100.
 | `MessageLoad` | Request | Window |
 |---|---|---|
 | `Latest` | no cursor | Views the channel. If the window is at the present, the page fills it from the old end; a stale window is refreshed (below); otherwise the window is replaced by the page (`MessagesCleared`, then `MessagesLoaded`): "jump to present" |
-| `Older` | `before` = the window's first message | Older history, `MessagesLoaded`. Past 200 messages the newest are trimmed and `latest` becomes false |
-| `Newer` | `after` = the window's last message | Newer history. Nothing to do if the window is already at the present. A short page means the present is reached |
+| `Older` | `before` = the window's first message | Older history, `MessagesLoaded`. Past 200 messages the newest are trimmed and `latest` becomes false. Nothing to do without a window |
+| `Newer` | `after` = the window's last message | Newer history. Nothing to do without a window or if it is already at the present. A short page means the present is reached, which also ends a stale window's staleness |
 | `Around { id }` | `around` = `id` | Views the channel and replaces the window with the page |
 
 - A load that ends at the present (`Latest`, `Newer`, the stale refresh) holds live
   messages back while it runs, and adds them after the page. Otherwise a message that
   arrives during the request could land in the window before the messages it follows.
 - A load whose window was cleared, replaced or evicted while it ran is dropped: the page
-  belongs to messages that are no longer there.
-- On an error the window stays as it was.
+  belongs to messages that are no longer there. So is an `Older` or `Newer` page whose
+  end of the window was trimmed or deleted meanwhile, since it would leave a gap.
+- A page is short if Discord sent fewer entries than the limit; messages skipped because
+  they didn't decode still count.
+- On an error the window stays as it was, except a stale one (below).
 
 ## After a new session
 
@@ -57,6 +60,12 @@ every stale window with the latest 100 messages:
 - If more than 100 messages were missed, the page can't be joined to the window. The
   window keeps its messages, stays stale, and stops being at the present (`latest` false,
   `MessagesStale` again); the UI offers "jump to present", which is a `Latest` load.
+- If the refresh fails, the window detaches the same way, so it doesn't hold live
+  messages back forever.
+- An empty window takes the page as it is. An empty page (no messages, or no
+  `READ_MESSAGE_HISTORY`) leaves the messages and makes the window fresh again.
+- A refresh that finishes after another load already refreshed the window changes
+  nothing.
 - Older parts of a window aren't re-checked, like the official client.
 
 ## Sending
@@ -74,7 +83,8 @@ every stale window with the latest 100 messages:
 - **Pending.** `Account::send_message` adds the message at once to the window's outbox,
   with the nonce as its provisional ID and `Delivery::Pending` (`MessageInserted`). The
   outbox is shown after the window's messages and is never trimmed, and a window with
-  messages in its outbox is never evicted.
+  messages in its outbox is never evicted. If the `send_message` future is dropped before
+  Discord answers, e.g. because its task was cancelled, the message becomes failed.
 - **Confirmed.** The REST response and the gateway's MESSAGE_CREATE both carry the nonce,
   and whichever comes first replaces the pending message: `MessageReplaced { pending_id,
   message }`. The message is then in the window if the window is at the present; otherwise
@@ -88,9 +98,10 @@ every stale window with the latest 100 messages:
   post the message twice, and the echo still matches.
 - **Order.** Sends to one channel go out one at a time, in the order they were made,
   retries included (see [rate-limits.md](rate-limits.md)).
-- **Where it goes.** Sending into a window that isn't at the present first jumps to the
-  present, like the official client. Sending into a stale window just queues; the refresh
-  brings the confirmed message.
+- **Where it goes.** Sending into a window that isn't at the present also jumps to the
+  present, like the official client. The jump runs alongside the send and never holds it
+  back; if it fails, the message is still sent. Sending into a stale window just queues;
+  the refresh brings the confirmed message.
 - **Content.** Empty or whitespace-only content is refused before any request
   (`RequestError::InvalidRequest`); Discord would answer 50006. The length isn't checked
   locally: the limit is 2,000 characters, or 4,000 with Nitro (**unverified**), and Discord
@@ -103,7 +114,8 @@ every stale window with the latest 100 messages:
 - `Unauthorized`: a 401. The token is gone: every later request fails at once, and the
   account closes with `GatewayError::AuthenticationFailed` like a gateway 4004, so a UI
   shows the login screen.
-- `RateLimited { retry_after }`: still rate limited after the retries.
+- `RateLimited { retry_after }`: still rate limited after the retries, or the wait would
+  be longer than 10 s (see [rate-limits.md](rate-limits.md)).
 - `CaptchaRequired(challenge)`: the request needs a captcha, which Akari doesn't solve
   yet. A send that needs one stays in the outbox as failed.
 - `Discord { status, code, message }`: an API error, e.g. 50013 Missing Permissions,

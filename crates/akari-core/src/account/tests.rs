@@ -848,9 +848,8 @@ async fn a_401_closes_the_account_like_a_rejected_token() {
 
 const ME: &str = "100000000000000001";
 
-// Records each send's body; the n-th call answers with `statuses[n]` (the last one repeats).
-// A 200 echoes the body as a created message whose ID depends only on the nonce, because
-// Discord sends a nonce's first message only.
+// The n-th send answers with `statuses[n]`, the last repeating. Created IDs depend only on the
+// nonce, because Discord sends a nonce's first message only.
 #[derive(Clone)]
 struct Sends {
     bodies: Arc<std::sync::Mutex<Vec<Value>>>,

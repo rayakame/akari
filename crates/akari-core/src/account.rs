@@ -331,13 +331,15 @@ impl Account {
     }
 
     /// Marks the channel as viewed: the store keeps its messages and adds new ones from
-    /// the gateway. Past 10 viewed channels, the least recently viewed loses its messages.
+    /// the gateway. Past 10 viewed channels, the least recently viewed one without pending or
+    /// failed messages loses its messages.
     pub fn view_channel(&self, channel: ChannelId) {
         self.shared.view(channel);
     }
 
-    /// Loads messages into the channel's window, viewing it first, within Discord's rate
-    /// limits. A 401 closes the account like a rejected token.
+    /// Loads messages into the channel's window within Discord's rate limits. `Latest` and
+    /// `Around` view the channel first; `Older` and `Newer` continue a window and do nothing
+    /// without one. A 401 closes the account like a rejected token.
     pub async fn load_messages(
         &self,
         channel: ChannelId,
