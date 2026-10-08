@@ -1,19 +1,20 @@
-//! Gateway payloads as Discord sends them.
+//! Gateway payloads as Discord sends them, and the connection that receives them.
 
-#[cfg_attr(not(test), allow(dead_code))]
+mod connection;
 mod decompress;
 mod guild;
 mod hello;
 mod lenient;
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 mod limiter;
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 mod outgoing;
 mod payload;
 mod ready;
 #[allow(dead_code)]
-mod session;
+pub(crate) mod session;
 
+pub use connection::{ConnectionEvent, DisconnectReason, Gateway, GatewayError, SendError};
 pub use guild::{AvailableGuild, GatewayGuild, UnavailableGuild};
 pub use hello::Hello;
 pub use outgoing::{GatewayCommand, PresenceStatus};

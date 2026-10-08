@@ -8,6 +8,8 @@ use tokio::sync::OnceCell;
 
 use crate::auth::{LoginError, LogoutError, PasswordLogin, QrLogin};
 use crate::error::TransportError;
+use crate::gateway::session::Timing;
+use crate::gateway::{Gateway, GatewayError};
 use crate::model::{Snowflake, UserMarker};
 use crate::properties::ClientProperties;
 use crate::rest::{BuildError, RequestExtras, RestClient};
@@ -25,6 +27,7 @@ pub struct DiscordClient {
 struct Inner {
     tls: Arc<rustls::ClientConfig>,
     endpoints: Endpoints,
+    gateway_url: Url,
     properties: ClientProperties,
     rest: RestClient,
     fingerprint: OnceCell<String>,
@@ -93,7 +96,7 @@ impl DiscordClient {
         }
         let plaintext = allows_plaintext(&endpoints);
         let api = parse_endpoint(&api, "api", "https", plaintext.then_some("http"))?;
-        parse_endpoint(
+        let gateway_url = parse_endpoint(
             &endpoints.gateway,
             "gateway",
             "wss",
@@ -118,6 +121,7 @@ impl DiscordClient {
             inner: Arc::new(Inner {
                 tls: Arc::new(tls),
                 endpoints,
+                gateway_url,
                 properties,
                 rest,
                 fingerprint: OnceCell::new(),
@@ -139,6 +143,12 @@ impl DiscordClient {
     /// Fails with [`LoginError::NoRuntime`] outside a Tokio runtime.
     pub fn qr_login(&self) -> Result<QrLogin, LoginError> {
         QrLogin::start(self.clone())
+    }
+
+    /// A gateway connection for `token`, idle until [`Gateway::connect`]. Fails with
+    /// [`GatewayError::NoRuntime`] outside a Tokio runtime.
+    pub fn gateway(&self, token: Token) -> Result<Gateway, GatewayError> {
+        Gateway::start(self.clone(), token, Timing::default())
     }
 
     pub async fn save_token(
@@ -206,6 +216,14 @@ impl DiscordClient {
 
     pub(crate) fn endpoints(&self) -> &Endpoints {
         &self.inner.endpoints
+    }
+
+    pub(crate) fn gateway_url(&self) -> &Url {
+        &self.inner.gateway_url
+    }
+
+    pub(crate) fn allows_plaintext(&self) -> bool {
+        allows_plaintext(&self.inner.endpoints)
     }
 
     pub(crate) async fn fingerprint(&self) -> Option<&str> {

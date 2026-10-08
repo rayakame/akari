@@ -49,6 +49,15 @@ pub enum DecodeError {
     },
 }
 
+impl DecodeError {
+    pub(crate) fn dispatch(&self) -> Option<(u64, &str)> {
+        match self {
+            Self::Dispatch { seq, event, .. } => Some((*seq, event)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct RawPayload<'a> {
     op: u16,
