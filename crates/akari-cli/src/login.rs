@@ -8,6 +8,7 @@ use akari_core::auth::{
 };
 use akari_core::model::{Snowflake, UserMarker};
 use akari_core::{DiscordClient, Secret};
+use akari_core::{Token, TokenStoreError};
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 
@@ -168,6 +169,8 @@ async fn finish<S: Accounts>(
     success: LoginSuccess,
 ) -> ExitCode {
     let id = success.user_id;
+    // Until the token is stored and selected, a failure would leave a live session that
+    // nothing can find, so each early return ends the new session first.
     let previous = match off_runtime(store, |store| store.current_account()).await {
         Ok(previous) => previous,
         Err(err) => {
@@ -175,22 +178,14 @@ async fn finish<S: Accounts>(
                 "Logged in, but couldn't read the keychain: {}",
                 report(&err)
             );
+            end_new_session(client, &success.token).await;
             return ExitCode::FAILURE;
         }
     };
-    // Logging in again as the same account replaces its token; that old session ends below.
-    let replaced_token = if previous == Some(id) {
-        client
-            .load_token(id)
-            .await
-            .ok()
-            .flatten()
-            .filter(|token| *token != success.token)
-    } else {
-        None
-    };
+    let replaced = replaced_session(client, previous, &success).await;
     if let Err(err) = client.save_token(id, &success.token).await {
         eprintln!("Logged in, but couldn't store the token: {}", report(&err));
+        end_new_session(client, &success.token).await;
         return ExitCode::FAILURE;
     }
     if previous != Some(id)
@@ -208,13 +203,21 @@ async fn finish<S: Accounts>(
     if success.password_update_required {
         println!("Discord asks you to change your password in the official app.");
     }
-    if let Some(old) = replaced_token
-        && let Err(err) = client.end_session(&old).await
-    {
-        eprintln!(
-            "Couldn't end this account's previous session. {}",
-            session_may_be_active(&err)
-        );
+    match replaced {
+        Ok(Some(old)) => {
+            if let Err(err) = client.end_session(&old).await {
+                eprintln!(
+                    "Couldn't end this account's previous session. {}",
+                    session_may_be_active(&err)
+                );
+            }
+        }
+        Ok(None) => {}
+        Err(err) => eprintln!(
+            "Couldn't read this account's previous token ({}), so its session couldn't be \
+             ended and may still be active. End it in Discord under User Settings → Devices.",
+            report(&err)
+        ),
     }
 
     // Only once the new account is complete: a failure here leaves at most the old entry.
@@ -245,15 +248,26 @@ async fn finish<S: Accounts>(
     }
 }
 
+// Logging in again as the same account replaces its token, whose session then has to end.
+// An unreadable old token is an error, not "none": its session may still be active.
+async fn replaced_session(
+    client: &DiscordClient,
+    previous: Option<Snowflake<UserMarker>>,
+    success: &LoginSuccess,
+) -> Result<Option<Token>, TokenStoreError> {
+    if previous != Some(success.user_id) {
+        return Ok(None);
+    }
+    Ok(client
+        .load_token(success.user_id)
+        .await?
+        .filter(|token| *token != success.token))
+}
+
 // Undoes a login that can't be kept: ends its session first, so no live session is left
 // behind a deleted token.
 async fn discard<S: Accounts>(client: &DiscordClient, store: &Arc<S>, success: &LoginSuccess) {
-    if let Err(err) = client.end_session(&success.token).await {
-        eprintln!(
-            "Couldn't end the new session. {}",
-            session_may_be_active(&err)
-        );
-    }
+    end_new_session(client, &success.token).await;
     let id = success.user_id;
     if let Err(err) = off_runtime(store, move |store| store.delete(id)).await {
         eprintln!(
@@ -261,6 +275,15 @@ async fn discard<S: Accounts>(client: &DiscordClient, store: &Arc<S>, success: &
              \"{}\" by hand.",
             report(&err),
             id.get()
+        );
+    }
+}
+
+async fn end_new_session(client: &DiscordClient, token: &Token) {
+    if let Err(err) = client.end_session(token).await {
+        eprintln!(
+            "Couldn't end the new session. {}",
+            session_may_be_active(&err)
         );
     }
 }
@@ -350,6 +373,9 @@ mod tests {
     struct FakeAccounts {
         tokens: Mutex<HashMap<u64, String>>,
         current: Mutex<Option<u64>>,
+        reading_fails: bool,
+        loading_fails: bool,
+        saving_fails: bool,
         selecting_fails: bool,
         deleting_fails: bool,
         // When set, current_account waits for a signal another task sends.
@@ -372,6 +398,9 @@ mod tests {
 
     impl TokenStore for FakeAccounts {
         fn load(&self, account: Snowflake<UserMarker>) -> Result<Option<Token>, TokenStoreError> {
+            if self.loading_fails {
+                return Err(TokenStoreError::Unavailable);
+            }
             Ok(self.token(account.get()).map(Token::new))
         }
         fn save(
@@ -379,6 +408,9 @@ mod tests {
             account: Snowflake<UserMarker>,
             token: &Token,
         ) -> Result<(), TokenStoreError> {
+            if self.saving_fails {
+                return Err(TokenStoreError::Unavailable);
+            }
             self.tokens
                 .lock()
                 .unwrap()
@@ -402,6 +434,9 @@ mod tests {
                     .unwrap()
                     .recv_timeout(Duration::from_secs(2))
                     .map_err(|_| TokenStoreError::Backend("blocked the runtime".to_owned()))?;
+            }
+            if self.reading_fails {
+                return Err(TokenStoreError::Unavailable);
             }
             Ok(self.current.lock().unwrap().map(Snowflake::new))
         }
@@ -510,6 +545,53 @@ mod tests {
         let code = finish(&client(&server, store.clone()), &store, login_as(2)).await;
 
         assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_keychain_ends_the_new_session() {
+        let server = MockServer::start().await;
+        expect_logout(&server, "new-token").await;
+        let store = Arc::new(FakeAccounts {
+            reading_fails: true,
+            ..FakeAccounts::default()
+        });
+
+        let code = finish(&client(&server, store.clone()), &store, login_as(1)).await;
+
+        assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[tokio::test]
+    async fn a_token_that_cant_be_saved_ends_its_session() {
+        let server = MockServer::start().await;
+        expect_logout(&server, "new-token").await;
+        let store = Arc::new(FakeAccounts {
+            saving_fails: true,
+            ..FakeAccounts::default()
+        });
+
+        let code = finish(&client(&server, store.clone()), &store, login_as(1)).await;
+
+        assert_eq!(code, ExitCode::FAILURE);
+        assert_eq!(store.token(1), None);
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_old_token_is_reported_not_ignored() {
+        let server = MockServer::start().await;
+        let store = Arc::new(FakeAccounts {
+            loading_fails: true,
+            ..FakeAccounts::with(1, "old-token")
+        });
+        let client = client(&server, store.clone());
+
+        let replaced = replaced_session(&client, Some(Snowflake::new(1)), &login_as(1)).await;
+
+        assert!(replaced.is_err());
+        assert!(matches!(
+            replaced_session(&client, Some(Snowflake::new(2)), &login_as(1)).await,
+            Ok(None)
+        ));
     }
 
     #[tokio::test(flavor = "current_thread")]
