@@ -119,7 +119,6 @@ impl FakeConnection {
         self.ws.send(message).await.unwrap();
     }
 
-    // The next payload that isn't a heartbeat; None once the client closed.
     pub(super) async fn recv(&mut self) -> Option<Value> {
         loop {
             let message = timeout(WAIT, self.ws.next())
@@ -152,7 +151,6 @@ impl FakeConnection {
         }
     }
 
-    // Answers heartbeats for `duration` and returns everything else the client sent.
     pub(super) async fn pump(&mut self, duration: Duration) -> Vec<Value> {
         let mut payloads = Vec::new();
         let _ = timeout(duration, async {
@@ -164,7 +162,6 @@ impl FakeConnection {
         payloads
     }
 
-    // Like `pump`, but stops as soon as `done` holds; panics if it never does.
     pub(super) async fn pump_until(
         &mut self,
         limit: Duration,

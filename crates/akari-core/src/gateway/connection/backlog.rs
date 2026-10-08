@@ -13,7 +13,6 @@ impl Default for Backlog {
 }
 
 impl Backlog {
-    // At 10,000 buffered events and at every doubling after; draining below re-arms it.
     pub(super) fn warns_at(&mut self, buffered: usize) -> bool {
         if buffered < FIRST_WARNING {
             self.next_warning = FIRST_WARNING;

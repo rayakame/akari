@@ -50,7 +50,6 @@ async fn send(ws: &mut WebSocketStream<TcpStream>, payload: Value) {
         .unwrap_or_else(|err| panic!("send failed: {err}"));
 }
 
-// The next payload that isn't a heartbeat; None once the client closed.
 async fn recv(ws: &mut WebSocketStream<TcpStream>) -> Option<Value> {
     loop {
         match timeout(WAIT, ws.next())

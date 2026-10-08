@@ -24,7 +24,7 @@ use crate::gateway::session::{
 use crate::ws::{self, WsStream};
 use crate::{DiscordClient, Token, random};
 
-// The largest gateway message, compressed or not; READY of a big account is a few MiB.
+// Applies compressed and decompressed; READY of a big account is a few MiB.
 pub(super) const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 // 1000 and 1001 end the session on Discord's side; any other code keeps it resumable.
 const NORMAL: u16 = 1000;
@@ -57,7 +57,7 @@ enum End {
     Fatal(GatewayError),
 }
 
-// The end of a connection and the close code to send; None when Discord closed it.
+// None: Discord already closed the socket.
 type Exit = (End, Option<u16>);
 
 fn lost(reason: DisconnectReason, healthy: bool) -> End {
@@ -111,7 +111,6 @@ impl Task {
         }
     }
 
-    // Waits until connect() is in effect and `until` has passed. False once closed.
     async fn idle(&mut self, mut until: Option<Instant>) -> bool {
         loop {
             match *self.mode.borrow_and_update() {
@@ -431,7 +430,7 @@ impl Task {
         self.send(Ok(event));
     }
 
-    // Never waits for the reader: the queue is unbounded, and a growing backlog only warns.
+    // The connection must never wait for the reader, so the queue is unbounded.
     fn send(&mut self, event: Result<ConnectionEvent, GatewayError>) {
         let buffered = self.buffered.fetch_add(1, Ordering::Relaxed) + 1;
         if self.backlog.warns_at(buffered) {

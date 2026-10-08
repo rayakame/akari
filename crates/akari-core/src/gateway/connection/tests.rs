@@ -81,7 +81,6 @@ async fn next_error(gateway: &Gateway) -> GatewayError {
     }
 }
 
-// Identifies with `interval` ms heartbeats and delivers READY with seq 1.
 async fn connected(fake: &mut FakeGateway, gateway: &Gateway, interval: u64) -> FakeConnection {
     let mut connection = fake.accept().await;
     let identify = connection.handshake(interval).await;
