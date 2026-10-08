@@ -41,6 +41,9 @@ pub struct Endpoints {
     pub remote_auth: String,
     /// The `Origin` header the remote auth gateway requires.
     pub origin: String,
+    /// Allows `http://` and `ws://` endpoints. Only for local test servers: without it,
+    /// every endpoint must use TLS.
+    pub allow_plaintext: bool,
 }
 
 impl Default for Endpoints {
@@ -50,6 +53,7 @@ impl Default for Endpoints {
             gateway: "wss://gateway.discord.gg/".to_owned(),
             remote_auth: "wss://remote-auth-gateway.discord.gg/?v=2".to_owned(),
             origin: "https://discord.com".to_owned(),
+            allow_plaintext: false,
         }
     }
 }
@@ -85,18 +89,29 @@ impl DiscordClient {
         if !api.ends_with('/') {
             api.push('/');
         }
-        let api = Url::parse(&api).map_err(|_| ClientError::InvalidEndpoint("api"))?;
-        Url::parse(&endpoints.gateway).map_err(|_| ClientError::InvalidEndpoint("gateway"))?;
-        Url::parse(&endpoints.remote_auth)
-            .map_err(|_| ClientError::InvalidEndpoint("remote auth"))?;
+        let plaintext = endpoints.allow_plaintext;
+        let api = parse_endpoint(&api, "api", "https", plaintext.then_some("http"))?;
+        parse_endpoint(
+            &endpoints.gateway,
+            "gateway",
+            "wss",
+            plaintext.then_some("ws"),
+        )?;
+        parse_endpoint(
+            &endpoints.remote_auth,
+            "remote auth",
+            "wss",
+            plaintext.then_some("ws"),
+        )?;
         HeaderValue::from_str(&endpoints.origin)
             .map_err(|_| ClientError::InvalidEndpoint("origin"))?;
 
         let tls = tls::client_config().map_err(ClientError::Tls)?;
-        let rest = RestClient::new(&tls, api, &properties).map_err(|err| match err {
-            BuildError::InvalidHeader(name) => ClientError::InvalidProperties(name),
-            BuildError::Transport(err) => ClientError::Http(err),
-        })?;
+        let rest =
+            RestClient::new(&tls, api, &properties, !plaintext).map_err(|err| match err {
+                BuildError::InvalidHeader(name) => ClientError::InvalidProperties(name),
+                BuildError::Transport(err) => ClientError::Http(err),
+            })?;
         Ok(Self {
             inner: Arc::new(Inner {
                 tls: Arc::new(tls),
@@ -223,6 +238,20 @@ impl fmt::Debug for DiscordClient {
     }
 }
 
+fn parse_endpoint(
+    url: &str,
+    name: &'static str,
+    scheme: &str,
+    plaintext_scheme: Option<&str>,
+) -> Result<Url, ClientError> {
+    let url = Url::parse(url).map_err(|_| ClientError::InvalidEndpoint(name))?;
+    if url.scheme() == scheme || Some(url.scheme()) == plaintext_scheme {
+        Ok(url)
+    } else {
+        Err(ClientError::InvalidEndpoint(name))
+    }
+}
+
 async fn blocking<T: Send + 'static>(
     job: impl FnOnce() -> Result<T, TokenStoreError> + Send + 'static,
 ) -> Result<T, TokenStoreError> {
@@ -273,6 +302,7 @@ mod tests {
     fn client(server: &MockServer) -> DiscordClient {
         let endpoints = Endpoints {
             api: format!("{}/api/v9", server.uri()),
+            allow_plaintext: true,
             ..Endpoints::default()
         };
         DiscordClient::with_endpoints(properties(), Arc::new(NoStore), endpoints).unwrap()
@@ -331,6 +361,7 @@ mod tests {
     fn malformed_endpoints_are_rejected() {
         let endpoints = Endpoints {
             gateway: "not a url".to_owned(),
+            allow_plaintext: true,
             ..Endpoints::default()
         };
 
@@ -338,6 +369,39 @@ mod tests {
             DiscordClient::with_endpoints(properties(), Arc::new(NoStore), endpoints).unwrap_err();
 
         assert!(matches!(err, ClientError::InvalidEndpoint("gateway")));
+    }
+
+    #[test]
+    fn plaintext_endpoints_need_an_explicit_opt_in() {
+        let plain_api = Endpoints {
+            api: "http://127.0.0.1:1/api/v9/".to_owned(),
+            ..Endpoints::default()
+        };
+        let plain_remote_auth = Endpoints {
+            remote_auth: "ws://127.0.0.1:1/?v=2".to_owned(),
+            ..Endpoints::default()
+        };
+
+        for (endpoints, name) in [
+            (plain_api.clone(), "api"),
+            (plain_remote_auth.clone(), "remote auth"),
+        ] {
+            let err = DiscordClient::with_endpoints(properties(), Arc::new(NoStore), endpoints)
+                .unwrap_err();
+            assert!(
+                matches!(err, ClientError::InvalidEndpoint(n) if n == name),
+                "{err:?}"
+            );
+        }
+        for endpoints in [plain_api, plain_remote_auth] {
+            let allowed = Endpoints {
+                allow_plaintext: true,
+                ..endpoints
+            };
+            assert!(
+                DiscordClient::with_endpoints(properties(), Arc::new(NoStore), allowed).is_ok()
+            );
+        }
     }
 
     #[test]

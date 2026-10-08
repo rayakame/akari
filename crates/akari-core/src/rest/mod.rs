@@ -46,6 +46,7 @@ impl RestClient {
         tls: &rustls::ClientConfig,
         base: Url,
         properties: &ClientProperties,
+        https_only: bool,
     ) -> Result<Self, BuildError> {
         let mut tls = tls.clone();
         tls.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
@@ -64,6 +65,9 @@ impl RestClient {
         let http = reqwest::Client::builder()
             .tls_backend_preconfigured(tls)
             .default_headers(headers)
+            .https_only(https_only)
+            // A redirect would carry the Authorization header to wherever Discord points.
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30))
             .build()

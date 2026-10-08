@@ -67,6 +67,7 @@ fn properties() -> ClientProperties {
 fn client_with(api: String, store: Arc<dyn TokenStore>) -> DiscordClient {
     let endpoints = Endpoints {
         api,
+        allow_plaintext: true,
         ..Endpoints::default()
     };
     DiscordClient::with_endpoints(properties(), store, endpoints)

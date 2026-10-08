@@ -21,7 +21,7 @@ fn properties() -> ClientProperties {
 
 async fn client(server: &MockServer) -> RestClient {
     let base = Url::parse(&format!("{}/api/v9/", server.uri())).unwrap();
-    RestClient::new(&tls::client_config().unwrap(), base, &properties()).unwrap()
+    RestClient::new(&tls::client_config().unwrap(), base, &properties(), false).unwrap()
 }
 
 async fn error_for(response: ResponseTemplate) -> RestError {
@@ -278,7 +278,8 @@ async fn non_json_success_is_an_invalid_body() {
 #[tokio::test]
 async fn unreachable_servers_are_transport_errors() {
     let base = Url::parse("http://127.0.0.1:1/api/v9/").unwrap();
-    let client = RestClient::new(&tls::client_config().unwrap(), base, &properties()).unwrap();
+    let client =
+        RestClient::new(&tls::client_config().unwrap(), base, &properties(), false).unwrap();
 
     let err = client
         .get_json::<Value>("experiments", &RequestExtras::default())
@@ -374,4 +375,48 @@ fn summaries_name_the_error_without_response_data() {
         RestError::UnexpectedStatus { status: 503 }.summary(),
         "unexpected status 503"
     );
+}
+
+#[tokio::test]
+async fn redirects_are_not_followed() {
+    let server = MockServer::start().await;
+    Mock::given(path("/api/v9/thing"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", "/api/v9/elsewhere"))
+        .mount(&server)
+        .await;
+    Mock::given(path("/api/v9/elsewhere"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+
+    let err = client(&server)
+        .await
+        .get_json::<Value>("thing", &RequestExtras::default())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, RestError::UnexpectedStatus { status: 302 }),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn https_only_clients_refuse_plain_http() {
+    let server = MockServer::start().await;
+    Mock::given(path("/api/v9/thing"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+    let base = Url::parse(&format!("{}/api/v9/", server.uri())).unwrap();
+    let client =
+        RestClient::new(&tls::client_config().unwrap(), base, &properties(), true).unwrap();
+
+    let err = client
+        .get_json::<Value>("thing", &RequestExtras::default())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, RestError::Transport(_)), "{err:?}");
+    assert!(server.received_requests().await.unwrap().is_empty());
 }

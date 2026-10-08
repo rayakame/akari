@@ -50,6 +50,7 @@ pub fn client(rest: &MockServer, remote_auth: &remote_auth::RemoteAuthServer) ->
     let endpoints = Endpoints {
         api: format!("{}/api/v9/", rest.uri()),
         remote_auth: remote_auth.url(),
+        allow_plaintext: true,
         ..Endpoints::default()
     };
     DiscordClient::with_endpoints(properties(), Arc::new(NoStore), endpoints)

@@ -53,6 +53,7 @@ fn client(server: &MockServer) -> DiscordClient {
     let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
     let endpoints = Endpoints {
         api: format!("{}/api/v9/", server.uri()),
+        allow_plaintext: true,
         ..Endpoints::default()
     };
     DiscordClient::with_endpoints(properties, Arc::new(NoStore), endpoints)

@@ -558,6 +558,7 @@ mod tests {
         );
         let endpoints = crate::Endpoints {
             remote_auth: format!("ws://{address}/?v=2"),
+            allow_plaintext: true,
             ..crate::Endpoints::default()
         };
         let client =
