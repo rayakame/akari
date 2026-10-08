@@ -1,17 +1,106 @@
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::gateway::session::Timing;
 use crate::gateway::{ConnectionEvent, DispatchEvent, Gateway, GatewayError};
-use crate::model::ChannelId;
-use crate::state::{ConnectionState, Store, WindowLimits};
+use crate::model::{ChannelId, MessageId};
+use crate::rest::{AccountRest, Query, RequestError};
+use crate::state::{ConnectionState, Cursor, LoadKind, Store, WindowLimits};
 use crate::{DiscordClient, Token};
+
+const REFRESH_LIMIT: u8 = 100;
+const SERVER_ERROR_RETRY: Duration = Duration::from_secs(1);
 
 /// A logged-in account: its gateway connection and the [`Store`] that connection keeps
 /// current. Dropping it ends the session like [`Account::close`].
 pub struct Account {
-    gateway: Arc<Gateway>,
+    shared: Arc<Shared>,
+}
+
+/// Which messages [`Account::load_messages`] loads. `limit` is clamped to 1–100.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MessageLoad {
+    /// The newest messages: fills a window, refreshes a stale one, or jumps to the present.
+    Latest { limit: u8 },
+    /// Before the window's first message.
+    Older { limit: u8 },
+    /// After the window's last message, towards the present.
+    Newer { limit: u8 },
+    /// Replaces the window with the messages around `id`.
+    Around { id: MessageId, limit: u8 },
+}
+
+impl MessageLoad {
+    fn parts(self) -> (LoadKind, u8) {
+        let (kind, limit) = match self {
+            Self::Latest { limit } => (LoadKind::Latest, limit),
+            Self::Older { limit } => (LoadKind::Older, limit),
+            Self::Newer { limit } => (LoadKind::Newer, limit),
+            Self::Around { id, limit } => (LoadKind::Around(id), limit),
+        };
+        (kind, limit.clamp(1, 100))
+    }
+}
+
+pub(crate) struct Shared {
+    gateway: Gateway,
     store: Store,
+    rest: AccountRest,
+}
+
+impl Shared {
+    async fn load(
+        &self,
+        channel: ChannelId,
+        kind: LoadKind,
+        limit: u8,
+    ) -> Result<(), RequestError> {
+        let Some(ticket) = self.store.begin_load(channel, kind) else {
+            return Ok(());
+        };
+        let query = match ticket.cursor {
+            Cursor::Latest => Query::Latest,
+            Cursor::Before(id) => Query::Before(id),
+            Cursor::After(id) => Query::After(id),
+            Cursor::Around(id) => Query::Around(id),
+        };
+        match self.rest.list_messages(channel, query, limit).await {
+            Ok(page) => {
+                self.store.finish_load(ticket, page, usize::from(limit));
+                Ok(())
+            }
+            Err(err) => {
+                self.store.abort_load(ticket);
+                self.failed(&err);
+                Err(err)
+            }
+        }
+    }
+
+    // A 401 means the token is gone, like the gateway's 4004: the UI has to log in again.
+    fn failed(&self, err: &RequestError) {
+        if matches!(err, RequestError::Unauthorized) {
+            let error = Some(Arc::new(GatewayError::AuthenticationFailed));
+            self.store.set_connection(ConnectionState::Closed { error });
+            self.gateway.close();
+        }
+    }
+
+    async fn refresh_stale(&self) {
+        for channel in self.store.stale_channels() {
+            let refreshed = self.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
+            if refreshed.is_err() && self.rest.is_unauthorized() {
+                return;
+            }
+        }
+    }
+
+    fn close(&self) {
+        self.gateway.close();
+        self.rest.close();
+    }
 }
 
 impl Account {
@@ -22,59 +111,72 @@ impl Account {
         limits: WindowLimits,
     ) -> Result<Self, GatewayError> {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
-        let gateway = Arc::new(Gateway::start(client, token, timing)?);
-        let store = Store::new(limits);
+        let rest = AccountRest::new(client.clone(), token.clone(), SERVER_ERROR_RETRY);
+        let shared = Arc::new(Shared {
+            gateway: Gateway::start(client, token, timing)?,
+            store: Store::new(limits),
+            rest,
+        });
         // Built before the task starts, so it runs even if the task is never polled.
-        let finish = Finish::new(gateway.clone(), store.clone());
+        let finish = Finish::new(shared.clone());
         runtime.spawn(pump(finish));
-        Ok(Self { gateway, store })
+        Ok(Self { shared })
     }
 
     /// The account's state. It stays readable after the account is closed.
     pub fn store(&self) -> &Store {
-        &self.store
+        &self.shared.store
     }
 
     /// Connects, or resumes after [`Account::disconnect`]. Does nothing while connected.
     /// Fails with [`GatewayError::Closed`] after `close()` or a fatal error.
     pub fn connect(&self) -> Result<(), GatewayError> {
-        self.gateway.connect()?;
-        self.store.begin_connecting();
+        self.shared.gateway.connect()?;
+        self.shared.store.begin_connecting();
         Ok(())
     }
 
     /// Closes the connection but keeps the session, e.g. while the app is suspended; the
     /// next `connect()` resumes it.
     pub fn disconnect(&self) {
-        self.gateway.disconnect();
-        self.store.set_connection(ConnectionState::Offline);
+        self.shared.gateway.disconnect();
+        self.shared.store.set_connection(ConnectionState::Offline);
     }
 
     /// Ends the session. Subscriptions end once the connection is closed.
     pub fn close(&self) {
-        self.gateway.close();
+        self.shared.close();
     }
 
     /// Marks the channel as viewed: the store keeps its messages and adds new ones from
     /// the gateway. Past 10 viewed channels, the least recently viewed loses its messages.
     pub fn view_channel(&self, channel: ChannelId) {
-        self.store.view_channel(channel);
+        self.shared.store.view_channel(channel);
+    }
+
+    /// Loads messages into the channel's window, viewing it first, within Discord's rate
+    /// limits. A 401 closes the account like a rejected token.
+    pub async fn load_messages(
+        &self,
+        channel: ChannelId,
+        load: MessageLoad,
+    ) -> Result<(), RequestError> {
+        let (kind, limit) = load.parts();
+        self.shared.load(channel, kind, limit).await
     }
 }
 
 // Closes the account however the pump ends: normally, by a panic, or because the runtime
 // shut down and dropped the task. Without it, subscribers would wait forever.
 pub(crate) struct Finish {
-    gateway: Arc<Gateway>,
-    store: Store,
+    shared: Arc<Shared>,
     ended: Option<Option<Arc<GatewayError>>>,
 }
 
 impl Finish {
-    pub(crate) fn new(gateway: Arc<Gateway>, store: Store) -> Self {
+    pub(crate) fn new(shared: Arc<Shared>) -> Self {
         Self {
-            gateway,
-            store,
+            shared,
             ended: None,
         }
     }
@@ -83,26 +185,28 @@ impl Finish {
 impl Drop for Finish {
     fn drop(&mut self) {
         // close() does nothing once the gateway has ended, so it runs on every path.
-        self.gateway.close();
+        self.shared.close();
         let error = self
             .ended
             .take()
             .unwrap_or_else(|| Some(Arc::new(GatewayError::Stopped)));
-        self.store.set_connection(ConnectionState::Closed { error });
-        self.store.finish();
+        self.shared
+            .store
+            .set_connection(ConnectionState::Closed { error });
+        self.shared.store.finish();
     }
 }
 
 impl Drop for Account {
     fn drop(&mut self) {
-        self.gateway.close();
+        self.shared.close();
     }
 }
 
 impl fmt::Debug for Account {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Account")
-            .field("connection", &self.store.connection())
+            .field("connection", &self.shared.store.connection())
             .finish_non_exhaustive()
     }
 }
@@ -110,24 +214,26 @@ impl fmt::Debug for Account {
 // The gateway buffers its events and the store never waits for subscribers, so nothing
 // here waits on a consumer.
 async fn pump(mut finish: Finish) {
-    let gateway = finish.gateway.clone();
-    let connecting = || gateway.wants_connection();
+    let shared = finish.shared.clone();
+    let connecting = || shared.gateway.wants_connection();
     let error = loop {
-        match gateway.next().await {
+        match shared.gateway.next().await {
             // A large READY takes milliseconds to convert; that mustn't hold a runtime worker.
             Ok(ConnectionEvent::Dispatch(DispatchEvent::Ready(ready))) => {
-                let store = finish.store.clone();
+                let store = shared.store.clone();
                 match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
                     Ok(next) => {
-                        finish.store.replace(next);
-                        finish
+                        shared.store.replace(next);
+                        shared
                             .store
                             .set_connection_if(ConnectionState::Online, connecting);
+                        let refresh = shared.clone();
+                        tokio::spawn(async move { refresh.refresh_stale().await });
                     }
                     Err(_) => break Some(Arc::new(GatewayError::Stopped)),
                 }
             }
-            Ok(event) => on_event(&finish.store, event, &connecting),
+            Ok(event) => on_event(&shared.store, event, &connecting),
             Err(GatewayError::Closed) => break None,
             Err(error) => break Some(Arc::new(error)),
         }

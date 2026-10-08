@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::events::StoreEvent;
 use super::permissions::compute;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
-use super::windows::{MessageWindow, WindowLimits, Windows};
+use super::windows::{LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
@@ -568,6 +568,34 @@ impl State {
 
     pub(crate) fn view_channel(&mut self, channel: ChannelId, events: &mut Vec<StoreEvent>) {
         self.windows.view(channel, events);
+    }
+
+    pub(crate) fn begin_load(
+        &mut self,
+        channel: ChannelId,
+        kind: LoadKind,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<LoadTicket> {
+        self.windows.begin_load(channel, kind, events)
+    }
+
+    pub(crate) fn finish_load(
+        &mut self,
+        ticket: LoadTicket,
+        page: Vec<model::Message>,
+        limit: usize,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows
+            .finish_load(ticket, page, &self.entities.users, limit, events);
+    }
+
+    pub(crate) fn abort_load(&mut self, ticket: LoadTicket) {
+        self.windows.abort_load(ticket);
+    }
+
+    pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
+        self.windows.stale_channels()
     }
 
     pub(crate) fn messages(&self, channel: ChannelId) -> Option<MessageWindow> {

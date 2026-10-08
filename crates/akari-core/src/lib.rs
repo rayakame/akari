@@ -19,7 +19,7 @@ mod tls;
 pub mod token_store;
 mod ws;
 
-pub use account::Account;
+pub use account::{Account, MessageLoad};
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{JsonError, JsonErrorKind, TransportError, TransportErrorKind};
 pub use rest::RequestError;

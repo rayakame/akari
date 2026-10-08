@@ -1,4 +1,4 @@
-// Account will be the first caller outside tests.
+// Sending messages will be the first caller of create_message outside tests.
 #[cfg_attr(not(test), allow(dead_code))]
 mod account;
 mod error;
@@ -10,6 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub use account::RequestError;
+pub(crate) use account::{AccountRest, Query};
 #[cfg(test)]
 pub(crate) use error::FieldError;
 pub(crate) use error::{ApiError, RestError};

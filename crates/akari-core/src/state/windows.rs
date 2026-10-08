@@ -586,6 +586,17 @@ impl Windows {
         }
     }
 
+    pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
+        let mut channels: Vec<ChannelId> = self
+            .windows
+            .iter()
+            .filter(|(_, window)| window.stale && window.latest)
+            .map(|(channel, _)| *channel)
+            .collect();
+        channels.sort_unstable();
+        channels
+    }
+
     pub(crate) fn mark_stale(&mut self, events: &mut Vec<StoreEvent>) {
         let mut channels: Vec<ChannelId> = self.windows.keys().copied().collect();
         channels.sort_unstable();

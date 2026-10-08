@@ -33,6 +33,14 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::ChannelUpdated(channel) => format!("ChannelUpdated({})", channel.id.get()),
         StoreEvent::MessageInserted(message) => format!("MessageInserted({})", message.id.get()),
         StoreEvent::MessagesStale { channel_id } => format!("MessagesStale({})", channel_id.get()),
+        StoreEvent::MessageUpdated(message) => format!("MessageUpdated({})", message.id.get()),
+        StoreEvent::MessageDeleted { message_id, .. } => {
+            format!("MessageDeleted({})", message_id.get())
+        }
+        StoreEvent::MessagesLoaded { first, last, .. } => {
+            format!("MessagesLoaded({}..{})", first.get(), last.get())
+        }
+        StoreEvent::MessagesCleared { .. } => "MessagesCleared".to_owned(),
         other => format!("{other:?}"),
     }
 }
@@ -433,7 +441,7 @@ fn a_panicking_task_still_closes_the_account() {
         )
         .unwrap();
         let subscription = account.store().subscribe();
-        let finish = Finish::new(account.gateway.clone(), account.store().clone());
+        let finish = Finish::new(account.shared.clone());
         (account, subscription, finish)
     });
 
@@ -477,7 +485,7 @@ fn a_task_that_stops_itself_closes_the_gateway() {
             DEFAULT_LIMITS,
         )
         .unwrap();
-        let finish = Finish::new(account.gateway.clone(), account.store().clone());
+        let finish = Finish::new(account.shared.clone());
         (account, finish)
     });
 
@@ -486,4 +494,324 @@ fn a_task_that_stops_itself_closes_the_gateway() {
 
     assert!(stopped(&account.store().connection()));
     assert!(account.connect().is_err());
+}
+
+fn start_with(fake: &FakeGateway, server: &wiremock::MockServer) -> Account {
+    Account::start(
+        crate::gateway::fake::client_with(fake.url(), format!("{}/api/v9/", server.uri())),
+        Token::new(TOKEN.to_owned()),
+        timing(),
+        DEFAULT_LIMITS,
+    )
+    .unwrap()
+}
+
+const MESSAGES: &str = "/api/v9/channels/300000000000000002/messages";
+
+fn page(ids: &[u64]) -> Value {
+    page_with(ids, &[])
+}
+
+fn page_with(ids: &[u64], edited: &[u64]) -> Value {
+    let mut messages: Vec<Value> = ids
+        .iter()
+        .rev()
+        .map(|id| {
+            let mut message = message(0, *id)["d"].clone();
+            if edited.contains(id) {
+                message["content"] = "edited".into();
+            }
+            message
+        })
+        .collect();
+    for message in &mut messages {
+        message.as_object_mut().unwrap().remove("nonce");
+    }
+    Value::Array(messages)
+}
+
+fn ids(account: &Account) -> Vec<u64> {
+    account
+        .store()
+        .messages(Snowflake::new(GENERAL))
+        .map(|window| {
+            window
+                .messages
+                .iter()
+                .map(|message| message.id.get())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn general() -> ChannelId {
+    Snowflake::new(GENERAL)
+}
+
+async fn mock_page(server: &wiremock::MockServer, query: (&str, &str), body: Value) {
+    use wiremock::matchers::{path, query_param};
+    wiremock::Mock::given(path(MESSAGES))
+        .and(query_param(query.0, query.1))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(body))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn loading_the_latest_messages_fills_the_window() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let _connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    mock_page(&server, ("limit", "3"), page(&[10, 11, 12])).await;
+
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 3 })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        next(&subscription).await.as_deref(),
+        Some("MessagesLoaded(10..12)")
+    );
+    assert_eq!(ids(&account), [10, 11, 12]);
+}
+
+#[tokio::test]
+async fn limits_are_clamped_to_1_to_100() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let _connection = online(&mut fake, &account).await;
+    mock_page(&server, ("limit", "1"), page(&[10])).await;
+    mock_page(&server, ("limit", "100"), page(&[])).await;
+
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 0 })
+        .await
+        .unwrap();
+    account
+        .load_messages(general(), MessageLoad::Older { limit: 200 })
+        .await
+        .unwrap();
+
+    let queries: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|request| request.url.query().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(queries, ["limit=1", "limit=100&before=10"]);
+}
+
+#[tokio::test]
+async fn older_pages_use_the_windows_first_message() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let _connection = online(&mut fake, &account).await;
+    mock_page(&server, ("limit", "3"), page(&[10, 11, 12])).await;
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 3 })
+        .await
+        .unwrap();
+    server.reset().await;
+    mock_page(&server, ("before", "10"), page(&[7, 8, 9])).await;
+
+    account
+        .load_messages(general(), MessageLoad::Older { limit: 3 })
+        .await
+        .unwrap();
+
+    assert_eq!(ids(&account), [7, 8, 9, 10, 11, 12]);
+}
+
+#[tokio::test]
+async fn a_new_session_refreshes_stale_windows() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    for (seq, id) in [(2, 10), (3, 11), (4, 12)] {
+        connection.send(message(seq, id)).await;
+    }
+    events_until(&subscription, "MessageInserted(12)").await;
+    {
+        use wiremock::matchers::{path, query_param};
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("limit", "100"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(page_with(&[10, 12, 13], &[12]))
+                    .set_delay(Duration::from_millis(300)),
+            )
+            .mount(&server)
+            .await;
+    }
+
+    connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh.send(ready_payload(1, &fake, |_| {})).await;
+    events_until(&subscription, "Online").await;
+    fresh.send(message(2, 14)).await;
+
+    assert_eq!(
+        events_until(&subscription, "MessagesLoaded(14..14)").await,
+        [
+            "MessageDeleted(11)",
+            "MessageUpdated(12)",
+            "MessagesLoaded(13..13)",
+            "MessagesLoaded(14..14)"
+        ]
+    );
+    assert_eq!(ids(&account), [10, 12, 13, 14]);
+    assert!(!account.store().messages(general()).unwrap().stale);
+}
+
+#[tokio::test]
+async fn messages_created_during_a_catch_up_are_kept() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let mut connection = online(&mut fake, &account).await;
+    mock_page(&server, ("around", "20"), page(&[19, 20, 21])).await;
+    account
+        .load_messages(
+            general(),
+            MessageLoad::Around {
+                id: Snowflake::new(20),
+                limit: 3,
+            },
+        )
+        .await
+        .unwrap();
+    {
+        use wiremock::matchers::{path, query_param};
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("after", "21"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(page(&[22]))
+                    .set_delay(Duration::from_millis(300)),
+            )
+            .mount(&server)
+            .await;
+    }
+
+    let (loaded, ()) = tokio::join!(
+        account.load_messages(general(), MessageLoad::Newer { limit: 50 }),
+        async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            connection.send(message(2, 30)).await;
+        }
+    );
+
+    loaded.unwrap();
+    assert_eq!(ids(&account), [19, 20, 21, 22, 30]);
+    assert!(account.store().messages(general()).unwrap().latest);
+}
+
+#[tokio::test]
+async fn a_failed_load_reports_the_error_and_stops_holding() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    mock_page(&server, ("around", "20"), page(&[19, 20, 21])).await;
+    account
+        .load_messages(
+            general(),
+            MessageLoad::Around {
+                id: Snowflake::new(20),
+                limit: 3,
+            },
+        )
+        .await
+        .unwrap();
+    {
+        use wiremock::matchers::{path, query_param};
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("after", "21"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+    }
+
+    let err = account
+        .load_messages(general(), MessageLoad::Newer { limit: 50 })
+        .await
+        .unwrap_err();
+    connection.send(message(2, 30)).await;
+    connection.send(message(3, 31)).await;
+    connection
+        .send(rename(4, "dispatches before this one are applied"))
+        .await;
+    events_until(&subscription, &format!("ChannelUpdated({GENERAL})")).await;
+    mock_page(&server, ("after", "21"), page(&[22])).await;
+    account
+        .load_messages(general(), MessageLoad::Newer { limit: 50 })
+        .await
+        .unwrap();
+
+    assert!(matches!(err, RequestError::UnexpectedResponse), "{err:?}");
+    assert_eq!(ids(&account), [19, 20, 21, 22]);
+}
+
+#[tokio::test]
+async fn a_401_closes_the_account_like_a_rejected_token() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    {
+        use wiremock::matchers::path;
+        wiremock::Mock::given(path(MESSAGES))
+            .respond_with(wiremock::ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+    }
+
+    let err = account
+        .load_messages(general(), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, RequestError::Unauthorized), "{err:?}");
+    assert_eq!(connection.client_close_code().await, Some(1000));
+    let rest: Vec<String> = {
+        let mut events = Vec::new();
+        while let Some(event) = next(&subscription).await {
+            events.push(event);
+        }
+        events
+    };
+    assert_eq!(
+        rest.last().map(String::as_str),
+        Some("Closed(AuthenticationFailed)")
+    );
+    assert!(matches!(
+        account.store().connection(),
+        ConnectionState::Closed { error: Some(ref error) } if matches!(**error, GatewayError::AuthenticationFailed)
+    ));
+    let again = account
+        .load_messages(general(), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(again, RequestError::Unauthorized | RequestError::Closed),
+        "{again:?}"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
