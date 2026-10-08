@@ -165,9 +165,18 @@ impl Store {
 
     // Closed is final.
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
+        self.set_connection_if(connection, || true);
+    }
+
+    // `allowed` runs under the write lock, so a change made before it can't be overtaken.
+    pub(crate) fn set_connection_if(
+        &self,
+        connection: ConnectionState,
+        allowed: impl FnOnce() -> bool,
+    ) {
         self.write(|inner, events| {
             let closed = matches!(inner.connection, ConnectionState::Closed { .. });
-            if !closed && !same(&inner.connection, &connection) {
+            if !closed && !same(&inner.connection, &connection) && allowed() {
                 inner.connection = connection.clone();
                 events.push(StoreEvent::Connection(connection));
             }

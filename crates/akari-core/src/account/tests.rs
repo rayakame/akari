@@ -229,16 +229,16 @@ fn stale_events_cant_undo_a_disconnect() {
     on_event(
         &store,
         ConnectionEvent::Dispatch(DispatchEvent::Resumed),
-        false,
+        &|| false,
     );
-    on_event(&store, reconnecting(), false);
+    on_event(&store, reconnecting(), &|| false);
     let offline = store.connection();
-    on_event(&store, reconnecting(), true);
+    on_event(&store, reconnecting(), &|| true);
     let reconnecting_state = store.connection();
     on_event(
         &store,
         ConnectionEvent::Dispatch(DispatchEvent::Resumed),
-        true,
+        &|| true,
     );
 
     assert!(matches!(offline, ConnectionState::Offline));
@@ -302,5 +302,38 @@ async fn view_channel_collects_live_messages() {
             .store()
             .message(Snowflake::new(GENERAL), Snowflake::new(10))
             .is_some()
+    );
+}
+
+#[test]
+fn a_disconnect_during_ready_leaves_the_account_offline() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let wanted = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let ready: Value = serde_json::from_str(READY).unwrap();
+    let ready = match crate::gateway::decode(ready.to_string().as_bytes()) {
+        Ok(crate::gateway::GatewayEvent::Dispatch { event, .. }) => event,
+        other => panic!("expected READY, got {other:?}"),
+    };
+    let (parked, release) = store.park_next_ready();
+    let applying = {
+        let store = store.clone();
+        let wanted = wanted.clone();
+        std::thread::spawn(move || {
+            on_event(&store, ConnectionEvent::Dispatch(ready), &|| {
+                wanted.load(std::sync::atomic::Ordering::SeqCst)
+            });
+        })
+    };
+    parked.recv_timeout(WAIT).unwrap();
+
+    wanted.store(false, std::sync::atomic::Ordering::SeqCst);
+    store.set_connection(ConnectionState::Offline);
+    release.send(()).unwrap();
+    applying.join().unwrap();
+
+    assert!(
+        matches!(store.connection(), ConnectionState::Offline),
+        "{:?}",
+        store.connection()
     );
 }

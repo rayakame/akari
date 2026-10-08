@@ -79,7 +79,7 @@ impl fmt::Debug for Account {
 async fn pump(gateway: Arc<Gateway>, store: Store) {
     let error = loop {
         match gateway.next().await {
-            Ok(event) => on_event(&store, event, gateway.wants_connection()),
+            Ok(event) => on_event(&store, event, &|| gateway.wants_connection()),
             Err(GatewayError::Closed) => break None,
             Err(error) => break Some(Arc::new(error)),
         }
@@ -89,17 +89,19 @@ async fn pump(gateway: Arc<Gateway>, store: Store) {
 }
 
 // Events queued before a disconnect() mustn't make the account look connected again.
-fn on_event(store: &Store, event: ConnectionEvent, connecting: bool) {
+// disconnect() idles the gateway before it takes the store's lock to go offline, so
+// checking `connecting` under that lock can't miss it.
+fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
     match event {
         ConnectionEvent::Dispatch(event) => {
             let ready = matches!(event, DispatchEvent::Ready(_) | DispatchEvent::Resumed);
             store.apply(event);
-            if ready && connecting {
-                store.set_connection(ConnectionState::Online);
+            if ready {
+                store.set_connection_if(ConnectionState::Online, connecting);
             }
         }
-        ConnectionEvent::Reconnecting { .. } if connecting => {
-            store.set_connection(ConnectionState::Connecting);
+        ConnectionEvent::Reconnecting { .. } => {
+            store.set_connection_if(ConnectionState::Connecting, connecting);
         }
         _ => {}
     }
