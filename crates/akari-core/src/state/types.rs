@@ -175,6 +175,7 @@ pub struct Message {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ReferencedMessage {
     /// Not a reply, or Discord didn't include it.
     NotIncluded,
