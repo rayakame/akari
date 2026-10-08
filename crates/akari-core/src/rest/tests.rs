@@ -458,3 +458,39 @@ async fn oversized_bodies_are_refused() {
         assert!(matches!(err, RestError::TooLarge), "{err:?}");
     }
 }
+
+#[tokio::test]
+async fn secret_headers_are_marked_sensitive() {
+    let server = MockServer::start().await;
+    let token = Token::new("token-value".to_owned());
+    let solution = CaptchaSolution {
+        key: crate::Secret::new("key-value".to_owned()),
+        rqtoken: Some("rqtoken-value".to_owned()),
+        session_id: Some("session-value".to_owned()),
+    };
+    let extras = RequestExtras {
+        authorization: Some(&token),
+        captcha: Some(&solution),
+        ..RequestExtras::default()
+    };
+
+    let request = client(&server)
+        .await
+        .request(reqwest::Method::POST, "auth/login", &extras)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    for name in [
+        "authorization",
+        "x-captcha-key",
+        "x-captcha-rqtoken",
+        "x-captcha-session-id",
+    ] {
+        assert!(request.headers()[name].is_sensitive(), "{name}");
+    }
+    let output = format!("{request:?}");
+    for value in ["token-value", "key-value", "rqtoken-value", "session-value"] {
+        assert!(!output.contains(value), "{output}");
+    }
+}

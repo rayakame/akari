@@ -28,6 +28,13 @@ pub(crate) struct RequestExtras<'a> {
     pub(crate) captcha: Option<&'a CaptchaSolution>,
 }
 
+// Sensitive values print as "Sensitive" in reqwest's Debug output.
+fn sensitive(value: &str) -> Result<HeaderValue, RestError> {
+    let mut value = HeaderValue::from_str(value).map_err(|_| RestError::InvalidRequest)?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
 // Login responses are a few KiB; anything near this is not Discord.
 const MAX_BODY: usize = 4 * 1024 * 1024;
 
@@ -144,21 +151,18 @@ impl RestClient {
             .map_err(|_| RestError::InvalidRequest)?;
         let mut request = self.http.request(method, url);
         if let Some(token) = extras.authorization {
-            let mut value =
-                HeaderValue::from_str(token.expose()).map_err(|_| RestError::InvalidRequest)?;
-            value.set_sensitive(true);
-            request = request.header(reqwest::header::AUTHORIZATION, value);
+            request = request.header(reqwest::header::AUTHORIZATION, sensitive(token.expose())?);
         }
         if let Some(fingerprint) = extras.fingerprint {
             request = request.header("x-fingerprint", fingerprint);
         }
         if let Some(captcha) = extras.captcha {
-            request = request.header("x-captcha-key", captcha.key.expose());
+            request = request.header("x-captcha-key", sensitive(captcha.key.expose())?);
             if let Some(rqtoken) = &captcha.rqtoken {
-                request = request.header("x-captcha-rqtoken", rqtoken);
+                request = request.header("x-captcha-rqtoken", sensitive(rqtoken)?);
             }
             if let Some(session_id) = &captcha.session_id {
-                request = request.header("x-captcha-session-id", session_id);
+                request = request.header("x-captcha-session-id", sensitive(session_id)?);
             }
         }
         Ok(request)

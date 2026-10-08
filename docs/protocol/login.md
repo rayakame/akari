@@ -263,8 +263,8 @@ through `spawn_blocking`.
 - Error messages never quote response bodies; a failed parse of a body that may hold a
   token reports only `UnexpectedResponse`. Transport errors keep their source but strip
   its URL.
-- `Authorization` is marked sensitive, so reqwest leaves it out of its own `Debug`
-  output.
+- `Authorization` and the three `X-Captcha-*` headers are marked sensitive, so reqwest
+  leaves their values out of its own `Debug` output.
 - tungstenite logs every frame at `trace` level through the `log` crate, and the gateway's
   Identify frame contains the token. Hosts must not forward `log` records at `trace` level
   for `tungstenite`. akari-cli doesn't forward `log` records at all.
