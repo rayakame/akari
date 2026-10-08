@@ -18,6 +18,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
 wiremock.workspace = true
 
 [lints]

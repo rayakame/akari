@@ -25,7 +25,12 @@ tokio-util.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
 
+[features]
+# Lets Endpoints point at http:// and ws:// test servers. Only the test suites enable it.
+insecure-test-endpoints = []
+
 [dev-dependencies]
+akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 wiremock.workspace = true
 

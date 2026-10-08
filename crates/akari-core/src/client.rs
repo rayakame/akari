@@ -41,8 +41,9 @@ pub struct Endpoints {
     pub remote_auth: String,
     /// The `Origin` header the remote auth gateway requires.
     pub origin: String,
-    /// Allows `http://` and `ws://` endpoints. Only for local test servers: without it,
-    /// every endpoint must use TLS.
+    /// Allows `http://` and `ws://` endpoints for local test servers. Only exists with the
+    /// `insecure-test-endpoints` feature; otherwise every endpoint must use TLS.
+    #[cfg(any(test, feature = "insecure-test-endpoints"))]
     pub allow_plaintext: bool,
 }
 
@@ -53,6 +54,7 @@ impl Default for Endpoints {
             gateway: "wss://gateway.discord.gg/".to_owned(),
             remote_auth: "wss://remote-auth-gateway.discord.gg/?v=2".to_owned(),
             origin: "https://discord.com".to_owned(),
+            #[cfg(any(test, feature = "insecure-test-endpoints"))]
             allow_plaintext: false,
         }
     }
@@ -89,7 +91,7 @@ impl DiscordClient {
         if !api.ends_with('/') {
             api.push('/');
         }
-        let plaintext = endpoints.allow_plaintext;
+        let plaintext = allows_plaintext(&endpoints);
         let api = parse_endpoint(&api, "api", "https", plaintext.then_some("http"))?;
         parse_endpoint(
             &endpoints.gateway,
@@ -243,6 +245,16 @@ impl fmt::Debug for DiscordClient {
             .field("properties", &self.inner.properties)
             .finish_non_exhaustive()
     }
+}
+
+#[cfg(any(test, feature = "insecure-test-endpoints"))]
+fn allows_plaintext(endpoints: &Endpoints) -> bool {
+    endpoints.allow_plaintext
+}
+
+#[cfg(not(any(test, feature = "insecure-test-endpoints")))]
+fn allows_plaintext(_: &Endpoints) -> bool {
+    false
 }
 
 fn parse_endpoint(
