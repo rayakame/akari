@@ -717,3 +717,54 @@ async fn reconnecting_after_disconnect_still_waits_out_an_invalid_session() {
     fake.accept().await;
     assert!(sent.elapsed() >= wait, "{:?}", sent.elapsed());
 }
+
+fn slow_close() -> Timing {
+    Timing {
+        close_timeout: Duration::from_secs(60),
+        ..timing()
+    }
+}
+
+#[tokio::test]
+async fn sends_after_close_fail_during_the_close_handshake() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start_with(&fake, slow_close());
+    let _silent = connected(&mut fake, &gateway, 60_000).await;
+
+    gateway.close();
+    let result = timeout(
+        Duration::from_secs(10),
+        gateway.send(presence(PresenceStatus::Idle)),
+    )
+    .await;
+
+    assert_eq!(result, Ok(Err(SendError::Closed)));
+}
+
+#[tokio::test]
+async fn closing_during_a_reconnect_reports_no_reconnect() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start_with(&fake, slow_close());
+    let mut connection = connected(&mut fake, &gateway, 60_000).await;
+
+    connection.send(json!({"op": 7, "d": null})).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    gateway.close();
+
+    let events = timeout(Duration::from_secs(10), async {
+        let mut events = Vec::new();
+        while let Ok(event) = gateway.next().await {
+            events.push(event);
+        }
+        events
+    })
+    .await
+    .expect("close() didn't end the gateway");
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, ConnectionEvent::Reconnecting { .. })),
+        "{events:?}"
+    );
+    assert!(fake.quiet_for(Duration::from_millis(300)).await);
+}

@@ -255,6 +255,9 @@ impl Gateway {
     }
 
     pub(crate) async fn send_payload(&self, payload: String) -> Result<(), SendError> {
+        if *self.control.borrow() == Mode::Closed {
+            return Err(SendError::Closed);
+        }
         if payload.len() > MAX_PAYLOAD {
             return Err(SendError::TooLarge);
         }

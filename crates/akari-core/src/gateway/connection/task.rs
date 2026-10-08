@@ -86,6 +86,7 @@ impl Task {
                     self.send(Err(err));
                     break;
                 }
+                End::Reconnect { .. } if *self.mode.borrow() == Mode::Closed => break,
                 End::Reconnect {
                     resume,
                     reason,
@@ -425,9 +426,17 @@ impl Task {
             }
         });
         tokio::pin!(handshake);
+        // A close() that ends a resumable close cuts it short; one already closing finishes.
+        let watch_mode = *self.mode.borrow() != Mode::Closed;
         loop {
             tokio::select! {
+                biased;
                 _ = &mut handshake => return,
+                changed = self.mode.changed(), if watch_mode => {
+                    if changed.is_err() || *self.mode.borrow_and_update() == Mode::Closed {
+                        return;
+                    }
+                }
                 Some(outgoing) = self.outgoing.recv() => outgoing.refuse(SendError::NotConnected),
             }
         }
