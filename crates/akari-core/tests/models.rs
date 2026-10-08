@@ -2,10 +2,10 @@ use std::collections::{BTreeSet, HashSet};
 
 use akari_core::model::{
     Channel, ChannelMarker, ChannelType, CurrentUser, GenericMarker, Guild, GuildMarker,
-    GuildMember, Message, MessageNotificationLevel, MessageReferenceType, MessageType, NsfwLevel,
-    OverwriteType, PartialEmoji, PermissionOverwrite, Permissions, PremiumTier, PremiumType,
-    ReactionCountDetails, Role, RoleColors, RoleMarker, Snowflake, StickerFormatType, Timestamp,
-    User, UserMarker,
+    GuildMember, Message, MessageNotificationLevel, MessageReferenceType, MessageType, Nonce,
+    NsfwLevel, OverwriteType, PartialEmoji, PermissionOverwrite, Permissions, PremiumTier,
+    PremiumType, ReactionCountDetails, Role, RoleColors, RoleMarker, Snowflake, StickerFormatType,
+    Timestamp, User, UserMarker,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -535,4 +535,46 @@ fn broken_list_entries_drop_only_themselves() {
     );
     assert_eq!(message.sticker_items.len(), 1);
     assert_eq!(message.reactions.len(), 2);
+}
+
+#[test]
+fn nonces_parse_from_strings_and_integers() {
+    let with = |nonce: Value| {
+        let mut value: Value = parse(include_str!("fixtures/message.json"));
+        value["nonce"] = nonce;
+        parse::<Message>(&value.to_string()).nonce
+    };
+
+    assert_eq!(
+        with("1213141516171819200".into()),
+        Some(Nonce::Text("1213141516171819200".to_owned()))
+    );
+    assert_eq!(with(42.into()), Some(Nonce::Integer(42)));
+    assert_eq!(with(Value::Null), None);
+    assert_eq!(
+        parse::<Message>(include_str!("fixtures/message.json")).nonce,
+        None
+    );
+    assert_eq!(
+        Nonce::Text("1213141516171819200".to_owned()).as_u64(),
+        Some(1_213_141_516_171_819_200)
+    );
+    assert_eq!(Nonce::Integer(42).as_u64(), Some(42));
+    assert_eq!(Nonce::Text("not-a-snowflake".to_owned()).as_u64(), None);
+}
+
+#[test]
+fn a_page_of_messages_decodes() {
+    let page: Vec<Message> = parse(include_str!("fixtures/messages_page.json"));
+
+    assert_eq!(
+        page.iter()
+            .map(|message| message.id.get())
+            .collect::<Vec<_>>(),
+        [
+            400_000_000_000_000_012,
+            400_000_000_000_000_011,
+            400_000_000_000_000_010
+        ]
+    );
 }

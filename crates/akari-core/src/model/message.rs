@@ -53,6 +53,56 @@ pub struct Message {
     /// `None` if Discord didn't include the referenced message, `Some(None)` if it was deleted.
     #[serde(default, deserialize_with = "double_option")]
     pub referenced_message: Option<Option<Box<Message>>>,
+    /// The sender's deduplication value; Discord echoes it to the sender's sessions.
+    #[serde(default)]
+    pub nonce: Option<Nonce>,
+}
+
+/// A message nonce. Clients send a snowflake as a string; Discord also accepts integers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Nonce {
+    Integer(u64),
+    Text(String),
+}
+
+impl Nonce {
+    /// The nonce as a snowflake, if it is one.
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            Self::Integer(value) => Some(*value),
+            Self::Text(text) => text.parse().ok(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Nonce {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(NonceVisitor)
+    }
+}
+
+struct NonceVisitor;
+
+impl serde::de::Visitor<'_> for NonceVisitor {
+    type Value = Nonce;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("an integer or a string")
+    }
+
+    fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Nonce, E> {
+        Ok(Nonce::Integer(value))
+    }
+
+    fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Nonce, E> {
+        u64::try_from(value)
+            .map(Nonce::Integer)
+            .map_err(|_| E::invalid_value(serde::de::Unexpected::Signed(value), &self))
+    }
+
+    fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Nonce, E> {
+        Ok(Nonce::Text(value.to_owned()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

@@ -13,6 +13,13 @@ impl Timestamp {
     pub fn unix_millis(self) -> i64 {
         self.0.unix_timestamp() * 1000 + i64::from(self.0.millisecond())
     }
+
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) fn from_unix_millis(unix_millis: i64) -> Option<Self> {
+        OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix_millis) * 1_000_000)
+            .ok()
+            .map(Self)
+    }
 }
 
 impl<'de> Deserialize<'de> for Timestamp {
@@ -34,5 +41,17 @@ impl Visitor<'_> for TimestampVisitor {
         OffsetDateTime::parse(value, &Rfc3339)
             .map(Timestamp)
             .map_err(|_| E::invalid_value(de::Unexpected::Str(value), &self))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timestamps_round_trip_through_unix_millis() {
+        let timestamp = Timestamp::from_unix_millis(1_700_000_000_123).unwrap();
+
+        assert_eq!(timestamp.unix_millis(), 1_700_000_000_123);
     }
 }
