@@ -82,10 +82,12 @@ impl Finish {
 
 impl Drop for Finish {
     fn drop(&mut self) {
-        let error = self.ended.take().unwrap_or_else(|| {
-            self.gateway.close();
-            Some(Arc::new(GatewayError::Stopped))
-        });
+        // close() does nothing once the gateway has ended, so it runs on every path.
+        self.gateway.close();
+        let error = self
+            .ended
+            .take()
+            .unwrap_or_else(|| Some(Arc::new(GatewayError::Stopped)));
         self.store.set_connection(ConnectionState::Closed { error });
         self.store.finish();
     }

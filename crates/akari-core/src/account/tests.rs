@@ -462,3 +462,28 @@ async fn ready_is_converted_off_the_runtime() {
     assert!(converted.is_some());
     assert_ne!(converted, Some(std::thread::current().id()));
 }
+
+#[test]
+fn a_task_that_stops_itself_closes_the_gateway() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (account, mut finish) = runtime.block_on(async {
+        let account = Account::start(
+            crate::gateway::fake::client_for("ws://127.0.0.1:9/".to_owned()),
+            Token::new(TOKEN.to_owned()),
+            timing(),
+            DEFAULT_LIMITS,
+        )
+        .unwrap();
+        let finish = Finish::new(account.gateway.clone(), account.store().clone());
+        (account, finish)
+    });
+
+    finish.ended = Some(Some(Arc::new(GatewayError::Stopped)));
+    drop(finish);
+
+    assert!(stopped(&account.store().connection()));
+    assert!(account.connect().is_err());
+}
