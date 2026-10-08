@@ -93,17 +93,10 @@ impl Window {
     }
 }
 
-// Upserts by ID; returns whether the message is new.
-fn upsert(messages: &mut Vec<Arc<Message>>, message: Arc<Message>) -> bool {
+fn upsert(messages: &mut Vec<Arc<Message>>, message: Arc<Message>) {
     match Window::position(messages, message.id) {
-        Ok(index) => {
-            messages[index] = message;
-            false
-        }
-        Err(index) => {
-            messages.insert(index, message);
-            true
-        }
+        Ok(index) => messages[index] = message,
+        Err(index) => messages.insert(index, message),
     }
 }
 
@@ -191,15 +184,24 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&channel_id) else {
             return;
         };
-        if window.stale {
-            upsert(&mut window.held, message);
-            let excess = window.held.len().saturating_sub(limit);
-            window.held.drain(..excess);
-            return;
+        match Window::position(&window.messages, message.id) {
+            Ok(index) => {
+                if window.messages[index] != message {
+                    window.messages[index] = message.clone();
+                    events.push(StoreEvent::MessageUpdated(message));
+                }
+            }
+            Err(_) if window.stale => {
+                upsert(&mut window.held, message);
+                let excess = window.held.len().saturating_sub(limit);
+                window.held.drain(..excess);
+            }
+            Err(index) => {
+                window.messages.insert(index, message.clone());
+                events.push(StoreEvent::MessageInserted(message));
+                window.trim(channel_id, limit, End::Older, events);
+            }
         }
-        upsert(&mut window.messages, message.clone());
-        events.push(StoreEvent::MessageInserted(message));
-        window.trim(channel_id, limit, End::Older, events);
     }
 
     // Callers pass the batch sorted by ID. History loads will be the first caller outside

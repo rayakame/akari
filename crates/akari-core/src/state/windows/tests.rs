@@ -185,10 +185,12 @@ fn a_repeated_message_create_replaces_the_message() {
     again.content = "again".to_owned();
 
     let first = harness.live(wire(10));
-    let second = harness.live(again);
+    let changed = harness.live(again.clone());
+    let identical = harness.live(again);
 
     assert_eq!(first, ["Inserted(10)"]);
-    assert_eq!(second, ["Inserted(10)"]);
+    assert_eq!(changed, ["Updated(10)"]);
+    assert!(identical.is_empty(), "{identical:?}");
     assert_eq!(harness.ids(), [10]);
     assert_eq!(&*harness.window().messages[0].content, "again");
 }
@@ -407,4 +409,19 @@ fn equal_authors_share_one_allocation() {
     assert!(Arc::ptr_eq(&messages[0].author, &messages[1].author));
     assert!(!Arc::ptr_eq(&messages[1].author, &messages[2].author));
     assert!(Arc::ptr_eq(&messages[3].author, &recipient));
+}
+
+#[test]
+fn a_stale_window_updates_a_visible_message_instead_of_holding_it() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.live(wire(10));
+    harness.windows.mark_stale(&mut Vec::new());
+    let mut again = wire(10);
+    again.content = "again".to_owned();
+
+    let events = harness.live(again);
+
+    assert_eq!(events, ["Updated(10)"]);
+    assert_eq!(&*harness.window().messages[0].content, "again");
+    assert!(harness.windows.held(channel(CH)).is_empty());
 }

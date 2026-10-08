@@ -37,7 +37,8 @@ pub enum StoreEvent {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
     },
-    /// A message was added to a viewed channel's window.
+    /// A message was added to a viewed channel's window. Discord repeating a loaded message
+    /// is a `MessageUpdated` if it changed, and no event otherwise.
     MessageInserted(Arc<Message>),
     /// A loaded message was edited, or Discord added embeds to it.
     MessageUpdated(Arc<Message>),
