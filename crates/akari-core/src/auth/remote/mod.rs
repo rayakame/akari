@@ -474,7 +474,7 @@ impl Task {
                         },
                     };
                     solution = Some(CaptchaSolution {
-                        key,
+                        key: Secret::new(key),
                         rqtoken: challenge.rqtoken,
                         session_id: challenge.session_id,
                     });

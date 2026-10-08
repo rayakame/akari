@@ -302,7 +302,7 @@ async fn captcha_solutions_go_in_headers() {
         .mount(&server)
         .await;
     let solution = CaptchaSolution {
-        key: "solution".to_owned(),
+        key: crate::Secret::new("solution".to_owned()),
         rqtoken: Some("rq".to_owned()),
         session_id: Some("sid".to_owned()),
     };
@@ -419,4 +419,31 @@ async fn https_only_clients_refuse_plain_http() {
 
     assert!(matches!(err, RestError::Transport(_)), "{err:?}");
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[test]
+fn request_extras_never_show_their_values() {
+    let token = Token::new("token-secret".to_owned());
+    let solution = CaptchaSolution {
+        key: crate::Secret::new("captcha-secret".to_owned()),
+        rqtoken: Some("rqtoken-secret".to_owned()),
+        session_id: Some("session-secret".to_owned()),
+    };
+    let extras = RequestExtras {
+        authorization: Some(&token),
+        fingerprint: Some("fingerprint-secret"),
+        captcha: Some(&solution),
+    };
+
+    let output = format!("{extras:?} {solution:?}");
+
+    for secret in [
+        "token-secret",
+        "captcha-secret",
+        "rqtoken-secret",
+        "session-secret",
+        "fingerprint-secret",
+    ] {
+        assert!(!output.contains(secret), "{output}");
+    }
 }

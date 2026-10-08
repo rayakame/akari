@@ -178,7 +178,7 @@ impl PasswordLogin {
         match std::mem::take(&mut flow.step) {
             Step::Captcha { retry, challenge } => {
                 let solution = CaptchaSolution {
-                    key: solution,
+                    key: Secret::new(solution),
                     rqtoken: challenge.rqtoken,
                     session_id: challenge.session_id,
                 };

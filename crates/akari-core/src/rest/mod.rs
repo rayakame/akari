@@ -9,9 +9,11 @@ use serde::de::DeserializeOwned;
 pub(crate) use error::FieldError;
 pub(crate) use error::{ApiError, RestError};
 
-use crate::Token;
+use std::fmt;
+
 use crate::error::TransportError;
 use crate::properties::ClientProperties;
+use crate::{Secret, Token};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RestClient {
@@ -19,18 +21,34 @@ pub(crate) struct RestClient {
     base: Url,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct RequestExtras<'a> {
     pub(crate) authorization: Option<&'a Token>,
     pub(crate) fingerprint: Option<&'a str>,
     pub(crate) captcha: Option<&'a CaptchaSolution>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct CaptchaSolution {
-    pub(crate) key: String,
+    pub(crate) key: Secret,
     pub(crate) rqtoken: Option<String>,
     pub(crate) session_id: Option<String>,
+}
+
+impl fmt::Debug for RequestExtras<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RequestExtras")
+            .field("authorization", &self.authorization.is_some())
+            .field("fingerprint", &self.fingerprint.is_some())
+            .field("captcha", &self.captcha.is_some())
+            .finish()
+    }
+}
+
+impl fmt::Debug for CaptchaSolution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CaptchaSolution(<redacted>)")
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -132,7 +150,7 @@ impl RestClient {
             request = request.header("x-fingerprint", fingerprint);
         }
         if let Some(captcha) = extras.captcha {
-            request = request.header("x-captcha-key", &captcha.key);
+            request = request.header("x-captcha-key", captcha.key.expose());
             if let Some(rqtoken) = &captcha.rqtoken {
                 request = request.header("x-captcha-rqtoken", rqtoken);
             }
