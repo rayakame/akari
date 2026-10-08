@@ -4,8 +4,11 @@ What Akari reads from the READY dispatch and which shape it expects. Sources:
 [Ready](https://docs.discord.food/gateway/gateway-events#ready) and
 [gateway capabilities](https://docs.discord.food/gateway/using-gateway#gateway-capabilities).
 
-Everything here is **unverified** against real traffic. The reference has no READY
-example, so `crates/akari-core/tests/fixtures/ready.json` is assembled from its tables.
+The reference has no READY example, so `crates/akari-core/tests/fixtures/ready.json` is
+assembled from its tables. On 2026-10-08 a real READY, received with the capabilities
+below, decoded completely ([Checking a real READY](#checking-a-real-ready) passed): no guild,
+channel, thread, member, user or private channel was skipped. The open points below are
+still **unverified** unless they say otherwise.
 
 ## Capabilities
 

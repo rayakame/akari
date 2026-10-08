@@ -89,9 +89,9 @@ What Akari does with it (`gateway::decompress`):
 - The output buffer grows for large messages such as READY and shrinks back to 256 KiB
   afterwards.
 - Corrupt data drops the connection; the resume starts over with a fresh context.
-- Text frames are decoded as plain JSON, so the connection still works if Discord ignores
-  the compression request for user accounts. Which of the two Discord sends is
-  **unverified**.
+- Discord honors `compress=zstd-stream` for user accounts: checked on 2026-10-08 with
+  `akari-cli connect`, which received READY as zstd-compressed binary frames. Text frames
+  are still decoded as plain JSON, in case that ever changes.
 
 The alternative, which Akari doesn't use, is
 [zlib-stream](https://docs.discord.food/gateway/using-gateway#zlib-stream-compression): one
@@ -246,8 +246,16 @@ What Akari does when Discord closes the connection, per the
 for Identify. `akari-cli connect --status <status>` sends it after every READY, because a
 new session starts with `unknown` again.
 
-Whether an account appears online to others after Identify with `unknown` alone, without a
-presence update, is **unverified**.
+Observed on 2026-10-08 with `akari-cli connect --keep-open`, watched from a second account:
+
+- With no other session (the phone app force-quit, the account shown as offline), Identify
+  with `unknown` alone made the account appear online. A presence update isn't needed to
+  show up.
+- `--status dnd` (op 3 with only the status) showed the account as do not disturb.
+- While another session was active (the phone session from scanning the QR code), the
+  account showed as online with the mobile indicator the whole time, and `--status dnd`
+  had no visible effect: another session's status can override Akari's. See the open
+  point under [Not implemented yet](#not-implemented-yet).
 
 ## Keeping the token out of logs
 
@@ -269,6 +277,14 @@ presence update, is **unverified**.
 - READY_SUPPLEMENTAL, op 14 guild subscriptions, voice states, presence activities.
 - `GET /gateway` with a cached URL, and persisting a session across launches for a fast
   resume after a cold start.
+- Status across several sessions. When a user has several sessions with a presence,
+  Discord broadcasts an overall one, shown as the session with `session_id` `all`
+  ([Session Object](https://docs.discord.food/resources/presence#session-object)); how it
+  picks that status isn't documented. The official client also stores the chosen status
+  in the user settings proto (`status.status`, "used to sync presence across clients",
+  [Status Settings](https://docs.discord.food/resources/user-settings-proto#status-settings-structure)).
+  A later milestone has to find out how Discord combines the sessions' statuses and set
+  the status through the settings as well, so another device doesn't override Akari's.
 - A pause/resume API for suspend and wake. Open point: on suspend it has to
   `disconnect()` and on wake `connect()`, because the gateway's own timers don't notice a
   sleep (see [Heartbeat](#heartbeat)).

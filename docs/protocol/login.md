@@ -10,7 +10,8 @@ Sources: [Authentication](https://docs.discord.food/authentication),
 [JSON error codes](https://docs.discord.food/api/codes) and
 [Remote Authentication](https://docs.discord.food/remote-authentication/overview).
 
-Everything here is **unverified** against real traffic unless it says otherwise.
+Everything here is **unverified** against real traffic unless it says otherwise. The QR code
+login worked end to end against Discord on 2026-10-08 (`akari-cli login --qr`).
 
 ## Requests
 
