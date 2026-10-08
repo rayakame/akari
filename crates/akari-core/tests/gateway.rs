@@ -10,7 +10,7 @@ use serde_json::Value;
 
 #[track_caller]
 fn decode_ok(json: &str) -> GatewayEvent {
-    decode(json.as_bytes()).unwrap_or_else(|err| panic!("failed to decode: {err}"))
+    decode(json.as_bytes()).unwrap_or_else(|err| panic!("failed to decode: {}", chain(&err)))
 }
 
 #[track_caller]
@@ -939,4 +939,29 @@ fn unknown_dispatches_stay_other() {
         dispatch("TYPING_START", r#"{"channel_id": "300000000000000002"}"#),
         DispatchEvent::Other("TYPING_START".to_owned())
     );
+}
+
+fn chain(err: &dyn std::error::Error) -> String {
+    let mut text = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
+#[test]
+fn decode_errors_never_quote_the_payload() {
+    let mut ready: Value = serde_json::from_str(include_str!("fixtures/ready.json")).unwrap();
+    ready["d"]["user"]["id"] = "leak-me".into();
+    let dispatch = decode(ready.to_string().as_bytes()).unwrap_err();
+    let envelope = decode(br#"{"op": "leak-me"}"#).unwrap_err();
+
+    for err in [dispatch, envelope] {
+        let shown = format!("{err:?} {}", chain(&err));
+        assert!(!shown.contains("leak-me"), "{shown}");
+        assert!(shown.contains("line 1"), "{shown}");
+    }
 }

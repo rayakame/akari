@@ -137,9 +137,9 @@ AKARI_READY_FIXTURE="$PWD/captures/ready-<unix time>.json" \
 
 It fails if a guild that the payload doesn't mark unavailable decodes as unavailable, if
 `merged_members` doesn't have one entry per guild, or if any user, private channel, member,
-guild channel or thread is skipped. Its own messages name only guild IDs, but when a strict
-part of READY fails, the panic shows serde's error, which can quote a value from the
-payload. Check the output before sharing it.
+guild channel or thread is skipped. Its own messages name only guild IDs, and when a strict
+part of READY fails, the panic shows only where: the error's category, line and column
+(`DecodeError` keeps no serde message, so no value from the payload).
 
 A captured READY contains secrets (`analytics_token`, `auth_session_id_hash`) and personal
 data. `captures/` is git-ignored; still never commit or share a capture, and delete it when

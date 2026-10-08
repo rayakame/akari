@@ -220,8 +220,6 @@ fn failure_message(err: &GatewayError) -> String {
         GatewayError::AuthenticationFailed => {
             format!("Discord rejected the stored token (4004). {LOG_IN} to log in again.")
         }
-        // Its source is serde's message, which can quote values from READY.
-        GatewayError::InvalidReady(_) => format!("The gateway connection failed: {err}"),
         err => format!("The gateway connection failed: {}", report(err)),
     }
 }
@@ -347,6 +345,7 @@ mod tests {
 
         assert!(!message.contains("secret-value"), "{message}");
         assert!(message.contains("READY couldn't be decoded"), "{message}");
+        assert!(message.contains("line 1"), "{message}");
     }
 
     #[test]

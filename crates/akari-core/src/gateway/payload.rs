@@ -10,6 +10,7 @@ use super::guild::GatewayGuild;
 use super::hello::Hello;
 use super::partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
 use super::ready::Ready;
+use crate::JsonError;
 use crate::model::{Channel, Message};
 
 /// A message received from the gateway.
@@ -62,10 +63,10 @@ pub enum DispatchEvent {
     Other(String),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
-    #[error("invalid gateway payload: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("invalid gateway payload")]
+    Json(#[source] JsonError),
     #[error("op {op} payload is missing `{field}`")]
     MissingField { op: u16, field: &'static str },
     /// A dispatch whose data didn't decode. `seq` still counts as received.
@@ -74,8 +75,14 @@ pub enum DecodeError {
         seq: u64,
         event: String,
         #[source]
-        source: serde_json::Error,
+        source: JsonError,
     },
+}
+
+impl From<serde_json::Error> for DecodeError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Json(err.into())
+    }
 }
 
 impl DecodeError {
@@ -155,7 +162,7 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
     event.map_err(|source| DecodeError::Dispatch {
         seq,
         event: name,
-        source,
+        source: source.into(),
     })
 }
 

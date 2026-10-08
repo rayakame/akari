@@ -1,9 +1,9 @@
 use std::any::type_name;
-use std::fmt;
 
 use serde::de::{Deserialize, DeserializeOwned, Deserializer};
 use serde_json::value::RawValue;
 
+use crate::JsonError;
 use crate::model::{GenericMarker, Snowflake};
 
 pub(crate) fn skip_invalid<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -47,7 +47,7 @@ fn parse_valid<T: DeserializeOwned>(entries: Vec<&RawValue>) -> Vec<T> {
             Err(err) => {
                 tracing::warn!(
                     id = ?entry_id(entry),
-                    error = %JsonErrorSummary(&err),
+                    error = %JsonError::from(&err),
                     "skipping a {} that failed to parse",
                     type_name::<T>()
                 );
@@ -69,26 +69,6 @@ fn entry_id(entry: &RawValue) -> Option<u64> {
     ids.id.or(ids.user_id).map(Snowflake::get)
 }
 
-// serde's own message can quote the payload.
-pub(crate) struct JsonErrorSummary<'a>(pub(crate) &'a serde_json::Error);
-
-impl fmt::Display for JsonErrorSummary<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let kind = match self.0.classify() {
-            serde_json::error::Category::Io => "I/O",
-            serde_json::error::Category::Syntax => "syntax",
-            serde_json::error::Category::Data => "data",
-            serde_json::error::Category::Eof => "unexpected end",
-        };
-        write!(
-            f,
-            "{kind} error at line {}, column {}",
-            self.0.line(),
-            self.0.column()
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,7 +81,7 @@ mod tests {
         )
         .unwrap_err();
 
-        let summary = JsonErrorSummary(&err).to_string();
+        let summary = JsonError::from(&err).to_string();
 
         assert!(err.to_string().contains("secret-name"), "{err}");
         assert!(summary.contains("line 1"), "{summary}");

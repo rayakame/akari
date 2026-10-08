@@ -336,3 +336,39 @@ fn a_disconnect_during_ready_leaves_the_account_offline() {
         store.connection()
     );
 }
+
+#[tokio::test]
+async fn an_undecodable_ready_closes_without_quoting_it() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+
+    connection
+        .send(ready_payload(1, &fake, |ready| {
+            ready["user"]["id"] = "leak-me".into()
+        }))
+        .await;
+    let mut closed = None;
+    while let Some(event) = timeout(WAIT, subscription.next()).await.unwrap() {
+        if let StoreEvent::Connection(ConnectionState::Closed { .. }) = &event {
+            closed = Some(event);
+        }
+    }
+
+    let closed = closed.expect("the account never closed");
+    let ConnectionState::Closed { error: Some(error) } = account.store().connection() else {
+        panic!("expected a fatal error");
+    };
+    assert!(matches!(*error, GatewayError::InvalidReady(_)));
+    let mut shown = format!("{closed:?} {account:?} {error:?} {error}");
+    let mut source = std::error::Error::source(&*error);
+    while let Some(cause) = source {
+        shown.push_str(&format!(" {cause} {cause:?}"));
+        source = cause.source();
+    }
+    assert!(!shown.contains("leak-me"), "{shown}");
+    assert!(shown.contains("line 1"), "{shown}");
+}
