@@ -11,10 +11,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use tokio::sync::{Mutex, mpsc, watch};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
 use self::backlog::Backlog;
 use self::task::Task;
+use super::outgoing::{GatewayCommand, MAX_PAYLOAD};
 use super::payload::{DecodeError, DispatchEvent};
 use super::session::{Retry, Session, Timing};
 use crate::error::TransportError;
@@ -26,6 +27,20 @@ pub struct Gateway {
     control: watch::Sender<Mode>,
     events: Mutex<mpsc::UnboundedReceiver<Result<ConnectionEvent, GatewayError>>>,
     buffered: Arc<AtomicUsize>,
+    outgoing: mpsc::Sender<Outgoing>,
+}
+
+const COMMAND_QUEUE: usize = 16;
+
+pub(crate) struct Outgoing {
+    pub(crate) payload: String,
+    pub(crate) sent: oneshot::Sender<Result<(), SendError>>,
+}
+
+impl Outgoing {
+    pub(crate) fn refuse(self, err: SendError) {
+        let _ = self.sent.send(Err(err));
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +129,7 @@ impl Gateway {
         let (control, mode) = watch::channel(Mode::Idle);
         let (events, receiver) = mpsc::unbounded_channel();
         let buffered = Arc::new(AtomicUsize::new(0));
+        let (outgoing, commands) = mpsc::channel(COMMAND_QUEUE);
         let task = Task {
             client,
             token,
@@ -122,6 +138,7 @@ impl Gateway {
             events,
             buffered: buffered.clone(),
             backlog: Backlog::default(),
+            outgoing: commands,
             session: Session::default(),
             retry: Retry::default(),
         };
@@ -130,6 +147,7 @@ impl Gateway {
             control,
             events: Mutex::new(receiver),
             buffered,
+            outgoing,
         })
     }
 
@@ -187,6 +205,24 @@ impl Gateway {
             }
             None => Err(GatewayError::Closed),
         }
+    }
+
+    /// Writes `command` to the current connection within the rate limit and resolves once
+    /// it is written.
+    pub async fn send(&self, command: GatewayCommand) -> Result<(), SendError> {
+        self.send_payload(command.to_payload()).await
+    }
+
+    pub(crate) async fn send_payload(&self, payload: String) -> Result<(), SendError> {
+        if payload.len() > MAX_PAYLOAD {
+            return Err(SendError::TooLarge);
+        }
+        let (sent, result) = oneshot::channel();
+        self.outgoing
+            .send(Outgoing { payload, sent })
+            .await
+            .map_err(|_| SendError::Closed)?;
+        result.await.unwrap_or(Err(SendError::Closed))
     }
 }
 

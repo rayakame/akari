@@ -186,7 +186,6 @@ impl Connection {
         self.ready_since.get_or_insert(now);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn is_ready(&self) -> bool {
         self.ready_since.is_some()
     }

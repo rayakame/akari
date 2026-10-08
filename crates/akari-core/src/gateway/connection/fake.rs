@@ -80,6 +80,7 @@ pub(super) struct FakeConnection {
     pub(super) ack: bool,
     pub(super) heartbeats: Vec<(Instant, Value)>,
     pub(super) received: Vec<Instant>,
+    pub(super) payload_times: Vec<Instant>,
     pub(super) close_code: Option<Option<u16>>,
 }
 
@@ -96,6 +97,7 @@ impl FakeConnection {
             ack: true,
             heartbeats: Vec::new(),
             received: Vec::new(),
+            payload_times: Vec::new(),
             close_code: None,
         }
     }
@@ -134,6 +136,7 @@ impl FakeConnection {
                         }
                         continue;
                     }
+                    self.payload_times.push(Instant::now());
                     return Some(payload);
                 }
                 Some(Ok(Message::Close(frame))) => {

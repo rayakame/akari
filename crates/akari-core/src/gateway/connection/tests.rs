@@ -7,6 +7,7 @@ use tokio::time::timeout;
 
 use super::fake::{FakeConnection, FakeGateway, WAIT};
 use super::*;
+use crate::gateway::{GatewayCommand, PresenceStatus};
 use crate::model::{Snowflake, UserMarker};
 use crate::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
 use crate::{Endpoints, TokenStore, TokenStoreError};
@@ -425,4 +426,158 @@ async fn an_unacknowledged_heartbeat_reconnects_and_resumes() {
             ..
         }
     ));
+}
+
+fn start_with(fake: &FakeGateway, timing: Timing) -> Gateway {
+    let gateway = Gateway::start(client(fake), Token::new(TOKEN.to_owned()), timing).unwrap();
+    gateway.connect().unwrap();
+    gateway
+}
+
+fn presence(status: PresenceStatus) -> GatewayCommand {
+    GatewayCommand::UpdatePresence { status }
+}
+
+#[tokio::test]
+async fn commands_fail_fast_without_a_session() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = Gateway::start(client(&fake), Token::new(TOKEN.to_owned()), timing()).unwrap();
+    let quick = Duration::from_secs(1);
+    let online = || gateway.send(presence(PresenceStatus::Online));
+
+    assert_eq!(
+        timeout(quick, online()).await.unwrap(),
+        Err(SendError::NotConnected)
+    );
+    gateway.connect().unwrap();
+    let mut connection = fake.accept().await;
+    assert_eq!(
+        timeout(quick, online()).await.unwrap(),
+        Err(SendError::NotConnected)
+    );
+    connection.handshake(60_000).await;
+    connection.ready(1, SESSION, &fake.resume_url()).await;
+    next(&gateway).await;
+    gateway.disconnect();
+    assert_eq!(connection.client_close_code().await, Some(4000));
+    assert_eq!(
+        timeout(quick, online()).await.unwrap(),
+        Err(SendError::NotConnected)
+    );
+}
+
+#[tokio::test]
+async fn a_presence_update_reaches_discord() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = connected(&mut fake, &gateway, 60_000).await;
+
+    gateway
+        .send(presence(PresenceStatus::DoNotDisturb))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        connection.recv().await,
+        Some(json!({"op": 3, "d": {"since": 0, "activities": [], "status": "dnd", "afk": false}}))
+    );
+}
+
+#[tokio::test]
+async fn commands_are_written_in_order() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = connected(&mut fake, &gateway, 60_000).await;
+
+    for n in 0..3 {
+        gateway
+            .send_payload(json!({"op": 99, "d": n}).to_string())
+            .await
+            .unwrap();
+    }
+
+    for n in 0..3 {
+        assert_eq!(connection.recv().await, Some(json!({"op": 99, "d": n})));
+    }
+}
+
+#[tokio::test]
+async fn oversized_commands_are_refused() {
+    let fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+
+    let result = gateway.send_payload("x".repeat(15 * 1024 + 1)).await;
+
+    assert_eq!(result, Err(SendError::TooLarge));
+}
+
+#[tokio::test]
+async fn sends_after_close_fail() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = connected(&mut fake, &gateway, 60_000).await;
+    gateway.close();
+    connection.client_close_code().await;
+    next_error(&gateway).await;
+
+    assert_eq!(
+        gateway.send(presence(PresenceStatus::Idle)).await,
+        Err(SendError::Closed)
+    );
+}
+
+#[tokio::test]
+async fn the_rate_limit_leaves_room_for_heartbeats() {
+    let mut fake = FakeGateway::start().await;
+    let window = Duration::from_secs(3);
+    let gateway = Arc::new(start_with(
+        &fake,
+        Timing {
+            rate_window: window,
+            ..timing()
+        },
+    ));
+    let mut connection = connected(&mut fake, &gateway, 500).await;
+    let sender = gateway.clone();
+    let sends = tokio::spawn(async move {
+        for n in 0..130 {
+            sender
+                .send_payload(json!({"op": 99, "d": n}).to_string())
+                .await
+                .unwrap();
+        }
+    });
+
+    let commands = connection
+        .pump_until(Duration::from_secs(30), |_, payloads| payloads.len() == 130)
+        .await;
+    sends.await.unwrap();
+
+    assert_eq!(connection.close_code, None);
+    let numbers: Vec<_> = commands
+        .iter()
+        .map(|command| command["d"].clone())
+        .collect();
+    assert_eq!(numbers, (0..130).map(|n| json!(n)).collect::<Vec<_>>());
+    let received = &connection.received;
+    for (index, start) in received.iter().enumerate() {
+        let in_window = received[index..]
+            .iter()
+            .take_while(|at| **at < *start + window)
+            .count();
+        assert!(in_window <= 120, "{in_window} messages within one window");
+    }
+    let times = &connection.payload_times;
+    let (held_from, held_until) = times
+        .windows(2)
+        .map(|pair| (pair[0], pair[1]))
+        .max_by_key(|(from, until)| *until - *from)
+        .unwrap();
+    assert!(
+        connection
+            .heartbeats
+            .iter()
+            .any(|(at, _)| (held_from..held_until).contains(at)),
+        "no heartbeat while commands were held back"
+    );
 }

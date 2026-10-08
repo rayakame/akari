@@ -26,7 +26,6 @@ pub enum PresenceStatus {
 }
 
 impl GatewayCommand {
-    #[allow(dead_code)]
     pub(crate) fn to_payload(&self) -> String {
         match *self {
             Self::UpdatePresence { status } => json(3, Presence::new(status)),
@@ -50,6 +49,9 @@ pub(crate) const CAPABILITIES: u64 = LAZY_USER_NOTES
     | PRIORITIZED_READY_PAYLOAD
     | USER_SETTINGS_PROTO
     | CLIENT_STATE_V2;
+
+// Discord closes the connection with 4002 for anything larger.
+pub(crate) const MAX_PAYLOAD: usize = 15 * 1024;
 
 #[derive(Serialize)]
 struct Payload<D> {

@@ -36,7 +36,6 @@ impl CommandLimiter {
         self.reserved = beats.saturating_add(EXTRA).min(LIMIT);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn allows_command(&mut self, now: Instant) -> bool {
         self.expire(now);
         self.sent.len() + self.reserved < LIMIT
@@ -48,7 +47,6 @@ impl CommandLimiter {
         self.sent.push_back(now);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn next_free(&self) -> Instant {
         self.sent
             .front()

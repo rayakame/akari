@@ -10,7 +10,7 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{self, Message};
 
 use super::backlog::Backlog;
-use super::{ConnectionEvent, DisconnectReason, GatewayError, Mode};
+use super::{ConnectionEvent, DisconnectReason, GatewayError, Mode, Outgoing, SendError};
 use crate::error::{TransportError, TransportErrorKind};
 use crate::gateway::decompress::{DecompressError, ZstdStream};
 use crate::gateway::outgoing;
@@ -36,6 +36,7 @@ pub(super) struct Task {
     pub(super) events: mpsc::UnboundedSender<Result<ConnectionEvent, GatewayError>>,
     pub(super) buffered: Arc<AtomicUsize>,
     pub(super) backlog: Backlog,
+    pub(super) outgoing: mpsc::Receiver<Outgoing>,
     pub(super) session: Session,
     pub(super) retry: Retry,
 }
@@ -127,6 +128,7 @@ impl Task {
                     }
                 }
                 () = sleep, if until.is_some() => {}
+                Some(outgoing) = self.outgoing.recv() => outgoing.refuse(SendError::NotConnected),
             }
         }
     }
@@ -165,6 +167,7 @@ impl Task {
                             Mode::Closed => return End::Closed,
                         }
                     }
+                    Some(outgoing) = self.outgoing.recv() => outgoing.refuse(SendError::NotConnected),
                 }
             }
         };
@@ -181,6 +184,10 @@ impl Task {
         link: &mut Connection,
     ) -> Exit {
         loop {
+            let now = Instant::now();
+            let ready = link.is_ready();
+            let budget = ready && link.limiter.allows_command(now);
+            let refill = (ready && !budget).then(|| link.limiter.next_free());
             tokio::select! {
                 biased;
                 changed = self.mode.changed() => {
@@ -215,6 +222,19 @@ impl Task {
                         return exit;
                     }
                 }
+                Some(outgoing) = self.outgoing.recv(), if !ready || budget => {
+                    if !ready {
+                        outgoing.refuse(SendError::NotConnected);
+                        continue;
+                    }
+                    let Outgoing { payload, sent } = outgoing;
+                    if let Err(exit) = self.write(socket, link, payload).await {
+                        let _ = sent.send(Err(SendError::NotConnected));
+                        return exit;
+                    }
+                    let _ = sent.send(Ok(()));
+                }
+                () = sleep_until(refill.unwrap_or(now)), if refill.is_some() => {}
             }
         }
     }
