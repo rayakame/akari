@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use super::events::StoreEvent;
 use super::permissions::compute;
-use super::types::{Channel, CurrentUser, Guild, Member, Role, User};
+use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
+use super::windows::{DEFAULT_LIMITS, MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
-use crate::model::{self, ChannelId, GuildId, Permissions, UserId};
+use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
 
 /// Everything a READY replaces.
 #[derive(Default)]
@@ -165,22 +166,36 @@ fn push_channel_changes(
     }
 }
 
-#[derive(Default)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct State {
     entities: Entities,
     ready: bool,
+    windows: Windows,
 }
 
 impl State {
     pub(crate) fn new() -> Self {
-        Self::default()
+        Self::with_limits(DEFAULT_LIMITS)
+    }
+
+    pub(crate) fn with_limits(limits: WindowLimits) -> Self {
+        Self {
+            entities: Entities::default(),
+            ready: false,
+            windows: Windows::new(limits),
+        }
     }
 
     /// Swaps in the state of a new session and pushes what changed.
     pub(crate) fn replace(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         if self.ready {
             self.diff(&next, events);
+            for channel in self.entities.channels.keys() {
+                if !next.channels.contains_key(channel) {
+                    self.windows.drop_channel(*channel);
+                }
+            }
+            self.windows.mark_stale(events);
         }
         self.entities = next;
         self.ready = true;
@@ -269,12 +284,17 @@ impl State {
                 self.channel_delete(delete, events);
             }
             E::UserUpdate(update) => self.user_update(*update, events),
-            E::MessageCreate(_)
-            | E::MessageUpdate(_)
-            | E::MessageDelete(_)
-            | E::MessageDeleteBulk(_)
-            | E::Resumed
-            | E::Other(_) => {}
+            E::MessageCreate(message) => {
+                self.windows.live(*message, &self.entities.users, events);
+            }
+            E::MessageUpdate(update) => self.windows.update(*update, &self.entities.users, events),
+            E::MessageDelete(delete) => self.windows.delete(delete.channel_id, delete.id, events),
+            E::MessageDeleteBulk(delete) => {
+                for id in delete.ids {
+                    self.windows.delete(delete.channel_id, id, events);
+                }
+            }
+            E::Resumed | E::Other(_) => {}
         }
     }
 
@@ -348,6 +368,7 @@ impl State {
             );
             return;
         };
+        self.windows.drop_channel(removed.id);
         events.push(StoreEvent::ChannelRemoved {
             channel_id: removed.id,
             guild_id: removed.guild_id,
@@ -361,6 +382,7 @@ impl State {
             .collect();
         for thread in threads {
             self.entities.channels.remove(&thread);
+            self.windows.drop_channel(thread);
             events.push(StoreEvent::ChannelRemoved {
                 channel_id: thread,
                 guild_id: removed.guild_id,
@@ -445,9 +467,14 @@ impl State {
     fn remove_guild_data(&mut self, id: GuildId) {
         self.entities.guilds.remove(&id);
         self.entities.members.remove(&id);
-        self.entities
-            .channels
-            .retain(|_, channel| channel.guild_id != Some(id));
+        let windows = &mut self.windows;
+        self.entities.channels.retain(|channel_id, channel| {
+            let keep = channel.guild_id != Some(id);
+            if !keep {
+                windows.drop_channel(*channel_id);
+            }
+            keep
+        });
     }
 
     fn put_role(&mut self, event: GuildRoleEvent, events: &mut Vec<StoreEvent>) {
@@ -536,6 +563,18 @@ impl State {
             self.entities.current_user = Some(next.clone());
             events.push(StoreEvent::CurrentUserUpdated(next));
         }
+    }
+
+    pub(crate) fn view_channel(&mut self, channel: ChannelId, events: &mut Vec<StoreEvent>) {
+        self.windows.view(channel, events);
+    }
+
+    pub(crate) fn messages(&self, channel: ChannelId) -> Option<MessageWindow> {
+        self.windows.snapshot(channel)
+    }
+
+    pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+        self.windows.message(channel, id)
     }
 
     pub(crate) fn current_user(&self) -> Option<Arc<CurrentUser>> {

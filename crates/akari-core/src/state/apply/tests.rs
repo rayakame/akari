@@ -65,6 +65,11 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::ChannelRemoved { channel_id, .. } => {
             format!("ChannelRemoved({})", channel_id.get())
         }
+        StoreEvent::MessageInserted(message) => format!("MessageInserted({})", message.id.get()),
+        StoreEvent::MessageDeleted { message_id, .. } => {
+            format!("MessageDeleted({})", message_id.get())
+        }
+        StoreEvent::MessagesStale { channel_id } => format!("MessagesStale({})", channel_id.get()),
         other => format!("{other:?}"),
     }
 }
@@ -612,4 +617,137 @@ fn a_later_ready_implies_the_channels_of_guilds_that_go_away() {
         down,
         [format!("GuildUnavailable({G1})"), "Ready".to_owned()]
     );
+}
+
+fn message(id: u64, channel: u64) -> Value {
+    let mut message = fixture(include_str!("../../../tests/fixtures/message_create.json"));
+    message["id"] = id.to_string().into();
+    message["channel_id"] = channel.to_string().into();
+    message
+}
+
+fn viewing_general() -> State {
+    let mut state = ready_state();
+    state.view_channel(Snowflake::new(GENERAL), &mut Vec::new());
+    state
+}
+
+fn message_ids(state: &State, channel: u64) -> Option<Vec<u64>> {
+    let window = state.messages(Snowflake::new(channel))?;
+    Some(
+        window
+            .messages
+            .iter()
+            .map(|message| message.id.get())
+            .collect(),
+    )
+}
+
+#[test]
+fn message_create_reaches_only_viewed_channels() {
+    let mut state = viewing_general();
+
+    let viewed = apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    let other = apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(11, 300_000_000_000_000_003),
+    );
+
+    assert_eq!(viewed, ["MessageInserted(10)"]);
+    assert!(other.is_empty(), "{other:?}");
+    assert_eq!(message_ids(&state, GENERAL), Some(vec![10]));
+    assert!(
+        state
+            .message(Snowflake::new(GENERAL), Snowflake::new(10))
+            .is_some()
+    );
+}
+
+#[test]
+fn bulk_delete_removes_only_stored_messages() {
+    let mut state = viewing_general();
+    for id in 10..13 {
+        apply(&mut state, "MESSAGE_CREATE", message(id, GENERAL));
+    }
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_DELETE_BULK",
+        json!({"ids": ["10", "11", "99"], "channel_id": GENERAL.to_string()}),
+    );
+
+    assert_eq!(events, ["MessageDeleted(10)", "MessageDeleted(11)"]);
+    assert_eq!(message_ids(&state, GENERAL), Some(vec![12]));
+}
+
+#[test]
+fn removing_a_channel_or_guild_drops_its_window() {
+    let mut channel_gone = viewing_general();
+    apply(&mut channel_gone, "MESSAGE_CREATE", message(10, GENERAL));
+    let mut guild_gone = viewing_general();
+    apply(&mut guild_gone, "MESSAGE_CREATE", message(10, GENERAL));
+
+    let deleted = apply(
+        &mut channel_gone,
+        "CHANNEL_DELETE",
+        json!({"id": GENERAL.to_string(), "guild_id": G1.to_string(), "type": 0}),
+    );
+    let left = apply(
+        &mut guild_gone,
+        "GUILD_DELETE",
+        json!({"id": G1.to_string()}),
+    );
+
+    assert_eq!(
+        deleted,
+        [
+            format!("ChannelRemoved({GENERAL})"),
+            format!("ChannelRemoved({THREAD})")
+        ]
+    );
+    assert_eq!(left, [format!("GuildRemoved({G1})")]);
+    assert_eq!(message_ids(&channel_gone, GENERAL), None);
+    assert_eq!(message_ids(&guild_gone, GENERAL), None);
+}
+
+#[test]
+fn a_new_session_marks_windows_stale_and_keeps_their_messages() {
+    let mut state = viewing_general();
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+
+    let events = apply(&mut state, "READY", ready_value());
+    let late = apply(&mut state, "MESSAGE_CREATE", message(11, GENERAL));
+
+    assert_eq!(
+        events,
+        [format!("MessagesStale({GENERAL})"), "Ready".to_owned()]
+    );
+    let window = state.messages(Snowflake::new(GENERAL)).unwrap();
+    assert!(window.stale);
+    assert_eq!(message_ids(&state, GENERAL), Some(vec![10]));
+    assert!(late.is_empty(), "{late:?}");
+}
+
+#[test]
+fn a_new_session_drops_the_windows_of_channels_that_are_gone() {
+    let mut state = viewing_general();
+    let mut next = ready_value();
+    next["guilds"][0]["channels"]
+        .as_array_mut()
+        .unwrap()
+        .remove(1);
+    next["guilds"][0]["threads"] = json!([]);
+
+    let events = apply(&mut state, "READY", next);
+
+    assert_eq!(
+        events,
+        [
+            format!("ChannelRemoved({GENERAL})"),
+            format!("ChannelRemoved({THREAD})"),
+            "Ready".to_owned()
+        ]
+    );
+    assert_eq!(message_ids(&state, GENERAL), None);
 }
