@@ -221,7 +221,7 @@ impl Store {
     }
 
     pub(crate) fn abort_load(&self, ticket: LoadTicket) {
-        self.write(|inner, _| inner.state.abort_load(ticket));
+        self.write(|inner, events| inner.state.abort_load(ticket, events));
     }
 
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {

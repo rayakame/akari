@@ -75,8 +75,8 @@ struct Window {
     latest: bool,
     oldest: bool,
     stale: bool,
-    // A load that ends at the present is running, so live messages wait for it.
-    holding: bool,
+    // Loads that end at the present still running; live messages wait for them.
+    holding: u32,
     // Live messages that arrived while stale or holding; appending them would leave a gap.
     held: Vec<Arc<Message>>,
     // Bumped whenever the messages are replaced, so a load for the old ones is dropped.
@@ -87,11 +87,20 @@ struct Window {
 
 impl Window {
     fn appends_live(&self) -> bool {
-        self.latest && !self.stale && !self.holding
+        self.latest && !self.stale && self.holding == 0
     }
 
     fn holds_live(&self) -> bool {
-        self.holding || (self.stale && self.latest)
+        self.holding > 0 || (self.stale && self.latest)
+    }
+
+    // Once no load holds them, held messages join a live window or are dropped.
+    fn settle(&mut self, channel_id: ChannelId, limit: usize, events: &mut Vec<StoreEvent>) {
+        if self.appends_live() {
+            self.release_held(channel_id, limit, events);
+        } else if !self.holds_live() {
+            self.held.clear();
+        }
     }
 
     fn merge(
@@ -136,7 +145,6 @@ impl Window {
             .into_iter()
             .filter(|message| newest.is_none_or(|newest| message.id > newest))
             .collect();
-        self.holding = false;
         self.merge(channel_id, held, End::Newer, false, limit, events);
     }
 
@@ -171,7 +179,9 @@ impl Window {
             usize::MAX,
             events,
         );
-        self.release_held(channel_id, usize::MAX, events);
+        if self.holding == 0 {
+            self.release_held(channel_id, usize::MAX, events);
+        }
         self.stale = false;
         self.latest = true;
         self.trim(channel_id, limit, End::Older, events);
@@ -214,7 +224,7 @@ impl Window {
     fn reaches(&self, page: &[Arc<Message>]) -> bool {
         match (page.first(), self.messages.last()) {
             (Some(first), Some(last)) => first.id <= last.id,
-            _ => false,
+            _ => true,
         }
     }
     fn position(messages: &[Arc<Message>], id: MessageId) -> Result<usize, usize> {
@@ -538,9 +548,7 @@ impl Windows {
         let last = window.messages.last().map(|message| message.id);
         let (kind, cursor) = match (kind, first, last) {
             (LoadKind::Older, Some(first), _) => (kind, Cursor::Before(first)),
-            (LoadKind::Newer, _, Some(last)) if !window.appends_live() => {
-                (kind, Cursor::After(last))
-            }
+            (LoadKind::Newer, _, Some(last)) if !window.latest => (kind, Cursor::After(last)),
             (LoadKind::Newer, _, Some(_)) => return None,
             (LoadKind::Refresh, ..) if !window.stale => return None,
             (LoadKind::Refresh, ..) => (kind, Cursor::Latest),
@@ -551,7 +559,9 @@ impl Windows {
         };
         let holds = matches!(kind, LoadKind::Latest | LoadKind::Refresh | LoadKind::Newer)
             && !window.appends_live();
-        window.holding |= holds;
+        if holds {
+            window.holding += 1;
+        }
         Some(LoadTicket {
             channel,
             kind,
@@ -580,6 +590,21 @@ impl Windows {
         else {
             return;
         };
+        if ticket.holds {
+            window.holding = window.holding.saturating_sub(1);
+        }
+        // A trim or delete at the end the page continues from would leave a gap.
+        let moved = match ticket.cursor {
+            Cursor::Before(first) => {
+                window.messages.first().map(|message| message.id) != Some(first)
+            }
+            Cursor::After(last) => window.messages.last().map(|message| message.id) != Some(last),
+            Cursor::Latest | Cursor::Around(_) => false,
+        };
+        if moved {
+            window.settle(channel_id, window_limit, events);
+            return;
+        }
         let reached_end = page.len() < limit;
         let mut page: Vec<Arc<Message>> = page
             .into_iter()
@@ -610,12 +635,8 @@ impl Windows {
                     window_limit,
                     events,
                 );
-                if reached_end {
-                    window.release_held(channel_id, window_limit, events);
-                } else {
-                    window.holding = false;
-                    window.held.clear();
-                }
+                // Older parts of a stale window aren't re-checked, like the official client.
+                window.stale &= !reached_end;
             }
             LoadKind::Latest if window.appends_live() => {
                 window.merge(
@@ -627,13 +648,12 @@ impl Windows {
                     events,
                 );
             }
+            LoadKind::Refresh if !window.stale => {}
             LoadKind::Latest | LoadKind::Refresh if window.stale && window.reaches(&page) => {
                 window.reconcile(channel_id, page, reached_end, window_limit, events);
             }
             LoadKind::Refresh => {
                 window.latest = false;
-                window.holding = false;
-                window.held.clear();
                 events.push(StoreEvent::MessagesStale { channel_id });
             }
             LoadKind::Latest | LoadKind::Around(_) => {
@@ -669,19 +689,26 @@ impl Windows {
                 window.trim(channel_id, window_limit, End::Older, events);
             }
         }
+        window.settle(channel_id, window_limit, events);
     }
 
-    pub(crate) fn abort_load(&mut self, ticket: LoadTicket) {
-        if let Some(window) = self
+    pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {
+        let limit = self.limits.messages;
+        let channel_id = ticket.channel;
+        let Some(window) = self
             .windows
-            .get_mut(&ticket.channel)
+            .get_mut(&channel_id)
             .filter(|window| window.generation == ticket.generation && ticket.holds)
-        {
-            window.holding = false;
-            if !window.stale {
-                window.held.clear();
-            }
+        else {
+            return;
+        };
+        window.holding = window.holding.saturating_sub(1);
+        // A stale window that can't be refreshed would hold live messages forever.
+        if window.holding == 0 && window.stale && window.latest {
+            window.latest = false;
+            events.push(StoreEvent::MessagesStale { channel_id });
         }
+        window.settle(channel_id, limit, events);
     }
 
     pub(crate) fn update(

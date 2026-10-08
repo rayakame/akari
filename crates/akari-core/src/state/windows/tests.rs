@@ -683,7 +683,7 @@ fn aborting_a_load_stops_holding() {
     let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
 
     let ticket = harness.begin(LoadKind::Newer).unwrap();
-    harness.windows.abort_load(ticket);
+    harness.windows.abort_load(ticket, &mut Vec::new());
     harness.live(wire(30));
 
     assert!(harness.windows.held(channel(CH)).is_empty());
@@ -904,4 +904,132 @@ fn a_window_with_pending_messages_isnt_evicted() {
 
     assert_eq!(events, ["Cleared(2)"]);
     assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
+}
+
+#[test]
+fn an_older_page_whose_end_was_trimmed_meanwhile_is_dropped() {
+    let mut harness = Harness::viewing(LOADS);
+    for id in 10..15 {
+        harness.live(wire(id));
+    }
+    let ticket = harness.begin(LoadKind::Older).unwrap();
+    harness.live(wire(15));
+
+    let events = harness.finish(ticket, &[7, 8, 9], 3);
+
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [11, 12, 13, 14, 15]);
+}
+
+#[test]
+fn a_newer_page_whose_end_was_trimmed_meanwhile_is_dropped() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let newer = harness.begin(LoadKind::Newer).unwrap();
+    let older = harness.begin(LoadKind::Older).unwrap();
+    harness.finish(older, &[16, 17, 18], 3);
+
+    let events = harness.finish(newer, &[22, 23], 3);
+    harness.live(wire(30));
+
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [16, 17, 18, 19, 20]);
+    assert!(!harness.window().latest);
+    assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
+#[test]
+fn a_refresh_that_finishes_after_the_window_was_refreshed_changes_nothing() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.live(wire(11));
+    harness.windows.mark_stale(&mut Vec::new());
+    let refresh = harness.begin(LoadKind::Refresh).unwrap();
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(latest, &[10, 11, 12], 3);
+
+    let events = harness.finish(refresh, &[10, 11, 12], 3);
+
+    assert!(events.is_empty(), "{events:?}");
+    let window = harness.window();
+    assert!(window.latest && !window.stale);
+    assert_eq!(harness.live(wire(13)), ["Inserted(13)"]);
+}
+
+#[test]
+fn a_newer_load_that_reaches_the_present_ends_staleness() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    harness.windows.mark_stale(&mut Vec::new());
+    let ticket = harness.begin(LoadKind::Newer).unwrap();
+
+    harness.finish(ticket, &[22], 3);
+
+    let window = harness.window();
+    assert!(window.latest && !window.stale);
+    assert_eq!(harness.live(wire(30)), ["Inserted(30)"]);
+}
+
+#[test]
+fn a_stale_window_at_the_present_waits_for_its_refresh_instead_of_newer() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.windows.mark_stale(&mut Vec::new());
+
+    assert!(harness.begin(LoadKind::Newer).is_none());
+}
+
+#[test]
+fn a_failed_refresh_detaches_the_window() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.windows.mark_stale(&mut Vec::new());
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    harness.live(wire(11));
+
+    harness.windows.abort_load(ticket, &mut Vec::new());
+
+    let window = harness.window();
+    assert!(window.stale && !window.latest);
+    assert!(harness.windows.held(channel(CH)).is_empty());
+    assert!(harness.windows.stale_channels().is_empty());
+}
+
+#[test]
+fn refreshing_an_empty_stale_window_fills_it() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.windows.mark_stale(&mut Vec::new());
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+
+    let events = harness.finish(ticket, &[10, 11], 3);
+
+    assert_eq!(events, ["Loaded(10..11)"]);
+    let window = harness.window();
+    assert!(window.latest && !window.stale && window.oldest);
+}
+
+#[test]
+fn an_empty_refresh_page_keeps_the_window_live() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.windows.mark_stale(&mut Vec::new());
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+
+    harness.finish(ticket, &[], 3);
+
+    let window = harness.window();
+    assert!(window.latest && !window.stale);
+    assert_eq!(harness.live(wire(12)), ["Inserted(12)"]);
+}
+
+#[test]
+fn a_failed_load_leaves_held_messages_to_the_one_still_running() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let newer = harness.begin(LoadKind::Newer).unwrap();
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+
+    harness.windows.abort_load(newer, &mut Vec::new());
+    harness.live(wire(40));
+    harness.finish(latest, &[30, 31], 3);
+
+    assert_eq!(harness.ids(), [30, 31, 40]);
+    assert!(harness.window().latest);
 }

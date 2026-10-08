@@ -590,8 +590,8 @@ impl State {
             .finish_load(ticket, page, &self.entities.users, limit, events);
     }
 
-    pub(crate) fn abort_load(&mut self, ticket: LoadTicket) {
-        self.windows.abort_load(ticket);
+    pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {
+        self.windows.abort_load(ticket, events);
     }
 
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
