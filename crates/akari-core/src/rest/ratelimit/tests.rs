@@ -176,6 +176,27 @@ async fn a_global_429_pauses_every_route() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_retry_keeps_its_place_on_the_route() {
+    let limiter = Arc::new(RateLimiter::default());
+    let permit = limiter.acquire(send(1)).await;
+    let waiting = tokio::spawn({
+        let limiter = limiter.clone();
+        async move {
+            let _later = limiter.acquire(send(1)).await;
+        }
+    });
+    tokio::task::yield_now().await;
+
+    permit.finish(&limited(SECOND, false));
+    let renewed = timeout(2 * SECOND, permit.renew()).await;
+
+    assert!(renewed.is_ok());
+    assert!(!waiting.is_finished());
+    drop(permit);
+    waiting.await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_dropped_permit_frees_its_route() {
     let limiter = RateLimiter::default();
     drop(limiter.acquire(send(1)).await);

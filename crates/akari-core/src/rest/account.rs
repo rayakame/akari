@@ -5,7 +5,7 @@ use reqwest::Method as HttpMethod;
 use serde::Serialize;
 
 use super::error::RestError;
-use super::ratelimit::{Method, RateLimiter, ResponseLimits, RouteKey};
+use super::ratelimit::{Method, Permit, RateLimiter, ResponseLimits, RouteKey};
 use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
@@ -182,6 +182,7 @@ impl AccountRest {
     ) -> Result<Vec<u8>, RequestError> {
         let mut rate_limited = 0;
         let mut server_errors = 0;
+        let mut permit: Option<Permit<'_>> = None;
         loop {
             if self.closed.load(Ordering::Acquire) {
                 return Err(RequestError::Closed);
@@ -190,7 +191,13 @@ impl AccountRest {
                 return Err(RequestError::Unauthorized);
             }
             let request = build()?;
-            let permit = self.limiter.acquire(route.clone()).await;
+            let permit = match &permit {
+                Some(held) => {
+                    held.renew().await;
+                    held
+                }
+                None => permit.insert(self.limiter.acquire(route.clone()).await),
+            };
             let RawResponse {
                 status,
                 headers,

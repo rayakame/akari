@@ -170,7 +170,8 @@ impl Limits {
     }
 }
 
-// One per token. Requests on one route key run one at a time, in the order they asked.
+// One per token. Requests on one route key run one at a time, in the order they asked;
+// a permit holds its route until dropped.
 #[derive(Default)]
 pub(crate) struct RateLimiter {
     lanes: Mutex<HashMap<RouteKey, Arc<tokio::sync::Mutex<()>>>>,
@@ -192,27 +193,36 @@ impl RateLimiter {
             lanes.entry(route.clone()).or_default().clone()
         };
         let guard = lane.lock_owned().await;
-        loop {
-            let wait = self
-                .limits
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .reserve(&route, Instant::now());
-            match wait {
-                Some(at) => sleep_until(at).await,
-                None => break,
-            }
-        }
+        self.reserve(&route).await;
         Permit {
             limiter: self,
             route,
             _lane: guard,
         }
     }
+
+    async fn reserve(&self, route: &RouteKey) {
+        loop {
+            let wait = self
+                .limits
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .reserve(route, Instant::now());
+            match wait {
+                Some(at) => sleep_until(at).await,
+                None => break,
+            }
+        }
+    }
 }
 
 impl Permit<'_> {
-    pub(crate) fn finish(self, limits: &ResponseLimits) {
+    /// Waits until the route may start again, so a retry goes before later requests.
+    pub(crate) async fn renew(&self) {
+        self.limiter.reserve(&self.route).await;
+    }
+
+    pub(crate) fn finish(&self, limits: &ResponseLimits) {
         self.limiter
             .limits
             .lock()

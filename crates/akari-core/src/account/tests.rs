@@ -1132,6 +1132,29 @@ async fn sends_in_one_channel_keep_their_order() {
 }
 
 #[tokio::test]
+async fn a_retried_send_keeps_its_place_before_later_sends() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[502, 200]).delayed(Duration::from_millis(30));
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let (one, two, three) = tokio::join!(
+        account.send_message(general(), "one".to_owned()),
+        account.send_message(general(), "two".to_owned()),
+        account.send_message(general(), "three".to_owned()),
+    );
+
+    assert!(one.is_ok() && two.is_ok() && three.is_ok());
+    let contents: Vec<_> = sends
+        .bodies()
+        .iter()
+        .map(|body| body["content"].clone())
+        .collect();
+    assert_eq!(contents, ["one", "one", "two", "three"]);
+}
+
+#[tokio::test]
 async fn sending_in_a_detached_window_jumps_to_the_present() {
     let mut fake = FakeGateway::start().await;
     let server = wiremock::MockServer::start().await;
