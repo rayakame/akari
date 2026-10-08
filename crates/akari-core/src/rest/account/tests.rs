@@ -395,6 +395,29 @@ async fn requests_after_close_fail_with_closed() {
 }
 
 #[tokio::test]
+async fn a_retry_waiting_when_the_account_closes_is_not_sent() {
+    let server = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .respond_with(rate_limited(Some(0.3)))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path(MESSAGES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page()))
+        .mount(&server)
+        .await;
+    let rest = rest(&server).await;
+
+    let (result, ()) = tokio::join!(rest.list_messages(channel(), Query::Latest, 3), async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        rest.close();
+    });
+
+    assert!(matches!(result, Err(RequestError::Closed)), "{result:?}");
+    assert_eq!(requests(&server).await.len(), 1);
+}
+
+#[tokio::test]
 async fn errors_never_contain_the_token() {
     let server = MockServer::start().await;
     Mock::given(path(MESSAGES))

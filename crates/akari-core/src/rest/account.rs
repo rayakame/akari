@@ -123,6 +123,16 @@ impl AccountRest {
         self.unauthorized.load(Ordering::Acquire)
     }
 
+    fn usable(&self) -> Result<(), RequestError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(RequestError::Closed);
+        }
+        if self.is_unauthorized() {
+            return Err(RequestError::Unauthorized);
+        }
+        Ok(())
+    }
+
     // Oldest first; a message that doesn't decode is skipped.
     pub(crate) async fn list_messages(
         &self,
@@ -184,12 +194,7 @@ impl AccountRest {
         let mut server_errors = 0;
         let mut permit: Option<Permit<'_>> = None;
         loop {
-            if self.closed.load(Ordering::Acquire) {
-                return Err(RequestError::Closed);
-            }
-            if self.is_unauthorized() {
-                return Err(RequestError::Unauthorized);
-            }
+            self.usable()?;
             let request = build()?;
             let permit = match &permit {
                 Some(held) => {
@@ -198,6 +203,8 @@ impl AccountRest {
                 }
                 None => permit.insert(self.limiter.acquire(route.clone()).await),
             };
+            // The wait for the route can be long; the account may have closed meanwhile.
+            self.usable()?;
             let RawResponse {
                 status,
                 headers,
