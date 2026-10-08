@@ -28,14 +28,12 @@ impl<M> Snowflake<M> {
         Snowflake::new(self.value)
     }
 
-    // Optimistic sending will be the first caller outside tests.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn from_unix_millis(unix_millis: i64, sequence: u64) -> Self {
         let since_epoch = u64::try_from(unix_millis - DISCORD_EPOCH).unwrap_or(0);
         Self::new((since_epoch << TIMESTAMP_SHIFT) | (sequence & SEQUENCE_MASK))
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg(test)]
     pub(crate) fn unix_millis(self) -> i64 {
         i64::try_from(self.value >> TIMESTAMP_SHIFT).unwrap_or(i64::MAX - DISCORD_EPOCH)
             + DISCORD_EPOCH

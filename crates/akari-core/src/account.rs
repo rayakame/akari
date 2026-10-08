@@ -1,16 +1,22 @@
 use std::fmt;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::gateway::session::Timing;
 use crate::gateway::{ConnectionEvent, DispatchEvent, Gateway, GatewayError};
 use crate::model::{ChannelId, MessageId};
-use crate::rest::{AccountRest, Query, RequestError};
-use crate::state::{ConnectionState, Cursor, LoadKind, Store, WindowLimits};
+use crate::rest::{AccountRest, CreateMessage, Query, RequestError};
+use crate::state::{ConnectionState, Cursor, LoadKind, Message, Store, WindowLimits};
 use crate::{DiscordClient, Token};
 
 const REFRESH_LIMIT: u8 = 100;
-const SERVER_ERROR_RETRY: Duration = Duration::from_secs(1);
+const JUMP_LIMIT: u8 = 50;
+// Short in tests, so retried 502s don't slow the suite down.
+const SERVER_ERROR_RETRY: Duration = if cfg!(test) {
+    Duration::from_millis(10)
+} else {
+    Duration::from_secs(1)
+};
 
 /// A logged-in account: its gateway connection and the [`Store`] that connection keeps
 /// current. Dropping it ends the session like [`Account::close`].
@@ -48,6 +54,29 @@ pub(crate) struct Shared {
     gateway: Gateway,
     store: Store,
     rest: AccountRest,
+    nonces: Nonces,
+}
+
+// Like the official client: a snowflake of the current time, strictly increasing, so it
+// doubles as the pending message's provisional ID.
+#[derive(Default)]
+pub(crate) struct Nonces(Mutex<u64>);
+
+impl Nonces {
+    pub(crate) fn next(&self, unix_millis: i64) -> MessageId {
+        let now = MessageId::from_unix_millis(unix_millis, 0).get();
+        let mut last = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        *last = (*last + 1).max(now);
+        MessageId::new(*last)
+    }
+}
+
+fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        })
 }
 
 impl Shared {
@@ -88,6 +117,39 @@ impl Shared {
         }
     }
 
+    // Discord jumps to the present before sending; a stale window just waits for its refresh.
+    async fn prepare_send(&self, channel: ChannelId) -> Result<(), RequestError> {
+        match self.store.messages(channel) {
+            None => self.store.view_channel(channel),
+            Some(window) if !window.latest => {
+                self.load(channel, LoadKind::Latest, JUMP_LIMIT).await?;
+            }
+            Some(_) => {}
+        }
+        Ok(())
+    }
+
+    async fn deliver(
+        &self,
+        channel: ChannelId,
+        pending: MessageId,
+        content: String,
+    ) -> Result<MessageId, RequestError> {
+        let body = CreateMessage::new(content, pending.get().to_string());
+        match self.rest.create_message(channel, &body).await {
+            Ok(message) => {
+                let id = message.id;
+                self.store.confirm_message(channel, pending, message);
+                Ok(id)
+            }
+            Err(err) => {
+                self.store.fail_message(channel, pending);
+                self.failed(&err);
+                Err(err)
+            }
+        }
+    }
+
     async fn refresh_stale(&self) {
         for channel in self.store.stale_channels() {
             let refreshed = self.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
@@ -116,6 +178,7 @@ impl Account {
             gateway: Gateway::start(client, token, timing)?,
             store: Store::new(limits),
             rest,
+            nonces: Nonces::default(),
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
@@ -163,6 +226,56 @@ impl Account {
     ) -> Result<(), RequestError> {
         let (kind, limit) = load.parts();
         self.shared.load(channel, kind, limit).await
+    }
+
+    /// Shows the message as pending at once and sends it. Resolves with Discord's ID; on an
+    /// error the pending message is marked failed and stays until retried or discarded.
+    pub async fn send_message(
+        &self,
+        channel: ChannelId,
+        content: String,
+    ) -> Result<MessageId, RequestError> {
+        let shared = &self.shared;
+        let author = shared
+            .store
+            .current_user()
+            .ok_or(RequestError::InvalidRequest)?;
+        if content.trim().is_empty() {
+            return Err(RequestError::InvalidRequest);
+        }
+        shared.prepare_send(channel).await?;
+        let now = now_millis();
+        let pending = shared.nonces.next(now);
+        let message = Message::pending(
+            pending,
+            channel,
+            Arc::new(author.user.clone()),
+            content.clone(),
+            now,
+        );
+        shared.store.queue_message(channel, Arc::new(message));
+        shared.deliver(channel, pending, content).await
+    }
+
+    /// Sends a failed message again with the same nonce.
+    pub async fn retry_message(
+        &self,
+        channel: ChannelId,
+        pending: MessageId,
+    ) -> Result<MessageId, RequestError> {
+        let message = self
+            .shared
+            .store
+            .retry_message(channel, pending)
+            .ok_or(RequestError::InvalidRequest)?;
+        self.shared
+            .deliver(channel, pending, message.content.to_string())
+            .await
+    }
+
+    /// Drops a failed message.
+    pub fn discard_message(&self, channel: ChannelId, pending: MessageId) {
+        self.shared.store.discard_message(channel, pending);
     }
 }
 

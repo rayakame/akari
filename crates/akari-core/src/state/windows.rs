@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::events::StoreEvent;
-use super::types::{Message, User};
+use super::types::{Delivery, Message, User};
 use crate::gateway::MessageUpdate;
 use crate::model::{self, ChannelId, MessageId, UserId};
 
@@ -64,6 +64,8 @@ pub struct MessageWindow {
     pub oldest: bool,
     /// A new session may have missed changes; a refresh is due.
     pub stale: bool,
+    /// Our pending and failed messages, in send order, shown after `messages`.
+    pub pending: Vec<Arc<Message>>,
 }
 
 #[derive(Default)]
@@ -79,6 +81,8 @@ struct Window {
     held: Vec<Arc<Message>>,
     // Bumped whenever the messages are replaced, so a load for the old ones is dropped.
     generation: u64,
+    // Pending and failed messages; never trimmed.
+    outbox: Vec<Arc<Message>>,
 }
 
 impl Window {
@@ -171,6 +175,40 @@ impl Window {
         self.stale = false;
         self.latest = true;
         self.trim(channel_id, limit, End::Older, events);
+    }
+
+    // Where a confirmed or live message goes: the visible window, the held ones, or nowhere.
+    fn place(
+        &mut self,
+        channel_id: ChannelId,
+        message: Arc<Message>,
+        limit: usize,
+        announce: bool,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        match Window::position(&self.messages, message.id) {
+            Ok(index) => {
+                if self.messages[index] != message {
+                    self.messages[index] = message.clone();
+                    if announce {
+                        events.push(StoreEvent::MessageUpdated(message));
+                    }
+                }
+            }
+            Err(_) if self.holds_live() => {
+                upsert(&mut self.held, message);
+                let excess = self.held.len().saturating_sub(limit);
+                self.held.drain(..excess);
+            }
+            Err(index) if self.appends_live() => {
+                self.messages.insert(index, message.clone());
+                if announce {
+                    events.push(StoreEvent::MessageInserted(message));
+                }
+                self.trim(channel_id, limit, End::Older, events);
+            }
+            Err(_) => {}
+        }
     }
 
     fn reaches(&self, page: &[Arc<Message>]) -> bool {
@@ -287,7 +325,15 @@ impl Windows {
         }
         self.order.push_front(channel);
         while self.order.len() > self.limits.channels {
-            if let Some(evicted) = self.order.pop_back() {
+            // Windows with our own unsent messages stay, so those messages aren't lost.
+            let Some(index) = self.order.iter().rposition(|viewed| {
+                self.windows
+                    .get(viewed)
+                    .is_none_or(|window| window.outbox.is_empty())
+            }) else {
+                break;
+            };
+            if let Some(evicted) = self.order.remove(index) {
                 self.windows.remove(&evicted);
                 events.push(StoreEvent::MessagesCleared {
                     channel_id: evicted,
@@ -303,6 +349,7 @@ impl Windows {
             latest: window.latest,
             oldest: window.oldest,
             stale: window.stale,
+            pending: window.outbox.clone(),
         })
     }
 
@@ -326,39 +373,138 @@ impl Windows {
         users: &HashMap<UserId, Arc<User>>,
         events: &mut Vec<StoreEvent>,
     ) {
+        let pending = message
+            .nonce
+            .as_ref()
+            .and_then(model::Nonce::as_u64)
+            .map(MessageId::new);
+        self.receive(message, pending, users, events);
+    }
+
+    // The REST response for a pending message; the echo may have replaced it already.
+    pub(crate) fn confirm(
+        &mut self,
+        channel: ChannelId,
+        pending_id: MessageId,
+        message: model::Message,
+        users: &HashMap<UserId, Arc<User>>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if message.channel_id == channel {
+            self.receive(message, Some(pending_id), users, events);
+        }
+    }
+
+    fn receive(
+        &mut self,
+        message: model::Message,
+        pending_id: Option<MessageId>,
+        users: &HashMap<UserId, Arc<User>>,
+        events: &mut Vec<StoreEvent>,
+    ) {
         let channel_id = message.channel_id;
+        let limit = self.limits.messages;
         let Some(window) = self.windows.get(&channel_id) else {
             return;
         };
+        let pending = pending_id.and_then(|id| {
+            window
+                .outbox
+                .iter()
+                .position(|queued| queued.id == id)
+                .map(|index| (id, index))
+        });
         let visible = Window::position(&window.messages, message.id).is_ok();
-        if !visible && !window.appends_live() && !window.holds_live() {
+        if pending.is_none() && !visible && !window.appends_live() && !window.holds_live() {
             return;
         }
         let message = Arc::new(Message::from_wire(message, &mut |user| {
             intern(user, users, &window.messages)
         }));
-        let limit = self.limits.messages;
         let Some(window) = self.windows.get_mut(&channel_id) else {
             return;
         };
-        match Window::position(&window.messages, message.id) {
-            Ok(index) => {
-                if window.messages[index] != message {
-                    window.messages[index] = message.clone();
-                    events.push(StoreEvent::MessageUpdated(message));
-                }
+        match pending {
+            Some((pending_id, index)) => {
+                window.outbox.remove(index);
+                window.place(channel_id, message.clone(), limit, false, events);
+                events.push(StoreEvent::MessageReplaced {
+                    channel_id,
+                    pending_id,
+                    message,
+                });
             }
-            Err(_) if window.holds_live() => {
-                upsert(&mut window.held, message);
-                let excess = window.held.len().saturating_sub(limit);
-                window.held.drain(..excess);
-            }
-            Err(index) => {
-                window.messages.insert(index, message.clone());
-                events.push(StoreEvent::MessageInserted(message));
-                window.trim(channel_id, limit, End::Older, events);
-            }
+            None => window.place(channel_id, message, limit, true, events),
         }
+    }
+
+    pub(crate) fn queue(
+        &mut self,
+        channel: ChannelId,
+        message: Arc<Message>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if let Some(window) = self.windows.get_mut(&channel) {
+            window.outbox.push(message.clone());
+            events.push(StoreEvent::MessageInserted(message));
+        }
+    }
+
+    fn set_delivery(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        from: Delivery,
+        to: Delivery,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<Arc<Message>> {
+        let window = self.windows.get_mut(&channel)?;
+        let queued = window
+            .outbox
+            .iter_mut()
+            .find(|queued| queued.id == id && queued.delivery == from)?;
+        let mut next = (**queued).clone();
+        next.delivery = to;
+        *queued = Arc::new(next);
+        events.push(StoreEvent::MessageUpdated(queued.clone()));
+        Some(queued.clone())
+    }
+
+    pub(crate) fn fail(&mut self, channel: ChannelId, id: MessageId, events: &mut Vec<StoreEvent>) {
+        self.set_delivery(channel, id, Delivery::Pending, Delivery::Failed, events);
+    }
+
+    pub(crate) fn retry(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<Arc<Message>> {
+        self.set_delivery(channel, id, Delivery::Failed, Delivery::Pending, events)
+    }
+
+    pub(crate) fn discard(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) -> bool {
+        let Some(window) = self.windows.get_mut(&channel) else {
+            return false;
+        };
+        let Some(index) = window
+            .outbox
+            .iter()
+            .position(|queued| queued.id == id && queued.delivery == Delivery::Failed)
+        else {
+            return false;
+        };
+        window.outbox.remove(index);
+        events.push(StoreEvent::MessageDeleted {
+            channel_id: channel,
+            message_id: id,
+        });
+        true
     }
 
     #[cfg(test)]
@@ -496,8 +642,10 @@ impl Windows {
                 }
                 let at_present = ticket.kind == LoadKind::Latest;
                 let held = std::mem::take(&mut window.held);
+                let outbox = std::mem::take(&mut window.outbox);
                 *window = Window {
                     generation,
+                    outbox,
                     ..Window::default()
                 };
                 let mut added = Added::default();

@@ -228,6 +228,39 @@ impl Store {
         self.read(|inner| inner.state.stale_channels())
     }
 
+    pub(crate) fn queue_message(&self, channel: ChannelId, message: Arc<Message>) {
+        self.write(|inner, events| inner.state.queue(channel, message, events));
+    }
+
+    pub(crate) fn confirm_message(
+        &self,
+        channel: ChannelId,
+        pending: MessageId,
+        message: model::Message,
+    ) {
+        self.write(|inner, events| inner.state.confirm(channel, pending, message, events));
+    }
+
+    pub(crate) fn fail_message(&self, channel: ChannelId, pending: MessageId) {
+        self.write(|inner, events| inner.state.fail(channel, pending, events));
+    }
+
+    pub(crate) fn retry_message(
+        &self,
+        channel: ChannelId,
+        pending: MessageId,
+    ) -> Option<Arc<Message>> {
+        let mut message = None;
+        self.write(|inner, events| {
+            message = inner.state.retry(channel, pending, events);
+        });
+        message
+    }
+
+    pub(crate) fn discard_message(&self, channel: ChannelId, pending: MessageId) {
+        self.write(|inner, events| inner.state.discard(channel, pending, events));
+    }
+
     pub(crate) fn view_channel(&self, channel: ChannelId) {
         self.write(|inner, events| inner.state.view_channel(channel, events));
     }

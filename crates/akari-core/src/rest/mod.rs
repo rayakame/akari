@@ -1,5 +1,3 @@
-// Sending messages will be the first caller of create_message outside tests.
-#[cfg_attr(not(test), allow(dead_code))]
 mod account;
 mod error;
 mod ratelimit;
@@ -10,7 +8,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 pub use account::RequestError;
-pub(crate) use account::{AccountRest, Query};
+pub(crate) use account::{AccountRest, CreateMessage, Query};
 #[cfg(test)]
 pub(crate) use error::FieldError;
 pub(crate) use error::{ApiError, RestError};

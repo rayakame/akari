@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -6,7 +7,7 @@ use tokio::time::timeout;
 use super::*;
 use crate::gateway::fake::{FakeConnection, FakeGateway, WAIT, client, timing};
 use crate::model::Snowflake;
-use crate::state::{DEFAULT_LIMITS, StoreEvent, Subscription};
+use crate::state::{DEFAULT_LIMITS, Delivery, StoreEvent, Subscription};
 
 const TOKEN: &str = "account-test-token.secret";
 const GENERAL: u64 = 300_000_000_000_000_002;
@@ -41,6 +42,9 @@ fn describe(event: &StoreEvent) -> String {
             format!("MessagesLoaded({}..{})", first.get(), last.get())
         }
         StoreEvent::MessagesCleared { .. } => "MessagesCleared".to_owned(),
+        StoreEvent::MessageReplaced { message, .. } => {
+            format!("MessageReplaced({})", message.id.get())
+        }
         other => format!("{other:?}"),
     }
 }
@@ -814,4 +818,413 @@ async fn a_401_closes_the_account_like_a_rejected_token() {
         "{again:?}"
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+const ME: &str = "100000000000000001";
+
+// Records each send's body; the n-th call answers with `statuses[n]` (the last one repeats).
+// A 200 echoes the body as a created message whose ID depends only on the nonce, because
+// Discord sends a nonce's first message only.
+#[derive(Clone)]
+struct Sends {
+    bodies: Arc<std::sync::Mutex<Vec<Value>>>,
+    statuses: Arc<Vec<u16>>,
+    delay: Duration,
+}
+
+fn created(id: u64, body: &Value) -> Value {
+    let mut message = message(0, id)["d"].clone();
+    message["content"] = body["content"].clone();
+    message["nonce"] = body["nonce"].clone();
+    message["author"] = json!({"id": ME, "username": "akari_tester"});
+    message
+}
+
+impl Sends {
+    fn new(statuses: &[u16]) -> Self {
+        Self {
+            bodies: Arc::default(),
+            statuses: Arc::new(statuses.to_vec()),
+            delay: Duration::ZERO,
+        }
+    }
+
+    fn delayed(mut self, delay: Duration) -> Self {
+        self.delay = delay;
+        self
+    }
+
+    async fn mount(&self, server: &wiremock::MockServer) {
+        use wiremock::matchers::{method, path};
+        let sends = self.clone();
+        wiremock::Mock::given(method("POST"))
+            .and(path(MESSAGES))
+            .respond_with(move |request: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                let mut bodies = sends.bodies.lock().unwrap();
+                bodies.push(body.clone());
+                let call = bodies.len() - 1;
+                let mut nonces: Vec<&Value> = Vec::new();
+                for sent in bodies.iter() {
+                    if !nonces.contains(&&sent["nonce"]) {
+                        nonces.push(&sent["nonce"]);
+                    }
+                }
+                let nth = nonces
+                    .iter()
+                    .position(|nonce| **nonce == body["nonce"])
+                    .unwrap_or(0) as u64;
+                let status = sends.statuses[call.min(sends.statuses.len() - 1)];
+                let template = wiremock::ResponseTemplate::new(status).set_delay(sends.delay);
+                match status {
+                    200 => template.set_body_json(created(400_000_000_000_000_050 + nth, &body)),
+                    403 => template
+                        .set_body_json(json!({"message": "Missing Permissions", "code": 50013})),
+                    400 => template.set_body_json(json!({
+                        "captcha_key": ["captcha-required"],
+                        "captcha_service": "hcaptcha",
+                        "captcha_sitekey": "site-key"
+                    })),
+                    _ => template,
+                }
+            })
+            .mount(server)
+            .await;
+    }
+
+    fn bodies(&self) -> Vec<Value> {
+        self.bodies.lock().unwrap().clone()
+    }
+
+    async fn first_nonce(&self) -> Value {
+        timeout(WAIT, async {
+            loop {
+                if let Some(body) = self.bodies.lock().unwrap().first() {
+                    return body["nonce"].clone();
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("no send arrived")
+    }
+}
+
+fn echo(seq: u64, id: u64, nonce: &Value) -> Value {
+    let body = json!({"content": "hello", "nonce": nonce});
+    json!({"op": 0, "s": seq, "t": "MESSAGE_CREATE", "d": created(id, &body)})
+}
+
+fn outbox(account: &Account) -> Vec<(u64, Delivery)> {
+    account
+        .store()
+        .messages(general())
+        .map(|window| {
+            window
+                .pending
+                .iter()
+                .map(|message| (message.id.get(), message.delivery))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn sending(
+    fake: &mut FakeGateway,
+    server: &wiremock::MockServer,
+) -> (Account, Subscription, FakeConnection) {
+    let account = start_with(fake, server);
+    let subscription = account.store().subscribe();
+    let connection = online(fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    (account, subscription, connection)
+}
+
+async fn sync(
+    connection: &mut FakeConnection,
+    subscription: &Subscription,
+    seq: u64,
+) -> Vec<String> {
+    connection.send(rename(seq, &format!("sync {seq}"))).await;
+    let mut events = events_until(subscription, &format!("ChannelUpdated({GENERAL})")).await;
+    events.pop();
+    events
+}
+
+#[tokio::test]
+async fn the_echo_first_replaces_the_pending_message() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]).delayed(Duration::from_millis(300));
+    sends.mount(&server).await;
+    let (account, subscription, mut connection) = sending(&mut fake, &server).await;
+
+    let (sent, ()) = tokio::join!(account.send_message(general(), "hello".to_owned()), async {
+        let nonce = sends.first_nonce().await;
+        connection
+            .send(echo(2, 400_000_000_000_000_050, &nonce))
+            .await;
+    });
+
+    assert_eq!(sent.unwrap().get(), 400_000_000_000_000_050);
+    let events = sync(&mut connection, &subscription, 3).await;
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert!(events[0].starts_with("MessageInserted("), "{events:?}");
+    assert_eq!(events[1], "MessageReplaced(400000000000000050)");
+    assert_eq!(ids(&account), [400_000_000_000_000_050]);
+    assert!(outbox(&account).is_empty());
+}
+
+#[tokio::test]
+async fn a_late_echo_after_the_response_changes_nothing() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]);
+    sends.mount(&server).await;
+    let (account, subscription, mut connection) = sending(&mut fake, &server).await;
+
+    account
+        .send_message(general(), "hello".to_owned())
+        .await
+        .unwrap();
+    let nonce = sends.first_nonce().await;
+    connection
+        .send(echo(2, 400_000_000_000_000_050, &nonce))
+        .await;
+    connection
+        .send(echo(3, 400_000_000_000_000_050, &nonce))
+        .await;
+
+    let events = sync(&mut connection, &subscription, 4).await;
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events[1], "MessageReplaced(400000000000000050)");
+    assert_eq!(ids(&account), [400_000_000_000_000_050]);
+}
+
+#[tokio::test]
+async fn an_echo_after_a_failed_send_still_shows_the_message() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[403]);
+    sends.mount(&server).await;
+    let (account, _subscription, mut connection) = sending(&mut fake, &server).await;
+
+    let err = account
+        .send_message(general(), "hello".to_owned())
+        .await
+        .unwrap_err();
+    let failed = outbox(&account);
+    let nonce = sends.first_nonce().await;
+    connection
+        .send(echo(2, 400_000_000_000_000_050, &nonce))
+        .await;
+    connection.send(rename(3, "sync")).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(
+        matches!(err, RequestError::Discord { code: 50013, .. }),
+        "{err:?}"
+    );
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].1, Delivery::Failed);
+    assert_eq!(ids(&account), [400_000_000_000_000_050]);
+    assert!(outbox(&account).is_empty());
+}
+
+#[tokio::test]
+async fn a_send_that_discord_took_but_answered_with_502_appears_once() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[502, 200]);
+    sends.mount(&server).await;
+    let (account, subscription, mut connection) = sending(&mut fake, &server).await;
+
+    let (sent, ()) = tokio::join!(account.send_message(general(), "hello".to_owned()), async {
+        let nonce = sends.first_nonce().await;
+        connection
+            .send(echo(2, 400_000_000_000_000_050, &nonce))
+            .await;
+    });
+
+    sent.unwrap();
+    let bodies = sends.bodies();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0], bodies[1]);
+    let events = sync(&mut connection, &subscription, 3).await;
+    let shown: Vec<_> = events
+        .iter()
+        .filter(|event| event.contains("400000000000000050"))
+        .collect();
+    assert_eq!(shown, ["MessageReplaced(400000000000000050)"], "{events:?}");
+    assert_eq!(ids(&account), [400_000_000_000_000_050]);
+}
+
+#[tokio::test]
+async fn a_failed_message_stays_until_retried_or_discarded() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[403]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    account
+        .send_message(general(), "hello".to_owned())
+        .await
+        .unwrap_err();
+    let failed = outbox(&account);
+    account.discard_message(general(), Snowflake::new(failed[0].0));
+
+    assert_eq!(failed[0].1, Delivery::Failed);
+    assert!(outbox(&account).is_empty());
+}
+
+#[tokio::test]
+async fn a_retry_reuses_the_nonce() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[403, 200]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    account
+        .send_message(general(), "hello".to_owned())
+        .await
+        .unwrap_err();
+    let pending = Snowflake::new(outbox(&account)[0].0);
+    let sent = account.retry_message(general(), pending).await.unwrap();
+
+    let bodies = sends.bodies();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0]["nonce"], bodies[1]["nonce"]);
+    assert_eq!(bodies[0]["nonce"], pending.get().to_string());
+    assert_eq!(ids(&account), [sent.get()]);
+    assert!(outbox(&account).is_empty());
+}
+
+#[tokio::test]
+async fn sends_in_one_channel_keep_their_order() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]).delayed(Duration::from_millis(30));
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let (one, two, three) = tokio::join!(
+        account.send_message(general(), "one".to_owned()),
+        account.send_message(general(), "two".to_owned()),
+        account.send_message(general(), "three".to_owned()),
+    );
+
+    assert!(one.is_ok() && two.is_ok() && three.is_ok());
+    let bodies = sends.bodies();
+    let contents: Vec<_> = bodies.iter().map(|body| body["content"].clone()).collect();
+    assert_eq!(contents, ["one", "two", "three"]);
+    let nonces: Vec<u64> = bodies
+        .iter()
+        .map(|body| body["nonce"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert!(
+        nonces.windows(2).all(|pair| pair[0] < pair[1]),
+        "{nonces:?}"
+    );
+}
+
+#[tokio::test]
+async fn sending_in_a_detached_window_jumps_to_the_present() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]);
+    sends.mount(&server).await;
+    mock_page(&server, ("around", "20"), page(&[19, 20, 21])).await;
+    mock_page(&server, ("limit", "50"), page(&[30])).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+    account
+        .load_messages(
+            general(),
+            MessageLoad::Around {
+                id: Snowflake::new(20),
+                limit: 3,
+            },
+        )
+        .await
+        .unwrap();
+
+    account
+        .send_message(general(), "hello".to_owned())
+        .await
+        .unwrap();
+
+    let requests: Vec<(String, String)> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|request| {
+            (
+                request.method.to_string(),
+                request.url.query().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        requests,
+        [
+            ("GET".to_owned(), "limit=3&around=20".to_owned()),
+            ("GET".to_owned(), "limit=50".to_owned()),
+            ("POST".to_owned(), String::new()),
+        ]
+    );
+    assert_eq!(ids(&account), [30, 400_000_000_000_000_050]);
+}
+
+#[tokio::test]
+async fn empty_messages_are_refused_without_a_request() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let err = account
+        .send_message(general(), " \n\t ".to_owned())
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, RequestError::InvalidRequest), "{err:?}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(outbox(&account).is_empty());
+}
+
+#[tokio::test]
+async fn a_captcha_leaves_the_message_failed_with_the_challenge() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[400]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let err = account
+        .send_message(general(), "hello".to_owned())
+        .await
+        .unwrap_err();
+
+    let RequestError::CaptchaRequired(challenge) = err else {
+        panic!("expected a captcha, got {err:?}");
+    };
+    assert_eq!(challenge.sitekey.as_deref(), Some("site-key"));
+    let failed = outbox(&account);
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].1, Delivery::Failed);
+}
+
+#[test]
+fn nonces_are_unique_and_increasing() {
+    let nonces = Nonces::default();
+    let now = 1_700_000_000_000;
+
+    let mut seen: Vec<u64> = (0..1000).map(|_| nonces.next(now).get()).collect();
+    seen.push(nonces.next(now - 5).get());
+    seen.push(nonces.next(now + 1).get());
+
+    assert!(seen.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(seen[0], MessageId::from_unix_millis(now, 0).get());
 }

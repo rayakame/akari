@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::gateway::MessageUpdate;
 use crate::model::Snowflake;
+use crate::state::types::Delivery;
 
 const CH: u64 = 1;
 const LIMITS: WindowLimits = WindowLimits {
@@ -77,6 +78,11 @@ fn describe(events: &[StoreEvent]) -> Vec<String> {
             }
             StoreEvent::MessagesStale { channel_id } => format!("Stale({})", channel_id.get()),
             StoreEvent::MessagesCleared { channel_id } => format!("Cleared({})", channel_id.get()),
+            StoreEvent::MessageReplaced {
+                pending_id,
+                message,
+                ..
+            } => format!("Replaced({} -> {})", pending_id.get(), message.id.get()),
             other => format!("{other:?}"),
         })
         .collect()
@@ -692,4 +698,210 @@ fn loads_with_nothing_to_do_are_skipped() {
     assert!(harness.begin(LoadKind::Refresh).is_none());
     let mut unviewed = Harness::new(LOADS);
     assert!(unviewed.begin(LoadKind::Older).is_none());
+}
+
+fn pending(id: u64, content: &str) -> Arc<Message> {
+    let mut message = (*stored(id)).clone();
+    message.content = content.into();
+    message.delivery = Delivery::Pending;
+    Arc::new(message)
+}
+
+fn echo(id: u64, nonce: u64) -> model::Message {
+    let mut message = wire(id);
+    message.nonce = Some(model::Nonce::Text(nonce.to_string()));
+    message
+}
+
+impl Harness {
+    fn queue(&mut self, message: Arc<Message>) -> Vec<String> {
+        let mut events = Vec::new();
+        self.windows.queue(channel(CH), message, &mut events);
+        describe(&events)
+    }
+
+    fn confirm(&mut self, pending_id: u64, message: model::Message) -> Vec<String> {
+        let mut events = Vec::new();
+        self.windows.confirm(
+            channel(CH),
+            Snowflake::new(pending_id),
+            message,
+            &self.users,
+            &mut events,
+        );
+        describe(&events)
+    }
+
+    fn outbox(&self) -> Vec<(u64, Delivery)> {
+        self.window()
+            .pending
+            .iter()
+            .map(|message| (message.id.get(), message.delivery))
+            .collect()
+    }
+}
+
+#[test]
+fn queued_messages_wait_in_the_outbox() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.live(wire(10));
+
+    let events = harness.queue(pending(500, "hi"));
+
+    assert_eq!(events, ["Inserted(500)"]);
+    assert_eq!(harness.ids(), [10]);
+    assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
+}
+
+#[test]
+fn an_echo_replaces_its_pending_message() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.queue(pending(500, "hi"));
+
+    let events = harness.live(echo(20, 500));
+    let response = harness.confirm(500, echo(20, 500));
+
+    assert_eq!(events, ["Replaced(500 -> 20)"]);
+    assert!(response.is_empty(), "{response:?}");
+    assert_eq!(harness.ids(), [20]);
+    assert!(harness.outbox().is_empty());
+}
+
+#[test]
+fn a_response_replaces_its_pending_message_and_the_echo_changes_nothing() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.queue(pending(500, "hi"));
+
+    let response = harness.confirm(500, echo(20, 500));
+    let late_echo = harness.live(echo(20, 500));
+
+    assert_eq!(response, ["Replaced(500 -> 20)"]);
+    assert!(late_echo.is_empty(), "{late_echo:?}");
+    assert_eq!(harness.ids(), [20]);
+}
+
+#[test]
+fn a_failed_message_can_be_retried_or_discarded() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.queue(pending(500, "hi"));
+    harness.queue(pending(501, "again"));
+    let mut events = Vec::new();
+
+    harness
+        .windows
+        .fail(channel(CH), Snowflake::new(500), &mut events);
+    harness
+        .windows
+        .fail(channel(CH), Snowflake::new(501), &mut events);
+    let retried = harness
+        .windows
+        .retry(channel(CH), Snowflake::new(500), &mut events);
+    let discarded = harness
+        .windows
+        .discard(channel(CH), Snowflake::new(501), &mut events);
+
+    assert_eq!(
+        describe(&events),
+        [
+            "Updated(500)",
+            "Updated(501)",
+            "Updated(500)",
+            "Deleted(501)"
+        ]
+    );
+    assert_eq!(
+        retried.map(|message| message.delivery),
+        Some(Delivery::Pending)
+    );
+    assert!(discarded);
+    assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
+    let mut none = Vec::new();
+    assert!(
+        harness
+            .windows
+            .retry(channel(CH), Snowflake::new(500), &mut none)
+            .is_none()
+    );
+    assert!(
+        !harness
+            .windows
+            .discard(channel(CH), Snowflake::new(500), &mut none)
+    );
+}
+
+#[test]
+fn an_echo_for_a_failed_message_still_replaces_it() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.queue(pending(500, "hi"));
+    harness
+        .windows
+        .fail(channel(CH), Snowflake::new(500), &mut Vec::new());
+
+    let events = harness.live(echo(20, 500));
+
+    assert_eq!(events, ["Replaced(500 -> 20)"]);
+    assert!(harness.outbox().is_empty());
+}
+
+#[test]
+fn trimming_never_drops_pending_messages() {
+    let mut harness = Harness::viewing(LIMITS);
+    for id in 10..13 {
+        harness.live(wire(id));
+    }
+    harness.queue(pending(500, "hi"));
+
+    harness.batch(&[stored(7), stored(8)], End::Older, false);
+    harness.live(wire(13));
+
+    assert!(!harness.window().latest);
+    assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
+}
+
+#[test]
+fn a_detached_window_drops_the_confirmed_message_but_reports_the_replacement() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    harness.queue(pending(500, "hi"));
+
+    let events = harness.live(echo(40, 500));
+
+    assert_eq!(events, ["Replaced(500 -> 40)"]);
+    assert_eq!(harness.ids(), [19, 20, 21]);
+    assert!(harness.outbox().is_empty());
+}
+
+#[test]
+fn reconcile_keeps_the_outbox() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.queue(pending(500, "hi"));
+    harness.windows.mark_stale(&mut Vec::new());
+
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    harness.finish(ticket, &[11], 5);
+
+    assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
+}
+
+#[test]
+fn a_jump_keeps_the_outbox() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    harness.queue(pending(500, "hi"));
+
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(ticket, &[30, 31], 5);
+
+    assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
+}
+
+#[test]
+fn a_window_with_pending_messages_isnt_evicted() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.queue(pending(500, "hi"));
+
+    harness.view(2);
+    let events = harness.view(3);
+
+    assert_eq!(events, ["Cleared(2)"]);
+    assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
 }

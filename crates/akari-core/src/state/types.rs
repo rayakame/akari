@@ -172,6 +172,18 @@ pub struct Message {
     /// The referenced message as Discord sent it along; if it is loaded, `Store::message`
     /// has a fresher copy.
     pub referenced_message: ReferencedMessage,
+    /// `Pending` and `Failed` messages are ours, waiting in the window's outbox.
+    pub delivery: Delivery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Delivery {
+    Sent,
+    /// Sent to Discord, not confirmed yet. The ID is provisional (the nonce).
+    Pending,
+    /// Discord didn't take it; retry or discard it.
+    Failed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

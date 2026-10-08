@@ -47,6 +47,13 @@ pub enum StoreEvent {
         channel_id: ChannelId,
         message_id: MessageId,
     },
+    /// Discord confirmed a pending message: drop `pending_id`'s row. `message` is in the
+    /// window if it is at the present; otherwise it comes with the next refresh.
+    MessageReplaced {
+        channel_id: ChannelId,
+        pending_id: MessageId,
+        message: Arc<Message>,
+    },
     /// Messages were added within `first..=last`: older or newer history, or messages a
     /// refresh filled in. Read the window for that range.
     MessagesLoaded {

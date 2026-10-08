@@ -598,6 +598,53 @@ impl State {
         self.windows.stale_channels()
     }
 
+    pub(crate) fn queue(
+        &mut self,
+        channel: ChannelId,
+        message: Arc<Message>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.queue(channel, message, events);
+    }
+
+    pub(crate) fn confirm(
+        &mut self,
+        channel: ChannelId,
+        pending: MessageId,
+        message: model::Message,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows
+            .confirm(channel, pending, message, &self.entities.users, events);
+    }
+
+    pub(crate) fn fail(
+        &mut self,
+        channel: ChannelId,
+        pending: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.fail(channel, pending, events);
+    }
+
+    pub(crate) fn retry(
+        &mut self,
+        channel: ChannelId,
+        pending: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<Arc<Message>> {
+        self.windows.retry(channel, pending, events)
+    }
+
+    pub(crate) fn discard(
+        &mut self,
+        channel: ChannelId,
+        pending: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.discard(channel, pending, events);
+    }
+
     pub(crate) fn messages(&self, channel: ChannelId) -> Option<MessageWindow> {
         self.windows.snapshot(channel)
     }
