@@ -26,6 +26,7 @@ pub enum PresenceStatus {
 }
 
 impl GatewayCommand {
+    #[allow(dead_code)]
     pub(crate) fn to_payload(&self) -> String {
         match *self {
             Self::UpdatePresence { status } => json(3, Presence::new(status)),

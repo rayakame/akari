@@ -293,3 +293,136 @@ fn a_gateway_needs_a_runtime() {
 
     assert!(matches!(result, Err(GatewayError::NoRuntime)));
 }
+
+#[tokio::test]
+async fn an_invalid_session_starts_over_on_the_gateway_url() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = connected(&mut fake, &gateway, 60_000).await;
+
+    connection.send(json!({"op": 9, "d": false})).await;
+
+    assert_eq!(connection.client_close_code().await, Some(4000));
+    let mut fresh = fake.accept().await;
+    assert!(fresh.uri.starts_with("/?"), "{}", fresh.uri);
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    match next(&gateway).await {
+        ConnectionEvent::Reconnecting {
+            resume,
+            delay,
+            reason,
+        } => {
+            assert!(!resume);
+            assert!(delay >= Duration::from_millis(10), "{delay:?}");
+            assert!(matches!(reason, DisconnectReason::InvalidSession));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_resumable_invalid_session_resumes() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = connected(&mut fake, &gateway, 60_000).await;
+
+    connection.send(json!({"op": 9, "d": true})).await;
+
+    assert_eq!(connection.client_close_code().await, Some(4000));
+    let mut resumed = fake.accept().await;
+    assert!(resumed.uri.starts_with("/resume?"), "{}", resumed.uri);
+    assert_eq!(resumed.handshake(60_000).await["op"], 6);
+}
+
+#[tokio::test]
+async fn session_close_codes_start_over_and_others_resume() {
+    for (code, op, path) in [(4009, 2, "/?"), (4007, 2, "/?"), (4000, 6, "/resume?")] {
+        let mut fake = FakeGateway::start().await;
+        let gateway = start(&fake);
+        let mut connection = connected(&mut fake, &gateway, 60_000).await;
+
+        connection.close(code).await;
+
+        let mut next_connection = fake.accept().await;
+        assert!(
+            next_connection.uri.starts_with(path),
+            "{code}: {}",
+            next_connection.uri
+        );
+        assert_eq!(next_connection.handshake(60_000).await["op"], op, "{code}");
+    }
+}
+
+#[tokio::test]
+async fn a_rejected_token_ends_the_gateway() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+
+    connection.close(4004).await;
+
+    assert!(matches!(
+        next_error(&gateway).await,
+        GatewayError::AuthenticationFailed
+    ));
+    assert!(matches!(next_error(&gateway).await, GatewayError::Closed));
+    assert!(fake.quiet_for(Duration::from_millis(300)).await);
+    assert!(matches!(gateway.connect(), Err(GatewayError::Closed)));
+}
+
+#[tokio::test]
+async fn a_refused_connection_ends_the_gateway() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+
+    connection.close(4015).await;
+
+    assert!(matches!(
+        next_error(&gateway).await,
+        GatewayError::Rejected { code: 4015 }
+    ));
+    assert!(fake.quiet_for(Duration::from_millis(300)).await);
+}
+
+#[tokio::test]
+async fn a_ready_that_fails_to_decode_ends_the_gateway() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+    let mut ready: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/ready.json")).unwrap();
+    ready["d"]["user"]["id"] = serde_json::Value::Null;
+
+    connection.send(ready).await;
+
+    assert!(matches!(
+        next_error(&gateway).await,
+        GatewayError::InvalidReady(_)
+    ));
+    assert_eq!(connection.client_close_code().await, Some(1000));
+    assert!(fake.quiet_for(Duration::from_millis(300)).await);
+}
+
+#[tokio::test]
+async fn an_unacknowledged_heartbeat_reconnects_and_resumes() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = connected(&mut fake, &gateway, 50).await;
+
+    connection.ack = false;
+
+    assert_eq!(connection.client_close_code().await, Some(4000));
+    let mut resumed = fake.accept().await;
+    assert_eq!(resumed.handshake(60_000).await["op"], 6);
+    assert!(matches!(
+        next(&gateway).await,
+        ConnectionEvent::Reconnecting {
+            reason: DisconnectReason::Zombie,
+            ..
+        }
+    ));
+}

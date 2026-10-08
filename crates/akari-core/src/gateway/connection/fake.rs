@@ -211,7 +211,6 @@ impl FakeConnection {
             .await;
     }
 
-    #[allow(dead_code)]
     pub(super) async fn close(&mut self, code: u16) {
         let frame = CloseFrame {
             code: code.into(),

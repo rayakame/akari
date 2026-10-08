@@ -5,13 +5,10 @@ mod decompress;
 mod guild;
 mod hello;
 mod lenient;
-#[allow(dead_code)]
 mod limiter;
-#[allow(dead_code)]
 mod outgoing;
 mod payload;
 mod ready;
-#[allow(dead_code)]
 pub(crate) mod session;
 
 pub use connection::{ConnectionEvent, DisconnectReason, Gateway, GatewayError, SendError};

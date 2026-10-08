@@ -15,7 +15,10 @@ use crate::error::{TransportError, TransportErrorKind};
 use crate::gateway::decompress::{DecompressError, ZstdStream};
 use crate::gateway::outgoing;
 use crate::gateway::payload::{DispatchEvent, GatewayEvent, decode};
-use crate::gateway::session::{Connection, Handshake, Retry, Session, Tick, Timing};
+use crate::gateway::session::{
+    AfterClose, Connection, Handshake, Retry, Session, Tick, Timing, after_close,
+    invalid_session_floor,
+};
 use crate::ws::{self, WsStream};
 use crate::{DiscordClient, Token, random};
 
@@ -46,7 +49,6 @@ enum End {
         floor: Duration,
         healthy: bool,
     },
-    #[allow(dead_code)]
     Fatal(GatewayError),
 }
 
@@ -227,11 +229,10 @@ impl Task {
         let event = match message {
             Some(Ok(Message::Binary(data))) => match zstd.decompress(&data, decode) {
                 Ok(event) => event,
-                Err(DecompressError::TooLarge { .. }) => {
-                    return Some((
-                        self.lost(link, DisconnectReason::Decompress),
-                        Some(RESUMABLE),
-                    ));
+                // Fatal: a resume would replay the same message.
+                Err(DecompressError::TooLarge { limit }) => {
+                    let end = End::Fatal(GatewayError::MessageTooLarge { limit });
+                    return Some((end, Some(NORMAL)));
                 }
                 Err(DecompressError::Zstd(err)) => {
                     tracing::warn!(error = %err, "the gateway's zstd stream broke");
@@ -248,6 +249,10 @@ impl Task {
                 return Some((self.closed(link, code), None));
             }
             Some(Ok(_)) => return None,
+            Some(Err(tungstenite::Error::Capacity(_))) => {
+                let end = End::Fatal(GatewayError::MessageTooLarge { limit: MAX_MESSAGE });
+                return Some((end, Some(NORMAL)));
+            }
             Some(Err(err)) => {
                 let reason = DisconnectReason::Transport(TransportError::from_tungstenite(err));
                 return Some((self.lost(link, reason), None));
@@ -257,15 +262,17 @@ impl Task {
         match event {
             Ok(event) => self.handle(socket, link, event).await,
             Err(err) => {
-                match err.dispatch() {
-                    Some((seq, event)) => {
-                        self.session.dispatched(seq);
-                        tracing::warn!(event, seq, "skipping a dispatch that failed to decode");
-                    }
+                let Some((seq, event)) = err.dispatch() else {
                     // serde's message can quote the payload, so it isn't logged.
-                    None => tracing::warn!("skipping an unreadable gateway message"),
+                    tracing::warn!("skipping an unreadable gateway message");
+                    return None;
+                };
+                self.session.dispatched(seq);
+                if event != "READY" {
+                    tracing::warn!(event, seq, "skipping a dispatch that failed to decode");
+                    return None;
                 }
-                None
+                Some((End::Fatal(GatewayError::InvalidReady(err)), Some(NORMAL)))
             }
         }
     }
@@ -313,7 +320,18 @@ impl Task {
                     Some(RESUMABLE),
                 ));
             }
-            GatewayEvent::InvalidSession { .. } | GatewayEvent::Unknown { .. } => {}
+            GatewayEvent::InvalidSession { resumable } => {
+                let end = End::Reconnect {
+                    resume: resumable,
+                    reason: DisconnectReason::InvalidSession,
+                    floor: invalid_session_floor(&self.timing, random::unit()),
+                    healthy: link.healthy(Instant::now(), &self.timing),
+                };
+                return Some((end, Some(RESUMABLE)));
+            }
+            GatewayEvent::Unknown { op } => {
+                tracing::debug!(op, "ignoring an unknown gateway opcode");
+            }
         }
         None
     }
@@ -336,7 +354,17 @@ impl Task {
             Some(code) => DisconnectReason::ClosedByDiscord { code },
             None => broken("closed without a code"),
         };
-        self.lost(link, reason)
+        match after_close(code) {
+            AfterClose::Resume => self.lost(link, reason),
+            AfterClose::Identify => End::Reconnect {
+                resume: false,
+                reason,
+                floor: Duration::ZERO,
+                healthy: link.healthy(Instant::now(), &self.timing),
+            },
+            AfterClose::AuthenticationFailed => End::Fatal(GatewayError::AuthenticationFailed),
+            AfterClose::Rejected { code } => End::Fatal(GatewayError::Rejected { code }),
+        }
     }
 
     fn lost(&self, link: &Connection, reason: DisconnectReason) -> End {
