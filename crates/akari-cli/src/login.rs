@@ -10,6 +10,8 @@ use akari_core::{DiscordClient, Secret};
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 
+use akari_core::TokenStore as _;
+
 use crate::keychain::KeychainStore;
 use crate::report;
 
@@ -166,29 +168,6 @@ async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuc
             return ExitCode::FAILURE;
         }
     };
-    // The previous account goes first: if its token can't be removed, nothing changes and
-    // no token is left behind without a current-account entry pointing to it.
-    if let Some(previous) = replaced_account(previous, success.user_id) {
-        let id = previous.get();
-        match client.logout(previous).await {
-            Ok(()) | Err(LogoutError::NotLoggedIn) => {
-                println!("Logged out the previous account (user {id}).");
-            }
-            Err(LogoutError::Storage(err)) => {
-                eprintln!(
-                    "Couldn't remove the previous account's token (user {id}), so the new \
-                     login wasn't stored: {}",
-                    report(&err)
-                );
-                return ExitCode::FAILURE;
-            }
-            Err(err) => println!(
-                "Removed the previous account's token (user {id}), but Discord didn't confirm \
-                 its logout: {}",
-                report(&err)
-            ),
-        }
-    }
     if let Err(err) = client.save_token(success.user_id, &success.token).await {
         eprintln!("Logged in, but couldn't store the token: {}", report(&err));
         return ExitCode::FAILURE;
@@ -198,13 +177,42 @@ async fn finish(client: &DiscordClient, store: &KeychainStore, success: LoginSuc
             "Logged in, but couldn't remember the account: {}",
             report(&err)
         );
+        // Without the current-account entry nothing would find this token again.
+        let _ = store.delete(success.user_id);
         return ExitCode::FAILURE;
     }
     println!("Logged in as user {}.", success.user_id.get());
     if success.password_update_required {
         println!("Discord asks you to change your password in the official app.");
     }
-    ExitCode::SUCCESS
+
+    // Only once the new account is complete: a failure here leaves at most the old entry.
+    let Some(previous) = replaced_account(previous, success.user_id) else {
+        return ExitCode::SUCCESS;
+    };
+    let id = previous.get();
+    match client.logout(previous).await {
+        Ok(()) | Err(LogoutError::NotLoggedIn) => {
+            println!("Logged out the previous account (user {id}).");
+            ExitCode::SUCCESS
+        }
+        Err(LogoutError::Storage(err)) => {
+            eprintln!(
+                "Couldn't remove the previous account's token: {}. Delete the keychain entry \
+                 \"akari-cli\" / \"{id}\" by hand.",
+                report(&err)
+            );
+            ExitCode::FAILURE
+        }
+        Err(err) => {
+            println!(
+                "Removed the previous account's token (user {id}), but Discord didn't confirm \
+                 its logout: {}",
+                report(&err)
+            );
+            ExitCode::SUCCESS
+        }
+    }
 }
 
 // akari-cli keeps one account, so logging in as someone else replaces the stored one.
