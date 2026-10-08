@@ -734,6 +734,10 @@ impl Windows {
         }
     }
 
+    pub(crate) fn channels(&self) -> impl Iterator<Item = ChannelId> + '_ {
+        self.windows.keys().copied()
+    }
+
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
         let mut channels: Vec<ChannelId> = self
             .windows

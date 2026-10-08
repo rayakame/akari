@@ -25,6 +25,7 @@ async fn a_broken_dispatch_is_skipped_without_logging_its_payload() {
         .unwrap_or_else(|err| panic!("no address: {err}"));
     let endpoints = Endpoints {
         gateway: format!("ws://{address}/"),
+        api: "http://127.0.0.1:9/api/v9/".to_owned(),
         allow_plaintext: true,
         ..Endpoints::default()
     };

@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::Token;
+use crate::model::GuildId;
 use crate::properties::ClientProperties;
 
 /// A command for [`Gateway::send`](super::Gateway::send).
@@ -11,6 +12,9 @@ use crate::properties::ClientProperties;
 pub enum GatewayCommand {
     /// Sets this session's status, without activities. Discord allows 5 updates per 20 s.
     UpdatePresence { status: PresenceStatus },
+    /// Op 37, as the official client sends it when a channel is opened: typing, activities
+    /// and threads, no member lists. Without it, large guilds may send no live messages.
+    SubscribeGuilds { guilds: Vec<GuildId> },
 }
 
 /// A status the user can choose.
@@ -27,10 +31,65 @@ pub enum PresenceStatus {
 
 impl GatewayCommand {
     pub(crate) fn to_payload(&self) -> String {
-        match *self {
-            Self::UpdatePresence { status } => json(3, Presence::new(status)),
+        match self {
+            Self::UpdatePresence { status } => json(3, Presence::new(*status)),
+            Self::SubscribeGuilds { guilds } => json(
+                37,
+                Subscriptions {
+                    subscriptions: guilds
+                        .iter()
+                        .map(|guild| (guild.get().to_string(), GuildFeatures::GUILD))
+                        .collect(),
+                },
+            ),
         }
     }
+
+    // One command per batch of guilds that fits in a payload.
+    pub(crate) fn subscribe_guilds(guilds: &[GuildId]) -> Vec<Self> {
+        let mut commands = Vec::new();
+        let mut batch = Vec::new();
+        let mut size = EMPTY_SUBSCRIPTIONS;
+        for guild in guilds {
+            let entry = guild.get().to_string().len() + SUBSCRIPTION_ENTRY;
+            if size + entry > MAX_PAYLOAD && !batch.is_empty() {
+                commands.push(Self::SubscribeGuilds {
+                    guilds: std::mem::take(&mut batch),
+                });
+                size = EMPTY_SUBSCRIPTIONS;
+            }
+            batch.push(*guild);
+            size += entry;
+        }
+        if !batch.is_empty() {
+            commands.push(Self::SubscribeGuilds { guilds: batch });
+        }
+        commands
+    }
+}
+
+// `{"op":37,"d":{"subscriptions":{}}}` and `"":{"typing":true,"activities":true,"threads":true},`
+const EMPTY_SUBSCRIPTIONS: usize = 34;
+const SUBSCRIPTION_ENTRY: usize = 53;
+
+#[derive(Serialize)]
+struct Subscriptions {
+    subscriptions: BTreeMap<String, GuildFeatures>,
+}
+
+#[derive(Serialize)]
+struct GuildFeatures {
+    typing: bool,
+    activities: bool,
+    threads: bool,
+}
+
+impl GuildFeatures {
+    const GUILD: Self = Self {
+        typing: true,
+        activities: true,
+        threads: true,
+    };
 }
 
 const LAZY_USER_NOTES: u64 = 1 << 0;
@@ -144,6 +203,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+    use crate::model::Snowflake;
     use crate::properties::{Arch, ClientBuild, DesktopOs, HostInfo};
 
     fn properties() -> ClientProperties {
@@ -219,5 +279,51 @@ mod tests {
                 json!({"op": 3, "d": {"since": 0, "activities": [], "status": name, "afk": false}})
             );
         }
+    }
+
+    #[test]
+    fn a_guild_subscription_matches_the_official_clients_shape() {
+        let command = GatewayCommand::SubscribeGuilds {
+            guilds: vec![Snowflake::new(200_000_000_000_000_001)],
+        };
+
+        let payload: Value = serde_json::from_str(&command.to_payload()).unwrap();
+
+        assert_eq!(
+            payload,
+            json!({"op": 37, "d": {"subscriptions": {"200000000000000001": {
+                "typing": true, "activities": true, "threads": true
+            }}}})
+        );
+    }
+
+    #[test]
+    fn guild_subscriptions_split_below_the_payload_limit() {
+        let guilds: Vec<_> = (0..1000)
+            .map(|index| Snowflake::new(200_000_000_000_000_000 + index))
+            .collect();
+
+        let commands = GatewayCommand::subscribe_guilds(&guilds);
+
+        assert!(commands.len() > 1);
+        let mut seen = Vec::new();
+        for command in &commands {
+            let payload = command.to_payload();
+            assert!(payload.len() <= MAX_PAYLOAD, "{} bytes", payload.len());
+            let payload: Value = serde_json::from_str(&payload).unwrap();
+            seen.extend(
+                payload["d"]["subscriptions"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(|id| id.parse::<u64>().unwrap()),
+            );
+        }
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            guilds.iter().map(|guild| guild.get()).collect::<Vec<_>>()
+        );
+        assert!(GatewayCommand::subscribe_guilds(&[]).is_empty());
     }
 }

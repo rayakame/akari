@@ -1322,3 +1322,116 @@ async fn gateway_commands_reach_the_gateway() {
         "online"
     );
 }
+
+const G1: &str = "200000000000000001";
+
+fn subscribed(command: &Value) -> Vec<String> {
+    assert_eq!(command["op"], 37, "{command}");
+    let mut guilds: Vec<String> = command["d"]["subscriptions"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    guilds.sort();
+    guilds
+}
+
+#[tokio::test]
+async fn viewing_a_channel_subscribes_its_guild_once_per_session() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+
+    account.view_channel(general());
+    let first = next_command(&mut connection)
+        .await
+        .expect("no subscription");
+    account.view_channel(Snowflake::new(300_000_000_000_000_003));
+    account.view_channel(Snowflake::new(300_000_000_000_000_010));
+
+    assert_eq!(subscribed(&first), [G1]);
+    assert_eq!(
+        first["d"]["subscriptions"][G1],
+        json!({"typing": true, "activities": true, "threads": true})
+    );
+    assert!(
+        next_command(&mut connection).await.is_none(),
+        "subscribed twice"
+    );
+}
+
+#[tokio::test]
+async fn loading_messages_subscribes_the_guild_too() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    mock_page(&server, ("limit", "50"), page(&[10])).await;
+
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        subscribed(
+            &next_command(&mut connection)
+                .await
+                .expect("no subscription")
+        ),
+        [G1]
+    );
+}
+
+#[tokio::test]
+async fn subscriptions_are_sent_again_after_ready_and_resumed() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    assert_eq!(
+        subscribed(&next_command(&mut connection).await.unwrap()),
+        [G1]
+    );
+
+    connection.close(4000).await;
+    let mut resumed = fake.accept().await;
+    assert_eq!(resumed.handshake(60_000).await["op"], 6);
+    resumed.dispatch(2, "RESUMED").await;
+    let after_resume = next_command(&mut resumed)
+        .await
+        .expect("nothing after RESUMED");
+    resumed.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh.send(ready_payload(1, &fake, |_| {})).await;
+    let after_ready = next_command(&mut fresh).await.expect("nothing after READY");
+
+    assert_eq!(subscribed(&after_resume), [G1]);
+    assert_eq!(subscribed(&after_ready), [G1]);
+}
+
+#[tokio::test]
+async fn nothing_is_subscribed_while_offline() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+
+    account.view_channel(general());
+    let mut connection = online(&mut fake, &account).await;
+
+    assert_eq!(
+        subscribed(
+            &next_command(&mut connection)
+                .await
+                .expect("no subscription after READY")
+        ),
+        [G1]
+    );
+}

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -7,7 +8,7 @@ use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, PresenceStatus,
     SendError,
 };
-use crate::model::{ChannelId, MessageId};
+use crate::model::{ChannelId, GuildId, MessageId};
 use crate::rest::{AccountRest, CreateMessage, Query, RequestError};
 use crate::state::{ConnectionState, Cursor, LoadKind, Message, Store, WindowLimits};
 use crate::{DiscordClient, Token};
@@ -59,6 +60,9 @@ pub(crate) struct Shared {
     rest: AccountRest,
     nonces: Nonces,
     status: Mutex<Status>,
+    // Guilds subscribed with op 37 in this session.
+    subscribed: Mutex<BTreeSet<GuildId>>,
+    runtime: tokio::runtime::Handle,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -93,7 +97,7 @@ fn now_millis() -> i64 {
 
 impl Shared {
     async fn load(
-        &self,
+        self: &Arc<Self>,
         channel: ChannelId,
         kind: LoadKind,
         limit: u8,
@@ -101,6 +105,7 @@ impl Shared {
         let Some(ticket) = self.store.begin_load(channel, kind) else {
             return Ok(());
         };
+        self.subscribe_guild_of(channel);
         let query = match ticket.cursor {
             Cursor::Latest => Query::Latest,
             Cursor::Before(id) => Query::Before(id),
@@ -130,9 +135,61 @@ impl Shared {
     }
 
     // Discord jumps to the present before sending; a stale window just waits for its refresh.
-    async fn prepare_send(&self, channel: ChannelId) -> Result<(), RequestError> {
+    fn view(self: &Arc<Self>, channel: ChannelId) {
+        self.store.view_channel(channel);
+        self.subscribe_guild_of(channel);
+    }
+
+    // Like the official client: a guild is subscribed once one of its channels is opened.
+    fn subscribe_guild_of(self: &Arc<Self>, channel: ChannelId) {
+        let Some(guild) = self
+            .store
+            .channel(channel)
+            .and_then(|channel| channel.guild_id)
+        else {
+            return;
+        };
+        if !matches!(self.store.connection(), ConnectionState::Online) {
+            return;
+        }
+        let new = self
+            .subscribed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(guild);
+        if new {
+            let shared = self.clone();
+            self.runtime.spawn(async move {
+                let _ = shared
+                    .send(GatewayCommand::SubscribeGuilds {
+                        guilds: vec![guild],
+                    })
+                    .await;
+            });
+        }
+    }
+
+    // Subscriptions belong to a session; the official client sends them again after READY
+    // and after RESUMED.
+    async fn resubscribe(&self, new_session: bool) {
+        let guilds: Vec<GuildId> = {
+            let mut subscribed = self
+                .subscribed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if new_session {
+                *subscribed = self.store.viewed_guilds();
+            }
+            subscribed.iter().copied().collect()
+        };
+        for command in GatewayCommand::subscribe_guilds(&guilds) {
+            let _ = self.send(command).await;
+        }
+    }
+
+    async fn prepare_send(self: &Arc<Self>, channel: ChannelId) -> Result<(), RequestError> {
         match self.store.messages(channel) {
-            None => self.store.view_channel(channel),
+            None => self.view(channel),
             Some(window) if !window.latest => {
                 self.load(channel, LoadKind::Latest, JUMP_LIMIT).await?;
             }
@@ -196,7 +253,7 @@ impl Shared {
         }
     }
 
-    async fn refresh_stale(&self) {
+    async fn refresh_stale(self: &Arc<Self>) {
         for channel in self.store.stale_channels() {
             let refreshed = self.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
             if refreshed.is_err() && self.rest.is_unauthorized() {
@@ -226,6 +283,8 @@ impl Account {
             rest,
             nonces: Nonces::default(),
             status: Mutex::default(),
+            subscribed: Mutex::default(),
+            runtime: runtime.clone(),
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
@@ -261,7 +320,7 @@ impl Account {
     /// Marks the channel as viewed: the store keeps its messages and adds new ones from
     /// the gateway. Past 10 viewed channels, the least recently viewed loses its messages.
     pub fn view_channel(&self, channel: ChannelId) {
-        self.shared.store.view_channel(channel);
+        self.shared.view(channel);
     }
 
     /// Loads messages into the channel's window, viewing it first, within Discord's rate
@@ -408,6 +467,8 @@ async fn pump(mut finish: Finish) {
                         tokio::spawn(async move { refresh.refresh_stale().await });
                         let status = shared.clone();
                         tokio::spawn(async move { status.send_status(true).await });
+                        let subscriptions = shared.clone();
+                        tokio::spawn(async move { subscriptions.resubscribe(true).await });
                     }
                     Err(_) => break Some(Arc::new(GatewayError::Stopped)),
                 }
@@ -420,6 +481,8 @@ async fn pump(mut finish: Finish) {
                 );
                 let status = shared.clone();
                 tokio::spawn(async move { status.send_status(false).await });
+                let subscriptions = shared.clone();
+                tokio::spawn(async move { subscriptions.resubscribe(false).await });
             }
             Ok(event) => on_event(&shared.store, event, &connecting),
             Err(GatewayError::Closed) => break None,

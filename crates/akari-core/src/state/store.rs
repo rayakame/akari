@@ -228,6 +228,10 @@ impl Store {
         self.read(|inner| inner.state.stale_channels())
     }
 
+    pub(crate) fn viewed_guilds(&self) -> std::collections::BTreeSet<GuildId> {
+        self.read(|inner| inner.state.viewed_guilds())
+    }
+
     pub(crate) fn queue_message(&self, channel: ChannelId, message: Arc<Message>) {
         self.write(|inner, events| inner.state.queue(channel, message, events));
     }
