@@ -156,7 +156,10 @@ impl Task {
                 tokio::select! {
                     result = &mut connect => match result {
                         Ok(socket) => break socket,
-                        Err(err) => return lost(DisconnectReason::Transport(err), false),
+                        Err(err) => {
+                            self.session.unreachable();
+                            return lost(DisconnectReason::Transport(err), false);
+                        }
                     },
                     changed = self.mode.changed() => {
                         let mode = if changed.is_err() {
@@ -176,6 +179,9 @@ impl Task {
         };
         let mut link = Connection::new(Instant::now(), &self.timing);
         let (end, code) = self.drive(&mut socket, &mut zstd, &mut link).await;
+        if !link.got_hello() && matches!(end, End::Reconnect { .. }) {
+            self.session.unreachable();
+        }
         self.close(&mut socket, code).await;
         end
     }
@@ -310,6 +316,7 @@ impl Task {
     ) -> Option<Exit> {
         match event {
             GatewayEvent::Hello(hello) => {
+                self.session.reached();
                 if link.hello(&hello, Instant::now(), random::unit()) {
                     let handshake = match self.session.handshake() {
                         Handshake::Identify => {
@@ -347,7 +354,7 @@ impl Task {
             }
             GatewayEvent::InvalidSession { resumable } => {
                 let end = End::Reconnect {
-                    resume: resumable,
+                    resume: self.session.resume_after_invalid_session(resumable),
                     reason: DisconnectReason::InvalidSession,
                     floor: invalid_session_floor(&self.timing, random::unit()),
                     healthy: link.healthy(Instant::now(), &self.timing),

@@ -660,3 +660,32 @@ fn a_captured_ready_debugs_as_its_size() {
 
     assert_eq!(debug, format!("CapturedReady(<{size} bytes>)"));
 }
+
+async fn unreachable_url() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    format!("ws://{address}/resume")
+}
+
+#[tokio::test]
+async fn an_unreachable_resume_url_falls_back_to_the_gateway() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = start(&fake);
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+    connection.ready(1, SESSION, &unreachable_url().await).await;
+    next(&gateway).await;
+    connection.dispatch(4, "TYPING_START").await;
+    next(&gateway).await;
+
+    connection.send(json!({"op": 7, "d": null})).await;
+
+    assert_eq!(connection.client_close_code().await, Some(4000));
+    let mut fallback = fake.accept().await;
+    assert!(fallback.uri.starts_with("/?"), "{}", fallback.uri);
+    assert_eq!(
+        fallback.handshake(60_000).await,
+        json!({"op": 6, "d": {"token": TOKEN, "session_id": SESSION, "seq": 4}})
+    );
+}

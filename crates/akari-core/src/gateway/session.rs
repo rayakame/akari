@@ -12,6 +12,7 @@ use crate::heartbeat::{Beat, Heartbeat};
 const API_VERSION: &str = "9";
 // A shorter interval would let the heartbeat reserve eat the whole send budget.
 const MIN_HEARTBEAT: Duration = Duration::from_secs(1);
+const RESUME_URL_ATTEMPTS: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Timing {
@@ -49,8 +50,9 @@ pub(crate) struct Session {
 #[derive(Debug)]
 struct Resume {
     session_id: String,
-    // None when READY's resume_gateway_url was unusable.
+    // None when READY's resume_gateway_url was unusable or unreachable.
     url: Option<Url>,
+    failed_attempts: u32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -106,7 +108,37 @@ impl Session {
         self.resume = Some(Resume {
             session_id: ready.session_id.clone(),
             url,
+            failed_attempts: 0,
         });
+    }
+
+    pub(crate) fn reached(&mut self) {
+        if let Some(resume) = &mut self.resume {
+            resume.failed_attempts = 0;
+        }
+    }
+
+    // On the gateway URL failures keep resuming: identifying would need the same server.
+    pub(crate) fn unreachable(&mut self) {
+        let Some(resume) = &mut self.resume else {
+            return;
+        };
+        if resume.url.is_none() {
+            return;
+        }
+        resume.failed_attempts += 1;
+        if resume.failed_attempts >= RESUME_URL_ATTEMPTS {
+            tracing::warn!("resume_gateway_url is unreachable; resuming through the gateway URL");
+            resume.url = None;
+        }
+    }
+
+    pub(crate) fn resume_after_invalid_session(&self, resumable: bool) -> bool {
+        resumable
+            && self
+                .resume
+                .as_ref()
+                .is_some_and(|resume| resume.url.is_some())
     }
 
     pub(crate) fn forget(&mut self) {
@@ -176,6 +208,10 @@ impl Connection {
         self.heartbeat = Some(Heartbeat::start(interval, now, jitter));
         self.limiter.reserve_for(interval);
         !std::mem::replace(&mut self.handshake_sent, true)
+    }
+
+    pub(crate) fn got_hello(&self) -> bool {
+        self.heartbeat.is_some()
     }
 
     pub(crate) fn acked(&mut self) {
@@ -342,6 +378,67 @@ mod tests {
             session.connect_url(&gateway()).host_str(),
             Some("127.0.0.1")
         );
+    }
+
+    fn resumed_at(session: &Session) -> Option<String> {
+        session
+            .connect_url(&gateway())
+            .host_str()
+            .map(str::to_owned)
+    }
+
+    #[test]
+    fn an_unreachable_resume_url_falls_back_to_the_gateway_url() {
+        let mut session = Session::default();
+        session.dispatched(1);
+        session.ready(&fixture_ready(), false);
+        session.dispatched(5);
+
+        session.unreachable();
+        assert_eq!(
+            resumed_at(&session).as_deref(),
+            Some("gateway-us-east1-b.discord.gg")
+        );
+        session.unreachable();
+
+        assert_eq!(resumed_at(&session).as_deref(), Some("gateway.discord.gg"));
+        assert_eq!(
+            session.handshake(),
+            Handshake::Resume {
+                session_id: "0123456789abcdef0123456789abcdef",
+                seq: 5
+            }
+        );
+    }
+
+    #[test]
+    fn reaching_the_resume_url_resets_the_count() {
+        let mut session = Session::default();
+        session.dispatched(1);
+        session.ready(&fixture_ready(), false);
+
+        session.unreachable();
+        session.reached();
+        session.unreachable();
+
+        assert_eq!(
+            resumed_at(&session).as_deref(),
+            Some("gateway-us-east1-b.discord.gg")
+        );
+    }
+
+    #[test]
+    fn an_invalid_session_after_the_fallback_starts_over() {
+        let mut session = Session::default();
+        session.dispatched(1);
+        session.ready(&fixture_ready(), false);
+        assert!(session.resume_after_invalid_session(true));
+
+        session.unreachable();
+        session.unreachable();
+
+        assert!(!session.resume_after_invalid_session(true));
+        assert!(!session.resume_after_invalid_session(false));
     }
 
     #[test]
