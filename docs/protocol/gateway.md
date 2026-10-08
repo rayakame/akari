@@ -206,6 +206,10 @@ What Akari does when Discord closes the connection, per the
   ([Update Presence](https://docs.discord.food/gateway/gateway-events#update-presence)).
   Not enforced by the driver yet; a host that lets the user change status quickly has to
   debounce.
+- **Writes:** a write that can't finish within 10 s, because the peer stopped reading and
+  the send buffer is full, counts as a lost connection (`TransportErrorKind::Timeout`) and
+  resumes. Otherwise a stalled socket would hold off heartbeats, `close()` and
+  `disconnect()` until the OS gives up on the TCP connection.
 - **Incoming:** messages up to 64 MiB.
 
 ## Using a `Gateway`

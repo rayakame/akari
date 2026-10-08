@@ -393,10 +393,17 @@ impl Task {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((now, payload.clone()));
-        socket.send(Message::text(payload)).await.map_err(|err| {
-            let reason = DisconnectReason::Transport(TransportError::from_tungstenite(err));
-            (self.lost(link, reason), None)
-        })
+        // A peer that stops reading would otherwise hold off heartbeats and close() for good.
+        let sent = tokio::time::timeout(
+            self.timing.write_timeout,
+            socket.send(Message::text(payload)),
+        );
+        let err = match sent.await {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(err)) => TransportError::from_tungstenite(err),
+            Err(elapsed) => TransportError::new(TransportErrorKind::Timeout, elapsed),
+        };
+        Err((self.lost(link, DisconnectReason::Transport(err)), None))
     }
 
     fn closed(&self, link: &Connection, code: Option<u16>) -> End {

@@ -18,6 +18,7 @@ const RESUME_URL_ATTEMPTS: u32 = 2;
 pub(crate) struct Timing {
     pub(crate) hello_timeout: Duration,
     pub(crate) close_timeout: Duration,
+    pub(crate) write_timeout: Duration,
     pub(crate) retry_base: Duration,
     pub(crate) retry_max: Duration,
     pub(crate) invalid_session_min: Duration,
@@ -31,6 +32,7 @@ impl Default for Timing {
         Self {
             hello_timeout: Duration::from_secs(20),
             close_timeout: Duration::from_secs(2),
+            write_timeout: Duration::from_secs(10),
             retry_base: Duration::from_secs(1),
             retry_max: Duration::from_secs(60),
             invalid_session_min: Duration::from_secs(1),

@@ -787,3 +787,41 @@ async fn closing_during_a_reconnect_reports_no_reconnect() {
     );
     assert!(fake.quiet_for(Duration::from_millis(300)).await);
 }
+
+#[tokio::test]
+async fn a_peer_that_stops_reading_cannot_stall_the_connection() {
+    let mut fake = FakeGateway::start().await;
+    let gateway = Arc::new(start_with(
+        &fake,
+        Timing {
+            write_timeout: Duration::from_millis(500),
+            rate_window: Duration::from_millis(50),
+            ..timing()
+        },
+    ));
+    let _stalled = connected(&mut fake, &gateway, 60_000).await;
+    let sender = gateway.clone();
+    tokio::spawn(async move {
+        let filler = "x".repeat(14 * 1024);
+        while sender
+            .send_payload(json!({"op": 99, "d": filler}).to_string())
+            .await
+            .is_ok()
+        {}
+    });
+
+    let event = timeout(Duration::from_secs(10), gateway.next())
+        .await
+        .expect("a blocked write stalled the connection");
+
+    assert!(
+        matches!(
+            &event,
+            Ok(ConnectionEvent::Reconnecting {
+                reason: DisconnectReason::Transport(err),
+                ..
+            }) if err.kind() == crate::TransportErrorKind::Timeout
+        ),
+        "{event:?}"
+    );
+}
