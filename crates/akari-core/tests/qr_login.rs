@@ -391,3 +391,27 @@ async fn an_unreadable_ticket_payload_restarts_the_session() {
         format!("https://discord.com/ra/{fingerprint}")
     );
 }
+
+#[tokio::test]
+async fn cancelling_on_the_phone_never_delays_the_next_code() {
+    let rest = support::rest_server().await;
+    let mut gateway = RemoteAuthServer::start().await;
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
+    let started = Instant::now();
+
+    for _ in 0..5 {
+        let mut session = gateway.accept().await;
+        session.handshake(30_000).await;
+        code_url(qr.next().await);
+        session.send(json!({"op": "cancel"})).await;
+        session.close(1000).await;
+        assert!(matches!(qr.next().await, Ok(QrEvent::CancelledOnPhone)));
+    }
+    gateway.accept().await;
+
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "{:?} for five cancels",
+        started.elapsed()
+    );
+}

@@ -190,7 +190,9 @@ row, `next()` returns the last error: `Network` for a connection error, otherwis
 A session that lived its normal few minutes starts over at once. One that ended within
 30 s, whether it failed or showed a code, starts over with backoff: at once the first time,
 then after 0.5–1 s, 1–2 s and so on, up to 30 s. That way a gateway that drops every code
-right away can't make Akari reconnect in a tight loop with a new RSA key each time.
+right away can't make Akari reconnect in a tight loop with a new RSA key each time. A
+cancel on the phone is a normal user action, not a quick restart: the next code shows at
+once and doesn't count toward the backoff.
 
 Events wait in a queue instead of a channel, so the session keeps heartbeating while the
 UI isn't reading. A new code replaces one that hasn't been read yet, so only the newest

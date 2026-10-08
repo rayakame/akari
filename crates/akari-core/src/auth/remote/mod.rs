@@ -239,6 +239,8 @@ struct Task {
 enum End {
     Done,
     Cancelled,
+    // A normal user action: the next code shows at once and doesn't count as a quick restart.
+    CancelledOnPhone,
     Fatal(LoginError),
     // `failure` is set when the session never showed a code; several in a row end the login.
     Restart { failure: Option<LoginError> },
@@ -272,6 +274,10 @@ impl Task {
             let started = Instant::now();
             let failure = match self.session().await {
                 End::Done | End::Cancelled => break,
+                End::CancelledOnPhone => {
+                    failures = 0;
+                    continue;
+                }
                 End::Fatal(err) => {
                     self.shared.push(Err(err));
                     break;
@@ -433,7 +439,7 @@ impl Task {
                 ServerPacket::PendingLogin { ticket } => return Outcome::Exchange(ticket),
                 ServerPacket::Cancel => {
                     self.shared.push(Ok(QrEvent::CancelledOnPhone));
-                    return Outcome::End(End::Restart { failure: None });
+                    return Outcome::End(End::CancelledOnPhone);
                 }
                 ServerPacket::HeartbeatAck => {
                     if let Some(heartbeat) = &mut session.heartbeat {
