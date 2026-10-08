@@ -36,7 +36,7 @@ async fn scanning_and_confirming_returns_the_token() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
     let client = support::client(&rest, &gateway);
-    let qr = client.qr_login();
+    let qr = client.qr_login().unwrap();
 
     let mut session = gateway.accept().await;
     assert_eq!(session.header("origin"), Some("https://discord.com"));
@@ -72,7 +72,7 @@ async fn scanning_and_confirming_returns_the_token() {
 async fn cancelling_on_the_phone_shows_a_new_code() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
 
     let mut first = gateway.accept().await;
     let first_code = format!("https://discord.com/ra/{}", first.handshake(30_000).await);
@@ -93,7 +93,7 @@ async fn cancelling_on_the_phone_shows_a_new_code() {
 async fn an_expired_session_restarts_with_a_new_code() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
 
     let mut first = gateway.accept().await;
     let first_code = code_url({
@@ -113,7 +113,7 @@ async fn an_expired_session_restarts_with_a_new_code() {
 async fn repeated_handshake_failures_end_the_login() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
     let started = Instant::now();
 
     for code in [4002, 4001, 4002] {
@@ -138,7 +138,7 @@ async fn repeated_handshake_failures_end_the_login() {
 async fn a_wrong_fingerprint_restarts_the_session() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
 
     let mut forged = gateway.accept().await;
     forged.handshake_until_fingerprint(30_000).await;
@@ -159,7 +159,7 @@ async fn a_wrong_fingerprint_restarts_the_session() {
 async fn missing_heartbeat_acks_restart_the_session() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
 
     let mut silent = gateway.accept().await;
     silent.ack = false;
@@ -180,7 +180,7 @@ async fn missing_heartbeat_acks_restart_the_session() {
 async fn a_captcha_on_the_ticket_exchange_is_solved_and_retried() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
     let mut session = gateway.accept().await;
     session.handshake(30_000).await;
     code_url(qr.next().await);
@@ -227,7 +227,7 @@ async fn a_captcha_on_the_ticket_exchange_is_solved_and_retried() {
 async fn solving_a_captcha_nobody_asked_for_is_rejected() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
     let mut session = gateway.accept().await;
     session.handshake(30_000).await;
     code_url(qr.next().await);
@@ -242,7 +242,7 @@ async fn solving_a_captcha_nobody_asked_for_is_rejected() {
 async fn cancel_closes_the_connection() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
     let mut session = gateway.accept().await;
     session.handshake(30_000).await;
     code_url(qr.next().await);
@@ -257,7 +257,7 @@ async fn cancel_closes_the_connection() {
 async fn dropping_the_login_closes_the_connection() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
     let mut session = gateway.accept().await;
     session.handshake(30_000).await;
 
@@ -270,7 +270,7 @@ async fn dropping_the_login_closes_the_connection() {
 async fn an_unread_login_keeps_heartbeating_and_keeps_only_the_newest_code() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
 
     let mut fingerprint = String::new();
     for round in 0..3 {
@@ -306,7 +306,7 @@ async fn an_unread_login_keeps_heartbeating_and_keeps_only_the_newest_code() {
 async fn timeouts_before_any_code_count_as_failures() {
     let rest = support::rest_server().await;
     let mut gateway = RemoteAuthServer::start().await;
-    let qr = support::client(&rest, &gateway).qr_login();
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
 
     for _ in 0..3 {
         let mut session = gateway.accept().await;
@@ -320,4 +320,15 @@ async fn timeouts_before_any_code_count_as_failures() {
         matches!(result, Ok(Err(LoginError::RemoteAuth(_)))),
         "{result:?}"
     );
+}
+
+#[test]
+fn starting_outside_a_tokio_runtime_is_an_error() {
+    let client = akari_core::DiscordClient::new(
+        support::properties(),
+        std::sync::Arc::new(support::NoStore),
+    )
+    .unwrap();
+
+    assert!(matches!(client.qr_login(), Err(LoginError::NoRuntime)));
 }

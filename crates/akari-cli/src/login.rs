@@ -106,7 +106,13 @@ fn method_name(method: MfaMethod) -> &'static str {
 }
 
 pub async fn qr(client: &DiscordClient, store: &KeychainStore) -> ExitCode {
-    let flow = client.qr_login();
+    let flow = match client.qr_login() {
+        Ok(flow) => flow,
+        Err(err) => {
+            eprintln!("Login failed: {}", report(&err));
+            return ExitCode::FAILURE;
+        }
+    };
     loop {
         let event = tokio::select! {
             _ = tokio::signal::ctrl_c() => {

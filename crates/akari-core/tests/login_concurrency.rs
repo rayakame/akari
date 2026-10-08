@@ -40,7 +40,7 @@ async fn password_login_finishes_while_the_qr_code_waits() {
     mount_password_login(&rest, Duration::ZERO).await;
     let mut gateway = RemoteAuthServer::start().await;
     let client = support::client(&rest, &gateway);
-    let qr = client.qr_login();
+    let qr = client.qr_login().unwrap();
     let mut session = gateway.accept().await;
     session.handshake(30_000).await;
     assert!(matches!(qr.next().await, Ok(QrEvent::Code { .. })));
@@ -68,7 +68,7 @@ async fn qr_login_finishes_while_a_password_login_is_cancelled() {
     mount_password_login(&rest, Duration::from_secs(10)).await;
     let mut gateway = RemoteAuthServer::start().await;
     let client = support::client(&rest, &gateway);
-    let qr = client.qr_login();
+    let qr = client.qr_login().unwrap();
     let password = client.password_login();
 
     let qr_side = async {

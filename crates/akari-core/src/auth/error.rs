@@ -48,6 +48,9 @@ pub enum LoginError {
     NoPendingStep,
     #[error("another login step is still running")]
     Busy,
+    /// QR code login runs in the background and needs a Tokio runtime to start in.
+    #[error("QR code login needs a Tokio runtime")]
+    NoRuntime,
 }
 
 impl LoginError {

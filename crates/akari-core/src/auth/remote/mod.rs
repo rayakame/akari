@@ -106,11 +106,12 @@ const RETRY_BASE: Duration = Duration::from_secs(1);
 const RETRY_MAX: Duration = Duration::from_secs(30);
 
 impl QrLogin {
-    pub(crate) fn start(client: DiscordClient) -> Self {
+    pub(crate) fn start(client: DiscordClient) -> Result<Self, LoginError> {
         Self::start_with(client, HELLO_TIMEOUT)
     }
 
-    fn start_with(client: DiscordClient, hello_timeout: Duration) -> Self {
+    fn start_with(client: DiscordClient, hello_timeout: Duration) -> Result<Self, LoginError> {
+        let runtime = tokio::runtime::Handle::try_current().map_err(|_| LoginError::NoRuntime)?;
         let shared = Arc::new(Shared::default());
         let cancel = CancellationToken::new();
         let (solutions, receiver) = mpsc::channel(1);
@@ -121,12 +122,12 @@ impl QrLogin {
             solutions: receiver,
             hello_timeout,
         };
-        tokio::spawn(task.run());
-        Self {
+        runtime.spawn(task.run());
+        Ok(Self {
             shared,
             solutions,
             cancel,
-        }
+        })
     }
 
     /// The next event. After [`QrEvent::Done`] or an error the login is over, and further
@@ -564,7 +565,7 @@ mod tests {
         let client =
             DiscordClient::with_endpoints(properties, Arc::new(NoStore), endpoints).unwrap();
 
-        let qr = QrLogin::start_with(client, Duration::from_millis(50));
+        let qr = QrLogin::start_with(client, Duration::from_millis(50)).unwrap();
         let result = tokio::time::timeout(Duration::from_secs(5), qr.next()).await;
 
         assert!(

@@ -6,7 +6,7 @@ use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use tokio::sync::OnceCell;
 
-use crate::auth::{LogoutError, PasswordLogin, QrLogin};
+use crate::auth::{LoginError, LogoutError, PasswordLogin, QrLogin};
 use crate::error::TransportError;
 use crate::model::{Snowflake, UserMarker};
 use crate::properties::ClientProperties;
@@ -133,9 +133,9 @@ impl DiscordClient {
         PasswordLogin::new(self.clone())
     }
 
-    /// Starts a QR code login in the background; must be called inside a Tokio runtime.
-    /// It can run next to a password login.
-    pub fn qr_login(&self) -> QrLogin {
+    /// Starts a QR code login in the background. It can run next to a password login.
+    /// Fails with [`LoginError::NoRuntime`] outside a Tokio runtime.
+    pub fn qr_login(&self) -> Result<QrLogin, LoginError> {
         QrLogin::start(self.clone())
     }
 
