@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::gateway::{GatewayEvent, decode};
-use crate::model::{self, Snowflake};
+use crate::model::{self, Permissions, Snowflake};
 
 const G1: u64 = 200_000_000_000_000_001;
 const G3: u64 = 200_000_000_000_000_003;
@@ -314,4 +314,124 @@ fn a_ready_is_built_outside_the_lock() {
     applying.join().unwrap();
 
     assert_eq!(guilds, Ok(1), "a read waited for the READY build");
+}
+
+fn raw_list(value: &Value) -> &[Value] {
+    value.as_array().map_or(&[], Vec::as_slice)
+}
+
+fn raw_id(value: &Value) -> u64 {
+    value["id"]
+        .as_str()
+        .and_then(|id| id.parse().ok())
+        .or_else(|| {
+            value["properties"]["id"]
+                .as_str()
+                .and_then(|id| id.parse().ok())
+        })
+        .expect("a guild without an id")
+}
+
+// Run on a real READY with:
+// AKARI_READY_FIXTURE="$PWD/captures/ready-<unix time>.json" \
+//   cargo test -p akari-core --lib -- --ignored captured_ready_builds_the_store --nocapture
+#[test]
+#[ignore = "needs AKARI_READY_FIXTURE, a READY captured with `akari-cli connect --capture`"]
+fn captured_ready_builds_the_store() {
+    let path = std::env::var("AKARI_READY_FIXTURE")
+        .expect("AKARI_READY_FIXTURE must point to a captured READY message");
+    let json = std::fs::read_to_string(&path).expect("AKARI_READY_FIXTURE is not readable");
+    let raw: Value = serde_json::from_str(&json).expect("AKARI_READY_FIXTURE is not JSON");
+    let ready = match decode(json.as_bytes()) {
+        Ok(GatewayEvent::Dispatch { event, .. }) => event,
+        Ok(_) => panic!("AKARI_READY_FIXTURE is not a dispatch"),
+        Err(err) => {
+            let mut text = err.to_string();
+            let mut source = std::error::Error::source(&err);
+            while let Some(cause) = source {
+                text = format!("{text}: {cause}");
+                source = cause.source();
+            }
+            panic!("READY didn't decode: {text}");
+        }
+    };
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready);
+    let data = &raw["d"];
+
+    let (unavailable, available): (Vec<&Value>, Vec<&Value>) = raw_list(&data["guilds"])
+        .iter()
+        .partition(|guild| guild["unavailable"].as_bool() == Some(true));
+    let mut marked: Vec<u64> = unavailable.iter().map(|guild| raw_id(guild)).collect();
+    marked.sort_unstable();
+    let mut found: Vec<u64> = store
+        .unavailable_guilds()
+        .iter()
+        .map(|id| id.get())
+        .collect();
+    found.sort_unstable();
+    assert_eq!(
+        found, marked,
+        "guilds became unavailable that READY didn't mark"
+    );
+    assert_eq!(
+        store.guilds().len(),
+        available.len(),
+        "available guilds were lost"
+    );
+
+    let (mut channels, mut visible, mut threads) = (0, 0, 0);
+    for raw_guild in available {
+        let id = Snowflake::new(raw_id(raw_guild));
+        assert!(store.guild(id).is_some(), "guild {} is missing", id.get());
+        assert!(
+            store.current_member(id).is_some(),
+            "guild {} has no current member",
+            id.get()
+        );
+        let guild_channels = store.guild_channels(id);
+        let guild_threads = store.threads(id);
+        assert_eq!(
+            guild_channels.len() + guild_threads.len(),
+            raw_list(&raw_guild["channels"]).len() + raw_list(&raw_guild["threads"]).len(),
+            "guild {} lost channels or threads",
+            id.get()
+        );
+        for channel in guild_channels.iter().chain(&guild_threads) {
+            let permissions = store.permissions(channel.id).unwrap_or_else(|| {
+                panic!(
+                    "no permissions for channel {} in guild {}",
+                    channel.id.get(),
+                    id.get()
+                )
+            });
+            if !channel.is_thread() && permissions.contains(Permissions::VIEW_CHANNEL) {
+                visible += 1;
+            }
+        }
+        channels += guild_channels.len();
+        threads += guild_threads.len();
+    }
+
+    let private_channels = store.private_channels();
+    assert_eq!(
+        private_channels.len(),
+        raw_list(&data["private_channels"]).len(),
+        "private channels were lost"
+    );
+    for channel in &private_channels {
+        for recipient in &channel.recipients {
+            assert!(
+                store.user(*recipient).is_some(),
+                "a recipient of private channel {} doesn't resolve",
+                channel.id.get()
+            );
+        }
+    }
+
+    println!(
+        "guilds: {}, channels: {channels}, visible channels: {visible}, threads: {threads}, DMs: {}",
+        store.guilds().len(),
+        private_channels.len()
+    );
 }

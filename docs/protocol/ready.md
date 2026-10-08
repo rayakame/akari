@@ -141,6 +141,20 @@ guild channel or thread is skipped. Its own messages name only guild IDs, and wh
 part of READY fails, the panic shows only where: the error's category, line and column
 (`DecodeError` keeps no serde message, so no value from the payload).
 
+A second ignored test builds the state store from the same capture:
+
+```sh
+AKARI_READY_FIXTURE="$PWD/captures/ready-<unix time>.json" \
+  cargo test -p akari-core --lib -- --ignored captured_ready_builds_the_store --nocapture
+```
+
+It fails if an available guild, channel or thread is missing from the store, if a guild
+becomes unavailable that READY didn't mark, if a private channel's recipient doesn't
+resolve through `Store::user`, if a guild has no member for the current user, or if
+`Store::permissions` returns `None` for a guild channel or thread. Its messages name only
+guild and channel IDs. With `--nocapture` it prints counts and nothing else: guilds,
+channels, visible channels (with `VIEW_CHANNEL`), threads and DMs.
+
 A captured READY contains secrets (`analytics_token`, `auth_session_id_hash`) and personal
 data. `captures/` is git-ignored; still never commit or share a capture, and delete it when
 you're done.
