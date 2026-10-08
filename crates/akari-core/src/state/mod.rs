@@ -6,6 +6,8 @@ mod events;
 mod permissions;
 mod store;
 mod types;
+// Account's history loads will be the first callers outside tests.
+#[cfg_attr(not(test), allow(dead_code))]
 mod windows;
 
 pub use events::{ConnectionState, StoreEvent};

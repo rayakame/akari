@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::events::StoreEvent;
@@ -19,12 +19,37 @@ pub(crate) const DEFAULT_LIMITS: WindowLimits = WindowLimits {
 
 const RECENT_AUTHORS: usize = 50;
 
-// History loads will be the first caller outside tests.
-#[cfg_attr(not(test), expect(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum End {
     Older,
     Newer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoadKind {
+    Latest,
+    // Like Latest, but keeps the window's position if the page doesn't reach it.
+    Refresh,
+    Older,
+    Newer,
+    Around(MessageId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cursor {
+    Latest,
+    Before(MessageId),
+    After(MessageId),
+    Around(MessageId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LoadTicket {
+    pub(crate) channel: ChannelId,
+    pub(crate) kind: LoadKind,
+    pub(crate) cursor: Cursor,
+    generation: u64,
+    holds: bool,
 }
 
 /// A snapshot of a viewed channel's loaded messages.
@@ -48,11 +73,112 @@ struct Window {
     latest: bool,
     oldest: bool,
     stale: bool,
-    // Live messages that arrived while stale; appending them would leave a gap.
+    // A load that ends at the present is running, so live messages wait for it.
+    holding: bool,
+    // Live messages that arrived while stale or holding; appending them would leave a gap.
     held: Vec<Arc<Message>>,
+    // Bumped whenever the messages are replaced, so a load for the old ones is dropped.
+    generation: u64,
 }
 
 impl Window {
+    fn appends_live(&self) -> bool {
+        self.latest && !self.stale && !self.holding
+    }
+
+    fn holds_live(&self) -> bool {
+        self.holding || (self.stale && self.latest)
+    }
+
+    fn merge(
+        &mut self,
+        channel_id: ChannelId,
+        batch: Vec<Arc<Message>>,
+        end: End,
+        reached_end: bool,
+        limit: usize,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let mut added = Added::default();
+        for message in batch {
+            match Window::position(&self.messages, message.id) {
+                Ok(index) => {
+                    if self.messages[index] != message {
+                        self.messages[index] = message.clone();
+                        events.push(StoreEvent::MessageUpdated(message));
+                    }
+                }
+                Err(index) => {
+                    added.add(message.id);
+                    self.messages.insert(index, message);
+                }
+            }
+        }
+        added.push(channel_id, events);
+        match end {
+            End::Older => self.oldest |= reached_end,
+            End::Newer => self.latest |= reached_end,
+        }
+        let away_from_the_load = match end {
+            End::Older => End::Newer,
+            End::Newer => End::Older,
+        };
+        self.trim(channel_id, limit, away_from_the_load, events);
+    }
+
+    fn release_held(&mut self, channel_id: ChannelId, limit: usize, events: &mut Vec<StoreEvent>) {
+        let newest = self.messages.last().map(|message| message.id);
+        let held: Vec<_> = std::mem::take(&mut self.held)
+            .into_iter()
+            .filter(|message| newest.is_none_or(|newest| message.id > newest))
+            .collect();
+        self.holding = false;
+        self.merge(channel_id, held, End::Newer, false, limit, events);
+    }
+
+    // The page is the channel's newest; within its range it is the truth.
+    fn reconcile(
+        &mut self,
+        channel_id: ChannelId,
+        page: Vec<Arc<Message>>,
+        reached_end: bool,
+        limit: usize,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if let (Some(first), Some(last)) = (page.first(), page.last()) {
+            let (first, last) = (first.id, last.id);
+            let ids: HashSet<MessageId> = page.iter().map(|message| message.id).collect();
+            self.messages.retain(|message| {
+                let gone = (first..=last).contains(&message.id) && !ids.contains(&message.id);
+                if gone {
+                    events.push(StoreEvent::MessageDeleted {
+                        channel_id,
+                        message_id: message.id,
+                    });
+                }
+                !gone
+            });
+        }
+        self.merge(
+            channel_id,
+            page,
+            End::Older,
+            reached_end,
+            usize::MAX,
+            events,
+        );
+        self.release_held(channel_id, usize::MAX, events);
+        self.stale = false;
+        self.latest = true;
+        self.trim(channel_id, limit, End::Older, events);
+    }
+
+    fn reaches(&self, page: &[Arc<Message>]) -> bool {
+        match (page.first(), self.messages.last()) {
+            (Some(first), Some(last)) => first.id <= last.id,
+            _ => false,
+        }
+    }
     fn position(messages: &[Arc<Message>], id: MessageId) -> Result<usize, usize> {
         messages.binary_search_by_key(&id, |message| message.id)
     }
@@ -92,6 +218,28 @@ impl Window {
     }
 }
 
+#[derive(Default)]
+struct Added(Option<(MessageId, MessageId)>);
+
+impl Added {
+    fn add(&mut self, id: MessageId) {
+        self.0 = Some(
+            self.0
+                .map_or((id, id), |(first, last)| (first.min(id), last.max(id))),
+        );
+    }
+
+    fn push(self, channel_id: ChannelId, events: &mut Vec<StoreEvent>) {
+        if let Some((first, last)) = self.0 {
+            events.push(StoreEvent::MessagesLoaded {
+                channel_id,
+                first,
+                last,
+            });
+        }
+    }
+}
+
 fn upsert(messages: &mut Vec<Arc<Message>>, message: Arc<Message>) {
     match Window::position(messages, message.id) {
         Ok(index) => messages[index] = message,
@@ -105,6 +253,7 @@ pub(crate) struct Windows {
     // Most recently viewed first.
     order: VecDeque<ChannelId>,
     windows: HashMap<ChannelId, Window>,
+    generations: u64,
 }
 
 impl Windows {
@@ -113,17 +262,25 @@ impl Windows {
             limits,
             order: VecDeque::new(),
             windows: HashMap::new(),
+            generations: 0,
         }
+    }
+
+    fn next_generation(&mut self) -> u64 {
+        self.generations += 1;
+        self.generations
     }
 
     pub(crate) fn view(&mut self, channel: ChannelId, events: &mut Vec<StoreEvent>) {
         if let Some(index) = self.order.iter().position(|viewed| *viewed == channel) {
             self.order.remove(index);
         } else {
+            let generation = self.next_generation();
             self.windows.insert(
                 channel,
                 Window {
                     latest: true,
+                    generation,
                     ..Window::default()
                 },
             );
@@ -173,7 +330,8 @@ impl Windows {
         let Some(window) = self.windows.get(&channel_id) else {
             return;
         };
-        if !window.latest {
+        let visible = Window::position(&window.messages, message.id).is_ok();
+        if !visible && !window.appends_live() && !window.holds_live() {
             return;
         }
         let message = Arc::new(Message::from_wire(message, &mut |user| {
@@ -190,7 +348,7 @@ impl Windows {
                     events.push(StoreEvent::MessageUpdated(message));
                 }
             }
-            Err(_) if window.stale => {
+            Err(_) if window.holds_live() => {
                 upsert(&mut window.held, message);
                 let excess = window.held.len().saturating_sub(limit);
                 window.held.drain(..excess);
@@ -203,9 +361,7 @@ impl Windows {
         }
     }
 
-    // Callers pass the batch sorted by ID. History loads will be the first caller outside
-    // tests.
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg(test)]
     pub(crate) fn insert_batch(
         &mut self,
         channel_id: ChannelId,
@@ -215,42 +371,169 @@ impl Windows {
         events: &mut Vec<StoreEvent>,
     ) {
         let limit = self.limits.messages;
-        let Some(window) = self.windows.get_mut(&channel_id) else {
+        if let Some(window) = self.windows.get_mut(&channel_id) {
+            window.merge(channel_id, batch, end, reached_end, limit, events);
+        }
+    }
+
+    // None if there's nothing to load: no window, a live window for Newer, a fresh one for
+    // Refresh.
+    pub(crate) fn begin_load(
+        &mut self,
+        channel: ChannelId,
+        kind: LoadKind,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<LoadTicket> {
+        if matches!(kind, LoadKind::Latest | LoadKind::Around(_)) {
+            self.view(channel, events);
+        }
+        let window = self.windows.get_mut(&channel)?;
+        let first = window.messages.first().map(|message| message.id);
+        let last = window.messages.last().map(|message| message.id);
+        let (kind, cursor) = match (kind, first, last) {
+            (LoadKind::Older, Some(first), _) => (kind, Cursor::Before(first)),
+            (LoadKind::Newer, _, Some(last)) if !window.appends_live() => {
+                (kind, Cursor::After(last))
+            }
+            (LoadKind::Newer, _, Some(_)) => return None,
+            (LoadKind::Refresh, ..) if !window.stale => return None,
+            (LoadKind::Refresh, ..) => (kind, Cursor::Latest),
+            (LoadKind::Around(id), ..) => (kind, Cursor::Around(id)),
+            (LoadKind::Latest | LoadKind::Older | LoadKind::Newer, ..) => {
+                (LoadKind::Latest, Cursor::Latest)
+            }
+        };
+        let holds = matches!(kind, LoadKind::Latest | LoadKind::Refresh | LoadKind::Newer)
+            && !window.appends_live();
+        window.holding |= holds;
+        Some(LoadTicket {
+            channel,
+            kind,
+            cursor,
+            generation: window.generation,
+            holds,
+        })
+    }
+
+    // The page as Discord sent it; it is sorted here.
+    pub(crate) fn finish_load(
+        &mut self,
+        ticket: LoadTicket,
+        page: Vec<model::Message>,
+        users: &HashMap<UserId, Arc<User>>,
+        limit: usize,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let window_limit = self.limits.messages;
+        let generation = self.next_generation();
+        let channel_id = ticket.channel;
+        let Some(window) = self
+            .windows
+            .get_mut(&channel_id)
+            .filter(|window| window.generation == ticket.generation)
+        else {
             return;
         };
-        let mut added: Option<(MessageId, MessageId)> = None;
-        for message in batch {
-            match Window::position(&window.messages, message.id) {
-                Ok(index) => {
-                    if window.messages[index] != message {
-                        window.messages[index] = message.clone();
-                        events.push(StoreEvent::MessageUpdated(message));
-                    }
-                }
-                Err(index) => {
-                    let id = message.id;
-                    window.messages.insert(index, message);
-                    added =
-                        Some(added.map_or((id, id), |(first, last)| (first.min(id), last.max(id))));
+        let reached_end = page.len() < limit;
+        let mut page: Vec<Arc<Message>> = page
+            .into_iter()
+            .map(|message| {
+                Arc::new(Message::from_wire(message, &mut |user| {
+                    intern(user, users, &window.messages)
+                }))
+            })
+            .collect();
+        page.sort_by_key(|message| message.id);
+        match ticket.kind {
+            LoadKind::Older => {
+                window.merge(
+                    channel_id,
+                    page,
+                    End::Older,
+                    reached_end,
+                    window_limit,
+                    events,
+                );
+            }
+            LoadKind::Newer => {
+                window.merge(
+                    channel_id,
+                    page,
+                    End::Newer,
+                    reached_end,
+                    window_limit,
+                    events,
+                );
+                if reached_end {
+                    window.release_held(channel_id, window_limit, events);
+                } else {
+                    window.holding = false;
+                    window.held.clear();
                 }
             }
+            LoadKind::Latest if window.appends_live() => {
+                window.merge(
+                    channel_id,
+                    page,
+                    End::Older,
+                    reached_end,
+                    window_limit,
+                    events,
+                );
+            }
+            LoadKind::Latest | LoadKind::Refresh if window.stale && window.reaches(&page) => {
+                window.reconcile(channel_id, page, reached_end, window_limit, events);
+            }
+            LoadKind::Refresh => {
+                window.latest = false;
+                window.holding = false;
+                window.held.clear();
+                events.push(StoreEvent::MessagesStale { channel_id });
+            }
+            LoadKind::Latest | LoadKind::Around(_) => {
+                if !window.messages.is_empty() {
+                    events.push(StoreEvent::MessagesCleared { channel_id });
+                }
+                let at_present = ticket.kind == LoadKind::Latest;
+                let held = std::mem::take(&mut window.held);
+                *window = Window {
+                    generation,
+                    ..Window::default()
+                };
+                let mut added = Added::default();
+                for message in &page {
+                    added.add(message.id);
+                }
+                window.messages = page;
+                window.oldest = at_present && reached_end;
+                window.latest = at_present;
+                if at_present {
+                    let newest = window.messages.last().map(|message| message.id);
+                    for message in held
+                        .into_iter()
+                        .filter(|message| newest.is_none_or(|newest| message.id > newest))
+                    {
+                        added.add(message.id);
+                        window.messages.push(message);
+                    }
+                }
+                added.push(channel_id, events);
+                window.trim(channel_id, window_limit, End::Older, events);
+            }
         }
-        if let Some((first, last)) = added {
-            events.push(StoreEvent::MessagesLoaded {
-                channel_id,
-                first,
-                last,
-            });
+    }
+
+    pub(crate) fn abort_load(&mut self, ticket: LoadTicket) {
+        if let Some(window) = self
+            .windows
+            .get_mut(&ticket.channel)
+            .filter(|window| window.generation == ticket.generation && ticket.holds)
+        {
+            window.holding = false;
+            if !window.stale {
+                window.held.clear();
+            }
         }
-        match end {
-            End::Older => window.oldest |= reached_end,
-            End::Newer => window.latest |= reached_end,
-        }
-        let away_from_the_load = match end {
-            End::Older => End::Newer,
-            End::Newer => End::Older,
-        };
-        window.trim(channel_id, limit, away_from_the_load, events);
     }
 
     pub(crate) fn update(

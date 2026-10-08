@@ -47,8 +47,8 @@ pub enum StoreEvent {
         channel_id: ChannelId,
         message_id: MessageId,
     },
-    /// A loaded range was added at one end of the window, e.g. older history. Read the
-    /// window to get `first..=last`.
+    /// Messages were added within `first..=last`: older or newer history, or messages a
+    /// refresh filled in. Read the window for that range.
     MessagesLoaded {
         channel_id: ChannelId,
         first: MessageId,
@@ -62,11 +62,14 @@ pub enum StoreEvent {
         last: MessageId,
     },
     /// A new session may have missed changes to the window's messages. They stay until
-    /// the window is refreshed; new messages wait for the refresh.
+    /// the window is refreshed; new messages wait for the refresh. Sent again when the
+    /// refresh can't reach the window: it stays stale, and `latest` is false until a jump
+    /// to the present.
     MessagesStale {
         channel_id: ChannelId,
     },
-    /// The channel was viewed least recently and its window was dropped.
+    /// The window's messages were dropped: the channel was viewed least recently, or a jump
+    /// to the present or to a message replaced them.
     MessagesCleared {
         channel_id: ChannelId,
     },

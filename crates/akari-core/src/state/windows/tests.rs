@@ -425,3 +425,271 @@ fn a_stale_window_updates_a_visible_message_instead_of_holding_it() {
     assert_eq!(&*harness.window().messages[0].content, "again");
     assert!(harness.windows.held(channel(CH)).is_empty());
 }
+
+const LOADS: WindowLimits = WindowLimits {
+    channels: 2,
+    messages: 5,
+};
+
+impl Harness {
+    fn begin(&mut self, kind: LoadKind) -> Option<LoadTicket> {
+        let mut events = Vec::new();
+        let ticket = self.windows.begin_load(channel(CH), kind, &mut events);
+        assert!(describe(&events).is_empty(), "{:?}", describe(&events));
+        ticket
+    }
+
+    fn finish(&mut self, ticket: LoadTicket, ids: &[u64], limit: usize) -> Vec<String> {
+        let mut events = Vec::new();
+        let page = ids.iter().map(|id| wire(*id)).collect();
+        self.windows
+            .finish_load(ticket, page, &self.users, limit, &mut events);
+        describe(&events)
+    }
+
+    fn edited_finish(
+        &mut self,
+        ticket: LoadTicket,
+        page: Vec<model::Message>,
+        limit: usize,
+    ) -> Vec<String> {
+        let mut events = Vec::new();
+        self.windows
+            .finish_load(ticket, page, &self.users, limit, &mut events);
+        describe(&events)
+    }
+
+    fn detached(limits: WindowLimits, ids: &[u64]) -> Self {
+        let mut harness = Self::viewing(limits);
+        let around = ids[ids.len() / 2];
+        let ticket = harness
+            .begin(LoadKind::Around(Snowflake::new(around)))
+            .unwrap();
+        harness.finish(ticket, ids, 100);
+        assert!(!harness.window().latest);
+        harness
+    }
+}
+
+fn edited_wire(id: u64) -> model::Message {
+    let mut message = wire(id);
+    message.content = format!("edited {id}");
+    message
+}
+
+#[test]
+fn older_and_newer_continue_from_the_ends() {
+    let mut live = Harness::viewing(LOADS);
+    live.live(wire(10));
+    live.live(wire(11));
+    let older = live.begin(LoadKind::Older).unwrap();
+    let mut detached = Harness::detached(LOADS, &[19, 20, 21]);
+    let newer = detached.begin(LoadKind::Newer).unwrap();
+
+    assert_eq!(older.cursor, Cursor::Before(Snowflake::new(10)));
+    assert_eq!(live.finish(older, &[7, 8, 9], 3), ["Loaded(7..9)"]);
+    assert_eq!(live.ids(), [7, 8, 9, 10, 11]);
+    assert_eq!(newer.cursor, Cursor::After(Snowflake::new(21)));
+    assert_eq!(detached.finish(newer, &[22, 23], 3), ["Loaded(22..23)"]);
+    assert!(detached.window().latest);
+}
+
+#[test]
+fn older_on_an_empty_window_loads_the_latest() {
+    let mut harness = Harness::viewing(LOADS);
+
+    let ticket = harness.begin(LoadKind::Older).unwrap();
+
+    assert_eq!(ticket.kind, LoadKind::Latest);
+    assert_eq!(ticket.cursor, Cursor::Latest);
+}
+
+#[test]
+fn latest_on_a_live_window_merges() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.live(wire(11));
+
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    let events = harness.finish(ticket, &[9, 10, 11], 3);
+
+    assert_eq!(events, ["Loaded(9..9)"]);
+    assert_eq!(harness.ids(), [9, 10, 11]);
+    assert!(harness.window().latest);
+}
+
+#[test]
+fn latest_on_a_detached_window_jumps_to_the_present() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    let held = harness.live(wire(30));
+    let events = harness.finish(ticket, &[28, 29], 5);
+
+    assert!(held.is_empty(), "{held:?}");
+    assert_eq!(events, ["Cleared(1)", "Loaded(28..30)"]);
+    assert_eq!(harness.ids(), [28, 29, 30]);
+    let window = harness.window();
+    assert!(window.latest && window.oldest && !window.stale);
+}
+
+#[test]
+fn refresh_reconciles_a_stale_window() {
+    let mut harness = Harness::viewing(LOADS);
+    for id in 10..13 {
+        harness.live(wire(id));
+    }
+    harness.windows.mark_stale(&mut Vec::new());
+    harness.live(wire(14));
+
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    let events = harness.edited_finish(ticket, vec![edited_wire(11), wire(13)], 5);
+
+    assert_eq!(
+        events,
+        [
+            "Deleted(12)",
+            "Updated(11)",
+            "Loaded(13..13)",
+            "Loaded(14..14)"
+        ]
+    );
+    assert_eq!(harness.ids(), [10, 11, 13, 14]);
+    let window = harness.window();
+    assert!(!window.stale && window.latest);
+    assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
+#[test]
+fn reconcile_touches_only_the_pages_range() {
+    let mut harness = Harness::viewing(LOADS);
+    for id in 5..10 {
+        harness.live(wire(id));
+    }
+    harness.windows.mark_stale(&mut Vec::new());
+
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    let events = harness.finish(ticket, &[8, 10], 5);
+
+    assert_eq!(events, ["Deleted(9)", "Loaded(10..10)"]);
+    assert_eq!(harness.ids(), [5, 6, 7, 8, 10]);
+}
+
+#[test]
+fn refresh_without_overlap_keeps_the_position() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.live(wire(11));
+    harness.windows.mark_stale(&mut Vec::new());
+    harness.live(wire(20));
+
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    let events = harness.finish(ticket, &[30, 31, 32], 3);
+
+    assert_eq!(events, ["Stale(1)"]);
+    assert_eq!(harness.ids(), [10, 11]);
+    let window = harness.window();
+    assert!(window.stale && !window.latest);
+    assert!(harness.windows.held(channel(CH)).is_empty());
+    assert!(harness.live(wire(33)).is_empty());
+    assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
+#[test]
+fn held_messages_join_after_a_catch_up() {
+    let mut harness = Harness::detached(
+        WindowLimits {
+            channels: 2,
+            messages: 10,
+        },
+        &[19, 20, 21],
+    );
+
+    let ticket = harness.begin(LoadKind::Newer).unwrap();
+    let held = harness.live(wire(30));
+    let events = harness.finish(ticket, &[22, 23], 5);
+
+    assert!(held.is_empty(), "{held:?}");
+    assert_eq!(events, ["Loaded(22..23)", "Loaded(30..30)"]);
+    assert_eq!(harness.ids(), [19, 20, 21, 22, 23, 30]);
+    assert!(harness.window().latest);
+    assert_eq!(harness.live(wire(31)), ["Inserted(31)"]);
+}
+
+#[test]
+fn a_catch_up_that_doesnt_reach_the_present_drops_held_messages() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+
+    let ticket = harness.begin(LoadKind::Newer).unwrap();
+    harness.live(wire(30));
+    harness.finish(ticket, &[22, 23], 2);
+
+    assert!(!harness.window().latest);
+    assert!(harness.windows.held(channel(CH)).is_empty());
+    assert!(harness.live(wire(31)).is_empty());
+}
+
+#[test]
+fn a_load_for_a_replaced_window_is_dropped() {
+    let mut evicted = Harness::viewing(LOADS);
+    evicted.live(wire(10));
+    let stale_ticket = evicted.begin(LoadKind::Older).unwrap();
+    evicted.view(2);
+    evicted.view(3);
+    evicted.view(CH);
+
+    let mut jumped = Harness::viewing(LOADS);
+    jumped.live(wire(10));
+    let old_ticket = jumped.begin(LoadKind::Older).unwrap();
+    let around = jumped.begin(LoadKind::Around(Snowflake::new(50))).unwrap();
+    jumped.finish(around, &[49, 50, 51], 3);
+
+    let mut deleted = Harness::viewing(LOADS);
+    deleted.live(wire(10));
+    let gone_ticket = deleted.begin(LoadKind::Older).unwrap();
+    deleted.windows.drop_channel(channel(CH));
+
+    assert!(evicted.finish(stale_ticket, &[7, 8, 9], 3).is_empty());
+    assert!(evicted.ids().is_empty());
+    assert!(jumped.finish(old_ticket, &[7, 8, 9], 3).is_empty());
+    assert_eq!(jumped.ids(), [49, 50, 51]);
+    assert!(deleted.finish(gone_ticket, &[7, 8, 9], 3).is_empty());
+    assert!(deleted.windows.snapshot(channel(CH)).is_none());
+}
+
+#[test]
+fn around_replaces_the_window() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.live(wire(11));
+
+    let ticket = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+    let events = harness.finish(ticket, &[4, 5, 6], 3);
+
+    assert_eq!(ticket.cursor, Cursor::Around(Snowflake::new(5)));
+    assert_eq!(events, ["Cleared(1)", "Loaded(4..6)"]);
+    assert_eq!(harness.ids(), [4, 5, 6]);
+    assert!(!harness.window().latest);
+}
+
+#[test]
+fn aborting_a_load_stops_holding() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+
+    let ticket = harness.begin(LoadKind::Newer).unwrap();
+    harness.windows.abort_load(ticket);
+    harness.live(wire(30));
+
+    assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
+#[test]
+fn loads_with_nothing_to_do_are_skipped() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+
+    assert!(harness.begin(LoadKind::Newer).is_none());
+    assert!(harness.begin(LoadKind::Refresh).is_none());
+    let mut unviewed = Harness::new(LOADS);
+    assert!(unviewed.begin(LoadKind::Older).is_none());
+}
