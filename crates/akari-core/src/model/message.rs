@@ -54,7 +54,7 @@ pub struct Message {
     #[serde(default, deserialize_with = "double_option")]
     pub referenced_message: Option<Option<Box<Message>>>,
     /// The sender's deduplication value; Discord echoes it to the sender's sessions.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_nonce")]
     pub nonce: Option<Nonce>,
 }
 
@@ -79,6 +79,22 @@ impl<'de> Deserialize<'de> for Nonce {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_any(NonceVisitor)
     }
+}
+
+// Other clients choose their own nonces; one Akari can't read mustn't drop the message.
+fn lenient_nonce<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Nonce>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Shape {
+        Nonce(Nonce),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Option::<Shape>::deserialize(deserializer)? {
+        Some(Shape::Nonce(nonce)) => Some(nonce),
+        Some(Shape::Other(_)) | None => None,
+    })
 }
 
 struct NonceVisitor;

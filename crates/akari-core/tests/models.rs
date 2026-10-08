@@ -8,7 +8,7 @@ use akari_core::model::{
     Timestamp, User, UserMarker,
 };
 use serde::de::DeserializeOwned;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 #[track_caller]
 fn parse<T: DeserializeOwned>(json: &str) -> T {
@@ -535,6 +535,27 @@ fn broken_list_entries_drop_only_themselves() {
     );
     assert_eq!(message.sticker_items.len(), 1);
     assert_eq!(message.reactions.len(), 2);
+}
+
+#[test]
+fn an_odd_nonce_doesnt_drop_the_message() {
+    for nonce in [
+        json!(-5),
+        json!(1.5),
+        json!(true),
+        json!({"a": 1}),
+        json!([1]),
+    ] {
+        let mut value: Value = parse(include_str!("fixtures/message.json"));
+        value["nonce"] = nonce.clone();
+
+        let message = serde_json::from_str::<Message>(&value.to_string());
+
+        assert!(
+            matches!(&message, Ok(message) if message.nonce.is_none()),
+            "{nonce}: {message:?}"
+        );
+    }
 }
 
 #[test]

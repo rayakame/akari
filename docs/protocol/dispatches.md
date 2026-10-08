@@ -16,7 +16,8 @@ fake IDs.
   resume doesn't replay it, and logs a warning with the event name and `s` only. serde's
   error text can quote values from the payload, so it is never logged.
 - A message's `attachments`, `embeds`, `mentions`, `mention_roles`, `sticker_items` and
-  `reactions` skip entries that fail to parse, so one odd embed doesn't drop a message.
+  `reactions` skip entries that fail to parse, so one odd embed doesn't drop a message. A
+  `nonce` that is neither a string nor a non-negative integer becomes `None`.
 - Discord may send an event more than once
   ([consistency](https://docs.discord.food/reference#consistency)). The store applies every
   dispatch idempotently: a repeated MESSAGE_CREATE, CHANNEL_CREATE or GUILD_CREATE replaces
