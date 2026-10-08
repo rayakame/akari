@@ -1,5 +1,7 @@
 //! Gateway payloads as Discord sends them.
 
+#[cfg_attr(not(test), allow(dead_code))]
+mod decompress;
 mod guild;
 mod hello;
 mod lenient;

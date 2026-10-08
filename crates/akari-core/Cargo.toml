@@ -24,6 +24,7 @@ tokio-tungstenite.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
+zstd.workspace = true
 
 [features]
 # Lets Endpoints point at http:// and ws:// test servers. Only the test suites enable it.
