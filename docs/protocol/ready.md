@@ -116,10 +116,11 @@ cargo run -p akari-cli -- connect --capture
 It connects with the capabilities above (Identify sends exactly them, see
 [gateway.md](gateway.md#identify)), saves the decompressed READY message (the whole
 `{"op": 0, "t": "READY", …}` object) as `captures/ready-<unix time>.json` with mode 0600,
-prints the path and closes the session. Then run the ignored test on it:
+prints its absolute path and closes the session. Then run the ignored test on it. The path
+must be absolute, because cargo runs the test from `crates/akari-core`:
 
 ```sh
-AKARI_READY_FIXTURE=captures/ready-<unix time>.json \
+AKARI_READY_FIXTURE="$PWD/captures/ready-<unix time>.json" \
   cargo test -p akari-core --test gateway -- --ignored captured_ready_decodes_completely
 ```
 

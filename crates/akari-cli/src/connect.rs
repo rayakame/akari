@@ -223,7 +223,8 @@ fn save_capture(dir: &Path, json: &[u8]) -> io::Result<PathBuf> {
         .mode(0o600)
         .open(&path)?;
     file.write_all(json)?;
-    Ok(path)
+    // The ignored READY test runs from crates/akari-core, so a relative path wouldn't work there.
+    std::path::absolute(&path)
 }
 
 #[cfg(test)]
@@ -293,6 +294,19 @@ mod tests {
             0o700
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn captures_report_an_absolute_path() {
+        let parent = Path::new(CAPTURES);
+        let dir = parent.join(format!("akari-cli-test-{}", std::process::id()));
+
+        let path = save_capture(&dir, b"{}");
+
+        fs::remove_dir_all(&dir).unwrap();
+        let _ = fs::remove_dir(parent);
+        let path = path.unwrap();
+        assert!(path.is_absolute(), "{}", path.display());
     }
 
     #[test]
