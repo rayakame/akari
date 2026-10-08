@@ -103,7 +103,8 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
         ConnectionEvent::Reconnecting { .. } => {
             store.set_connection_if(ConnectionState::Connecting, connecting);
         }
-        _ => {}
+        #[cfg(feature = "capture")]
+        ConnectionEvent::CapturedReady(_) => {}
     }
 }
 
