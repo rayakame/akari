@@ -27,6 +27,8 @@ pub enum GatewayEvent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DispatchEvent {
     Ready(Box<Ready>),
+    /// The replay after a resume is complete.
+    Resumed,
     /// An event Akari doesn't parse yet, by name.
     Other(String),
 }
@@ -37,6 +39,14 @@ pub enum DecodeError {
     Json(#[from] serde_json::Error),
     #[error("op {op} payload is missing `{field}`")]
     MissingField { op: u16, field: &'static str },
+    /// A dispatch whose data didn't decode. `seq` still counts as received.
+    #[error("invalid {event} dispatch")]
+    Dispatch {
+        seq: u64,
+        event: String,
+        #[source]
+        source: serde_json::Error,
+    },
 }
 
 #[derive(Deserialize)]
@@ -59,7 +69,7 @@ pub fn decode(input: &[u8]) -> Result<GatewayEvent, DecodeError> {
             let data = d.ok_or_else(|| missing("d"))?;
             GatewayEvent::Dispatch {
                 seq,
-                event: decode_dispatch(name, data)?,
+                event: decode_dispatch(seq, name, data)?,
             }
         }
         1 => GatewayEvent::Heartbeat,
@@ -76,9 +86,17 @@ pub fn decode(input: &[u8]) -> Result<GatewayEvent, DecodeError> {
     })
 }
 
-fn decode_dispatch(name: String, data: &RawValue) -> Result<DispatchEvent, DecodeError> {
-    Ok(match name.as_str() {
-        "READY" => DispatchEvent::Ready(Box::new(serde_json::from_str(data.get())?)),
-        _ => DispatchEvent::Other(name),
-    })
+fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEvent, DecodeError> {
+    match name.as_str() {
+        "READY" => match serde_json::from_str(data.get()) {
+            Ok(ready) => Ok(DispatchEvent::Ready(Box::new(ready))),
+            Err(source) => Err(DecodeError::Dispatch {
+                seq,
+                event: name,
+                source,
+            }),
+        },
+        "RESUMED" => Ok(DispatchEvent::Resumed),
+        _ => Ok(DispatchEvent::Other(name)),
+    }
 }
