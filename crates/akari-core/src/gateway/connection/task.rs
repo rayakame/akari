@@ -399,17 +399,23 @@ impl Task {
 
     // Messages read after this are dropped unseen, so their seq isn't counted and a resume
     // replays them.
-    async fn close(&self, socket: &mut WsStream, code: Option<u16>) {
+    async fn close(&mut self, socket: &mut WsStream, code: Option<u16>) {
         let frame = code.map(|code| CloseFrame {
             code: CloseCode::from(code),
             reason: "".into(),
         });
-        let _ = tokio::time::timeout(self.timing.close_timeout, async {
+        let handshake = tokio::time::timeout(self.timing.close_timeout, async {
             if socket.close(frame).await.is_ok() {
                 while let Some(Ok(_)) = socket.next().await {}
             }
-        })
-        .await;
+        });
+        tokio::pin!(handshake);
+        loop {
+            tokio::select! {
+                _ = &mut handshake => return,
+                Some(outgoing) = self.outgoing.recv() => outgoing.refuse(SendError::NotConnected),
+            }
+        }
     }
 
     fn decode(&mut self, json: &[u8]) -> Result<GatewayEvent, DecodeError> {

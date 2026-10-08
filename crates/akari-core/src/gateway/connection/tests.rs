@@ -630,3 +630,23 @@ async fn a_capture_keeps_a_ready_that_fails_to_decode() {
         GatewayError::InvalidReady(_)
     ));
 }
+
+#[tokio::test]
+async fn commands_fail_fast_during_the_close_handshake() {
+    let mut fake = FakeGateway::start().await;
+    let slow_close = Timing {
+        close_timeout: Duration::from_secs(10),
+        ..timing()
+    };
+    let gateway = start_with(&fake, slow_close);
+    let _silent = connected(&mut fake, &gateway, 60_000).await;
+
+    gateway.disconnect();
+    let result = timeout(
+        Duration::from_secs(2),
+        gateway.send(presence(PresenceStatus::Online)),
+    )
+    .await;
+
+    assert_eq!(result, Ok(Err(SendError::NotConnected)));
+}
