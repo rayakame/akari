@@ -1,6 +1,6 @@
-use std::fs::{DirBuilder, OpenOptions};
+use std::fs::{self, DirBuilder, OpenOptions, Permissions};
 use std::io::{self, Write as _};
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -11,6 +11,8 @@ use akari_core::gateway::{
     ConnectionEvent, DisconnectReason, DispatchEvent, Gateway, GatewayCommand, GatewayError,
     GatewayGuild, PresenceStatus, Ready,
 };
+
+use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use crate::keychain::{Accounts, off_runtime};
 use crate::report;
@@ -85,21 +87,33 @@ pub async fn run<S: Accounts>(
     if options.capture {
         gateway.capture_next_ready();
     }
+    // One stream for the whole run: an interrupt arriving between two selects isn't lost.
+    let mut interrupts = match signal(SignalKind::interrupt()) {
+        Ok(interrupts) => interrupts,
+        Err(err) => {
+            eprintln!("Couldn't watch for Ctrl+C: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
     if let Err(err) = gateway.connect() {
         eprintln!("{}", failure_message(&err));
         return ExitCode::FAILURE;
     }
-    let code = events(&gateway, &options).await;
+    let code = events(&gateway, &options, &mut interrupts).await;
     gateway.close();
-    let _ = tokio::time::timeout(CLOSE_WAIT, async { while gateway.next().await.is_ok() {} }).await;
+    let drained = tokio::time::timeout(CLOSE_WAIT, async { while gateway.next().await.is_ok() {} });
+    tokio::select! {
+        _ = drained => {}
+        _ = interrupts.recv() => {}
+    }
     code
 }
 
-async fn events(gateway: &Gateway, options: &Options) -> ExitCode {
+async fn events(gateway: &Gateway, options: &Options, interrupts: &mut Signal) -> ExitCode {
     let mut connected = false;
     loop {
         let event = tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
+            _ = interrupts.recv() => {
                 if connected {
                     return ExitCode::SUCCESS;
                 }
@@ -110,9 +124,8 @@ async fn events(gateway: &Gateway, options: &Options) -> ExitCode {
         };
         match event {
             Ok(ConnectionEvent::CapturedReady(raw)) => {
-                match save_capture(Path::new(CAPTURES), &raw) {
-                    Ok(path) => eprintln!("Saved READY to {}. {CAPTURE_WARNING}", path.display()),
-                    Err(err) => eprintln!("Couldn't save READY: {err}"),
+                if let Err(code) = save_and_report(Path::new(CAPTURES), &raw) {
+                    return code;
                 }
             }
             Ok(ConnectionEvent::Dispatch(DispatchEvent::Ready(ready))) => {
@@ -207,12 +220,29 @@ fn failure_message(err: &GatewayError) -> String {
         GatewayError::AuthenticationFailed => {
             format!("Discord rejected the stored token (4004). {LOG_IN} to log in again.")
         }
+        // Its source is serde's message, which can quote values from READY.
+        GatewayError::InvalidReady(_) => format!("The gateway connection failed: {err}"),
         err => format!("The gateway connection failed: {}", report(err)),
+    }
+}
+
+fn save_and_report(dir: &Path, json: &[u8]) -> Result<(), ExitCode> {
+    match save_capture(dir, json) {
+        Ok(path) => {
+            eprintln!("Saved READY to {}. {CAPTURE_WARNING}", path.display());
+            Ok(())
+        }
+        Err(err) => {
+            eprintln!("Couldn't save READY: {err}");
+            Err(ExitCode::FAILURE)
+        }
     }
 }
 
 fn save_capture(dir: &Path, json: &[u8]) -> io::Result<PathBuf> {
     DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    // The mode above only applies to a directory that didn't exist yet.
+    fs::set_permissions(dir, Permissions::from_mode(0o700))?;
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
@@ -230,7 +260,6 @@ fn save_capture(dir: &Path, json: &[u8]) -> io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt as _;
 
     use akari_core::gateway::{DispatchEvent, GatewayEvent, decode};
 
@@ -307,6 +336,41 @@ mod tests {
         let _ = fs::remove_dir(parent);
         let path = path.unwrap();
         assert!(path.is_absolute(), "{}", path.display());
+    }
+
+    #[test]
+    fn an_undecodable_ready_never_quotes_its_values() {
+        let err =
+            decode(br#"{"op": 0, "s": 1, "t": "READY", "d": {"v": "secret-value"}}"#).unwrap_err();
+
+        let message = failure_message(&GatewayError::InvalidReady(err));
+
+        assert!(!message.contains("secret-value"), "{message}");
+        assert!(message.contains("READY couldn't be decoded"), "{message}");
+    }
+
+    #[test]
+    fn a_failed_capture_exits_non_zero() {
+        let file = std::env::temp_dir().join(format!("akari-cli-not-a-dir-{}", std::process::id()));
+        fs::write(&file, b"").unwrap();
+
+        let result = save_and_report(&file.join("captures"), b"{}");
+
+        fs::remove_file(&file).unwrap();
+        assert_eq!(result, Err(ExitCode::FAILURE));
+    }
+
+    #[test]
+    fn an_existing_captures_directory_becomes_private() {
+        let dir = std::env::temp_dir().join(format!("akari-cli-open-dir-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        save_capture(&dir, b"{}").unwrap();
+
+        let mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(mode, 0o700);
     }
 
     #[test]
