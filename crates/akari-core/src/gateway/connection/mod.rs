@@ -1,8 +1,7 @@
-mod backlog;
 mod task;
 
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 #[cfg(test)]
 mod tests;
 
@@ -15,11 +14,11 @@ use std::time::Duration;
 
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
-use self::backlog::Backlog;
 use self::task::Task;
 use super::outgoing::{GatewayCommand, MAX_PAYLOAD};
 use super::payload::{DecodeError, DispatchEvent};
 use super::session::{Retry, Session, Timing};
+use crate::backlog::Backlog;
 use crate::error::TransportError;
 use crate::{DiscordClient, Token};
 
@@ -116,6 +115,10 @@ pub enum GatewayError {
     Closed,
     #[error("a gateway connection needs a Tokio runtime")]
     NoRuntime,
+    /// A background task stopped before the connection was closed, e.g. because the Tokio
+    /// runtime shut down.
+    #[error("the connection's background task stopped")]
+    Stopped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -258,6 +261,10 @@ impl Gateway {
     /// it is written.
     pub async fn send(&self, command: GatewayCommand) -> Result<(), SendError> {
         self.send_payload(command.to_payload()).await
+    }
+
+    pub(crate) fn wants_connection(&self) -> bool {
+        *self.control.borrow() == Mode::Connected
     }
 
     /// Delivers the next READY's raw JSON as [`ConnectionEvent::CapturedReady`].

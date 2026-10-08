@@ -1,8 +1,17 @@
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 
+use super::dispatch::{
+    ChannelDelete, GuildDelete, GuildRoleDelete, GuildRoleEvent, MessageDelete, MessageDeleteBulk,
+    ReadySupplemental,
+};
+use super::guild::GatewayGuild;
 use super::hello::Hello;
+use super::partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
 use super::ready::Ready;
+use crate::JsonError;
+use crate::model::{Channel, Message};
 
 /// A message received from the gateway.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,18 +34,39 @@ pub enum GatewayEvent {
 
 /// The event inside a dispatch.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum DispatchEvent {
     Ready(Box<Ready>),
+    ReadySupplemental(Box<ReadySupplemental>),
     /// The replay after a resume is complete.
     Resumed,
+    /// The user joined a guild, or it is available again.
+    GuildCreate(Box<GatewayGuild>),
+    GuildUpdate(Box<GuildUpdate>),
+    GuildDelete(GuildDelete),
+    GuildRoleCreate(Box<GuildRoleEvent>),
+    GuildRoleUpdate(Box<GuildRoleEvent>),
+    GuildRoleDelete(GuildRoleDelete),
+    GuildMemberUpdate(Box<GuildMemberUpdate>),
+    ChannelCreate(Box<Channel>),
+    ChannelUpdate(Box<ChannelUpdate>),
+    ChannelDelete(ChannelDelete),
+    ThreadCreate(Box<Channel>),
+    ThreadUpdate(Box<ChannelUpdate>),
+    ThreadDelete(ChannelDelete),
+    MessageCreate(Box<Message>),
+    MessageUpdate(Box<MessageUpdate>),
+    MessageDelete(MessageDelete),
+    MessageDeleteBulk(MessageDeleteBulk),
+    UserUpdate(Box<UserUpdate>),
     /// An event Akari doesn't parse yet, by name.
     Other(String),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
-    #[error("invalid gateway payload: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("invalid gateway payload")]
+    Json(#[source] JsonError),
     #[error("op {op} payload is missing `{field}`")]
     MissingField { op: u16, field: &'static str },
     /// A dispatch whose data didn't decode. `seq` still counts as received.
@@ -45,8 +75,14 @@ pub enum DecodeError {
         seq: u64,
         event: String,
         #[source]
-        source: serde_json::Error,
+        source: JsonError,
     },
+}
+
+impl From<serde_json::Error> for DecodeError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Json(err.into())
+    }
 }
 
 impl DecodeError {
@@ -96,16 +132,40 @@ pub fn decode(input: &[u8]) -> Result<GatewayEvent, DecodeError> {
 }
 
 fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEvent, DecodeError> {
-    match name.as_str() {
-        "READY" => match serde_json::from_str(data.get()) {
-            Ok(ready) => Ok(DispatchEvent::Ready(Box::new(ready))),
-            Err(source) => Err(DecodeError::Dispatch {
-                seq,
-                event: name,
-                source,
-            }),
-        },
-        "RESUMED" => Ok(DispatchEvent::Resumed),
-        _ => Ok(DispatchEvent::Other(name)),
-    }
+    use DispatchEvent as E;
+
+    let json = data.get();
+    let event = match name.as_str() {
+        "READY" => parse(json).map(|ready| E::Ready(Box::new(ready))),
+        "READY_SUPPLEMENTAL" => parse(json).map(|data| E::ReadySupplemental(Box::new(data))),
+        "RESUMED" => Ok(E::Resumed),
+        "GUILD_CREATE" => parse(json).map(|guild| E::GuildCreate(Box::new(guild))),
+        "GUILD_UPDATE" => parse(json).map(|update| E::GuildUpdate(Box::new(update))),
+        "GUILD_DELETE" => parse(json).map(E::GuildDelete),
+        "GUILD_ROLE_CREATE" => parse(json).map(|role| E::GuildRoleCreate(Box::new(role))),
+        "GUILD_ROLE_UPDATE" => parse(json).map(|role| E::GuildRoleUpdate(Box::new(role))),
+        "GUILD_ROLE_DELETE" => parse(json).map(E::GuildRoleDelete),
+        "GUILD_MEMBER_UPDATE" => parse(json).map(|update| E::GuildMemberUpdate(Box::new(update))),
+        "CHANNEL_CREATE" => parse(json).map(|channel| E::ChannelCreate(Box::new(channel))),
+        "CHANNEL_UPDATE" => parse(json).map(|update| E::ChannelUpdate(Box::new(update))),
+        "CHANNEL_DELETE" => parse(json).map(E::ChannelDelete),
+        "THREAD_CREATE" => parse(json).map(|thread| E::ThreadCreate(Box::new(thread))),
+        "THREAD_UPDATE" => parse(json).map(|update| E::ThreadUpdate(Box::new(update))),
+        "THREAD_DELETE" => parse(json).map(E::ThreadDelete),
+        "MESSAGE_CREATE" => parse(json).map(|message| E::MessageCreate(Box::new(message))),
+        "MESSAGE_UPDATE" => parse(json).map(|update| E::MessageUpdate(Box::new(update))),
+        "MESSAGE_DELETE" => parse(json).map(E::MessageDelete),
+        "MESSAGE_DELETE_BULK" => parse(json).map(E::MessageDeleteBulk),
+        "USER_UPDATE" => parse(json).map(|update| E::UserUpdate(Box::new(update))),
+        _ => return Ok(E::Other(name)),
+    };
+    event.map_err(|source| DecodeError::Dispatch {
+        seq,
+        event: name,
+        source: source.into(),
+    })
+}
+
+fn parse<T: DeserializeOwned>(json: &str) -> Result<T, serde_json::Error> {
+    serde_json::from_str(json)
 }

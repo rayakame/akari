@@ -1,5 +1,6 @@
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 
+use super::double_option;
 use super::guild::GuildMember;
 use super::int_enum::int_enum;
 use super::snowflake::{
@@ -8,6 +9,7 @@ use super::snowflake::{
 };
 use super::timestamp::Timestamp;
 use super::user::User;
+use crate::lenient::skip_invalid;
 
 /// A message from REST or from MESSAGE_CREATE / MESSAGE_UPDATE.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -28,17 +30,17 @@ pub struct Message {
     pub tts: bool,
     #[serde(default)]
     pub mention_everyone: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub mentions: Vec<User>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub mention_roles: Vec<Snowflake<RoleMarker>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub attachments: Vec<Attachment>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub embeds: Vec<Embed>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub reactions: Vec<Reaction>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "skip_invalid")]
     pub sticker_items: Vec<StickerItem>,
     #[serde(default)]
     pub pinned: bool,
@@ -51,14 +53,6 @@ pub struct Message {
     /// `None` if Discord didn't include the referenced message, `Some(None)` if it was deleted.
     #[serde(default, deserialize_with = "double_option")]
     pub referenced_message: Option<Option<Box<Message>>>,
-}
-
-fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

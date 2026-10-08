@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use super::guild::GatewayGuild;
-use super::lenient::{skip_invalid, skip_invalid_in_each};
+use crate::lenient::{skip_invalid, skip_invalid_in_each};
 use crate::model::{Channel, CurrentUser, GuildMember, User};
 
 /// The READY dispatch, in the shape described in `docs/protocol/ready.md`.

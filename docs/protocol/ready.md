@@ -47,6 +47,11 @@ Everything else is ignored for now, notably `read_state`, `user_guild_settings`,
 `relationships`, `user_settings_proto`, `sessions` and the experiments, which are
 positional arrays rather than objects.
 
+The state store takes the current user, the guilds with their channels, threads and roles,
+the current user's member from `merged_members`, the private channels, and from `users`
+only the DM and group DM recipients. READY_SUPPLEMENTAL, which follows READY, is described
+in [dispatches.md](dispatches.md#ready_supplemental).
+
 READY can also carry secrets: `analytics_token`, `auth_session_id_hash` and, with
 `AUTH_TOKEN_REFRESH` (bit 8), a replacement `auth_token`. None of them is modeled, so
 `Debug` can't leak them. Supporting `AUTH_TOKEN_REFRESH` later means handing the new token
@@ -58,7 +63,9 @@ With `CLIENT_STATE_V2`, a
 [gateway guild](https://docs.discord.food/gateway/gateway-events#gateway-guild-object)
 keeps `channels`, `threads`, `roles`, `emojis`, `stickers`, `member_count`, `joined_at`,
 `large` and `premium_subscription_count` at the top level, and the guild object's own
-fields in `properties`. `GatewayGuild::Available` holds `properties` as a `Guild`. A guild
+fields in `properties`. `GatewayGuild::Available` holds `properties` as a `Guild`. The same
+object arrives as GUILD_CREATE, which also carries a top-level `members` list (the current
+user's member when they join); READY has `merged_members` instead. A guild
 without `properties` that isn't marked unavailable means Identify didn't request
 `CLIENT_STATE_V2`; it is treated like any guild that fails to parse (see below).
 
@@ -97,8 +104,9 @@ failing:
 | An entry in `users` | Skipped; whatever refers to that ID shows an unknown user |
 | `null` instead of one of these lists, or of a member list | Treated as empty; `merged_members` keeps one entry per guild |
 
-Each case logs a `tracing` warning with the entry's ID and the serde error, which can quote
-a value from the payload. Roles stay strict, because a missing role would silently change
+Each case logs a `tracing` warning with the entry's ID and the serde error's category, line
+and column. serde's message itself isn't logged, because it can quote a value from the
+payload. Roles stay strict, because a missing role would silently change
 computed permissions: a broken role makes its guild unavailable. Errors in `user`,
 `session_id`, `resume_gateway_url` or the envelope still fail READY, as does a broken
 guild with no readable `id` at the top level or in `properties`.
@@ -129,9 +137,23 @@ AKARI_READY_FIXTURE="$PWD/captures/ready-<unix time>.json" \
 
 It fails if a guild that the payload doesn't mark unavailable decodes as unavailable, if
 `merged_members` doesn't have one entry per guild, or if any user, private channel, member,
-guild channel or thread is skipped. Its own messages name only guild IDs, but when a strict
-part of READY fails, the panic shows serde's error, which can quote a value from the
-payload. Check the output before sharing it.
+guild channel or thread is skipped. Its own messages name only guild IDs, and when a strict
+part of READY fails, the panic shows only where: the error's category, line and column
+(`DecodeError` keeps no serde message, so no value from the payload).
+
+A second ignored test builds the state store from the same capture:
+
+```sh
+AKARI_READY_FIXTURE="$PWD/captures/ready-<unix time>.json" \
+  cargo test -p akari-core --lib -- --ignored captured_ready_builds_the_store --nocapture
+```
+
+It fails if an available guild, channel or thread is missing from the store, if a guild
+becomes unavailable that READY didn't mark, if a private channel's recipient doesn't
+resolve through `Store::user`, if a guild has no member for the current user, or if
+`Store::permissions` returns `None` for a guild channel or thread. Its messages name only
+guild and channel IDs. With `--nocapture` it prints counts and nothing else: guilds,
+channels, visible channels (with `VIEW_CHANNEL`), threads and DMs.
 
 A captured READY contains secrets (`analytics_token`, `auth_session_id_hash`) and personal
 data. `captures/` is git-ignored; still never commit or share a capture, and delete it when

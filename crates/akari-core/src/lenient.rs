@@ -3,9 +3,10 @@ use std::any::type_name;
 use serde::de::{Deserialize, DeserializeOwned, Deserializer};
 use serde_json::value::RawValue;
 
+use crate::JsonError;
 use crate::model::{GenericMarker, Snowflake};
 
-pub(super) fn skip_invalid<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+pub(crate) fn skip_invalid<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: DeserializeOwned,
@@ -14,8 +15,18 @@ where
     Ok(parse_valid(entries.unwrap_or_default()))
 }
 
+// For partial updates: a missing or `null` list means "unchanged".
+pub(crate) fn skip_invalid_option<'de, D, T>(deserializer: D) -> Result<Option<Vec<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let entries = Option::<Vec<&'de RawValue>>::deserialize(deserializer)?;
+    Ok(entries.map(parse_valid))
+}
+
 // The outer list never drops an entry, so it stays aligned with another list.
-pub(super) fn skip_invalid_in_each<'de, D, T>(deserializer: D) -> Result<Vec<Vec<T>>, D::Error>
+pub(crate) fn skip_invalid_in_each<'de, D, T>(deserializer: D) -> Result<Vec<Vec<T>>, D::Error>
 where
     D: Deserializer<'de>,
     T: DeserializeOwned,
@@ -36,7 +47,7 @@ fn parse_valid<T: DeserializeOwned>(entries: Vec<&RawValue>) -> Vec<T> {
             Err(err) => {
                 tracing::warn!(
                     id = ?entry_id(entry),
-                    error = %err,
+                    error = %JsonError::from(&err),
                     "skipping a {} that failed to parse",
                     type_name::<T>()
                 );
@@ -56,4 +67,24 @@ fn entry_id(entry: &RawValue) -> Option<u64> {
 
     let ids: Ids = serde_json::from_str(entry.get()).ok()?;
     ids.id.or(ids.user_id).map(Snowflake::get)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::User;
+
+    #[test]
+    fn summaries_never_quote_the_payload() {
+        let err = serde_json::from_str::<User>(
+            r#"{"id": "1", "username": "akari", "accent_color": "secret-name"}"#,
+        )
+        .unwrap_err();
+
+        let summary = JsonError::from(&err).to_string();
+
+        assert!(err.to_string().contains("secret-name"), "{err}");
+        assert!(summary.contains("line 1"), "{summary}");
+        assert!(!summary.contains("secret-name"), "{summary}");
+    }
 }

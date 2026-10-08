@@ -1,0 +1,23 @@
+{
+  "id": "300000000000000021",
+  "type": 11,
+  "guild_id": "200000000000000001",
+  "parent_id": "300000000000000002",
+  "owner_id": "100000000000000002",
+  "name": "Bug triage",
+  "last_message_id": null,
+  "message_count": 0,
+  "member_count": 1,
+  "rate_limit_per_user": 0,
+  "flags": 0,
+  "total_message_sent": 0,
+  "thread_metadata": {
+    "archived": false,
+    "auto_archive_duration": 1440,
+    "archive_timestamp": "2026-10-08T12:00:00.000000+00:00",
+    "locked": false,
+    "create_timestamp": "2026-10-08T12:00:00.000000+00:00"
+  },
+  "newly_created": true,
+  "member": { "id": "300000000000000021", "user_id": "100000000000000001", "join_timestamp": "2026-10-08T12:00:00.000000+00:00", "flags": 1 }
+}

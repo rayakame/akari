@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
@@ -13,17 +14,21 @@ use tokio_tungstenite::tungstenite::http::HeaderMap;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
 use crate::gateway::decompress::ZstdCompressor;
+use crate::gateway::session::Timing;
+use crate::model::{Snowflake, UserMarker};
+use crate::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
+use crate::{DiscordClient, Endpoints, Token, TokenStore, TokenStoreError};
 
-pub(super) const WAIT: Duration = Duration::from_secs(5);
+pub(crate) const WAIT: Duration = Duration::from_secs(5);
 const READY: &str = include_str!("../../../tests/fixtures/ready.json");
 
-pub(super) struct FakeGateway {
+pub(crate) struct FakeGateway {
     address: SocketAddr,
     connections: mpsc::UnboundedReceiver<FakeConnection>,
 }
 
 impl FakeGateway {
-    pub(super) async fn start() -> Self {
+    pub(crate) async fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (sender, connections) = mpsc::unbounded_channel();
@@ -52,34 +57,34 @@ impl FakeGateway {
         }
     }
 
-    pub(super) fn url(&self) -> String {
+    pub(crate) fn url(&self) -> String {
         format!("ws://{}/", self.address)
     }
 
-    pub(super) fn resume_url(&self) -> String {
+    pub(crate) fn resume_url(&self) -> String {
         format!("ws://{}/resume", self.address)
     }
 
-    pub(super) async fn accept(&mut self) -> FakeConnection {
+    pub(crate) async fn accept(&mut self) -> FakeConnection {
         timeout(WAIT, self.connections.recv())
             .await
             .expect("the client didn't connect")
             .expect("the server stopped")
     }
 
-    pub(super) async fn quiet_for(&mut self, duration: Duration) -> bool {
+    pub(crate) async fn quiet_for(&mut self, duration: Duration) -> bool {
         timeout(duration, self.connections.recv()).await.is_err()
     }
 }
 
-pub(super) struct FakeConnection {
+pub(crate) struct FakeConnection {
     ws: WebSocketStream<TcpStream>,
-    pub(super) uri: String,
-    pub(super) headers: HeaderMap,
+    pub(crate) uri: String,
+    pub(crate) headers: HeaderMap,
     compressor: Option<ZstdCompressor>,
-    pub(super) ack: bool,
-    pub(super) heartbeats: Vec<(Instant, Value)>,
-    pub(super) close_code: Option<Option<u16>>,
+    pub(crate) ack: bool,
+    pub(crate) heartbeats: Vec<(Instant, Value)>,
+    pub(crate) close_code: Option<Option<u16>>,
 }
 
 impl FakeConnection {
@@ -98,15 +103,15 @@ impl FakeConnection {
         }
     }
 
-    pub(super) fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers.get(name).and_then(|value| value.to_str().ok())
     }
 
-    pub(super) fn send_text_frames(&mut self) {
+    pub(crate) fn send_text_frames(&mut self) {
         self.compressor = None;
     }
 
-    pub(super) async fn send(&mut self, payload: Value) {
+    pub(crate) async fn send(&mut self, payload: Value) {
         let text = payload.to_string();
         let message = match &mut self.compressor {
             Some(compressor) => Message::binary(compressor.message(text.as_bytes())),
@@ -115,7 +120,7 @@ impl FakeConnection {
         self.ws.send(message).await.unwrap();
     }
 
-    pub(super) async fn recv(&mut self) -> Option<Value> {
+    pub(crate) async fn recv(&mut self) -> Option<Value> {
         loop {
             let message = timeout(WAIT, self.ws.next())
                 .await
@@ -145,7 +150,7 @@ impl FakeConnection {
         }
     }
 
-    pub(super) async fn pump(&mut self, duration: Duration) -> Vec<Value> {
+    pub(crate) async fn pump(&mut self, duration: Duration) -> Vec<Value> {
         let mut payloads = Vec::new();
         let _ = timeout(duration, async {
             while let Some(payload) = self.recv().await {
@@ -156,7 +161,7 @@ impl FakeConnection {
         payloads
     }
 
-    pub(super) async fn pump_until(
+    pub(crate) async fn pump_until(
         &mut self,
         limit: Duration,
         done: impl Fn(&Self, &[Value]) -> bool,
@@ -172,12 +177,12 @@ impl FakeConnection {
         payloads
     }
 
-    pub(super) async fn client_close_code(&mut self) -> Option<u16> {
+    pub(crate) async fn client_close_code(&mut self) -> Option<u16> {
         while self.recv().await.is_some() {}
         self.close_code.flatten()
     }
 
-    pub(super) async fn hello(&mut self, interval_ms: u64) {
+    pub(crate) async fn hello(&mut self, interval_ms: u64) {
         self.send(json!({
             "op": 10,
             "d": {"heartbeat_interval": interval_ms, "_trace": []},
@@ -187,12 +192,12 @@ impl FakeConnection {
         .await;
     }
 
-    pub(super) async fn handshake(&mut self, interval_ms: u64) -> Value {
+    pub(crate) async fn handshake(&mut self, interval_ms: u64) -> Value {
         self.hello(interval_ms).await;
         self.recv().await.expect("no handshake")
     }
 
-    pub(super) async fn ready(&mut self, seq: u64, session_id: &str, resume_url: &str) {
+    pub(crate) async fn ready(&mut self, seq: u64, session_id: &str, resume_url: &str) {
         let mut payload: Value = serde_json::from_str(READY).unwrap();
         payload["s"] = seq.into();
         payload["d"]["session_id"] = session_id.into();
@@ -200,16 +205,62 @@ impl FakeConnection {
         self.send(payload).await;
     }
 
-    pub(super) async fn dispatch(&mut self, seq: u64, name: &str) {
+    pub(crate) async fn dispatch(&mut self, seq: u64, name: &str) {
         self.send(json!({"op": 0, "s": seq, "t": name, "d": {}}))
             .await;
     }
 
-    pub(super) async fn close(&mut self, code: u16) {
+    pub(crate) async fn close(&mut self, code: u16) {
         let frame = CloseFrame {
             code: code.into(),
             reason: "".into(),
         };
         let _ = self.ws.close(Some(frame)).await;
+    }
+}
+
+struct NoStore;
+
+impl TokenStore for NoStore {
+    fn load(&self, _: Snowflake<UserMarker>) -> Result<Option<Token>, TokenStoreError> {
+        Ok(None)
+    }
+    fn save(&self, _: Snowflake<UserMarker>, _: &Token) -> Result<(), TokenStoreError> {
+        Ok(())
+    }
+    fn delete(&self, _: Snowflake<UserMarker>) -> Result<(), TokenStoreError> {
+        Ok(())
+    }
+}
+
+pub(crate) fn client_for(gateway: String) -> DiscordClient {
+    let host = HostInfo {
+        os: DesktopOs::MacOs,
+        os_version: "25.0.0".to_owned(),
+        arch: Arch::Arm64,
+        system_locale: "en-US".to_owned(),
+    };
+    let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
+    let endpoints = Endpoints {
+        gateway,
+        allow_plaintext: true,
+        ..Endpoints::default()
+    };
+    DiscordClient::with_endpoints(properties, Arc::new(NoStore), endpoints).unwrap()
+}
+
+pub(crate) fn client(fake: &FakeGateway) -> DiscordClient {
+    client_for(fake.url())
+}
+
+pub(crate) fn timing() -> Timing {
+    Timing {
+        hello_timeout: Duration::from_secs(2),
+        close_timeout: Duration::from_millis(200),
+        retry_base: Duration::from_millis(10),
+        retry_max: Duration::from_millis(100),
+        invalid_session_min: Duration::from_millis(10),
+        invalid_session_max: Duration::from_millis(20),
+        ..Timing::default()
     }
 }

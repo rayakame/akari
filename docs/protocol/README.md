@@ -15,6 +15,8 @@ surprises we found.
   codes, limits, presence
 - [login.md](login.md): email/password and QR code login, logout, token storage
 - [ready.md](ready.md): READY, gateway capabilities, gateway guilds
+- [dispatches.md](dispatches.md): the dispatches after READY, partial updates, and what the
+  state store does with each
 - [models.md](models.md): users, guilds, channels and messages, and how they map to Rust
 
 ## Conventions

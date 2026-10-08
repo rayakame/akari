@@ -5,61 +5,12 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::time::{Instant, timeout};
 
-use super::fake::{FakeConnection, FakeGateway, WAIT};
+use super::fake::{FakeConnection, FakeGateway, WAIT, client, client_for, timing};
 use super::*;
 use crate::gateway::{GatewayCommand, PresenceStatus};
-use crate::model::{Snowflake, UserMarker};
-use crate::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
-use crate::{Endpoints, TokenStore, TokenStoreError};
 
 const TOKEN: &str = "gateway-test-token.secret";
 const SESSION: &str = "session-1";
-
-struct NoStore;
-
-impl TokenStore for NoStore {
-    fn load(&self, _: Snowflake<UserMarker>) -> Result<Option<Token>, TokenStoreError> {
-        Ok(None)
-    }
-    fn save(&self, _: Snowflake<UserMarker>, _: &Token) -> Result<(), TokenStoreError> {
-        Ok(())
-    }
-    fn delete(&self, _: Snowflake<UserMarker>) -> Result<(), TokenStoreError> {
-        Ok(())
-    }
-}
-
-fn client_for(gateway: String) -> DiscordClient {
-    let host = HostInfo {
-        os: DesktopOs::MacOs,
-        os_version: "25.0.0".to_owned(),
-        arch: Arch::Arm64,
-        system_locale: "en-US".to_owned(),
-    };
-    let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
-    let endpoints = Endpoints {
-        gateway,
-        allow_plaintext: true,
-        ..Endpoints::default()
-    };
-    DiscordClient::with_endpoints(properties, Arc::new(NoStore), endpoints).unwrap()
-}
-
-fn client(fake: &FakeGateway) -> DiscordClient {
-    client_for(fake.url())
-}
-
-fn timing() -> Timing {
-    Timing {
-        hello_timeout: Duration::from_secs(2),
-        close_timeout: Duration::from_millis(200),
-        retry_base: Duration::from_millis(10),
-        retry_max: Duration::from_millis(100),
-        invalid_session_min: Duration::from_millis(10),
-        invalid_session_max: Duration::from_millis(20),
-        ..Timing::default()
-    }
-}
 
 fn start(fake: &FakeGateway) -> Gateway {
     let gateway = Gateway::start(client(fake), Token::new(TOKEN.to_owned()), timing()).unwrap();

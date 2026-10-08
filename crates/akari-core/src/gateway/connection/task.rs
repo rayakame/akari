@@ -11,8 +11,8 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{self, Message};
 
-use super::backlog::Backlog;
 use super::{ConnectionEvent, DisconnectReason, GatewayError, Mode, Outgoing, SendError};
+use crate::backlog::Backlog;
 use crate::error::{TransportError, TransportErrorKind};
 use crate::gateway::decompress::{DecompressError, ZstdStream};
 use crate::gateway::outgoing;
@@ -354,7 +354,7 @@ impl Task {
                         link.ready(Instant::now());
                     }
                     DispatchEvent::Resumed => link.ready(Instant::now()),
-                    DispatchEvent::Other(_) => {}
+                    _ => {}
                 }
                 self.emit(ConnectionEvent::Dispatch(event));
             }

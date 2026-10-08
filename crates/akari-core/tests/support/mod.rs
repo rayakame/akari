@@ -1,6 +1,7 @@
 // Each test crate uses a different subset of these helpers.
 #![allow(dead_code)]
 
+pub mod gateway;
 pub mod remote_auth;
 
 use std::sync::Arc;

@@ -31,9 +31,10 @@ Reference notes on Discord's layout, behavior and shortcuts live in `docs/ui/`.
 
 This is the intended layout. So far `akari-core` has the wire models, gateway decoding, the
 shared `DiscordClient` with both login flows (email/password and QR code), the token
-storage trait and the gateway connection (zstd-stream, heartbeats, resume, rate-limited
-sends), and `akari-cli` can log in, log out and connect; `akari-markdown` and `akari-ffi`
-are still empty skeletons, and each app folder contains only a README.
+storage trait, the gateway connection (zstd-stream, heartbeats, resume, rate-limited
+sends) and the state store (`akari_core::state`) with `Account`, which keeps it current
+from the gateway; `akari-cli` can log in, log out and connect. `akari-markdown` and
+`akari-ffi` are still empty skeletons, and each app folder contains only a README.
 
 | Path | Contents |
 |---|---|
@@ -62,9 +63,10 @@ apps/linux ──► akari-core, akari-markdown   (later, as a workspace member)
 - `akari-core` emits fine-grained events/diffs, never whole lists.
 - The wire layer (`akari_core::model` and the payload types in `akari_core::gateway`)
   mirrors what Discord sends and nothing else. UIs never see wire structs and the SQLite
-  cache never stores them; a state layer converts them into its own memory-efficient types.
-  Value types (`Snowflake<M>` with its markers, `Timestamp`, `Permissions`) are shared
-  vocabulary the state layer may reuse.
+  cache never stores them; the state layer (`akari_core::state`) converts them into its own
+  memory-efficient types. Value types (`Snowflake<M>` with its markers and ID aliases,
+  `Timestamp`, `Permissions`) and the integer enums (`ChannelType`, `MessageType`, …) are
+  shared vocabulary the state layer reuses.
 - `akari-ffi` contains bindings only; logic belongs in `akari-core` or `akari-markdown`.
 - Dev-only cargo features (`capture`, which hands out the raw READY) are enabled only by
   `akari-cli`. Cargo unifies features across a workspace build, so `cargo build --workspace`

@@ -13,8 +13,9 @@ use crate::gateway::{Gateway, GatewayError};
 use crate::model::{Snowflake, UserMarker};
 use crate::properties::ClientProperties;
 use crate::rest::{BuildError, RequestExtras, RestClient};
+use crate::state::DEFAULT_LIMITS;
 use crate::token_store::{TokenStore, TokenStoreError};
-use crate::{Token, tls};
+use crate::{Account, Token, tls};
 
 /// The shared context for talking to Discord, one per app. Logins and connections are
 /// created from it, so all of them present the same client. Cheap to clone; the async
@@ -149,6 +150,15 @@ impl DiscordClient {
     /// [`GatewayError::NoRuntime`] outside a Tokio runtime.
     pub fn gateway(&self, token: Token) -> Result<Gateway, GatewayError> {
         Gateway::start(self.clone(), token, Timing::default())
+    }
+
+    /// The account `token` belongs to: a gateway connection and the [`Store`] it keeps
+    /// current. Idle until [`Account::connect`]. Fails with [`GatewayError::NoRuntime`]
+    /// outside a Tokio runtime.
+    ///
+    /// [`Store`]: crate::state::Store
+    pub fn account(&self, token: Token) -> Result<Account, GatewayError> {
+        Account::start(self.clone(), token, Timing::default(), DEFAULT_LIMITS)
     }
 
     pub async fn save_token(

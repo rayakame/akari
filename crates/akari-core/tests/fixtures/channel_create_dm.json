@@ -1,0 +1,9 @@
+{
+  "id": "300000000000000013",
+  "type": 1,
+  "last_message_id": null,
+  "flags": 0,
+  "recipients": [
+    { "id": "100000000000000005", "username": "ren", "global_name": "Ren", "avatar": "0123456789abcdef0123456789abcdef", "discriminator": "0", "public_flags": 0 }
+  ]
+}

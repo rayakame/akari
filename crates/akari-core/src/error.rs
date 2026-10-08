@@ -37,6 +37,76 @@ impl fmt::Display for TransportErrorKind {
     }
 }
 
+/// Where a JSON payload failed to parse. serde's message isn't kept, because it can quote
+/// values from the payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{kind} error at line {line}, column {column}")]
+pub struct JsonError {
+    kind: JsonErrorKind,
+    line: usize,
+    column: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum JsonErrorKind {
+    /// Not valid JSON.
+    Syntax,
+    /// Valid JSON in an unexpected shape.
+    Data,
+    /// The input ended early.
+    Eof,
+    Io,
+}
+
+impl fmt::Display for JsonErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Syntax => "syntax",
+            Self::Data => "data",
+            Self::Eof => "unexpected end",
+            Self::Io => "I/O",
+        })
+    }
+}
+
+impl JsonError {
+    pub fn kind(&self) -> JsonErrorKind {
+        self.kind
+    }
+
+    pub fn line(&self) -> usize {
+        self.line
+    }
+
+    pub fn column(&self) -> usize {
+        self.column
+    }
+}
+
+impl From<&serde_json::Error> for JsonError {
+    fn from(err: &serde_json::Error) -> Self {
+        use serde_json::error::Category;
+
+        Self {
+            kind: match err.classify() {
+                Category::Syntax => JsonErrorKind::Syntax,
+                Category::Data => JsonErrorKind::Data,
+                Category::Eof => JsonErrorKind::Eof,
+                Category::Io => JsonErrorKind::Io,
+            },
+            line: err.line(),
+            column: err.column(),
+        }
+    }
+}
+
+impl From<serde_json::Error> for JsonError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::from(&err)
+    }
+}
+
 impl TransportError {
     pub fn kind(&self) -> TransportErrorKind {
         self.kind

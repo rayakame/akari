@@ -1,0 +1,26 @@
+{
+  "id": "200000000000000001",
+  "name": "Akari Lab",
+  "icon": null,
+  "banner": "0123456789abcdef0123456789abcdef",
+  "splash": null,
+  "description": "Testing ground",
+  "owner_id": "100000000000000001",
+  "features": ["COMMUNITY"],
+  "afk_channel_id": null,
+  "afk_timeout": 300,
+  "system_channel_id": null,
+  "rules_channel_id": null,
+  "vanity_url_code": null,
+  "preferred_locale": "en-US",
+  "default_message_notifications": 0,
+  "nsfw_level": 0,
+  "premium_tier": 1,
+  "roles": [
+    { "id": "200000000000000001", "name": "@everyone", "permissions": "104324673", "position": 0, "color": 0, "hoist": false, "managed": false, "mentionable": false, "flags": 0 },
+    { "id": "500000000000000002", "name": "Moderators", "permissions": "1099511627775", "position": 1, "color": 3447003, "hoist": true, "managed": false, "mentionable": true, "flags": 0 }
+  ],
+  "emojis": [],
+  "stickers": [],
+  "version": "1728388800000"
+}
