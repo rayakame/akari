@@ -12,6 +12,7 @@ pub mod properties;
 mod random;
 mod rest;
 mod secret;
+pub mod state;
 mod tls;
 pub mod token_store;
 mod ws;
