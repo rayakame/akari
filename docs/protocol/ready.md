@@ -106,12 +106,20 @@ guild is scanned twice: once as raw JSON, then into the model.
 
 ## Checking a real READY
 
-The fixture is assembled, not captured. To check the models against a real payload, save
-a decompressed READY gateway message (the whole `{"op": 0, "t": "READY", …}` object)
-received with the capabilities above, then run the ignored test:
+The fixture is assembled, not captured. To check the models against a real payload,
+capture one with akari-cli (after `akari-cli login`):
 
 ```sh
-AKARI_READY_FIXTURE=/path/outside/the/repo/ready.json \
+cargo run -p akari-cli -- connect --capture
+```
+
+It connects with the capabilities above (Identify sends exactly them, see
+[gateway.md](gateway.md#identify)), saves the decompressed READY message (the whole
+`{"op": 0, "t": "READY", …}` object) as `captures/ready-<unix time>.json` with mode 0600,
+prints the path and closes the session. Then run the ignored test on it:
+
+```sh
+AKARI_READY_FIXTURE=captures/ready-<unix time>.json \
   cargo test -p akari-core --test gateway -- --ignored captured_ready_decodes_completely
 ```
 
@@ -121,6 +129,6 @@ guild channel or thread is skipped. Its own messages name only guild IDs, but wh
 part of READY fails, the panic shows serde's error, which can quote a value from the
 payload. Check the output before sharing it.
 
-A captured READY contains secrets (`analytics_token`, `auth_session_id_hash`, possibly
-`auth_token`) and personal data. Keep it outside the repository, never commit or share it,
-and delete it when you're done.
+A captured READY contains secrets (`analytics_token`, `auth_session_id_hash`) and personal
+data. `captures/` is git-ignored; still never commit or share a capture, and delete it when
+you're done.

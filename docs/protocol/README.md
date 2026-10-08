@@ -11,7 +11,8 @@ surprises we found.
 ## Files
 
 - [client-properties.md](client-properties.md): the client identity Akari sends and how to refresh it
-- [gateway.md](gateway.md): payload envelope, opcodes, Hello
+- [gateway.md](gateway.md): connecting, zstd-stream, heartbeats, identify, resume, close
+  codes, limits, presence
 - [login.md](login.md): email/password and QR code login, logout, token storage
 - [ready.md](ready.md): READY, gateway capabilities, gateway guilds
 - [models.md](models.md): users, guilds, channels and messages, and how they map to Rust
