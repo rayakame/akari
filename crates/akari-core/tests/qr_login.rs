@@ -332,3 +332,62 @@ fn starting_outside_a_tokio_runtime_is_an_error() {
 
     assert!(matches!(client.qr_login(), Err(LoginError::NoRuntime)));
 }
+
+#[tokio::test]
+async fn oversized_packets_end_the_session() {
+    let rest = support::rest_server().await;
+    let mut gateway = RemoteAuthServer::start().await;
+    let _qr = support::client(&rest, &gateway).qr_login().unwrap();
+
+    let mut session = gateway.accept().await;
+    session.handshake(30_000).await;
+    session
+        .send(json!({"op": "something_new", "padding": "x".repeat(64 * 1024)}))
+        .await;
+
+    assert!(session.closed_by_client().await);
+    gateway.accept().await;
+}
+
+#[tokio::test]
+async fn a_gateway_that_drops_every_code_at_once_is_backed_off() {
+    let rest = support::rest_server().await;
+    let mut gateway = RemoteAuthServer::start().await;
+    let _qr = support::client(&rest, &gateway).qr_login().unwrap();
+
+    let started = Instant::now();
+    let mut sessions = 0;
+    while started.elapsed() < Duration::from_secs(2) {
+        let Ok(mut session) =
+            tokio::time::timeout(Duration::from_secs(2) - started.elapsed(), gateway.accept())
+                .await
+        else {
+            break;
+        };
+        sessions += 1;
+        session.handshake(30_000).await;
+        session.close(4003).await;
+    }
+
+    assert!(sessions <= 4, "{sessions} sessions in 2 s");
+}
+
+#[tokio::test]
+async fn an_unreadable_ticket_payload_restarts_the_session() {
+    let rest = support::rest_server().await;
+    let mut gateway = RemoteAuthServer::start().await;
+    let qr = support::client(&rest, &gateway).qr_login().unwrap();
+    let mut first = gateway.accept().await;
+    first.handshake(30_000).await;
+    code_url(qr.next().await);
+
+    first.scan("not a user payload").await;
+
+    assert!(first.closed_by_client().await);
+    let mut second = gateway.accept().await;
+    let fingerprint = second.handshake(30_000).await;
+    assert_eq!(
+        code_url(qr.next().await),
+        format!("https://discord.com/ra/{fingerprint}")
+    );
+}

@@ -104,6 +104,11 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_FAILURES: u32 = 3;
 const RETRY_BASE: Duration = Duration::from_secs(1);
 const RETRY_MAX: Duration = Duration::from_secs(30);
+// A session shorter than this restarts with backoff; a code normally lives a few minutes.
+const HEALTHY_SESSION: Duration = Duration::from_secs(30);
+// Remote auth packets are under 1 KiB.
+const MAX_PACKET: usize = 16 * 1024;
+const MAX_QUEUED: usize = 8;
 
 impl QrLogin {
     pub(crate) fn start(client: DiscordClient) -> Result<Self, LoginError> {
@@ -199,6 +204,10 @@ impl Shared {
                 .events
                 .retain(|queued| !matches!(queued, Ok(QrEvent::Code { .. })));
         }
+        // The end of the login is always pushed last, so dropping the oldest never loses it.
+        while queue.events.len() >= MAX_QUEUED {
+            queue.events.pop_front();
+        }
         queue.events.push_back(event);
         drop(queue);
         self.notify.notify_waiters();
@@ -258,26 +267,36 @@ impl Task {
     async fn run(mut self) {
         let _ending = Ending(self.shared.clone());
         let mut failures = 0;
+        let mut quick_restarts = 0;
         loop {
-            match self.session().await {
+            let started = Instant::now();
+            let failure = match self.session().await {
                 End::Done | End::Cancelled => break,
                 End::Fatal(err) => {
                     self.shared.push(Err(err));
                     break;
                 }
-                End::Restart { failure: None } => failures = 0,
-                End::Restart { failure: Some(err) } => {
+                End::Restart { failure } => failure,
+            };
+            match failure {
+                Some(err) => {
                     failures += 1;
                     if failures >= MAX_FAILURES {
                         self.shared.push(Err(err));
                         break;
                     }
-                    let delay = backoff::delay(failures - 1, RETRY_BASE, RETRY_MAX, random::unit());
-                    tokio::select! {
-                        () = self.cancel.cancelled() => break,
-                        () = tokio::time::sleep(delay) => {}
-                    }
                 }
+                None => failures = 0,
+            }
+            if started.elapsed() >= HEALTHY_SESSION {
+                quick_restarts = 0;
+                continue;
+            }
+            let delay = backoff::delay(quick_restarts, RETRY_BASE, RETRY_MAX, random::unit());
+            quick_restarts += 1;
+            tokio::select! {
+                () = self.cancel.cancelled() => break,
+                () = tokio::time::sleep(delay) => {}
             }
         }
         self.shared.finish();
@@ -296,7 +315,12 @@ impl Task {
                 self.client.properties().browser_user_agent.as_str(),
             ),
         ];
-        let connect = ws::connect(&endpoints.remote_auth, &headers, self.client.tls());
+        let connect = ws::connect(
+            &endpoints.remote_auth,
+            &headers,
+            self.client.tls(),
+            MAX_PACKET,
+        );
         let mut socket = tokio::select! {
             () = self.cancel.cancelled() => return End::Cancelled,
             result = connect => match result {
@@ -403,7 +427,7 @@ impl Task {
                             self.shared.push(Ok(QrEvent::Scanned(user.clone())));
                             session.user = Some(user);
                         }
-                        None => tracing::warn!("ignoring an unreadable remote auth user payload"),
+                        None => return session.lost("the gateway sent an unreadable user"),
                     }
                 }
                 ServerPacket::PendingLogin { ticket } => return Outcome::Exchange(ticket),
@@ -577,6 +601,24 @@ mod tests {
             silent.push(socket);
         }
         assert_eq!(silent.len(), MAX_FAILURES as usize);
+    }
+
+    #[tokio::test]
+    async fn an_unread_queue_stays_small_and_keeps_the_newest_events() {
+        let qr = login();
+        for _ in 0..1000 {
+            qr.shared.push(Ok(QrEvent::CancelledOnPhone));
+        }
+        qr.shared.push(Err(LoginError::Expired));
+        qr.shared.finish();
+
+        assert!(qr.shared.lock().events.len() <= MAX_QUEUED);
+        let end = loop {
+            if let Err(err) = qr.next().await {
+                break err;
+            }
+        };
+        assert!(matches!(end, LoginError::Expired), "{end:?}");
     }
 
     #[tokio::test]

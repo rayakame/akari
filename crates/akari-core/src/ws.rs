@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 
 use crate::error::{TransportError, TransportErrorKind};
@@ -16,6 +17,7 @@ pub(crate) async fn connect(
     url: &str,
     headers: &[(&'static str, &str)],
     tls: Arc<rustls::ClientConfig>,
+    max_message: usize,
 ) -> Result<WsStream, TransportError> {
     let mut request = url
         .into_client_request()
@@ -27,9 +29,12 @@ pub(crate) async fn connect(
             .headers_mut()
             .insert(HeaderName::from_static(name), value);
     }
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(max_message))
+        .max_frame_size(Some(max_message));
     let connect = tokio_tungstenite::connect_async_tls_with_config(
         request,
-        None,
+        Some(config),
         false,
         Some(Connector::Rustls(tls)),
     );
