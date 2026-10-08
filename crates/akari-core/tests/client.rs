@@ -209,3 +209,48 @@ async fn logout_without_a_token_is_not_logged_in() {
     assert!(matches!(err, LogoutError::NotLoggedIn));
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn end_session_logs_out_a_token_without_touching_the_store() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v9/auth/logout"))
+        .and(header("authorization", "replaced-token"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let store = Arc::new(MemoryStore::default());
+    let client = client(&server, store.clone());
+    client
+        .save_token(ACCOUNT, &Token::new("current-token".to_owned()))
+        .await
+        .unwrap();
+
+    client
+        .end_session(&Token::new("replaced-token".to_owned()))
+        .await
+        .unwrap();
+
+    assert!(store.holds(ACCOUNT));
+}
+
+#[tokio::test]
+async fn ending_an_already_dead_session_succeeds() {
+    let server = MockServer::start().await;
+    Mock::given(path("/api/v9/auth/logout"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_json(json!({"message": "401: Unauthorized", "code": 0})),
+        )
+        .mount(&server)
+        .await;
+    let client = client(&server, Arc::new(MemoryStore::default()));
+
+    assert!(
+        client
+            .end_session(&Token::new("dead".to_owned()))
+            .await
+            .is_ok()
+    );
+}

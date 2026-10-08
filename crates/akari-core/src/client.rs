@@ -167,21 +167,28 @@ impl DiscordClient {
             .await
             .map_err(LogoutError::Storage)?
             .ok_or(LogoutError::NotLoggedIn)?;
-        let extras = RequestExtras {
-            authorization: Some(&token),
-            ..RequestExtras::default()
-        };
-        let remote = self
-            .inner
-            .rest
-            .post("auth/logout", &serde_json::Map::new(), &extras)
-            .await;
+        let remote = self.end_session(&token).await;
 
         let store = self.inner.store.clone();
         blocking(move || store.delete(account))
             .await
             .map_err(LogoutError::Storage)?;
-        match remote {
+        remote
+    }
+
+    /// Ends the session `token` belongs to, without touching the token store; for a token
+    /// that was already replaced there. A token Discord no longer accepts counts as done.
+    pub async fn end_session(&self, token: &Token) -> Result<(), LogoutError> {
+        let extras = RequestExtras {
+            authorization: Some(token),
+            ..RequestExtras::default()
+        };
+        match self
+            .inner
+            .rest
+            .post("auth/logout", &serde_json::Map::new(), &extras)
+            .await
+        {
             Ok(()) => Ok(()),
             Err(err) => LogoutError::from_rest(err).map_or(Ok(()), Err),
         }
