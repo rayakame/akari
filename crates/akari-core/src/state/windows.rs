@@ -17,7 +17,6 @@ pub(crate) const DEFAULT_LIMITS: WindowLimits = WindowLimits {
     messages: 200,
 };
 
-// How far back a new message looks for an equal author to share.
 const RECENT_AUTHORS: usize = 50;
 
 // History loads will be the first caller outside tests.
@@ -316,8 +315,6 @@ impl Windows {
     }
 }
 
-// Shares one allocation between equal copies of a user: a DM recipient's directory entry,
-// or the author or a mention of a recent message.
 fn intern(
     user: model::User,
     directory: &HashMap<UserId, Arc<User>>,

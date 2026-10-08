@@ -44,7 +44,6 @@ async fn next(subscription: &Subscription) -> Option<String> {
         .map(|event| describe(&event))
 }
 
-// Collects events up to and including `last`.
 async fn events_until(subscription: &Subscription, last: &str) -> Vec<String> {
     let mut events = Vec::new();
     while let Some(event) = next(subscription).await {

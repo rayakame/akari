@@ -259,7 +259,6 @@ impl Gateway {
         self.send_payload(command.to_payload()).await
     }
 
-    // Whether connect() was called and neither disconnect() nor close() since.
     pub(crate) fn wants_connection(&self) -> bool {
         *self.control.borrow() == Mode::Connected
     }

@@ -163,7 +163,6 @@ impl Store {
         }
     }
 
-    // Closed is final.
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
         self.set_connection_if(connection, || true);
     }
@@ -183,7 +182,6 @@ impl Store {
         });
     }
 
-    // Already connected or closed accounts stay as they are.
     pub(crate) fn begin_connecting(&self) {
         self.write(|inner, events| {
             if matches!(inner.connection, ConnectionState::Offline) {

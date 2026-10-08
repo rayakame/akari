@@ -12,16 +12,15 @@ use crate::gateway::{
 };
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
 
-/// Everything a READY replaces.
 #[derive(Default)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct Entities {
     current_user: Option<Arc<CurrentUser>>,
-    /// DM and group DM recipients.
+    // DM and group DM recipients only.
     users: HashMap<UserId, Arc<User>>,
     guilds: HashMap<GuildId, Arc<Guild>>,
     unavailable: HashSet<GuildId>,
-    /// The current user's member in each guild.
+    // Only the current user's member in each guild.
     members: HashMap<GuildId, Arc<Member>>,
     channels: HashMap<ChannelId, Arc<Channel>>,
 }
@@ -112,7 +111,6 @@ fn member_user(member: &model::GuildMember) -> Option<UserId> {
     member.user.as_ref().map(|user| user.id).or(member.user_id)
 }
 
-// The users go to the directory; the channel keeps their IDs.
 fn split_recipients(mut channel: model::Channel) -> (model::Channel, Vec<model::User>) {
     let users = std::mem::take(&mut channel.recipients);
     if channel.recipient_ids.is_empty() {
@@ -187,7 +185,6 @@ impl State {
         }
     }
 
-    /// Swaps in the state of a new session and pushes what changed.
     pub(crate) fn replace(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         if self.ready {
             self.diff(&next, events);

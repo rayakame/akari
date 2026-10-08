@@ -69,7 +69,7 @@ fn entry_id(entry: &RawValue) -> Option<u64> {
     ids.id.or(ids.user_id).map(Snowflake::get)
 }
 
-/// Describes a serde_json error without its message, which can quote the payload.
+// serde's own message can quote the payload.
 pub(crate) struct JsonErrorSummary<'a>(pub(crate) &'a serde_json::Error);
 
 impl fmt::Display for JsonErrorSummary<'_> {

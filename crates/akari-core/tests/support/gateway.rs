@@ -68,8 +68,8 @@ pub async fn handshake(ws: &mut WebSocketStream<TcpStream>) -> Value {
 }
 
 impl Logs {
-    /// Installs a global TRACE subscriber writing into the returned buffer. A test binary
-    /// that uses it must hold a single test: tracing caches callsite interest process-wide.
+    // A binary that calls this must hold a single test: tracing caches callsite interest
+    // process-wide.
     pub fn capture() -> Self {
         let logs = Self::default();
         let writer = logs.clone();

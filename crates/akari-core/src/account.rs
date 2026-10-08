@@ -88,9 +88,8 @@ async fn pump(gateway: Arc<Gateway>, store: Store) {
     store.finish();
 }
 
-// Events queued before a disconnect() mustn't make the account look connected again.
-// disconnect() idles the gateway before it takes the store's lock to go offline, so
-// checking `connecting` under that lock can't miss it.
+// Queued events mustn't make a disconnected account look connected. disconnect() idles the
+// gateway before it takes the store's lock, so `connecting` checked under that lock sees it.
 fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
     match event {
         ConnectionEvent::Dispatch(event) => {
