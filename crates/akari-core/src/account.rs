@@ -134,7 +134,6 @@ impl Shared {
         }
     }
 
-    // Discord jumps to the present before sending; a stale window just waits for its refresh.
     fn view(self: &Arc<Self>, channel: ChannelId) {
         self.store.view_channel(channel);
         self.subscribe_guild_of(channel);
@@ -170,7 +169,7 @@ impl Shared {
     }
 
     // Subscriptions belong to a session; the official client sends them again after READY
-    // and after RESUMED.
+    // and after RESUMED. Channels viewed while offline count too.
     async fn resubscribe(&self, new_session: bool) {
         let guilds: Vec<GuildId> = {
             let mut subscribed = self
@@ -178,8 +177,9 @@ impl Shared {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             if new_session {
-                *subscribed = self.store.viewed_guilds();
+                subscribed.clear();
             }
+            subscribed.extend(self.store.viewed_guilds());
             subscribed.iter().copied().collect()
         };
         for command in GatewayCommand::subscribe_guilds(&guilds) {
@@ -187,6 +187,7 @@ impl Shared {
         }
     }
 
+    // Discord jumps to the present before sending; a stale window just waits for its refresh.
     async fn prepare_send(self: &Arc<Self>, channel: ChannelId) -> Result<(), RequestError> {
         match self.store.messages(channel) {
             None => self.view(channel),

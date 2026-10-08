@@ -1442,6 +1442,31 @@ async fn subscriptions_are_sent_again_after_ready_and_resumed() {
 }
 
 #[tokio::test]
+async fn a_channel_viewed_while_resuming_is_subscribed_after_resumed() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+
+    connection.close(4000).await;
+    events_until(&subscription, "Connecting").await;
+    account.view_channel(general());
+    let mut resumed = fake.accept().await;
+    assert_eq!(resumed.handshake(60_000).await["op"], 6);
+    resumed.dispatch(2, "RESUMED").await;
+
+    assert_eq!(
+        subscribed(
+            &next_command(&mut resumed)
+                .await
+                .expect("nothing after RESUMED")
+        ),
+        [G1]
+    );
+}
+
+#[tokio::test]
 async fn nothing_is_subscribed_while_offline() {
     let mut fake = FakeGateway::start().await;
     let account = start(&fake);
