@@ -126,9 +126,11 @@ async fn identify_presents_the_same_client_as_rest() {
 async fn heartbeats_carry_the_last_sequence() {
     let mut fake = FakeGateway::start().await;
     let gateway = start(&fake);
-    let mut connection = connected(&mut fake, &gateway, 50).await;
-
+    let mut connection = connected(&mut fake, &gateway, 60_000).await;
     connection.dispatch(2, "TYPING_START").await;
+    next(&gateway).await;
+
+    connection.send(json!({"op": 1, "d": null})).await;
 
     connection
         .pump_until(WAIT, |connection, _| {
@@ -142,7 +144,7 @@ async fn an_unread_consumer_never_stalls_the_connection() {
     let mut fake = FakeGateway::start().await;
     let gateway = start(&fake);
     let mut connection = fake.accept().await;
-    connection.handshake(1000).await;
+    connection.handshake(2000).await;
     connection.ready(1, SESSION, &fake.resume_url()).await;
     for seq in 2..=501 {
         connection.dispatch(seq, "TYPING_START").await;
@@ -154,7 +156,7 @@ async fn an_unread_consumer_never_stalls_the_connection() {
         })
         .await;
     let before = connection.heartbeats.len();
-    let unexpected = connection.pump(Duration::from_millis(3500)).await;
+    let unexpected = connection.pump(Duration::from_millis(6500)).await;
 
     assert!(unexpected.is_empty(), "{unexpected:?}");
     assert_eq!(connection.close_code, None);
@@ -528,7 +530,8 @@ async fn sends_after_close_fail() {
 #[tokio::test]
 async fn the_rate_limit_leaves_room_for_heartbeats() {
     let mut fake = FakeGateway::start().await;
-    let window = Duration::from_secs(3);
+    let window = Duration::from_secs(4);
+    let interval = Duration::from_secs(2);
     let gateway = Arc::new(start_with(
         &fake,
         Timing {
@@ -536,7 +539,7 @@ async fn the_rate_limit_leaves_room_for_heartbeats() {
             ..timing()
         },
     ));
-    let mut connection = connected(&mut fake, &gateway, 500).await;
+    let mut connection = connected(&mut fake, &gateway, 2000).await;
     let sender = gateway.clone();
     let sends = tokio::spawn(async move {
         for n in 0..130 {
@@ -558,25 +561,41 @@ async fn the_rate_limit_leaves_room_for_heartbeats() {
         .map(|command| command["d"].clone())
         .collect();
     assert_eq!(numbers, (0..130).map(|n| json!(n)).collect::<Vec<_>>());
-    let received = &connection.received;
-    for (index, start) in received.iter().enumerate() {
-        let in_window = received[index..]
+    let writes: Vec<(Instant, i64)> = gateway
+        .writes
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(at, payload)| {
+            let payload: serde_json::Value = serde_json::from_str(payload).unwrap();
+            (*at, payload["op"].as_i64().unwrap())
+        })
+        .collect();
+    for (index, (start, _)) in writes.iter().enumerate() {
+        let in_window = writes[index..]
             .iter()
-            .take_while(|at| **at < *start + window)
+            .take_while(|(at, _)| *at < *start + window)
             .count();
-        assert!(in_window <= 120, "{in_window} messages within one window");
+        assert!(in_window <= 120, "{in_window} writes within one window");
     }
-    let times = &connection.payload_times;
-    let (held_from, held_until) = times
+    let command_times: Vec<Instant> = writes
+        .iter()
+        .filter(|(_, op)| *op == 99)
+        .map(|(at, _)| *at)
+        .collect();
+    let (held_from, held_until) = command_times
         .windows(2)
         .map(|pair| (pair[0], pair[1]))
         .max_by_key(|(from, until)| *until - *from)
         .unwrap();
     assert!(
-        connection
-            .heartbeats
+        held_until - held_from >= interval,
+        "the commands were never held back"
+    );
+    assert!(
+        writes
             .iter()
-            .any(|(at, _)| (held_from..held_until).contains(at)),
+            .any(|(at, op)| *op == 1 && (held_from..held_until).contains(at)),
         "no heartbeat while commands were held back"
     );
 }

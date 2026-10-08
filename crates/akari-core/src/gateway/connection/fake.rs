@@ -79,8 +79,6 @@ pub(super) struct FakeConnection {
     compressor: Option<ZstdCompressor>,
     pub(super) ack: bool,
     pub(super) heartbeats: Vec<(Instant, Value)>,
-    pub(super) received: Vec<Instant>,
-    pub(super) payload_times: Vec<Instant>,
     pub(super) close_code: Option<Option<u16>>,
 }
 
@@ -96,8 +94,6 @@ impl FakeConnection {
             compressor,
             ack: true,
             heartbeats: Vec::new(),
-            received: Vec::new(),
-            payload_times: Vec::new(),
             close_code: None,
         }
     }
@@ -126,7 +122,6 @@ impl FakeConnection {
                 .expect("the client went quiet");
             match message {
                 Some(Ok(Message::Text(text))) => {
-                    self.received.push(Instant::now());
                     let payload: Value = serde_json::from_str(&text).unwrap();
                     if payload["op"] == 1 {
                         self.heartbeats.push((Instant::now(), payload["d"].clone()));
@@ -135,7 +130,6 @@ impl FakeConnection {
                         }
                         continue;
                     }
-                    self.payload_times.push(Instant::now());
                     return Some(payload);
                 }
                 Some(Ok(Message::Close(frame))) => {

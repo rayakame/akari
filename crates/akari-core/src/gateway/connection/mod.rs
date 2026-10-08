@@ -32,7 +32,13 @@ pub struct Gateway {
     outgoing: mpsc::Sender<Outgoing>,
     #[cfg(feature = "capture")]
     capture: Arc<AtomicBool>,
+    #[cfg(test)]
+    writes: Writes,
 }
+
+// Every payload the task wrote, with the instant the rate limiter counted it.
+#[cfg(test)]
+type Writes = Arc<std::sync::Mutex<Vec<(tokio::time::Instant, String)>>>;
 
 const COMMAND_QUEUE: usize = 16;
 
@@ -160,6 +166,8 @@ impl Gateway {
         let (outgoing, commands) = mpsc::channel(COMMAND_QUEUE);
         #[cfg(feature = "capture")]
         let capture = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let writes = Writes::default();
         let task = Task {
             client,
             token,
@@ -173,6 +181,8 @@ impl Gateway {
             capture: capture.clone(),
             session: Session::default(),
             retry: Retry::default(),
+            #[cfg(test)]
+            writes: writes.clone(),
         };
         runtime.spawn(task.run());
         Ok(Self {
@@ -182,6 +192,8 @@ impl Gateway {
             outgoing,
             #[cfg(feature = "capture")]
             capture,
+            #[cfg(test)]
+            writes,
         })
     }
 

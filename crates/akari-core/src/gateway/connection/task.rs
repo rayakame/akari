@@ -43,6 +43,8 @@ pub(super) struct Task {
     pub(super) capture: Arc<AtomicBool>,
     pub(super) session: Session,
     pub(super) retry: Retry,
+    #[cfg(test)]
+    pub(super) writes: super::Writes,
 }
 
 enum End {
@@ -384,7 +386,13 @@ impl Task {
         link: &mut Connection,
         payload: String,
     ) -> Result<(), Exit> {
-        link.limiter.record(Instant::now());
+        let now = Instant::now();
+        link.limiter.record(now);
+        #[cfg(test)]
+        self.writes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((now, payload.clone()));
         socket.send(Message::text(payload)).await.map_err(|err| {
             let reason = DisconnectReason::Transport(TransportError::from_tungstenite(err));
             (self.lost(link, reason), None)
