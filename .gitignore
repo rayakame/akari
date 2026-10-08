@@ -10,6 +10,9 @@ target/
 token.txt
 tokens/
 
+# Captured gateway payloads hold personal data and secrets
+captures/
+
 # Local caches hold real messages
 *.sqlite
 *.sqlite3

@@ -10,7 +10,8 @@ Sources: [Authentication](https://docs.discord.food/authentication),
 [JSON error codes](https://docs.discord.food/api/codes) and
 [Remote Authentication](https://docs.discord.food/remote-authentication/overview).
 
-Everything here is **unverified** against real traffic unless it says otherwise.
+Everything here is **unverified** against real traffic unless it says otherwise. The QR code
+login worked end to end against Discord on 2026-10-08 (`akari-cli login --qr`).
 
 ## Requests
 
@@ -265,6 +266,8 @@ through `spawn_blocking`.
   its URL.
 - `Authorization` and the three `X-Captcha-*` headers are marked sensitive, so reqwest
   leaves their values out of its own `Debug` output.
-- tungstenite logs every frame at `trace` level through the `log` crate, and the gateway's
-  Identify frame contains the token. Hosts must not forward `log` records at `trace` level
-  for `tungstenite`. akari-cli doesn't forward `log` records at all.
+- tungstenite logs every frame at `trace` level through the `log` crate, so the remote auth
+  ticket and, on the gateway, Identify and Resume with the token end up there (see
+  [gateway.md](gateway.md#keeping-the-token-out-of-logs)). Hosts must not forward `log`
+  records at `trace` level for `tungstenite`. akari-cli doesn't forward `log` records at
+  all.

@@ -30,9 +30,10 @@ Reference notes on Discord's layout, behavior and shortcuts live in `docs/ui/`.
 ## Repository layout
 
 This is the intended layout. So far `akari-core` has the wire models, gateway decoding, the
-shared `DiscordClient` with both login flows (email/password and QR code) and the token
-storage trait, and `akari-cli` can log in and out; `akari-markdown` and `akari-ffi` are
-still empty skeletons, and each app folder contains only a README.
+shared `DiscordClient` with both login flows (email/password and QR code), the token
+storage trait and the gateway connection (zstd-stream, heartbeats, resume, rate-limited
+sends), and `akari-cli` can log in, log out and connect; `akari-markdown` and `akari-ffi`
+are still empty skeletons, and each app folder contains only a README.
 
 | Path | Contents |
 |---|---|
@@ -65,6 +66,10 @@ apps/linux ──► akari-core, akari-markdown   (later, as a workspace member)
   Value types (`Snowflake<M>` with its markers, `Timestamp`, `Permissions`) are shared
   vocabulary the state layer may reuse.
 - `akari-ffi` contains bindings only; logic belongs in `akari-core` or `akari-markdown`.
+- Dev-only cargo features (`capture`, which hands out the raw READY) are enabled only by
+  `akari-cli`. Cargo unifies features across a workspace build, so `cargo build --workspace`
+  would compile `akari-core` with them for `akari-ffi` too: app builds always build
+  `-p akari-ffi`, and CI checks that `-p akari-ffi` never pulls in `capture`.
 - Swift and Kotlin apps reach Rust only through `akari-ffi`; the Linux app links the
   crates directly.
 
@@ -121,6 +126,10 @@ cargo test --workspace
 # cargo-ndk always needs an Android NDK: ANDROID_NDK_HOME or Android Studio's SDK.
 cargo check --workspace --exclude akari-cli --target aarch64-apple-ios
 cargo ndk -t arm64-v8a check --workspace --exclude akari-cli  # needs cargo-ndk
+
+# akari-core without akari-cli's dev features, and the feature boundary apps rely on
+cargo clippy -p akari-core --all-targets -- -D warnings
+cargo tree -p akari-ffi -e features -i akari-core   # must not list feature "capture"
 
 # Banned dependencies (needs cargo-deny)
 cargo deny check bans

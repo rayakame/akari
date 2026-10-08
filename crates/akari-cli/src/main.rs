@@ -1,6 +1,7 @@
 // The no-unwrap rule covers library crates only.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod connect;
 mod host;
 mod keychain;
 mod login;
@@ -30,6 +31,8 @@ enum Command {
     Login(LoginArgs),
     /// End the session on Discord and remove the stored token.
     Logout,
+    /// Connect to the gateway with the stored login and print a summary of READY.
+    Connect(ConnectArgs),
 }
 
 #[derive(Args)]
@@ -41,6 +44,19 @@ struct LoginArgs {
     /// Log in with email or phone number and password.
     #[arg(long)]
     password: bool,
+}
+
+#[derive(Args)]
+struct ConnectArgs {
+    /// Stay connected and report reconnects until Ctrl+C.
+    #[arg(long)]
+    keep_open: bool,
+    /// Save the raw READY payload to captures/. It contains personal data.
+    #[arg(long)]
+    capture: bool,
+    /// Set this session's status after READY.
+    #[arg(long, value_enum)]
+    status: Option<connect::Status>,
 }
 
 #[tokio::main]
@@ -65,6 +81,14 @@ async fn main() -> ExitCode {
         Command::Login(args) if args.qr => login::qr(&client, &store).await,
         Command::Login(_) => login::password(&client, &store).await,
         Command::Logout => login::logout(&client, &store).await,
+        Command::Connect(args) => {
+            let options = connect::Options {
+                keep_open: args.keep_open,
+                capture: args.capture,
+                status: args.status,
+            };
+            connect::run(&client, &store, options).await
+        }
     }
 }
 

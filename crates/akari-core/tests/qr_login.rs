@@ -409,8 +409,9 @@ async fn cancelling_on_the_phone_never_delays_the_next_code() {
     }
     gateway.accept().await;
 
+    // Backing off would wait at least 0.5 + 1 + 2 + 4 s; key generation alone can take 2 s on CI.
     assert!(
-        started.elapsed() < Duration::from_secs(2),
+        started.elapsed() < Duration::from_secs(7),
         "{:?} for five cancels",
         started.elapsed()
     );

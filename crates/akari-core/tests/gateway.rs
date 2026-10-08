@@ -43,6 +43,17 @@ fn hello_decodes() {
 }
 
 #[test]
+fn resumed_decodes() {
+    assert_eq!(
+        decode_ok(r#"{"op": 0, "s": 9, "t": "RESUMED", "d": {"_trace": []}}"#),
+        GatewayEvent::Dispatch {
+            seq: 9,
+            event: DispatchEvent::Resumed,
+        }
+    );
+}
+
+#[test]
 fn control_opcodes_decode() {
     assert_eq!(
         decode_ok(r#"{"op": 1, "d": null, "s": null, "t": null}"#),
@@ -300,7 +311,7 @@ fn broken_current_user_is_still_an_error() {
 
     assert!(matches!(
         decode(payload.to_string().as_bytes()),
-        Err(DecodeError::Json(_))
+        Err(DecodeError::Dispatch { seq: 1, ref event, .. }) if event == "READY"
     ));
 }
 
