@@ -11,7 +11,7 @@ use super::hello::Hello;
 use super::partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
 use super::ready::Ready;
 use crate::JsonError;
-use crate::model::{Channel, Message};
+use crate::model::{Channel, GenericMarker, Message, Snowflake};
 
 /// A message received from the gateway.
 #[derive(Debug, Clone, PartialEq)]
@@ -135,6 +135,16 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
     use DispatchEvent as E;
 
     let json = data.get();
+    // Names and guild IDs only: payloads hold message content and personal data.
+    if tracing::enabled!(target: "akari_core::dispatches", tracing::Level::DEBUG) {
+        tracing::debug!(
+            target: "akari_core::dispatches",
+            event = %name,
+            seq,
+            guild_id = guild_of(&name, json),
+            "dispatch"
+        );
+    }
     let event = match name.as_str() {
         "READY" => parse(json).map(|ready| E::Ready(Box::new(ready))),
         "READY_SUPPLEMENTAL" => parse(json).map(|data| E::ReadySupplemental(Box::new(data))),
@@ -164,6 +174,23 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
         event: name,
         source: source.into(),
     })
+}
+
+// Parsed only for the dispatch log, so it costs nothing otherwise.
+fn guild_of(name: &str, json: &str) -> Option<u64> {
+    #[derive(Deserialize)]
+    struct Guild {
+        guild_id: Option<Snowflake<GenericMarker>>,
+    }
+    #[derive(Deserialize)]
+    struct Own {
+        id: Option<Snowflake<GenericMarker>>,
+    }
+    let id = match name {
+        "GUILD_CREATE" | "GUILD_UPDATE" | "GUILD_DELETE" => parse::<Own>(json).ok()?.id,
+        _ => parse::<Guild>(json).ok()?.guild_id,
+    };
+    id.map(Snowflake::get)
 }
 
 fn parse<T: DeserializeOwned>(json: &str) -> Result<T, serde_json::Error> {
