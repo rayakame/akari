@@ -33,18 +33,21 @@ serde_json = "1.0"
 time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 # Default features add a legacy-format decoder and a dictionary builder Akari doesn't need.
 zstd = { version = "0.14", default-features = false }
-uniffi = "0.32"
+# Without default features: "cargo-metadata" would make the library itself depend on
+# cargo_metadata. akari-bindgen turns on what the bindings generator needs.
+uniffi = { version = "0.32", default-features = false }
 thiserror = "2"
 tracing = "0.1"
 wiremock = "0.6"
+
+# Without "tracing-log": tungstenite logs whole frames, the token included, through `log`.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
 
 # akari-cli only
 clap = { version = "4.6", features = ["derive"] }
 keyring = "4.2"
 qrcode = { version = "0.14", default-features = false }
 rpassword = "7.5"
-# Without "tracing-log": tungstenite logs whole frames, the token included, through `log`.
-tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

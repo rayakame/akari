@@ -198,6 +198,16 @@ impl DiscordClient {
         remote
     }
 
+    /// Deletes the stored token without a request to Discord, e.g. for a token Discord
+    /// already rejected.
+    pub async fn forget_token(
+        &self,
+        account: Snowflake<UserMarker>,
+    ) -> Result<(), TokenStoreError> {
+        let store = self.inner.store.clone();
+        blocking(move || store.delete(account)).await
+    }
+
     /// Ends the session `token` belongs to, without touching the token store; for a token
     /// that was already replaced there. A token Discord no longer accepts counts as done.
     pub async fn end_session(&self, token: &Token) -> Result<(), LogoutError> {
