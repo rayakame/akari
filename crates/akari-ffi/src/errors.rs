@@ -138,3 +138,89 @@ impl From<akari_core::auth::LogoutError> for LogoutError {
         }
     }
 }
+
+/// Why a login step failed. Messages are safe to show and never contain secrets.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+#[uniffi::export(Display)]
+pub enum LoginError {
+    /// Wrong login or password; `message` is Discord's, for display.
+    #[error("{message}")]
+    InvalidCredentials { message: String },
+    /// The step stays pending, so the user can try another code.
+    #[error("invalid two-factor code")]
+    InvalidMfaCode,
+    /// The MFA ticket ran out; start the login again.
+    #[error("the login attempt expired, start again")]
+    Expired,
+    #[error("this account is disabled")]
+    AccountDisabled,
+    #[error("this account is scheduled for deletion")]
+    AccountScheduledForDeletion,
+    #[error("this account is suspended")]
+    AccountSuspended,
+    /// `retry_after` is `None` when Discord didn't say how long to wait.
+    #[error("rate limited by Discord")]
+    RateLimited {
+        retry_after: Option<Duration>,
+        global: bool,
+    },
+    #[error("blocked by Discord's anti-abuse systems")]
+    Blocked,
+    #[error("Discord couldn't send an SMS for this account")]
+    SmsUnavailable,
+    #[error("not a login verification link or token")]
+    InvalidVerificationLink,
+    #[error("Discord error {code}: {message}")]
+    Discord { code: u32, message: String },
+    #[error("network error")]
+    Network { kind: NetworkErrorKind },
+    #[error("QR code login failed: {message}")]
+    RemoteAuth { message: String },
+    #[error("unexpected response from Discord")]
+    UnexpectedResponse,
+    #[error("the login was cancelled")]
+    Cancelled,
+    #[error("no login step is waiting for this")]
+    NoPendingStep,
+    #[error("another login step is still running")]
+    Busy,
+}
+
+impl From<akari_core::auth::LoginError> for LoginError {
+    fn from(err: akari_core::auth::LoginError) -> Self {
+        use akari_core::auth::LoginError as E;
+
+        match err {
+            E::InvalidCredentials { message } => Self::InvalidCredentials { message },
+            E::InvalidMfaCode => Self::InvalidMfaCode,
+            E::Expired => Self::Expired,
+            E::AccountDisabled => Self::AccountDisabled,
+            E::AccountScheduledForDeletion => Self::AccountScheduledForDeletion,
+            E::AccountSuspended => Self::AccountSuspended,
+            E::RateLimited {
+                retry_after,
+                global,
+            } => Self::RateLimited {
+                retry_after,
+                global,
+            },
+            E::Blocked => Self::Blocked,
+            E::SmsUnavailable => Self::SmsUnavailable,
+            E::InvalidVerificationLink => Self::InvalidVerificationLink,
+            E::Discord { code, message } => Self::Discord { code, message },
+            E::Network(err) => Self::Network {
+                kind: err.kind().into(),
+            },
+            E::RemoteAuth(message) => Self::RemoteAuth { message },
+            E::UnexpectedResponse => Self::UnexpectedResponse,
+            E::Cancelled => Self::Cancelled,
+            E::NoPendingStep => Self::NoPendingStep,
+            E::Busy => Self::Busy,
+            // The bindings always enter their runtime first, so this can't happen.
+            E::NoRuntime => {
+                tracing::error!("a login started outside the runtime");
+                Self::Cancelled
+            }
+        }
+    }
+}

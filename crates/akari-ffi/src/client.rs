@@ -4,7 +4,8 @@ use akari_core::model::UserId;
 use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs};
 use tokio::runtime::Runtime;
 
-use crate::errors::{ClientError, LogoutError, TokenStoreError};
+use crate::errors::{ClientError, LoginError, LogoutError, TokenStoreError};
+use crate::login::{PasswordLogin, QrLogin};
 use crate::runtime::{run, runtime};
 use crate::token_store::{HostStore, TokenStore};
 
@@ -100,6 +101,17 @@ impl DiscordClient {
             endpoints,
         )?;
         Ok(Arc::new(Self { core, runtime }))
+    }
+
+    /// Starts an email/password login. Several logins can run at the same time.
+    pub fn password_login(&self) -> Arc<PasswordLogin> {
+        PasswordLogin::new(self.core.password_login(), self.runtime)
+    }
+
+    /// Starts a QR code login in the background.
+    pub fn qr_login(&self) -> Result<Arc<QrLogin>, LoginError> {
+        let _entered = self.runtime.enter();
+        Ok(QrLogin::new(self.core.qr_login()?))
     }
 
     pub async fn save_token(

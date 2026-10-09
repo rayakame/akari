@@ -29,6 +29,57 @@ pub fn unreachable_endpoints() -> Endpoints {
     }
 }
 
+/// A client for local test servers, which `DiscordClient::with_endpoints` can't reach
+/// because they don't use TLS.
+pub fn local_client(
+    endpoints: akari_core::Endpoints,
+    store: Arc<dyn TokenStore>,
+) -> Arc<DiscordClient> {
+    use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
+
+    let host = HostInfo {
+        os: DesktopOs::MacOs,
+        os_version: "25.0.0".to_owned(),
+        arch: Arch::Arm64,
+        system_locale: "en-US".to_owned(),
+    };
+    let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
+    let endpoints = akari_core::Endpoints {
+        allow_plaintext: true,
+        ..endpoints
+    };
+    let core = akari_core::DiscordClient::with_endpoints(
+        properties,
+        Arc::new(crate::token_store::HostStore(store)),
+        endpoints,
+    )
+    .unwrap_or_else(|err| panic!("client setup failed: {err}"));
+    DiscordClient::from_core(core).unwrap_or_else(|err| panic!("{err}"))
+}
+
+/// A REST server that already answers the fingerprint request logins start with.
+pub async fn rest_server() -> wiremock::MockServer {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, ResponseTemplate};
+
+    let server = wiremock::MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v9/experiments"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"fingerprint": "fp.1"})),
+        )
+        .mount(&server)
+        .await;
+    server
+}
+
+pub fn rest_endpoints(server: &wiremock::MockServer) -> akari_core::Endpoints {
+    akari_core::Endpoints {
+        api: format!("{}/api/v9/", server.uri()),
+        ..akari_core::Endpoints::default()
+    }
+}
+
 pub fn unreachable_client(store: Arc<dyn TokenStore>) -> Arc<DiscordClient> {
     DiscordClient::with_endpoints(host(), store, unreachable_endpoints())
         .unwrap_or_else(|err| panic!("client setup failed: {err}"))
