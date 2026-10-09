@@ -49,6 +49,12 @@ keyring = "4.2"
 qrcode = { version = "0.14", default-features = false }
 rpassword = "7.5"
 
+[profile.release]
+codegen-units = 1
+lto = "fat"
+# UniFFI catches a panic at the FFI boundary and reports it to the host; abort would end the app.
+panic = "unwind"
+
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"

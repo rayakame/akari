@@ -44,11 +44,12 @@ jobs:
       # Built alone, akari-core has no dev features; akari-cli turns them on in workspace builds.
       - run: cargo clippy -p akari-core --all-targets --locked -- -D warnings
       # Apps build akari-ffi alone (-p), where workspace feature unification can't add dev features.
-      - name: akari-ffi builds without akari-cli's dev features
+      # Its own dev-dependencies (tests) may use insecure-test-endpoints; the library may not.
+      - name: akari-ffi builds without dev features
         # A failing cargo tree must fail the step, not leave grep with nothing to find.
         run: |
-          tree=$(cargo tree -p akari-ffi -e features -i akari-core --locked)
-          if grep -qE 'feature "(capture|flags-only|repeat-nonce)"' <<<"$tree"; then
+          tree=$(cargo tree -p akari-ffi -e features,no-dev -i akari-core --locked)
+          if grep -qE 'feature "(capture|flags-only|repeat-nonce|insecure-test-endpoints)"' <<<"$tree"; then
             echo "akari-ffi would build akari-core with a dev feature" >&2
             exit 1
           fi
@@ -64,7 +65,8 @@ jobs:
           persist-credentials: false
       - run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --exclude akari-cli --target aarch64-apple-ios --locked
+      # akari-bindgen is a host tool; it never runs on a device.
+      - run: cargo check --workspace --exclude akari-cli --exclude akari-bindgen --target aarch64-apple-ios --locked
 
   android:
     name: check aarch64-linux-android
@@ -79,7 +81,21 @@ jobs:
         with:
           tool: cargo-ndk@4.1.2
       # cargo-ndk finds the runner's preinstalled NDK through ANDROID_NDK_HOME.
-      - run: cargo ndk -t arm64-v8a check --workspace --exclude akari-cli --locked
+      - run: cargo ndk -t arm64-v8a check --workspace --exclude akari-cli --exclude akari-bindgen --locked
+
+  apple:
+    name: AkariKit (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+      - run: xcodebuild -version && swift --version
+      # Universal release build of akari-ffi, the Swift bindings and the XCFramework.
+      - run: apps/apple/build-ffi.sh
+      - run: swift test --package-path apps/apple/AkariKit
 
   deny:
     name: cargo-deny bans
