@@ -152,7 +152,7 @@ Observed on 2026-10-09 with `akari-cli tail` on a test account:
 |---|---|---|
 | Small (under 250 members) | guild flags | new, edit and delete |
 | A few thousand members | flags and `channels: {<channel>: [[0, 99]]}` | new and edit |
-| Millions of members, default | flags and the channel range | new, edit, delete |
+| Millions of members, default | flags and the channel range | new messages; the guild's edits and deletes arrived too |
 | Millions of members, `tail --flags-only` | flags only | new messages |
 
 A first run in the server of millions showed nothing live because the account was only

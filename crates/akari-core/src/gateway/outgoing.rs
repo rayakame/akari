@@ -23,8 +23,8 @@ pub enum GatewayCommand {
 #[non_exhaustive]
 pub struct GuildSubscription {
     pub guild_id: GuildId,
-    /// `Some` also subscribes these member lists and drops all others in the guild. In very
-    /// large guilds, live messages only come for channels whose member list is subscribed.
+    /// `Some` also subscribes these member lists and drops all others in the guild, as the
+    /// official client does for the channel it shows. Live messages don't need them.
     pub member_lists: Option<MemberLists>,
 }
 
