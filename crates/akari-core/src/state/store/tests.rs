@@ -825,3 +825,24 @@ fn report_write_lock_hold_times() {
         println!("{:>8.3} ms  {event}", held.as_secs_f64() * 1000.0);
     }
 }
+
+#[test]
+fn a_window_opened_between_prepare_and_swap_is_dropped_with_its_channel() {
+    let store = ready_store();
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    data["guilds"][0]["channels"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|channel| channel["id"].as_str().and_then(|id| id.parse().ok()) != Some(GENERAL));
+    let DispatchEvent::Ready(ready) = dispatch("READY", &data) else {
+        unreachable!()
+    };
+
+    let prepared = store.prepare_ready(*ready);
+    store.view_channel(Snowflake::new(GENERAL));
+    assert!(store.messages(Snowflake::new(GENERAL)).is_some());
+    store.replace(prepared);
+
+    assert!(store.channel(Snowflake::new(GENERAL)).is_none());
+    assert!(store.messages(Snowflake::new(GENERAL)).is_none());
+}
