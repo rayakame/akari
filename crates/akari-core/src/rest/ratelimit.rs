@@ -115,20 +115,20 @@ impl Limits {
 
     // None: the request may start now and is counted. Some: try again then.
     fn reserve(&mut self, route: &RouteKey, now: Instant) -> Option<Instant> {
-        let later = |at: Option<Instant>| at.filter(|at| *at > now);
-        if let Some(at) = later(self.global_until) {
+        self.paused.retain(|_, until| *until > now);
+        self.buckets
+            .retain(|_, bucket| bucket.reset_at.is_some_and(|reset_at| reset_at > now));
+        if let Some(at) = self.global_until.filter(|at| *at > now) {
             return Some(at);
         }
-        if let Some(at) = later(self.paused.get(route).copied()) {
-            return Some(at);
+        if let Some(at) = self.paused.get(route) {
+            return Some(*at);
         }
         let key = self.bucket_key(route);
-        if let Some(bucket) = self.buckets.get_mut(&key) {
-            match later(bucket.reset_at) {
-                Some(at) if bucket.remaining == Some(0) => return Some(at),
-                Some(_) => {}
-                None => *bucket = Bucket::default(),
-            }
+        if let Some(bucket) = self.buckets.get(&key)
+            && bucket.remaining == Some(0)
+        {
+            return bucket.reset_at;
         }
         while self
             .starts

@@ -289,3 +289,28 @@ fn a_global_429_is_recognized_from_header_or_body() {
 
     assert!(header.global && body.global);
 }
+
+#[tokio::test(start_paused = true)]
+async fn expired_limits_are_forgotten() {
+    let mut limits = Limits::default();
+    let start = Instant::now();
+    for channel in 1..=3 {
+        limits.finished(&send(channel), &limited(SECOND, false), start);
+        limits.finished(
+            &route(Method::Get, channel),
+            &ResponseLimits {
+                bucket: Some("abcd1234".to_owned()),
+                remaining: Some(0),
+                reset_after: Some(SECOND),
+                ..ResponseLimits::default()
+            },
+            start,
+        );
+    }
+    limits.finished(&send(4), &limited(10 * SECOND, false), start);
+
+    assert!(limits.reserve(&send(9), start + 2 * SECOND).is_none());
+
+    assert_eq!(limits.paused.keys().collect::<Vec<_>>(), [&send(4)]);
+    assert!(limits.buckets.is_empty());
+}
