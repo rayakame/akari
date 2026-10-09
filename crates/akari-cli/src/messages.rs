@@ -201,13 +201,18 @@ fn repeat_line(first: MessageId, repeat: &Result<MessageId, RequestError>) -> St
 async fn tail(session: &Session, channel: ChannelId, interrupts: &mut Signal) -> ExitCode {
     let account = &session.account;
     let store = account.store();
-    let large = store
-        .channel(channel)
+    let known = store.channel(channel);
+    let guild = known
+        .as_ref()
         .and_then(|channel| channel.guild_id)
-        .and_then(|guild| store.guild(guild))
-        .is_some_and(|guild| guild.large);
-    if large {
-        eprintln!("(a large server: live messages arrive through Akari's guild subscription)");
+        .and_then(|guild| store.guild(guild));
+    let note = guild_note(
+        known.is_some(),
+        guild.as_ref().is_some_and(|guild| guild.large),
+        guild.as_ref().and_then(|guild| guild.member_count),
+    );
+    if let Some(note) = note {
+        eprintln!("{note}");
     }
     let mut shown = HashSet::new();
     if let Err(code) = jump_to_present(session, channel, &mut shown, Change::Loaded).await {
@@ -308,6 +313,23 @@ async fn jump_to_present(
         }
     }
     Ok(())
+}
+
+fn guild_note(known: bool, large: bool, member_count: Option<u32>) -> Option<String> {
+    if !known {
+        return Some(
+            "(this channel isn't in Akari's state, so its guild can't be subscribed: \
+             live messages may not arrive)"
+                .to_owned(),
+        );
+    }
+    if !large {
+        return None;
+    }
+    let size = member_count.map_or_else(String::new, |count| format!(", {count} members"));
+    Some(format!(
+        "(a large server{size}: Akari subscribes this channel's member list)"
+    ))
 }
 
 fn line(message: &Message) -> String {
@@ -489,6 +511,26 @@ mod tests {
             repeat_line(first, &Err(RequestError::UnexpectedResponse)),
             "The repeat failed: unexpected response from Discord"
         );
+    }
+
+    #[test]
+    fn tail_says_how_live_messages_will_arrive() {
+        assert_eq!(
+            guild_note(false, false, None).as_deref(),
+            Some(
+                "(this channel isn't in Akari's state, so its guild can't be subscribed: \
+                 live messages may not arrive)"
+            )
+        );
+        assert_eq!(
+            guild_note(true, true, Some(3_000_000)).as_deref(),
+            Some("(a large server, 3000000 members: Akari subscribes this channel's member list)")
+        );
+        assert_eq!(
+            guild_note(true, true, None).as_deref(),
+            Some("(a large server: Akari subscribes this channel's member list)")
+        );
+        assert_eq!(guild_note(true, false, Some(12)), None);
     }
 
     #[test]
