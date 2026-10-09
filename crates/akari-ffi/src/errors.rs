@@ -274,3 +274,71 @@ impl From<akari_core::gateway::GatewayError> for GatewayError {
         Self::from(&err)
     }
 }
+
+/// A request on behalf of an account that Discord didn't fulfil.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+#[uniffi::export(Display)]
+pub enum RequestError {
+    /// The token is no longer valid; log in again. Later requests fail at once.
+    #[error("Discord no longer accepts the token")]
+    Unauthorized,
+    #[error("rate limited by Discord")]
+    RateLimited { retry_after: Option<Duration> },
+    /// Discord wants a captcha solved, which Akari doesn't support yet.
+    #[error("Discord wants a captcha solved")]
+    CaptchaRequired {
+        challenge: Box<crate::login::CaptchaChallenge>,
+    },
+    /// E.g. 50013 Missing Permissions, or 50035 for a message that is too long.
+    #[error("Discord error {code}: {message}")]
+    Discord {
+        status: u16,
+        code: u32,
+        message: String,
+    },
+    /// A 5xx: Discord couldn't answer. Trying again later may work.
+    #[error("Discord server error {status}")]
+    ServerError { status: u16 },
+    #[error("network error")]
+    Network { kind: NetworkErrorKind },
+    #[error("unexpected response from Discord")]
+    UnexpectedResponse,
+    /// Empty content, a send before the account is online, or a retry of a message that
+    /// isn't failed.
+    #[error("invalid request")]
+    InvalidRequest,
+    /// The account is closed.
+    #[error("the account is closed")]
+    Closed,
+}
+
+impl From<akari_core::RequestError> for RequestError {
+    fn from(err: akari_core::RequestError) -> Self {
+        use akari_core::RequestError as E;
+
+        match err {
+            E::Unauthorized => Self::Unauthorized,
+            E::RateLimited { retry_after } => Self::RateLimited { retry_after },
+            E::CaptchaRequired(challenge) => Self::CaptchaRequired {
+                challenge: Box::new((*challenge).into()),
+            },
+            E::Discord {
+                status,
+                code,
+                message,
+            } => Self::Discord {
+                status,
+                code,
+                message,
+            },
+            E::ServerError { status } => Self::ServerError { status },
+            E::Network(err) => Self::Network {
+                kind: err.kind().into(),
+            },
+            E::UnexpectedResponse => Self::UnexpectedResponse,
+            E::InvalidRequest => Self::InvalidRequest,
+            E::Closed => Self::Closed,
+            _ => Self::UnexpectedResponse,
+        }
+    }
+}

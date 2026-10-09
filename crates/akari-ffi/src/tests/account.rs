@@ -1,104 +1,22 @@
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use akari_core::model::{ChannelId, ChannelType, GuildId, MessageId, MessageType, Permissions};
-use serde_json::{Value, json};
-use tokio::net::{TcpListener, TcpStream};
+use akari_core::model::{ChannelId, ChannelType, MessageId, MessageType, Permissions};
+use serde_json::json;
 use tokio::time::timeout;
-use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
-use super::gateway::{WAIT, accept, handshake, send};
+use super::fake::{
+    CATEGORY, DOWN, FakeGateway, GENERAL, GUILD, MESSAGE, VOICE, drain, events_until, fixture,
+    online,
+};
+use super::gateway::{WAIT, send};
 use super::support::{
     BlockingStore, MemoryStore, USER, block_on, local_client, token, unreachable_client,
 };
-use crate::client::DiscordClient;
 use crate::errors::GatewayError;
 use crate::records::{Channel, ConnectionState, Delivery};
-use crate::subscription::{StoreEvent, StoreSubscription};
-
-const GUILD: GuildId = GuildId::new(200_000_000_000_000_001);
-const DOWN: GuildId = GuildId::new(200_000_000_000_000_002);
-const CATEGORY: ChannelId = ChannelId::new(300_000_000_000_000_001);
-const GENERAL: ChannelId = ChannelId::new(300_000_000_000_000_002);
-const VOICE: ChannelId = ChannelId::new(300_000_000_000_000_003);
-const MESSAGE: MessageId = MessageId::new(400_000_000_000_000_003);
-
-struct FakeGateway {
-    listener: TcpListener,
-    address: SocketAddr,
-}
-
-impl FakeGateway {
-    async fn start() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        Self { listener, address }
-    }
-
-    fn client(&self) -> Arc<DiscordClient> {
-        let endpoints = akari_core::Endpoints {
-            gateway: format!("ws://{}/", self.address),
-            api: "http://127.0.0.1:9/api/v9/".to_owned(),
-            ..akari_core::Endpoints::default()
-        };
-        local_client(endpoints, Arc::new(MemoryStore::default()))
-    }
-
-    async fn serve_ready(&self) -> WebSocketStream<TcpStream> {
-        let mut ws = accept(&self.listener).await;
-        assert_eq!(handshake(&mut ws).await["op"], 2);
-        let mut ready: Value = fixture(include_str!(
-            "../../../akari-core/tests/fixtures/ready.json"
-        ));
-        ready["d"]["resume_gateway_url"] = format!("ws://{}/resume", self.address).into();
-        send(&mut ws, ready).await;
-        ws
-    }
-}
-
-fn fixture(json: &str) -> Value {
-    serde_json::from_str(json).unwrap()
-}
-
-/// Reads batches until an event matches `last`, and returns every event up to it.
-async fn events_until(
-    subscription: &StoreSubscription,
-    last: impl Fn(&StoreEvent) -> bool,
-) -> Vec<StoreEvent> {
-    let mut events = Vec::new();
-    timeout(WAIT, async {
-        while !events.iter().any(&last) {
-            let batch = subscription.next().await.expect("the subscription ended");
-            events.extend(batch);
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("the event never arrived; got {events:?}"));
-    events
-}
-
-async fn drain(subscription: &StoreSubscription) -> Vec<StoreEvent> {
-    let mut events = Vec::new();
-    timeout(WAIT, async {
-        while let Some(batch) = subscription.next().await {
-            events.extend(batch);
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("the subscription never ended; got {events:?}"));
-    events
-}
-
-fn online(event: &StoreEvent) -> bool {
-    matches!(
-        event,
-        StoreEvent::Connection {
-            state: ConnectionState::Online
-        }
-    )
-}
+use crate::subscription::StoreEvent;
 
 #[tokio::test]
 async fn ready_crosses_as_ids_in_order() {

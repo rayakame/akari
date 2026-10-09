@@ -15,10 +15,11 @@ mod token_store;
 #[cfg(test)]
 mod tests;
 
-pub use account::Account;
+pub use account::{Account, MessageLoad};
 pub use client::{DiscordClient, Endpoints, HostInfo, Token, discord_endpoints};
 pub use errors::{
-    ClientError, GatewayError, LoginError, LogoutError, NetworkErrorKind, TokenStoreError,
+    ClientError, GatewayError, LoginError, LogoutError, NetworkErrorKind, RequestError,
+    TokenStoreError,
 };
 pub use logging::enable_logging;
 pub use login::{
