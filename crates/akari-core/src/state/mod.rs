@@ -1,6 +1,6 @@
 //! The account's state as a UI reads it, kept current by the gateway.
 
-mod apply;
+pub(crate) mod apply;
 mod convert;
 mod events;
 mod order;

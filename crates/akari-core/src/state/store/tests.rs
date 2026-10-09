@@ -291,9 +291,9 @@ async fn connection_changes_are_state_and_events() {
 }
 
 #[test]
-fn a_ready_is_built_outside_the_lock() {
+fn a_ready_is_built_and_diffed_outside_the_lock() {
     let store = ready_store();
-    let (parked, release) = store.park_next_ready();
+    let (parked, release) = store.park_next_conversion();
     let applying = {
         let store = store.clone();
         thread::spawn(move || store.apply(ready()))
@@ -314,6 +314,92 @@ fn a_ready_is_built_outside_the_lock() {
     applying.join().unwrap();
 
     assert_eq!(guilds, Ok(1), "a read waited for the READY build");
+}
+
+#[test]
+fn a_later_ready_is_diffed_outside_the_lock() {
+    let store = ready_store();
+    let (parked, on_parked) = std_mpsc::channel();
+    let (release, on_release) = std_mpsc::channel::<()>();
+    let applying = {
+        let store = store.clone();
+        thread::spawn(move || {
+            crate::state::apply::tests::on_next_diff(move || {
+                let _ = parked.send(());
+                let _ = on_release.recv();
+            });
+            store.apply(ready());
+        })
+    };
+    on_parked
+        .recv_timeout(WAIT)
+        .expect("READY never reached the diff");
+
+    let (read, done) = std_mpsc::channel();
+    {
+        let store = store.clone();
+        thread::spawn(move || {
+            let _ = read.send(store.guilds().len());
+        });
+    }
+    let guilds = done.recv_timeout(WAIT);
+    release.send(()).unwrap();
+    applying.join().unwrap();
+
+    assert_eq!(guilds, Ok(1), "a read waited for the READY diff");
+}
+
+fn guild_create() -> DispatchEvent {
+    dispatch(
+        "GUILD_CREATE",
+        &fixture(include_str!("../../../tests/fixtures/guild_create.json")),
+    )
+}
+
+#[test]
+fn a_guild_create_is_converted_outside_the_lock() {
+    let store = ready_store();
+    let (parked, release) = store.park_next_conversion();
+    let applying = {
+        let store = store.clone();
+        thread::spawn(move || store.apply(guild_create()))
+    };
+    parked
+        .recv_timeout(WAIT)
+        .expect("GUILD_CREATE never reached the conversion");
+
+    let (read, done) = std_mpsc::channel();
+    {
+        let store = store.clone();
+        thread::spawn(move || {
+            let _ = read.send(store.guilds().len());
+        });
+    }
+    let guilds = done.recv_timeout(WAIT);
+    release.send(()).unwrap();
+    applying.join().unwrap();
+
+    assert_eq!(
+        guilds,
+        Ok(1),
+        "a read waited for the GUILD_CREATE conversion"
+    );
+    assert_eq!(store.guilds().len(), 2);
+}
+
+#[test]
+fn a_long_write_warns_with_its_event_name_only() {
+    let store = ready_store();
+    store.delay_next_write(Duration::from_millis(5));
+
+    store.apply(guild_create());
+
+    let long = store.long_holds();
+    assert!(
+        long.iter()
+            .any(|(event, held)| *event == "GUILD_CREATE" && *held > Duration::from_millis(4)),
+        "{long:?}"
+    );
 }
 
 fn raw_list(value: &Value) -> &[Value] {
@@ -596,4 +682,146 @@ fn guild_list_reads_join_dates_from_the_current_member() {
     ));
 
     assert_eq!(ids(&store.guild_list()), [G3, G1]);
+}
+
+// Synthetic IDs, small and unique per guild; snowflake values don't matter here.
+fn generated_guild(guild: u64, channels: u64, roles: u64, threads: u64) -> Value {
+    let mut data = fixture(include_str!("../../../tests/fixtures/guild_create.json"));
+    let channel = data["channels"][0].clone();
+    let role = data["roles"][0].clone();
+    let thread = fixture(include_str!("../../../tests/fixtures/thread_create.json"));
+    let base = guild * 1_000_000;
+    data["id"] = guild.to_string().into();
+    data["properties"]["id"] = guild.to_string().into();
+    let mut category = base;
+    data["channels"] = (0..channels)
+        .map(|i| {
+            let mut next = channel.clone();
+            let id = base + 1 + i;
+            next["id"] = id.to_string().into();
+            next["position"] = i.into();
+            if i % 20 == 0 {
+                next["type"] = 4.into();
+                category = id;
+            } else {
+                next["parent_id"] = category.to_string().into();
+            }
+            next["permission_overwrites"] = json!([
+                {"id": guild.to_string(), "type": 0, "allow": "0", "deny": "2048"},
+                {"id": (base + 500_001).to_string(), "type": 0, "allow": "2048", "deny": "0"},
+            ]);
+            next
+        })
+        .collect();
+    data["roles"] = (0..roles)
+        .map(|i| {
+            let mut next = role.clone();
+            let id = if i == 0 { guild } else { base + 500_000 + i };
+            next["id"] = id.to_string().into();
+            next["position"] = i.into();
+            next
+        })
+        .collect();
+    data["threads"] = (0..threads)
+        .map(|i| {
+            let mut next = thread.clone();
+            next["id"] = (base + 800_000 + i).to_string().into();
+            next["guild_id"] = guild.to_string().into();
+            next["parent_id"] = (base + 2).to_string().into();
+            next
+        })
+        .collect();
+    data
+}
+
+fn generated_ready(guilds: u64, channels: u64, roles: u64, threads: u64) -> DispatchEvent {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    let member = data["merged_members"][0][0].clone();
+    data["guilds"] = (1..=guilds)
+        .map(|guild| generated_guild(guild, channels, roles, threads))
+        .collect();
+    data["merged_members"] = (1..=guilds).map(|_| json!([member.clone()])).collect();
+    dispatch("READY", &data)
+}
+
+fn page(template: &model::Message, first: u64, count: u64) -> Vec<model::Message> {
+    (first..first + count)
+        .map(|id| {
+            let mut message = template.clone();
+            message.id = Snowflake::new(id);
+            message
+        })
+        .collect()
+}
+
+#[test]
+#[ignore = "prints write-lock hold times; run in release with --nocapture"]
+fn report_write_lock_hold_times() {
+    let mut longest = std::collections::BTreeMap::<String, Duration>::new();
+    let mut note = |label: &str, store: &Store| {
+        for (event, held) in store.take_holds() {
+            let entry = longest.entry(format!("{label}: {event}")).or_default();
+            *entry = (*entry).max(held);
+        }
+    };
+    let template = message_template();
+
+    let store = Store::new(DEFAULT_LIMITS);
+    store.record_holds();
+    store.apply(ready());
+    store.apply(ready());
+    store.apply(guild_create());
+    store.apply(rename(GENERAL, "renamed"));
+    store.view_channel(Snowflake::new(GENERAL));
+    store.apply(message_create(&template, 400_000_000_000_000_100));
+    let fixture_page: Vec<model::Message> =
+        serde_json::from_str(include_str!("../../../tests/fixtures/messages_page.json")).unwrap();
+    let ticket = store
+        .begin_load(Snowflake::new(GENERAL), LoadKind::Older)
+        .unwrap();
+    store.finish_load(ticket, fixture_page, false);
+    note("fixtures", &store);
+
+    let store = Store::new(DEFAULT_LIMITS);
+    store.record_holds();
+    store.apply(generated_ready(100, 100, 50, 20));
+    let DispatchEvent::Ready(second) = generated_ready(100, 100, 50, 20) else {
+        unreachable!()
+    };
+    let started = std::time::Instant::now();
+    let prepared = store.prepare_ready(*second);
+    let outside = started.elapsed();
+    store.replace(prepared);
+    println!(
+        "{:>8.3} ms  outside the lock: converting and diffing the generated READY",
+        outside.as_secs_f64() * 1000.0
+    );
+    let started = std::time::Instant::now();
+    store.apply(dispatch(
+        "GUILD_CREATE",
+        &generated_guild(500, 500, 250, 100),
+    ));
+    println!(
+        "{:>8.3} ms  GUILD_CREATE of the 500-channel guild, all of it",
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+    assert_eq!(store.guilds().len(), 101);
+    assert_eq!(store.guild_channels(Snowflake::new(500)).len(), 500);
+    assert_eq!(store.threads(Snowflake::new(500)).len(), 100);
+    assert_eq!(store.guild_channels(Snowflake::new(42)).len(), 100);
+    let channel = Snowflake::new(1_000_002);
+    store.view_channel(channel);
+    let mut template = template;
+    template.channel_id = channel;
+    let ticket = store.begin_load(channel, LoadKind::Latest).unwrap();
+    store.finish_load(ticket, page(&template, 10_000, 100), false);
+    store.apply(message_create(&template, 20_000));
+    note(
+        "generated (100 guilds x 100 channels; one 500-channel guild; 100 messages)",
+        &store,
+    );
+
+    for (event, held) in longest {
+        println!("{:>8.3} ms  {event}", held.as_secs_f64() * 1000.0);
+    }
 }

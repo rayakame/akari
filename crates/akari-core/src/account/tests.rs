@@ -326,7 +326,7 @@ fn a_disconnect_during_ready_leaves_the_account_offline() {
         Ok(crate::gateway::GatewayEvent::Dispatch { event, .. }) => event,
         other => panic!("expected READY, got {other:?}"),
     };
-    let (parked, release) = store.park_next_ready();
+    let (parked, release) = store.park_next_conversion();
     let applying = {
         let store = store.clone();
         let wanted = wanted.clone();

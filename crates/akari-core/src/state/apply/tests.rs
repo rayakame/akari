@@ -772,3 +772,19 @@ fn a_repeated_guild_create_keeps_its_windows_and_member() {
     assert_eq!(message_ids(&state, welcome), Some(vec![10, 11]));
     assert!(state.current_member(Snowflake::new(G3)).is_some());
 }
+
+thread_local! {
+    static DIFF_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+/// Runs `hook` inside the next READY diff on this thread.
+pub(crate) fn on_next_diff(hook: impl FnOnce() + 'static) {
+    DIFF_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+pub(super) fn run_diff_hook() {
+    if let Some(hook) = DIFF_HOOK.with(|slot| slot.borrow_mut().take()) {
+        hook();
+    }
+}

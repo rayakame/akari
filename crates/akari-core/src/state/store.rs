@@ -1,10 +1,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Mutex, mpsc};
 
-use super::apply::{Entities, State};
+use super::apply::{Entities, ReadyDiff, State};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
@@ -12,8 +12,17 @@ use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{LoadKind, LoadTicket, MessageWindow, WindowLimits};
 use crate::backlog::Backlog;
-use crate::gateway::{DispatchEvent, Ready};
+use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
+
+// Main-thread readers (SwiftUI, AppKit) wait at most this long for a write.
+const LONG_HOLD: Duration = Duration::from_millis(4);
+
+/// A READY converted, and diffed against the current state, before the write lock is taken.
+pub(crate) struct PreparedReady {
+    entities: Entities,
+    diff: Option<ReadyDiff>,
+}
 
 /// An account's state, kept current by its gateway connection. Cheap to clone. Reads
 /// return snapshots: values later changes never touch.
@@ -28,6 +37,12 @@ struct Shared {
     park: std::sync::Mutex<Option<Park>>,
     #[cfg(test)]
     ready_thread: std::sync::Mutex<Option<std::thread::ThreadId>>,
+    #[cfg(test)]
+    slow_write: std::sync::Mutex<Option<std::time::Duration>>,
+    #[cfg(test)]
+    long_holds: std::sync::Mutex<Vec<(&'static str, std::time::Duration)>>,
+    #[cfg(test)]
+    holds: std::sync::Mutex<Option<Vec<(&'static str, std::time::Duration)>>>,
 }
 
 #[cfg(test)]
@@ -145,6 +160,12 @@ impl Store {
                 park: std::sync::Mutex::new(None),
                 #[cfg(test)]
                 ready_thread: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                slow_write: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                long_holds: std::sync::Mutex::new(Vec::new()),
+                #[cfg(test)]
+                holds: std::sync::Mutex::new(None),
             }),
         }
     }
@@ -158,15 +179,42 @@ impl Store {
         read(&inner)
     }
 
-    fn write(&self, write: impl FnOnce(&mut Inner, &mut Vec<StoreEvent>)) {
+    fn write<T>(
+        &self,
+        event: &'static str,
+        write: impl FnOnce(&mut Inner, &mut Vec<StoreEvent>) -> T,
+    ) -> T {
         let mut inner = self
             .shared
             .inner
             .write()
             .unwrap_or_else(PoisonError::into_inner);
+        let taken = Instant::now();
         let mut events = Vec::new();
-        write(&mut inner, &mut events);
+        let value = write(&mut inner, &mut events);
         inner.publish(events);
+        #[cfg(test)]
+        self.slow_down();
+        let held = taken.elapsed();
+        drop(inner);
+        #[cfg(test)]
+        if let Ok(mut holds) = self.shared.holds.lock()
+            && let Some(holds) = holds.as_mut()
+        {
+            holds.push((event, held));
+        }
+        if held > LONG_HOLD {
+            tracing::warn!(
+                event,
+                held_ms = held.as_millis(),
+                "the store's write lock was held too long"
+            );
+            #[cfg(test)]
+            if let Ok(mut long) = self.shared.long_holds.lock() {
+                long.push((event, held));
+            }
+        }
+        value
     }
 
     pub(crate) fn apply(&self, event: DispatchEvent) {
@@ -175,14 +223,36 @@ impl Store {
                 let next = self.prepare_ready(*ready);
                 self.replace(next);
             }
-            event => self.write(|inner, events| inner.state.apply(event, events)),
+            DispatchEvent::GuildCreate(guild) => match *guild {
+                GatewayGuild::Available(guild) => {
+                    let me = self.read(|inner| inner.state.me());
+                    let next = Entities::from_guild(*guild, me);
+                    #[cfg(test)]
+                    self.park();
+                    self.write("GUILD_CREATE", |inner, events| {
+                        inner.state.add_guild(next, events);
+                    });
+                }
+                unavailable => {
+                    let event = DispatchEvent::GuildCreate(Box::new(unavailable));
+                    self.write("GUILD_CREATE", |inner, events| {
+                        inner.state.apply(event, events);
+                    });
+                }
+            },
+            event => {
+                let name = event.name();
+                self.write(name, |inner, events| inner.state.apply(event, events));
+            }
         }
     }
 
-    // Converting a large READY takes milliseconds; readers mustn't wait for it, so it
-    // happens before the write lock is taken.
-    pub(crate) fn prepare_ready(&self, ready: Ready) -> Entities {
-        let next = Entities::from_ready(ready);
+    // Converting and diffing a large READY takes milliseconds, so it happens before the
+    // write lock is taken. Only the pump changes entities, so the diff still holds at the
+    // swap.
+    pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
+        let entities = Entities::from_ready(ready);
+        let diff = self.read(|inner| inner.state.ready_diff(&entities));
         #[cfg(test)]
         {
             if let Ok(mut thread) = self.shared.ready_thread.lock() {
@@ -190,11 +260,14 @@ impl Store {
             }
             self.park();
         }
-        next
+        PreparedReady { entities, diff }
     }
 
-    pub(crate) fn replace(&self, next: Entities) {
-        self.write(|inner, events| inner.state.replace(next, events));
+    pub(crate) fn replace(&self, next: PreparedReady) {
+        let old = self.write("READY", |inner, events| {
+            inner.state.swap(next.entities, next.diff, events)
+        });
+        drop(old);
     }
 
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
@@ -207,7 +280,7 @@ impl Store {
         connection: ConnectionState,
         allowed: impl FnOnce() -> bool,
     ) {
-        self.write(|inner, events| {
+        self.write("connection", |inner, events| {
             let closed = matches!(inner.connection, ConnectionState::Closed { .. });
             if !closed && !same(&inner.connection, &connection) && allowed() {
                 inner.connection = connection.clone();
@@ -217,7 +290,7 @@ impl Store {
     }
 
     pub(crate) fn begin_connecting(&self) {
-        self.write(|inner, events| {
+        self.write("connection", |inner, events| {
             if matches!(inner.connection, ConnectionState::Offline) {
                 inner.connection = ConnectionState::Connecting;
                 events.push(StoreEvent::Connection(ConnectionState::Connecting));
@@ -227,7 +300,9 @@ impl Store {
 
     pub(crate) fn begin_load(&self, channel: ChannelId, kind: LoadKind) -> Option<LoadTicket> {
         let mut ticket = None;
-        self.write(|inner, events| ticket = inner.state.begin_load(channel, kind, events));
+        self.write("load", |inner, events| {
+            ticket = inner.state.begin_load(channel, kind, events);
+        });
         ticket
     }
 
@@ -237,11 +312,15 @@ impl Store {
         page: Vec<model::Message>,
         reached_end: bool,
     ) {
-        self.write(|inner, events| inner.state.finish_load(ticket, page, reached_end, events));
+        self.write("load", |inner, events| {
+            inner.state.finish_load(ticket, page, reached_end, events);
+        });
     }
 
     pub(crate) fn abort_load(&self, ticket: LoadTicket) {
-        self.write(|inner, events| inner.state.abort_load(ticket, events));
+        self.write("load", |inner, events| {
+            inner.state.abort_load(ticket, events)
+        });
     }
 
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
@@ -253,7 +332,9 @@ impl Store {
     }
 
     pub(crate) fn queue_message(&self, channel: ChannelId, message: Arc<Message>) {
-        self.write(|inner, events| inner.state.queue(channel, message, events));
+        self.write("send", |inner, events| {
+            inner.state.queue(channel, message, events)
+        });
     }
 
     pub(crate) fn confirm_message(
@@ -262,11 +343,15 @@ impl Store {
         pending: MessageId,
         message: model::Message,
     ) {
-        self.write(|inner, events| inner.state.confirm(channel, pending, message, events));
+        self.write("send", |inner, events| {
+            inner.state.confirm(channel, pending, message, events);
+        });
     }
 
     pub(crate) fn fail_message(&self, channel: ChannelId, pending: MessageId) {
-        self.write(|inner, events| inner.state.fail(channel, pending, events));
+        self.write("send", |inner, events| {
+            inner.state.fail(channel, pending, events)
+        });
     }
 
     pub(crate) fn retry_message(
@@ -275,22 +360,26 @@ impl Store {
         pending: MessageId,
     ) -> Option<Arc<Message>> {
         let mut message = None;
-        self.write(|inner, events| {
+        self.write("send", |inner, events| {
             message = inner.state.retry(channel, pending, events);
         });
         message
     }
 
     pub(crate) fn discard_message(&self, channel: ChannelId, pending: MessageId) {
-        self.write(|inner, events| inner.state.discard(channel, pending, events));
+        self.write("send", |inner, events| {
+            inner.state.discard(channel, pending, events)
+        });
     }
 
     pub(crate) fn view_channel(&self, channel: ChannelId) {
-        self.write(|inner, events| inner.state.view_channel(channel, events));
+        self.write("view", |inner, events| {
+            inner.state.view_channel(channel, events)
+        });
     }
 
     pub(crate) fn finish(&self) {
-        self.write(|inner, _| {
+        self.write("finish", |inner, _| {
             inner.finished = true;
             inner.subscribers.clear();
         });
@@ -302,7 +391,7 @@ impl Store {
     pub fn subscribe(&self) -> Subscription {
         let (sender, receiver) = mpsc::unbounded_channel();
         let buffered = Arc::new(AtomicUsize::new(0));
-        self.write(|inner, _| {
+        self.write("subscribe", |inner, _| {
             if !inner.finished {
                 inner.subscribers.push(Subscriber {
                     events: sender,
@@ -440,7 +529,7 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(crate) fn park_next_ready(
+    pub(crate) fn park_next_conversion(
         &self,
     ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
         let (parked, on_parked) = std::sync::mpsc::channel();
@@ -449,6 +538,53 @@ impl Store {
             *park = Some((parked, on_release));
         }
         (on_parked, release)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn delay_next_write(&self, delay: std::time::Duration) {
+        if let Ok(mut slow) = self.shared.slow_write.lock() {
+            *slow = Some(delay);
+        }
+    }
+
+    /// Records every write's hold time until `take_holds`.
+    #[cfg(test)]
+    pub(crate) fn record_holds(&self) {
+        if let Ok(mut holds) = self.shared.holds.lock() {
+            *holds = Some(Vec::new());
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_holds(&self) -> Vec<(&'static str, std::time::Duration)> {
+        self.shared
+            .holds
+            .lock()
+            .ok()
+            .and_then(|mut holds| holds.as_mut().map(std::mem::take))
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn long_holds(&self) -> Vec<(&'static str, std::time::Duration)> {
+        self.shared
+            .long_holds
+            .lock()
+            .map(|holds| holds.clone())
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    fn slow_down(&self) {
+        let delay = self
+            .shared
+            .slow_write
+            .lock()
+            .ok()
+            .and_then(|mut slow| slow.take());
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
+        }
     }
 
     #[cfg(test)]

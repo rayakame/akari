@@ -59,6 +59,13 @@ impl Entities {
         entities
     }
 
+    /// One guild from GUILD_CREATE, converted before the write lock is taken.
+    pub(crate) fn from_guild(guild: AvailableGuild, me: Option<UserId>) -> Self {
+        let mut next = Self::default();
+        next.insert_guild(guild, Vec::new(), me);
+        next
+    }
+
     fn me(&self) -> Option<UserId> {
         self.current_user.as_ref().map(|current| current.user.id)
     }
@@ -164,6 +171,12 @@ fn push_channel_changes(
     }
 }
 
+/// What a later READY changes, worked out before the swap.
+pub(crate) struct ReadyDiff {
+    events: Vec<StoreEvent>,
+    removed_channels: Vec<ChannelId>,
+}
+
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct State {
     entities: Entities,
@@ -186,21 +199,56 @@ impl State {
     }
 
     pub(crate) fn replace(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
-        if self.ready {
-            self.diff(&next, events);
-            for channel in self.entities.channels.keys() {
-                if !next.channels.contains_key(channel) {
-                    self.windows.drop_channel(*channel);
-                }
+        let diff = self.ready_diff(&next);
+        self.swap(next, diff, events);
+    }
+
+    /// `None` before the first READY, which has nothing to diff against.
+    pub(crate) fn ready_diff(&self, next: &Entities) -> Option<ReadyDiff> {
+        if !self.ready {
+            return None;
+        }
+        let mut events = Vec::new();
+        self.diff(next, &mut events);
+        let removed_channels = self
+            .entities
+            .channels
+            .keys()
+            .filter(|channel| !next.channels.contains_key(channel))
+            .copied()
+            .collect();
+        Some(ReadyDiff {
+            events,
+            removed_channels,
+        })
+    }
+
+    /// Returns the old entities, so the caller can drop them after releasing the lock.
+    pub(crate) fn swap(
+        &mut self,
+        next: Entities,
+        diff: Option<ReadyDiff>,
+        events: &mut Vec<StoreEvent>,
+    ) -> Entities {
+        if let Some(diff) = diff {
+            events.extend(diff.events);
+            for channel in diff.removed_channels {
+                self.windows.drop_channel(channel);
             }
             self.windows.mark_stale(events);
         }
-        self.entities = next;
         self.ready = true;
         events.push(StoreEvent::Ready);
+        std::mem::replace(&mut self.entities, next)
+    }
+
+    pub(crate) fn me(&self) -> Option<UserId> {
+        self.entities.me()
     }
 
     fn diff(&self, next: &Entities, events: &mut Vec<StoreEvent>) {
+        #[cfg(test)]
+        tests::run_diff_hook();
         let old = &self.entities;
         if let Some(current) = &next.current_user
             && old.current_user.as_ref() != Some(current)
@@ -389,8 +437,12 @@ impl State {
     }
 
     fn guild_create(&mut self, guild: AvailableGuild, events: &mut Vec<StoreEvent>) {
-        let mut next = Entities::default();
-        next.insert_guild(guild, Vec::new(), self.entities.me());
+        let next = Entities::from_guild(guild, self.entities.me());
+        self.add_guild(next, events);
+    }
+
+    /// `next` holds one guild, from [`Entities::from_guild`].
+    pub(crate) fn add_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         let Some((&id, after)) = next.guilds.iter().next() else {
             return;
         };
@@ -727,4 +779,4 @@ impl State {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
