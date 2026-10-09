@@ -435,3 +435,165 @@ fn captured_ready_builds_the_store() {
         private_channels.len()
     );
 }
+
+#[tokio::test]
+async fn next_batch_returns_buffered_events_in_order_up_to_max() {
+    let store = ready_store();
+    let subscription = store.subscribe();
+    for name in ["a", "b", "c", "d", "e"] {
+        store.apply(rename(GENERAL, name));
+    }
+
+    let first = subscription.next_batch(3).await;
+    let second = subscription.next_batch(3).await;
+
+    let names = |batch: &[StoreEvent]| -> Vec<String> {
+        batch
+            .iter()
+            .map(|event| match event {
+                StoreEvent::ChannelUpdated(channel) => {
+                    channel.name.as_deref().unwrap_or_default().to_owned()
+                }
+                other => describe(other),
+            })
+            .collect()
+    };
+    assert_eq!(names(&first), ["a", "b", "c"]);
+    assert_eq!(names(&second), ["d", "e"]);
+}
+
+#[tokio::test]
+async fn next_batch_waits_for_the_first_event() {
+    let store = ready_store();
+    let subscription = store.subscribe();
+
+    let (batch, ()) = tokio::join!(
+        tokio::time::timeout(WAIT, subscription.next_batch(10)),
+        async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            store.apply(rename(GENERAL, "late"));
+        }
+    );
+
+    let batch = batch.expect("the batch never arrived");
+    assert_eq!(batch.len(), 1);
+    assert_eq!(describe(&batch[0]), format!("ChannelUpdated({GENERAL})"));
+}
+
+#[tokio::test]
+async fn next_batch_of_zero_takes_one() {
+    let store = ready_store();
+    let subscription = store.subscribe();
+    store.apply(rename(GENERAL, "a"));
+    store.apply(rename(GENERAL, "b"));
+
+    assert_eq!(subscription.next_batch(0).await.len(), 1);
+    assert_eq!(subscription.next_batch(0).await.len(), 1);
+}
+
+#[tokio::test]
+async fn next_batch_is_empty_once_finished_and_drained() {
+    let store = ready_store();
+    let subscription = store.subscribe();
+    store.apply(rename(GENERAL, "a"));
+    store.apply(rename(GENERAL, "b"));
+    store.finish();
+
+    assert_eq!(subscription.next_batch(10).await.len(), 2);
+    assert!(subscription.next_batch(10).await.is_empty());
+    assert!(subscription.next_batch(10).await.is_empty());
+}
+
+#[tokio::test]
+async fn next_batch_lowers_the_backlog() {
+    let store = ready_store();
+    let subscription = store.subscribe();
+    for name in ["a", "b", "c", "d"] {
+        store.apply(rename(GENERAL, name));
+    }
+    assert_eq!(subscription.buffered(), 4);
+
+    let _ = subscription.next_batch(3).await;
+
+    assert_eq!(subscription.buffered(), 1);
+}
+
+const CATEGORY: u64 = 300_000_000_000_000_001;
+const VOICE: u64 = 300_000_000_000_000_003;
+
+fn ids<M>(list: &[Arc<impl HasId<M>>]) -> Vec<u64> {
+    list.iter().map(|item| item.id().get()).collect()
+}
+
+trait HasId<M> {
+    fn id(&self) -> Snowflake<M>;
+}
+
+impl HasId<model::ChannelMarker> for Channel {
+    fn id(&self) -> ChannelId {
+        self.id
+    }
+}
+
+impl HasId<model::GuildMarker> for Guild {
+    fn id(&self) -> GuildId {
+        self.id
+    }
+}
+
+// The fixture's user owns G1 and is a moderator there; both would show every channel.
+fn ready_as_member(general_overwrites: Value) -> DispatchEvent {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    let guild = &mut data["guilds"][0];
+    guild["properties"]["owner_id"] = "100000000000000099".into();
+    for channel in guild["channels"].as_array_mut().unwrap() {
+        if channel["id"].as_str().and_then(|id| id.parse().ok()) == Some(GENERAL) {
+            channel["permission_overwrites"] = general_overwrites.clone();
+        }
+    }
+    data["merged_members"][0][0]["roles"] = json!([]);
+    dispatch("READY", &data)
+}
+
+#[test]
+fn channel_list_shows_what_the_user_can_view() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_as_member(json!([])));
+
+    assert_eq!(
+        ids(&store.channel_list(Snowflake::new(G1))),
+        [VOICE, CATEGORY, GENERAL]
+    );
+}
+
+#[test]
+fn channel_list_applies_permissions() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let deny_view = json!([{
+        "id": G1.to_string(),
+        "type": 0,
+        "allow": "0",
+        "deny": Permissions::VIEW_CHANNEL.0.to_string(),
+    }]);
+    store.apply(ready_as_member(deny_view));
+
+    assert_eq!(ids(&store.channel_list(Snowflake::new(G1))), [VOICE]);
+}
+
+#[test]
+fn channel_list_of_an_unknown_guild_is_empty() {
+    let store = ready_store();
+
+    assert!(store.channel_list(Snowflake::new(G3)).is_empty());
+}
+
+#[test]
+fn guild_list_reads_join_dates_from_the_current_member() {
+    let store = ready_store();
+    store.apply(dispatch(
+        "GUILD_CREATE",
+        &fixture(include_str!("../../../tests/fixtures/guild_create.json")),
+    ));
+
+    assert_eq!(ids(&store.guild_list()), [G3, G1]);
+}

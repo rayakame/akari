@@ -6,6 +6,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use super::apply::{Entities, State};
 use super::events::{ConnectionState, StoreEvent};
+use super::order;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
@@ -58,6 +59,20 @@ impl Subscription {
         let event = self.events.lock().await.recv().await?;
         self.buffered.fetch_sub(1, Ordering::Relaxed);
         Some(event)
+    }
+
+    /// The next changes in order, at most `max` and at least one; waits while none are
+    /// buffered. Empty once the account is closed and every event has been read.
+    pub async fn next_batch(&self, max: usize) -> Vec<StoreEvent> {
+        let mut batch = Vec::new();
+        let taken = self
+            .events
+            .lock()
+            .await
+            .recv_many(&mut batch, max.max(1))
+            .await;
+        self.buffered.fetch_sub(taken, Ordering::Relaxed);
+        batch
     }
 
     #[cfg(test)]
@@ -321,6 +336,26 @@ impl Store {
         self.read(|inner| inner.state.guilds())
     }
 
+    /// Available guilds in server list order. Akari doesn't read the user's own order and
+    /// folders yet; until it does, the most recently joined guild comes first.
+    pub fn guild_list(&self) -> Vec<Arc<Guild>> {
+        self.read(|inner| {
+            let state = &inner.state;
+            order::guild_order(
+                state
+                    .guilds()
+                    .into_iter()
+                    .map(|guild| {
+                        let joined = state
+                            .current_member(guild.id)
+                            .and_then(|member| member.joined_at);
+                        (guild, joined)
+                    })
+                    .collect(),
+            )
+        })
+    }
+
     pub fn guild(&self, id: GuildId) -> Option<Arc<Guild>> {
         self.read(|inner| inner.state.guild(id))
     }
@@ -343,6 +378,24 @@ impl Store {
     /// A guild's channels and categories without threads, in no particular order.
     pub fn guild_channels(&self, guild: GuildId) -> Vec<Arc<Channel>> {
         self.read(|inner| inner.state.guild_channels(guild))
+    }
+
+    /// A guild's channel list as Discord shows it: [`display_order`], only channels the
+    /// user can view, the categories holding them, and empty categories the user can
+    /// view. Threads are left out.
+    ///
+    /// [`display_order`]: super::display_order
+    pub fn channel_list(&self, guild: GuildId) -> Vec<Arc<Channel>> {
+        let now = now_millis();
+        self.read(|inner| {
+            let state = &inner.state;
+            let ordered = order::display_order(&state.guild_channels(guild));
+            order::visible_channels(ordered, |channel| {
+                state
+                    .permissions(channel.id, now)
+                    .is_some_and(|permissions| permissions.contains(Permissions::VIEW_CHANNEL))
+            })
+        })
     }
 
     /// The threads the user has joined in a guild.
