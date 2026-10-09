@@ -435,11 +435,12 @@ impl Windows {
         let Some(window) = self.windows.get(&channel_id) else {
             return;
         };
+        // Other users see our nonces and may send the same value.
         let pending = pending_id.and_then(|id| {
             window
                 .outbox
                 .iter()
-                .position(|queued| queued.id == id)
+                .position(|queued| queued.id == id && queued.author.id == message.author.id)
                 .map(|index| (id, index))
         });
         let visible = Window::position(&window.messages, message.id).is_ok();

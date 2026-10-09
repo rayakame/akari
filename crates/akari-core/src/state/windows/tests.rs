@@ -1118,3 +1118,16 @@ fn edits_during_one_load_arent_replayed_onto_the_next() {
 
     assert_eq!(harness.ids(), [11, 12, 13]);
 }
+
+#[test]
+fn another_users_message_with_our_nonce_doesnt_replace_ours() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.queue(pending(500, "hi"));
+    let mut theirs = wire_by(20, author(8));
+    theirs.nonce = Some(model::Nonce::Text("500".to_owned()));
+
+    let events = harness.live(theirs);
+
+    assert_eq!(events, ["Inserted(20)"]);
+    assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
+}
