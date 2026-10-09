@@ -7,11 +7,16 @@ use std::thread::{self, Thread};
 
 use akari_core::model::UserId;
 
+use crate::client::Token;
 use crate::{DiscordClient, Endpoints, HostInfo, TokenStore, TokenStoreError};
 
 pub const USER: UserId = UserId::new(100_000_000_000_000_001);
 /// Nothing listens there, so connections are refused at once.
 pub const UNREACHABLE: &str = "127.0.0.1:9";
+
+pub fn token(value: &str) -> Arc<Token> {
+    Token::new(akari_core::Token::new(value.to_owned()))
+}
 
 pub fn host() -> HostInfo {
     HostInfo {
@@ -171,5 +176,46 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
             return value;
         }
         thread::park();
+    }
+}
+
+/// A token store whose `load` blocks until released, like a Keychain waiting on a dialog.
+pub struct BlockingStore {
+    entered: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl BlockingStore {
+    /// The store, a receiver that fires once `load` blocks, and the sender that releases it.
+    pub fn new() -> (
+        Arc<Self>,
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (entered, on_entered) = std::sync::mpsc::channel();
+        let (release, on_release) = std::sync::mpsc::channel();
+        let store = Arc::new(Self {
+            entered: Mutex::new(Some(entered)),
+            release: Mutex::new(on_release),
+        });
+        (store, on_entered, release)
+    }
+}
+
+impl TokenStore for BlockingStore {
+    fn load(&self, _: UserId) -> Result<Option<String>, TokenStoreError> {
+        if let Some(entered) = lock(&self.entered).take() {
+            let _ = entered.send(());
+        }
+        let _ = lock(&self.release).recv();
+        Ok(None)
+    }
+
+    fn save(&self, _: UserId, _: String) -> Result<(), TokenStoreError> {
+        Ok(())
+    }
+
+    fn delete(&self, _: UserId) -> Result<(), TokenStoreError> {
+        Ok(())
     }
 }

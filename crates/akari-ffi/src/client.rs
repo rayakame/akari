@@ -4,7 +4,8 @@ use akari_core::model::UserId;
 use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs};
 use tokio::runtime::Runtime;
 
-use crate::errors::{ClientError, LoginError, LogoutError, TokenStoreError};
+use crate::account::Account;
+use crate::errors::{ClientError, GatewayError, LoginError, LogoutError, TokenStoreError};
 use crate::login::{PasswordLogin, QrLogin};
 use crate::runtime::{run, runtime};
 use crate::token_store::{HostStore, TokenStore};
@@ -112,6 +113,15 @@ impl DiscordClient {
     pub fn qr_login(&self) -> Result<Arc<QrLogin>, LoginError> {
         let _entered = self.runtime.enter();
         Ok(QrLogin::new(self.core.qr_login()?))
+    }
+
+    /// The account `token` belongs to, idle until `connect()`.
+    pub fn account(&self, token: Arc<Token>) -> Result<Arc<Account>, GatewayError> {
+        let _entered = self.runtime.enter();
+        Ok(Account::new(
+            self.core.account(token.core().clone())?,
+            self.runtime,
+        ))
     }
 
     pub async fn save_token(

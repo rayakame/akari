@@ -5,17 +5,13 @@ use akari_core::model::UserId;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::support::{
-    Call, MemoryStore, USER, block_on, host, local_client, rest_endpoints, unreachable_client,
-    unreachable_endpoints,
+    Call, MemoryStore, USER, block_on, host, local_client, rest_endpoints, token,
+    unreachable_client, unreachable_endpoints,
 };
-use crate::client::{DiscordClient, Token};
+use crate::client::DiscordClient;
 use crate::errors::{ClientError, LogoutError, NetworkErrorKind, TokenStoreError};
 use crate::runtime::{run, runtime};
 use crate::{Endpoints, enable_logging};
-
-fn token(value: &str) -> Arc<Token> {
-    Token::new(akari_core::Token::new(value.to_owned()))
-}
 
 #[test]
 fn plaintext_and_malformed_endpoints_are_rejected() {

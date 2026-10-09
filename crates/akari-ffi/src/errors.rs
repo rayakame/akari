@@ -224,3 +224,53 @@ impl From<akari_core::auth::LoginError> for LoginError {
         }
     }
 }
+
+/// Why a gateway connection can't go on.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+#[uniffi::export(Display)]
+pub enum GatewayError {
+    /// Close code 4004: the token is invalid and the user has to log in again.
+    #[error("Discord rejected the token")]
+    AuthenticationFailed,
+    /// A close code that rules out reconnecting (4010–4016).
+    #[error("Discord refused the connection ({code})")]
+    Rejected { code: u16 },
+    #[error("a gateway message is larger than {limit} bytes")]
+    MessageTooLarge { limit: u64 },
+    #[error("READY couldn't be decoded")]
+    InvalidReady,
+    #[error("the gateway connection is closed")]
+    Closed,
+    /// A background task stopped before the connection was closed.
+    #[error("the connection's background task stopped")]
+    Stopped,
+}
+
+impl From<&akari_core::gateway::GatewayError> for GatewayError {
+    fn from(err: &akari_core::gateway::GatewayError) -> Self {
+        use akari_core::gateway::GatewayError as E;
+
+        match err {
+            E::AuthenticationFailed => Self::AuthenticationFailed,
+            E::Rejected { code } => Self::Rejected { code: *code },
+            E::MessageTooLarge { limit } => Self::MessageTooLarge {
+                limit: u64::try_from(*limit).unwrap_or(u64::MAX),
+            },
+            E::InvalidReady(_) => Self::InvalidReady,
+            E::Closed => Self::Closed,
+            E::Stopped => Self::Stopped,
+            // The bindings always enter their runtime first, so this can't happen.
+            E::NoRuntime => {
+                tracing::error!("a gateway started outside the runtime");
+                Self::Stopped
+            }
+            _ => Self::Stopped,
+        }
+    }
+}
+
+impl From<akari_core::gateway::GatewayError> for GatewayError {
+    fn from(err: akari_core::gateway::GatewayError) -> Self {
+        Self::from(&err)
+    }
+}
