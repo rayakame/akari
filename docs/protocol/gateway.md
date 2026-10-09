@@ -266,29 +266,57 @@ Observed on 2026-10-08 with `akari-cli connect --keep-open`, watched from a seco
 
 Op 37 (Guild Subscriptions Bulk) is only a row in the reference's
 [opcode table](https://docs.discord.food/gateway/opcodes-and-close-codes#gateway-opcodes); its payload is
-undocumented. Akari sends what open-source clients (discord.py-self) and the official
-client are observed to send when a guild is opened:
+undocumented. Akari sends what the official client and open-source clients
+(discord.py-self, Abaddon) are observed to send when a channel is opened. In a large
+guild that includes the channel's member list:
 
 ```json
-{"op": 37, "d": {"subscriptions": {"200000000000000001": {"typing": true, "activities": true, "threads": true}}}}
+{"op": 37, "d": {"subscriptions": {"200000000000000001": {
+  "typing": true, "activities": true, "threads": true,
+  "channels": {"300000000000000002": [[0, 99]]},
+  "thread_member_lists": []
+}}}}
 ```
 
-- `GatewayCommand::SubscribeGuilds { guilds }`. Only keys that are present are updated;
-  Akari sends no member list ranges (`channels`) and no `members`.
-- `Account` subscribes a guild the first time one of its channels is viewed or loaded
-  while online, and sends all of them again after every READY (the guilds with a viewed
-  channel) and after RESUMED (the same, plus guilds viewed while reconnecting), like the
+- `GatewayCommand::SubscribeGuilds { guilds }`, one `GuildSubscription` per guild. Only
+  keys that are present are updated. Akari sends no `members` and no `member_updates`.
+- Every guild with a viewed channel gets the three flags. `typing: true` is what makes
+  the gateway treat the guild as subscribed (discord.py-self).
+- **Guilds READY marks `large`** (over 250 members) also get member lists: the first 100
+  entries (`[[0, 99]]`, the official client's first page) of every viewed channel's list,
+  and for a viewed thread its parent channel's list plus the thread's own
+  (`thread_member_lists`). A `channels` map replaces the one sent before for that guild
+  (discord.py-self merges them client-side for that reason), so every send lists all
+  viewed channels. When a large guild has no viewed channel any more, its lists are dropped
+  with `"channels": {}` and `"thread_member_lists": []`; the guild stays subscribed.
+- `Account` sends a guild's entry when one of its channels is viewed or loaded while
+  online and the entry changed, and sends all entries again after every READY (the guilds
+  with a viewed channel) and after RESUMED (the same, plus those sent before), like the
   official client. A guild viewed while offline is subscribed after the next READY or
   RESUMED.
 - The payload is split into several commands so each stays under 15 KiB, the official
   client's limit, below the gateway's 16 KiB.
-- Without a subscription, guilds over the large threshold get no MESSAGE_CREATE, UPDATE or
-  DELETE ([Identify](https://docs.discord.food/gateway/gateway-events#identify-structure)).
-  discord.py-self reports that guilds under 75,000 members are subscribed automatically,
-  which contradicts that; **unverified**.
 - The first subscription to a guild may bring a GUILD_CREATE for it, which the store
-  applies as a replacement, and `threads: true` brings THREAD_LIST_SYNC, which isn't
-  decoded yet.
+  applies as a replacement. `threads: true` brings THREAD_LIST_SYNC, and member lists bring
+  GUILD_MEMBER_LIST_UPDATE and THREAD_MEMBER_LIST_UPDATE. None of these are decoded yet:
+  they stay `DispatchEvent::Other`, and decoding a 100-member SYNC (about 70 KiB) to that
+  takes about 65 µs, with nothing kept.
+
+Which subscription a guild needs for live messages depends on its size:
+
+| Members | Live MESSAGE_CREATE, UPDATE, DELETE | Source |
+|---|---|---|
+| Up to 250 (not `large`) | Always | [Identify](https://docs.discord.food/gateway/gateway-events#identify-structure): `large_threshold` |
+| 250 to 75,000 | Subscribed automatically on connect | discord.py-self (**unverified**; the reference says they need a subscription) |
+| Over 75,000 | Only with the guild subscription | discord.py-self |
+| Millions | Not with the guild flags alone; with the channel's member list | Observed 2026-10-09 with `akari-cli tail` in a server of millions (no live messages, while a small server worked). [discord.py #6340](https://github.com/Rapptz/discord.py/issues/6340) saw the same in 500,000 and 700,000 member servers until an op 14 with a `channels` range. Whether the member list is what fixes it is **unverified** until the re-run |
+
+### Debugging subscriptions
+
+`RUST_LOG=akari_core::subscriptions=debug,akari_core::dispatches=debug` makes akari-cli
+log every op 37 payload it sends, a debug line when a channel can't be subscribed because
+it isn't in the state, and each dispatch's name, sequence number and guild ID. Nothing
+else from a payload is logged, and the guild ID is only read while that log is on.
 
 ## Keeping the token out of logs
 

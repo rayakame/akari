@@ -140,6 +140,7 @@ None of them carries the token or message content.
 ## Live messages
 
 MESSAGE_CREATE, MESSAGE_UPDATE and MESSAGE_DELETE change only windows; see
-[dispatches.md](dispatches.md). In guilds over the large threshold Discord sends them only
-to clients that subscribed to the guild, so Akari subscribes every guild with a viewed
-channel ([gateway.md](gateway.md#guild-subscriptions)).
+[dispatches.md](dispatches.md). In large guilds Discord sends them only to sessions that
+subscribed to the guild, and in guilds of millions only for channels whose member list is
+subscribed. So `Account` subscribes every guild with a viewed channel, and in large guilds
+the viewed channels' member lists ([gateway.md](gateway.md#guild-subscriptions)).
