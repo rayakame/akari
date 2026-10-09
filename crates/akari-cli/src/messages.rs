@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use akari_core::model::{ChannelId, ChannelType, GuildId, MessageId, Permissions, Snowflake};
 use akari_core::state::{Channel, ConnectionState, Delivery, Message, StoreEvent, display_order};
-use akari_core::{DiscordClient, MessageLoad};
+use akari_core::{DiscordClient, MessageLoad, RequestError};
 use clap::Subcommand;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
@@ -31,6 +31,9 @@ pub enum SessionCommand {
     },
     /// Send a message.
     Send {
+        // Checks that Discord ignores a repeated nonce, which retrying after a 502 relies on.
+        #[arg(long, hide = true)]
+        repeat_nonce: bool,
         channel_id: u64,
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         text: Vec<String>,
@@ -55,8 +58,17 @@ pub async fn run<S: Accounts>(
         SessionCommand::Read { channel_id, limit } => {
             read(&session, Snowflake::new(channel_id), limit).await
         }
-        SessionCommand::Send { channel_id, text } => {
-            send(&session, Snowflake::new(channel_id), text.join(" ")).await
+        SessionCommand::Send {
+            repeat_nonce,
+            channel_id,
+            text,
+        } => {
+            let channel = Snowflake::new(channel_id);
+            if repeat_nonce {
+                send_twice(&session, channel, text.join(" ")).await
+            } else {
+                send(&session, channel, text.join(" ")).await
+            }
         }
         SessionCommand::Tail { channel_id } => match signal(SignalKind::interrupt()) {
             Ok(stream) => {
@@ -154,6 +166,35 @@ async fn send(session: &Session, channel: ChannelId, text: String) -> ExitCode {
             eprintln!("Couldn't send: {}", report(&err));
             ExitCode::FAILURE
         }
+    }
+}
+
+async fn send_twice(session: &Session, channel: ChannelId, text: String) -> ExitCode {
+    println!("Sending, then sending again with the same nonce…");
+    match session.account.send_message_twice(channel, text).await {
+        Ok((first, repeat)) => {
+            println!("Sent: {}", first.get());
+            println!("{}", repeat_line(first, &repeat));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("Couldn't send: {}", report(&err));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn repeat_line(first: MessageId, repeat: &Result<MessageId, RequestError>) -> String {
+    match repeat {
+        Ok(id) if *id == first => format!(
+            "The repeat got {} back, the same message: Discord ignored the repeated nonce.",
+            id.get()
+        ),
+        Ok(id) => format!(
+            "The repeat got {} back, a second message: Discord did NOT ignore the repeated nonce.",
+            id.get()
+        ),
+        Err(err) => format!("The repeat failed: {}", report(err)),
     }
 }
 
@@ -429,6 +470,24 @@ mod tests {
         assert_eq!(
             marked(Change::Deleted, "400000000000000001"),
             "- 400000000000000001"
+        );
+    }
+
+    #[test]
+    fn the_repeat_line_says_whether_discord_ignored_the_nonce() {
+        let first = Snowflake::new(42);
+
+        assert_eq!(
+            repeat_line(first, &Ok(Snowflake::new(42))),
+            "The repeat got 42 back, the same message: Discord ignored the repeated nonce."
+        );
+        assert_eq!(
+            repeat_line(first, &Ok(Snowflake::new(43))),
+            "The repeat got 43 back, a second message: Discord did NOT ignore the repeated nonce."
+        );
+        assert_eq!(
+            repeat_line(first, &Err(RequestError::UnexpectedResponse)),
+            "The repeat failed: unexpected response from Discord"
         );
     }
 

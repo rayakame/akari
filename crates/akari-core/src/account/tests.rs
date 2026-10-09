@@ -1345,6 +1345,27 @@ async fn a_retried_send_keeps_its_place_before_later_sends() {
     assert_eq!(contents, ["one", "one", "two", "three"]);
 }
 
+#[cfg(feature = "repeat-nonce")]
+#[tokio::test]
+async fn a_repeated_send_posts_the_same_body_twice() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let (first, repeat) = account
+        .send_message_twice(general(), "hello".to_owned())
+        .await
+        .unwrap();
+
+    let bodies = sends.bodies();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0], bodies[1]);
+    assert_eq!(repeat.unwrap(), first);
+    assert!(outbox(&account).is_empty());
+}
+
 #[tokio::test]
 async fn a_cancelled_send_leaves_the_message_failed() {
     let mut fake = FakeGateway::start().await;

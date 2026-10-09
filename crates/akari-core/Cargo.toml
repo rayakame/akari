@@ -30,6 +30,9 @@ zstd.workspace = true
 # Hands out the raw READY for checking the models against real traffic. Only akari-cli
 # enables it; apps build with `-p akari-ffi`, so workspace feature unification can't add it.
 capture = []
+# Adds Account::send_message_twice, which repeats a send with the same nonce, to check that
+# Discord ignores the repeat. Only akari-cli enables it, like capture.
+repeat-nonce = []
 # Lets Endpoints point at http:// and ws:// test servers. Only the test suites enable it.
 insecure-test-endpoints = []
 

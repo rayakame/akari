@@ -117,6 +117,8 @@ fn report(err: &dyn Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory as _;
+
     use super::*;
 
     #[test]
@@ -125,6 +127,28 @@ mod tests {
             assert!(Cli::try_parse_from(["akari-cli", "read", "1", "--limit", limit]).is_err());
         }
         assert!(Cli::try_parse_from(["akari-cli", "read", "1", "--limit", "100"]).is_ok());
+    }
+
+    #[test]
+    fn repeat_nonce_is_a_hidden_send_option() {
+        let cli =
+            Cli::try_parse_from(["akari-cli", "send", "--repeat-nonce", "1", "hello"]).unwrap();
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("send")
+            .unwrap()
+            .render_help()
+            .to_string();
+
+        let Command::Session(SessionCommand::Send {
+            repeat_nonce, text, ..
+        }) = cli.command
+        else {
+            panic!("expected send");
+        };
+        assert!(repeat_nonce);
+        assert_eq!(text, ["hello"]);
+        assert!(!help.contains("repeat"), "{help}");
     }
 
     #[test]

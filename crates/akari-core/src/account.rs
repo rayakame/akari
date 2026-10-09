@@ -88,6 +88,11 @@ impl Nonces {
     }
 }
 
+struct Queued {
+    pending: MessageId,
+    detached: bool,
+}
+
 // A load dropped before its page arrived, e.g. by a cancelled task, would hold live messages
 // back forever.
 struct Unfinished<'a> {
@@ -239,6 +244,34 @@ impl Shared {
         for command in GatewayCommand::subscribe_guilds(&guilds) {
             let _ = self.send(command).await;
         }
+    }
+
+    fn queue(self: &Arc<Self>, channel: ChannelId, content: &str) -> Result<Queued, RequestError> {
+        let author = self
+            .store
+            .current_user()
+            .ok_or(RequestError::InvalidRequest)?;
+        if content.trim().is_empty() {
+            return Err(RequestError::InvalidRequest);
+        }
+        let detached = match self.store.messages(channel) {
+            Some(window) => !window.latest,
+            None => {
+                self.view(channel);
+                false
+            }
+        };
+        let now = now_millis();
+        let pending = self.nonces.next(now);
+        let message = Message::pending(
+            pending,
+            channel,
+            Arc::new(author.user.clone()),
+            content.to_owned(),
+            now,
+        );
+        self.store.queue_message(channel, Arc::new(message));
+        Ok(Queued { pending, detached })
     }
 
     async fn deliver(
@@ -394,30 +427,10 @@ impl Account {
         content: String,
     ) -> Result<MessageId, RequestError> {
         let shared = &self.shared;
-        let author = shared
-            .store
-            .current_user()
-            .ok_or(RequestError::InvalidRequest)?;
-        if content.trim().is_empty() {
-            return Err(RequestError::InvalidRequest);
-        }
-        let window = shared.store.messages(channel);
-        if window.is_none() {
-            shared.view(channel);
-        }
-        let now = now_millis();
-        let pending = shared.nonces.next(now);
-        let message = Message::pending(
-            pending,
-            channel,
-            Arc::new(author.user.clone()),
-            content.clone(),
-            now,
-        );
-        shared.store.queue_message(channel, Arc::new(message));
+        let Queued { pending, detached } = shared.queue(channel, &content)?;
         // Like the official client, a detached window jumps to the present; a stale one waits
         // for its refresh. The send doesn't wait for the jump.
-        if window.is_some_and(|window| !window.latest) {
+        if detached {
             let (jumped, delivered) = tokio::join!(
                 shared.load(channel, LoadKind::Latest, JUMP_LIMIT),
                 shared.deliver(channel, pending, content),
@@ -428,6 +441,27 @@ impl Account {
             return delivered;
         }
         shared.deliver(channel, pending, content).await
+    }
+
+    /// Dev only: sends like [`Account::send_message`], then posts the same body with the same
+    /// nonce again, as a retry after a lost response would. Returns what Discord answered to
+    /// each; the repeat isn't tracked in the store.
+    #[cfg(feature = "repeat-nonce")]
+    pub async fn send_message_twice(
+        &self,
+        channel: ChannelId,
+        content: String,
+    ) -> Result<(MessageId, Result<MessageId, RequestError>), RequestError> {
+        let shared = &self.shared;
+        let Queued { pending, .. } = shared.queue(channel, &content)?;
+        let first = shared.deliver(channel, pending, content.clone()).await?;
+        let body = CreateMessage::new(content, pending.get().to_string());
+        let repeat = shared
+            .rest
+            .create_message(channel, &body)
+            .await
+            .map(|message| message.id);
+        Ok((first, repeat))
     }
 
     /// Sends a failed message again with the same nonce.
