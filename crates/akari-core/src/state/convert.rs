@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use super::types::{
-    Attachment, Channel, CurrentUser, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia,
-    EmbedProvider, Guild, ImageHash, Member, Message, MessageReference, PermissionOverwrite,
-    ReferencedMessage, Role, Sticker, ThreadInfo, User,
+    Attachment, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
+    EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
+    PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, User,
 };
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
 };
-use crate::model::{self, GuildId};
+use crate::model::{self, ChannelId, GuildId, MessageId, Timestamp};
 
 fn text(value: String) -> Box<str> {
     value.into_boxed_str()
@@ -306,6 +306,38 @@ impl Message {
                 })
             }),
             referenced_message,
+            delivery: Delivery::Sent,
+        }
+    }
+
+    pub(crate) fn pending(
+        id: MessageId,
+        channel_id: ChannelId,
+        author: Arc<User>,
+        content: String,
+        unix_millis: i64,
+    ) -> Self {
+        Self {
+            id,
+            channel_id,
+            kind: model::MessageType::Default,
+            author,
+            webhook_id: None,
+            content: text(content),
+            timestamp: Timestamp::from_unix_millis(unix_millis),
+            edited_timestamp: None,
+            flags: 0,
+            pinned: false,
+            tts: false,
+            mention_everyone: false,
+            mentions: Box::new([]),
+            mention_roles: Box::new([]),
+            attachments: Box::new([]),
+            embeds: Box::new([]),
+            stickers: Box::new([]),
+            reference: None,
+            referenced_message: ReferencedMessage::NotIncluded,
+            delivery: Delivery::Pending,
         }
     }
 

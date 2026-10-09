@@ -9,10 +9,10 @@ use super::events::{ConnectionState, StoreEvent};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
-use super::windows::{MessageWindow, WindowLimits};
+use super::windows::{LoadKind, LoadTicket, MessageWindow, WindowLimits};
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, Ready};
-use crate::model::{ChannelId, GuildId, MessageId, Permissions, UserId};
+use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
 
 /// An account's state, kept current by its gateway connection. Cheap to clone. Reads
 /// return snapshots: values later changes never touch.
@@ -208,6 +208,66 @@ impl Store {
                 events.push(StoreEvent::Connection(ConnectionState::Connecting));
             }
         });
+    }
+
+    pub(crate) fn begin_load(&self, channel: ChannelId, kind: LoadKind) -> Option<LoadTicket> {
+        let mut ticket = None;
+        self.write(|inner, events| ticket = inner.state.begin_load(channel, kind, events));
+        ticket
+    }
+
+    pub(crate) fn finish_load(
+        &self,
+        ticket: LoadTicket,
+        page: Vec<model::Message>,
+        reached_end: bool,
+    ) {
+        self.write(|inner, events| inner.state.finish_load(ticket, page, reached_end, events));
+    }
+
+    pub(crate) fn abort_load(&self, ticket: LoadTicket) {
+        self.write(|inner, events| inner.state.abort_load(ticket, events));
+    }
+
+    pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
+        self.read(|inner| inner.state.stale_channels())
+    }
+
+    pub(crate) fn viewed_channels(&self) -> Vec<Arc<Channel>> {
+        self.read(|inner| inner.state.viewed_channels())
+    }
+
+    pub(crate) fn queue_message(&self, channel: ChannelId, message: Arc<Message>) {
+        self.write(|inner, events| inner.state.queue(channel, message, events));
+    }
+
+    pub(crate) fn confirm_message(
+        &self,
+        channel: ChannelId,
+        pending: MessageId,
+        message: model::Message,
+    ) {
+        self.write(|inner, events| inner.state.confirm(channel, pending, message, events));
+    }
+
+    pub(crate) fn fail_message(&self, channel: ChannelId, pending: MessageId) {
+        self.write(|inner, events| inner.state.fail(channel, pending, events));
+    }
+
+    pub(crate) fn retry_message(
+        &self,
+        channel: ChannelId,
+        pending: MessageId,
+    ) -> Option<Arc<Message>> {
+        let mut message = None;
+        self.write(|inner, events| {
+            message = inner.state.retry(channel, pending, events);
+        });
+        message
+    }
+
+    pub(crate) fn discard_message(&self, channel: ChannelId, pending: MessageId) {
+        self.write(|inner, events| inner.state.discard(channel, pending, events));
     }
 
     pub(crate) fn view_channel(&self, channel: ChannelId) {

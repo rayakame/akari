@@ -15,7 +15,7 @@ pub use guild::{
 };
 pub use message::{
     Attachment, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, Message,
-    MessageReference, MessageReferenceType, MessageType, PartialEmoji, Reaction,
+    MessageReference, MessageReferenceType, MessageType, Nonce, PartialEmoji, Reaction,
     ReactionCountDetails, StickerFormatType, StickerItem,
 };
 pub use permissions::Permissions;

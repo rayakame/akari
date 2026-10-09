@@ -1,10 +1,14 @@
+mod account;
 mod error;
+mod ratelimit;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{RequestBuilder, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+pub use account::RequestError;
+pub(crate) use account::{AccountRest, CreateMessage, Page, Query};
 #[cfg(test)]
 pub(crate) use error::FieldError;
 pub(crate) use error::{ApiError, RestError};
@@ -59,6 +63,12 @@ impl fmt::Debug for CaptchaSolution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("CaptchaSolution(<redacted>)")
     }
+}
+
+pub(crate) struct RawResponse {
+    pub(crate) status: u16,
+    pub(crate) headers: HeaderMap,
+    pub(crate) body: Vec<u8>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -169,9 +179,22 @@ impl RestClient {
     }
 
     async fn execute(&self, request: RequestBuilder) -> Result<impl AsRef<[u8]>, RestError> {
+        let RawResponse {
+            status,
+            headers,
+            body,
+        } = self.send_raw(request).await?;
+        if (200..300).contains(&status) {
+            Ok(body)
+        } else {
+            Err(RestError::from_response(status, &headers, &body))
+        }
+    }
+
+    pub(crate) async fn send_raw(&self, request: RequestBuilder) -> Result<RawResponse, RestError> {
         let transport = |err| RestError::Transport(TransportError::from_reqwest(err));
         let mut response = request.send().await.map_err(transport)?;
-        let status = response.status();
+        let status = response.status().as_u16();
         let headers = response.headers().clone();
         if response
             .content_length()
@@ -186,11 +209,11 @@ impl RestClient {
             }
             body.extend_from_slice(&chunk);
         }
-        if status.is_success() {
-            Ok(body)
-        } else {
-            Err(RestError::from_response(status.as_u16(), &headers, &body))
-        }
+        Ok(RawResponse {
+            status,
+            headers,
+            body,
+        })
     }
 }
 

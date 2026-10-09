@@ -39,6 +39,14 @@ where
         .collect())
 }
 
+pub(crate) fn parse_list<T: DeserializeOwned>(
+    json: &[u8],
+) -> Result<(Vec<T>, usize), serde_json::Error> {
+    let entries: Vec<&RawValue> = serde_json::from_slice(json)?;
+    let count = entries.len();
+    Ok((parse_valid(entries), count))
+}
+
 fn parse_valid<T: DeserializeOwned>(entries: Vec<&RawValue>) -> Vec<T> {
     entries
         .into_iter()

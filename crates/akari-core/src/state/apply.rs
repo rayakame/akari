@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::events::StoreEvent;
 use super::permissions::compute;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
-use super::windows::{MessageWindow, WindowLimits, Windows};
+use super::windows::{LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
@@ -568,6 +568,88 @@ impl State {
 
     pub(crate) fn view_channel(&mut self, channel: ChannelId, events: &mut Vec<StoreEvent>) {
         self.windows.view(channel, events);
+    }
+
+    pub(crate) fn begin_load(
+        &mut self,
+        channel: ChannelId,
+        kind: LoadKind,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<LoadTicket> {
+        self.windows.begin_load(channel, kind, events)
+    }
+
+    pub(crate) fn finish_load(
+        &mut self,
+        ticket: LoadTicket,
+        page: Vec<model::Message>,
+        reached_end: bool,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows
+            .finish_load(ticket, page, &self.entities.users, reached_end, events);
+    }
+
+    pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {
+        self.windows.abort_load(ticket, events);
+    }
+
+    pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
+        self.windows.stale_channels()
+    }
+
+    pub(crate) fn viewed_channels(&self) -> Vec<Arc<Channel>> {
+        self.windows
+            .channels()
+            .filter_map(|channel| self.entities.channels.get(&channel).cloned())
+            .collect()
+    }
+
+    pub(crate) fn queue(
+        &mut self,
+        channel: ChannelId,
+        message: Arc<Message>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.queue(channel, message, events);
+    }
+
+    pub(crate) fn confirm(
+        &mut self,
+        channel: ChannelId,
+        pending: MessageId,
+        message: model::Message,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows
+            .confirm(channel, pending, message, &self.entities.users, events);
+    }
+
+    pub(crate) fn fail(
+        &mut self,
+        channel: ChannelId,
+        pending: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.fail(channel, pending, events);
+    }
+
+    pub(crate) fn retry(
+        &mut self,
+        channel: ChannelId,
+        pending: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<Arc<Message>> {
+        self.windows.retry(channel, pending, events)
+    }
+
+    pub(crate) fn discard(
+        &mut self,
+        channel: ChannelId,
+        pending: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.discard(channel, pending, events);
     }
 
     pub(crate) fn messages(&self, channel: ChannelId) -> Option<MessageWindow> {

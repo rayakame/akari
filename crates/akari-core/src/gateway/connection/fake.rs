@@ -233,7 +233,12 @@ impl TokenStore for NoStore {
     }
 }
 
+// REST goes to a closed local port: a test that doesn't mock REST must never reach Discord.
 pub(crate) fn client_for(gateway: String) -> DiscordClient {
+    client_with(gateway, "http://127.0.0.1:9/api/v9/".to_owned())
+}
+
+pub(crate) fn client_with(gateway: String, api: String) -> DiscordClient {
     let host = HostInfo {
         os: DesktopOs::MacOs,
         os_version: "25.0.0".to_owned(),
@@ -243,6 +248,7 @@ pub(crate) fn client_for(gateway: String) -> DiscordClient {
     let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
     let endpoints = Endpoints {
         gateway,
+        api,
         allow_plaintext: true,
         ..Endpoints::default()
     };

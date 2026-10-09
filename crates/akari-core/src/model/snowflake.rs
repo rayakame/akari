@@ -27,7 +27,23 @@ impl<M> Snowflake<M> {
     pub const fn cast<N>(self) -> Snowflake<N> {
         Snowflake::new(self.value)
     }
+
+    pub(crate) fn from_unix_millis(unix_millis: i64, sequence: u64) -> Self {
+        let since_epoch = u64::try_from(unix_millis - DISCORD_EPOCH).unwrap_or(0);
+        Self::new((since_epoch << TIMESTAMP_SHIFT) | (sequence & SEQUENCE_MASK))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn unix_millis(self) -> i64 {
+        i64::try_from(self.value >> TIMESTAMP_SHIFT).unwrap_or(i64::MAX - DISCORD_EPOCH)
+            + DISCORD_EPOCH
+    }
 }
+
+// The first second of 2015, from which snowflake timestamps count.
+const DISCORD_EPOCH: i64 = 1_420_070_400_000;
+const TIMESTAMP_SHIFT: u32 = 22;
+const SEQUENCE_MASK: u64 = (1 << TIMESTAMP_SHIFT) - 1;
 
 // Implemented by hand so markers need no derives of their own.
 impl<M> Clone for Snowflake<M> {
@@ -134,3 +150,20 @@ pub enum UserMarker {}
 
 /// Marks the ID of a webhook.
 pub enum WebhookMarker {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snowflakes_round_trip_through_unix_millis() {
+        let id = Snowflake::<MessageMarker>::from_unix_millis(1_420_070_401_000, 5);
+
+        assert_eq!(id.get(), (1000 << 22) + 5);
+        assert_eq!(id.unix_millis(), 1_420_070_401_000);
+        assert_eq!(
+            Snowflake::<MessageMarker>::new(4_194_304_005).unix_millis(),
+            1_420_070_401_000
+        );
+    }
+}

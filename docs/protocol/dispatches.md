@@ -16,7 +16,8 @@ fake IDs.
   resume doesn't replay it, and logs a warning with the event name and `s` only. serde's
   error text can quote values from the payload, so it is never logged.
 - A message's `attachments`, `embeds`, `mentions`, `mention_roles`, `sticker_items` and
-  `reactions` skip entries that fail to parse, so one odd embed doesn't drop a message.
+  `reactions` skip entries that fail to parse, so one odd embed doesn't drop a message. A
+  `nonce` that is neither a string nor a non-negative integer becomes `None`.
 - Discord may send an event more than once
   ([consistency](https://docs.discord.food/reference#consistency)). The store applies every
   dispatch idempotently: a repeated MESSAGE_CREATE, CHANNEL_CREATE or GUILD_CREATE replaces
@@ -65,7 +66,7 @@ Two details:
 | CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped |
 | CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed |
 | CHANNEL_DELETE, THREAD_DELETE | `ChannelDelete` | `ChannelRemoved`, also for the threads of a deleted channel. CHANNEL_DELETE "will be partial" for private channels and THREAD_DELETE has only `id`, `guild_id`, `parent_id` and `type`, so only those are read |
-| MESSAGE_CREATE | `Message` | Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted` |
+| MESSAGE_CREATE | `Message` | Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)) |
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
@@ -98,8 +99,9 @@ captures READY.
 User accounts "are only synced threads they have been added to"
 ([gateway guild](https://docs.discord.food/gateway/gateway-events#gateway-guild-object)).
 The store keeps the joined threads from READY and whatever THREAD_CREATE brings. The full
-thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild, which
-Akari doesn't do yet, so THREAD_LIST_SYNC isn't decoded. Losing access to a channel doesn't
+thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
+`threads: true`. Akari's guild subscriptions ask for it, but THREAD_LIST_SYNC isn't decoded
+yet, so the store ignores it. Losing access to a channel doesn't
 send THREAD_DELETE for its threads ([threads](https://docs.discord.food/topics/threads));
 they stay in the store until the next session.
 
@@ -108,9 +110,10 @@ they stay in the store until the next session.
 For user accounts, the gateway stops "sending non-stateful events for guilds without a
 subscription" once a guild has more members than `large_threshold`, 250 by default
 ([Identify](https://docs.discord.food/gateway/gateway-events#identify-structure)). Gateway
-guilds over the threshold are marked `large`. Live messages probably don't arrive in such
-guilds until Akari subscribes to them with op 14 or op 37, whose payloads the reference
-doesn't document. `state::Guild::large` exposes the flag.
+guilds over the threshold are marked `large`, and `state::Guild::large` exposes the flag.
+Akari subscribes every guild with a viewed channel, like the official client, so live
+messages arrive there too ([gateway.md](gateway.md#guild-subscriptions)). **Unverified**
+whether a guild under the threshold needs it.
 
 ## The state store
 
@@ -162,9 +165,22 @@ and applies each event.
 - A new session marks every window stale (`MessagesStale`) instead of clearing it, so a UI
   keeps its scroll position. Edits and deletes still apply, but new messages are held back
   until the window is refreshed and reconciled, because appending them could leave a gap.
+  `Account` refreshes stale windows right after READY; see
+  [messages.md](messages.md#after-a-new-session).
+- `MessagesLoaded { first, last }` announces messages added within that ID range: history
+  at either end, or messages a refresh filled in between loaded ones. The UI reads the
+  window for the range.
+- Our own pending and failed messages sit in the window's outbox, after its messages, and
+  are never trimmed ([messages.md](messages.md#sending)). A window with an outbox is never
+  evicted; the next least recently viewed one goes instead. When its channel goes away
+  (deleted, left, or its guild down), the window loses its messages but keeps the outbox,
+  so the text can still be retried, discarded or offered to the user again.
 
 ## Open points
 
+- **Previewing (lurking) guilds.** A guild the user previews without joining isn't in
+  READY, so its channels aren't in the store, and viewing one does nothing: no window
+  events and no subscription. akari-cli's `tail` warns about it.
 - **Author nicknames.** Messages keep only their author as Discord sent it. Server
   nicknames will come from a member cache keyed by (guild, user) that resolves display
   names, filled by op 8 member requests and MESSAGE_CREATE's `member`. MESSAGE_CREATE's
@@ -175,6 +191,4 @@ and applies each event.
   `last_message_id` changes, so tracking it belongs there too. Every MESSAGE_CREATE
   reaches the store; only the window step drops those for channels without a window, so
   the event goes in front of it.
-- **Guild subscriptions** (op 14 or op 37) for live messages in large guilds, and
-  THREAD_LIST_SYNC with them.
-- **Refreshing stale windows** and loading history come with the REST client.
+- **THREAD_LIST_SYNC**, which guild subscriptions bring, for the full thread list.

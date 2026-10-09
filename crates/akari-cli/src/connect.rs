@@ -14,13 +14,11 @@ use akari_core::gateway::{
 
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
-use crate::keychain::{Accounts, off_runtime};
-use crate::report;
+use crate::keychain::Accounts;
+use crate::session::{CLOSE_WAIT, LOG_IN, stored_token};
+use crate::{printable, report};
 
 const CAPTURES: &str = "captures";
-// Long enough for the close frame, so Discord ends the session instead of timing it out.
-const CLOSE_WAIT: Duration = Duration::from_secs(5);
-const LOG_IN: &str = "Run `akari-cli login --qr` or `akari-cli login --password`";
 const CAPTURE_WARNING: &str = "It contains personal data and secrets such as the analytics \
     token: don't commit or share it, and delete it when you're done.";
 
@@ -55,27 +53,9 @@ pub async fn run<S: Accounts>(
     store: &Arc<S>,
     options: Options,
 ) -> ExitCode {
-    let account = match off_runtime(store, |store| store.current_account()).await {
-        Ok(Some(account)) => account,
-        Ok(None) => {
-            eprintln!("Not logged in. {LOG_IN} first.");
-            return ExitCode::FAILURE;
-        }
-        Err(err) => {
-            eprintln!("Couldn't read the keychain: {}", report(&err));
-            return ExitCode::FAILURE;
-        }
-    };
-    let token = match client.load_token(account).await {
-        Ok(Some(token)) => token,
-        Ok(None) => {
-            eprintln!("No token is stored for this account. {LOG_IN}.");
-            return ExitCode::FAILURE;
-        }
-        Err(err) => {
-            eprintln!("Couldn't read the token: {}", report(&err));
-            return ExitCode::FAILURE;
-        }
+    let token = match stored_token(client, store).await {
+        Ok(token) => token,
+        Err(code) => return code,
     };
     let gateway = match client.gateway(token) {
         Ok(gateway) => gateway,
@@ -181,7 +161,7 @@ fn ready_summary(ready: &Ready) -> String {
         .count();
     format!(
         "Connected as {}: {} guilds ({unavailable} unavailable), {} private channels.",
-        ready.user.user.username,
+        printable(&ready.user.user.username),
         ready.guilds.len(),
         ready.private_channels.len()
     )

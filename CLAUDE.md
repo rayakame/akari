@@ -32,9 +32,11 @@ Reference notes on Discord's layout, behavior and shortcuts live in `docs/ui/`.
 This is the intended layout. So far `akari-core` has the wire models, gateway decoding, the
 shared `DiscordClient` with both login flows (email/password and QR code), the token
 storage trait, the gateway connection (zstd-stream, heartbeats, resume, rate-limited
-sends) and the state store (`akari_core::state`) with `Account`, which keeps it current
-from the gateway; `akari-cli` can log in, log out and connect. `akari-markdown` and
-`akari-ffi` are still empty skeletons, and each app folder contains only a README.
+sends), the state store (`akari_core::state`) and `Account`, which keeps the store current
+from the gateway, loads message history and sends messages over rate-limited REST;
+`akari-cli` can log in, log out, connect, list guilds and channels, and read, send and tail
+messages. `akari-markdown` and `akari-ffi` are still empty skeletons, and each app folder
+contains only a README.
 
 | Path | Contents |
 |---|---|
@@ -68,10 +70,12 @@ apps/linux ──► akari-core, akari-markdown   (later, as a workspace member)
   `Timestamp`, `Permissions`) and the integer enums (`ChannelType`, `MessageType`, …) are
   shared vocabulary the state layer reuses.
 - `akari-ffi` contains bindings only; logic belongs in `akari-core` or `akari-markdown`.
-- Dev-only cargo features (`capture`, which hands out the raw READY) are enabled only by
-  `akari-cli`. Cargo unifies features across a workspace build, so `cargo build --workspace`
-  would compile `akari-core` with them for `akari-ffi` too: app builds always build
-  `-p akari-ffi`, and CI checks that `-p akari-ffi` never pulls in `capture`.
+- Dev-only cargo features (`capture`, which hands out the raw READY, `repeat-nonce`, which
+  repeats a send with the same nonce, and `flags-only`, which leaves member lists out of op
+  37) are enabled only by `akari-cli`. Cargo unifies features across a workspace build, so
+  `cargo build --workspace` would compile `akari-core` with them for `akari-ffi` too: app
+  builds always build `-p akari-ffi`, and CI checks that `-p akari-ffi` pulls in none of
+  them.
 - Swift and Kotlin apps reach Rust only through `akari-ffi`; the Linux app links the
   crates directly.
 
@@ -131,7 +135,7 @@ cargo ndk -t arm64-v8a check --workspace --exclude akari-cli  # needs cargo-ndk
 
 # akari-core without akari-cli's dev features, and the feature boundary apps rely on
 cargo clippy -p akari-core --all-targets -- -D warnings
-cargo tree -p akari-ffi -e features -i akari-core   # must not list feature "capture"
+cargo tree -p akari-ffi -e features -i akari-core   # must list no "capture", "flags-only" or "repeat-nonce"
 
 # Banned dependencies (needs cargo-deny)
 cargo deny check bans

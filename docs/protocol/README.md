@@ -12,12 +12,16 @@ surprises we found.
 
 - [client-properties.md](client-properties.md): the client identity Akari sends and how to refresh it
 - [gateway.md](gateway.md): connecting, zstd-stream, heartbeats, identify, resume, close
-  codes, limits, presence
+  codes, limits, presence, guild subscriptions
 - [login.md](login.md): email/password and QR code login, logout, token storage
 - [ready.md](ready.md): READY, gateway capabilities, gateway guilds
 - [dispatches.md](dispatches.md): the dispatches after READY, partial updates, and what the
   state store does with each
 - [models.md](models.md): users, guilds, channels and messages, and how they map to Rust
+- [messages.md](messages.md): loading history, refreshing after a new session, sending with
+  a nonce, request errors
+- [rate-limits.md](rate-limits.md): per-route and global REST limits and how Akari stays
+  within them
 
 ## Conventions
 

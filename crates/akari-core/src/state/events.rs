@@ -20,11 +20,13 @@ pub enum StoreEvent {
     GuildAdded(Arc<Guild>),
     /// Settings or roles changed. Role changes can change channel permissions.
     GuildUpdated(Arc<Guild>),
-    /// The user left or was removed. Its channels, threads and messages are gone.
+    /// The user left or was removed. Its channels, threads and messages are gone; our pending
+    /// and failed messages stay in [`Store::messages`](super::Store::messages) until discarded.
     GuildRemoved {
         guild_id: GuildId,
     },
-    /// The guild is down. Its channels, threads and messages are gone until `GuildAdded`.
+    /// The guild is down. Its channels, threads and messages are gone until `GuildAdded`; our
+    /// pending and failed messages stay in [`Store::messages`](super::Store::messages).
     GuildUnavailable {
         guild_id: GuildId,
     },
@@ -33,7 +35,8 @@ pub enum StoreEvent {
     /// A channel, category, thread, DM or group DM appeared.
     ChannelAdded(Arc<Channel>),
     ChannelUpdated(Arc<Channel>),
-    /// The channel and its messages are gone.
+    /// The channel and its messages are gone; our pending and failed messages in it stay in
+    /// [`Store::messages`](super::Store::messages) until discarded.
     ChannelRemoved {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -47,8 +50,15 @@ pub enum StoreEvent {
         channel_id: ChannelId,
         message_id: MessageId,
     },
-    /// A loaded range was added at one end of the window, e.g. older history. Read the
-    /// window to get `first..=last`.
+    /// Discord confirmed a pending message: drop `pending_id`'s row. `message` is in the
+    /// window if it is at the present; otherwise it comes with a later load.
+    MessageReplaced {
+        channel_id: ChannelId,
+        pending_id: MessageId,
+        message: Arc<Message>,
+    },
+    /// Messages were added within `first..=last`: older or newer history, or messages a
+    /// refresh filled in. Read the window for that range.
     MessagesLoaded {
         channel_id: ChannelId,
         first: MessageId,
@@ -62,11 +72,14 @@ pub enum StoreEvent {
         last: MessageId,
     },
     /// A new session may have missed changes to the window's messages. They stay until
-    /// the window is refreshed; new messages wait for the refresh.
+    /// the window is refreshed; new messages wait for the refresh. Sent again when the
+    /// refresh can't reach the window: it stays stale, and `latest` is false until a jump
+    /// to the present.
     MessagesStale {
         channel_id: ChannelId,
     },
-    /// The channel was viewed least recently and its window was dropped.
+    /// The window's messages were dropped: the channel was viewed least recently, or a jump
+    /// to the present or to a message replaced them.
     MessagesCleared {
         channel_id: ChannelId,
     },

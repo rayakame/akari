@@ -8,13 +8,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-akari-core = { workspace = true, features = ["capture"] }
+akari-core = { workspace = true, features = ["capture", "flags-only", "repeat-nonce"] }
 akari-markdown.workspace = true
 clap.workspace = true
 keyring.workspace = true
 qrcode.workspace = true
 rpassword.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]

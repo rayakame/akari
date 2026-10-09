@@ -41,15 +41,15 @@ jobs:
       - run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # Built alone, akari-core has no capture feature; akari-cli turns it on in workspace builds.
+      # Built alone, akari-core has no dev features; akari-cli turns them on in workspace builds.
       - run: cargo clippy -p akari-core --all-targets --locked -- -D warnings
-      # Apps build akari-ffi alone (-p), where workspace feature unification can't add capture.
-      - name: akari-ffi builds without the capture feature
+      # Apps build akari-ffi alone (-p), where workspace feature unification can't add dev features.
+      - name: akari-ffi builds without akari-cli's dev features
         # A failing cargo tree must fail the step, not leave grep with nothing to find.
         run: |
           tree=$(cargo tree -p akari-ffi -e features -i akari-core --locked)
-          if grep -q 'feature "capture"' <<<"$tree"; then
-            echo "akari-ffi would build akari-core with the capture feature" >&2
+          if grep -qE 'feature "(capture|flags-only|repeat-nonce)"' <<<"$tree"; then
+            echo "akari-ffi would build akari-core with a dev feature" >&2
             exit 1
           fi
       - run: cargo test --workspace --locked
