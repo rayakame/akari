@@ -1,12 +1,16 @@
+use std::pin::pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::task::Poll;
+use std::time::Duration;
 
 use serde_json::json;
 use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, ResponseTemplate};
 
+use super::gateway::WAIT;
 use super::support::{
-    MemoryStore, USER, block_on, local_client, rest_endpoints, rest_server, unreachable_client,
+    MemoryStore, USER, block_on, local_client, poll_once, refused_connection, rest_endpoints,
+    rest_server, unreachable_client,
 };
 use crate::errors::{LoginError, NetworkErrorKind};
 use crate::login::{LoginStep, MfaMethod};
@@ -122,8 +126,8 @@ fn a_login_without_network_reports_the_kind() {
     );
 }
 
-#[test]
-fn login_errors_map_one_to_one() {
+#[tokio::test]
+async fn login_errors_map_one_to_one() {
     use akari_core::auth::LoginError as Core;
 
     let cases = [
@@ -179,7 +183,13 @@ fn login_errors_map_one_to_one() {
         (Core::Cancelled, LoginError::Cancelled),
         (Core::NoPendingStep, LoginError::NoPendingStep),
         (Core::Busy, LoginError::Busy),
-        (Core::NoRuntime, LoginError::Cancelled),
+        (
+            Core::Network(refused_connection().await),
+            LoginError::Network {
+                kind: NetworkErrorKind::Connect,
+            },
+        ),
+        (Core::NoRuntime, LoginError::UnexpectedResponse),
     ];
 
     for (core, expected) in cases {
@@ -196,18 +206,31 @@ async fn cancel_ends_a_running_step() {
         .await;
     let client = local_client(rest_endpoints(&server), Arc::new(MemoryStore::default()));
     let login = client.password_login();
-    let started = Instant::now();
+    let mut submit = pin!(login.submit("me@example.com".to_owned(), "hunter2".to_owned()));
 
-    let (result, ()) = tokio::join!(
-        login.submit("me@example.com".to_owned(), "hunter2".to_owned()),
-        async {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            login.cancel();
+    assert!(poll_once(submit.as_mut()).is_pending());
+    tokio::time::timeout(WAIT, async {
+        while !login_requested(&server).await {
+            tokio::time::sleep(Duration::from_millis(5)).await;
         }
-    );
+    })
+    .await
+    .expect("the login request never reached the server");
+    login.cancel();
 
+    let result = tokio::time::timeout(WAIT, submit)
+        .await
+        .expect("cancel didn't end the step");
     assert_eq!(result.map(|_| ()), Err(LoginError::Cancelled));
-    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+async fn login_requested(server: &wiremock::MockServer) -> bool {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .any(|request| request.url.path() == "/api/v9/auth/login")
 }
 
 #[test]
@@ -221,12 +244,13 @@ fn qr_login_starts_outside_a_runtime_and_cancel_ends_next() {
     .join()
     .unwrap()
     .unwrap();
-    let waiting = {
-        let qr = qr.clone();
-        std::thread::spawn(move || block_on(qr.next()).map(|_| ()))
-    };
-    std::thread::sleep(Duration::from_millis(50));
+    let mut next = pin!(qr.next());
+
+    assert!(poll_once(next.as_mut()).is_pending());
     qr.cancel();
 
-    assert_eq!(waiting.join().unwrap(), Err(LoginError::Cancelled));
+    assert!(matches!(
+        poll_once(next.as_mut()),
+        Poll::Ready(Err(LoginError::Cancelled))
+    ));
 }

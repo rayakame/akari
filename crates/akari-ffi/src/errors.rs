@@ -216,10 +216,11 @@ impl From<akari_core::auth::LoginError> for LoginError {
             E::Cancelled => Self::Cancelled,
             E::NoPendingStep => Self::NoPendingStep,
             E::Busy => Self::Busy,
-            // The bindings always enter their runtime first, so this can't happen.
+            // The bindings always enter their runtime first, so this can't happen. Not
+            // Cancelled: a UI ignores that, and the failure would be silent.
             E::NoRuntime => {
                 tracing::error!("a login started outside the runtime");
-                Self::Cancelled
+                Self::UnexpectedResponse
             }
         }
     }

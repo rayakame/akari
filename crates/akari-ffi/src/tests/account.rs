@@ -1,4 +1,6 @@
+use std::pin::pin;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use akari_core::model::{ChannelId, ChannelType, MessageId, MessageType, Permissions};
@@ -12,7 +14,7 @@ use super::fake::{
 };
 use super::gateway::{WAIT, send};
 use super::support::{
-    BlockingStore, MemoryStore, USER, block_on, local_client, token, unreachable_client,
+    BlockingStore, MemoryStore, USER, block_on, local_client, poll_once, token, unreachable_client,
 };
 use crate::errors::GatewayError;
 use crate::records::{Channel, ConnectionState, Delivery};
@@ -205,8 +207,17 @@ async fn batches_keep_order_and_stop_at_256() {
     .expect("the channels never arrived");
 
     let mut added = Vec::new();
+    let mut first = true;
     while added.len() < ids.len() {
         let batch = timeout(WAIT, subscription.next()).await.unwrap().unwrap();
+        if first {
+            assert_eq!(
+                batch.len(),
+                256,
+                "everything was buffered, so the first batch is full"
+            );
+            first = false;
+        }
         assert!(batch.len() <= 256, "a batch of {}", batch.len());
         added.extend(batch.into_iter().filter_map(|event| match event {
             StoreEvent::ChannelAdded { channel_id, .. } => Some(channel_id),
@@ -224,14 +235,13 @@ fn close_ends_a_waiting_next_and_stops_buffering() {
     let subscription = account.store().subscribe();
     let inner = subscription.inner_for_tests();
 
-    let waiting = {
-        let subscription = subscription.clone();
-        std::thread::spawn(move || block_on(subscription.next()))
-    };
-    std::thread::sleep(Duration::from_millis(50));
-    subscription.close();
+    {
+        let mut next = pin!(subscription.next());
+        assert!(poll_once(next.as_mut()).is_pending());
+        subscription.close();
+        assert_eq!(poll_once(next.as_mut()), Poll::Ready(None));
+    }
 
-    assert_eq!(waiting.join().unwrap(), None);
     assert_eq!(block_on(subscription.next()), None);
     assert!(
         inner.upgrade().is_none(),
@@ -321,4 +331,35 @@ async fn a_blocked_token_store_never_stalls_events() {
     release.send(()).unwrap();
     assert_eq!(loading.join().unwrap(), Ok(false));
     account.close();
+}
+
+#[test]
+fn gateway_errors_map_one_to_one() {
+    use akari_core::gateway::{DecodeError, GatewayError as Core};
+
+    let cases = [
+        (
+            Core::AuthenticationFailed,
+            GatewayError::AuthenticationFailed,
+        ),
+        (
+            Core::Rejected { code: 4013 },
+            GatewayError::Rejected { code: 4013 },
+        ),
+        (
+            Core::MessageTooLarge { limit: 64 << 20 },
+            GatewayError::MessageTooLarge { limit: 64 << 20 },
+        ),
+        (
+            Core::InvalidReady(DecodeError::MissingField { op: 0, field: "d" }),
+            GatewayError::InvalidReady,
+        ),
+        (Core::Closed, GatewayError::Closed),
+        (Core::Stopped, GatewayError::Stopped),
+        (Core::NoRuntime, GatewayError::Stopped),
+    ];
+
+    for (core, expected) in cases {
+        assert_eq!(GatewayError::from(core), expected);
+    }
 }

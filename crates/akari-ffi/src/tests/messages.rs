@@ -11,7 +11,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::fake::{FakeGateway, GENERAL, events_until, fixture, online};
-use super::support::{block_on, token};
+use super::support::{block_on, refused_connection, token};
 use crate::account::{Account, MessageLoad};
 use crate::errors::{NetworkErrorKind, RequestError};
 use crate::login::CaptchaChallenge;
@@ -206,8 +206,8 @@ async fn a_failed_send_stays_until_retried_or_discarded() {
     online.account.close();
 }
 
-#[test]
-fn request_errors_map_one_to_one() {
+#[tokio::test]
+async fn request_errors_map_one_to_one() {
     use akari_core::RequestError as Core;
 
     let challenge = CoreChallenge {
@@ -260,6 +260,12 @@ fn request_errors_map_one_to_one() {
         (Core::UnexpectedResponse, RequestError::UnexpectedResponse),
         (Core::InvalidRequest, RequestError::InvalidRequest),
         (Core::Closed, RequestError::Closed),
+        (
+            Core::Network(refused_connection().await),
+            RequestError::Network {
+                kind: NetworkErrorKind::Connect,
+            },
+        ),
     ];
 
     for (core, expected) in cases {

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
+use std::time::Duration;
 
 use akari_core::model::UserId;
 
@@ -40,6 +41,13 @@ pub fn local_client(
     endpoints: akari_core::Endpoints,
     store: Arc<dyn TokenStore>,
 ) -> Arc<DiscordClient> {
+    DiscordClient::from_core(core_client(endpoints, store)).unwrap_or_else(|err| panic!("{err}"))
+}
+
+pub fn core_client(
+    endpoints: akari_core::Endpoints,
+    store: Arc<dyn TokenStore>,
+) -> akari_core::DiscordClient {
     use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
 
     let host = HostInfo {
@@ -53,13 +61,35 @@ pub fn local_client(
         allow_plaintext: true,
         ..endpoints
     };
-    let core = akari_core::DiscordClient::with_endpoints(
+    akari_core::DiscordClient::with_endpoints(
         properties,
         Arc::new(crate::token_store::HostStore(store)),
         endpoints,
     )
-    .unwrap_or_else(|err| panic!("client setup failed: {err}"));
-    DiscordClient::from_core(core).unwrap_or_else(|err| panic!("{err}"))
+    .unwrap_or_else(|err| panic!("client setup failed: {err}"))
+}
+
+// A real refused connection: akari-core's TransportError can't be built any other way.
+pub async fn refused_connection() -> akari_core::TransportError {
+    let endpoints = akari_core::Endpoints {
+        api: format!("https://{UNREACHABLE}/api/v9/"),
+        ..akari_core::Endpoints::default()
+    };
+    let login = core_client(endpoints, Arc::new(MemoryStore::default())).password_login();
+    match tokio::time::timeout(
+        Duration::from_secs(5),
+        login.submit("me@example.com", akari_core::Secret::new("x".to_owned())),
+    )
+    .await
+    {
+        Ok(Err(akari_core::auth::LoginError::Network(err))) => err,
+        other => panic!("expected a network error, got {other:?}"),
+    }
+}
+
+// Polls once with a waker that does nothing, so a test can see a future wait.
+pub fn poll_once<F: Future + ?Sized>(future: Pin<&mut F>) -> Poll<F::Output> {
+    future.poll(&mut Context::from_waker(Waker::noop()))
 }
 
 // A REST server that already answers the fingerprint request logins start with.
