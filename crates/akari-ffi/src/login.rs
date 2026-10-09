@@ -43,8 +43,8 @@ impl PasswordLogin {
 impl PasswordLogin {
     /// Starts or restarts the login. `login` is an email address or an E.164 phone number.
     pub async fn submit(&self, login: String, password: String) -> Result<LoginStep, LoginError> {
-        let password = Secret::new(password);
-        self.step(|core| async move { core.submit(&login, password).await })
+        let (login, password) = (Secret::new(login), Secret::new(password));
+        self.step(|core| async move { core.submit(login.expose(), password).await })
             .await
     }
 
@@ -75,7 +75,8 @@ impl PasswordLogin {
         &self,
         link_or_token: String,
     ) -> Result<LoginStep, LoginError> {
-        self.step(|core| async move { core.confirm_new_location(&link_or_token).await })
+        let link_or_token = Secret::new(link_or_token);
+        self.step(|core| async move { core.confirm_new_location(link_or_token.expose()).await })
             .await
     }
 
