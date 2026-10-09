@@ -1786,6 +1786,27 @@ async fn viewing_a_channel_in_a_large_guild_subscribes_its_member_list() {
     );
 }
 
+#[cfg(feature = "flags-only")]
+#[tokio::test]
+async fn flags_only_subscriptions_leave_out_member_lists() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    account.subscribe_flags_only();
+    let subscription = account.store().subscribe();
+    let mut connection = online_in_a_large_guild(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+
+    account.view_channel(general());
+    let command = next_command(&mut connection)
+        .await
+        .expect("no subscription");
+
+    assert_eq!(
+        command["d"]["subscriptions"][G1],
+        json!({"typing": true, "activities": true, "threads": true})
+    );
+}
+
 #[tokio::test]
 async fn every_viewed_channel_of_a_large_guild_keeps_its_member_list() {
     let mut fake = FakeGateway::start().await;

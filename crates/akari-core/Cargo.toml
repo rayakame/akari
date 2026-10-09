@@ -33,6 +33,9 @@ capture = []
 # Adds Account::send_message_twice, which repeats a send with the same nonce, to check that
 # Discord ignores the repeat. Only akari-cli enables it, like capture.
 repeat-nonce = []
+# Adds Account::subscribe_flags_only, which leaves member lists out of op 37, to test whether
+# very large guilds need them for live messages. Only akari-cli enables it, like capture.
+flags-only = []
 # Lets Endpoints point at http:// and ws:// test servers. Only the test suites enable it.
 insecure-test-endpoints = []
 

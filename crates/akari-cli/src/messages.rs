@@ -39,7 +39,12 @@ pub enum SessionCommand {
         text: Vec<String>,
     },
     /// Print a channel's latest messages, then new, edited and deleted ones until Ctrl+C.
-    Tail { channel_id: u64 },
+    Tail {
+        // Sends op 37 without member lists, to test whether very large guilds need them.
+        #[arg(long, hide = true)]
+        flags_only: bool,
+        channel_id: u64,
+    },
 }
 
 pub async fn run<S: Accounts>(
@@ -47,7 +52,14 @@ pub async fn run<S: Accounts>(
     store: &Arc<S>,
     command: SessionCommand,
 ) -> ExitCode {
-    let session = match session::open(client, store).await {
+    let flags_only = matches!(
+        command,
+        SessionCommand::Tail {
+            flags_only: true,
+            ..
+        }
+    );
+    let session = match session::open(client, store, flags_only).await {
         Ok(session) => session,
         Err(code) => return code,
     };
@@ -70,10 +82,13 @@ pub async fn run<S: Accounts>(
                 send(&session, channel, text.join(" ")).await
             }
         }
-        SessionCommand::Tail { channel_id } => match signal(SignalKind::interrupt()) {
+        SessionCommand::Tail {
+            flags_only,
+            channel_id,
+        } => match signal(SignalKind::interrupt()) {
             Ok(stream) => {
                 let interrupts = interrupts.insert(stream);
-                tail(&session, Snowflake::new(channel_id), interrupts).await
+                tail(&session, Snowflake::new(channel_id), flags_only, interrupts).await
             }
             Err(err) => {
                 eprintln!("Couldn't watch for Ctrl+C: {err}");
@@ -198,7 +213,12 @@ fn repeat_line(first: MessageId, repeat: &Result<MessageId, RequestError>) -> St
     }
 }
 
-async fn tail(session: &Session, channel: ChannelId, interrupts: &mut Signal) -> ExitCode {
+async fn tail(
+    session: &Session,
+    channel: ChannelId,
+    flags_only: bool,
+    interrupts: &mut Signal,
+) -> ExitCode {
     let account = &session.account;
     let store = account.store();
     let known = store.channel(channel);
@@ -210,6 +230,7 @@ async fn tail(session: &Session, channel: ChannelId, interrupts: &mut Signal) ->
         known.is_some(),
         guild.as_ref().is_some_and(|guild| guild.large),
         guild.as_ref().and_then(|guild| guild.member_count),
+        flags_only,
     );
     if let Some(note) = note {
         eprintln!("{note}");
@@ -315,7 +336,12 @@ async fn jump_to_present(
     Ok(())
 }
 
-fn guild_note(known: bool, large: bool, member_count: Option<u32>) -> Option<String> {
+fn guild_note(
+    known: bool,
+    large: bool,
+    member_count: Option<u32>,
+    flags_only: bool,
+) -> Option<String> {
     if !known {
         return Some(
             "(this channel isn't in Akari's state, so its guild can't be subscribed: \
@@ -327,9 +353,12 @@ fn guild_note(known: bool, large: bool, member_count: Option<u32>) -> Option<Str
         return None;
     }
     let size = member_count.map_or_else(String::new, |count| format!(", {count} members"));
-    Some(format!(
-        "(a large server{size}: Akari subscribes this channel's member list)"
-    ))
+    let subscription = if flags_only {
+        "op 37 sends the guild flags only, no member list"
+    } else {
+        "Akari subscribes this channel's member list"
+    };
+    Some(format!("(a large server{size}: {subscription})"))
 }
 
 fn line(message: &Message) -> String {
@@ -516,21 +545,27 @@ mod tests {
     #[test]
     fn tail_says_how_live_messages_will_arrive() {
         assert_eq!(
-            guild_note(false, false, None).as_deref(),
+            guild_note(false, false, None, false).as_deref(),
             Some(
                 "(this channel isn't in Akari's state, so its guild can't be subscribed: \
                  live messages may not arrive)"
             )
         );
         assert_eq!(
-            guild_note(true, true, Some(3_000_000)).as_deref(),
+            guild_note(true, true, Some(3_000_000), false).as_deref(),
             Some("(a large server, 3000000 members: Akari subscribes this channel's member list)")
         );
         assert_eq!(
-            guild_note(true, true, None).as_deref(),
+            guild_note(true, true, None, false).as_deref(),
             Some("(a large server: Akari subscribes this channel's member list)")
         );
-        assert_eq!(guild_note(true, false, Some(12)), None);
+        assert_eq!(
+            guild_note(true, true, Some(3_000_000), true).as_deref(),
+            Some(
+                "(a large server, 3000000 members: op 37 sends the guild flags only, no member list)"
+            )
+        );
+        assert_eq!(guild_note(true, false, Some(12), false), None);
     }
 
     #[test]

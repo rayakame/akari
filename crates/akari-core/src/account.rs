@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -63,6 +64,7 @@ pub(crate) struct Shared {
     status: Mutex<Status>,
     // What op 37 last asked for per guild in this session.
     subscribed: Mutex<BTreeMap<GuildId, GuildSubscription>>,
+    member_lists: AtomicBool,
     runtime: tokio::runtime::Handle,
 }
 
@@ -266,7 +268,8 @@ impl Shared {
             let entry = wanted
                 .entry(guild)
                 .or_insert_with(|| GuildSubscription::new(guild));
-            if !self.store.guild(guild).is_some_and(|guild| guild.large) {
+            let large = self.store.guild(guild).is_some_and(|guild| guild.large);
+            if !large || !self.member_lists.load(Ordering::Relaxed) {
                 continue;
             }
             let lists = entry.member_lists.get_or_insert_default();
@@ -419,6 +422,7 @@ impl Account {
             nonces: Nonces::default(),
             status: Mutex::default(),
             subscribed: Mutex::default(),
+            member_lists: AtomicBool::new(true),
             runtime: runtime.clone(),
         });
         // Built before the task starts, so it runs even if the task is never polled.
@@ -514,6 +518,13 @@ impl Account {
             .await
             .map(|message| message.id);
         Ok((first, repeat))
+    }
+
+    /// Dev only: op 37 leaves member lists out, sending only the guild flags. Call it before
+    /// `connect()`.
+    #[cfg(feature = "flags-only")]
+    pub fn subscribe_flags_only(&self) {
+        self.shared.member_lists.store(false, Ordering::Relaxed);
     }
 
     /// Sends a failed message again with the same nonce.

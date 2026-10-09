@@ -44,14 +44,19 @@ pub async fn stored_token<S: Accounts>(
     }
 }
 
+/// `flags_only` leaves member lists out of op 37, for testing.
 pub async fn open<S: Accounts>(
     client: &DiscordClient,
     store: &Arc<S>,
+    flags_only: bool,
 ) -> Result<Session, ExitCode> {
     let token = stored_token(client, store).await?;
     let account = client
         .account(token)
         .map_err(|err| fail(&closed_message(Some(&err))))?;
+    if flags_only {
+        account.subscribe_flags_only();
+    }
     let events = account.store().subscribe();
     account
         .connect()

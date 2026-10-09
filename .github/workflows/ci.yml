@@ -48,7 +48,7 @@ jobs:
         # A failing cargo tree must fail the step, not leave grep with nothing to find.
         run: |
           tree=$(cargo tree -p akari-ffi -e features -i akari-core --locked)
-          if grep -qE 'feature "(capture|repeat-nonce)"' <<<"$tree"; then
+          if grep -qE 'feature "(capture|flags-only|repeat-nonce)"' <<<"$tree"; then
             echo "akari-ffi would build akari-core with a dev feature" >&2
             exit 1
           fi

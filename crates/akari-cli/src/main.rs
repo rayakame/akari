@@ -152,6 +152,28 @@ mod tests {
     }
 
     #[test]
+    fn flags_only_is_a_hidden_tail_option() {
+        let cli = Cli::try_parse_from(["akari-cli", "tail", "--flags-only", "1"]).unwrap();
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("tail")
+            .unwrap()
+            .render_help()
+            .to_string();
+
+        let Command::Session(SessionCommand::Tail {
+            flags_only,
+            channel_id,
+        }) = cli.command
+        else {
+            panic!("expected tail");
+        };
+        assert!(flags_only);
+        assert_eq!(channel_id, 1);
+        assert!(!help.contains("flags"), "{help}");
+    }
+
+    #[test]
     fn send_joins_the_words_of_its_text() {
         let cli = Cli::try_parse_from(["akari-cli", "send", "1", "hello", "there"]).unwrap();
 
