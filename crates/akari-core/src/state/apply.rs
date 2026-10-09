@@ -598,10 +598,10 @@ impl State {
         self.windows.stale_channels()
     }
 
-    pub(crate) fn viewed_guilds(&self) -> BTreeSet<GuildId> {
+    pub(crate) fn viewed_channels(&self) -> Vec<Arc<Channel>> {
         self.windows
             .channels()
-            .filter_map(|channel| self.entities.channels.get(&channel)?.guild_id)
+            .filter_map(|channel| self.entities.channels.get(&channel).cloned())
             .collect()
     }
 

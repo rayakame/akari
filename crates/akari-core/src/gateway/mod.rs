@@ -21,7 +21,7 @@ pub use dispatch::{
 };
 pub use guild::{AvailableGuild, GatewayGuild, UnavailableGuild};
 pub use hello::Hello;
-pub use outgoing::{GatewayCommand, PresenceStatus};
+pub use outgoing::{GatewayCommand, GuildSubscription, MemberLists, PresenceStatus};
 pub use partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
 pub use payload::{DecodeError, DispatchEvent, GatewayEvent, decode};
 pub use ready::Ready;

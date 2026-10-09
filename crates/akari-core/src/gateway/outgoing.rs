@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::Token;
-use crate::model::GuildId;
+use crate::model::{ChannelId, GuildId};
 use crate::properties::ClientProperties;
 
 /// A command for [`Gateway::send`](super::Gateway::send).
@@ -13,8 +13,43 @@ pub enum GatewayCommand {
     /// Sets this session's status, without activities. Discord allows 5 updates per 20 s.
     UpdatePresence { status: PresenceStatus },
     /// Op 37, as the official client sends it when a channel is opened: typing, activities
-    /// and threads, no member lists. Without it, large guilds may send no live messages.
-    SubscribeGuilds { guilds: Vec<GuildId> },
+    /// and threads, and optionally member lists. Without it, large guilds send no live
+    /// messages.
+    SubscribeGuilds { guilds: Vec<GuildSubscription> },
+}
+
+/// One guild's entry in [`GatewayCommand::SubscribeGuilds`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct GuildSubscription {
+    pub guild_id: GuildId,
+    /// `Some` also subscribes these member lists and drops all others in the guild. In very
+    /// large guilds, live messages only come for channels whose member list is subscribed.
+    pub member_lists: Option<MemberLists>,
+}
+
+impl GuildSubscription {
+    pub fn new(guild_id: GuildId) -> Self {
+        Self {
+            guild_id,
+            member_lists: None,
+        }
+    }
+}
+
+/// Member lists to subscribe: the first 100 entries of each channel's list, as the official
+/// client loads them, and each thread's list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MemberLists {
+    pub channels: Vec<ChannelId>,
+    pub threads: Vec<ChannelId>,
+}
+
+impl MemberLists {
+    pub fn new(channels: Vec<ChannelId>, threads: Vec<ChannelId>) -> Self {
+        Self { channels, threads }
+    }
 }
 
 /// A status the user can choose.
@@ -33,31 +68,35 @@ impl GatewayCommand {
     pub(crate) fn to_payload(&self) -> String {
         match self {
             Self::UpdatePresence { status } => json(3, Presence::new(*status)),
-            Self::SubscribeGuilds { guilds } => json(
-                37,
-                Subscriptions {
-                    subscriptions: guilds
-                        .iter()
-                        .map(|guild| (guild.get().to_string(), GuildFeatures::GUILD))
-                        .collect(),
-                },
-            ),
+            Self::SubscribeGuilds { guilds } => {
+                let payload = json(
+                    37,
+                    Subscriptions {
+                        subscriptions: guilds
+                            .iter()
+                            .map(|guild| (guild.guild_id.get().to_string(), Entry::new(guild)))
+                            .collect(),
+                    },
+                );
+                tracing::debug!(target: "akari_core::subscriptions", %payload, "sending op 37");
+                payload
+            }
         }
     }
 
-    pub(crate) fn subscribe_guilds(guilds: &[GuildId]) -> Vec<Self> {
+    pub(crate) fn subscribe_guilds(guilds: &[GuildSubscription]) -> Vec<Self> {
         let mut commands = Vec::new();
         let mut batch = Vec::new();
         let mut size = EMPTY_SUBSCRIPTIONS;
         for guild in guilds {
-            let entry = guild.get().to_string().len() + SUBSCRIPTION_ENTRY;
+            let entry = entry_size(guild);
             if size + entry > MAX_PAYLOAD && !batch.is_empty() {
                 commands.push(Self::SubscribeGuilds {
                     guilds: std::mem::take(&mut batch),
                 });
                 size = EMPTY_SUBSCRIPTIONS;
             }
-            batch.push(*guild);
+            batch.push(guild.clone());
             size += entry;
         }
         if !batch.is_empty() {
@@ -67,29 +106,57 @@ impl GatewayCommand {
     }
 }
 
-// `{"op":37,"d":{"subscriptions":{}}}` and `"":{"typing":true,"activities":true,"threads":true},`
+// `{"op":37,"d":{"subscriptions":{}}}`
 const EMPTY_SUBSCRIPTIONS: usize = 34;
-const SUBSCRIPTION_ENTRY: usize = 52;
+
+// `"<guild id>":<entry>,`
+fn entry_size(guild: &GuildSubscription) -> usize {
+    let entry = serde_json::to_string(&Entry::new(guild)).map_or(0, |entry| entry.len());
+    guild.guild_id.get().to_string().len() + entry + 4
+}
 
 #[derive(Serialize)]
 struct Subscriptions {
-    subscriptions: BTreeMap<String, GuildFeatures>,
+    subscriptions: BTreeMap<String, Entry>,
 }
 
 #[derive(Serialize)]
-struct GuildFeatures {
+struct Entry {
     typing: bool,
     activities: bool,
     threads: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channels: Option<BTreeMap<String, [[u32; 2]; 1]>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_member_lists: Option<Vec<String>>,
 }
 
-impl GuildFeatures {
-    const GUILD: Self = Self {
-        typing: true,
-        activities: true,
-        threads: true,
-    };
+impl Entry {
+    fn new(guild: &GuildSubscription) -> Self {
+        let lists = guild.member_lists.as_ref();
+        Self {
+            typing: true,
+            activities: true,
+            threads: true,
+            channels: lists.map(|lists| {
+                lists
+                    .channels
+                    .iter()
+                    .map(|channel| (channel.get().to_string(), FIRST_HUNDRED))
+                    .collect()
+            }),
+            thread_member_lists: lists.map(|lists| {
+                lists
+                    .threads
+                    .iter()
+                    .map(|thread| thread.get().to_string())
+                    .collect()
+            }),
+        }
+    }
 }
+
+const FIRST_HUNDRED: [[u32; 2]; 1] = [[0, 99]];
 
 const LAZY_USER_NOTES: u64 = 1 << 0;
 const VERSIONED_READ_STATES: u64 = 1 << 2;
@@ -283,7 +350,9 @@ mod tests {
     #[test]
     fn a_guild_subscription_matches_the_official_clients_shape() {
         let command = GatewayCommand::SubscribeGuilds {
-            guilds: vec![Snowflake::new(200_000_000_000_000_001)],
+            guilds: vec![GuildSubscription::new(Snowflake::new(
+                200_000_000_000_000_001,
+            ))],
         };
 
         let payload: Value = serde_json::from_str(&command.to_payload()).unwrap();
@@ -297,9 +366,59 @@ mod tests {
     }
 
     #[test]
+    fn member_lists_ask_for_the_first_hundred_of_each_channel() {
+        let mut lists = GuildSubscription::new(Snowflake::new(200_000_000_000_000_001));
+        lists.member_lists = Some(MemberLists::new(
+            vec![
+                Snowflake::new(300_000_000_000_000_002),
+                Snowflake::new(300_000_000_000_000_003),
+            ],
+            vec![Snowflake::new(300_000_000_000_000_020)],
+        ));
+        let mut cleared = GuildSubscription::new(Snowflake::new(200_000_000_000_000_002));
+        cleared.member_lists = Some(MemberLists::default());
+        let command = GatewayCommand::SubscribeGuilds {
+            guilds: vec![lists, cleared],
+        };
+
+        let payload: Value = serde_json::from_str(&command.to_payload()).unwrap();
+
+        assert_eq!(
+            payload,
+            json!({"op": 37, "d": {"subscriptions": {
+                "200000000000000001": {
+                    "typing": true, "activities": true, "threads": true,
+                    "channels": {
+                        "300000000000000002": [[0, 99]],
+                        "300000000000000003": [[0, 99]]
+                    },
+                    "thread_member_lists": ["300000000000000020"]
+                },
+                "200000000000000002": {
+                    "typing": true, "activities": true, "threads": true,
+                    "channels": {},
+                    "thread_member_lists": []
+                }
+            }}})
+        );
+    }
+
+    #[test]
     fn guild_subscriptions_split_below_the_payload_limit() {
         let guilds: Vec<_> = (0..1000)
-            .map(|index| Snowflake::new(200_000_000_000_000_000 + index))
+            .map(|index| {
+                let mut guild =
+                    GuildSubscription::new(Snowflake::new(200_000_000_000_000_000 + index));
+                if index % 2 == 0 {
+                    guild.member_lists = Some(MemberLists::new(
+                        (0..10)
+                            .map(|channel| Snowflake::new(300_000_000_000_000_000 + channel))
+                            .collect(),
+                        vec![Snowflake::new(300_000_000_000_000_100)],
+                    ));
+                }
+                guild
+            })
             .collect();
 
         let commands = GatewayCommand::subscribe_guilds(&guilds);
@@ -321,7 +440,10 @@ mod tests {
         seen.sort_unstable();
         assert_eq!(
             seen,
-            guilds.iter().map(|guild| guild.get()).collect::<Vec<_>>()
+            guilds
+                .iter()
+                .map(|guild| guild.guild_id.get())
+                .collect::<Vec<_>>()
         );
         assert!(GatewayCommand::subscribe_guilds(&[]).is_empty());
     }

@@ -1740,6 +1740,149 @@ async fn a_channel_viewed_while_resuming_is_subscribed_after_resumed() {
     );
 }
 
+const THREAD: u64 = 300_000_000_000_000_020;
+const VOICE: u64 = 300_000_000_000_000_003;
+
+fn large(ready: &mut Value) {
+    ready["guilds"][0]["large"] = true.into();
+}
+
+async fn online_in_a_large_guild(fake: &mut FakeGateway, account: &Account) -> FakeConnection {
+    account.connect().unwrap();
+    let mut connection = fake.accept().await;
+    assert_eq!(connection.handshake(60_000).await["op"], 2);
+    connection.send(ready_payload(1, fake, large)).await;
+    connection
+}
+
+fn member_lists(command: &Value) -> (Value, Value) {
+    let entry = &command["d"]["subscriptions"][G1];
+    (
+        entry["channels"].clone(),
+        entry["thread_member_lists"].clone(),
+    )
+}
+
+#[tokio::test]
+async fn viewing_a_channel_in_a_large_guild_subscribes_its_member_list() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online_in_a_large_guild(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+
+    account.view_channel(general());
+    let command = next_command(&mut connection)
+        .await
+        .expect("no subscription");
+
+    assert_eq!(
+        command["d"]["subscriptions"][G1],
+        json!({
+            "typing": true, "activities": true, "threads": true,
+            "channels": {GENERAL.to_string(): [[0, 99]]},
+            "thread_member_lists": []
+        })
+    );
+}
+
+#[tokio::test]
+async fn every_viewed_channel_of_a_large_guild_keeps_its_member_list() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online_in_a_large_guild(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    next_command(&mut connection)
+        .await
+        .expect("no subscription");
+
+    account.view_channel(Snowflake::new(THREAD));
+    let with_thread = next_command(&mut connection).await.expect("no update");
+    account.view_channel(Snowflake::new(VOICE));
+    let with_voice = next_command(&mut connection).await.expect("no update");
+    account.view_channel(general());
+
+    assert_eq!(
+        member_lists(&with_thread),
+        (
+            json!({GENERAL.to_string(): [[0, 99]]}),
+            json!([THREAD.to_string()])
+        )
+    );
+    assert_eq!(
+        member_lists(&with_voice),
+        (
+            json!({GENERAL.to_string(): [[0, 99]], VOICE.to_string(): [[0, 99]]}),
+            json!([THREAD.to_string()])
+        )
+    );
+    assert!(
+        next_command(&mut connection).await.is_none(),
+        "subscribed again without a change"
+    );
+}
+
+#[tokio::test]
+async fn an_evicted_channel_drops_its_member_list() {
+    let mut fake = FakeGateway::start().await;
+    let account = Account::start(
+        client(&fake),
+        Token::new(TOKEN.to_owned()),
+        timing(),
+        WindowLimits {
+            channels: 1,
+            messages: 200,
+        },
+    )
+    .unwrap();
+    let subscription = account.store().subscribe();
+    let mut connection = online_in_a_large_guild(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    next_command(&mut connection)
+        .await
+        .expect("no subscription");
+
+    account.view_channel(Snowflake::new(300_000_000_000_000_010));
+    let dropped = next_command(&mut connection)
+        .await
+        .expect("the member list stayed");
+
+    assert_eq!(member_lists(&dropped), (json!({}), json!([])));
+}
+
+#[tokio::test]
+async fn member_lists_are_sent_again_after_ready_and_resumed() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online_in_a_large_guild(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    next_command(&mut connection)
+        .await
+        .expect("no subscription");
+
+    connection.close(4000).await;
+    let mut resumed = fake.accept().await;
+    assert_eq!(resumed.handshake(60_000).await["op"], 6);
+    resumed.dispatch(2, "RESUMED").await;
+    let after_resume = next_command(&mut resumed)
+        .await
+        .expect("nothing after RESUMED");
+    resumed.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh.send(ready_payload(1, &fake, large)).await;
+    let after_ready = next_command(&mut fresh).await.expect("nothing after READY");
+
+    let general_list = json!({GENERAL.to_string(): [[0, 99]]});
+    assert_eq!(member_lists(&after_resume).0, general_list);
+    assert_eq!(member_lists(&after_ready).0, general_list);
+}
+
 #[tokio::test]
 async fn nothing_is_subscribed_while_offline() {
     let mut fake = FakeGateway::start().await;

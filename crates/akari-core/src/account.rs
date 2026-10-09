@@ -1,12 +1,12 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::gateway::session::Timing;
 use crate::gateway::{
-    ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, PresenceStatus,
-    SendError,
+    ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
+    MemberLists, PresenceStatus, SendError,
 };
 use crate::model::{ChannelId, GuildId, MessageId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
@@ -61,8 +61,8 @@ pub(crate) struct Shared {
     rest: AccountRest,
     nonces: Nonces,
     status: Mutex<Status>,
-    // Guilds subscribed with op 37 in this session.
-    subscribed: Mutex<BTreeSet<GuildId>>,
+    // What op 37 last asked for per guild in this session.
+    subscribed: Mutex<BTreeMap<GuildId, GuildSubscription>>,
     runtime: tokio::runtime::Handle,
 }
 
@@ -198,39 +198,90 @@ impl Shared {
         self.subscribe_guild_of(channel);
     }
 
-    // Like the official client: a guild is subscribed once one of its channels is opened.
+    // Like the official client: a guild is subscribed once one of its channels is opened, and
+    // in large guilds so is that channel's member list.
     fn subscribe_guild_of(self: &Arc<Self>, channel: ChannelId) {
-        let Some(guild) = self
-            .store
-            .channel(channel)
-            .and_then(|channel| channel.guild_id)
-        else {
+        if self.store.channel(channel).is_none() {
+            tracing::debug!(
+                target: "akari_core::subscriptions",
+                channel = channel.get(),
+                "not subscribing: the channel isn't in the state"
+            );
             return;
-        };
+        }
         if !matches!(self.store.connection(), ConnectionState::Online) {
             return;
         }
-        let new = self
-            .subscribed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(guild);
-        if new {
+        let changed: Vec<GuildSubscription> = {
+            let mut subscribed = self
+                .subscribed
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let mut wanted = self.wanted_subscriptions();
+            // Member lists of channels no longer viewed are dropped; the guild stays subscribed.
+            for (guild, sent) in subscribed.iter() {
+                if sent.member_lists.is_some() && !wanted.contains_key(guild) {
+                    let mut dropped = GuildSubscription::new(*guild);
+                    dropped.member_lists = Some(MemberLists::default());
+                    wanted.insert(*guild, dropped);
+                }
+            }
+            let mut changed = Vec::new();
+            for entry in wanted.into_values() {
+                if subscribed.get(&entry.guild_id) != Some(&entry) {
+                    subscribed.insert(entry.guild_id, entry.clone());
+                    changed.push(entry);
+                }
+            }
+            changed
+        };
+        if !changed.is_empty() {
             let shared = self.clone();
             self.runtime.spawn(async move {
-                let _ = shared
-                    .send(GatewayCommand::SubscribeGuilds {
-                        guilds: vec![guild],
-                    })
-                    .await;
+                for command in GatewayCommand::subscribe_guilds(&changed) {
+                    let _ = shared.send(command).await;
+                }
             });
         }
+    }
+
+    fn wanted_subscriptions(&self) -> BTreeMap<GuildId, GuildSubscription> {
+        let mut wanted: BTreeMap<GuildId, GuildSubscription> = BTreeMap::new();
+        for channel in self.store.viewed_channels() {
+            let Some(guild) = channel.guild_id else {
+                continue;
+            };
+            let entry = wanted
+                .entry(guild)
+                .or_insert_with(|| GuildSubscription::new(guild));
+            if !self.store.guild(guild).is_some_and(|guild| guild.large) {
+                continue;
+            }
+            let lists = entry.member_lists.get_or_insert_default();
+            match channel.parent_id.filter(|_| channel.is_thread()) {
+                Some(parent) => {
+                    lists.channels.push(parent);
+                    lists.threads.push(channel.id);
+                }
+                None => lists.channels.push(channel.id),
+            }
+        }
+        for lists in wanted
+            .values_mut()
+            .filter_map(|entry| entry.member_lists.as_mut())
+        {
+            lists.channels.sort_unstable();
+            lists.channels.dedup();
+            lists.threads.sort_unstable();
+            lists.threads.dedup();
+        }
+        wanted
     }
 
     // Subscriptions belong to a session; the official client sends them again after READY
     // and after RESUMED. Channels viewed while offline count too.
     async fn resubscribe(&self, new_session: bool) {
-        let guilds: Vec<GuildId> = {
+        let guilds: Vec<GuildSubscription> = {
             let mut subscribed = self
                 .subscribed
                 .lock()
@@ -238,8 +289,8 @@ impl Shared {
             if new_session {
                 subscribed.clear();
             }
-            subscribed.extend(self.store.viewed_guilds());
-            subscribed.iter().copied().collect()
+            subscribed.extend(self.wanted_subscriptions());
+            subscribed.values().cloned().collect()
         };
         for command in GatewayCommand::subscribe_guilds(&guilds) {
             let _ = self.send(command).await;
