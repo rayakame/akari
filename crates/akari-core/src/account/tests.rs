@@ -1884,6 +1884,27 @@ async fn member_lists_are_sent_again_after_ready_and_resumed() {
 }
 
 #[tokio::test]
+async fn a_late_resend_after_ready_doesnt_repeat_a_subscription() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    let first = next_command(&mut connection)
+        .await
+        .expect("no subscription");
+
+    account.shared.resubscribe().await;
+
+    assert_eq!(subscribed(&first), [G1]);
+    assert!(
+        next_command(&mut connection).await.is_none(),
+        "op 37 sent twice for one change"
+    );
+}
+
+#[tokio::test]
 async fn nothing_is_subscribed_while_offline() {
     let mut fake = FakeGateway::start().await;
     let account = start(&fake);

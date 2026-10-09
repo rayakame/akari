@@ -212,29 +212,7 @@ impl Shared {
         if !matches!(self.store.connection(), ConnectionState::Online) {
             return;
         }
-        let changed: Vec<GuildSubscription> = {
-            let mut subscribed = self
-                .subscribed
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            let mut wanted = self.wanted_subscriptions();
-            // Member lists of channels no longer viewed are dropped; the guild stays subscribed.
-            for (guild, sent) in subscribed.iter() {
-                if sent.member_lists.is_some() && !wanted.contains_key(guild) {
-                    let mut dropped = GuildSubscription::new(*guild);
-                    dropped.member_lists = Some(MemberLists::default());
-                    wanted.insert(*guild, dropped);
-                }
-            }
-            let mut changed = Vec::new();
-            for entry in wanted.into_values() {
-                if subscribed.get(&entry.guild_id) != Some(&entry) {
-                    subscribed.insert(entry.guild_id, entry.clone());
-                    changed.push(entry);
-                }
-            }
-            changed
-        };
+        let changed = self.subscription_changes();
         if !changed.is_empty() {
             let shared = self.clone();
             self.runtime.spawn(async move {
@@ -243,6 +221,40 @@ impl Shared {
                 }
             });
         }
+    }
+
+    // The entries that differ from what this session was sent, marked as sent.
+    fn subscription_changes(&self) -> Vec<GuildSubscription> {
+        let mut subscribed = self
+            .subscribed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut wanted = self.wanted_subscriptions();
+        // Member lists of channels no longer viewed are dropped; the guild stays subscribed.
+        for (guild, sent) in subscribed.iter() {
+            if sent.member_lists.is_some() && !wanted.contains_key(guild) {
+                let mut dropped = GuildSubscription::new(*guild);
+                dropped.member_lists = Some(MemberLists::default());
+                wanted.insert(*guild, dropped);
+            }
+        }
+        let mut changed = Vec::new();
+        for entry in wanted.into_values() {
+            if subscribed.get(&entry.guild_id) != Some(&entry) {
+                subscribed.insert(entry.guild_id, entry.clone());
+                changed.push(entry);
+            }
+        }
+        changed
+    }
+
+    // A new or resumed session starts unsubscribed. Called before it goes online, so views
+    // from then on and the re-send after it never send the same entry twice.
+    fn forget_subscriptions(&self) {
+        self.subscribed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
     fn wanted_subscriptions(&self) -> BTreeMap<GuildId, GuildSubscription> {
@@ -278,21 +290,10 @@ impl Shared {
         wanted
     }
 
-    // Subscriptions belong to a session; the official client sends them again after READY
-    // and after RESUMED. Channels viewed while offline count too.
-    async fn resubscribe(&self, new_session: bool) {
-        let guilds: Vec<GuildSubscription> = {
-            let mut subscribed = self
-                .subscribed
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            if new_session {
-                subscribed.clear();
-            }
-            subscribed.extend(self.wanted_subscriptions());
-            subscribed.values().cloned().collect()
-        };
-        for command in GatewayCommand::subscribe_guilds(&guilds) {
+    // The official client sends its subscriptions again after READY and after RESUMED.
+    // Channels viewed while offline count too.
+    async fn resubscribe(&self) {
+        for command in GatewayCommand::subscribe_guilds(&self.subscription_changes()) {
             let _ = self.send(command).await;
         }
     }
@@ -612,6 +613,7 @@ async fn pump(mut finish: Finish) {
                 match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
                     Ok(next) => {
                         shared.store.replace(next);
+                        shared.forget_subscriptions();
                         shared
                             .store
                             .set_connection_if(ConnectionState::Online, connecting);
@@ -620,12 +622,13 @@ async fn pump(mut finish: Finish) {
                         let status = shared.clone();
                         tokio::spawn(async move { status.send_status(true).await });
                         let subscriptions = shared.clone();
-                        tokio::spawn(async move { subscriptions.resubscribe(true).await });
+                        tokio::spawn(async move { subscriptions.resubscribe().await });
                     }
                     Err(_) => break Some(Arc::new(GatewayError::Stopped)),
                 }
             }
             Ok(ConnectionEvent::Dispatch(DispatchEvent::Resumed)) => {
+                shared.forget_subscriptions();
                 on_event(
                     &shared.store,
                     ConnectionEvent::Dispatch(DispatchEvent::Resumed),
@@ -634,7 +637,7 @@ async fn pump(mut finish: Finish) {
                 let status = shared.clone();
                 tokio::spawn(async move { status.send_status(false).await });
                 let subscriptions = shared.clone();
-                tokio::spawn(async move { subscriptions.resubscribe(false).await });
+                tokio::spawn(async move { subscriptions.resubscribe().await });
             }
             Ok(event) => on_event(&shared.store, event, &connecting),
             Err(GatewayError::Closed) => break None,
