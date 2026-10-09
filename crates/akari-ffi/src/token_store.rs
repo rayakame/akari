@@ -14,7 +14,6 @@ pub trait TokenStore: Send + Sync {
     fn delete(&self, account: UserId) -> Result<(), TokenStoreError>;
 }
 
-/// The host's store as akari-core sees it.
 pub(crate) struct HostStore(pub(crate) Arc<dyn TokenStore>);
 
 impl akari_core::TokenStore for HostStore {

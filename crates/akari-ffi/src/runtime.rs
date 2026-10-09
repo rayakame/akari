@@ -7,9 +7,8 @@ use crate::errors::ClientError;
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
-/// Akari's background runtime, started on first use. It is never shut down: accounts and
-/// running requests can outlive any one client, and a runtime can't be dropped from one of
-/// its own threads.
+// Never shut down: accounts and running requests can outlive any one client, and a runtime
+// can't be dropped from one of its own threads.
 pub(crate) fn runtime() -> Result<&'static Runtime, ClientError> {
     if let Some(runtime) = RUNTIME.get() {
         return Ok(runtime);
@@ -26,8 +25,8 @@ pub(crate) fn runtime() -> Result<&'static Runtime, ClientError> {
     Ok(RUNTIME.get_or_init(|| runtime))
 }
 
-/// Runs `work` on the runtime and waits for it from any executor, since UniFFI polls from
-/// the host's threads. A panic in `work` is raised again here, where UniFFI reports it.
+// Awaitable from any executor, as UniFFI polls from the host's threads. A panic in `work` is
+// raised again here, where UniFFI reports it.
 pub(crate) async fn run<T: Send + 'static>(
     runtime: &'static Runtime,
     work: impl Future<Output = T> + Send + 'static,

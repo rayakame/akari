@@ -59,7 +59,7 @@ impl Entities {
         entities
     }
 
-    /// One guild from GUILD_CREATE, converted before the write lock is taken.
+    // One guild from GUILD_CREATE, converted before the write lock is taken.
     pub(crate) fn from_guild(guild: AvailableGuild, me: Option<UserId>) -> Self {
         let mut next = Self::default();
         next.insert_guild(guild, Vec::new(), me);
@@ -171,7 +171,7 @@ fn push_channel_changes(
     }
 }
 
-/// What a later READY changes, worked out before the swap.
+// What a later READY changes, worked out before the swap.
 pub(crate) struct ReadyDiff {
     events: Vec<StoreEvent>,
     removed_channels: Vec<ChannelId>,
@@ -203,7 +203,7 @@ impl State {
         self.swap(next, diff, events);
     }
 
-    /// `None` before the first READY, which has nothing to diff against.
+    // `None` before the first READY, which has nothing to diff against.
     pub(crate) fn ready_diff(&self, next: &Entities) -> Option<ReadyDiff> {
         if !self.ready {
             return None;
@@ -223,7 +223,7 @@ impl State {
         })
     }
 
-    /// Returns the old entities, so the caller can drop them after releasing the lock.
+    // Returns the old entities, so the caller can drop them after releasing the lock.
     pub(crate) fn swap(
         &mut self,
         next: Entities,
@@ -441,7 +441,6 @@ impl State {
         self.add_guild(next, events);
     }
 
-    /// `next` holds one guild, from [`Entities::from_guild`].
     pub(crate) fn add_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         let Some((&id, after)) = next.guilds.iter().next() else {
             return;

@@ -2,8 +2,8 @@ import AkariKit
 import Foundation
 import Testing
 
-/// The real bindings, without network: nothing listens on port 9, so connections are
-/// refused at once.
+// The real bindings, without network: nothing listens on port 9, so connections are refused
+// at once.
 @Suite(.timeLimit(.minutes(1)))
 struct FFISmokeTests {
     static let user = UserId(rawValue: 100_000_000_000_000_001)

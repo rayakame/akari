@@ -1,10 +1,6 @@
 #!/bin/sh
-# Builds akari-ffi for macOS, generates its Swift bindings and puts both into AkariKit:
-# Frameworks/akari_ffiFFI.xcframework and Sources/AkariFFI/Generated/akari_ffi.swift.
-#
-#   apps/apple/build-ffi.sh              release, Apple silicon and Intel
-#   apps/apple/build-ffi.sh --host-only  only this Mac's architecture, for local iteration
-#   apps/apple/build-ffi.sh --debug      a debug build of the library
+# Builds akari-ffi for macOS and puts the XCFramework and its Swift bindings into AkariKit.
+# Usage: apps/apple/build-ffi.sh [--host-only] [--debug]; see apps/apple/AkariKit/README.md.
 set -eu
 
 profile=release

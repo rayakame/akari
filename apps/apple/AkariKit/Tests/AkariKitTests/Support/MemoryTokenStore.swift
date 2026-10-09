@@ -1,7 +1,6 @@
 import AkariKit
 import Foundation
 
-/// Tokens in memory; records each call and whether it ran on the main thread.
 final class MemoryTokenStore: TokenStore, @unchecked Sendable {
     enum Call: Equatable {
         case load(UserId)

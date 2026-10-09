@@ -18,7 +18,7 @@ use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
 // Main-thread readers (SwiftUI, AppKit) wait at most this long for a write.
 const LONG_HOLD: Duration = Duration::from_millis(4);
 
-/// A READY converted, and diffed against the current state, before the write lock is taken.
+// A READY converted, and diffed against the current state, before the write lock is taken.
 pub(crate) struct PreparedReady {
     entities: Entities,
     diff: Option<ReadyDiff>,
@@ -247,9 +247,8 @@ impl Store {
         }
     }
 
-    // Converting and diffing a large READY takes milliseconds, so it happens before the
-    // write lock is taken. Only the pump changes entities, so the diff still holds at the
-    // swap.
+    // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
+    // it. Only the pump changes entities, so the diff still holds at the swap.
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
         let entities = Entities::from_ready(ready);
         let diff = self.read(|inner| inner.state.ready_diff(&entities));
@@ -547,7 +546,6 @@ impl Store {
         }
     }
 
-    /// Records every write's hold time until `take_holds`.
     #[cfg(test)]
     pub(crate) fn record_holds(&self) {
         if let Ok(mut holds) = self.shared.holds.lock() {

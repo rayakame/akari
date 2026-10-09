@@ -61,7 +61,6 @@ pub fn fixture(json: &str) -> Value {
     serde_json::from_str(json).unwrap()
 }
 
-/// Reads batches until an event matches `last`, and returns every event up to it.
 pub async fn events_until(
     subscription: &StoreSubscription,
     last: impl Fn(&StoreEvent) -> bool,

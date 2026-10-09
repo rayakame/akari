@@ -11,7 +11,7 @@ use crate::client::Token;
 use crate::{DiscordClient, Endpoints, HostInfo, TokenStore, TokenStoreError};
 
 pub const USER: UserId = UserId::new(100_000_000_000_000_001);
-/// Nothing listens there, so connections are refused at once.
+// Nothing listens there, so connections are refused at once.
 pub const UNREACHABLE: &str = "127.0.0.1:9";
 
 pub fn token(value: &str) -> Arc<Token> {
@@ -34,8 +34,8 @@ pub fn unreachable_endpoints() -> Endpoints {
     }
 }
 
-/// A client for local test servers, which `DiscordClient::with_endpoints` can't reach
-/// because they don't use TLS.
+// A client for local test servers, which `DiscordClient::with_endpoints` can't reach
+// because they don't use TLS.
 pub fn local_client(
     endpoints: akari_core::Endpoints,
     store: Arc<dyn TokenStore>,
@@ -62,7 +62,7 @@ pub fn local_client(
     DiscordClient::from_core(core).unwrap_or_else(|err| panic!("{err}"))
 }
 
-/// A REST server that already answers the fingerprint request logins start with.
+// A REST server that already answers the fingerprint request logins start with.
 pub async fn rest_server() -> wiremock::MockServer {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, ResponseTemplate};
@@ -97,7 +97,6 @@ pub enum Call {
     Delete(u64),
 }
 
-/// A token store in memory that records its calls; `fail` makes every call fail.
 #[derive(Default)]
 pub struct MemoryStore {
     tokens: Mutex<HashMap<u64, String>>,
@@ -165,8 +164,8 @@ impl Wake for Unpark {
     }
 }
 
-/// Polls `future` on this thread without any async runtime, the way UniFFI polls from
-/// Swift's threads.
+// Polls `future` on this thread without any async runtime, the way UniFFI polls from
+// Swift's threads.
 pub fn block_on<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(Unpark(thread::current())));
     let mut context = Context::from_waker(&waker);
@@ -179,14 +178,14 @@ pub fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
-/// A token store whose `load` blocks until released, like a Keychain waiting on a dialog.
+// A token store whose `load` blocks until released, like a Keychain waiting on a dialog.
 pub struct BlockingStore {
     entered: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     release: Mutex<std::sync::mpsc::Receiver<()>>,
 }
 
 impl BlockingStore {
-    /// The store, a receiver that fires once `load` blocks, and the sender that releases it.
+    // The store, a receiver that fires once `load` blocks, and the sender that releases it.
     pub fn new() -> (
         Arc<Self>,
         std::sync::mpsc::Receiver<()>,
