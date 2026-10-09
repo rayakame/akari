@@ -85,3 +85,12 @@ akari-cli's dev features) for `aarch64-apple-darwin` and `x86_64-apple-darwin`, 
 the bindings with `akari-bindgen` (UniFFI's generator at the workspace's version), and packs
 `apps/apple/AkariKit/Frameworks/akari_ffiFFI.xcframework`. `--host-only` builds only this
 Mac's architecture; `--debug` builds the library without optimizations.
+
+The crate's only crate type is `staticlib`: with an rlib among a crate's outputs, Cargo skips
+LTO, so the release profile's fat LTO wouldn't reach the library the apps link.
+
+## Building for Android (later)
+
+The Android app will need a `cdylib`. Build it as a separate crate type at that time, e.g.
+`cargo rustc -p akari-ffi --release --crate-type cdylib`, instead of adding `cdylib` to the
+crate's crate types, so the Apple staticlib keeps its own LTO build.
