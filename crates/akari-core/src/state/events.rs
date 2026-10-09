@@ -20,11 +20,13 @@ pub enum StoreEvent {
     GuildAdded(Arc<Guild>),
     /// Settings or roles changed. Role changes can change channel permissions.
     GuildUpdated(Arc<Guild>),
-    /// The user left or was removed. Its channels, threads and messages are gone.
+    /// The user left or was removed. Its channels, threads and messages are gone; our pending
+    /// and failed messages stay in [`Store::messages`](super::Store::messages) until discarded.
     GuildRemoved {
         guild_id: GuildId,
     },
-    /// The guild is down. Its channels, threads and messages are gone until `GuildAdded`.
+    /// The guild is down. Its channels, threads and messages are gone until `GuildAdded`; our
+    /// pending and failed messages stay in [`Store::messages`](super::Store::messages).
     GuildUnavailable {
         guild_id: GuildId,
     },
@@ -33,7 +35,8 @@ pub enum StoreEvent {
     /// A channel, category, thread, DM or group DM appeared.
     ChannelAdded(Arc<Channel>),
     ChannelUpdated(Arc<Channel>),
-    /// The channel and its messages are gone.
+    /// The channel and its messages are gone; our pending and failed messages in it stay in
+    /// [`Store::messages`](super::Store::messages) until discarded.
     ChannelRemoved {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,

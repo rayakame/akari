@@ -811,9 +811,22 @@ impl Windows {
     }
 
     pub(crate) fn drop_channel(&mut self, channel: ChannelId) {
-        if self.windows.remove(&channel).is_some() {
-            self.order.retain(|viewed| *viewed != channel);
+        let generation = self.next_generation();
+        let Some(window) = self.windows.get_mut(&channel) else {
+            return;
+        };
+        // Our unsent messages stay readable and retryable, so a UI can offer their text again.
+        if !window.outbox.is_empty() {
+            let outbox = std::mem::take(&mut window.outbox);
+            *window = Window {
+                generation,
+                outbox,
+                ..Window::default()
+            };
+            return;
         }
+        self.windows.remove(&channel);
+        self.order.retain(|viewed| *viewed != channel);
     }
 
     pub(crate) fn channels(&self) -> impl Iterator<Item = ChannelId> + '_ {

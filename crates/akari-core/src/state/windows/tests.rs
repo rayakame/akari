@@ -1131,3 +1131,28 @@ fn another_users_message_with_our_nonce_doesnt_replace_ours() {
     assert_eq!(events, ["Inserted(20)"]);
     assert_eq!(harness.outbox(), [(500, Delivery::Pending)]);
 }
+
+#[test]
+fn a_dropped_channel_keeps_its_unsent_messages() {
+    let mut harness = Harness::viewing(LIMITS);
+    harness.live(wire(10));
+    harness.queue(pending(500, "failed"));
+    harness
+        .windows
+        .fail(channel(CH), Snowflake::new(500), &mut Vec::new());
+    harness.queue(pending(501, "in flight"));
+
+    harness.windows.drop_channel(channel(CH));
+    let confirmed = harness.confirm(501, echo(21, 501));
+
+    let window = harness.window();
+    assert!(window.messages.is_empty() && !window.latest);
+    assert_eq!(confirmed, ["Replaced(501 -> 21)"]);
+    assert_eq!(harness.outbox(), [(500, Delivery::Failed)]);
+    assert!(
+        harness
+            .windows
+            .retry(channel(CH), Snowflake::new(500), &mut Vec::new())
+            .is_some()
+    );
+}

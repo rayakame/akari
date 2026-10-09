@@ -172,7 +172,9 @@ and applies each event.
   window for the range.
 - Our own pending and failed messages sit in the window's outbox, after its messages, and
   are never trimmed ([messages.md](messages.md#sending)). A window with an outbox is never
-  evicted; the next least recently viewed one goes instead.
+  evicted; the next least recently viewed one goes instead. When its channel goes away
+  (deleted, left, or its guild down), the window loses its messages but keeps the outbox,
+  so the text can still be retried, discarded or offered to the user again.
 
 ## Open points
 
