@@ -10,7 +10,7 @@ use super::support::{
 };
 use crate::client::DiscordClient;
 use crate::errors::{ClientError, LogoutError, NetworkErrorKind, TokenStoreError};
-use crate::runtime::{run, runtime};
+use crate::runtime::{run, runtime, start};
 use crate::{Endpoints, enable_logging};
 
 #[test]
@@ -174,4 +174,43 @@ fn enable_logging_rejects_a_bad_filter() {
         enable_logging("akari_core=nonsense[".to_owned()),
         Err(ClientError::InvalidLogFilter)
     );
+}
+
+#[test]
+fn concurrent_first_starts_build_one_runtime() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Barrier, OnceLock};
+
+    let cell = Box::leak(Box::new(OnceLock::new()));
+    let builds = Arc::new(AtomicUsize::new(0));
+    let barrier = Arc::new(Barrier::new(8));
+    let callers: Vec<_> = (0..8)
+        .map(|_| {
+            let (cell, builds, barrier) = (&*cell, builds.clone(), barrier.clone());
+            std::thread::spawn(move || {
+                // Inside an async context, where dropping a spare runtime panics.
+                let local = tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap();
+                local.block_on(async {
+                    barrier.wait();
+                    start(cell, || {
+                        builds.fetch_add(1, Ordering::SeqCst);
+                        tokio::runtime::Builder::new_multi_thread()
+                            .worker_threads(1)
+                            .build()
+                    })
+                    .map(|runtime| std::ptr::from_ref(runtime) as usize)
+                })
+            })
+        })
+        .collect();
+
+    let started: Vec<_> = callers
+        .into_iter()
+        .map(|caller| caller.join().expect("a caller panicked").unwrap())
+        .collect();
+
+    assert_eq!(builds.load(Ordering::SeqCst), 1);
+    assert!(started.iter().all(|runtime| *runtime == started[0]));
 }
