@@ -8,7 +8,9 @@ mod login;
 mod messages;
 mod session;
 
+use std::borrow::Cow;
 use std::error::Error;
+use std::io::IsTerminal as _;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -16,6 +18,8 @@ use akari_core::DiscordClient;
 use akari_core::properties::{ClientBuild, ClientProperties};
 use clap::{Args, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::util::SubscriberInitExt as _;
 
 use crate::keychain::KeychainStore;
 use crate::messages::SessionCommand;
@@ -66,12 +70,12 @@ struct ConnectArgs {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+    log_subscriber(
+        std::io::stderr,
+        std::io::stderr().is_terminal(),
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+    )
+    .init();
     let cli = Cli::parse();
 
     let store = Arc::new(KeychainStore);
@@ -104,6 +108,18 @@ fn client(store: Arc<KeychainStore>) -> Result<DiscordClient, String> {
     DiscordClient::new(properties, store).map_err(|err| report(&err))
 }
 
+// Colors only on a terminal, so a log redirected to a file can be grepped.
+fn log_subscriber<W>(writer: W, ansi: bool, filter: EnvFilter) -> impl tracing::Subscriber
+where
+    W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
+{
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(ansi)
+        .with_writer(writer)
+        .finish()
+}
+
 fn report(err: &dyn Error) -> String {
     let mut text = err.to_string();
     let mut source = err.source();
@@ -112,14 +128,104 @@ fn report(err: &dyn Error) -> String {
         text.push_str(&cause.to_string());
         source = cause.source();
     }
-    text
+    printable(&text).into_owned()
+}
+
+// Text from Discord can carry escape sequences or carriage returns that would drive the
+// terminal.
+fn printable(text: &str) -> Cow<'_, str> {
+    let escaped = |c: char| c.is_control() && c != '\n' && c != '\t';
+    if !text.chars().any(escaped) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if escaped(c) {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
+    Cow::Owned(out)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::sync::Mutex;
+
     use clap::CommandFactory as _;
 
     use super::*;
+
+    fn warn() -> EnvFilter {
+        EnvFilter::new("warn")
+    }
+
+    #[derive(Clone, Default)]
+    struct Logs(Arc<Mutex<Vec<u8>>>);
+
+    impl Logs {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    impl io::Write for Logs {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Logs {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn printable_escapes_control_characters_except_newline_and_tab() {
+        assert_eq!(
+            printable("a\u{1b}[2Jb\rc\td\ne\u{9b}f\u{7}"),
+            "a\\u{1b}[2Jb\\rc\td\ne\\u{9b}f\\u{7}"
+        );
+        assert!(matches!(printable("plain text"), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn errors_from_discord_are_printable() {
+        let err = std::io::Error::other("Missing\u{1b}[2K Permissions");
+
+        assert_eq!(report(&err), "Missing\\u{1b}[2K Permissions");
+    }
+
+    #[test]
+    fn logs_to_a_file_carry_no_escape_sequences() {
+        let plain = Logs::default();
+        let colored = Logs::default();
+
+        tracing::subscriber::with_default(log_subscriber(plain.clone(), false, warn()), || {
+            tracing::warn!(event = %"MESSAGE_CREATE", "dispatch");
+        });
+        tracing::subscriber::with_default(log_subscriber(colored.clone(), true, warn()), || {
+            tracing::warn!(event = %"MESSAGE_CREATE", "dispatch");
+        });
+
+        assert!(
+            plain.text().contains("event=MESSAGE_CREATE"),
+            "{}",
+            plain.text()
+        );
+        assert!(!plain.text().contains('\u{1b}'), "{}", plain.text());
+        assert!(colored.text().contains('\u{1b}'));
+    }
 
     #[test]
     fn limits_outside_1_to_100_are_refused() {

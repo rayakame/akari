@@ -15,8 +15,8 @@ use akari_core::gateway::{
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use crate::keychain::Accounts;
-use crate::report;
 use crate::session::{CLOSE_WAIT, LOG_IN, stored_token};
+use crate::{printable, report};
 
 const CAPTURES: &str = "captures";
 const CAPTURE_WARNING: &str = "It contains personal data and secrets such as the analytics \
@@ -161,7 +161,7 @@ fn ready_summary(ready: &Ready) -> String {
         .count();
     format!(
         "Connected as {}: {} guilds ({unavailable} unavailable), {} private channels.",
-        ready.user.user.username,
+        printable(&ready.user.user.username),
         ready.guilds.len(),
         ready.private_channels.len()
     )

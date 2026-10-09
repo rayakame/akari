@@ -10,8 +10,8 @@ use clap::Subcommand;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use crate::keychain::Accounts;
-use crate::report;
 use crate::session::{self, Session, closed_message};
+use crate::{printable, report};
 
 const TAIL_BACKLOG: u8 = 20;
 
@@ -105,7 +105,7 @@ fn guilds(session: &Session) -> ExitCode {
     let mut guilds = store.guilds();
     guilds.sort_by_cached_key(|guild| guild.name.to_lowercase());
     for guild in guilds {
-        println!("{}  {}", guild.name, guild.id.get());
+        println!("{}  {}", printable(&guild.name), guild.id.get());
     }
     for id in store.unavailable_guilds() {
         println!("(unavailable)  {}", id.get());
@@ -388,7 +388,13 @@ struct MessageLine<'a> {
 
 impl fmt::Display for MessageLine<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}  {}: {}", self.time, self.author, self.content)?;
+        write!(
+            f,
+            "{}  {}: {}",
+            self.time,
+            printable(self.author),
+            printable(self.content)
+        )?;
         if self.edited {
             f.write_str(" (edited)")?;
         }
@@ -438,6 +444,7 @@ fn kind(channel: &Channel) -> ChannelKind {
 
 fn channel_line(kind: ChannelKind, name: &str, id: u64, nested: bool) -> String {
     let indent = if nested { "  " } else { "" };
+    let name = printable(name);
     match kind {
         ChannelKind::Category => format!("{}  {id}", name.to_uppercase()),
         ChannelKind::Text => format!("{indent}#{name}  {id}"),
@@ -510,6 +517,27 @@ mod tests {
         assert_eq!(
             line.to_string(),
             "2026-10-08 12:00  Mira: look (edited) [2 attachments] [1 embed]"
+        );
+    }
+
+    #[test]
+    fn message_lines_escape_control_characters() {
+        let line = MessageLine {
+            time: "2026-10-08 12:00".to_owned(),
+            author: "Mi\u{1b}[31mra",
+            content: "first\rsecond\u{1b}[2K\nthird\tfourth",
+            edited: false,
+            attachments: 0,
+            embeds: 0,
+        };
+
+        assert_eq!(
+            line.to_string(),
+            "2026-10-08 12:00  Mi\\u{1b}[31mra: first\\rsecond\\u{1b}[2K\nthird\tfourth"
+        );
+        assert_eq!(
+            channel_line(ChannelKind::Text, "gen\u{7}eral", 2, false),
+            "#gen\\u{7}eral  2"
         );
     }
 

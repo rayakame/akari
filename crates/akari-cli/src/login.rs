@@ -13,7 +13,7 @@ use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 
 use crate::keychain::{Accounts, KeychainStore, off_runtime};
-use crate::report;
+use crate::{printable, report};
 
 const CAPTCHA_HELP: &str = "Discord wants a captcha for this login, which akari-cli can't show.";
 const MFA_TRIES: usize = 3;
@@ -129,7 +129,7 @@ pub async fn qr(client: &DiscordClient, store: &Arc<KeychainStore>) -> ExitCode 
             Ok(QrEvent::Scanned(user)) => {
                 println!(
                     "Scanned by {}. Confirm the login on your phone.",
-                    user.username
+                    printable(&user.username)
                 );
             }
             Ok(QrEvent::CancelledOnPhone) => println!("Cancelled on the phone."),

@@ -33,6 +33,7 @@ dependencies = [
  "qrcode",
  "rpassword",
  "tokio",
+ "tracing",
  "tracing-subscriber",
  "wiremock",
 ]
