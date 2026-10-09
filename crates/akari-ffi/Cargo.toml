@@ -8,7 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [lib]
-crate-type = ["lib", "staticlib"]
+# Only staticlib: Cargo skips LTO when an rlib is among the outputs.
+crate-type = ["staticlib"]
 
 [dependencies]
 akari-core.workspace = true
