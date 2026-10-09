@@ -286,8 +286,8 @@ guild that includes the channel's member list:
   entries (`[[0, 99]]`, the official client's first page) of every viewed channel's list,
   and for a viewed thread its parent channel's list plus the thread's own
   (`thread_member_lists`). This mirrors the official client, which loads the member list of
-  the channel it shows; whether it's required for live messages in very large guilds is
-  **unverified**. A `channels` map replaces the one sent before for that guild
+  the channel it shows. It is not required for MESSAGE_CREATE, verified on 2026-10-09 (see
+  below). A `channels` map replaces the one sent before for that guild
   (discord.py-self merges them client-side for that reason), so every send lists all
   viewed channels. When a large guild has no viewed channel any more, its lists are dropped
   with `"channels": {}` and `"thread_member_lists": []`; the guild stays subscribed.
@@ -311,7 +311,7 @@ Which subscription a guild needs for live messages depends on its size:
 | Up to 250 (not `large`) | Always | [Identify](https://docs.discord.food/gateway/gateway-events#identify-structure): `large_threshold` |
 | 250 to 75,000 | Subscribed automatically on connect | discord.py-self (**unverified**; the reference says they need a subscription) |
 | Over 75,000 | Only with the guild subscription | discord.py-self |
-| Millions | With the guild flags and the channel's member list, observed. With the flags alone: **unverified** | [discord.py #6340](https://github.com/Rapptz/discord.py/issues/6340) saw no messages in 500,000 and 700,000 member servers until an op 14 with a `channels` range, but never tried the flags alone |
+| Millions | With the guild subscription; the channel's member list isn't needed | A/B test on 2026-10-09 in a server of 4,518,424 members (below). [discord.py #6340](https://github.com/Rapptz/discord.py/issues/6340) saw no messages in 500,000 and 700,000 member servers until an op 14 that also set `typing`, so it was most likely the guild subscription there too |
 
 Observed on 2026-10-09 with `akari-cli tail` on a test account:
 
@@ -319,10 +319,13 @@ Observed on 2026-10-09 with `akari-cli tail` on a test account:
   op 37 carried the flags only.
 - **A mid-size server** (a few thousand): new and edited messages arrived live; op 37
   carried `channels: {<channel>: [[0, 99]]}` and `thread_member_lists: []`.
-- **A server of millions**: live messages arrived with the channel's member list. A first
-  run without them wasn't a test of the flags: the account was only previewing the server,
-  so the guild wasn't in READY and no op 37 was sent at all. `tail --flags-only` is there to
-  test the flags alone.
+- **A server of millions** (4,518,424 members), one minute per run in the same channel:
+  with `tail --flags-only` op 37 carried only the flags and 6 live messages arrived; with the
+  default, op 37 also carried `channels: {<channel>: [[0, 99]]}` and 5 arrived, along with
+  MESSAGE_UPDATE, MESSAGE_DELETE, TYPING_START, reactions and GUILD_MEMBER_LIST_UPDATE. So
+  the member list isn't needed for live messages. A first run had shown nothing live because
+  the account was only previewing the server: the guild wasn't in READY and no op 37 was
+  sent. Joining it was the fix.
 - A guild the user only previews (lurks) isn't in READY, so Akari can't view it yet; see
   [Not implemented yet](#not-implemented-yet).
 
@@ -333,6 +336,17 @@ log every op 37 payload it sends, a debug line when a channel can't be subscribe
 it isn't in the state, and each dispatch's name, sequence number and guild ID. Nothing
 else from a payload is logged, and the guild ID is only read while that log is on. The
 hidden `akari-cli tail --flags-only <channel_id>` sends op 37 without member lists.
+Logs written to a file carry no color codes, so they can be searched:
+
+```sh
+RUST_LOG=akari_core::subscriptions=debug,akari_core::dispatches=debug \
+  akari-cli tail <channel_id> 2> tail.log
+grep 'sending op 37' tail.log
+grep 'event=MESSAGE_CREATE' tail.log | grep -c 'guild_id=<guild_id>'
+```
+
+The log holds real guild and channel IDs, though no message content or token; keep it out
+of the repo.
 
 ## Keeping the token out of logs
 
