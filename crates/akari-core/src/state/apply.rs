@@ -59,7 +59,6 @@ impl Entities {
         entities
     }
 
-    // One guild from GUILD_CREATE, converted before the write lock is taken.
     pub(crate) fn from_guild(guild: AvailableGuild, me: Option<UserId>) -> Self {
         let mut next = Self::default();
         next.insert_guild(guild, Vec::new(), me);
@@ -171,7 +170,6 @@ fn push_channel_changes(
     }
 }
 
-// What a later READY changes, worked out before the swap.
 pub(crate) struct ReadyDiff {
     events: Vec<StoreEvent>,
     removed_channels: Vec<ChannelId>,

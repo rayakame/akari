@@ -778,7 +778,6 @@ thread_local! {
         std::cell::RefCell::new(None);
 }
 
-// Runs `hook` inside the next READY diff on this thread.
 pub(crate) fn on_next_diff(hook: impl FnOnce() + 'static) {
     DIFF_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
 }

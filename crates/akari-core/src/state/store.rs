@@ -18,7 +18,6 @@ use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
 // Main-thread readers (SwiftUI, AppKit) wait at most this long for a write.
 const LONG_HOLD: Duration = Duration::from_millis(4);
 
-// A READY converted, and diffed against the current state, before the write lock is taken.
 pub(crate) struct PreparedReady {
     entities: Entities,
     diff: Option<ReadyDiff>,
@@ -225,6 +224,7 @@ impl Store {
             }
             DispatchEvent::GuildCreate(guild) => match *guild {
                 GatewayGuild::Available(guild) => {
+                    // A large guild takes a while to convert; readers mustn't wait for it.
                     let me = self.read(|inner| inner.state.me());
                     let next = Entities::from_guild(*guild, me);
                     #[cfg(test)]

@@ -236,8 +236,9 @@ impl StoreEvent {
             },
             E::MessagesStale { channel_id } => Self::MessagesStale { channel_id },
             E::MessagesCleared { channel_id } => Self::MessagesCleared { channel_id },
-            other => {
-                tracing::debug!(?other, "skipping a store event the bindings don't know");
+            // The event itself could hold message content, which logs never do.
+            _ => {
+                tracing::debug!("skipping a store event the bindings don't know");
                 return None;
             }
         })
