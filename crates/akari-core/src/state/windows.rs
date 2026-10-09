@@ -83,6 +83,15 @@ struct Window {
     generation: u64,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
+    loading: u32,
+    // Edits and deletes while a load runs; its page may predate them.
+    missed: Vec<Missed>,
+}
+
+#[cfg_attr(test, derive(PartialEq))]
+enum Missed {
+    Updated(Box<MessageUpdate>),
+    Deleted(MessageId),
 }
 
 impl Window {
@@ -92,6 +101,12 @@ impl Window {
 
     fn holds_live(&self) -> bool {
         self.holding > 0 || (self.stale && self.latest)
+    }
+
+    fn forget_missed(&mut self) {
+        if self.loading == 0 {
+            self.missed.clear();
+        }
     }
 
     fn release_or_drop_held(
@@ -565,6 +580,7 @@ impl Windows {
         if holds {
             window.holding += 1;
         }
+        window.loading += 1;
         Some(LoadTicket {
             channel,
             kind,
@@ -595,6 +611,7 @@ impl Windows {
         if ticket.holds {
             window.holding = window.holding.saturating_sub(1);
         }
+        window.loading = window.loading.saturating_sub(1);
         // A trim or delete at the end the page continues from would leave a gap.
         let moved = match ticket.cursor {
             Cursor::Before(first) => {
@@ -604,6 +621,7 @@ impl Windows {
             Cursor::Latest | Cursor::Around(_) => false,
         };
         if moved {
+            window.forget_missed();
             window.release_or_drop_held(channel_id, window_limit, events);
             return;
         }
@@ -616,6 +634,28 @@ impl Windows {
             })
             .collect();
         page.sort_by_key(|message| message.id);
+        for missed in &window.missed {
+            match missed {
+                Missed::Deleted(id) => page.retain(|message| message.id != *id),
+                Missed::Updated(update) => {
+                    let Ok(index) = Window::position(&page, update.id) else {
+                        continue;
+                    };
+                    let page_is_newer =
+                        match (update.edited_timestamp, page[index].edited_timestamp) {
+                            (Some(Some(edit)), Some(shown)) => shown > edit,
+                            _ => false,
+                        };
+                    if !page_is_newer {
+                        page[index] =
+                            Arc::new(page[index].patch((**update).clone(), &mut |user| {
+                                intern(user, users, &window.messages)
+                            }));
+                    }
+                }
+            }
+        }
+        window.forget_missed();
         match ticket.kind {
             LoadKind::Older => {
                 window.merge(
@@ -699,10 +739,15 @@ impl Windows {
         let Some(window) = self
             .windows
             .get_mut(&channel_id)
-            .filter(|window| window.generation == ticket.generation && ticket.holds)
+            .filter(|window| window.generation == ticket.generation)
         else {
             return;
         };
+        window.loading = window.loading.saturating_sub(1);
+        window.forget_missed();
+        if !ticket.holds {
+            return;
+        }
         window.holding = window.holding.saturating_sub(1);
         // A stale window that can't be refreshed would hold live messages forever.
         if window.holding == 0 && window.stale && window.latest {
@@ -721,6 +766,11 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&update.channel_id) else {
             return;
         };
+        if window.loading > 0 {
+            window
+                .missed
+                .push(Missed::Updated(Box::new(update.clone())));
+        }
         if let Ok(index) = Window::position(&window.messages, update.id) {
             let known = window.messages[index].clone();
             let next =
@@ -745,6 +795,9 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&channel_id) else {
             return;
         };
+        if window.loading > 0 {
+            window.missed.push(Missed::Deleted(id));
+        }
         if let Ok(index) = Window::position(&window.messages, id) {
             window.messages.remove(index);
             events.push(StoreEvent::MessageDeleted {

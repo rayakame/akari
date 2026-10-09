@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::gateway::MessageUpdate;
-use crate::model::Snowflake;
+use crate::model::{Snowflake, Timestamp};
 use crate::state::types::Delivery;
 
 const CH: u64 = 1;
@@ -1033,4 +1033,88 @@ fn a_failed_load_leaves_held_messages_to_the_one_still_running() {
 
     assert_eq!(harness.ids(), [30, 31, 40]);
     assert!(harness.window().latest);
+}
+
+impl Harness {
+    fn content(&self, id: u64) -> String {
+        self.windows
+            .message(channel(CH), Snowflake::new(id))
+            .unwrap()
+            .content
+            .to_string()
+    }
+}
+
+fn edited_at(id: u64, content: &str, unix_millis: i64) -> MessageUpdate {
+    let mut update = update(id, content);
+    update.edited_timestamp = Some(Some(Timestamp::from_unix_millis(unix_millis)));
+    update
+}
+
+#[test]
+fn a_delete_during_a_load_stays_deleted() {
+    let mut harness = Harness::viewing(LOADS);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.delete(12);
+
+    let events = harness.finish(ticket, &[10, 11, 12], 3);
+
+    assert_eq!(events, ["Loaded(10..11)"]);
+    assert_eq!(harness.ids(), [10, 11]);
+}
+
+#[test]
+fn a_delete_during_a_refresh_isnt_brought_back() {
+    let mut harness = Harness::viewing(LOADS);
+    for id in [10, 11, 12] {
+        harness.live(wire(id));
+    }
+    harness.windows.mark_stale(&mut Vec::new());
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    assert_eq!(harness.delete(12), ["Deleted(12)"]);
+
+    let events = harness.finish(ticket, &[10, 11, 12], 3);
+
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [10, 11]);
+}
+
+#[test]
+fn an_edit_during_a_load_is_applied_to_the_page() {
+    let mut harness = Harness::viewing(LOADS);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.update(update(11, "edited while loading"));
+
+    harness.finish(ticket, &[10, 11, 12], 3);
+
+    assert_eq!(harness.content(11), "edited while loading");
+}
+
+#[test]
+fn an_edit_older_than_the_page_doesnt_revert_it() {
+    let mut harness = Harness::viewing(LOADS);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.update(edited_at(11, "first edit", 1_700_000_000_000));
+    let mut newer = wire(11);
+    newer.content = "second edit".to_owned();
+    newer.edited_timestamp = Some(Timestamp::from_unix_millis(1_700_000_060_000));
+
+    harness.edited_finish(ticket, vec![wire(10), newer], 3);
+
+    assert_eq!(harness.content(11), "second edit");
+}
+
+#[test]
+fn edits_during_one_load_arent_replayed_onto_the_next() {
+    let mut harness = Harness::viewing(LOADS);
+    let first = harness.begin(LoadKind::Latest).unwrap();
+    harness.delete(12);
+    harness.finish(first, &[10, 11], 3);
+
+    let older = harness.begin(LoadKind::Older).unwrap();
+    harness.finish(older, &[7, 8, 9], 3);
+    let ticket = harness.begin(LoadKind::Around(Snowflake::new(12))).unwrap();
+    harness.finish(ticket, &[11, 12, 13], 3);
+
+    assert_eq!(harness.ids(), [11, 12, 13]);
 }
