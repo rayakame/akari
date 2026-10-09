@@ -122,16 +122,20 @@ whether a guild under the threshold needs it.
 and applies each event.
 
 - **Reads** are synchronous from any thread and return `Arc` snapshots that later changes
-  never touch. The state sits behind a `RwLock`. Writes are a few map operations. A READY
-  is converted on a blocking thread before the write lock is taken, so neither readers nor
-  a runtime worker wait for the conversion; comparing a later session with the old state
-  does happen under the lock.
+  never touch. The state sits behind a `RwLock`, and UIs read it from their main thread, so
+  writes stay short. A READY is converted on a blocking thread and compared with the old
+  state under a read lock before the write lock is taken; the old state is dropped after
+  the lock is released. A GUILD_CREATE converts its guild before taking the lock. A write
+  that holds the lock for more than 4 ms logs a warning with the event's name (never
+  payload values); on the test fixtures the longest hold is well under 0.1 ms.
 - **Events** (`StoreEvent`) carry the new value for added and updated things, and IDs for
   removed ones; never lists. They are sent while the write lock is held, so they arrive in
   the order of the changes. Each subscriber has an unbounded queue: a subscriber that stops
   reading never holds up the store, and a warning is logged at 10,000 unread events and
   every doubling. Subscribe first, then read: an event may describe a change the read
-  already shows, and applying it again is harmless.
+  already shows, and applying it again is harmless. `Subscription::next_batch` takes up to
+  a given number of buffered events at once, so a host across an FFI boundary pays one
+  round trip per batch.
 - **The account's task** ends the store's subscriptions however it stops. After
   `close()` or a fatal gateway error the connection state is `Closed` with that error; if
   the task panics or the Tokio runtime shuts down first, it is `Closed` with
@@ -175,6 +179,25 @@ and applies each event.
   evicted; the next least recently viewed one goes instead. When its channel goes away
   (deleted, left, or its guild down), the window loses its messages but keeps the outbox,
   so the text can still be retried, discarded or offered to the user again.
+
+### Lists for display
+
+Two reads give lists in the order a UI shows them. Both are display rules every app needs,
+so they live in the core.
+
+- **`Store::guild_list`**: the server list. The user's own order and folders are in the
+  settings proto, which Akari doesn't read yet ([user-settings.md](user-settings.md)).
+  Until then the most recently joined guild comes first, where the official client puts a
+  newly joined server, then guilds without a known join date, by ID. **Unverified**: where
+  the official client puts guilds missing from the user's saved order.
+- **`Store::channel_list`**: `display_order` without threads, keeping only channels with
+  `VIEW_CHANNEL`. A category shows when it holds at least one visible channel; an empty
+  category shows when the user can view it, because servers use empty categories as
+  dividers. A channel whose permissions can't be computed (for example without the
+  current user's member) is hidden. **Unverified**: the category rule; to be compared with
+  the official client in the macOS app's manual check. Servers with opt-in channels show
+  more channels than the official client, which hides those the user didn't pick
+  ([user-settings.md](user-settings.md#opt-in-channels-community-onboarding)).
 
 ## Open points
 

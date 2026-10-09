@@ -45,7 +45,8 @@ The example value also sets bits 17, 19 and 20, which the reference doesn't docu
 
 Everything else is ignored for now, notably `read_state`, `user_guild_settings`,
 `relationships`, `user_settings_proto`, `sessions` and the experiments, which are
-positional arrays rather than objects.
+positional arrays rather than objects. What `user_settings_proto` and `user_guild_settings`
+hold, and what ignoring them costs, is in [user-settings.md](user-settings.md).
 
 The state store takes the current user, the guilds with their channels, threads and roles,
 the current user's member from `merged_members`, the private channels, and from `users`
