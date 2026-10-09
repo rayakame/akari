@@ -43,7 +43,12 @@ can't get a hole. The limit is clamped to 1–100.
   end of the window was trimmed or deleted meanwhile, since it would leave a gap.
 - A page is short if Discord sent fewer entries than the limit; messages skipped because
   they didn't decode still count.
-- On an error the window stays as it was, except a stale one (below).
+- Edits and deletes that arrive while a page is loading are applied to the page when it
+  lands, since it may predate them: a deleted message never comes back. An edit older than
+  the page's own version of the message is skipped.
+- On an error the window stays as it was, except a stale one (below). A load whose future
+  is dropped before its page arrives, e.g. because its task was cancelled, ends the same
+  way.
 
 ## After a new session
 
@@ -60,8 +65,10 @@ every stale window with the latest 100 messages:
 - If more than 100 messages were missed, the page can't be joined to the window. The
   window keeps its messages, stays stale, and stops being at the present (`latest` false,
   `MessagesStale` again); the UI offers "jump to present", which is a `Latest` load.
-- If the refresh fails, the window detaches the same way, so it doesn't hold live
-  messages back forever.
+- A refresh that fails with a network error or a 5xx is tried again three times, after 1,
+  2 and 4 s, so a flaky network right after a reconnect doesn't detach every window. If it
+  still fails, or Discord refuses it (4xx), the window detaches the same way, so it doesn't
+  hold live messages back forever.
 - An empty window takes the page as it is. An empty page (no messages, or no
   `READ_MESSAGE_HISTORY`) leaves the messages and makes the window fresh again.
 - A refresh that finishes after another load already refreshed the window changes
@@ -79,7 +86,9 @@ every stale window with the latest 100 messages:
   "Sending multiple messages in the same channel with the same nonce in a short period of
   time will result in only the first message being sent"; how short is undocumented. A
   nonce isn't kept in history. `enforce_nonce` isn't in the reference and no user client
-  sends it.
+  sends it. The hidden `akari-cli send --repeat-nonce <channel_id> <text>` sends a message,
+  then the same body again, to check that Discord ignores the repeat (**unverified** until
+  then).
 - **Pending.** `Account::send_message` adds the message at once to the window's outbox,
   with the nonce as its provisional ID and `Delivery::Pending` (`MessageInserted`). The
   outbox is shown after the window's messages and is never trimmed, and a window with
@@ -87,7 +96,8 @@ every stale window with the latest 100 messages:
   Discord answers, e.g. because its task was cancelled, the message becomes failed.
 - **Confirmed.** The REST response and the gateway's MESSAGE_CREATE both carry the nonce,
   and whichever comes first replaces the pending message: `MessageReplaced { pending_id,
-  message }`. The message is then in the window if the window is at the present; otherwise
+  message }`. An echo counts only if its author is the current user: other users see our
+  nonces too, and another client could send the same value. The message is then in the window if the window is at the present; otherwise
   it comes with the next load. The other one finds nothing pending and is handled like any
   repeated message.
 - **Failed.** On an error the message stays in the outbox as `Delivery::Failed`
@@ -118,6 +128,7 @@ every stale window with the latest 100 messages:
   be longer than 10 s (see [rate-limits.md](rate-limits.md)).
 - `CaptchaRequired(challenge)`: the request needs a captcha, which Akari doesn't solve
   yet. A send that needs one stays in the outbox as failed.
+- `ServerError { status }`: a 5xx; trying again later may work.
 - `Discord { status, code, message }`: an API error, e.g. 50013 Missing Permissions,
   50001 Missing Access, 10003 Unknown Channel, 20016 slowmode, 50035 invalid form body
   ([JSON error codes](https://docs.discord.food/topics/errors#json-error-codes)).
