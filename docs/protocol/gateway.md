@@ -285,15 +285,17 @@ guild that includes the channel's member list:
 - **Guilds READY marks `large`** (over 250 members) also get member lists: the first 100
   entries (`[[0, 99]]`, the official client's first page) of every viewed channel's list,
   and for a viewed thread its parent channel's list plus the thread's own
-  (`thread_member_lists`). A `channels` map replaces the one sent before for that guild
+  (`thread_member_lists`). This mirrors the official client, which loads the member list of
+  the channel it shows; whether it's required for live messages in very large guilds is
+  **unverified**. A `channels` map replaces the one sent before for that guild
   (discord.py-self merges them client-side for that reason), so every send lists all
   viewed channels. When a large guild has no viewed channel any more, its lists are dropped
   with `"channels": {}` and `"thread_member_lists": []`; the guild stays subscribed.
 - `Account` sends a guild's entry when one of its channels is viewed or loaded while
-  online and the entry changed, and sends all entries again after every READY (the guilds
-  with a viewed channel) and after RESUMED (the same, plus those sent before), like the
-  official client. A guild viewed while offline is subscribed after the next READY or
-  RESUMED.
+  online and the entry changed, and sends the entries of all guilds with a viewed channel
+  again after every READY and RESUMED, like the official client. Each entry goes out once
+  per change: a channel viewed right after READY isn't sent again by the re-send. A guild
+  viewed while offline is subscribed after the next READY or RESUMED.
 - The payload is split into several commands so each stays under 15 KiB, the official
   client's limit, below the gateway's 16 KiB.
 - The first subscription to a guild may bring a GUILD_CREATE for it, which the store
@@ -309,14 +311,28 @@ Which subscription a guild needs for live messages depends on its size:
 | Up to 250 (not `large`) | Always | [Identify](https://docs.discord.food/gateway/gateway-events#identify-structure): `large_threshold` |
 | 250 to 75,000 | Subscribed automatically on connect | discord.py-self (**unverified**; the reference says they need a subscription) |
 | Over 75,000 | Only with the guild subscription | discord.py-self |
-| Millions | Not with the guild flags alone; with the channel's member list | Observed 2026-10-09 with `akari-cli tail` in a server of millions (no live messages, while a small server worked). [discord.py #6340](https://github.com/Rapptz/discord.py/issues/6340) saw the same in 500,000 and 700,000 member servers until an op 14 with a `channels` range. Whether the member list is what fixes it is **unverified** until the re-run |
+| Millions | With the guild flags and the channel's member list, observed. With the flags alone: **unverified** | [discord.py #6340](https://github.com/Rapptz/discord.py/issues/6340) saw no messages in 500,000 and 700,000 member servers until an op 14 with a `channels` range, but never tried the flags alone |
+
+Observed on 2026-10-09 with `akari-cli tail` on a test account:
+
+- **A small server** (under 250 members): new, edited and deleted messages arrived live;
+  op 37 carried the flags only.
+- **A mid-size server** (a few thousand): new and edited messages arrived live; op 37
+  carried `channels: {<channel>: [[0, 99]]}` and `thread_member_lists: []`.
+- **A server of millions**: live messages arrived with the channel's member list. A first
+  run without them wasn't a test of the flags: the account was only previewing the server,
+  so the guild wasn't in READY and no op 37 was sent at all. `tail --flags-only` is there to
+  test the flags alone.
+- A guild the user only previews (lurks) isn't in READY, so Akari can't view it yet; see
+  [Not implemented yet](#not-implemented-yet).
 
 ### Debugging subscriptions
 
 `RUST_LOG=akari_core::subscriptions=debug,akari_core::dispatches=debug` makes akari-cli
 log every op 37 payload it sends, a debug line when a channel can't be subscribed because
 it isn't in the state, and each dispatch's name, sequence number and guild ID. Nothing
-else from a payload is logged, and the guild ID is only read while that log is on.
+else from a payload is logged, and the guild ID is only read while that log is on. The
+hidden `akari-cli tail --flags-only <channel_id>` sends op 37 without member lists.
 
 ## Keeping the token out of logs
 
@@ -336,6 +352,9 @@ else from a payload is logged, and the guild ID is only read while that log is o
   both and the official client is believed to send them; the effect of their absence on
   anti-abuse is **unverified**.
 - Op 14 member list subscriptions, voice states, presence activities.
+- Previewing (lurking) guilds the user hasn't joined. They aren't in READY, so their
+  channels aren't in the store and can't be viewed or subscribed. The official client
+  previews them through other requests; that's for a later milestone.
 - `GET /gateway` with a cached URL, and persisting a session across launches for a fast
   resume after a cold start.
 - Status across several sessions. When a user has several sessions with a presence,

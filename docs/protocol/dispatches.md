@@ -178,6 +178,9 @@ and applies each event.
 
 ## Open points
 
+- **Previewing (lurking) guilds.** A guild the user previews without joining isn't in
+  READY, so its channels aren't in the store, and viewing one does nothing: no window
+  events and no subscription. akari-cli's `tail` warns about it.
 - **Author nicknames.** Messages keep only their author as Discord sent it. Server
   nicknames will come from a member cache keyed by (guild, user) that resolves display
   names, filled by op 8 member requests and MESSAGE_CREATE's `member`. MESSAGE_CREATE's

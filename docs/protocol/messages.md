@@ -141,6 +141,19 @@ None of them carries the token or message content.
 
 MESSAGE_CREATE, MESSAGE_UPDATE and MESSAGE_DELETE change only windows; see
 [dispatches.md](dispatches.md). In large guilds Discord sends them only to sessions that
-subscribed to the guild, and in guilds of millions only for channels whose member list is
-subscribed. So `Account` subscribes every guild with a viewed channel, and in large guilds
-the viewed channels' member lists ([gateway.md](gateway.md#guild-subscriptions)).
+subscribed to the guild, so `Account` subscribes every guild with a viewed channel. In
+large guilds it also subscribes the viewed channels' member lists, like the official
+client; whether guilds of millions need that for live messages is **unverified**
+([gateway.md](gateway.md#guild-subscriptions)).
+
+Observed on 2026-10-09 with `akari-cli tail` on a test account:
+
+| Server | op 37 | Live |
+|---|---|---|
+| Small (under 250 members) | guild flags | new, edit and delete |
+| A few thousand members | flags and `channels: {<channel>: [[0, 99]]}` | new and edit |
+| Millions of members | flags and the channel range | new messages |
+
+A first run in the server of millions showed nothing live because the account was only
+previewing it: a previewed guild isn't in READY, so no op 37 was sent. Previewing guilds
+is an open point for a later milestone.
