@@ -10,12 +10,13 @@ use crate::gateway::{
 };
 use crate::model::{ChannelId, GuildId, MessageId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
-use crate::state::{ConnectionState, Cursor, LoadKind, Message, Store, WindowLimits};
+use crate::state::{ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits};
 use crate::{DiscordClient, Token};
 
 const REFRESH_LIMIT: u8 = 100;
 const JUMP_LIMIT: u8 = 50;
-// Short in tests, so retried 502s don't slow the suite down.
+const REFRESH_RETRIES: u32 = 3;
+// Short in tests, so retries don't slow the suite down.
 const SERVER_ERROR_RETRY: Duration = if cfg!(test) {
     Duration::from_millis(10)
 } else {
@@ -87,6 +88,21 @@ impl Nonces {
     }
 }
 
+// A load dropped before its page arrived, e.g. by a cancelled task, would hold live messages
+// back forever.
+struct Unfinished<'a> {
+    store: &'a Store,
+    ticket: Option<LoadTicket>,
+}
+
+impl Drop for Unfinished<'_> {
+    fn drop(&mut self) {
+        if let Some(ticket) = self.ticket.take() {
+            self.store.abort_load(ticket);
+        }
+    }
+}
+
 // A send dropped before Discord answered, e.g. by a cancelled task, stays retryable instead of
 // pending forever.
 struct Unanswered<'a> {
@@ -121,6 +137,10 @@ impl Shared {
         let Some(ticket) = self.store.begin_load(channel, kind) else {
             return Ok(());
         };
+        let mut unfinished = Unfinished {
+            store: &self.store,
+            ticket: Some(ticket),
+        };
         self.subscribe_guild_of(channel);
         let query = match ticket.cursor {
             Cursor::Latest => Query::Latest,
@@ -128,7 +148,24 @@ impl Shared {
             Cursor::After(id) => Query::After(id),
             Cursor::Around(id) => Query::Around(id),
         };
-        match self.rest.list_messages(channel, query, limit).await {
+        // A flaky network right after a reconnect mustn't detach every open window.
+        let retries = if kind == LoadKind::Refresh {
+            REFRESH_RETRIES
+        } else {
+            0
+        };
+        let mut attempt = 0;
+        let loaded = loop {
+            match self.rest.list_messages(channel, query, limit).await {
+                Err(err) if attempt < retries && err.is_transient() => {
+                    tokio::time::sleep(SERVER_ERROR_RETRY * 2u32.pow(attempt)).await;
+                    attempt += 1;
+                }
+                loaded => break loaded,
+            }
+        };
+        unfinished.ticket = None;
+        match loaded {
             Ok(Page { messages, received }) => {
                 let reached_end = received < usize::from(limit);
                 self.store.finish_load(ticket, messages, reached_end);

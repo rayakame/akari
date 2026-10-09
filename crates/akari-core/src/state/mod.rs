@@ -14,4 +14,4 @@ pub use order::display_order;
 pub use store::{Store, Subscription};
 pub use types::*;
 pub use windows::MessageWindow;
-pub(crate) use windows::{Cursor, DEFAULT_LIMITS, LoadKind, WindowLimits};
+pub(crate) use windows::{Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket, WindowLimits};

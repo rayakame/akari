@@ -37,6 +37,9 @@ pub enum RequestError {
         code: u32,
         message: String,
     },
+    /// A 5xx: Discord couldn't answer. Trying again later may work.
+    #[error("Discord server error {status}")]
+    ServerError { status: u16 },
     #[error("network error")]
     Network(#[source] TransportError),
     #[error("unexpected response from Discord")]
@@ -50,12 +53,20 @@ pub enum RequestError {
     Closed,
 }
 
+impl RequestError {
+    pub(crate) fn is_transient(&self) -> bool {
+        matches!(self, Self::Network(_) | Self::ServerError { .. })
+    }
+}
+
 impl From<RestError> for RequestError {
     fn from(err: RestError) -> Self {
         match err {
             RestError::Transport(err) => Self::Network(err),
             RestError::RateLimited { retry_after, .. } => Self::RateLimited { retry_after },
             RestError::Captcha(challenge) => Self::CaptchaRequired(challenge),
+            RestError::UnexpectedStatus { status } if status >= 500 => Self::ServerError { status },
+            RestError::Api(api) if api.status >= 500 => Self::ServerError { status: api.status },
             RestError::Api(api) => Self::Discord {
                 status: api.status,
                 code: api.code,

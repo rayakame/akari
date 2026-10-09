@@ -269,6 +269,43 @@ async fn a_long_rate_limit_fails_instead_of_waiting() {
 }
 
 #[tokio::test]
+async fn a_server_error_says_so() {
+    let server = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let with_body = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .respond_with(
+            ResponseTemplate::new(503)
+                .set_body_json(json!({"message": "503: Service Unavailable", "code": 0})),
+        )
+        .mount(&with_body)
+        .await;
+
+    let bare = rest(&server)
+        .await
+        .list_messages(channel(), Query::Latest, 3)
+        .await
+        .unwrap_err();
+    let coded = rest(&with_body)
+        .await
+        .list_messages(channel(), Query::Latest, 3)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(bare, RequestError::ServerError { status: 500 }),
+        "{bare:?}"
+    );
+    assert!(
+        matches!(coded, RequestError::ServerError { status: 503 }),
+        "{coded:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_502_is_retried_once() {
     let server = MockServer::start().await;
     Mock::given(path(MESSAGES))

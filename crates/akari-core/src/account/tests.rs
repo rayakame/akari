@@ -705,6 +705,170 @@ async fn a_new_session_refreshes_stale_windows() {
     assert_eq!(&*edited.content, "edited");
 }
 
+async fn reconnect_with_a_new_session(
+    fake: &mut FakeGateway,
+    connection: &mut FakeConnection,
+) -> FakeConnection {
+    connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh.send(ready_payload(1, fake, |_| {})).await;
+    fresh
+}
+
+async fn mock_refresh_failures(server: &wiremock::MockServer, status: u16, times: u64) {
+    use wiremock::matchers::{path, query_param};
+    wiremock::Mock::given(path(MESSAGES))
+        .and(query_param("limit", "100"))
+        .respond_with(wiremock::ResponseTemplate::new(status))
+        .up_to_n_times(times)
+        .mount(server)
+        .await;
+}
+
+fn refresh_requests(requests: &[wiremock::Request]) -> usize {
+    requests
+        .iter()
+        .filter(|request| request.url.query() == Some("limit=100"))
+        .count()
+}
+
+#[tokio::test]
+async fn a_refresh_after_a_reconnect_retries_server_errors() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    connection.send(message(2, 10)).await;
+    events_until(&subscription, "MessageInserted(10)").await;
+    mock_refresh_failures(&server, 500, 2).await;
+    mock_page(&server, ("limit", "100"), page(&[10, 11])).await;
+
+    let _fresh = reconnect_with_a_new_session(&mut fake, &mut connection).await;
+    events_until(&subscription, "Online").await;
+    while account.store().messages(general()).unwrap().stale {
+        next(&subscription)
+            .await
+            .expect("the refresh never finished");
+    }
+
+    assert!(account.store().messages(general()).unwrap().latest);
+    assert_eq!(ids(&account), [10, 11]);
+    assert_eq!(
+        refresh_requests(&server.received_requests().await.unwrap()),
+        3
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_that_keeps_failing_detaches_after_its_retries() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    mock_refresh_failures(&server, 500, u64::MAX).await;
+
+    let _fresh = reconnect_with_a_new_session(&mut fake, &mut connection).await;
+    events_until(&subscription, "Online").await;
+    while account.store().messages(general()).unwrap().latest {
+        next(&subscription)
+            .await
+            .expect("the window never detached");
+    }
+
+    assert!(account.store().messages(general()).unwrap().stale);
+    assert_eq!(
+        refresh_requests(&server.received_requests().await.unwrap()),
+        4
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_refused_by_discord_isnt_retried() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    mock_refresh_failures(&server, 403, u64::MAX).await;
+
+    let _fresh = reconnect_with_a_new_session(&mut fake, &mut connection).await;
+    events_until(&subscription, "Online").await;
+    while account.store().messages(general()).unwrap().latest {
+        next(&subscription)
+            .await
+            .expect("the window never detached");
+    }
+
+    assert_eq!(
+        refresh_requests(&server.received_requests().await.unwrap()),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_load_stops_holding_live_messages() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    mock_page(&server, ("around", "20"), page(&[19, 20, 21])).await;
+    {
+        use wiremock::matchers::{path, query_param};
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("after", "21"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(page(&[22, 23, 24]))
+                    .set_delay(Duration::from_millis(500)),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+    }
+    mock_page(&server, ("after", "21"), page(&[22])).await;
+    account
+        .load_messages(
+            general(),
+            MessageLoad::Around {
+                id: Snowflake::new(20),
+                limit: 3,
+            },
+        )
+        .await
+        .unwrap();
+    let cancelled = timeout(
+        Duration::from_millis(100),
+        account.load_messages(general(), MessageLoad::Newer { limit: 3 }),
+    )
+    .await;
+    assert!(cancelled.is_err());
+
+    account
+        .load_messages(general(), MessageLoad::Newer { limit: 3 })
+        .await
+        .unwrap();
+    connection.send(message(2, 30)).await;
+
+    assert_eq!(
+        events_until(&subscription, "MessageInserted(30)")
+            .await
+            .last()
+            .map(String::as_str),
+        Some("MessageInserted(30)")
+    );
+}
+
 #[tokio::test]
 async fn messages_created_during_a_catch_up_are_kept() {
     let mut fake = FakeGateway::start().await;
@@ -793,7 +957,10 @@ async fn a_failed_load_reports_the_error_and_stops_holding() {
         .await
         .unwrap();
 
-    assert!(matches!(err, RequestError::UnexpectedResponse), "{err:?}");
+    assert!(
+        matches!(err, RequestError::ServerError { status: 500 }),
+        "{err:?}"
+    );
     assert_eq!(ids(&account), [19, 20, 21, 22]);
 }
 
