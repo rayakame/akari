@@ -31,8 +31,8 @@ private struct AppScreen: View {
             switch app.screen {
             case .starting:
                 Color(nsColor: Palette.frame)
-            case .login:
-                Text("Login")
+            case .login(let login):
+                LoginView(model: login)
                     .transition(.opacity)
             case .session:
                 Text("Session")
