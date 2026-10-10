@@ -101,6 +101,9 @@ pub struct Channel {
     pub nsfw: bool,
     /// Slowmode in seconds.
     pub rate_limit_per_user: u32,
+    /// The newest message. Forum and media channels keep their newest post's thread ID here,
+    /// so it isn't a `MessageId`. It may be deleted already, and it never moves back.
+    pub last_message_id: Option<Snowflake<GenericMarker>>,
     pub permission_overwrites: Box<[PermissionOverwrite]>,
     /// DM and group DM recipients without the current user; see `Store::user`.
     pub recipients: Box<[UserId]>,
@@ -174,6 +177,17 @@ pub struct Message {
     pub referenced_message: ReferencedMessage,
     /// `Pending` and `Failed` messages are ours, waiting in the window's outbox.
     pub delivery: Delivery,
+}
+
+impl Message {
+    /// Discord's `IS_COMPONENTS_V2` message flag.
+    pub const IS_COMPONENTS_V2: u64 = 1 << 15;
+
+    /// Laid out with Components V2: the message has no content and is made of its components,
+    /// which Akari doesn't read yet.
+    pub fn uses_components_v2(&self) -> bool {
+        self.flags & Self::IS_COMPONENTS_V2 != 0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

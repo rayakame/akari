@@ -167,6 +167,7 @@ mod tests {
             topic: None,
             nsfw: false,
             rate_limit_per_user: 0,
+            last_message_id: None,
             permission_overwrites: overwrites.into_boxed_slice(),
             recipients: Box::new([]),
             icon: None,

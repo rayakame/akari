@@ -3,6 +3,7 @@ struct EventBatch {
     var ready = false
     var connection: ConnectionState?
     var currentUserChanged = false
+    var usersChanged: Set<UserId> = []
     var guildsChanged: Set<GuildId> = []
     var guildListChanged = false
     var membersChanged: Set<GuildId> = []
@@ -23,8 +24,8 @@ struct EventBatch {
                 ready = true
             case .currentUserUpdated:
                 currentUserChanged = true
-            case .userUpdated:
-                break
+            case .userUpdated(let user):
+                usersChanged.insert(user)
             case .guildAdded(let guild), .guildRemoved(let guild), .guildUnavailable(let guild):
                 guildsChanged.insert(guild)
                 guildListChanged = true

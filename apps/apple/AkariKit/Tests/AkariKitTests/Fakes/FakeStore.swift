@@ -9,6 +9,8 @@ final class FakeStore: Store, @unchecked Sendable {
         var guilds: [GuildId: Guild] = [:]
         var unavailableGuildIds: [GuildId] = []
         var channelLists: [GuildId: [ChannelId]] = [:]
+        var privateChannels: [ChannelId] = []
+        var users: [UserId: User] = [:]
         var channels: [ChannelId: Channel] = [:]
         var permissions: [ChannelId: Permissions] = [:]
         var windows: [ChannelId: MessageWindow] = [:]
@@ -25,6 +27,16 @@ final class FakeStore: Store, @unchecked Sendable {
             channelLists[id(guild)] = channels.map(\.id)
             for channel in channels {
                 self.channels[channel.id] = channel
+            }
+        }
+
+        mutating func talk(_ channels: Channel..., with users: User...) {
+            for channel in channels {
+                privateChannels.append(channel.id)
+                self.channels[channel.id] = channel
+            }
+            for user in users {
+                self.users[user.id] = user
             }
         }
 
@@ -75,7 +87,7 @@ final class FakeStore: Store, @unchecked Sendable {
     }
 
     override func user(id: UserId) -> User? {
-        nil
+        read(.user(id)) { $0.users[id] }
     }
 
     override func guildIds() -> [GuildId] {
@@ -94,8 +106,8 @@ final class FakeStore: Store, @unchecked Sendable {
         read(.channelList(guildId)) { $0.channelLists[guildId] ?? [] }
     }
 
-    override func privateChannelIds() -> [ChannelId] {
-        []
+    override func privateChannelList() -> [ChannelId] {
+        read(.privateChannelList) { $0.privateChannels }
     }
 
     override func channel(id: ChannelId) -> Channel? {

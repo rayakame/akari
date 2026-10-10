@@ -620,10 +620,13 @@ async fn pump(mut finish: Finish) {
         match shared.gateway.next().await {
             // A large READY takes milliseconds to convert; that mustn't hold a runtime worker.
             Ok(ConnectionEvent::Dispatch(DispatchEvent::Ready(ready))) => {
+                let started = std::time::Instant::now();
                 let store = shared.store.clone();
                 match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
                     Ok(next) => {
                         shared.store.replace(next);
+                        let convert_ms = crate::millis(started.elapsed());
+                        tracing::info!(convert_ms, "READY applied");
                         shared.forget_subscriptions();
                         shared
                             .store

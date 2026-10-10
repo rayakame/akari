@@ -158,3 +158,17 @@ Observed on 2026-10-09 with `akari-cli tail` on a test account:
 A first run in the server of millions showed nothing live because the account was only
 previewing it: a previewed guild isn't in READY, so no op 37 was sent. Previewing guilds
 is an open point for a later milestone.
+
+## Components V2
+
+A message with the `IS_COMPONENTS_V2` flag (`1 << 15`,
+[message flags](https://docs.discord.food/resources/message#message-flags)) is laid out
+entirely by its `components`: text displays, sections, containers, media galleries and so on.
+Its `content` and `embeds` don't work, polls and stickers are disabled, and attachments show
+only where a component exposes them
+([components](https://docs.discord.food/resources/components)). Without its components it
+would show as an empty row.
+
+Akari doesn't model `components` yet. The state message keeps the flag, the FFI record says
+`components_v2`, and the apps show a one-line placeholder instead of the layout; the row still
+lists the message's attachments. Reading and rendering the components is a later milestone.

@@ -44,9 +44,14 @@ screen, so views render from them without calling into Rust.
   location); whichever finishes first logs in and cancels the other. A captcha shows as not
   supported yet.
 - `SessionModel` holds the connection, the current user, the open place (home or a guild) and
-  the channel last opened in each guild. It owns `GuildListModel` (the server list),
-  `ChannelListModel` (the open guild's channels) and `MessageListModel` (the open channel's
-  messages, loads, sends and whether the user may send there).
+  the channel last opened in each guild and at home. It owns `GuildListModel` (the server
+  list), `DirectMessageListModel` (the DM list, the latest conversation first, with each
+  one's recipients and name), `ChannelListModel` (the open guild's channels) and
+  `MessageListModel` (the open channel's messages, loads, sends and whether the user may send
+  there). `AccountMemory` keeps the last place and channel per account, and the session's
+  first READY reopens them, as Discord does after a restart.
+- `CollapsedCategories` keeps the collapsed categories per guild across launches; a collapsed
+  category still shows the open channel.
 
 The session replaces `messages` on its own when the open channel is deleted or the user can
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.
@@ -80,6 +85,19 @@ The app's message table diffs `MessageListModel.rows` by their keys. When Discor
 pending message, its row keeps the pending ID as its key for as long as the message stays in
 the window, and the row's message carries the confirmed ID. A confirmation then reloads that
 one row instead of removing and inserting it.
+
+## Presentation
+
+Rules every Apple app shows the same way, so they live here rather than in the app:
+
+- `MessageTimeline` turns `MessageListModel.rows` into table items: a divider before each
+  local day and where author groups start, by the rule in `docs/ui/message-list.md`.
+- `TimelineChanges` diffs two timelines by item keys into the removed, inserted and reloaded
+  indexes a table or collection view applies, so a list never reloads as a whole. A
+  confirmation keeps its row key (above) and reloads one row.
+- `Message.notice` is Akari's sentence for a system message; `Initials` gives the letters a
+  server or avatar without an image shows; `Channel.opensMessageList` says which channels
+  have a message list.
 
 ## Tests
 

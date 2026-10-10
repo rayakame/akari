@@ -19,6 +19,11 @@ mod tls;
 pub mod token_store;
 mod ws;
 
+// Launch logs carry durations in whole milliseconds.
+pub(crate) fn millis(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
 pub use account::{Account, MessageLoad};
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{JsonError, JsonErrorKind, TransportError, TransportErrorKind};

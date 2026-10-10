@@ -63,10 +63,10 @@ Two details:
 | GUILD_ROLE_CREATE, GUILD_ROLE_UPDATE | `GuildRoleEvent` | The role is added or replaced: `GuildUpdated` |
 | GUILD_ROLE_DELETE | `GuildRoleDelete` | `GuildUpdated` |
 | GUILD_MEMBER_UPDATE | `GuildMemberUpdate` | Only for the current user: `CurrentMemberUpdated`. Users also get it for friends and DM partners; those are skipped |
-| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped |
-| CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed |
+| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer |
+| CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it |
 | CHANNEL_DELETE, THREAD_DELETE | `ChannelDelete` | `ChannelRemoved`, also for the threads of a deleted channel. CHANNEL_DELETE "will be partial" for private channels and THREAD_DELETE has only `id`, `guild_id`, `parent_id` and `type`, so only those are read |
-| MESSAGE_CREATE | `Message` | Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)) |
+| MESSAGE_CREATE | `Message` | Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event |
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
@@ -182,7 +182,7 @@ and applies each event.
 
 ### Lists for display
 
-Two reads give lists in the order a UI shows them. Both are display rules every app needs,
+Three reads give lists in the order a UI shows them. They are display rules every app needs,
 so they live in the core.
 
 - **`Store::guild_list`**: the server list. The user's own order and folders are in the
@@ -198,6 +198,18 @@ so they live in the core.
   the official client in the macOS app's manual check. Servers with opt-in channels show
   more channels than the official client, which hides those the user didn't pick
   ([user-settings.md](user-settings.md#opt-in-channels-community-onboarding)).
+- **`Store::private_channel_list`**: the DM list. The latest conversation comes first, by
+  `last_message_id`, or by the channel's own ID (its creation time) when it has none; ties
+  by channel ID, newest first. The official client sorts the same way after the user's
+  favorites, which are in the settings proto. It also leaves out message requests and
+  conversations marked as spam; Akari lists them for now (see the open points).
+
+Every channel keeps `last_message_id` from READY, CHANNEL_CREATE, CHANNEL_UPDATE and
+MESSAGE_CREATE. In forum and media channels it holds the newest post's thread ID, so its
+type is a generic snowflake. Only DMs and group DMs report a new value with `ChannelUpdated`,
+because their list order depends on it. Guild channels change silently, and a later READY's
+diff doesn't report a guild channel whose only change is its last message, so a reconnect
+doesn't bring an event for every active channel.
 
 ## Open points
 
@@ -208,10 +220,11 @@ so they live in the core.
   nicknames will come from a member cache keyed by (guild, user) that resolves display
   names, filled by op 8 member requests and MESSAGE_CREATE's `member`. MESSAGE_CREATE's
   `member` isn't kept until then, so live and loaded messages show the same names.
-- **Unread and mention badges.** They need an event for MESSAGE_CREATEs in channels
+- **Unread and mention badges.** They need an event for MESSAGE_CREATEs in guild channels
   without a window: the channel, the message ID, and whether it mentions the current user
-  (directly, through a role, or `@everyone`). CHANNEL_UPDATE isn't sent when
-  `last_message_id` changes, so tracking it belongs there too. Every MESSAGE_CREATE
-  reaches the store; only the window step drops those for channels without a window, so
-  the event goes in front of it.
+  (directly, through a role, or `@everyone`). Each channel's `last_message_id` is already
+  tracked; only that event is missing.
+- **Message requests and spam DMs.** READY marks them with `is_message_request` and
+  `is_spam`, and the official client keeps them out of the DM list. The store doesn't keep
+  those flags yet, so `private_channel_list` includes them.
 - **THREAD_LIST_SYNC**, which guild subscriptions bring, for the full thread list.

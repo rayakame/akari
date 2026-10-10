@@ -69,10 +69,10 @@ impl Store {
             .collect()
     }
 
-    /// DMs and group DMs, in no particular order.
-    pub fn private_channel_ids(&self) -> Vec<ChannelId> {
+    /// DMs and group DMs, the latest conversation first.
+    pub fn private_channel_list(&self) -> Vec<ChannelId> {
         self.core
-            .private_channels()
+            .private_channel_list()
             .iter()
             .map(|channel| channel.id)
             .collect()

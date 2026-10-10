@@ -13,6 +13,11 @@ public final class MessageListModel {
         /// Stable for the row's life: a sent message keeps its pending ID as its key.
         public let id: MessageId
         public let message: Message
+
+        public init(id: MessageId, message: Message) {
+            self.id = id
+            self.message = message
+        }
     }
 
     public let channelId: ChannelId
@@ -129,8 +134,10 @@ public final class MessageListModel {
             case .older: .older(limit: Self.pageSize)
             case .newer: .newer(limit: Self.pageSize)
             }
+        LaunchLog.mark("first message load started")
         do {
             try await account.loadMessages(channelId: channelId, load: request)
+            LaunchLog.mark("first message load finished")
             loadError = nil
             // The batch with the loaded range may come later; the rows shouldn't lag `loading`.
             reload(rereading: [])

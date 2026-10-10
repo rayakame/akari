@@ -1,0 +1,68 @@
+name: Akari
+options:
+  bundleIdPrefix: app.akari
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/Akari.xcconfig
+  Release: Config/Akari.xcconfig
+packages:
+  AkariKit:
+    path: ../apple/AkariKit
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+targets:
+  Akari:
+    type: application
+    platform: macOS
+    sources:
+      - Akari
+    dependencies:
+      - package: AkariKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.akari.Akari
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Akari
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.social-networking
+        CODE_SIGN_ENTITLEMENTS: Akari/Akari.entitlements
+      configs:
+        # Debug leaves it off: library validation would refuse the ad-hoc signed test bundle.
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
+  AkariTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - AkariTests
+    dependencies:
+      - target: Akari
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.akari.AkariTests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Akari:
+    build:
+      targets:
+        Akari: all
+        AkariTests: [test]
+    run:
+      config: Debug
+      commandLineArguments:
+        "-AkariLog akari_core=info": false
+        "-AkariLog scroll": false
+    test:
+      config: Debug
+      targets:
+        - AkariTests
+    profile:
+      config: Release
+    archive:
+      config: Release

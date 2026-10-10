@@ -127,7 +127,10 @@ fn split_recipients(mut channel: model::Channel) -> (model::Channel, Vec<model::
 
 enum Change<'a, T> {
     Added(&'a Arc<T>),
-    Updated(&'a Arc<T>),
+    Updated {
+        before: &'a Arc<T>,
+        after: &'a Arc<T>,
+    },
     Removed(&'a Arc<T>),
 }
 
@@ -140,7 +143,9 @@ fn changes<'a, K: Copy + Ord + Hash, T: PartialEq>(
     keys.into_iter()
         .filter_map(|key| match (old.get(&key), new.get(&key)) {
             (None, Some(added)) => Some(Change::Added(added)),
-            (Some(before), Some(after)) if before != after => Some(Change::Updated(after)),
+            (Some(before), Some(after)) if before != after => {
+                Some(Change::Updated { before, after })
+            }
             (Some(removed), None) => Some(Change::Removed(removed)),
             _ => None,
         })
@@ -158,8 +163,12 @@ fn push_channel_changes(
             Change::Added(channel) if !skip(channel) => {
                 events.push(StoreEvent::ChannelAdded(channel.clone()));
             }
-            Change::Updated(channel) if !skip(channel) => {
-                events.push(StoreEvent::ChannelUpdated(channel.clone()));
+            // A guild channel's newest message alone changes without an event, as it does live.
+            Change::Updated { before, after }
+                if !skip(after)
+                    && !(after.guild_id.is_some() && before.same_apart_from_activity(after)) =>
+            {
+                events.push(StoreEvent::ChannelUpdated(after.clone()));
             }
             Change::Removed(channel) if !skip(channel) => events.push(StoreEvent::ChannelRemoved {
                 channel_id: channel.id,
@@ -254,7 +263,7 @@ impl State {
             events.push(StoreEvent::CurrentUserUpdated(current.clone()));
         }
         for change in changes(&old.users, &next.users) {
-            if let Change::Updated(user) = change {
+            if let Change::Updated { after: user, .. } = change {
                 events.push(StoreEvent::UserUpdated(user.clone()));
             }
         }
@@ -288,7 +297,7 @@ impl State {
         }
 
         for change in changes(&old.members, &next.members) {
-            if let Change::Added(member) | Change::Updated(member) = change
+            if let Change::Added(member) | Change::Updated { after: member, .. } = change
                 && kept.contains(&member.guild_id)
             {
                 events.push(StoreEvent::CurrentMemberUpdated(member.clone()));
@@ -329,7 +338,9 @@ impl State {
             }
             E::UserUpdate(update) => self.user_update(*update, events),
             E::MessageCreate(message) => {
+                let (channel, id) = (message.channel_id, message.id);
                 self.windows.live(*message, &self.entities.users, events);
+                self.note_message(channel, id, events);
             }
             E::MessageUpdate(update) => self.windows.update(*update, &self.entities.users, events),
             E::MessageDelete(delete) => self.windows.delete(delete.channel_id, delete.id, events),
@@ -372,7 +383,16 @@ impl State {
         for user in users {
             self.put_user(user, events);
         }
-        let channel = Arc::new(Channel::from_wire(channel, None));
+        let mut channel = Channel::from_wire(channel, None);
+        if let Some(last) = self
+            .entities
+            .channels
+            .get(&channel.id)
+            .and_then(|known| known.last_message_id)
+        {
+            channel.note_message(last);
+        }
+        let channel = Arc::new(channel);
         match self.entities.channels.get(&channel.id) {
             Some(known) if *known == channel => {}
             Some(_) => {
@@ -383,6 +403,17 @@ impl State {
                 self.entities.channels.insert(channel.id, channel.clone());
                 events.push(StoreEvent::ChannelAdded(channel));
             }
+        }
+    }
+
+    // DM lists sort by the newest message; guild channels change silently, or every message
+    // in a busy server would be an event.
+    fn note_message(&mut self, channel: ChannelId, id: MessageId, events: &mut Vec<StoreEvent>) {
+        let Some(stored) = self.entities.channels.get_mut(&channel) else {
+            return;
+        };
+        if Arc::make_mut(stored).note_message(id.cast()) && stored.guild_id.is_none() {
+            events.push(StoreEvent::ChannelUpdated(stored.clone()));
         }
     }
 

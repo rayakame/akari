@@ -8,7 +8,7 @@ use super::types::{
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
 };
-use crate::model::{self, ChannelId, GuildId, MessageId, Timestamp};
+use crate::model::{self, ChannelId, GenericMarker, GuildId, MessageId, Snowflake, Timestamp};
 
 fn text(value: String) -> Box<str> {
     value.into_boxed_str()
@@ -185,6 +185,7 @@ impl Channel {
             topic: optional_text(channel.topic),
             nsfw: channel.nsfw,
             rate_limit_per_user: channel.rate_limit_per_user.unwrap_or(0),
+            last_message_id: channel.last_message_id,
             permission_overwrites: list(channel.permission_overwrites, overwrite),
             recipients,
             icon: image(channel.icon),
@@ -192,6 +193,21 @@ impl Channel {
             thread,
             flags: channel.flags,
         }
+    }
+
+    pub(crate) fn note_message(&mut self, id: Snowflake<GenericMarker>) -> bool {
+        if self.last_message_id.is_some_and(|last| last >= id) {
+            return false;
+        }
+        self.last_message_id = Some(id);
+        true
+    }
+
+    pub(crate) fn same_apart_from_activity(&self, other: &Channel) -> bool {
+        Channel {
+            last_message_id: other.last_message_id,
+            ..self.clone()
+        } == *other
     }
 
     pub(crate) fn patch(&self, update: ChannelUpdate) -> Self {
@@ -212,6 +228,9 @@ impl Channel {
         next.rate_limit_per_user = update
             .rate_limit_per_user
             .unwrap_or(next.rate_limit_per_user);
+        if let Some(Some(id)) = update.last_message_id {
+            next.note_message(id);
+        }
         if let Some(overwrites) = update.permission_overwrites {
             next.permission_overwrites = list(overwrites, overwrite);
         }

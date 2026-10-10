@@ -846,3 +846,19 @@ fn a_window_opened_between_prepare_and_swap_is_dropped_with_its_channel() {
     assert!(store.channel(Snowflake::new(GENERAL)).is_none());
     assert!(store.messages(Snowflake::new(GENERAL)).is_none());
 }
+
+#[test]
+fn private_channel_list_follows_the_latest_message() {
+    let store = ready_store();
+    let dm = 300_000_000_000_000_010;
+    let group = 300_000_000_000_000_011;
+    let mut message = message_template();
+    message.channel_id = Snowflake::new(dm);
+    message.guild_id = None;
+
+    let before = ids(&store.private_channel_list());
+    store.apply(message_create(&message, 400_000_000_000_000_030));
+
+    assert_eq!(before, [group, dm]);
+    assert_eq!(ids(&store.private_channel_list()), [dm, group]);
+}

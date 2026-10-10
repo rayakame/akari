@@ -14,6 +14,7 @@ public final class SessionModel {
     public private(set) var connection: ConnectionState = .offline
     public private(set) var currentUser: User?
     public let guilds: GuildListModel
+    public let directMessages: DirectMessageListModel
     public private(set) var place: Place = .home
     /// The open guild's channels; `nil` at home.
     public private(set) var channels: ChannelListModel?
@@ -26,21 +27,28 @@ public final class SessionModel {
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let onClosed: @MainActor (GatewayError?) -> Void
+    @ObservationIgnored private let memory: AccountMemory
     @ObservationIgnored private var subscription: StoreSubscription?
     @ObservationIgnored private var lastChannels: [GuildId: ChannelId] = [:]
+    @ObservationIgnored private var lastHomeChannel: ChannelId?
+    @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
 
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
-    /// means the user has to log in again.
+    /// means the user has to log in again. The first READY reopens the place and channel
+    /// `memory` holds for the account.
     public init(
-        userId: UserId, account: Account,
+        userId: UserId, account: Account, memory: AccountMemory = AccountMemory(),
         onClosed: @escaping @MainActor (GatewayError?) -> Void
     ) {
         self.userId = userId
         self.account = account
+        self.memory = memory
         self.onClosed = onClosed
+        spotToRestore = memory.lastSpot(of: userId)
         store = account.store()
         guilds = GuildListModel(store: store)
+        directMessages = DirectMessageListModel(store: store)
     }
 
     deinit {
@@ -57,6 +65,7 @@ public final class SessionModel {
         connection = store.connection()
         currentUser = store.currentUser()
         guilds.reload()
+        directMessages.reload()
         do {
             try account.connect()
         } catch {
@@ -77,17 +86,39 @@ public final class SessionModel {
                     subscription.close()
                 }
             })
+        LaunchLog.mark("session started")
+        // The store keeps a window for a channel it doesn't know yet, so the last channel's
+        // messages load while the gateway connects; READY then places it.
+        if let channel = spotToRestore?.channel {
+            messages = MessageListModel(channelId: channel, account: account, store: store)
+        }
     }
 
-    /// A guild opens the channel last opened there, else its first text channel.
+    /// A guild opens the channel last opened there, else its first text channel; home opens
+    /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
         guard place != self.place else {
+            // The session starts at home, so choosing home before READY cancels a server restore.
+            if case .guild = spotToRestore?.place {
+                spotToRestore = nil
+                messages = nil
+                rememberSpot()
+            }
             return
         }
+        // Where the user went before the first READY wins over where they were last time.
+        spotToRestore = nil
         self.place = place
+        defer { rememberSpot() }
         guard case .guild(let guildId) = place else {
             channels = nil
-            messages = nil
+            if let last = lastHomeChannel,
+                directMessages.conversations.contains(where: { $0.id == last })
+            {
+                open(channel: last)
+            } else {
+                messages = nil
+            }
             return
         }
         let list = ChannelListModel(guildId: guildId, store: store)
@@ -96,9 +127,12 @@ public final class SessionModel {
     }
 
     public func open(channel id: ChannelId) {
-        if case .guild(let guildId) = place {
-            lastChannels[guildId] = id
+        spotToRestore = nil
+        switch place {
+        case .guild(let guildId): lastChannels[guildId] = id
+        case .home: lastHomeChannel = id
         }
+        defer { rememberSpot() }
         guard messages?.channelId != id else {
             return
         }
@@ -149,6 +183,7 @@ public final class SessionModel {
         let open = messages?.channelId
         let wasListed = open.map(isListed) ?? false
         guilds.apply(batch)
+        directMessages.apply(batch)
         channels?.apply(batch)
         // Threads and DMs aren't in the channel list; they leave only when removed.
         if let open, batch.removedChannels.contains(open) || (wasListed && !isListed(open)) {
@@ -158,6 +193,13 @@ public final class SessionModel {
                 messages = nil
             }
         }
+        if batch.ready {
+            LaunchLog.mark("READY in the app")
+        }
+        if batch.ready, let spot = spotToRestore {
+            spotToRestore = nil
+            restore(spot)
+        }
         messages?.apply(batch)
     }
 
@@ -165,10 +207,40 @@ public final class SessionModel {
         channels?.channels.contains { $0.id == channel } == true
     }
 
+    private func restore(_ spot: AccountMemory.Spot) {
+        switch spot.place {
+        case .guild(let guildId):
+            guard guilds.guilds.contains(where: { $0.id == guildId }) else {
+                messages = nil
+                rememberSpot()
+                return
+            }
+            if let channel = spot.channel {
+                lastChannels[guildId] = channel
+            }
+            open(.guild(guildId))
+        case .home:
+            open(.home)
+            if let channel = spot.channel,
+                directMessages.conversations.contains(where: { $0.id == channel })
+            {
+                open(channel: channel)
+            } else {
+                messages = nil
+                rememberSpot()
+            }
+        }
+    }
+
+    private func rememberSpot() {
+        memory.remember(.init(place: place, channel: messages?.channelId), of: userId)
+    }
+
     private func openListedChannel(in list: ChannelListModel, guildId: GuildId) {
-        let last = lastChannels[guildId].flatMap { last in list.channels.first { $0.id == last } }
-        // Forum and media channels hold posts, not a message list.
-        let first = list.channels.first { $0.kind == .guildText || $0.kind == .guildNews }
+        let last = lastChannels[guildId].flatMap { last in
+            list.channels.first { $0.id == last && $0.opensMessageList }
+        }
+        let first = list.channels.first(where: \.opensMessageList)
         if let channel = last ?? first {
             open(channel: channel.id)
         } else {

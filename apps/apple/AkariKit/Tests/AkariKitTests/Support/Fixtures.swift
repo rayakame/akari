@@ -17,12 +17,27 @@ func guild(_ raw: UInt64, name: String? = nil) -> Guild {
 }
 
 func channel(
-    _ raw: UInt64, guild: UInt64? = 1, kind: ChannelType = .guildText, name: String? = nil
+    _ raw: UInt64, guild: UInt64? = 1, kind: ChannelType = .guildText, name: String? = nil,
+    parent: UInt64? = nil
 ) -> Channel {
     Channel(
-        id: id(raw), kind: kind, guildId: guild.map(id), parentId: nil,
+        id: id(raw), kind: kind, guildId: guild.map(id), parentId: parent.map(id),
         name: name ?? (guild == nil ? nil : "channel-\(raw)"), position: 0, topic: nil,
         nsfw: false, rateLimitPerUser: 0, recipientIds: []
+    )
+}
+
+func dm(_ raw: UInt64, with recipient: UInt64) -> Channel {
+    Channel(
+        id: id(raw), kind: .dm, guildId: nil, parentId: nil, name: nil, position: 0, topic: nil,
+        nsfw: false, rateLimitPerUser: 0, recipientIds: [id(recipient)]
+    )
+}
+
+func group(_ raw: UInt64, name: String? = nil, with recipients: [UInt64]) -> Channel {
+    Channel(
+        id: id(raw), kind: .groupDm, guildId: nil, parentId: nil, name: name, position: 0,
+        topic: nil, nsfw: false, rateLimitPerUser: 0, recipientIds: recipients.map(id)
     )
 }
 
@@ -35,7 +50,7 @@ func message(
         fromWebhook: false, content: content ?? "message \(raw)",
         timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(raw)),
         editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-        embedCount: 0, stickerNames: [], delivery: delivery
+        embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery
     )
 }
 

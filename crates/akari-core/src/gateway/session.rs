@@ -168,6 +168,7 @@ pub(crate) enum Tick {
 }
 
 pub(crate) struct Connection {
+    opened: Instant,
     hello_deadline: Instant,
     heartbeat: Option<Heartbeat>,
     handshake_sent: bool,
@@ -178,12 +179,17 @@ pub(crate) struct Connection {
 impl Connection {
     pub(crate) fn new(now: Instant, timing: &Timing) -> Self {
         Self {
+            opened: now,
             hello_deadline: now + timing.hello_timeout,
             heartbeat: None,
             handshake_sent: false,
             ready_since: None,
             limiter: CommandLimiter::new(timing.rate_window),
         }
+    }
+
+    pub(crate) fn opened(&self) -> Instant {
+        self.opened
     }
 
     pub(crate) fn deadline(&self) -> Instant {
