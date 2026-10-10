@@ -46,8 +46,16 @@ screen, so views render from them without calling into Rust.
 - `SessionModel` holds the connection, the current user, the open place (home or a guild) and
   the channel last opened in each guild. It owns `GuildListModel` (the server list),
   `ChannelListModel` (the open guild's channels) and `MessageListModel` (the open channel's
-  messages, loads, sends and whether the user may send there). The view calls
-  `MessageListModel.open()` when the channel appears.
+  messages, loads, sends and whether the user may send there).
+
+The session replaces `messages` on its own when the open channel is deleted or the user can
+no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.
+The view therefore calls it once per channel, not once per appearance of the message area:
+
+```swift
+MessageList(model: messages)
+    .task(id: messages.channelId) { await messages.open() }
+```
 
 ### The event loop
 
