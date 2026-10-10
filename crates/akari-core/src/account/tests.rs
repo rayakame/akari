@@ -2182,6 +2182,57 @@ async fn a_queued_message_waits_for_delivery_then_sends() {
 }
 
 #[tokio::test]
+async fn a_pending_message_is_delivered_once() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]).delayed(Duration::from_millis(100));
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+    let pending = account.queue_message(general(), "hello").unwrap();
+
+    let (first, second) = tokio::join!(
+        account.deliver_message(general(), pending),
+        account.deliver_message(general(), pending),
+    );
+
+    assert_eq!(sends.bodies().len(), 1);
+    assert_eq!(
+        [&first, &second].iter().filter(|sent| sent.is_ok()).count(),
+        1
+    );
+    assert!(
+        [first, second]
+            .iter()
+            .any(|sent| matches!(sent, Err(RequestError::InvalidRequest)))
+    );
+    assert!(outbox(&account).is_empty());
+}
+
+#[tokio::test]
+async fn a_message_being_retried_isnt_delivered_again() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[403, 200]).delayed(Duration::from_millis(100));
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+    account
+        .send_message(general(), "hello".to_owned())
+        .await
+        .unwrap_err();
+    let pending = Snowflake::new(outbox(&account)[0].0);
+
+    let (retried, delivered) = tokio::join!(
+        account.retry_message(general(), pending),
+        account.deliver_message(general(), pending),
+    );
+
+    assert!(retried.is_ok());
+    assert!(matches!(delivered, Err(RequestError::InvalidRequest)));
+    assert_eq!(sends.bodies().len(), 2);
+    assert!(outbox(&account).is_empty());
+}
+
+#[tokio::test]
 async fn a_closed_account_refuses_before_anything_is_queued() {
     let mut fake = FakeGateway::start().await;
     let server = wiremock::MockServer::start().await;

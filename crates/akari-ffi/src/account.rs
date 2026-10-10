@@ -94,7 +94,8 @@ impl Account {
     }
 
     /// Sends a message `queue_message` queued; a detached window jumps to the present, as with
-    /// `send_message`. On an error the message stays as failed.
+    /// `send_message`. On an error the message stays as failed. A second call for a message
+    /// already on its way fails with `InvalidRequest`.
     pub async fn deliver_message(
         &self,
         channel_id: ChannelId,

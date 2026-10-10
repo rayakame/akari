@@ -131,6 +131,8 @@ every stale window with the latest 100 messages:
   `deliver_message`. `queue_message` refuses empty or too long content and a closed account
   before anything is queued, and returns the pending ID; a UI that keeps a draft clears it only
   then. `deliver_message` sends a queued message (jumping a detached window to the present).
+  A pending message is delivered by one call at a time: a second `deliver_message` or a
+  `retry_message` for it while it's on its way fails with `InvalidRequest` and sends nothing.
 - **Akari's check.** `message_length(content)` counts code points, and
   `Store::message_length_limit()` gives the limit for the current user's `premium_type`
   (2,000 before READY). `send_message` refuses longer content with
@@ -182,7 +184,8 @@ for unknown channels.
   ([JSON error codes](https://docs.discord.food/topics/errors#json-error-codes)).
 - `TooLong { limit }`: the message is longer than the limit, Akari's or Discord's (above).
 - `Network(TransportError)`, `UnexpectedResponse`, `InvalidRequest` (empty content, a
-  failed message that isn't there), `Closed` (the account is closed).
+  failed message that isn't there, a message already being delivered), `Closed` (the account
+  is closed).
 
 None of them carries the token or message content.
 
