@@ -67,7 +67,7 @@ message content, names or tokens.
 `-AkariLog scroll` turns on the message list's scroll log instead (category `scroll`, in Xcode's
 console and the unified log): the clip origin, its allowed range, the rows' height, the
 elasticity and whether a live scroll is running on every bounds change, plus each scroll the
-app makes itself and each origin the clip view clamps. Numbers only. Combine both as
+app makes itself. Numbers only. Combine both as
 `-AkariLog akari_core=info,scroll`; a second `-AkariLog` argument would replace the first.
 
 The app logs its launch milestones once each, in milliseconds since process start, to the

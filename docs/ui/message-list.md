@@ -9,7 +9,10 @@ client on 2026-10-10; colors in [theme.md](theme.md).
 - Messages are listed oldest at the top, newest at the bottom. While the user is at the
   bottom, new messages keep the list at the bottom; when they scrolled up, the list stays
   where it is.
-- Scrolling stops at the top and the bottom of the list: no elastic bounce past either end.
+- At its top and bottom the list bounces with the native macOS elastic overscroll, unlike the
+  official client, whose Chromium list stops there. While the user scrolls, momentum and
+  bounce included, the list never moves on its own, and a position past the bottom counts as
+  being at the bottom.
 - Each message has 2 of vertical padding and 16 on the right. Its content starts 72 from the
   left: 16 margin, a 40 avatar column, 16 gap.
 - Text is 16 on a 22 line height.

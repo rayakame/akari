@@ -374,11 +374,11 @@ struct MessageTableTests {
     }
 
     @Test
-    func scrollingPastTheBottomStopsThereWithoutBouncing() async throws {
+    func theListBouncesOnlyVerticallyAndAWheelLandsOnTheBottom() async throws {
         var rows = messages(80, longText: true)
         show(rows)
         let scrollView = controller.scrollView
-        #expect(scrollView.verticalScrollElasticity == .none)
+        #expect(scrollView.verticalScrollElasticity == .automatic)
         #expect(scrollView.horizontalScrollElasticity == .none)
         let clip = scrollView.contentView
         let bottom = clip.bounds.origin
@@ -391,6 +391,35 @@ struct MessageTableTests {
         rows += messages(1, from: 81)
         show(rows)
         window.layoutIfNeeded()
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    @Test
+    func anOverscrollPastTheBottomMovesNothingOfOursAndStaysPinned() {
+        var rows = messages(80, longText: true)
+        show(rows)
+        let clip = controller.scrollView.contentView
+        let bottom = clip.bounds.origin
+
+        // The elastic bounce takes the clip past the end; scroll(to:) isn't constrained.
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        clip.scroll(to: NSPoint(x: bottom.x, y: bottom.y + 40))
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+        let bounced = clip.bounds.origin
+        #expect(bounced.y == bottom.y + 40)
+        #expect(controller.isPinnedToBottom)
+        table.needsLayout = true
+        window.layoutIfNeeded()
+        #expect(clip.bounds.origin == bounced)
+
+        // The gesture can end before the bounce has settled back.
+        postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+        window.layoutIfNeeded()
+        #expect(clip.bounds.origin == bounced)
+
+        clip.scroll(to: bottom)
+        rows += messages(1, from: 81)
+        show(rows)
         #expect(visibleRows.contains(table.numberOfRows - 1))
     }
 
@@ -452,35 +481,6 @@ struct MessageTableTests {
             }
             #expect(wrong.isEmpty, "at \(width): rows \(wrong) differ from their cells")
         }
-    }
-
-    @Test
-    func theClipViewCantLeaveTheRowsWhateverMovesIt() {
-        show(variedMessages(80))
-        let clip = controller.scrollView.contentView
-        let bottom = clip.bounds.origin.y
-
-        // None of these goes through constrainBoundsRect.
-        clip.setBoundsOrigin(NSPoint(x: 0, y: bottom + 300))
-        #expect(clip.bounds.origin.y == bottom)
-        clip.setBoundsOrigin(NSPoint(x: 0, y: -300))
-        #expect(clip.bounds.origin.y == 0)
-        clip.scroll(to: NSPoint(x: 0, y: bottom + 300))
-        #expect(clip.bounds.origin.y == bottom)
-        clip.bounds = NSRect(origin: NSPoint(x: 0, y: bottom + 300), size: clip.bounds.size)
-        #expect(clip.bounds.origin.y == bottom)
-    }
-
-    @Test
-    func aShortConversationCantBeMovedOffTheBottom() {
-        show(messages(3))
-        let clip = controller.scrollView.contentView
-        let origin = clip.bounds.origin.y
-
-        clip.setBoundsOrigin(NSPoint(x: 0, y: 0))
-        #expect(clip.bounds.origin.y == origin)
-        clip.setBoundsOrigin(NSPoint(x: 0, y: origin - 200))
-        #expect(clip.bounds.origin.y == origin)
     }
 
     @Test
