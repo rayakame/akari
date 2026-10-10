@@ -104,6 +104,25 @@ struct ThemeTests {
     }
 
     @Test
+    func tokensResolveOffTheMainThread() {
+        let color = Palette.chat
+        nonisolated(unsafe) var red: CGFloat = -1
+
+        // async: a sync call from the main thread would run the block on the main thread. The
+        // appearance is one no other test resolves, so the provider runs instead of a cache.
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            NSAppearance(named: .accessibilityHighContrastDarkAqua)?.performAsCurrentDrawingAppearance {
+                red = color.usingColorSpace(.sRGB)?.redComponent ?? -1
+            }
+            done.signal()
+        }
+        done.wait()
+
+        #expect(abs(red - 0x1a / 255.0) < 0.01)
+    }
+
+    @Test
     func everyTokenIsChecked() {
         #expect(Set(colors.keys) == Set(Self.tokens.map(\.name)))
         #expect(Palette.avatars.count == 6)

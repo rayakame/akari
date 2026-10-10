@@ -33,7 +33,8 @@ enum Palette {
     static let avatars = ["#5865f2", "#3e8e7e", "#c06c2b", "#a352b5", "#c2445a", "#4f7fba"]
         .map { NSColor(hex: $0) }
 
-    private static func token(
+    // AppKit can resolve colors off the main thread; MainActor isolation would trap there.
+    nonisolated private static func token(
         _ name: String, dark: String, light: String, alpha: (dark: CGFloat, light: CGFloat) = (1, 1)
     ) -> NSColor {
         let darkColor = NSColor(hex: dark, alpha: alpha.dark)
