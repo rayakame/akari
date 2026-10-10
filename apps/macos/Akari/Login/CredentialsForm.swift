@@ -38,9 +38,9 @@ struct CredentialsForm: View {
             }
             SubmitArea(model: model, title: "Log In")
             HStack(spacing: 4) {
-                Text("Need an account?")
+                Text("No account yet?")
                     .foregroundStyle(Color(nsColor: Palette.textMuted))
-                Link("Register", destination: Self.register)
+                Link("Create one on discord.com", destination: Self.register)
                     .foregroundStyle(Color(nsColor: Palette.textLink))
             }
             .font(.system(size: 14))

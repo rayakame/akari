@@ -112,9 +112,10 @@ struct ThemeTests {
         // appearance is one no other test resolves, so the provider runs instead of a cache.
         let done = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
-            NSAppearance(named: .accessibilityHighContrastDarkAqua)?.performAsCurrentDrawingAppearance {
-                red = color.usingColorSpace(.sRGB)?.redComponent ?? -1
-            }
+            NSAppearance(named: .accessibilityHighContrastDarkAqua)?
+                .performAsCurrentDrawingAppearance {
+                    red = color.usingColorSpace(.sRGB)?.redComponent ?? -1
+                }
             done.signal()
         }
         done.wait()

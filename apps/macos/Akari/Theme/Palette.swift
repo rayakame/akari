@@ -1,6 +1,5 @@
 import AppKit
 
-// The tokens of docs/ui/theme.md; each resolves to its dark or light value.
 enum Palette {
     static let frame = token("frame", dark: "#121214", light: "#f3f3f4")
     static let chat = token("chat", dark: "#1a1a1e", light: "#fbfbfb")

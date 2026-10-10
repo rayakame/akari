@@ -9,7 +9,6 @@ let berlin: Calendar = {
     return calendar
 }()
 
-// A wall-clock time in Berlin.
 func berlinTime(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
     berlin.date(
         from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!

@@ -38,8 +38,8 @@ message shown right before it** (sent, pending and failed messages alike). It st
 group when any of these holds:
 
 1. It is the first message shown.
-2. Its local calendar day differs from the previous message's. A day divider sits between
-   them.
+2. Its local calendar day is later than the previous message's. A day divider sits between
+   them (see [Day dividers](#day-dividers) for a day that goes backwards).
 3. It or the previous message is a system message (see below).
 4. Its author's user ID differs from the previous message's.
 5. Both are webhook messages and their author names differ. One webhook can post under
@@ -62,14 +62,20 @@ The time in a group's first line:
 |---|---|
 | Today | "Today at 2:05 PM" |
 | Yesterday | "Yesterday at 11:59 PM" |
-| Earlier, or a date in the future | numeric date and short time, "10/03/2026 2:05 PM" |
+| Earlier, or a date in the future | numeric date and short time, "10/03/2026, 2:05 PM" |
 
 All of them follow the user's locale and time zone. Hovering the time shows the full date and
-time.
+time. Discord writes the older form without the comma; Akari uses the platform's date format
+for the locale.
 
 ## Day dividers
 
 - One before the first message of each local calendar day in the list.
+- Days only move forward: a message stamped earlier than the one before it (a pending message
+  from a device whose clock runs ahead or behind) gets no divider of its own and stays under
+  the current day. That keeps one divider per day, so a divider's key never repeats.
+- A divider stays while any message of its day is shown, also when the day's first message
+  goes.
 - A 1 pt `borderSubtle` line across the list with the date in the middle, in the locale's
   long form ("October 10, 2026"), 12 semibold `textMuted`, on the list's background.
 

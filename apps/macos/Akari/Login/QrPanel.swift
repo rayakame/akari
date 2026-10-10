@@ -46,8 +46,8 @@ struct QrPanel: View {
 
     private var heading: String {
         switch model.qr {
-        case .connecting, .code: "Log in with QR code"
-        case .scanned: "Check your phone"
+        case .connecting, .code: "Log in with your phone"
+        case .scanned: "Confirm on your phone"
         case .captchaUnsupported, .failed: "QR login stopped"
         }
     }
@@ -55,7 +55,7 @@ struct QrPanel: View {
     private var detail: String {
         switch model.qr {
         case .connecting, .code: "Scan it with the Discord app on your phone to log in."
-        case .scanned(let user): "Logging in as \(user.username). Confirm on your phone."
+        case .scanned(let user): "Logging in as \(user.username)."
         case .captchaUnsupported: "Discord asked for a captcha, which Akari can't show yet."
         case .failed(let error): error.localizedDescription
         }
@@ -66,7 +66,7 @@ struct QrPanel: View {
         case .connecting, .code:
             EmptyView()
         case .scanned:
-            LinkButton("Not you? Start over") { model.restartQr() }
+            LinkButton("Wrong account? Show a new code") { model.restartQr() }
         case .captchaUnsupported, .failed:
             LinkButton("Try again") { model.restartQr() }
         }

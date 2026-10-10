@@ -10,9 +10,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private let locale = Locale.current
     private let now: () -> Date
     private var filled = false
-    // Follows the user's scrolling: at the bottom, new messages and re-wrapping keep it there.
     private var sticksToBottom = true
-    // Where the reader is while scrolled up: the first visible item and its offset in the view.
     private var anchor: (id: MessageTimeline.ItemId, offset: CGFloat)?
 
     init(
@@ -67,8 +65,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.contentView.bounds.maxY >= tableView.frame.height - 2
     }
 
-    // MARK: NSTableViewDataSource, NSTableViewDelegate
-
     func numberOfRows(in tableView: NSTableView) -> Int {
         timeline.items.count
     }
@@ -111,8 +107,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
         false
     }
-
-    // MARK: Private
 
     private func configure() {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("messages"))
@@ -171,7 +165,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     // Read before the update: `timeline` and the table still hold the old rows.
-    private func visibleAnchor(skipping removed: IndexSet) -> (id: MessageTimeline.ItemId, offset: CGFloat)? {
+    private func visibleAnchor(skipping removed: IndexSet) -> (
+        id: MessageTimeline.ItemId, offset: CGFloat
+    )? {
         let top = scrollView.contentView.bounds.minY
         let visible = tableView.rows(in: scrollView.contentView.bounds)
         for row in visible.location..<(visible.location + visible.length)

@@ -3,7 +3,7 @@ import Foundation
 
 enum Launch {
     enum State {
-        // Under tests nothing starts: no client, no Keychain, no network.
+        // Hosted tests run inside the app; they must not reach the Keychain or Discord.
         case testing
         case failed(String)
         case running(AppModel)
