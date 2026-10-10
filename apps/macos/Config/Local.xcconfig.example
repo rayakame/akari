@@ -1,0 +1,3 @@
+// Copy to Local.xcconfig and put in your team ID (Xcode → Settings → Accounts → your team).
+// Without it the app is signed ad hoc, and the Keychain asks for access after every rebuild.
+DEVELOPMENT_TEAM = ABCDE12345

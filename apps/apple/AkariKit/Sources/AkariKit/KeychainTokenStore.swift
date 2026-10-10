@@ -46,6 +46,7 @@ public final class KeychainTokenStore: TokenStore {
         }
     }
 
+    // The login keychain ignores kSecAttrAccessible; it only applies to the data-protection one.
     private func item(_ account: UserId) -> [CFString: Any] {
         [
             kSecClass: kSecClassGenericPassword,

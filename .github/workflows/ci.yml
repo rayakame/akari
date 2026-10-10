@@ -97,6 +97,28 @@ jobs:
       - run: apps/apple/build-ffi.sh
       - run: swift test --package-path apps/apple/AkariKit
 
+  macos-app:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+      - run: xcodebuild -version && swift --version
+      # This runner's architecture is enough to build the app and run its tests.
+      - run: apps/apple/build-ffi.sh --host-only
+      # A pinned release; the checksum is GitHub's published digest for this asset.
+      - name: Install XcodeGen 2.46.0
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          echo "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+      - run: xcodegen generate --spec apps/macos/project.yml
+      - run: xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari -destination 'platform=macOS'
+
   deny:
     name: cargo-deny bans
     runs-on: ubuntu-latest

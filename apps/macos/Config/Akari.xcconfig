@@ -1,0 +1,4 @@
+// Signing: Local.xcconfig (not committed) sets DEVELOPMENT_TEAM; without it builds sign ad hoc.
+CODE_SIGN_STYLE = Automatic
+
+#include? "Local.xcconfig"
