@@ -152,6 +152,7 @@ impl Task {
         let Ok(mut zstd) = ZstdStream::new(MAX_MESSAGE) else {
             return lost(DisconnectReason::Decompress, false);
         };
+        let started = Instant::now();
         // Scoped so the connect future and its borrow of the client end here.
         let mut socket = {
             let url = self.session.connect_url(self.client.gateway_url());
@@ -167,7 +168,11 @@ impl Task {
             loop {
                 tokio::select! {
                     result = &mut connect => match result {
-                        Ok(socket) => break socket,
+                        Ok(socket) => {
+                            let connect_ms = crate::millis(started.elapsed());
+                            tracing::info!(connect_ms, "gateway connected");
+                            break socket;
+                        }
                         Err(err) => {
                             self.session.unreachable();
                             return lost(DisconnectReason::Transport(err), false);
@@ -350,6 +355,8 @@ impl Task {
                 self.session.dispatched(seq);
                 match &event {
                     DispatchEvent::Ready(ready) => {
+                        let after_connect_ms = crate::millis(link.opened().elapsed());
+                        tracing::info!(after_connect_ms, "READY received");
                         self.session.ready(ready, self.client.allows_plaintext());
                         link.ready(Instant::now());
                     }
