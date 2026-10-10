@@ -44,4 +44,17 @@ enum CellText {
             range: NSRange(location: 0, length: line.length))
         return line
     }
+
+    // Smaller than the text, on its baseline, in the timestamps' color.
+    static func editedMark() -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 22
+        paragraph.maximumLineHeight = 22
+        return NSAttributedString(
+            string: " (edited)",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.chatTextMuted,
+                .paragraphStyle: paragraph, .baselineOffset: 3,
+            ])
+    }
 }

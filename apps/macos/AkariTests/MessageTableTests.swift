@@ -470,6 +470,14 @@ struct MessageTableTests {
                     44, by: author(3), at: later + 40, attachments: ["a.png", "b.txt"],
                     embedCount: 2, stickers: ["wave"]),
                 row(45, by: author(3), at: later + 50, content: "", attachments: ["c.zip"]),
+                row(46, by: author(3), at: later + 60, delivery: .pending),
+                row(47, by: author(3), at: later + 70, delivery: .failed),
+                row(
+                    48, by: author(3), at: later + 80,
+                    content: String(repeating: "x", count: 52), edited: later + 90),
+                row(
+                    49, by: author(3), at: later + 100, content: "", attachments: ["d.zip"],
+                    edited: later + 110),
             ]
         show(rows)
 
@@ -565,5 +573,76 @@ struct MessageTableTests {
         #expect((cells[1] as? MessageCell)?.showsHeader == true)
         #expect((cells[2] as? MessageCell)?.showsHeader == false)
         #expect(cells[3] is NoticeCell)
+    }
+
+    final class RecordingActions: MessageListActions {
+        var calls: [String] = []
+
+        func retry(_ message: MessageId) {
+            calls.append("retry \(message.rawValue)")
+        }
+
+        func delete(_ message: MessageId) {
+            calls.append("delete \(message.rawValue)")
+        }
+    }
+
+    func contentColor(at row: Int, text: String) throws -> NSColor? {
+        let field = try #require(
+            textFields(in: try cell(at: row)).first { $0.stringValue.hasPrefix(text) })
+        return field.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil)
+            as? NSColor
+    }
+
+    @Test
+    func pendingIsDimmedAndFailedIsRedWithActions() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show([
+            row(1, at: noon), row(2, at: noon + 10, delivery: .pending),
+            row(3, at: noon + 20, delivery: .failed),
+        ])
+
+        #expect(try contentColor(at: 1, text: "message 1") == Palette.textDefault)
+        #expect(try contentColor(at: 2, text: "message 2") == Palette.textMuted)
+        #expect(try contentColor(at: 3, text: "message 3") == Palette.danger)
+        let failed = try cell(at: 3)
+        let visible = { (cell: NSView) in
+            self.textFields(in: cell).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
+        }
+        #expect(visible(failed).contains("Not sent."))
+        #expect(!visible(try cell(at: 2)).contains("Not sent."))
+        let buttons = buttons(in: failed)
+        try #require(buttons.first { $0.title == "Retry" }).performClick(nil)
+        try #require(buttons.first { $0.title == "Delete" }).performClick(nil)
+        #expect(actions.calls == ["retry 3", "delete 3"])
+    }
+
+    func buttons(in view: NSView) -> [NSButton] {
+        view.subviews.flatMap { subview in
+            (subview as? NSButton).map { [$0] } ?? buttons(in: subview)
+        }.filter { !$0.isHiddenOrHasHiddenAncestor }
+    }
+
+    @Test
+    func editedMessagesEndWithTheMarker() throws {
+        show([
+            row(1, at: noon, edited: noon + 60),
+            row(2, at: noon + 10, content: "", attachments: ["a.zip"], edited: noon + 70),
+            row(3, at: noon + 20),
+        ])
+
+        let fields = textFields(in: try cell(at: 1)).filter {
+            $0.stringValue.hasPrefix("message 1")
+        }
+        let text = try #require(fields.first).attributedStringValue
+        #expect(text.string == "message 1 (edited)")
+        let marker = text.attributes(at: text.length - 1, effectiveRange: nil)
+        #expect((marker[.font] as? NSFont)?.pointSize == 12)
+        #expect(marker[.foregroundColor] as? NSColor == Palette.chatTextMuted)
+        let extras = textFields(in: try cell(at: 2)).filter { $0.stringValue.contains("a.zip") }
+        #expect(try #require(extras.first).stringValue.hasSuffix(" (edited)"))
+        let plain = textFields(in: try cell(at: 3)).filter { $0.stringValue.hasPrefix("message 3") }
+        #expect(try #require(plain.first).stringValue == "message 3")
     }
 }

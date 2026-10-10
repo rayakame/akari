@@ -19,7 +19,7 @@ struct SessionLayoutTests {
         session.open(.guild(GuildId(rawValue: 1)))
         #expect(session.messages?.channelId == ChannelId(rawValue: 11))
         let image = try Rendered(
-            SessionView(session: session) { _ in Color.red }, appearance: appearance)
+            SessionView(session: session) { _, _ in Color.red }, appearance: appearance)
         let sidebar = SidebarWidth.stored(in: .standard)
         let listX = sidebar - 30
         let pageX = image.width - 20

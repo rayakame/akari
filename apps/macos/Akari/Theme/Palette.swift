@@ -29,6 +29,7 @@ enum Palette {
         "inputBackground", dark: "#000000", light: "#000000", alpha: (0.12, 0.02))
     static let danger = token("danger", dark: "#f23f43", light: "#da373c")
     static let brand = NSColor(hex: "#5865f2")
+    static let composer = token("composer", dark: "#222327", light: "#ffffff")
     static let avatars = ["#5865f2", "#3e8e7e", "#c06c2b", "#a352b5", "#c2445a", "#4f7fba"]
         .map { NSColor(hex: $0) }
 

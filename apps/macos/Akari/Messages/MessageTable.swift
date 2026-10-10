@@ -6,6 +6,7 @@ import SwiftUI
 struct MessageTable: NSViewRepresentable {
     let rows: [MessageListModel.Row]
     let atPresent: Bool
+    let actions: MessageListActions
 
     func makeCoordinator() -> MessageTableController {
         MessageTableController()
@@ -16,18 +17,32 @@ struct MessageTable: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.actions = actions
         context.coordinator.show(rows, atPresent: atPresent)
     }
 }
 
 struct MessageArea: View {
     let messages: MessageListModel
+    let placeholder: String
 
     var body: some View {
-        MessageTable(rows: messages.rows, atPresent: messages.atPresent)
-            .id(messages.channelId)
-            .overlay { status }
-            .task(id: messages.channelId) { await messages.open() }
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                MessageTable(
+                    rows: messages.rows, atPresent: messages.atPresent,
+                    actions: MessageListBridge(messages: messages)
+                )
+                .id(messages.channelId)
+                .overlay { status }
+                ComposerView(
+                    composer: messages.composer, placeholder: placeholder,
+                    areaHeight: geometry.size.height
+                )
+                .id(messages.channelId)
+            }
+        }
+        .task(id: messages.channelId) { await messages.open() }
     }
 
     @ViewBuilder private var status: some View {
@@ -44,5 +59,22 @@ struct MessageArea: View {
                 ProgressView()
             }
         }
+    }
+}
+
+// The table's actions on the channel's models.
+final class MessageListBridge: MessageListActions {
+    let messages: MessageListModel
+
+    init(messages: MessageListModel) {
+        self.messages = messages
+    }
+
+    func retry(_ message: MessageId) {
+        Task { await messages.composer.retry(message) }
+    }
+
+    func delete(_ message: MessageId) {
+        messages.composer.discard(message)
     }
 }

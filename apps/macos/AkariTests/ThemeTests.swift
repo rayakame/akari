@@ -44,6 +44,7 @@ struct ThemeTests {
         Token("inputBackground", "#000000", "#000000", alpha: (0.12, 0.02)),
         Token("danger", "#f23f43", "#da373c"),
         Token("brand", "#5865f2", "#5865f2"),
+        Token("composer", "#222327", "#ffffff"),
         Token("avatar0", "#5865f2", "#5865f2"),
         Token("avatar1", "#3e8e7e", "#3e8e7e"),
         Token("avatar2", "#c06c2b", "#c06c2b"),
@@ -64,7 +65,8 @@ struct ThemeTests {
         "hoverBackground": Palette.hoverBackground,
         "selectedBackground": Palette.selectedBackground,
         "inputBackground": Palette.inputBackground, "danger": Palette.danger,
-        "brand": Palette.brand, "avatar0": Palette.avatars[0], "avatar1": Palette.avatars[1],
+        "brand": Palette.brand, "composer": Palette.composer, "avatar0": Palette.avatars[0],
+        "avatar1": Palette.avatars[1],
         "avatar2": Palette.avatars[2], "avatar3": Palette.avatars[3],
         "avatar4": Palette.avatars[4], "avatar5": Palette.avatars[5],
     ]

@@ -3,7 +3,8 @@ import SwiftUI
 
 struct SessionView<MessageArea: View>: View {
     let session: SessionModel
-    @ViewBuilder let messageArea: (MessageListModel) -> MessageArea
+    // The open channel's messages and the composer's placeholder.
+    @ViewBuilder let messageArea: (MessageListModel, String) -> MessageArea
     @State private var collapsed = CollapsedCategories()
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
 
@@ -68,7 +69,7 @@ struct SessionView<MessageArea: View>: View {
         VStack(spacing: 0) {
             ChannelHeader(channel: openChannel, name: openName)
             if let messages = session.messages {
-                messageArea(messages)
+                messageArea(messages, placeholder)
             } else if session.currentUser == nil {
                 EmptyState(text: nil)
             } else if session.place == .home {
@@ -103,5 +104,9 @@ struct SessionView<MessageArea: View>: View {
 
     private var openName: String {
         conversation?.name ?? openChannel?.name ?? ""
+    }
+
+    private var placeholder: String {
+        ComposerView.placeholder(guildChannel: openChannel?.guildId != nil, name: openName)
     }
 }

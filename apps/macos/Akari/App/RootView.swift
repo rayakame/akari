@@ -37,8 +37,8 @@ private struct AppScreen: View {
                 LoginView(model: login)
                     .transition(.opacity)
             case .session(let session):
-                SessionView(session: session) { messages in
-                    MessageArea(messages: messages)
+                SessionView(session: session) { messages, placeholder in
+                    MessageArea(messages: messages, placeholder: placeholder)
                 }
                 .transition(.opacity)
             }

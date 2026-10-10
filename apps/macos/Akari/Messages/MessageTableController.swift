@@ -5,6 +5,8 @@ import AppKit
 final class MessageTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     let tableView: MessageTableView
     let scrollView = NSScrollView()
+    // Strong: the bridge that implements it holds nothing that leads back here.
+    var actions: MessageListActions?
     private let clipView = BottomClipView()
     private static var created = 0
     // Tells tables apart in the scroll log, so a replaced scroll view shows.
@@ -195,6 +197,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             let cell = reuse(MessageCell.identifier) as? MessageCell ?? MessageCell()
             cell.isHovered = item.id == hovered
+            cell.onRetry = { [weak self] in self?.actions?.retry(message.id) }
+            cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
             cell.configure(
                 message, startsGroup: startsGroup, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
