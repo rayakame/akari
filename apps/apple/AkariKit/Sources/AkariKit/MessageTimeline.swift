@@ -3,10 +3,12 @@ import Foundation
 /// A message list as a table shows it: day dividers and where author groups start, by the rule
 /// in `docs/ui/message-list.md`.
 public struct MessageTimeline: Equatable, Sendable {
-    /// The ends of a list that may have more history beyond them.
+    /// The ends of a list: more history beyond them, or where the channel begins.
     public enum Edge: Hashable, Sendable {
         case older
         case newer
+        /// In place of `.older` once the oldest message is loaded.
+        case beginning
     }
 
     public enum ItemId: Hashable, Sendable {
@@ -37,13 +39,13 @@ public struct MessageTimeline: Equatable, Sendable {
 
     public let items: [Item]
 
-    /// `edges` wrap the rows when there are any: `.older` first, `.newer` last.
+    /// `edges` wrap the rows when there are any: `.beginning` or `.older` first, `.newer` last.
     public init(
         rows: [MessageListModel.Row], calendar: Calendar = .current, edges: Set<Edge> = []
     ) {
         var items: [Item] = []
-        if !rows.isEmpty && edges.contains(.older) {
-            items.append(.edge(.older))
+        if !rows.isEmpty, let top = [Edge.beginning, .older].first(where: edges.contains) {
+            items.append(.edge(top))
         }
         var previous: Message?
         var day: Date?

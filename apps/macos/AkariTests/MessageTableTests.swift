@@ -296,7 +296,7 @@ struct MessageTableTests {
     @Test
     func aShortConversationSitsAtTheBottom() {
         var rows = messages(3)
-        show(rows)
+        show(MessageTableState(rows: rows, reachedOldest: true))
         let clip = controller.scrollView.contentView
 
         let below = { clip.bounds.maxY - self.table.rect(ofRow: self.table.numberOfRows - 1).maxY }
@@ -304,14 +304,14 @@ struct MessageTableTests {
         #expect(table.rect(ofRow: 0).minY - clip.bounds.minY > 100)
 
         rows += messages(1, from: 4)
-        show(rows)
+        show(MessageTableState(rows: rows, reachedOldest: true))
         #expect(abs(below() - 8) <= 1)
 
         // A short list is at its bottom, so a resize doesn't unpin it and later messages follow.
         window.setContentSize(NSSize(width: 600, height: 300))
         window.layoutIfNeeded()
         rows += messages(60, from: 5, longText: true)
-        show(rows)
+        show(MessageTableState(rows: rows, reachedOldest: true))
         #expect(visibleRows.contains(table.numberOfRows - 1))
     }
 
@@ -595,7 +595,7 @@ struct MessageTableTests {
             table.view(atColumn: 0, row: $0, makeIfNecessary: true)
         }
 
-        #expect(cells[0] is EdgeCell)
+        #expect(cells[0] is PlaceholderCell)
         #expect(cells[1] is DayDividerCell)
         #expect((cells[2] as? MessageCell)?.showsHeader == true)
         #expect((cells[3] as? MessageCell)?.showsHeader == false)
@@ -907,37 +907,29 @@ struct MessageTableTests {
     }
 
     @Test
-    func edgesKeepOneHeightInEveryState() throws {
+    func placeholdersKeepOneHeightInEveryState() throws {
         let failed: [MessageListModel.Load: RequestError] = [.older: .ServerError(status: 500)]
-        let states = [
-            MessageTableState(rows: page),
-            MessageTableState(rows: page, loading: .older),
-            MessageTableState(rows: page, failedLoads: failed),
-            MessageTableState(
-                rows: page, reachedOldest: true, beginning: "This is the beginning of #general."),
-        ]
         var heights: [CGFloat] = []
-        for state in states {
+        for state in [
+            MessageTableState(rows: page), MessageTableState(rows: page, loading: .older),
+            MessageTableState(rows: page, failedLoads: failed),
+        ] {
             show(state)
             heights.append(table.rect(ofRow: 0).height)
         }
-        #expect(Set(heights) == [48])
+        #expect(Set(heights).count == 1)
+        #expect(heights[0] >= 1.5 * clip.bounds.height)
+        #expect(try cell(at: 0) is PlaceholderCell)
 
-        let edge = try cell(at: 0)
+        show(
+            MessageTableState(
+                rows: page, reachedOldest: true, beginning: "This is the beginning of #general."))
+        #expect(table.rect(ofRow: 0).height == 48)
         #expect(
-            textFields(in: edge).contains {
+            textFields(in: try cell(at: 0)).contains {
                 $0.stringValue == "This is the beginning of #general."
                     && !$0.isHiddenOrHasHiddenAncestor
             })
-        show(MessageTableState(rows: page, loading: .older))
-        let spinner = try #require(spinners(in: try cell(at: 0)).first)
-        #expect(!spinner.isHiddenOrHasHiddenAncestor)
-    }
-
-    func spinners(in view: NSView) -> [NSProgressIndicator] {
-        view.subviews.flatMap { subview in
-            (subview as? NSProgressIndicator).map { [$0] } ?? spinners(in: subview)
-        }
     }
 
     @Test
@@ -1125,5 +1117,92 @@ struct MessageTableTests {
         #expect(abs(place(of: 130) - before) <= 0.5)
         setListHeight(400)
         #expect(abs(place(of: 130) - before) <= 0.5)
+    }
+
+    @Test
+    func aFlingIntoThePlaceholdersKeepsMoving() throws {
+        show(page)
+        let bottomClip = try #require(clip as? BottomClipView)
+        let first = table.rect(ofRow: index(of: 101)).minY
+        #expect(first - bottomClip.originRange.lowerBound >= 1.5 * clip.bounds.height)
+
+        let inside = first - clip.bounds.height - 50
+        clip.scroll(to: NSPoint(x: 0, y: inside))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+
+        #expect(inside >= bottomClip.originRange.lowerBound)
+        #expect(clip.bounds.minY == inside)
+    }
+
+    @Test
+    func aPageLandingOverVisiblePlaceholdersKeepsTheFirstMessageInPlace() {
+        show(page)
+        let first = table.rect(ofRow: index(of: 101)).minY
+        clip.scroll(to: NSPoint(x: 0, y: first - 200))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        let before = place(of: 101)
+
+        show(messages(50, from: 51) + page)
+        #expect(abs(place(of: 101) - before) <= 0.5)
+
+        // Only placeholders in view: the first real message below them holds the place.
+        let next = table.rect(ofRow: index(of: 51)).minY
+        clip.scroll(to: NSPoint(x: 0, y: next - clip.bounds.height - 100))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        let hidden = place(of: 51)
+
+        show(messages(50, from: 1) + messages(50, from: 51) + page)
+        #expect(abs(place(of: 51) - hidden) <= 0.5)
+        #expect(
+            visibleRows.contains { row in
+                if case .message = controller.timeline.items[row] { true } else { false }
+            })
+    }
+
+    @Test
+    func theNextPageIsRequestedWithinThreeViewHeights() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(messages(200, from: 101))
+        let first = table.rect(ofRow: index(of: 101)).minY
+        let view = clip.bounds.height
+
+        clip.scroll(to: NSPoint(x: 0, y: first + 3.2 * view))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        #expect(actions.calls.isEmpty)
+
+        clip.scroll(to: NSPoint(x: 0, y: first + 2.8 * view))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        #expect(actions.calls == ["more older"])
+    }
+
+    @Test
+    func everyPlaceholderFillIsLogged() {
+        var lines: [String] = []
+        let enabled = ScrollLog.enabled
+        let write = ScrollLog.write
+        ScrollLog.enabled = true
+        ScrollLog.write = { lines.append($0) }
+        defer {
+            ScrollLog.enabled = enabled
+            ScrollLog.write = write
+        }
+        show(page)
+        let first = table.rect(ofRow: index(of: 101)).minY
+        clip.scroll(to: NSPoint(x: 0, y: first - 200))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+
+        show(messages(50, from: 51) + page)
+
+        let fills = lines.filter { $0.contains("fills the older placeholders") }
+        #expect(fills.count == 1, "\(lines)")
+        #expect(fills.first?.contains("inserted 50") == true, "\(fills)")
+        #expect(fills.first?.contains("visible true") == true, "\(fills)")
     }
 }

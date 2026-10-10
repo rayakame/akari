@@ -55,6 +55,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // fling first reaches a row, which moves the bottom under it.
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
     private var rowHeightsWidth: CGFloat = 0
+    private var placeholderHeight = PlaceholderCell.height(forViewHeight: 0)
 
     init(
         tableView: MessageTableView = MessageTableView(),
@@ -153,9 +154,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func timeline(of state: MessageTableState) -> MessageTimeline {
-        MessageTimeline(
-            rows: state.rows, calendar: calendar,
-            edges: state.atPresent ? [.older] : [.older, .newer])
+        var edges: Set<MessageTimeline.Edge> = [state.reachedOldest ? .beginning : .older]
+        if !state.atPresent {
+            edges.insert(.newer)
+        }
+        return MessageTimeline(rows: state.rows, calendar: calendar, edges: edges)
     }
 
     // A scroll before the newest page lands cancels following the bottom.
@@ -188,6 +191,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             timeline.items.firstIndex { $0.id == place.id }.map { tableView.rect(ofRow: $0).minY }
         }
         let y = clipView.bounds.minY
+        let fills = placeholderPlaces()
         ownChanges += 1
         defer { ownChanges -= 1 }
         for index in changes.removed {
@@ -223,7 +227,68 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             restoreAnchor()
             logCompensation(place, before: before, y: y, changes: changes)
         }
+        logFills(fills, changes: changes)
         updateHover()
+    }
+
+    // Before an update: each placeholder block with the message next to it, where that message
+    // sits on screen, and whether the block shows.
+    private func placeholderPlaces() -> [(
+        edge: MessageTimeline.Edge, message: MessageTimeline.ItemId, y: CGFloat, visible: Bool
+    )] {
+        guard ScrollLog.enabled, let rows = messageRows else {
+            return []
+        }
+        var places: [(MessageTimeline.Edge, MessageTimeline.ItemId, CGFloat, Bool)] = []
+        for (index, item) in timeline.items.enumerated() {
+            guard case .edge(let edge) = item, edge != .beginning else {
+                continue
+            }
+            let row = edge == .older ? rows.first : rows.last
+            places.append(
+                (
+                    edge, timeline.items[row].id,
+                    tableView.rect(ofRow: row).minY - clipView.bounds.minY,
+                    tableView.rect(ofRow: index).intersects(clipView.bounds)
+                ))
+        }
+        return places
+    }
+
+    private func logFills(
+        _ places: [(
+            edge: MessageTimeline.Edge, message: MessageTimeline.ItemId, y: CGFloat, visible: Bool
+        )], changes: TimelineChanges
+    ) {
+        for place in places {
+            guard let index = timeline.items.firstIndex(where: { $0.id == place.message }) else {
+                continue
+            }
+            let inserted =
+                place.edge == .older
+                ? changes.inserted.count(in: 1..<index)
+                : changes.inserted.count(in: (index + 1)..<timeline.items.count)
+            guard inserted > 0 else {
+                continue
+            }
+            ScrollLog.log(
+                "table \(number) fills the \(place.edge == .older ? "older" : "newer") "
+                    + "placeholders: inserted \(inserted), visible \(place.visible), next message "
+                    + "y \(place.y) to \(tableView.rect(ofRow: index).minY - clipView.bounds.minY)")
+        }
+    }
+
+    // The first and last message rows, between the edges.
+    private var messageRows: (first: Int, last: Int)? {
+        let isMessage = { (item: MessageTimeline.Item) -> Bool in
+            if case .message = item { true } else { false }
+        }
+        guard let first = timeline.items.firstIndex(where: isMessage),
+            let last = timeline.items.lastIndex(where: isMessage)
+        else {
+            return nil
+        }
+        return (first, last)
     }
 
     private func logCompensation(
@@ -248,16 +313,20 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard filled, !requested, state.loading == nil, !state.rows.isEmpty else {
             return
         }
+        guard let rows = messageRows else {
+            return
+        }
         let bounds = clipView.bounds
-        let distance = max(bounds.height, 600)
+        // Well before the reader reaches the placeholders, as in the official client.
+        let distance = 3 * max(bounds.height, 200)
         if !state.reachedOldest, state.failedLoads[.older] == nil,
-            bounds.minY - clipView.originRange.lowerBound < distance
+            bounds.minY - tableView.rect(ofRow: rows.first).minY < distance
         {
             requested = true
             ScrollLog.log("table \(number) asks for older messages at y \(bounds.minY)")
             actions?.loadMore(.older)
         } else if !state.atPresent, state.failedLoads[.newer] == nil,
-            tableView.contentHeight - bounds.maxY < distance
+            tableView.rect(ofRow: rows.last).maxY - bounds.maxY < distance
         {
             requested = true
             ScrollLog.log("table \(number) asks for newer messages at y \(bounds.minY)")
@@ -269,27 +338,44 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         for (index, item) in timeline.items.enumerated() {
             guard case .edge(let edge) = item,
                 let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
-                    as? EdgeCell
             else {
                 continue
             }
-            cell.show(look(of: edge))
+            configure(cell, edge)
         }
     }
 
-    private func look(of edge: MessageTimeline.Edge) -> EdgeCell.Look {
-        let load: MessageListModel.Load = edge == .older ? .older : .newer
-        if state.loading == load {
-            return .loading
+    private func configure(_ cell: NSView, _ edge: MessageTimeline.Edge) {
+        if let cell = cell as? EdgeCell {
+            cell.show(state.beginning)
+        } else if let cell = cell as? PlaceholderCell {
+            let load: MessageListModel.Load = edge == .older ? .older : .newer
+            let failure =
+                state.failedLoads[load] == nil
+                ? nil
+                : edge == .older ? "Couldn't load older messages." : "Couldn't load newer messages."
+            cell.show(edge, height: placeholderHeight, failure: failure)
         }
-        if state.failedLoads[load] != nil {
-            return .failed(
-                edge == .older ? "Couldn't load older messages." : "Couldn't load newer messages.")
+    }
+
+    // The placeholders cover one and a half views of whatever height the list has.
+    private func updatePlaceholderHeight() {
+        let height = PlaceholderCell.height(forViewHeight: clipView.bounds.height)
+        guard height != placeholderHeight else {
+            return
         }
-        if edge == .older && state.reachedOldest {
-            return .beginning(state.beginning)
+        placeholderHeight = height
+        var rows = IndexSet()
+        for (index, item) in timeline.items.enumerated() {
+            if case .edge(let edge) = item, edge != .beginning {
+                rowHeights[item.id] = nil
+                rows.insert(index)
+            }
         }
-        return .idle
+        if !rows.isEmpty {
+            tableView.noteHeightOfRows(withIndexesChanged: rows)
+            configureEdges()
+        }
     }
 
     // Away from the present, rows below the reader are an older page's continuation, not news.
@@ -341,8 +427,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func height(of item: MessageTimeline.Item, width: CGFloat) -> CGFloat {
         switch item {
-        case .edge:
+        case .edge(.beginning):
             return EdgeCell.height
+        case .edge:
+            return placeholderHeight
         case .day(let day):
             return DayDividerCell.height(
                 MessageFormat.dayDivider(day, calendar: calendar, locale: locale))
@@ -367,10 +455,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     func cell(for item: MessageTimeline.Item) -> NSTableCellView {
         switch item {
-        case .edge(let edge):
+        case .edge(.beginning):
             let cell = reuse(EdgeCell.identifier) as? EdgeCell ?? EdgeCell()
+            configure(cell, .beginning)
+            return cell
+        case .edge(let edge):
+            let cell = reuse(PlaceholderCell.identifier) as? PlaceholderCell ?? PlaceholderCell()
             cell.onRetry = { [weak self] in self?.actions?.loadMore(edge) }
-            cell.show(look(of: edge))
+            configure(cell, edge)
             return cell
         case .day(let day):
             let cell = reuse(DayDividerCell.identifier) as? DayDividerCell ?? DayDividerCell()
@@ -503,6 +595,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // A list that grew below its rows looks like a bounce past the bottom, which settling leaves
     // to AppKit; here it's the frame, so a pinned list goes to the exact bottom.
     @objc private func listResized(_ notification: Notification) {
+        updatePlaceholderHeight()
         if filled, pinsToBottom, !isLiveScrolling {
             ownChanges += 1
             defer { ownChanges -= 1 }

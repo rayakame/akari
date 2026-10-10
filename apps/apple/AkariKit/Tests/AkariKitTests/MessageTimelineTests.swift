@@ -109,5 +109,8 @@ struct MessageTimelineTests {
         #expect(
             MessageTimeline(rows: rows, calendar: berlin, edges: [.older]).shape
                 == ["older", "day", "+1", "2"])
+        #expect(
+            MessageTimeline(rows: rows, calendar: berlin, edges: [.beginning, .newer]).shape
+                == ["beginning", "day", "+1", "2", "newer"])
     }
 }

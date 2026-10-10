@@ -117,6 +117,7 @@ final class MessageListBridge: MessageListActions {
             switch edge {
             case .older: await messages.loadOlder()
             case .newer: await messages.loadNewer()
+            case .beginning: break
             }
         }
     }

@@ -35,6 +35,7 @@ extension MessageTimeline {
             case .day: "day"
             case .edge(.older): "older"
             case .edge(.newer): "newer"
+            case .edge(.beginning): "beginning"
             case .message(let row, let startsGroup):
                 startsGroup ? "+\(row.id.rawValue)" : "\(row.id.rawValue)"
             }
