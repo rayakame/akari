@@ -33,21 +33,27 @@ Akari's own wording, in `textMuted`:
 ## Keys
 
 - **Return** sends.
-- **Shift+Return** and **Option+Return** start a new line.
+- **Shift+Return**, **Option+Return** and **Ctrl+Return** start a new line.
 - **Return while an input method is composing** (Japanese, Chinese and other input sources)
   commits the composition; it never sends.
 - **Up arrow in an empty composer** edits the user's last message in the official client.
   Akari reserves the key for that and does nothing yet.
 - **Escape** see [shortcuts.md](shortcuts.md).
 
-Pasted text arrives as plain text. Smart quotes, smart dashes and text replacement are off,
-since they would change markdown and code; the official client doesn't do them either.
+Pasted text arrives as plain text. Smart quotes, smart dashes, text replacement and automatic
+spelling correction are off, since they would change markdown and code; the official client
+doesn't do them either. Misspelled words are still underlined. Undo works within the draft and
+never reaches back past a send or into another channel's draft.
 
 ## Sending
 
 - The text is trimmed of spaces and newlines at both ends. A blank message sends nothing.
-- The card clears at once and the message shows in the list as pending, dimmed (`textMuted`).
-  The official client shows pending messages in a muted gray (**unverified**).
+- The card clears as soon as the message is queued, and the message shows in the list as
+  pending, dimmed (`textMuted`). The official client shows pending messages in a muted gray
+  (**unverified**). A message refused before it's queued (too long, or Akari isn't connected)
+  leaves the text exactly as it was, with the reason under the card.
+- After a reconnect, messages that were still pending or had failed come back as the draft of
+  their channel, after any text already there, so nothing typed is lost.
 - Sending while the list shows older messages jumps to the present first.
 
 ## Failed messages

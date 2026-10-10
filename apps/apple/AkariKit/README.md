@@ -40,7 +40,8 @@ screen, so views render from them without calling into Rust.
   memory. After a login it saves the token and opens the session. A session that ends with
   `AuthenticationFailed` returns to the login screen and deletes the token with `forgetToken`,
   without sending it to Discord again. Any other close keeps the session on screen;
-  `reconnect()` opens a new one from the token in memory, with the same drafts.
+  `reconnect()` opens a new one from the token in memory, with the same drafts; the old
+  account's pending and failed messages become drafts of their channels.
   `suspend()` and `resume()` disconnect and reconnect the open session around sleep.
   `logOut()` runs once: it deletes the token with `forgetToken` first, and if that fails it
   stays on the session and sets `logoutError`; otherwise it shows the login screen and ends
@@ -54,15 +55,16 @@ screen, so views render from them without calling into Rust.
   the channel last opened in each guild and at home. It owns `GuildListModel` (the server
   list), `DirectMessageListModel` (the DM list, the latest conversation first, with each
   one's recipients and name), `ChannelListModel` (the open guild's channels) and
-  `MessageListModel` (the open channel's messages and loads; `loadFailure` says which load
-  failed). `AccountMemory` keeps the last place and channel per account, and the session's
+  `MessageListModel` (the open channel's messages and loads; `failedLoads` keeps each kind of
+  load's last failure). `AccountMemory` keeps the last place and channel per account, and the session's
   first READY reopens them, as Discord does after a restart. `notice` is what a connection bar
   says (`ConnectionNotice`: connecting, reconnecting, offline after `suspend()`, or closed with
   its error), with the delay before a bar shows it.
 - `ComposerModel` (`messages.composer`) holds the channel's draft, kept per channel for the
   session, its length as Discord counts it and the limit, whether the user may send there,
   the slowmode from akari-core, and the problem shown under the composer in Akari's words.
-  `submit()` sends the trimmed draft unless it is blank, too long or held back by slowmode;
+  `submit()` sends the trimmed draft unless it is blank, too long or held back by slowmode,
+  and clears it only once the core has queued the message;
   `retry(_:)` and `discard(_:)` act on failed messages.
 - `CollapsedCategories` keeps the collapsed categories per guild across launches; a collapsed
   category still shows the open channel.

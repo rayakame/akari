@@ -127,6 +127,10 @@ every stale window with the latest 100 messages:
   Discord's OpenAPI description gives `content` a maximum length of 4,000
   ([discord-api-spec](https://github.com/discord/discord-api-spec)).
 
+- **Queueing and delivering.** `send_message` is `queue_message` followed by
+  `deliver_message`. `queue_message` refuses empty or too long content and a closed account
+  before anything is queued, and returns the pending ID; a UI that keeps a draft clears it only
+  then. `deliver_message` sends a queued message (jumping a detached window to the present).
 - **Akari's check.** `message_length(content)` counts code points, and
   `Store::message_length_limit()` gives the limit for the current user's `premium_type`
   (2,000 before READY). `send_message` refuses longer content with
