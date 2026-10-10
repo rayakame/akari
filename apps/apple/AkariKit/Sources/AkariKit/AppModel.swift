@@ -19,6 +19,7 @@ public final class AppModel {
 
     @ObservationIgnored private let client: DiscordClient
     @ObservationIgnored private let memory: AccountMemory
+    @ObservationIgnored private var started = false
 
     public init(client: DiscordClient, memory: AccountMemory = AccountMemory()) {
         self.client = client
@@ -27,9 +28,11 @@ public final class AppModel {
 
     /// Restores the last account, or shows the login screen.
     public func start() async {
-        guard case .starting = screen else {
+        // Set before the token load awaits, which can wait on a Keychain dialog.
+        guard !started else {
             return
         }
+        started = true
         guard let userId = memory.lastAccount else {
             return showLogin(nil)
         }

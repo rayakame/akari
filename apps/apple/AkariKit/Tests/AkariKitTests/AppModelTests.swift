@@ -42,6 +42,28 @@ final class AppModelTests {
     }
 
     @Test
+    func aSecondStartDuringTheTokenLoadDoesNothing() async throws {
+        memory.lastAccount = id(42)
+        client.tokens.withLock { $0[id(42)] = "stored.token" }
+        client.holdTokenLoads.withLock { $0 = true }
+        let app = makeApp()
+
+        async let first: Void = app.start()
+        await client.tokenLoads.pulled(1)
+        client.tokenLoads.send(())
+        client.tokenLoads.send(())
+        await app.start()
+        await first
+
+        let accounts = client.calls.current.filter { call in
+            if case .account = call { true } else { false }
+        }
+        #expect(accounts.count == 1)
+        #expect(client.calls.current.filter { $0 == .loadToken(id(42)) }.count == 1)
+        try #require(app.screen.session).close()
+    }
+
+    @Test
     func startShowsLoginWithoutAStoredToken() async throws {
         let fresh = makeApp()
         await fresh.start()

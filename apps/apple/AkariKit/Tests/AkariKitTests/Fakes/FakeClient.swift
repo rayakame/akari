@@ -19,6 +19,9 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
     let qrError = Locked<LoginError?>(nil)
     let tokens = Locked<[UserId: String]>([:])
     let loadError = Locked<TokenStoreError?>(nil)
+    // While set, each token load waits for one value here, like a Keychain dialog.
+    let holdTokenLoads = Locked(false)
+    let tokenLoads = AsyncQueue<Void>()
     let saveError = Locked<TokenStoreError?>(nil)
     // Every account `account(token:)` returned.
     let accounts = Locked<[FakeAccount]>([])
@@ -58,6 +61,9 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
 
     override func loadToken(account: UserId) async throws -> Token? {
         record(.loadToken(account))
+        if holdTokenLoads.current {
+            _ = await tokenLoads.next()
+        }
         if let error = loadError.current {
             throw error
         }
