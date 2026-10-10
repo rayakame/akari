@@ -321,6 +321,23 @@ final class AppModelTests {
     }
 
     @Test
+    func reconnectWaitsForALogOut() async throws {
+        let (app, _, account) = try await restored()
+        account.fakeStore.subscription.send(.connection(state: .closed(error: .Stopped)))
+        await account.fakeStore.subscription.batches.pulled(2)
+        client.holdForgets.withLock { $0 = true }
+
+        async let logOut: Void = app.logOut()
+        await client.forgets.pulled(1)
+        app.reconnect()
+        #expect(client.accounts.current.count == 1)
+        client.forgets.send(())
+        await logOut
+
+        #expect(app.screen.login != nil)
+    }
+
+    @Test
     func suspendAndResumeReachTheOpenSession() async throws {
         let fresh = makeApp()
         await fresh.start()

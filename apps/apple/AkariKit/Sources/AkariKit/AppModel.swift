@@ -110,8 +110,8 @@ public final class AppModel {
 
     /// Opens a new session from the held token after a close that wasn't a rejected token.
     public func reconnect() {
-        guard case .session(let old) = screen, case .closed(let error) = old.connection,
-            error != .AuthenticationFailed, let token
+        guard !loggingOut, case .session(let old) = screen,
+            case .closed(let error) = old.connection, error != .AuthenticationFailed, let token
         else {
             return
         }
@@ -119,14 +119,13 @@ public final class AppModel {
         open(old.userId, token, drafts: old.drafts)
     }
 
-    /// Before the Mac sleeps.
+    /// Disconnects the open session, e.g. before the system sleeps.
     public func suspend() {
         if case .session(let session) = screen {
             session.suspend()
         }
     }
 
-    /// After the Mac wakes.
     public func resume() {
         if case .session(let session) = screen {
             session.resume()
