@@ -102,6 +102,8 @@ pub struct Message {
     /// Embeds aren't rendered yet; the count is enough for a placeholder.
     pub embed_count: u32,
     pub sticker_names: Vec<String>,
+    /// Laid out with Components V2, which Akari can't show yet; such a message has no content.
+    pub components_v2: bool,
     pub delivery: Delivery,
 }
 
@@ -125,6 +127,7 @@ impl From<&state::Message> for Message {
                 .iter()
                 .map(|sticker| sticker.name.to_string())
                 .collect(),
+            components_v2: message.uses_components_v2(),
             delivery: message.delivery.into(),
         }
     }

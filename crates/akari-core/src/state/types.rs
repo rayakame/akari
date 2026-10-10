@@ -179,6 +179,17 @@ pub struct Message {
     pub delivery: Delivery,
 }
 
+impl Message {
+    /// Discord's `IS_COMPONENTS_V2` message flag.
+    pub const IS_COMPONENTS_V2: u64 = 1 << 15;
+
+    /// Laid out with Components V2: the message has no content and is made of its components,
+    /// which Akari doesn't read yet.
+    pub fn uses_components_v2(&self) -> bool {
+        self.flags & Self::IS_COMPONENTS_V2 != 0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Delivery {

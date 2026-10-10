@@ -936,3 +936,45 @@ fn a_later_ready_reports_guild_channels_only_beyond_their_last_message() {
     );
     assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_099));
 }
+
+#[test]
+fn a_components_v2_message_keeps_its_flag() {
+    let mut state = viewing_general();
+    let mut v2 = message(400_000_000_000_000_030, GENERAL);
+    v2["flags"] = (1u64 << 15).into();
+    v2["content"] = "".into();
+
+    apply(&mut state, "MESSAGE_CREATE", v2);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(400_000_000_000_000_031, GENERAL),
+    );
+
+    let stored = |id| {
+        state
+            .message(Snowflake::new(GENERAL), Snowflake::new(id))
+            .unwrap()
+    };
+    assert!(stored(400_000_000_000_000_030).uses_components_v2());
+    assert!(!stored(400_000_000_000_000_031).uses_components_v2());
+}
+
+#[test]
+fn a_window_opened_before_the_first_ready_survives_it() {
+    let mut state = State::new();
+    state.view_channel(Snowflake::new(GENERAL), &mut Vec::new());
+    let ticket = state
+        .begin_load(Snowflake::new(GENERAL), LoadKind::Latest, &mut Vec::new())
+        .unwrap();
+    let page: Vec<model::Message> = [message(10, GENERAL), message(11, GENERAL)]
+        .into_iter()
+        .map(|value| serde_json::from_str(&value.to_string()).unwrap())
+        .collect();
+    state.finish_load(ticket, page, true, &mut Vec::new());
+
+    let events = apply(&mut state, "READY", ready_value());
+
+    assert_eq!(events, ["Ready"]);
+    assert_eq!(message_ids(&state, GENERAL), Some(vec![10, 11]));
+}

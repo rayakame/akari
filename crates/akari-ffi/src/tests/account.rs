@@ -178,7 +178,38 @@ async fn live_messages_cross_as_ids_and_read_as_records() {
     );
     assert_eq!(message.embed_count, 1);
     assert_eq!(message.delivery, Delivery::Sent);
+    assert!(!message.components_v2);
     assert!(message.timestamp < SystemTime::now());
+    account.close();
+}
+
+#[tokio::test]
+async fn a_components_v2_message_says_so() {
+    let gateway = FakeGateway::start().await;
+    let account = gateway.client().account(token("t")).unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let mut ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    account.view_channel(GENERAL);
+    let mut message = fixture(include_str!(
+        "../../../akari-core/tests/fixtures/message_create.json"
+    ));
+    message["flags"] = (1u64 << 15).into();
+    message["content"] = "".into();
+
+    send(
+        &mut ws,
+        json!({"op": 0, "s": 2, "t": "MESSAGE_CREATE", "d": message}),
+    )
+    .await;
+
+    events_until(&subscription, |event| {
+        matches!(event, StoreEvent::MessageInserted { .. })
+    })
+    .await;
+    let messages = account.store().messages(GENERAL, vec![MESSAGE]);
+    assert!(messages[0].components_v2);
     account.close();
 }
 
