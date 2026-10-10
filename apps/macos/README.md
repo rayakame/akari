@@ -54,15 +54,24 @@ is tested there with `swift test`.
 
 ## Logs and launch time
 
-In Debug builds, the `-AkariLog <filter>` launch argument sends akari-core's logs to stderr,
-e.g. `-AkariLog akari_core=info`; the scheme has it, switched off. The logs hold IDs and
-event names, never message content, names or tokens.
+The `-AkariLog <filter>` launch argument sends akari-core's logs to stderr, in every build.
+The filter has tracing's syntax: `akari_core=info` shows the gateway's milestones with their
+durations, `akari_core=debug` more. The logs hold event names, IDs and durations, never
+message content, names or tokens.
 
-The app logs once how long it took from process start to the first message list with rows
-(`subsystem == "app.akari"`, category `launch`):
+- **Xcode:** Product → Scheme → Edit Scheme… → Run → Arguments, tick
+  `-AkariLog akari_core=info`, run. The lines show in Xcode's console, e.g.
+  `INFO akari_core::gateway::connection::task: gateway connected connect_ms=290`.
+- **Terminal:** `Akari.app/Contents/MacOS/Akari -AkariLog akari_core=info`.
+
+The app logs its launch milestones once each, in milliseconds since process start, to the
+unified log (subsystem `app.akari`, category `launch`): app started, client created, token
+loaded, session started, first message load started and finished, first channel rendered,
+READY in the app. Xcode's console shows them too. In zsh, `log` is a builtin, so call the
+tool by its path:
 
 ```sh
-log stream --predicate 'subsystem == "app.akari" AND category == "launch"' --info
+/usr/bin/log stream --predicate 'subsystem == "app.akari" AND category == "launch"' --level info
 ```
 
 ## Theme

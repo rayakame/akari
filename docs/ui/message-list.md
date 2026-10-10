@@ -104,3 +104,5 @@ Akari doesn't know. A type Akari doesn't know shows its content like an ordinary
 - Markdown, mentions, emoji, embeds and images. Until markdown rendering exists, Akari shows
   message content as plain text: a mention looks like `<@123>` and markdown symbols show as
   typed.
+- Components V2 layouts ([messages.md](../protocol/messages.md#components-v2)). Until Akari
+  renders them, such a message shows one muted placeholder line where its content would be.
