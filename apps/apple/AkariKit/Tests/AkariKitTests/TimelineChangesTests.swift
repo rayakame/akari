@@ -6,8 +6,26 @@ import Testing
 struct TimelineChangesTests {
     let noon = berlinTime(2026, 10, 10, 12, 0)
 
-    func items(_ rows: [MessageListModel.Row]) -> [MessageTimeline.Item] {
-        MessageTimeline(rows: rows, calendar: berlin).items
+    func items(
+        _ rows: [MessageListModel.Row], edges: Set<MessageTimeline.Edge> = []
+    ) -> [MessageTimeline.Item] {
+        MessageTimeline(rows: rows, calendar: berlin, edges: edges).items
+    }
+
+    @Test
+    func edgesKeepTheirKeysAcrossPages() {
+        let page = (51...60).map { row(UInt64($0), at: noon + Double($0) * 60) }
+        let older = (1...50).map { row(UInt64($0), at: noon - 86_400 + Double($0) * 60) }
+        let old = items(page, edges: [.older])
+        let new = items(older + page, edges: [.older])
+
+        let changes = TimelineChanges(from: old, to: new)
+
+        #expect(new[0].id == .edge(.older))
+        #expect(!changes.removed.contains(0))
+        #expect(!changes.inserted.contains(0))
+        #expect(!changes.reloaded.contains(0))
+        #expect(changes.inserted == IndexSet(1...51))
     }
 
     @Test
@@ -96,8 +114,9 @@ struct TimelineChangesTests {
                 last += 86_400
                 edited.append(row(next, at: last))
             }
-            let old = items(rows)
-            let new = items(edited)
+            let both: Set<MessageTimeline.Edge> = [.older, .newer]
+            let old = items(rows, edges: random.next() % 2 == 0 ? [.older] : both)
+            let new = items(edited, edges: random.next() % 2 == 0 ? [.older] : both)
 
             let changes = TimelineChanges(from: old, to: new)
 

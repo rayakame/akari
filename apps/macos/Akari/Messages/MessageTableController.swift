@@ -29,6 +29,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var lastLiveScroll = Date.distantPast
     private var liveScrollGeneration = 0
     private static let liveScrollQuiet: TimeInterval = 0.5
+    private static let edgeHeight: CGFloat = 48
     // Exact heights before a row shows: automatic heights start as estimates and change when a
     // fling first reaches a row, which moves the bottom under it.
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
@@ -149,6 +150,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func height(of item: MessageTimeline.Item, width: CGFloat) -> CGFloat {
         switch item {
+        case .edge:
+            return Self.edgeHeight
         case .day(let day):
             return DayDividerCell.height(
                 MessageFormat.dayDivider(day, calendar: calendar, locale: locale))
@@ -173,6 +176,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     func cell(for item: MessageTimeline.Item) -> NSTableCellView {
         switch item {
+        case .edge:
+            return NSTableCellView()
         case .day(let day):
             let cell = reuse(DayDividerCell.identifier) as? DayDividerCell ?? DayDividerCell()
             cell.configure(MessageFormat.dayDivider(day, calendar: calendar, locale: locale))

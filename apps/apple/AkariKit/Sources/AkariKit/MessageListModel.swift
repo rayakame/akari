@@ -9,6 +9,16 @@ public final class MessageListModel {
         case newer
     }
 
+    public struct LoadFailure: Equatable, Sendable {
+        public let load: Load
+        public let error: RequestError
+
+        public init(load: Load, error: RequestError) {
+            self.load = load
+            self.error = error
+        }
+    }
+
     public struct Row: Identifiable, Equatable, Sendable {
         /// Stable for the row's life: a sent message keeps its pending ID as its key.
         public let id: MessageId
@@ -27,7 +37,8 @@ public final class MessageListModel {
     public private(set) var atPresent = true
     public private(set) var isStale = false
     public private(set) var loading: Load?
-    public private(set) var loadError: RequestError?
+    /// The last load's failure, until a load works.
+    public private(set) var loadFailure: LoadFailure?
     /// The channel's composer; created with the model.
     public let composer: ComposerModel
 
@@ -108,11 +119,12 @@ public final class MessageListModel {
         do {
             try await account.loadMessages(channelId: channelId, load: request)
             LaunchLog.mark("first message load finished")
-            loadError = nil
+            loadFailure = nil
             // The batch with the loaded range may come later; the rows shouldn't lag `loading`.
             reload(rereading: [])
         } catch {
-            loadError = error as? RequestError
+            loadFailure = LoadFailure(
+                load: kind, error: error as? RequestError ?? .UnexpectedResponse)
         }
     }
 

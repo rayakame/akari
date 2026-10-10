@@ -32,7 +32,7 @@ struct MessageArea: View {
 
     @ViewBuilder private var status: some View {
         if messages.rows.isEmpty {
-            if let error = messages.loadError {
+            if let error = messages.loadFailure?.error {
                 VStack(spacing: 12) {
                     Text(error.localizedDescription)
                         .foregroundStyle(Color(nsColor: Palette.textMuted))

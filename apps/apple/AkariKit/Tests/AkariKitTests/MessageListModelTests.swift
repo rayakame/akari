@@ -305,11 +305,11 @@ struct MessageListModelTests {
         model.apply(EventBatch([.messagesTrimmed(channelId: here, first: id(3), last: id(3))]))
         account.loadError.withLock { $0 = .Network(kind: .timeout) }
         await model.loadNewer()
-        #expect(model.loadError == .Network(kind: .timeout))
+        #expect(model.loadFailure == .init(load: .newer, error: .Network(kind: .timeout)))
 
         account.loadError.withLock { $0 = nil }
         await model.loadNewer()
-        #expect(model.loadError == nil)
+        #expect(model.loadFailure == nil)
         #expect(store.log.actions == [.load(here, .newer(limit: 50)), .load(here, .newer(limit: 50))])
     }
 
@@ -327,5 +327,19 @@ struct MessageListModelTests {
         #expect(!model.reachedOldest)
         #expect(model.atPresent)
         #expect(!model.isStale)
+    }
+
+    @Test
+    func aFailedLoadSaysWhichLoadFailed() async {
+        shown(window([1, 2], latest: false))
+        let model = loaded()
+        account.loadError.withLock { $0 = .ServerError(status: 500) }
+
+        await model.loadOlder()
+        #expect(model.loadFailure == .init(load: .older, error: .ServerError(status: 500)))
+
+        account.loadError.withLock { $0 = nil }
+        await model.loadNewer()
+        #expect(model.loadFailure == nil)
     }
 }
