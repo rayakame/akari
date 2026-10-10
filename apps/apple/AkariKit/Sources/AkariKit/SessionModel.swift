@@ -98,6 +98,12 @@ public final class SessionModel {
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
         guard place != self.place else {
+            // The session starts at home, so choosing home before READY cancels a server restore.
+            if case .guild = spotToRestore?.place {
+                spotToRestore = nil
+                messages = nil
+                rememberSpot()
+            }
             return
         }
         // Where the user went before the first READY wins over where they were last time.

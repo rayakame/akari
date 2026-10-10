@@ -414,6 +414,26 @@ final class SessionModelTests {
     }
 
     @Test
+    func homeChosenBeforeReadyWinsOverALastServer() async {
+        memory.remember(.init(place: .guild(id(1)), channel: id(12)), of: id(1))
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(11), channel(12)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+
+        session.open(.home)
+        subscription.send(.ready)
+        await subscription.batches.pulled(2)
+
+        #expect(session.place == .home)
+        #expect(session.messages == nil)
+        #expect(memory.lastSpot(of: id(1)) == .init(place: .home, channel: nil))
+        session.close()
+    }
+
+    @Test
     func aGoneGuildFallsBackHome() async {
         memory.remember(.init(place: .guild(id(9)), channel: id(90)), of: id(1))
         let session = makeSession()
