@@ -22,7 +22,8 @@ struct InitialsAvatar: View {
             .fill(Color(nsColor: Palette.avatars[Int(id % UInt64(Palette.avatars.count))]))
             .frame(width: size, height: size)
             .overlay {
-                Text(Initials.of(name, limit: 2))
+                // Server initials keep punctuation; an avatar of "Ren, Bo" should read "RB".
+                Text(Initials.of(name.filter { !$0.isPunctuation }, limit: 2))
                     .font(.system(size: size * 0.4, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)

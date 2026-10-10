@@ -34,9 +34,11 @@ private struct AppScreen: View {
             case .login(let login):
                 LoginView(model: login)
                     .transition(.opacity)
-            case .session:
-                Text("Session")
-                    .transition(.opacity)
+            case .session(let session):
+                SessionView(session: session) { _ in
+                    Color(nsColor: Palette.chat)
+                }
+                .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: app.screen.key)
