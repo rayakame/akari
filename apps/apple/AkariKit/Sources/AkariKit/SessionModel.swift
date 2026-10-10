@@ -177,11 +177,11 @@ public final class SessionModel {
     }
 
     private func closed(_ error: GatewayError?) {
-        connection = .closed(error: error)
         guard !ended else {
             return
         }
         ended = true
+        connection = .closed(error: error)
         onClosed(error)
     }
 }

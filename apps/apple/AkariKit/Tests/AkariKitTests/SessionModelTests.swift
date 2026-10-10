@@ -116,6 +116,7 @@ struct SessionModelTests {
         await subscription.batches.pulled(2)
 
         session.close()
+        await finished(session.loop.running)
 
         #expect(session.connection == .closed(error: .AuthenticationFailed))
     }
