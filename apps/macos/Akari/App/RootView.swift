@@ -35,8 +35,8 @@ private struct AppScreen: View {
                 LoginView(model: login)
                     .transition(.opacity)
             case .session(let session):
-                SessionView(session: session) { _ in
-                    Color(nsColor: Palette.chat)
+                SessionView(session: session) { messages in
+                    MessageArea(messages: messages)
                 }
                 .transition(.opacity)
             }

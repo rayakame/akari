@@ -13,6 +13,11 @@ public final class MessageListModel {
         /// Stable for the row's life: a sent message keeps its pending ID as its key.
         public let id: MessageId
         public let message: Message
+
+        public init(id: MessageId, message: Message) {
+            self.id = id
+            self.message = message
+        }
     }
 
     public let channelId: ChannelId
