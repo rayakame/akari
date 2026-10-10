@@ -22,11 +22,11 @@ enum Launch {
         if isTesting {
             return .testing
         }
-        #if DEBUG
-            enableLoggingIfAsked(defaults) { try enableLogging(filter: $0) }
-        #endif
+        LaunchLog.mark("app started")
+        enableLoggingIfAsked(defaults) { try enableLogging(filter: $0) }
         do {
             let client = try DiscordClient(host: .current, tokenStore: KeychainTokenStore())
+            LaunchLog.mark("client created")
             return .running(AppModel(client: client))
         } catch {
             return .failed(error.localizedDescription)
