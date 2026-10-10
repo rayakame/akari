@@ -353,6 +353,28 @@ struct LoginModelTests {
     }
 
     @Test
+    func aStepThatEndsAfterBackToFormChangesNothing() async {
+        let model = filledIn()
+        async let submitting: Void = model.submit()
+        await password.replies.pulled(1)
+
+        password.reply(.mfa(challenge: mfa([.totp])))
+        model.backToForm()
+        await submitting
+        #expect(model.step == .credentials)
+
+        let second = FakePasswordLogin()
+        client.passwordLogins.withLock { $0 = [second] }
+        async let failing: Void = model.submit()
+        await second.replies.pulled(1)
+        second.fail(.InvalidCredentials(message: "Login or password is invalid."))
+        model.backToForm()
+        await failing
+
+        #expect(model.fieldError == nil)
+    }
+
+    @Test
     func disappearCancelsBothFlows() async {
         let model = filledIn()
         model.appear()

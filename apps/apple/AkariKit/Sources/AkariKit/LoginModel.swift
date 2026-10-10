@@ -110,7 +110,7 @@ public final class LoginModel {
         }
         let flow = flows.password ?? client.passwordLogin()
         flows.password = flow
-        await run {
+        await run(flow) {
             switch self.step {
             case .credentials:
                 try await flow.submit(login: self.login, password: self.password)
@@ -137,13 +137,8 @@ public final class LoginModel {
             step = .mfa(challenge, method: method)
             return
         }
-        await run {
-            let next = try await flow.sendMfaSms()
-            if case .mfa(let challenge) = next {
-                self.step = .mfa(challenge, method: .sms)
-                return nil
-            }
-            return next
+        await run(flow, showing: .sms) {
+            try await flow.sendMfaSms()
         }
     }
 
@@ -167,8 +162,11 @@ public final class LoginModel {
         flows.password = nil
     }
 
-    // `request` returns nil when it already set the step.
-    private func run(_ request: @MainActor () async throws -> LoginStep?) async {
+    // `showing` is the method an MFA step answer selects; without it, the preferred one.
+    private func run(
+        _ flow: PasswordLogin, showing method: MfaMethod? = nil,
+        _ request: @MainActor () async throws -> LoginStep?
+    ) async {
         isSubmitting = true
         fieldError = nil
         message = nil
@@ -177,7 +175,9 @@ public final class LoginModel {
             isSubmitting = false
         }
         do {
-            guard let next = try await request() else {
+            let next = try await request()
+            // A flow that backToForm() or the QR login ended can still answer.
+            guard flows.password === flow, let next else {
                 return
             }
             switch next {
@@ -187,14 +187,17 @@ public final class LoginModel {
                 step = .captchaUnsupported
             case .mfa(let challenge):
                 code = ""
-                let preferred = [MfaMethod.totp, .sms, .backup].first(where: challenge.methods.contains)
+                let preferred =
+                    method ?? [MfaMethod.totp, .sms, .backup].first(where: challenge.methods.contains)
                 step = .mfa(challenge, method: preferred ?? challenge.methods.first ?? .totp)
             case .newLocation(let via):
                 code = ""
                 step = .newLocation(via)
             }
         } catch {
-            show(error as? LoginError ?? .UnexpectedResponse)
+            if flows.password === flow {
+                show(error as? LoginError ?? .UnexpectedResponse)
+            }
         }
     }
 
