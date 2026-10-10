@@ -405,3 +405,30 @@ async fn a_too_long_message_is_refused() {
 fn message_length_counts_like_the_core() {
     assert_eq!(crate::message_length("👍🏽".to_owned()), 2);
 }
+
+#[tokio::test]
+async fn queueing_and_delivering_cross_the_boundary() {
+    let server = MockServer::start().await;
+    mount_sends(&server, &[200], Duration::ZERO).await;
+    let online = online_with(&server).await;
+    online.account.view_channel(GENERAL);
+
+    let pending = online
+        .account
+        .queue_message(GENERAL, "hello".to_owned())
+        .unwrap();
+    let window = online.account.store().window(GENERAL).unwrap();
+    assert_eq!(window.pending_ids, [pending]);
+
+    let sent = online
+        .account
+        .deliver_message(GENERAL, pending)
+        .await
+        .unwrap();
+    assert_eq!(sent, MessageId::new(400_000_000_000_000_050));
+    online.account.close();
+    assert_eq!(
+        online.account.queue_message(GENERAL, "again".to_owned()),
+        Err(RequestError::Closed)
+    );
+}

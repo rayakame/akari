@@ -2158,3 +2158,43 @@ async fn discords_length_refusal_is_too_long_with_its_limit() {
             .all(|(_, delivery)| *delivery == Delivery::Failed)
     );
 }
+
+#[tokio::test]
+async fn a_queued_message_waits_for_delivery_then_sends() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let pending = account.queue_message(general(), "hello").unwrap();
+
+    assert_eq!(outbox(&account), [(pending.get(), Delivery::Pending)]);
+    assert!(sends.bodies().is_empty());
+    let sent = account.deliver_message(general(), pending).await.unwrap();
+    assert_eq!(sent.get(), 400_000_000_000_000_050);
+    assert_eq!(sends.bodies()[0]["content"], "hello");
+    assert!(outbox(&account).is_empty());
+    assert!(matches!(
+        account.deliver_message(general(), pending).await,
+        Err(RequestError::InvalidRequest)
+    ));
+}
+
+#[tokio::test]
+async fn a_closed_account_refuses_before_anything_is_queued() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    account.close();
+
+    assert!(matches!(
+        account.queue_message(general(), "hello"),
+        Err(RequestError::Closed)
+    ));
+    assert!(outbox(&account).is_empty());
+    assert!(sends.bodies().is_empty());
+}

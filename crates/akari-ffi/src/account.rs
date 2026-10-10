@@ -81,6 +81,33 @@ impl Account {
         .map_err(Into::into)
     }
 
+    /// Shows the message as pending and returns its provisional ID, or refuses (empty or too
+    /// long content, a closed account) before anything is queued; `deliver_message` sends it.
+    pub fn queue_message(
+        &self,
+        channel_id: ChannelId,
+        content: String,
+    ) -> Result<MessageId, RequestError> {
+        self.core
+            .queue_message(channel_id, &content)
+            .map_err(Into::into)
+    }
+
+    /// Sends a message `queue_message` queued; a detached window jumps to the present, as with
+    /// `send_message`. On an error the message stays as failed.
+    pub async fn deliver_message(
+        &self,
+        channel_id: ChannelId,
+        pending_id: MessageId,
+    ) -> Result<MessageId, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.deliver_message(channel_id, pending_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
     /// Sends a failed message again with the same nonce.
     pub async fn retry_message(
         &self,

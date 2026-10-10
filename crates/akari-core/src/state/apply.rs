@@ -784,6 +784,10 @@ impl State {
         self.windows.snapshot(channel)
     }
 
+    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+        self.windows.pending(channel, id)
+    }
+
     pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.windows.message(channel, id)
     }

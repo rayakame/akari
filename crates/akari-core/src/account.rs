@@ -304,6 +304,7 @@ impl Shared {
     }
 
     fn queue(self: &Arc<Self>, channel: ChannelId, content: &str) -> Result<Queued, RequestError> {
+        self.rest.usable()?;
         let author = self
             .store
             .current_user()
@@ -333,6 +334,28 @@ impl Shared {
         );
         self.store.queue_message(channel, Arc::new(message));
         Ok(Queued { pending, detached })
+    }
+
+    // Like the official client, a detached window jumps to the present; a stale one waits for
+    // its refresh. The send doesn't wait for the jump.
+    async fn deliver_queued(
+        self: &Arc<Self>,
+        channel: ChannelId,
+        pending: MessageId,
+        content: String,
+        detached: bool,
+    ) -> Result<MessageId, RequestError> {
+        if detached {
+            let (jumped, delivered) = tokio::join!(
+                self.load(channel, LoadKind::Latest, JUMP_LIMIT),
+                self.deliver(channel, pending, content),
+            );
+            if let Err(err) = jumped {
+                tracing::debug!(error = %err, "couldn't jump to the present before sending");
+            }
+            return delivered;
+        }
+        self.deliver(channel, pending, content).await
     }
 
     async fn deliver(
@@ -501,21 +524,42 @@ impl Account {
         channel: ChannelId,
         content: String,
     ) -> Result<MessageId, RequestError> {
+        let Queued { pending, detached } = self.shared.queue(channel, &content)?;
+        self.shared
+            .deliver_queued(channel, pending, content, detached)
+            .await
+    }
+
+    /// The first half of [`Account::send_message`]: shows the message as pending and returns
+    /// its provisional ID, or refuses (empty or too long content, a closed account) before
+    /// anything is queued. [`Account::deliver_message`] sends it.
+    pub fn queue_message(
+        &self,
+        channel: ChannelId,
+        content: &str,
+    ) -> Result<MessageId, RequestError> {
+        Ok(self.shared.queue(channel, content)?.pending)
+    }
+
+    /// Sends a message [`Account::queue_message`] queued, like [`Account::send_message`].
+    /// Fails with [`RequestError::InvalidRequest`] if it isn't pending.
+    pub async fn deliver_message(
+        &self,
+        channel: ChannelId,
+        pending: MessageId,
+    ) -> Result<MessageId, RequestError> {
         let shared = &self.shared;
-        let Queued { pending, detached } = shared.queue(channel, &content)?;
-        // Like the official client, a detached window jumps to the present; a stale one waits
-        // for its refresh. The send doesn't wait for the jump.
-        if detached {
-            let (jumped, delivered) = tokio::join!(
-                shared.load(channel, LoadKind::Latest, JUMP_LIMIT),
-                shared.deliver(channel, pending, content),
-            );
-            if let Err(err) = jumped {
-                tracing::debug!(error = %err, "couldn't jump to the present before sending");
-            }
-            return delivered;
-        }
-        shared.deliver(channel, pending, content).await
+        let message = shared
+            .store
+            .pending_message(channel, pending)
+            .ok_or(RequestError::InvalidRequest)?;
+        let detached = shared
+            .store
+            .messages(channel)
+            .is_some_and(|window| !window.latest);
+        shared
+            .deliver_queued(channel, pending, message.content.to_string(), detached)
+            .await
     }
 
     /// Dev only: sends like [`Account::send_message`], then posts the same body with the same

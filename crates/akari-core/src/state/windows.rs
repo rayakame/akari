@@ -387,6 +387,15 @@ impl Windows {
         messages.get(index).cloned()
     }
 
+    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+        self.windows
+            .get(&channel)?
+            .outbox
+            .iter()
+            .find(|message| message.id == id && message.delivery == Delivery::Pending)
+            .cloned()
+    }
+
     #[cfg(test)]
     pub(crate) fn held(&self, channel: ChannelId) -> Vec<Arc<Message>> {
         self.windows

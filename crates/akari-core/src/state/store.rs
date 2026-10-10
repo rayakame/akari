@@ -368,6 +368,14 @@ impl Store {
         message
     }
 
+    pub(crate) fn pending_message(
+        &self,
+        channel: ChannelId,
+        id: MessageId,
+    ) -> Option<Arc<Message>> {
+        self.read(|inner| inner.state.pending(channel, id))
+    }
+
     pub(crate) fn drop_cooldown(&self, channel: ChannelId, send: MessageId) {
         self.write("send", |inner, _| inner.state.drop_cooldown(channel, send));
     }

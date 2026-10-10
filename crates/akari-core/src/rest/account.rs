@@ -166,7 +166,7 @@ impl AccountRest {
         self.unauthorized.load(Ordering::Acquire)
     }
 
-    fn usable(&self) -> Result<(), RequestError> {
+    pub(crate) fn usable(&self) -> Result<(), RequestError> {
         if self.closed.load(Ordering::Acquire) {
             return Err(RequestError::Closed);
         }
