@@ -15,7 +15,6 @@ struct WindowChrome: NSViewRepresentable {
             guard let window else {
                 return
             }
-            window.titlebarAppearsTransparent = true
             window.styleMask.insert(.fullSizeContentView)
             window.backgroundColor = Palette.frame
         }

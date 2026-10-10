@@ -20,6 +20,8 @@ struct RootView: View {
         .frame(minWidth: 940, minHeight: 500)
         .background(Color(nsColor: Palette.frame))
         .background(WindowChrome())
+        // SwiftUI resets the title bar's transparency when it shows the window.
+        .toolbarBackground(.hidden, for: .windowToolbar)
     }
 }
 

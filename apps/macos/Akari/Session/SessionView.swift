@@ -63,7 +63,8 @@ struct SessionView<MessageArea: View>: View {
                 EmptyState(text: "No text channels you can see here")
             }
         }
-        .background(Color(nsColor: Palette.chat))
+        // A background reaches into the title bar by default, over the strip.
+        .background(Color(nsColor: Palette.chat), ignoresSafeAreaEdges: [])
     }
 
     private var title: String {
