@@ -9,6 +9,7 @@ struct ComposerView: View {
     let areaHeight: CGFloat
     var onSend: () -> Void = {}
     var onEscape: () -> Void = {}
+    var onAttach: (ComposerTextView) -> Void = { _ in }
     @State private var height: CGFloat = 56
 
     var body: some View {
@@ -19,7 +20,7 @@ struct ComposerView: View {
                 onSubmit: {
                     Task { await composer.submit(willSend: onSend) }
                 },
-                onEscape: onEscape
+                onEscape: onEscape, onAttach: onAttach
             )
             // Room for the counter at the right edge.
             .padding(.trailing, composer.remaining == nil ? 0 : 48)
@@ -67,6 +68,7 @@ struct ComposerField: NSViewRepresentable {
     @Binding var height: CGFloat
     let onSubmit: () -> Void
     let onEscape: () -> Void
+    var onAttach: (ComposerTextView) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -76,14 +78,7 @@ struct ComposerField: NSViewRepresentable {
         let (scrollView, textView) = ComposerTextView.scrollable()
         textView.string = text
         context.coordinator.attach(textView)
-        // The composer takes focus when a channel opens, as in Discord.
-        DispatchQueue.main.async {
-            if let window = textView.window, window.isKeyWindow,
-                !(window.firstResponder is NSTextView)
-            {
-                window.makeFirstResponder(textView)
-            }
-        }
+        onAttach(textView)
         return scrollView
     }
 
@@ -107,6 +102,7 @@ struct ComposerField: NSViewRepresentable {
         weak var textView: ComposerTextView?
         // The window's shared undo manager would replay typing against text replaced in code.
         private let undo = UndoManager()
+        private var keyObserver: NSObjectProtocol?
 
         init(_ parent: ComposerField) {
             self.parent = parent
@@ -115,11 +111,41 @@ struct ComposerField: NSViewRepresentable {
         func attach(_ textView: ComposerTextView) {
             self.textView = textView
             textView.delegate = self
+            textView.onWindow = { [weak self] in self?.focusWhenKey() }
+            focusWhenKey()
             // The height depends on the width, which the view only gets in layout.
             textView.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(
                 self, selector: #selector(resized), name: NSView.frameDidChangeNotification,
                 object: textView)
+        }
+
+        // A channel's composer takes focus when it opens, as in the official client; at launch
+        // the window only becomes key after the restored channel's composer exists.
+        private func focusWhenKey() {
+            guard let textView, let window = textView.window else {
+                return
+            }
+            if let keyObserver {
+                NotificationCenter.default.removeObserver(keyObserver)
+                self.keyObserver = nil
+            }
+            if window.isKeyWindow {
+                DispatchQueue.main.async { [weak textView] in textView?.takeFocus() }
+                return
+            }
+            keyObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let keyObserver = self.keyObserver else {
+                        return
+                    }
+                    NotificationCenter.default.removeObserver(keyObserver)
+                    self.keyObserver = nil
+                    self.textView?.takeFocus()
+                }
+            }
         }
 
         func replaceText(with text: String) {

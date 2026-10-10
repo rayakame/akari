@@ -211,4 +211,33 @@ final class ComposerTextViewTests {
         #expect(firstView.string == "abc")
         _ = (first, second)
     }
+
+    @Test
+    func theComposerTakesFocusOnceTheWindowIsKey() {
+        window.makeFirstResponder(nil)
+        let (coordinator, view) = field()
+        _ = coordinator
+
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        RunLoop.current.run(until: Date() + 0.05)
+
+        #expect(window.firstResponder === view)
+    }
+
+    @Test
+    func takingFocusLeavesSelectedMessageTextAlone() {
+        let (_, view) = field()
+        let message = NSTextField(labelWithString: "a message")
+        message.isSelectable = true
+        window.contentView?.addSubview(message)
+        message.selectText(nil)
+        #expect((window.firstResponder as? NSTextView)?.isFieldEditor == true)
+
+        view.takeFocus()
+        #expect(window.firstResponder !== view)
+
+        message.removeFromSuperview()
+        view.takeFocus()
+        #expect(window.firstResponder === view)
+    }
 }

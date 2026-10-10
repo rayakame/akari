@@ -1,3 +1,4 @@
+import AkariKit
 import AppKit
 
 // Return, Shift+Return, input-method composition and an empty Up arrow need AppKit's key
@@ -10,6 +11,7 @@ final class ComposerTextView: NSTextView {
     var onSubmit: () -> Void = {}
     var onEscape: () -> Void = {}
     var onEditLastMessage: (() -> Void)?
+    var onWindow: () -> Void = {}
     var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
 
     static func scrollable() -> (NSScrollView, ComposerTextView) {
@@ -61,6 +63,32 @@ final class ComposerTextView: NSTextView {
         let used = max(layoutManager.usedRect(for: textContainer).height, Self.lineHeight)
         let height = used + 2 * Self.insets.height
         return min(height, max(maxHeight, Self.lineHeight + 2 * Self.insets.height))
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindow()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became {
+            LaunchLog.mark("composer focused")
+        }
+        return became
+    }
+
+    /// Becomes first responder unless the user is selecting message text that's still shown.
+    func takeFocus() {
+        guard let window, isEditable else {
+            return
+        }
+        if let editor = window.firstResponder as? NSTextView, editor !== self, editor.isFieldEditor,
+            (editor.delegate as? NSView)?.window === window
+        {
+            return
+        }
+        window.makeFirstResponder(self)
     }
 
     override func doCommand(by selector: Selector) {

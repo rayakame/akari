@@ -26,6 +26,7 @@ struct MessageTable: NSViewRepresentable {
 // Lets the SwiftUI parts around the table (jump bar, composer) reach its controller.
 final class MessageTableLink {
     weak var controller: MessageTableController?
+    weak var composer: ComposerTextView?
 }
 
 struct MessageArea: View {
@@ -63,7 +64,8 @@ struct MessageArea: View {
                     composer: messages.composer, placeholder: name.placeholder,
                     areaHeight: geometry.size.height,
                     onSend: { link.controller?.jumpToPresent(load: false) },
-                    onEscape: { bridge.escape() }
+                    onEscape: { bridge.escape() },
+                    onAttach: { link.composer = $0 }
                 )
                 .id(messages.channelId)
             }
@@ -128,5 +130,6 @@ final class MessageListBridge: MessageListActions {
 
     func escape() {
         link.controller?.jumpToPresent(load: true)
+        link.composer?.takeFocus()
     }
 }
