@@ -182,7 +182,6 @@ impl From<state::Delivery> for Delivery {
     }
 }
 
-/// The message IDs and state of a viewed channel.
 /// A channel's slowmode as it applies to the current user.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Slowmode {
@@ -203,6 +202,7 @@ impl From<state::Slowmode> for Slowmode {
     }
 }
 
+/// The message IDs and state of a viewed channel.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct MessageWindow {
     /// Oldest first, without gaps.
