@@ -304,6 +304,10 @@ pub enum RequestError {
     Network { kind: NetworkErrorKind },
     #[error("unexpected response from Discord")]
     UnexpectedResponse,
+    /// Longer than `Store::message_length_limit()`, or refused by Discord as too long;
+    /// `limit` is Discord's limit then.
+    #[error("the message is longer than {limit} characters")]
+    TooLong { limit: u32 },
     /// Empty content, a send before the account is online, or a retry of a message that
     /// isn't failed.
     #[error("invalid request")]
@@ -335,6 +339,9 @@ impl From<akari_core::RequestError> for RequestError {
             E::ServerError { status } => Self::ServerError { status },
             E::Network(err) => Self::Network {
                 kind: err.kind().into(),
+            },
+            E::TooLong { limit } => Self::TooLong {
+                limit: u32::try_from(limit).unwrap_or(u32::MAX),
             },
             E::UnexpectedResponse => Self::UnexpectedResponse,
             E::InvalidRequest => Self::InvalidRequest,

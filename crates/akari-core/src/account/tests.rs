@@ -1072,6 +1072,12 @@ impl Sends {
                     200 => template.set_body_json(created(400_000_000_000_000_050 + nth, &body)),
                     403 => template
                         .set_body_json(json!({"message": "Missing Permissions", "code": 50013})),
+                    429 => template.set_body_json(json!({
+                        "message": "This action cannot be performed due to slowmode rate limit.",
+                        "code": 20016,
+                        "retry_after": 25.0,
+                        "global": false
+                    })),
                     400 => template.set_body_json(json!({
                         "captcha_key": ["captcha-required"],
                         "captcha_service": "hcaptcha",
@@ -1940,5 +1946,215 @@ async fn nothing_is_subscribed_while_offline() {
                 .expect("no subscription after READY")
         ),
         [G1]
+    );
+}
+
+// A plain member of guild 1 (the fixture's user owns it and is an administrator) in a GENERAL
+// with a 30 s slowmode; `roles` are extra guild roles the member holds.
+async fn slowmode_sending(
+    fake: &mut FakeGateway,
+    server: &wiremock::MockServer,
+    roles: Value,
+) -> (Account, Subscription, FakeConnection) {
+    let account = start_with(fake, server);
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let mut connection = fake.accept().await;
+    assert_eq!(connection.handshake(60_000).await["op"], 2);
+    connection
+        .send(ready_payload(1, fake, |data| {
+            let guild = &mut data["guilds"][0];
+            guild["properties"]["owner_id"] = "100000000000000099".into();
+            guild["channels"][1]["rate_limit_per_user"] = 30.into();
+            let mut held = Vec::new();
+            for role in roles.as_array().cloned().unwrap_or_default() {
+                held.push(role["id"].clone());
+                guild["roles"].as_array_mut().unwrap().push(role);
+            }
+            data["merged_members"][0][0]["roles"] = Value::Array(held);
+        }))
+        .await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(general());
+    (account, subscription, connection)
+}
+
+fn slowmode_until(account: &Account) -> Option<std::time::SystemTime> {
+    account.store().slowmode(general()).unwrap().until
+}
+
+#[tokio::test]
+async fn a_message_over_the_limit_is_refused_before_anything_is_queued() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]);
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let err = account
+        .send_message(general(), "a".repeat(2001))
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, RequestError::TooLong { limit: 2000 }),
+        "{err:?}"
+    );
+    assert!(outbox(&account).is_empty());
+    assert!(sends.bodies().is_empty());
+    // 2,000 code points, 2,001 UTF-16 units.
+    let fits = format!("{}👍", "a".repeat(1999));
+    account.send_message(general(), fits).await.unwrap();
+    assert_eq!(sends.bodies().len(), 1);
+}
+
+#[tokio::test]
+async fn a_send_starts_the_cooldown_when_it_is_queued() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let sends = Sends::new(&[200]).delayed(Duration::from_millis(300));
+    sends.mount(&server).await;
+    let (account, _subscription, _connection) =
+        slowmode_sending(&mut fake, &server, json!([])).await;
+    assert_eq!(slowmode_until(&account), None);
+
+    let before = std::time::SystemTime::now();
+    let (sent, pending) = tokio::join!(account.send_message(general(), "hi".to_owned()), async {
+        sends.first_nonce().await;
+        slowmode_until(&account)
+    });
+
+    sent.unwrap();
+    let pending = pending.expect("no cooldown while the send was pending");
+    assert!(pending > before + Duration::from_secs(29), "{pending:?}");
+    assert!(pending <= std::time::SystemTime::now() + Duration::from_secs(30));
+    let confirmed = slowmode_until(&account).expect("the cooldown ended with the confirmation");
+    let moved = confirmed
+        .duration_since(pending)
+        .unwrap_or_else(|err| err.duration());
+    assert!(moved < Duration::from_millis(50), "restarted by {moved:?}");
+}
+
+#[tokio::test]
+async fn a_failed_send_clears_the_cooldown_it_started() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    Sends::new(&[403]).mount(&server).await;
+    let (account, _subscription, _connection) =
+        slowmode_sending(&mut fake, &server, json!([])).await;
+
+    let err = account
+        .send_message(general(), "hi".to_owned())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, RequestError::Discord { code: 50013, .. }),
+        "{err:?}"
+    );
+    assert_eq!(slowmode_until(&account), None);
+}
+
+#[tokio::test]
+async fn a_slowmode_answer_holds_until_retry_after() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    Sends::new(&[429]).mount(&server).await;
+    let (account, _subscription, _connection) =
+        slowmode_sending(&mut fake, &server, json!([])).await;
+
+    let before = std::time::SystemTime::now();
+    let err = timeout(WAIT, account.send_message(general(), "hi".to_owned()))
+        .await
+        .expect("a long slowmode wait must fail at once")
+        .unwrap_err();
+
+    let RequestError::RateLimited {
+        retry_after: Some(wait),
+    } = err
+    else {
+        panic!("{err:?}");
+    };
+    assert!(wait > Duration::from_secs(24), "{wait:?}");
+    let until = slowmode_until(&account).expect("no cooldown after the slowmode answer");
+    assert!(until > before + Duration::from_secs(24), "{until:?}");
+}
+
+#[tokio::test]
+async fn exempt_users_get_no_cooldown() {
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    Sends::new(&[200]).mount(&server).await;
+    let permissions = (crate::model::Permissions::VIEW_CHANNEL.0
+        | crate::model::Permissions::SEND_MESSAGES.0
+        | crate::model::Permissions::BYPASS_SLOWMODE.0)
+        .to_string();
+    let bypass =
+        json!([{"id": "600", "name": "bypass", "permissions": permissions, "position": 2}]);
+    let (account, _subscription, _connection) = slowmode_sending(&mut fake, &server, bypass).await;
+
+    account
+        .send_message(general(), "hi".to_owned())
+        .await
+        .unwrap();
+
+    let slowmode = account.store().slowmode(general()).unwrap();
+    assert!(slowmode.exempt);
+    assert_eq!(slowmode.until, None);
+}
+
+#[tokio::test]
+async fn discords_length_refusal_is_too_long_with_its_limit() {
+    use wiremock::matchers::{method, path};
+    let mut fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let refusal = |field: &str, message: &str| {
+        let mut errors = serde_json::Map::new();
+        errors.insert(
+            field.to_owned(),
+            json!({"_errors": [{"code": "BASE_TYPE_MAX_LENGTH", "message": message}]}),
+        );
+        json!({"code": 50035, "message": "Invalid Form Body", "errors": errors})
+    };
+    for body in [
+        refusal("content", "Must be 1990 or fewer in length."),
+        refusal("nonce", "Must be 25 or fewer in length."),
+        refusal("content", "Too long."),
+    ] {
+        wiremock::Mock::given(method("POST"))
+            .and(path(MESSAGES))
+            .respond_with(wiremock::ResponseTemplate::new(400).set_body_json(body))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+    }
+    let (account, _subscription, _connection) = sending(&mut fake, &server).await;
+
+    let mut errors = Vec::new();
+    for _ in 0..3 {
+        errors.push(
+            account
+                .send_message(general(), "hello".to_owned())
+                .await
+                .unwrap_err(),
+        );
+    }
+
+    assert!(
+        matches!(errors[0], RequestError::TooLong { limit: 1990 }),
+        "{errors:?}"
+    );
+    assert!(
+        matches!(errors[1], RequestError::Discord { code: 50035, .. }),
+        "{errors:?}"
+    );
+    assert!(
+        matches!(errors[2], RequestError::TooLong { limit: 2000 }),
+        "{errors:?}"
+    );
+    assert!(
+        outbox(&account)
+            .iter()
+            .all(|(_, delivery)| *delivery == Delivery::Failed)
     );
 }

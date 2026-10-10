@@ -90,4 +90,11 @@ struct FFISmokeTests {
         #expect(Permissions.sendMessagesInThreads.rawValue == 1 << 38)
         #expect(Permissions.all.contains(.administrator))
     }
+
+    @Test
+    func messageLengthCountsCodePoints() {
+        #expect(messageLength(content: "👍🏽") == 2)
+        #expect("👍🏽".count == 1)
+        #expect("👍🏽".utf16.count == 4)
+    }
 }

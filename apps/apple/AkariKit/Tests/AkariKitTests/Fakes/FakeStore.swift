@@ -15,6 +15,8 @@ final class FakeStore: Store, @unchecked Sendable {
         var permissions: [ChannelId: Permissions] = [:]
         var windows: [ChannelId: MessageWindow] = [:]
         var messages: [MessageId: Message] = [:]
+        var lengthLimit: UInt32 = 2000
+        var slowmodes: [ChannelId: Slowmode] = [:]
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -130,5 +132,13 @@ final class FakeStore: Store, @unchecked Sendable {
         read(.messages(channelId, ids)) { state in
             ids.compactMap { state.messages[$0] }.filter { $0.channelId == channelId }
         }
+    }
+
+    override func messageLengthLimit() -> UInt32 {
+        read(.messageLengthLimit) { $0.lengthLimit }
+    }
+
+    override func slowmode(channelId: ChannelId) -> Slowmode? {
+        read(.slowmode(channelId)) { $0.slowmodes[channelId] }
     }
 }

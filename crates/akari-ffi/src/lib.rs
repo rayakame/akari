@@ -27,9 +27,9 @@ pub use login::{
     QrEvent, QrLogin, ScannedUser,
 };
 pub use records::{
-    Attachment, Channel, ConnectionState, Delivery, Guild, Message, MessageWindow, User,
+    Attachment, Channel, ConnectionState, Delivery, Guild, Message, MessageWindow, Slowmode, User,
 };
-pub use store::Store;
+pub use store::{Store, message_length};
 pub use subscription::{StoreEvent, StoreSubscription};
 pub use token_store::TokenStore;
 

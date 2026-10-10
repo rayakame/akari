@@ -30,6 +30,8 @@ final class CallLog: Sendable {
         case permissions(ChannelId)
         case window(ChannelId)
         case messages(ChannelId, [MessageId])
+        case messageLengthLimit
+        case slowmode(ChannelId)
     }
 
     private let state = Locked<(calls: [Call], offMainThread: Int)>(([], 0))

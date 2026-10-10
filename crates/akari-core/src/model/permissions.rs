@@ -21,6 +21,7 @@ impl Permissions {
     pub const MENTION_EVERYONE: Self = Self(1 << 17);
     pub const CHANGE_NICKNAME: Self = Self(1 << 26);
     pub const SEND_MESSAGES_IN_THREADS: Self = Self(1 << 38);
+    pub const BYPASS_SLOWMODE: Self = Self(1 << 52);
 
     /// Whether every bit of `other` is set.
     pub const fn contains(self, other: Self) -> bool {

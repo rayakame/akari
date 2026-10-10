@@ -15,7 +15,7 @@ use super::support::{block_on, refused_connection, token};
 use crate::account::{Account, MessageLoad};
 use crate::errors::{NetworkErrorKind, RequestError};
 use crate::login::CaptchaChallenge;
-use crate::records::Delivery;
+use crate::records::{Delivery, Slowmode};
 use crate::subscription::{StoreEvent, StoreSubscription};
 
 const MESSAGES: &str = "/api/v9/channels/300000000000000002/messages";
@@ -257,6 +257,10 @@ async fn request_errors_map_one_to_one() {
             Core::ServerError { status: 502 },
             RequestError::ServerError { status: 502 },
         ),
+        (
+            Core::TooLong { limit: 4000 },
+            RequestError::TooLong { limit: 4000 },
+        ),
         (Core::UnexpectedResponse, RequestError::UnexpectedResponse),
         (Core::InvalidRequest, RequestError::InvalidRequest),
         (Core::Closed, RequestError::Closed),
@@ -323,4 +327,81 @@ async fn message_actions_work_without_a_tokio_context() {
     assert_eq!(loaded, Ok(()));
     assert_eq!(sent, Ok(MessageId::new(400_000_000_000_000_050)));
     online.account.close();
+}
+
+// A plain member (the fixture's user owns guild 1 and is an administrator) in a GENERAL with a
+// 30 s slowmode.
+async fn slowmode_online(server: &MockServer) -> Online {
+    let gateway = FakeGateway::start().await;
+    let account = gateway
+        .client_with_api(&format!("{}/api/v9/", server.uri()))
+        .account(token("t"))
+        .unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let ws = gateway
+        .serve_ready_with(|data| {
+            let guild = &mut data["guilds"][0];
+            guild["properties"]["owner_id"] = "100000000000000099".into();
+            guild["channels"][1]["rate_limit_per_user"] = 30.into();
+            data["merged_members"][0][0]["roles"] = json!([]);
+        })
+        .await;
+    events_until(&subscription, online).await;
+    account.view_channel(GENERAL);
+    Online {
+        account,
+        subscription,
+        _ws: ws,
+    }
+}
+
+#[tokio::test]
+async fn slowmode_and_the_limit_cross_the_boundary() {
+    let server = MockServer::start().await;
+    mount_sends(&server, &[200], Duration::from_millis(300)).await;
+    let Online {
+        account,
+        subscription,
+        _ws,
+    } = slowmode_online(&server).await;
+    let store = account.store();
+
+    assert_eq!(store.message_length_limit(), 2000);
+    assert_eq!(
+        store.slowmode(GENERAL),
+        Some(Slowmode {
+            interval: Duration::from_secs(30),
+            exempt: false,
+            until: None,
+        })
+    );
+    let sending = account.clone();
+    let sent = tokio::spawn(async move { sending.send_message(GENERAL, "hi".to_owned()).await });
+    events_until(&subscription, |event| {
+        matches!(event, StoreEvent::MessageInserted { .. })
+    })
+    .await;
+    assert!(store.slowmode(GENERAL).unwrap().until.is_some());
+    sent.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn a_too_long_message_is_refused() {
+    let server = MockServer::start().await;
+    mount_sends(&server, &[200], Duration::ZERO).await;
+    let online = online_with(&server).await;
+
+    let err = online
+        .account
+        .send_message(GENERAL, "a".repeat(2001))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err, RequestError::TooLong { limit: 2000 });
+}
+
+#[test]
+fn message_length_counts_like_the_core() {
+    assert_eq!(crate::message_length("👍🏽".to_owned()), 2);
 }

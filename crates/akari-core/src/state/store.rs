@@ -7,6 +7,7 @@ use tokio::sync::{Mutex, mpsc};
 use super::apply::{Entities, ReadyDiff, State};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
+use super::send::Slowmode;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
@@ -365,6 +366,24 @@ impl Store {
         message
     }
 
+    pub(crate) fn start_cooldown(&self, channel: ChannelId, send: MessageId) {
+        let now = now_millis();
+        self.write("send", |inner, _| {
+            inner.state.start_cooldown(channel, send, now);
+        });
+    }
+
+    pub(crate) fn drop_cooldown(&self, channel: ChannelId, send: MessageId) {
+        self.write("send", |inner, _| inner.state.drop_cooldown(channel, send));
+    }
+
+    pub(crate) fn hold_cooldown(&self, channel: ChannelId, wait: Duration) {
+        let now = now_millis();
+        self.write("send", |inner, _| {
+            inner.state.hold_cooldown(channel, wait, now);
+        });
+    }
+
     pub(crate) fn discard_message(&self, channel: ChannelId, pending: MessageId) {
         self.write("send", |inner, events| {
             inner.state.discard(channel, pending, events)
@@ -508,6 +527,22 @@ impl Store {
     pub fn permissions(&self, channel: ChannelId) -> Option<Permissions> {
         let now = now_millis();
         self.read(|inner| inner.state.permissions(channel, now))
+    }
+
+    /// The longest message the current user may send: 4,000 characters with Nitro, else 2,000.
+    pub fn message_length_limit(&self) -> usize {
+        self.read(|inner| inner.state.length_limit())
+    }
+
+    /// The channel's slowmode as it applies to the current user; `None` without slowmode, in
+    /// DMs and group DMs, and for unknown channels.
+    pub fn slowmode(&self, channel: ChannelId) -> Option<Slowmode> {
+        let now = now_millis();
+        self.read(|inner| {
+            inner
+                .state
+                .slowmode(channel, now, Instant::now(), SystemTime::now())
+        })
     }
 
     /// The loaded messages of a viewed channel; `None` if it isn't viewed.

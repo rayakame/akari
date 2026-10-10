@@ -127,6 +127,39 @@ every stale window with the latest 100 messages:
   Discord's OpenAPI description gives `content` a maximum length of 4,000
   ([discord-api-spec](https://github.com/discord/discord-api-spec)).
 
+- **Akari's check.** `message_length(content)` counts code points, and
+  `Store::message_length_limit()` gives the limit for the current user's `premium_type`
+  (2,000 before READY). `send_message` refuses longer content with
+  `RequestError::TooLong { limit }` before anything is queued or sent. Discord's own refusal
+  (50035 with `BASE_TYPE_MAX_LENGTH` on `content`) becomes the same `TooLong`, with the limit
+  read from Discord's message, or Akari's limit when the message holds no number; the message
+  then stays failed like any other. So a count that differs from Discord's never shows as a
+  generic error.
+
+## Slowmode
+
+`Store::slowmode(channel)` says how a channel's slowmode applies to the current user:
+`interval` (the channel's or thread's `rate_limit_per_user`), `exempt`, and `until`, when the
+user may send again. It is `None` for channels without slowmode, for DMs and group DMs, and
+for unknown channels.
+
+- **Exempt:** the user's permissions in the channel contain `BYPASS_SLOWMODE` (bit 52); the
+  owner and administrators hold every bit ([models.md](models.md)). An exempt user never has a
+  cooldown.
+- **A cooldown starts** when `send_message` or `retry_message` queues a message, as the
+  official client starts it when the user sends, so a second send right after the first can
+  be held back by the UI instead of failing at Discord. A message of the current user from
+  another device (MESSAGE_CREATE whose nonce isn't the send that started the cooldown)
+  starts it too, since Discord counts per user.
+- **A failed send** clears the cooldown it started, unless something moved it since: Discord
+  didn't count that message. A `RateLimited { retry_after }` answer (Discord's 20016, see
+  [rate-limits.md](rate-limits.md)) instead holds the cooldown until at least `retry_after`
+  from now.
+- **The clock:** cooldowns are kept as monotonic instants and turned into wall-clock time
+  when read, so changing the system clock doesn't stretch or cut them.
+- No event reports a cooldown. It only changes with the user's own sends and messages, which
+  already bring window events, so a UI re-reads `slowmode` for its channel on those.
+
 ## Errors
 
 `RequestError` is what a load or send returns:
@@ -143,6 +176,7 @@ every stale window with the latest 100 messages:
   50001 Missing Access, 50007 a user who doesn't accept the message (a 403), 10003 Unknown
   Channel, 50035 invalid form body
   ([JSON error codes](https://docs.discord.food/topics/errors#json-error-codes)).
+- `TooLong { limit }`: the message is longer than the limit, Akari's or Discord's (above).
 - `Network(TransportError)`, `UnexpectedResponse`, `InvalidRequest` (empty content, a
   failed message that isn't there), `Closed` (the account is closed).
 

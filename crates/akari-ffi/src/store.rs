@@ -3,7 +3,7 @@ use std::sync::Arc;
 use akari_core::model::{ChannelId, GuildId, MessageId, Permissions, UserId};
 use akari_core::state;
 
-use crate::records::{Channel, ConnectionState, Guild, Message, MessageWindow, User};
+use crate::records::{Channel, ConnectionState, Guild, Message, MessageWindow, Slowmode, User};
 use crate::subscription::StoreSubscription;
 
 /// An account's state. Reads are synchronous and cheap (one read lock each) and return
@@ -95,6 +95,17 @@ impl Store {
         self.core.permissions(channel_id)
     }
 
+    /// The longest message the current user may send: 4,000 characters with Nitro, else 2,000.
+    pub fn message_length_limit(&self) -> u32 {
+        u32::try_from(self.core.message_length_limit()).unwrap_or(u32::MAX)
+    }
+
+    /// The channel's slowmode as it applies to the current user; `None` without slowmode, in
+    /// DMs and group DMs, and for unknown channels.
+    pub fn slowmode(&self, channel_id: ChannelId) -> Option<Slowmode> {
+        self.core.slowmode(channel_id).map(Slowmode::from)
+    }
+
     /// The message IDs and state of a viewed channel; `None` if it isn't viewed.
     pub fn window(&self, channel_id: ChannelId) -> Option<MessageWindow> {
         self.core
@@ -119,4 +130,10 @@ impl Store {
             })
             .collect()
     }
+}
+
+/// How long `content` is as Discord counts it: Unicode code points.
+#[uniffi::export]
+pub fn message_length(content: String) -> u32 {
+    u32::try_from(akari_core::message_length(&content)).unwrap_or(u32::MAX)
 }

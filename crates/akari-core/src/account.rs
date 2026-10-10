@@ -11,7 +11,9 @@ use crate::gateway::{
 };
 use crate::model::{ChannelId, GuildId, MessageId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
-use crate::state::{ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits};
+use crate::state::{
+    ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
+};
 use crate::{DiscordClient, Token};
 
 const REFRESH_LIMIT: u8 = 100;
@@ -309,6 +311,10 @@ impl Shared {
         if content.trim().is_empty() {
             return Err(RequestError::InvalidRequest);
         }
+        let limit = self.store.message_length_limit();
+        if message_length(content) > limit {
+            return Err(RequestError::TooLong { limit });
+        }
         let detached = match self.store.messages(channel) {
             Some(window) => !window.latest,
             None => {
@@ -326,6 +332,7 @@ impl Shared {
             now,
         );
         self.store.queue_message(channel, Arc::new(message));
+        self.store.start_cooldown(channel, pending);
         Ok(Queued { pending, detached })
     }
 
@@ -348,7 +355,20 @@ impl Shared {
                 Ok(id)
             }
             Err(err) => {
+                // The core can't count what Discord refused; the 0 asks for our own limit.
+                let err = match err {
+                    RequestError::TooLong { limit: 0 } => RequestError::TooLong {
+                        limit: self.store.message_length_limit(),
+                    },
+                    err => err,
+                };
                 self.store.fail_message(channel, pending);
+                match &err {
+                    RequestError::RateLimited {
+                        retry_after: Some(wait),
+                    } => self.store.hold_cooldown(channel, *wait),
+                    _ => self.store.drop_cooldown(channel, pending),
+                }
                 self.failed(&err);
                 Err(err)
             }
@@ -538,6 +558,7 @@ impl Account {
             .store
             .retry_message(channel, pending)
             .ok_or(RequestError::InvalidRequest)?;
+        self.shared.store.start_cooldown(channel, pending);
         self.shared
             .deliver(channel, pending, message.content.to_string())
             .await
