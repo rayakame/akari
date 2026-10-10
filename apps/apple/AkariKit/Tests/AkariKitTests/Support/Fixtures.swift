@@ -48,3 +48,16 @@ func window(
         stale: stale
     )
 }
+
+func success(_ raw: UInt64, token: String = "new.token") -> LoginSuccess {
+    LoginSuccess(userId: id(raw), token: FakeToken(token), passwordUpdateRequired: false)
+}
+
+func mfa(_ methods: [MfaMethod], smsSentTo: String? = nil) -> MfaChallenge {
+    MfaChallenge(methods: methods, webauthnOptions: nil, smsSentTo: smsSentTo)
+}
+
+let captcha = CaptchaChallenge(
+    service: "hcaptcha", sitekey: "site-key", rqdata: nil, rqtoken: nil, sessionId: nil,
+    shouldServeInvisible: false
+)

@@ -76,7 +76,7 @@ struct SessionModelTests {
         await subscription.batches.pulled(1)
 
         session.close()
-        await session.loop.running?.value
+        await finished(session.loop.running)
 
         #expect(store.log.calls.contains(.close))
         #expect(subscription.closed.fired)
@@ -102,7 +102,7 @@ struct SessionModelTests {
         subscription.send(.connection(state: .closed(error: .AuthenticationFailed)))
         subscription.send(.connection(state: .closed(error: .AuthenticationFailed)))
         subscription.end()
-        await session.loop.running?.value
+        await finished(session.loop.running)
 
         #expect(closes.current == [.AuthenticationFailed])
         #expect(session.connection == .closed(error: .AuthenticationFailed))
