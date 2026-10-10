@@ -2,6 +2,7 @@ import AkariKit
 import AppKit
 import SwiftUI
 import Testing
+import os
 
 @testable import Akari
 
@@ -164,6 +165,28 @@ final class ComposerTextViewTests {
         #expect(height == 100)
     }
 
+    @Test
+    func aComposerGoneBeforeItsWindowIsKeyLeavesNoObserver() {
+        let center = CountingCenter()
+        let field = ComposerField(
+            text: .constant(""), enabled: true, maxHeight: 300, height: .constant(56),
+            onSubmit: {}, onEscape: {})
+        let (scroll, view) = ComposerTextView.scrollable()
+        window.contentView?.addSubview(scroll)
+        weak var gone: ComposerField.Coordinator?
+        // AppKit autoreleases the coordinator while attaching it.
+        autoreleasepool {
+            let coordinator = ComposerField.Coordinator(field, notifications: center)
+            coordinator.attach(view)
+            gone = coordinator
+            #expect(!window.isKeyWindow)
+            #expect(center.registered == 1)
+        }
+
+        #expect(gone == nil)
+        #expect(center.registered == 0)
+    }
+
     func field() -> (ComposerField.Coordinator, ComposerTextView) {
         var current = ""
         let field = ComposerField(
@@ -239,5 +262,28 @@ final class ComposerTextViewTests {
         message.removeFromSuperview()
         view.takeFocus()
         #expect(window.firstResponder === view)
+    }
+}
+
+// Counts the block observers still registered with it.
+nonisolated final class CountingCenter: NotificationCenter, @unchecked Sendable {
+    private let tokens = OSAllocatedUnfairLock<Set<ObjectIdentifier>>(initialState: [])
+
+    var registered: Int { tokens.withLock { $0.count } }
+
+    override func addObserver(
+        forName name: NSNotification.Name?, object obj: Any?, queue: OperationQueue?,
+        using block: @escaping @Sendable (Notification) -> Void
+    ) -> any NSObjectProtocol {
+        let token = super.addObserver(forName: name, object: obj, queue: queue, using: block)
+        let key = ObjectIdentifier(token)
+        tokens.withLock { _ = $0.insert(key) }
+        return token
+    }
+
+    override func removeObserver(_ observer: Any) {
+        let key = ObjectIdentifier(observer as AnyObject)
+        tokens.withLock { _ = $0.remove(key) }
+        super.removeObserver(observer)
     }
 }

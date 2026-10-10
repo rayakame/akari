@@ -102,10 +102,20 @@ struct ComposerField: NSViewRepresentable {
         weak var textView: ComposerTextView?
         // The window's shared undo manager would replay typing against text replaced in code.
         private let undo = UndoManager()
-        private var keyObserver: NSObjectProtocol?
+        nonisolated(unsafe) private var keyObserver: NSObjectProtocol?
+        private let notifications: NotificationCenter
 
-        init(_ parent: ComposerField) {
+        init(_ parent: ComposerField, notifications: NotificationCenter = .default) {
             self.parent = parent
+            self.notifications = notifications
+        }
+
+        // A composer can go away before its window ever becomes key, e.g. a channel switch in
+        // the background; block observers aren't removed on their own.
+        deinit {
+            if let keyObserver {
+                notifications.removeObserver(keyObserver)
+            }
         }
 
         func attach(_ textView: ComposerTextView) {
@@ -127,21 +137,21 @@ struct ComposerField: NSViewRepresentable {
                 return
             }
             if let keyObserver {
-                NotificationCenter.default.removeObserver(keyObserver)
+                notifications.removeObserver(keyObserver)
                 self.keyObserver = nil
             }
             if window.isKeyWindow {
                 DispatchQueue.main.async { [weak textView] in textView?.takeFocus() }
                 return
             }
-            keyObserver = NotificationCenter.default.addObserver(
+            keyObserver = notifications.addObserver(
                 forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, let keyObserver = self.keyObserver else {
                         return
                     }
-                    NotificationCenter.default.removeObserver(keyObserver)
+                    self.notifications.removeObserver(keyObserver)
                     self.keyObserver = nil
                     self.textView?.takeFocus()
                 }
