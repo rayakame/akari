@@ -14,10 +14,11 @@ struct ChannelSidebar: View {
                 .foregroundStyle(Color(nsColor: Palette.textStrong))
                 .lineLimit(1)
                 .padding(.horizontal, 16)
-                .frame(maxWidth: .infinity, minHeight: 48, maxHeight: 48, alignment: .leading)
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(Color(nsColor: Palette.borderSubtle)).frame(height: 1)
-                }
+                .frame(
+                    maxWidth: .infinity, minHeight: ChannelHeader.height,
+                    maxHeight: ChannelHeader.height, alignment: .leading
+                )
+                .padding(.bottom, 1)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     let open = session.messages?.channelId

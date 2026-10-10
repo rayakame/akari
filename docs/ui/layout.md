@@ -58,7 +58,9 @@ The rail and the channel list together form the sidebar.
 
 ## Channel header
 
-- 48 tall, plus a 1 pt `borderSubtle` line at the bottom.
+- 48 tall, plus a 1 pt `borderSubtle` line at the bottom. The server name above the channel
+  list has the same height, and the line runs on under it: one line at one height across both
+  columns.
 - 16 padding on the left, 8 between toolbar buttons on the right.
 - A guild channel shows its icon, its name, a short divider and the topic on one line. A DM
   shows the other person's name.

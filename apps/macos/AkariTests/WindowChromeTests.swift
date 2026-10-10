@@ -20,36 +20,14 @@ struct WindowChromeTests {
     @Test
     func theStripUnderTheTitleBarIsTheSidebarColorAcrossTheWindow() throws {
         let session = SessionModel(userId: UserId(rawValue: 1), account: EmptyAccount()) { _ in }
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 600),
-            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
-        window.titlebarAppearsTransparent = true
-        window.appearance = NSAppearance(named: .darkAqua)
-        let host = NSHostingView(rootView: SessionView(session: session) { _ in EmptyView() })
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
-        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: rep)
-        let scale = CGFloat(rep.pixelsWide) / host.bounds.width
-        let pixel = { (x: CGFloat, y: CGFloat) in
-            rep.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB)
-        }
-        let right = host.bounds.width - 20
+        let image = try Rendered(SessionView(session: session) { _ in EmptyView() })
+        let right = image.width - 20
 
-        // The bitmap's color space shifts the tokens, so colors are compared with the rail's.
-        let rail = try #require(pixel(20, 300))
-        #expect(!Self.same(pixel(right, 300), rail), "the page has its own color")
-        #expect(Self.same(pixel(right, 10), rail), "over the page")
-        #expect(Self.same(pixel(20, 10), rail), "over the rail")
-    }
-
-    private static func same(_ color: NSColor?, _ other: NSColor) -> Bool {
-        guard let color else {
-            return false
-        }
-        return abs(color.redComponent - other.redComponent) < 0.5 / 255
-            && abs(color.greenComponent - other.greenComponent) < 0.5 / 255
-            && abs(color.blueComponent - other.blueComponent) < 0.5 / 255
+        // The rail is `frame`.
+        let rail = image.color(20, 300)
+        #expect(!same(image.color(right, 300), rail), "the page has its own color")
+        #expect(same(image.color(right, 10), rail), "over the page")
+        #expect(same(image.color(20, 10), rail), "over the rail")
     }
 
     // SwiftUI styles its window once it shows, so wait until that's done.

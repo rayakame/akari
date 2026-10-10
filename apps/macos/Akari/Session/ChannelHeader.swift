@@ -2,6 +2,8 @@ import AkariKit
 import SwiftUI
 
 struct ChannelHeader: View {
+    static let height: CGFloat = 48
+
     let channel: Channel?
     let name: String
 
@@ -29,9 +31,8 @@ struct ChannelHeader: View {
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
-        .frame(height: 48)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color(nsColor: Palette.borderSubtle)).frame(height: 1)
-        }
+        .frame(height: Self.height)
+        // Room for the line SessionView draws under both headers.
+        .padding(.bottom, 1)
     }
 }

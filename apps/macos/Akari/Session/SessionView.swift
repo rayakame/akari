@@ -14,6 +14,7 @@ struct SessionView<MessageArea: View>: View {
                 sidebar.frame(width: sidebarWidth)
                 page
             }
+            .overlay(alignment: .topLeading) { headerLine }
         }
         .ignoresSafeArea(edges: .top)
         .navigationTitle(title)
@@ -24,10 +25,12 @@ struct SessionView<MessageArea: View>: View {
             HStack(spacing: 0) {
                 ServerRail(session: session).frame(width: SidebarWidth.rail)
                 Rectangle().fill(Color(nsColor: Palette.frameBorder)).frame(width: 1)
-                VStack(spacing: 0) {
-                    Rectangle().fill(Color(nsColor: Palette.frameBorder)).frame(height: 1)
-                    list
-                }
+                // Over the list, not above it, so its header starts level with the channel header.
+                list
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color(nsColor: Palette.frameBorder)).frame(height: 1)
+                    }
             }
             UserPanel(user: session.currentUser).padding(8)
         }
@@ -35,6 +38,17 @@ struct SessionView<MessageArea: View>: View {
         .overlay(alignment: .trailing) {
             SidebarResizer(width: $sidebarWidth)
         }
+    }
+
+    // One line under the server and channel headers; it starts where the channel list does, so
+    // resizing the sidebar can't break it.
+    private var headerLine: some View {
+        Rectangle()
+            .fill(Color(nsColor: Palette.borderSubtle))
+            .frame(height: 1)
+            .padding(.leading, session.channels == nil ? sidebarWidth : SidebarWidth.rail + 1)
+            .offset(y: ChannelHeader.height)
+            .allowsHitTesting(false)
     }
 
     @ViewBuilder private var list: some View {
