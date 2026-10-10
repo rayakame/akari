@@ -18,8 +18,8 @@ public final class SessionModel {
     /// The open guild's channels; `nil` at home.
     public private(set) var channels: ChannelListModel?
     /// The open channel's messages. The session can replace it on its own, when the open channel
-    /// is deleted or hidden, and a new model loads nothing until the view calls `open()`. Call
-    /// it per channel, e.g. with `.task(id: messages.channelId) { await messages.open() }`.
+    /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
+    /// with `.task(id: messages.channelId) { await messages.open() }`.
     public private(set) var messages: MessageListModel?
 
     let loop = EventLoop()
