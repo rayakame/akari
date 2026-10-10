@@ -35,6 +35,7 @@ public final class MessageListModel {
     // Confirmed message ID → the pending ID its row keeps as key.
     @ObservationIgnored private var pendingKeys: [MessageId: MessageId] = [:]
     @ObservationIgnored private var loads = 0
+    @ObservationIgnored private var activeLoads: [Int: Load] = [:]
 
     init(channelId: ChannelId, account: Account, store: Store) {
         self.channelId = channelId
@@ -115,11 +116,12 @@ public final class MessageListModel {
     private func load(_ kind: Load) async {
         loads += 1
         let ticket = loads
+        activeLoads[ticket] = kind
         loading = kind
         defer {
-            if loads == ticket {
-                loading = nil
-            }
+            activeLoads[ticket] = nil
+            // Loads can end out of order; show the newest one still running.
+            loading = activeLoads.max { $0.key < $1.key }?.value
         }
         let request: MessageLoad =
             switch kind {

@@ -263,6 +263,33 @@ struct MessageListModelTests {
     }
 
     @Test
+    func aLoadThatEndsFirstLeavesTheOtherShowing() async {
+        shown(window([3, 4], latest: false))
+        let model = loaded()
+        account.holdLoads.withLock { $0 = true }
+
+        async let older: Void = model.loadOlder()
+        await account.loadReplies.pulled(1)
+        account.holdLoads.withLock { $0 = false }
+        await model.jumpToPresent()
+        #expect(model.loading == .older)
+
+        account.holdLoads.withLock { $0 = true }
+        async let jump: Void = model.jumpToPresent()
+        await account.loadReplies.pulled(2)
+        account.holdLoads.withLock { $0 = false }
+        await model.jumpToPresent()
+        #expect(model.loading == .latest)
+
+        account.loadReplies.send(nil)
+        await older
+        #expect(model.loading == .latest)
+        account.loadReplies.send(nil)
+        await jump
+        #expect(model.loading == nil)
+    }
+
+    @Test
     func loadNewerStopsAtThePresentAndErrorsShowUntilALoadWorks() async {
         shown(window([1, 2]))
         let model = loaded()
