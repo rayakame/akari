@@ -76,7 +76,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int)
         -> NSView?
     {
-        switch timeline.items[row] {
+        let cell = cell(for: timeline.items[row])
+        cell.objectValue = timeline.items[row].id
+        return cell
+    }
+
+    private func cell(for item: MessageTimeline.Item) -> NSTableCellView {
+        switch item {
         case .day(let day):
             let cell = reuse(DayDividerCell.identifier) as? DayDividerCell ?? DayDividerCell()
             cell.configure(MessageFormat.dayDivider(day, calendar: calendar, locale: locale))

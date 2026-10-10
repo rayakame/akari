@@ -71,6 +71,15 @@ struct MessageTableTests {
         #expect(table.numberOfRows == controller.timeline.items.count)
     }
 
+    // Every row's view shows the item at its index, not just the right number of rows.
+    func expectRowsMatchTheTimeline() {
+        let shown = (0..<table.numberOfRows).map { row in
+            (table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView)?
+                .objectValue as? MessageTimeline.ItemId
+        }
+        #expect(shown == controller.timeline.items.map(\.id))
+    }
+
     var visibleRows: Range<Int> {
         let range = table.rows(in: table.visibleRect)
         return range.location..<(range.location + range.length)
@@ -82,18 +91,26 @@ struct MessageTableTests {
         show(rows)
         table.forget()
 
+        expectRowsMatchTheTimeline()
         rows += messages(3, from: 61)
         show(rows)
+        expectRowsMatchTheTimeline()
         rows[62] = row(500, by: rows[62].message.author, at: rows[62].message.timestamp, key: 63)
         show(rows)
-        let groupStart = rows.firstIndex { $0.message.author.id == author(2).id }!
-        rows.remove(at: groupStart - 1)
+        expectRowsMatchTheTimeline()
+        // Message 4 starts a group that message 5 continues; 5 takes over the header.
+        let reloadsBefore = table.reloaded.count
+        rows.removeAll { $0.message.id.rawValue == 4 }
         show(rows)
+        expectRowsMatchTheTimeline()
+        #expect(table.reloaded.count > reloadsBefore)
         rows.removeFirst(10)
         rows += messages(2, from: 70)
         show(rows)
+        expectRowsMatchTheTimeline()
         rows.append(row(80, at: noon + 86_400))
         show(rows)
+        expectRowsMatchTheTimeline()
 
         #expect(table.fullReloads == 0)
         #expect(table.inserts > 0 && table.removes > 0)
