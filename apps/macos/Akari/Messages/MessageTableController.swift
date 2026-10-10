@@ -171,6 +171,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.autohidesScrollers = true
         scrollView.backgroundColor = Palette.chat
         scrollView.automaticallyAdjustsContentInsets = false
+        // The official client's list stops at both ends.
+        scrollView.verticalScrollElasticity = .none
+        scrollView.horizontalScrollElasticity = .none
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 16, right: 0)
         tableView.didLayout = { [weak self] in
             self?.settle()

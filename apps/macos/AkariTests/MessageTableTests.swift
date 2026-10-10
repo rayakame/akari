@@ -292,6 +292,23 @@ struct MessageTableTests {
         NotificationCenter.default.post(name: name, object: controller.scrollView)
     }
 
+    // Positive scrolls up. Without a gesture phase it scrolls as a mouse wheel does, on a later
+    // pass of the run loop; offscreen, phased trackpad events don't scroll at all.
+    func scrollWheel(by pixels: Int32) async throws {
+        let event = try #require(
+            CGEvent(
+                scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: pixels,
+                wheel2: 0, wheel3: 0))
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        let clip = controller.scrollView.contentView
+        let start = clip.bounds.origin
+        controller.scrollView.scrollWheel(with: try #require(NSEvent(cgEvent: event)))
+        for _ in 0..<40 where clip.bounds.origin == start {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try await Task.sleep(for: .milliseconds(200))
+    }
+
     @Test
     func theHoveredRowFollowsThePointerOnEveryScroll() {
         show(messages(80, longText: true))
@@ -333,24 +350,42 @@ struct MessageTableTests {
     }
 
     @Test
-    func aBouncePastTheBottomStaysPinnedWithoutProgrammaticScrolls() {
+    func scrollingPastTheBottomStopsThereWithoutBouncing() async throws {
+        var rows = messages(80, longText: true)
+        show(rows)
+        let scrollView = controller.scrollView
+        #expect(scrollView.verticalScrollElasticity == .none)
+        #expect(scrollView.horizontalScrollElasticity == .none)
+        let clip = scrollView.contentView
+        let bottom = clip.bounds.origin
+
+        try await scrollWheel(by: 80)
+        #expect(clip.bounds.origin.y < bottom.y)
+        try await scrollWheel(by: -300)
+        #expect(clip.bounds.origin == bottom)
+
+        rows += messages(1, from: 81)
+        show(rows)
+        window.layoutIfNeeded()
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    @Test
+    func aLiveScrollHoldsTheListUntilItsNotificationsStop() async throws {
         var rows = messages(80, longText: true)
         show(rows)
         let clip = controller.scrollView.contentView
         let bottom = clip.bounds.origin
 
+        // Paging starts a live scroll and never ends it.
         postLiveScroll(NSScrollView.willStartLiveScrollNotification)
-        clip.setBoundsOrigin(NSPoint(x: bottom.x, y: bottom.y + 40))
         postLiveScroll(NSScrollView.didLiveScrollNotification)
-        let bounced = clip.bounds.origin
-        table.needsLayout = true
-        window.layoutIfNeeded()
         rows += messages(1, from: 81)
         show(rows)
-        #expect(clip.bounds.origin == bounced)
+        window.layoutIfNeeded()
+        #expect(clip.bounds.origin == bottom)
 
-        clip.setBoundsOrigin(bottom)
-        postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+        try await Task.sleep(for: .seconds(0.8))
         window.layoutIfNeeded()
         #expect(visibleRows.contains(table.numberOfRows - 1))
     }
