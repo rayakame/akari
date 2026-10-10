@@ -108,8 +108,9 @@ Rules every Apple app shows the same way, so they live here rather than in the a
 
 - `MessageTimeline` turns `MessageListModel.rows` into table items: a divider before each
   local day and where author groups start, by the rule in `docs/ui/message-list.md`, wrapped
-  in `.edge(.older)` and `.edge(.newer)` items when asked, where a list shows its loading
-  state, an error or the beginning of the channel.
+  in edge items when asked: `.edge(.older)` and `.edge(.newer)` where more history lies beyond
+  the loaded messages (the app shows placeholder rows there), `.edge(.beginning)` where the
+  channel begins.
 - `TimelineChanges` diffs two timelines by item keys into the removed, inserted and reloaded
   indexes a table or collection view applies, so a list never reloads as a whole. A
   confirmation keeps its row key (above) and reloads one row.
