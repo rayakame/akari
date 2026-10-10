@@ -273,6 +273,8 @@ struct MessageListModelTests {
         account.holdLoads.withLock { $0 = false }
         await model.jumpToPresent()
         #expect(model.loading == .older)
+        await model.loadOlder()
+        #expect(store.log.actions.filter { $0 == .load(here, .older(limit: 50)) }.count == 1)
 
         account.holdLoads.withLock { $0 = true }
         async let jump: Void = model.jumpToPresent()
