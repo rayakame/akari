@@ -10,6 +10,7 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
         case loadToken(UserId)
         case logout(UserId)
         case forgetToken(UserId)
+        case endSession(String)
     }
 
     let calls = Locked<[Call]>([])
@@ -26,6 +27,13 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
     // Every account `account(token:)` returned.
     let accounts = Locked<[FakeAccount]>([])
     let forgotten = Signal()
+    let forgetError = Locked<TokenStoreError?>(nil)
+    // While set, each forget or end of a session waits for one value here.
+    let holdForgets = Locked(false)
+    let forgets = AsyncQueue<Void>()
+    let holdEndSessions = Locked(false)
+    let endSessions = AsyncQueue<Void>()
+    let endSessionError = Locked<LogoutError?>(nil)
 
     init() {
         super.init(noHandle: NoHandle())
@@ -86,7 +94,23 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
 
     override func forgetToken(account: UserId) async throws {
         record(.forgetToken(account))
+        if holdForgets.current {
+            _ = await forgets.next()
+        }
+        if let error = forgetError.current {
+            throw error
+        }
         tokens.withLock { $0[account] = nil }
         forgotten.fire()
+    }
+
+    override func endSession(token: Token) async throws {
+        record(.endSession((token as? FakeToken)?.value ?? "?"))
+        if holdEndSessions.current {
+            _ = await endSessions.next()
+        }
+        if let error = endSessionError.current {
+            throw error
+        }
     }
 }

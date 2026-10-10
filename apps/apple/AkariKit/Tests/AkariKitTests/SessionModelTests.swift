@@ -197,6 +197,35 @@ final class SessionModelTests {
     }
 
     @Test
+    func theNoticeFollowsTheConnection() async {
+        let session = makeSession()
+        #expect(session.notice == .connecting)
+        session.start()
+
+        subscription.send(.connection(state: .connecting))
+        await subscription.batches.pulled(2)
+        #expect(session.notice == .connecting)
+        subscription.send(.connection(state: .online))
+        await subscription.batches.pulled(3)
+        #expect(session.notice == nil)
+        subscription.send(.connection(state: .connecting))
+        await subscription.batches.pulled(4)
+        #expect(session.notice == .reconnecting)
+        session.suspend()
+        subscription.send(.connection(state: .offline))
+        await subscription.batches.pulled(5)
+        #expect(session.notice == .offline)
+        session.resume()
+        subscription.send(.connection(state: .connecting))
+        await subscription.batches.pulled(6)
+        #expect(session.notice == .reconnecting)
+        subscription.send(.connection(state: .closed(error: .Stopped)))
+        await subscription.batches.pulled(7)
+        #expect(session.notice == .closed(.Stopped))
+        session.close()
+    }
+
+    @Test
     func aDeletedOrHiddenOpenChannelOpensAnother() async {
         store.update { state in
             state.add(guild(1))

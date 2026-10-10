@@ -152,6 +152,18 @@ impl DiscordClient {
             .map_err(Into::into)
     }
 
+    /// Ends the session `token` belongs to on Discord, without touching the token store. A
+    /// token Discord no longer accepts counts as done.
+    pub async fn end_session(&self, token: Arc<Token>) -> Result<(), LogoutError> {
+        let core = self.core.clone();
+        run(
+            self.runtime,
+            async move { core.end_session(token.core()).await },
+        )
+        .await
+        .map_err(Into::into)
+    }
+
     /// Deletes the stored token without a request, for a token Discord already rejected.
     pub async fn forget_token(&self, account: UserId) -> Result<(), TokenStoreError> {
         let core = self.core.clone();

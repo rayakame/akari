@@ -97,4 +97,15 @@ struct FFISmokeTests {
         #expect("👍🏽".count == 1)
         #expect("👍🏽".utf16.count == 4)
     }
+
+    @Test @MainActor
+    func endSessionWithoutNetworkReportsNetwork() async throws {
+        let store = MemoryTokenStore(tokens: [Self.user: "stored.token"])
+        let client = try Self.client(store)
+        let token = try #require(try await client.loadToken(account: Self.user))
+
+        await #expect(throws: LogoutError.Network(kind: .connect)) {
+            try await client.endSession(token: token)
+        }
+    }
 }

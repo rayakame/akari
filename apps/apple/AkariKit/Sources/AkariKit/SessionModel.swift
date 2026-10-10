@@ -22,8 +22,21 @@ public final class SessionModel {
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
     /// with `.task(id: messages.channelId) { await messages.open() }`.
     public private(set) var messages: MessageListModel?
+    /// What the connection bar says; `nil` while online.
+    public var notice: ConnectionNotice? {
+        switch connection {
+        case .online: nil
+        case .offline where suspended: .offline
+        case .offline, .connecting: wasOnline ? .reconnecting : .connecting
+        case .closed(let error): .closed(error)
+        }
+    }
 
     let loop = EventLoop()
+    let drafts: Drafts
+    private var wasOnline = false
+    // Before the first connect the store says offline too; only a suspend is "offline".
+    private var suspended = false
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let onClosed: @MainActor (GatewayError?) -> Void
@@ -37,13 +50,23 @@ public final class SessionModel {
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
     /// means the user has to log in again. The first READY reopens the place and channel
     /// `memory` holds for the account.
-    public init(
+    public convenience init(
         userId: UserId, account: Account, memory: AccountMemory = AccountMemory(),
+        onClosed: @escaping @MainActor (GatewayError?) -> Void
+    ) {
+        self.init(
+            userId: userId, account: account, memory: memory, drafts: Drafts(),
+            onClosed: onClosed)
+    }
+
+    init(
+        userId: UserId, account: Account, memory: AccountMemory, drafts: Drafts,
         onClosed: @escaping @MainActor (GatewayError?) -> Void
     ) {
         self.userId = userId
         self.account = account
         self.memory = memory
+        self.drafts = drafts
         self.onClosed = onClosed
         spotToRestore = memory.lastSpot(of: userId)
         store = account.store()
@@ -141,10 +164,12 @@ public final class SessionModel {
 
     /// Disconnects but keeps the session, e.g. before the Mac sleeps.
     public func suspend() {
+        suspended = true
         account.disconnect()
     }
 
     public func resume() {
+        suspended = false
         do {
             try account.connect()
         } catch {
@@ -170,6 +195,9 @@ public final class SessionModel {
                 closed(error)
             } else {
                 connection = state
+                if state == .online {
+                    wasOnline = true
+                }
             }
         }
         if batch.ready || batch.currentUserChanged {
