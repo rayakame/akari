@@ -151,6 +151,24 @@ struct MessageTableTests {
     }
 
     @Test
+    func rowsAwayFromThePresentDontPinOnLayout() {
+        var rows = messages(80, longText: true)
+        show(rows)
+        let clip = controller.scrollView.contentView
+        let first = visibleRows.lowerBound
+        let offset = table.rect(ofRow: first).minY - clip.bounds.minY
+
+        rows += messages(5, from: 81)
+        controller.show(rows, atPresent: false)
+        window.layoutIfNeeded()
+        table.needsLayout = true
+        window.layoutIfNeeded()
+
+        #expect(visibleRows.lowerBound == first)
+        #expect(abs(table.rect(ofRow: first).minY - clip.bounds.minY - offset) <= 1)
+    }
+
+    @Test
     func newMessagesFollowTheBottomOnlyWhenPinned() {
         var rows = messages(80, longText: true)
         show(rows)

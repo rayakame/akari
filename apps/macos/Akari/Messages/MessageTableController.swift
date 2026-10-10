@@ -11,6 +11,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private let now: () -> Date
     private var filled = false
     private var sticksToBottom = true
+    private var atPresent = true
     private var anchor: (id: MessageTimeline.ItemId, offset: CGFloat)?
     // Clip moves from the controller's own updates and scrolls aren't the user's.
     private var ownChanges = 0
@@ -34,8 +35,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard !changes.isEmpty else {
             return
         }
+        self.atPresent = atPresent
         let firstFill = !filled && !next.items.isEmpty
-        let pin = firstFill || (sticksToBottom && atPresent)
+        let pin = firstFill || pinsToBottom
         if !pin {
             anchor = visibleAnchor(skipping: changes.removed) ?? anchor
         }
@@ -64,6 +66,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         } else {
             restoreAnchor()
         }
+    }
+
+    // Away from the present, rows below the reader are an older page's continuation, not news.
+    private var pinsToBottom: Bool {
+        sticksToBottom && atPresent
     }
 
     var isPinnedToBottom: Bool {
@@ -140,7 +147,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             self.ownChanges += 1
             defer { self.ownChanges -= 1 }
-            if self.sticksToBottom {
+            if self.pinsToBottom {
                 if !self.isPinnedToBottom {
                     self.scrollToBottom()
                 }
