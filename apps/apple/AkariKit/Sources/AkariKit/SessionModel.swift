@@ -86,6 +86,12 @@ public final class SessionModel {
                     subscription.close()
                 }
             })
+        LaunchLog.mark("session started")
+        // The store keeps a window for a channel it doesn't know yet, so the last channel's
+        // messages load while the gateway connects; READY then places it.
+        if let channel = spotToRestore?.channel {
+            messages = MessageListModel(channelId: channel, account: account, store: store)
+        }
     }
 
     /// A guild opens the channel last opened there, else its first text channel; home opens
@@ -181,6 +187,9 @@ public final class SessionModel {
                 messages = nil
             }
         }
+        if batch.ready {
+            LaunchLog.mark("READY in the app")
+        }
         if batch.ready, let spot = spotToRestore {
             spotToRestore = nil
             restore(spot)
@@ -196,6 +205,7 @@ public final class SessionModel {
         switch spot.place {
         case .guild(let guildId):
             guard guilds.guilds.contains(where: { $0.id == guildId }) else {
+                messages = nil
                 return
             }
             if let channel = spot.channel {
@@ -208,6 +218,8 @@ public final class SessionModel {
                 directMessages.conversations.contains(where: { $0.id == channel })
             {
                 open(channel: channel)
+            } else {
+                messages = nil
             }
         }
     }

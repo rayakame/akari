@@ -42,6 +42,7 @@ public final class AppModel {
         } catch {
             return showLogin(.tokenUnreadable)
         }
+        LaunchLog.mark("token loaded")
         guard let token else {
             memory.lastAccount = nil
             return showLogin(nil)

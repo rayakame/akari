@@ -369,6 +369,30 @@ final class SessionModelTests {
     }
 
     @Test
+    func theLastChannelStartsLoadingBeforeReady() async throws {
+        memory.remember(.init(place: .guild(id(1)), channel: id(12)), of: id(1))
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(11), channel(12)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+
+        let early = try #require(session.messages)
+        #expect(early.channelId == id(12))
+        #expect(session.place == .home)
+        await early.open()
+        subscription.send(.ready)
+        await subscription.batches.pulled(2)
+
+        #expect(session.place == .guild(id(1)))
+        #expect(session.messages === early)
+        let loads = account.log.actions.filter { if case .load = $0 { true } else { false } }
+        #expect(loads.count == 1)
+        session.close()
+    }
+
+    @Test
     func aPlaceOpenedBeforeReadyWinsOverTheLastOne() async {
         memory.remember(.init(place: .guild(id(1)), channel: id(12)), of: id(1))
         store.update { state in
@@ -394,6 +418,21 @@ final class SessionModelTests {
         memory.remember(.init(place: .guild(id(9)), channel: id(90)), of: id(1))
         let session = makeSession()
         session.start()
+
+        subscription.send(.ready)
+        await subscription.batches.pulled(2)
+
+        #expect(session.place == .home)
+        #expect(session.messages == nil)
+        session.close()
+    }
+
+    @Test
+    func aGoneConversationLeavesNothingOpen() async {
+        memory.remember(.init(place: .home, channel: id(5)), of: id(1))
+        let session = makeSession()
+        session.start()
+        #expect(session.messages?.channelId == id(5))
 
         subscription.send(.ready)
         await subscription.batches.pulled(2)

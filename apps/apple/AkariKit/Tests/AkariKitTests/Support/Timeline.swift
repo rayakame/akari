@@ -22,7 +22,7 @@ func row(
         id: id(raw), channelId: id(10), kind: kind, author: author, fromWebhook: webhook,
         content: "message \(raw)", timestamp: time, editedTimestamp: nil, pinned: false,
         mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
-        delivery: delivery
+        componentsV2: false, delivery: delivery
     )
     return MessageListModel.Row(id: id(key ?? raw), message: message)
 }
