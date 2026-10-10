@@ -93,4 +93,12 @@ nonisolated private final class GuildStore: Store, @unchecked Sendable {
     override func window(channelId: ChannelId) -> MessageWindow? {
         nil
     }
+
+    override func messageLengthLimit() -> UInt32 {
+        2000
+    }
+
+    override func slowmode(channelId: ChannelId) -> Slowmode? {
+        nil
+    }
 }
