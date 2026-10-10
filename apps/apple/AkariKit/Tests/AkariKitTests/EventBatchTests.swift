@@ -30,6 +30,7 @@ struct EventBatchTests {
 
         #expect(batch.ready)
         #expect(batch.currentUserChanged)
+        #expect(batch.usersChanged == [id(9)])
         #expect(batch.guildsChanged == [id(1), id(2), id(3), id(4)])
         #expect(batch.guildListChanged)
         #expect(batch.membersChanged == [id(5)])

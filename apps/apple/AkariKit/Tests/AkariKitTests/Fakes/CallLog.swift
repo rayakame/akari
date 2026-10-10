@@ -23,6 +23,8 @@ final class CallLog: Sendable {
         case guild(GuildId)
         case unavailableGuildIds
         case channelList(GuildId)
+        case privateChannelList
+        case user(UserId)
         case channel(ChannelId)
         case channels([ChannelId])
         case permissions(ChannelId)

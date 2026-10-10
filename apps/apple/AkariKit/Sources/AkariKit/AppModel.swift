@@ -56,7 +56,7 @@ public final class AppModel {
             return
         }
         session.close()
-        memory.lastAccount = nil
+        forget(session.userId)
         warning = nil
         showLogin(nil)
         // The token is deleted even when Discord can't be reached.
@@ -88,7 +88,8 @@ public final class AppModel {
         } catch {
             return showLogin(nil)
         }
-        let session = SessionModel(userId: userId, account: account) { [weak self] error in
+        let session = SessionModel(userId: userId, account: account, memory: memory) {
+            [weak self] error in
             self?.closed(userId, error)
         }
         screen = .session(session)
@@ -102,10 +103,15 @@ public final class AppModel {
             return
         }
         session.close()
-        memory.lastAccount = nil
+        forget(userId)
         showLogin(.sessionExpired)
         Task { [client] in
             try? await client.forgetToken(account: userId)
         }
+    }
+
+    private func forget(_ userId: UserId) {
+        memory.lastAccount = nil
+        memory.remember(nil, of: userId)
     }
 }

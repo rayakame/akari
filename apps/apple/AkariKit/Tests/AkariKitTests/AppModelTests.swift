@@ -23,6 +23,7 @@ final class AppModelTests {
 
     func restored() async throws -> (AppModel, SessionModel, FakeAccount) {
         memory.lastAccount = id(42)
+        memory.remember(.init(place: .home, channel: id(5)), of: id(42))
         client.tokens.withLock { $0[id(42)] = "stored.token" }
         let app = makeApp()
         await app.start()
@@ -144,6 +145,7 @@ final class AppModelTests {
         #expect(client.calls.current.filter { $0 == .forgetToken(id(42)) }.count == 1)
         #expect(!client.calls.current.contains(.logout(id(42))))
         #expect(memory.lastAccount == nil)
+        #expect(memory.lastSpot(of: id(42)) == nil)
         #expect(try #require(app.screen.login).notice == .sessionExpired)
         #expect(account.log.calls.contains(.close))
     }
@@ -171,6 +173,7 @@ final class AppModelTests {
         #expect(client.calls.current.last == .logout(id(42)))
         #expect(!client.calls.current.contains(.forgetToken(id(42))))
         #expect(memory.lastAccount == nil)
+        #expect(memory.lastSpot(of: id(42)) == nil)
         #expect(try #require(app.screen.login).notice == nil)
     }
 }
