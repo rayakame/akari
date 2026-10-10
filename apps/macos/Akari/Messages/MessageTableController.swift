@@ -23,9 +23,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // Tells tables apart in the scroll log, so a replaced scroll view shows.
     private let number: Int
     private(set) var timeline: MessageTimeline
-    private let calendar: Calendar
-    private let locale = Locale.current
+    // Read again when the day, time zone or locale changes.
+    private let calendarSource: () -> Calendar
+    private let localeSource: () -> Locale
+    private var calendar: Calendar
+    private var locale: Locale
     private let now: () -> Date
+    private let notifications: NotificationCenter
+    nonisolated(unsafe) private var timeObservers: [NSObjectProtocol] = []
     // Where the pointer is, in window coordinates; nil when hover shouldn't show.
     private let pointer: () -> NSPoint?
     private var filled = false
@@ -54,12 +59,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var rowHeightsWidth: CGFloat = 0
 
     init(
-        tableView: MessageTableView = MessageTableView(), calendar: Calendar = .current,
-        now: @escaping () -> Date = Date.init, pointer: (() -> NSPoint?)? = nil
+        tableView: MessageTableView = MessageTableView(),
+        calendar: @escaping () -> Calendar = { .autoupdatingCurrent },
+        locale: @escaping () -> Locale = { .autoupdatingCurrent },
+        now: @escaping () -> Date = Date.init, pointer: (() -> NSPoint?)? = nil,
+        notifications: NotificationCenter = .default
     ) {
         self.tableView = tableView
-        self.calendar = calendar
+        calendarSource = calendar
+        localeSource = locale
+        self.calendar = calendar()
+        self.locale = locale()
         self.now = now
+        self.notifications = notifications
         self.pointer =
             pointer ?? { [weak tableView] in
                 guard let window = tableView?.window, window.isKeyWindow else {
@@ -67,7 +79,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 }
                 return window.mouseLocationOutsideOfEventStream
             }
-        timeline = MessageTimeline(rows: [], calendar: calendar)
+        timeline = MessageTimeline(rows: [], calendar: self.calendar)
         Self.created += 1
         number = Self.created
         super.init()
@@ -88,9 +100,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         requested = false
         // Before the early return: leaving the present ends pinning even without new rows.
         atPresent = state.atPresent
-        let next = MessageTimeline(
-            rows: state.rows, calendar: calendar,
-            edges: state.atPresent ? [.older] : [.older, .newer])
+        let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
             apply(next, changes)
@@ -102,6 +112,50 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             configureEdges()
         }
         askForMore()
+    }
+
+    deinit {
+        for observer in timeObservers {
+            notifications.removeObserver(observer)
+        }
+    }
+
+    // "Today at" and day dividers depend on the date, the time zone and the locale. Every height
+    // is measured again: system rows carry the time in their wrapped text.
+    func refreshTimes() {
+        calendar = calendarSource()
+        locale = localeSource()
+        let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
+        if let place {
+            anchor = place
+        }
+        rowHeights.removeAll()
+        let next = timeline(of: state)
+        let changes = TimelineChanges(from: timeline.items, to: next.items)
+        if !changes.isEmpty {
+            apply(next, changes)
+        }
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        let visible = tableView.rows(in: tableView.visibleRect)
+        if visible.length > 0 {
+            tableView.reloadData(
+                forRowIndexes: IndexSet(integersIn: visible.location..<NSMaxRange(visible)),
+                columnIndexes: [0])
+        }
+        tableView.noteHeightOfRows(
+            withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows))
+        if pinsToBottom {
+            scrollToBottom()
+        } else {
+            restoreAnchor()
+        }
+    }
+
+    private func timeline(of state: MessageTableState) -> MessageTimeline {
+        MessageTimeline(
+            rows: state.rows, calendar: calendar,
+            edges: state.atPresent ? [.older] : [.older, .newer])
     }
 
     // Loads the newest messages when needed and follows the bottom once they're there; a
@@ -390,6 +444,20 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         center.addObserver(
             self, selector: #selector(columnResized), name: NSTableView.columnDidResizeNotification,
             object: tableView)
+        // Posted at midnight (and after a wake that crossed it), or when the zone or locale
+        // changes; not necessarily on the main thread.
+        for name in [
+            Notification.Name.NSCalendarDayChanged, .NSSystemTimeZoneDidChange,
+            NSLocale.currentLocaleDidChangeNotification,
+        ] {
+            timeObservers.append(
+                notifications.addObserver(forName: name, object: nil, queue: .main) {
+                    [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.refreshTimes()
+                    }
+                })
+        }
         // Wheel, keyboard and accessibility scrolls post no live-scroll notifications; every
         // scroll moves the clip view.
         scrollView.contentView.postsBoundsChangedNotifications = true

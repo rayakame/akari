@@ -52,7 +52,7 @@ struct MessageTableTests {
 
     init() {
         controller = MessageTableController(
-            tableView: table, calendar: berlin, now: { berlinTime(2026, 10, 10, 15, 0) },
+            tableView: table, calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) },
             pointer: { [pointer] in pointer.location })
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
