@@ -101,6 +101,12 @@ whichever request asked: login, MFA, SMS, authorize-ip or phone verification. Wh
 CAPTCHA is pending for an MFA request, `submit_mfa` and `send_mfa_sms` still work with the
 same ticket.
 
+The apps can't show a CAPTCHA yet: a web view sheet for hCaptcha is a later milestone, and
+until then they say so. A password login from a new device often gets one, so QR code login
+is the reliable way in for now. After a new login location is confirmed, retrying the login
+shouldn't need another CAPTCHA
+([Login Account](https://docs.discord.food/authentication#login-account)).
+
 ### New login location
 
 When an account without MFA logs in from a new location, Discord can refuse and ask for

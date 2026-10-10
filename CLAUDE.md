@@ -35,8 +35,10 @@ storage trait, the gateway connection (zstd-stream, heartbeats, resume, rate-lim
 sends), the state store (`akari_core::state`) and `Account`, which keeps the store current
 from the gateway, loads message history and sends messages over rate-limited REST;
 `akari-cli` can log in, log out, connect, list guilds and channels, and read, send and tail
-messages. `akari-markdown` and `akari-ffi` are still empty skeletons, and each app folder
-contains only a README.
+messages. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
+and the message APIs through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+XCFramework and generated bindings. `akari-markdown` is still an empty skeleton, and the
+other app folders contain only a README.
 
 | Path | Contents |
 |---|---|
@@ -44,6 +46,7 @@ contains only a README.
 | `crates/akari-markdown` | Discord-flavored markdown parser |
 | `crates/akari-ffi` | UniFFI bindings only (Swift for macOS/iOS, Kotlin for Android) |
 | `crates/akari-cli` | Terminal test client for developing the core |
+| `crates/akari-bindgen` | UniFFI's Swift bindings generator at the workspace's UniFFI version (a build tool, run by `apps/apple/build-ffi.sh`) |
 | `apps/apple/AkariKit` | Shared Swift package: logic and view models for macOS and iOS |
 | `apps/macos` | SwiftUI shell + AppKit message list, XcodeGen project, consumes `akari-ffi` via an XCFramework / Swift package |
 | `apps/ios` | Later: SwiftUI/UIKit, same XCFramework, uses AkariKit |
@@ -75,9 +78,14 @@ apps/linux ──► akari-core, akari-markdown   (later, as a workspace member)
   37) are enabled only by `akari-cli`. Cargo unifies features across a workspace build, so
   `cargo build --workspace` would compile `akari-core` with them for `akari-ffi` too: app
   builds always build `-p akari-ffi`, and CI checks that `-p akari-ffi` pulls in none of
-  them.
+  them, nor `insecure-test-endpoints` (plaintext test servers), which only test suites
+  enable as a dev-dependency.
 - Swift and Kotlin apps reach Rust only through `akari-ffi`; the Linux app links the
-  crates directly.
+  crates directly. How state crosses the boundary (records read by ID, ID-only events,
+  Akari's own tokio runtime) is in `crates/akari-ffi/README.md`.
+- The generated Swift bindings and the XCFramework are build outputs, never committed. The
+  bindings stay in their own target (`AkariFFI`), because they don't compile with MainActor
+  as the default isolation.
 
 ## Cross-platform requirements
 
@@ -127,15 +135,20 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 
-# Cross-target checks (CI runs them; rust-toolchain.toml installs both targets).
+# Cross-target checks (CI runs them; rust-toolchain.toml installs the targets).
 # Locally, the iOS check needs the iOS SDK (full Xcode) once crates compile C code.
 # cargo-ndk always needs an Android NDK: ANDROID_NDK_HOME or Android Studio's SDK.
-cargo check --workspace --exclude akari-cli --target aarch64-apple-ios
-cargo ndk -t arm64-v8a check --workspace --exclude akari-cli  # needs cargo-ndk
+cargo check --workspace --exclude akari-cli --exclude akari-bindgen --target aarch64-apple-ios
+cargo ndk -t arm64-v8a check --workspace --exclude akari-cli --exclude akari-bindgen  # needs cargo-ndk
 
 # akari-core without akari-cli's dev features, and the feature boundary apps rely on
 cargo clippy -p akari-core --all-targets -- -D warnings
-cargo tree -p akari-ffi -e features -i akari-core   # must list no "capture", "flags-only" or "repeat-nonce"
+cargo tree -p akari-ffi -e features,no-dev -i akari-core   # must list no "capture", "flags-only", "repeat-nonce" or "insecure-test-endpoints"
+
+# akari-ffi for Apple: the XCFramework and Swift bindings into AkariKit (needs full Xcode),
+# then the package's tests. --host-only builds just this Mac's architecture.
+apps/apple/build-ffi.sh
+swift test --package-path apps/apple/AkariKit
 
 # Banned dependencies (needs cargo-deny)
 cargo deny check bans

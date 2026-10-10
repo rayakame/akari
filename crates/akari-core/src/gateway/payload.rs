@@ -63,6 +63,35 @@ pub enum DispatchEvent {
     Other(String),
 }
 
+impl DispatchEvent {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::Ready(_) => "READY",
+            Self::ReadySupplemental(_) => "READY_SUPPLEMENTAL",
+            Self::Resumed => "RESUMED",
+            Self::GuildCreate(_) => "GUILD_CREATE",
+            Self::GuildUpdate(_) => "GUILD_UPDATE",
+            Self::GuildDelete(_) => "GUILD_DELETE",
+            Self::GuildRoleCreate(_) => "GUILD_ROLE_CREATE",
+            Self::GuildRoleUpdate(_) => "GUILD_ROLE_UPDATE",
+            Self::GuildRoleDelete(_) => "GUILD_ROLE_DELETE",
+            Self::GuildMemberUpdate(_) => "GUILD_MEMBER_UPDATE",
+            Self::ChannelCreate(_) => "CHANNEL_CREATE",
+            Self::ChannelUpdate(_) => "CHANNEL_UPDATE",
+            Self::ChannelDelete(_) => "CHANNEL_DELETE",
+            Self::ThreadCreate(_) => "THREAD_CREATE",
+            Self::ThreadUpdate(_) => "THREAD_UPDATE",
+            Self::ThreadDelete(_) => "THREAD_DELETE",
+            Self::MessageCreate(_) => "MESSAGE_CREATE",
+            Self::MessageUpdate(_) => "MESSAGE_UPDATE",
+            Self::MessageDelete(_) => "MESSAGE_DELETE",
+            Self::MessageDeleteBulk(_) => "MESSAGE_DELETE_BULK",
+            Self::UserUpdate(_) => "USER_UPDATE",
+            Self::Other(_) => "other",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
     #[error("invalid gateway payload")]

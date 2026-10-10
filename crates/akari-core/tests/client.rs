@@ -254,3 +254,23 @@ async fn ending_an_already_dead_session_succeeds() {
             .is_ok()
     );
 }
+
+#[tokio::test]
+async fn forget_token_deletes_without_a_request() {
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let store = Arc::new(MemoryStore::default());
+    let client = client(&server, store.clone());
+    client
+        .save_token(ACCOUNT, &Token::new("rejected.token".to_owned()))
+        .await
+        .unwrap();
+
+    client.forget_token(ACCOUNT).await.unwrap();
+
+    assert!(!store.holds(ACCOUNT));
+}

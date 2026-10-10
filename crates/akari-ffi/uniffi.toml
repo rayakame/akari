@@ -1,0 +1,28 @@
+[bindings.swift]
+# AkariKit supplies LocalizedError with akari-core's texts (Sources/AkariFFI/ErrorText.swift).
+omit_localized_error_conformance = true
+
+# IDs and permissions lift into the typed values in Sources/AkariFFI.
+[bindings.swift.custom_types.UserId]
+lift = "UserId(rawValue: {})"
+lower = "{}.rawValue"
+
+[bindings.swift.custom_types.GuildId]
+lift = "GuildId(rawValue: {})"
+lower = "{}.rawValue"
+
+[bindings.swift.custom_types.ChannelId]
+lift = "ChannelId(rawValue: {})"
+lower = "{}.rawValue"
+
+[bindings.swift.custom_types.MessageId]
+lift = "MessageId(rawValue: {})"
+lower = "{}.rawValue"
+
+[bindings.swift.custom_types.AttachmentId]
+lift = "AttachmentId(rawValue: {})"
+lower = "{}.rawValue"
+
+[bindings.swift.custom_types.Permissions]
+lift = "Permissions(rawValue: {})"
+lower = "{}.rawValue"

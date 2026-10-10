@@ -26,6 +26,9 @@ captures/
 .DS_Store
 
 # Xcode / SwiftPM
+# AkariKit's build outputs, made by apps/apple/build-ffi.sh
+apps/apple/AkariKit/Frameworks/
+apps/apple/AkariKit/Sources/AkariFFI/Generated/
 xcuserdata/
 *.xcuserstate
 DerivedData/

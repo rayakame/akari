@@ -1,0 +1,15 @@
+[package]
+name = "akari-bindgen"
+description = "Generates the Swift bindings for akari-ffi (a build tool, run by apps/apple/build-ffi.sh)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The same UniFFI as akari-ffi: the bindings check the library's checksums when they load.
+uniffi = { workspace = true, features = ["cli", "cargo-metadata"] }
+
+[lints]
+workspace = true
