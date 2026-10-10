@@ -2,9 +2,9 @@ use serde::de::{self, Deserialize, Deserializer};
 
 use crate::lenient::skip_invalid_option;
 use crate::model::{
-    Attachment, ChannelId, ChannelType, Embed, GuildId, MessageId, MessageType,
-    PermissionOverwrite, PremiumType, Role, RoleId, StickerItem, ThreadMetadata, Timestamp, User,
-    UserId, WebhookId, double_option,
+    Attachment, ChannelId, ChannelType, Embed, GenericMarker, GuildId, MessageId, MessageType,
+    PermissionOverwrite, PremiumType, Role, RoleId, Snowflake, StickerItem, ThreadMetadata,
+    Timestamp, User, UserId, WebhookId, double_option,
 };
 
 /// GUILD_UPDATE. A missing field is unchanged, `Some(None)` is `null`, a list replaces.
@@ -71,6 +71,8 @@ pub struct ChannelUpdate {
     pub topic: Option<Option<String>>,
     pub nsfw: Option<bool>,
     pub rate_limit_per_user: Option<u32>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub last_message_id: Option<Option<Snowflake<GenericMarker>>>,
     pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
     #[serde(default, deserialize_with = "skip_invalid_option")]
     pub recipients: Option<Vec<User>>,

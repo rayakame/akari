@@ -11,6 +11,9 @@ const G2: u64 = 200_000_000_000_000_002;
 const G3: u64 = 200_000_000_000_000_003;
 const GENERAL: u64 = 300_000_000_000_000_002;
 const THREAD: u64 = 300_000_000_000_000_020;
+const VOICE: u64 = 300_000_000_000_000_003;
+const DM: u64 = 300_000_000_000_000_010;
+const GROUP: u64 = 300_000_000_000_000_011;
 
 fn dispatch(name: &str, data: &Value) -> DispatchEvent {
     let payload = json!({"op": 0, "s": 1, "t": name, "d": data});
@@ -515,6 +518,10 @@ fn updates_for_unknown_entities_change_nothing() {
         ("CHANNEL_CREATE", foreign_channel),
         ("GUILD_MEMBER_UPDATE", other_member),
         (
+            "MESSAGE_CREATE",
+            message(400_000_000_000_000_090, 300_000_000_000_000_099),
+        ),
+        (
             "GUILD_ROLE_DELETE",
             json!({"guild_id": G1.to_string(), "role_id": "500000000000000099"}),
         ),
@@ -786,4 +793,146 @@ pub(super) fn run_diff_hook() {
     if let Some(hook) = DIFF_HOOK.with(|slot| slot.borrow_mut().take()) {
         hook();
     }
+}
+
+fn last_message(state: &State, channel: u64) -> Option<u64> {
+    state
+        .channel(Snowflake::new(channel))
+        .and_then(|channel| channel.last_message_id)
+        .map(|id| id.get())
+}
+
+fn dm_message(id: u64, channel: u64) -> Value {
+    let mut message = message(id, channel);
+    let fields = message.as_object_mut().unwrap();
+    fields.remove("guild_id");
+    fields.remove("member");
+    message
+}
+
+#[test]
+fn channels_keep_their_last_message_from_ready_create_and_update() {
+    let mut state = ready_state();
+    let mut created = fixture(include_str!("../../../tests/fixtures/channel_update.json"));
+    created["id"] = "300000000000000005".into();
+    created["last_message_id"] = "400000000000000040".into();
+    let mut repeated_dm = fixture(include_str!(
+        "../../../tests/fixtures/channel_create_dm.json"
+    ));
+    repeated_dm["id"] = DM.to_string().into();
+    repeated_dm["last_message_id"] = "400000000000000010".into();
+    let update = |last: Value| json!({"id": GENERAL.to_string(), "last_message_id": last});
+
+    assert_eq!(last_message(&state, DM), Some(400_000_000_000_000_020));
+    assert_eq!(last_message(&state, GROUP), Some(400_000_000_000_000_021));
+    apply(&mut state, "CHANNEL_CREATE", created);
+    let raised = apply(
+        &mut state,
+        "CHANNEL_UPDATE",
+        update("400000000000000050".into()),
+    );
+    let older = apply(
+        &mut state,
+        "CHANNEL_UPDATE",
+        update("400000000000000045".into()),
+    );
+    let cleared = apply(&mut state, "CHANNEL_UPDATE", update(Value::Null));
+    apply(&mut state, "CHANNEL_CREATE", repeated_dm);
+
+    assert_eq!(
+        last_message(&state, 300_000_000_000_000_005),
+        Some(400_000_000_000_000_040)
+    );
+    assert_eq!(raised, [format!("ChannelUpdated({GENERAL})")]);
+    assert!(older.is_empty(), "{older:?}");
+    assert!(cleared.is_empty(), "{cleared:?}");
+    assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_050));
+    assert_eq!(last_message(&state, DM), Some(400_000_000_000_000_020));
+}
+
+#[test]
+fn a_dm_message_raises_its_last_message_and_reports_it() {
+    let mut state = ready_state();
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_message(400_000_000_000_000_030, DM),
+    );
+
+    assert_eq!(events, [format!("ChannelUpdated({DM})")]);
+    assert_eq!(last_message(&state, DM), Some(400_000_000_000_000_030));
+}
+
+#[test]
+fn a_viewed_dm_reports_the_message_first() {
+    let mut state = ready_state();
+    state.view_channel(Snowflake::new(DM), &mut Vec::new());
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_message(400_000_000_000_000_030, DM),
+    );
+
+    assert_eq!(
+        events,
+        [
+            "MessageInserted(400000000000000030)".to_owned(),
+            format!("ChannelUpdated({DM})")
+        ]
+    );
+}
+
+#[test]
+fn a_message_in_a_guild_channel_changes_it_silently() {
+    let mut state = ready_state();
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(400_000_000_000_000_030, GENERAL),
+    );
+
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_030));
+}
+
+#[test]
+fn an_older_message_leaves_the_last_message() {
+    let mut state = ready_state();
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_message(400_000_000_000_000_015, DM),
+    );
+
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(last_message(&state, DM), Some(400_000_000_000_000_020));
+}
+
+#[test]
+fn a_later_ready_reports_guild_channels_only_beyond_their_last_message() {
+    let mut state = ready_state();
+    let mut next = ready_value();
+    let channels = &mut next["guilds"][0]["channels"];
+    assert_eq!(channels[1]["id"], GENERAL.to_string());
+    assert_eq!(channels[2]["id"], VOICE.to_string());
+    channels[1]["last_message_id"] = "400000000000000099".into();
+    channels[2]["name"] = "Voice 2".into();
+    assert_eq!(next["private_channels"][0]["id"], DM.to_string());
+    next["private_channels"][0]["last_message_id"] = "400000000000000098".into();
+
+    let events = apply(&mut state, "READY", next);
+
+    assert_eq!(
+        events,
+        [
+            format!("ChannelUpdated({VOICE})"),
+            format!("ChannelUpdated({DM})"),
+            "Ready".to_owned()
+        ]
+    );
+    assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_099));
 }

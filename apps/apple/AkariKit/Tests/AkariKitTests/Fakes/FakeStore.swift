@@ -94,7 +94,7 @@ final class FakeStore: Store, @unchecked Sendable {
         read(.channelList(guildId)) { $0.channelLists[guildId] ?? [] }
     }
 
-    override func privateChannelIds() -> [ChannelId] {
+    override func privateChannelList() -> [ChannelId] {
         []
     }
 

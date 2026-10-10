@@ -20,6 +20,9 @@ use crate::errors::GatewayError;
 use crate::records::{Channel, ConnectionState, Delivery};
 use crate::subscription::StoreEvent;
 
+const DM: ChannelId = ChannelId::new(300_000_000_000_000_010);
+const GROUP: ChannelId = ChannelId::new(300_000_000_000_000_011);
+
 #[tokio::test]
 async fn ready_crosses_as_ids_in_order() {
     let gateway = FakeGateway::start().await;
@@ -62,6 +65,7 @@ async fn store_reads_convert_after_ready() {
     );
     assert_eq!(store.unavailable_guild_ids(), [DOWN]);
     assert_eq!(store.channel_list(GUILD), [VOICE, CATEGORY, GENERAL]);
+    assert_eq!(store.private_channel_list(), [GROUP, DM]);
     assert_eq!(
         store.channel(GENERAL),
         Some(Channel {
@@ -175,6 +179,44 @@ async fn live_messages_cross_as_ids_and_read_as_records() {
     assert_eq!(message.embed_count, 1);
     assert_eq!(message.delivery, Delivery::Sent);
     assert!(message.timestamp < SystemTime::now());
+    account.close();
+}
+
+#[tokio::test]
+async fn a_dm_message_moves_its_conversation_up() {
+    let gateway = FakeGateway::start().await;
+    let account = gateway.client().account(token("t")).unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let mut ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    let mut message = fixture(include_str!(
+        "../../../akari-core/tests/fixtures/message_create.json"
+    ));
+    message["id"] = "400000000000000030".into();
+    message["channel_id"] = DM.get().to_string().into();
+    let fields = message.as_object_mut().unwrap();
+    fields.remove("guild_id");
+    fields.remove("member");
+
+    send(
+        &mut ws,
+        json!({"op": 0, "s": 2, "t": "MESSAGE_CREATE", "d": message}),
+    )
+    .await;
+
+    let events = events_until(&subscription, |event| {
+        matches!(event, StoreEvent::ChannelUpdated { .. })
+    })
+    .await;
+    assert_eq!(
+        events.last(),
+        Some(&StoreEvent::ChannelUpdated {
+            channel_id: DM,
+            guild_id: None
+        })
+    );
+    assert_eq!(account.store().private_channel_list(), [DM, GROUP]);
     account.close();
 }
 

@@ -491,9 +491,15 @@ impl Store {
         self.read(|inner| inner.state.threads(guild))
     }
 
-    /// DMs and group DMs.
+    /// DMs and group DMs, in no particular order.
     pub fn private_channels(&self) -> Vec<Arc<Channel>> {
         self.read(|inner| inner.state.private_channels())
+    }
+
+    /// DMs and group DMs as the DM list shows them: the latest conversation first. One
+    /// without messages counts from when it was created.
+    pub fn private_channel_list(&self) -> Vec<Arc<Channel>> {
+        order::private_channel_order(self.read(|inner| inner.state.private_channels()))
     }
 
     /// The current user's permissions in a guild channel or thread; in a thread,

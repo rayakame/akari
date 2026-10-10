@@ -101,6 +101,9 @@ pub struct Channel {
     pub nsfw: bool,
     /// Slowmode in seconds.
     pub rate_limit_per_user: u32,
+    /// The newest message. Forum and media channels keep their newest post's thread ID here,
+    /// so it isn't a `MessageId`. It may be deleted already, and it never moves back.
+    pub last_message_id: Option<Snowflake<GenericMarker>>,
     pub permission_overwrites: Box<[PermissionOverwrite]>,
     /// DM and group DM recipients without the current user; see `Store::user`.
     pub recipients: Box<[UserId]>,

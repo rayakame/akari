@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -60,6 +61,16 @@ pub(crate) fn guild_order(mut guilds: Vec<(Arc<Guild>, Option<Timestamp>)>) -> V
             .then(b.id.cmp(&a.id))
     });
     guilds.into_iter().map(|(guild, _)| guild).collect()
+}
+
+pub(crate) fn private_channel_order(mut channels: Vec<Arc<Channel>>) -> Vec<Arc<Channel>> {
+    channels.sort_by_key(|channel| {
+        let activity = channel
+            .last_message_id
+            .map_or(channel.id.get(), |last| last.get());
+        Reverse((activity, channel.id))
+    });
+    channels
 }
 
 // `ordered` comes from `display_order`: channels outside a category, then each category
@@ -129,7 +140,15 @@ mod tests {
             owner_id: None,
             thread: None,
             flags: 0,
+            last_message_id: None,
         })
+    }
+
+    fn private(id: u64, last: Option<u64>) -> Arc<Channel> {
+        let mut channel = (*channel(id, ChannelType::Dm, None, 0)).clone();
+        channel.guild_id = None;
+        channel.last_message_id = last.map(Snowflake::new);
+        Arc::new(channel)
     }
 
     #[test]
@@ -228,5 +247,23 @@ mod tests {
             .collect();
 
         assert_eq!(ordered, [10, 20, 21]);
+    }
+
+    #[test]
+    fn private_channels_come_latest_conversation_first() {
+        let channels = vec![
+            private(3, None),
+            private(4, Some(9)),
+            private(7, None),
+            private(8, Some(5)),
+            private(6, Some(7)),
+        ];
+
+        let ordered: Vec<u64> = private_channel_order(channels)
+            .iter()
+            .map(|channel| channel.id.get())
+            .collect();
+
+        assert_eq!(ordered, [4, 7, 6, 8, 3]);
     }
 }
