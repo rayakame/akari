@@ -62,7 +62,8 @@ Examples: "Rust Programming Language" → "RPL", "🌸 Garden" → "🌸G",
 
 **Where Akari differs on purpose:** Discord's word rule only knows the letters A–Z, digits
 and the underscore, so "Café" gives "Cé" and a name in Arabic or Japanese stays whole.
-Akari counts any letter or digit of any script as part of a word: "Café Crème" → "CC".
+Akari counts any letter or digit of any script, and the underscore, as part of a word:
+"Café Crème" → "CC".
 
 ## Tooltips
 
