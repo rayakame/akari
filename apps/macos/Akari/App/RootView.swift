@@ -27,6 +27,7 @@ struct RootView: View {
 
 private struct AppScreen: View {
     let app: AppModel
+    @State private var power: PowerEvents?
 
     var body: some View {
         ZStack {
@@ -35,16 +36,40 @@ private struct AppScreen: View {
                 Color(nsColor: Palette.frame)
             case .login(let login):
                 LoginView(model: login)
+                    .overlay(alignment: .top) {
+                        if app.warning == .logoutNotConfirmed, let warning = app.warning {
+                            WarningLine(text: warning.text) { app.dismissWarning() }
+                                .padding(.top, 32)
+                        }
+                    }
                     .transition(.opacity)
             case .session(let session):
-                SessionView(session: session) { messages, placeholder in
+                SessionView(
+                    session: session, warning: app.warning,
+                    dismissWarning: { app.dismissWarning() }, reconnect: { app.reconnect() }
+                ) { messages, placeholder in
                     MessageArea(messages: messages, placeholder: placeholder)
                 }
                 .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: app.screen.key)
-        .task { await app.start() }
+        .alert(
+            "Akari couldn't log out",
+            isPresented: Binding(
+                get: { app.logoutError != nil }, set: { if !$0 { app.dismissLogoutError() } }),
+            presenting: app.logoutError
+        ) { _ in
+            Button("OK") { app.dismissLogoutError() }
+        } message: { error in
+            Text(
+                "Akari couldn't remove your login from the Keychain, so you're still logged in. "
+                    + error.localizedDescription)
+        }
+        .task {
+            power = PowerEvents(sleep: { app.suspend() }, wake: { app.resume() })
+            await app.start()
+        }
     }
 }
 

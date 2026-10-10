@@ -14,6 +14,17 @@ public final class AppModel {
         case tokenNotSaved
         /// Discord didn't confirm the logout; the session may still be active there.
         case logoutNotConfirmed
+
+        public var text: String {
+            switch self {
+            case .tokenNotSaved:
+                "Akari couldn't save your login to the Keychain, so you'll need to log in again "
+                    + "next time."
+            case .logoutNotConfirmed:
+                "Discord didn't confirm the logout. The session may still be active; you can end "
+                    + "it in Discord's settings under Devices."
+            }
+        }
     }
 
     public private(set) var screen: Screen = .starting

@@ -3,6 +3,9 @@ import SwiftUI
 
 struct SessionView<MessageArea: View>: View {
     let session: SessionModel
+    var warning: AppModel.Warning?
+    var dismissWarning: () -> Void = {}
+    var reconnect: () -> Void = {}
     // The open channel's messages and the composer's placeholder.
     @ViewBuilder let messageArea: (MessageListModel, String) -> MessageArea
     @State private var collapsed = CollapsedCategories()
@@ -11,6 +14,11 @@ struct SessionView<MessageArea: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             Color(nsColor: Palette.frame).frame(height: 32)
+            ConnectionBar(notice: session.notice, reconnect: reconnect)
+            // The login screen shows the logout warning; only this one belongs to a session.
+            if warning == .tokenNotSaved, let warning {
+                WarningLine(text: warning.text, dismiss: dismissWarning)
+            }
             HStack(spacing: 0) {
                 sidebar.frame(width: sidebarWidth)
                 page

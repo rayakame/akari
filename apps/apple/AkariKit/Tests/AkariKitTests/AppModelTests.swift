@@ -337,6 +337,18 @@ final class AppModelTests {
     }
 
     @Test
+    func warningsSayWhatHappened() {
+        #expect(
+            AppModel.Warning.tokenNotSaved.text
+                == "Akari couldn't save your login to the Keychain, so you'll need to log in "
+                + "again next time.")
+        #expect(
+            AppModel.Warning.logoutNotConfirmed.text
+                == "Discord didn't confirm the logout. The session may still be active; you can "
+                + "end it in Discord's settings under Devices.")
+    }
+
+    @Test
     func warningsCanBeDismissed() async throws {
         let password = FakePasswordLogin()
         client.passwordLogins.withLock { $0 = [password] }
