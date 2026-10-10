@@ -14,6 +14,16 @@ app can mirror it and Discord users can switch with zero relearning.
 - Theme colors for the dark and light themes
 - Places where a platform convention wins over Discord's behavior, and why
 
+## Files
+
+- [layout.md](layout.md): how the window is divided, and the size of each part
+- [server-list.md](server-list.md): the server rail, its order, icons, pill and initials
+- [channel-list.md](channel-list.md): categories, channel rows, and the DM list at home
+- [message-list.md](message-list.md): message layout, the grouping rule, times, day dividers
+  and system messages
+- [theme.md](theme.md): the dark and light color tokens
+- [login.md](login.md): the login screen
+
 ## Conventions
 
 - One file per topic, e.g. `layout.md`, `shortcuts.md`, `message-list.md`.
