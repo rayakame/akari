@@ -332,8 +332,9 @@ impl Store {
     }
 
     pub(crate) fn queue_message(&self, channel: ChannelId, message: Arc<Message>) {
+        let now = now_millis();
         self.write("send", |inner, events| {
-            inner.state.queue(channel, message, events)
+            inner.state.queue(channel, message, now, events)
         });
     }
 
@@ -360,17 +361,11 @@ impl Store {
         pending: MessageId,
     ) -> Option<Arc<Message>> {
         let mut message = None;
+        let now = now_millis();
         self.write("send", |inner, events| {
-            message = inner.state.retry(channel, pending, events);
+            message = inner.state.retry(channel, pending, now, events);
         });
         message
-    }
-
-    pub(crate) fn start_cooldown(&self, channel: ChannelId, send: MessageId) {
-        let now = now_millis();
-        self.write("send", |inner, _| {
-            inner.state.start_cooldown(channel, send, now);
-        });
     }
 
     pub(crate) fn drop_cooldown(&self, channel: ChannelId, send: MessageId) {

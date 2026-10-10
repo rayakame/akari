@@ -969,3 +969,30 @@ fn a_message_from_another_device_starts_the_cooldown() {
     store.apply(message_create(&in_dm, 400_000_000_000_000_102));
     assert_eq!(store.slowmode(Snowflake::new(DM)), None);
 }
+
+#[test]
+fn queueing_or_retrying_a_send_starts_its_cooldown_in_the_same_write() {
+    let store = slowmode_store(json!([]), &[]);
+    let general = Snowflake::new(GENERAL);
+    let me = store.current_user().unwrap();
+    let pending = Snowflake::new(500);
+    store.view_channel(general);
+
+    store.queue_message(
+        general,
+        Arc::new(Message::pending(
+            pending,
+            general,
+            Arc::new(me.user.clone()),
+            "hi".to_owned(),
+            0,
+        )),
+    );
+    assert!(store.slowmode(general).unwrap().until.is_some());
+
+    store.fail_message(general, pending);
+    store.drop_cooldown(general, pending);
+    assert_eq!(store.slowmode(general).unwrap().until, None);
+    store.retry_message(general, pending).unwrap();
+    assert!(store.slowmode(general).unwrap().until.is_some());
+}

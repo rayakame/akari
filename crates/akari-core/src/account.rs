@@ -332,7 +332,6 @@ impl Shared {
             now,
         );
         self.store.queue_message(channel, Arc::new(message));
-        self.store.start_cooldown(channel, pending);
         Ok(Queued { pending, detached })
     }
 
@@ -558,7 +557,6 @@ impl Account {
             .store
             .retry_message(channel, pending)
             .ok_or(RequestError::InvalidRequest)?;
-        self.shared.store.start_cooldown(channel, pending);
         self.shared
             .deliver(channel, pending, message.content.to_string())
             .await

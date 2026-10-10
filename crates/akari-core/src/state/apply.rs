@@ -725,13 +725,18 @@ impl State {
             .collect()
     }
 
+    // The cooldown starts in the same write, so a UI that reads slowmode on the pending
+    // message's event sees it.
     pub(crate) fn queue(
         &mut self,
         channel: ChannelId,
         message: Arc<Message>,
+        now_millis: i64,
         events: &mut Vec<StoreEvent>,
     ) {
+        let send = message.id;
         self.windows.queue(channel, message, events);
+        self.start_cooldown(channel, send, now_millis);
     }
 
     pub(crate) fn confirm(
@@ -758,9 +763,12 @@ impl State {
         &mut self,
         channel: ChannelId,
         pending: MessageId,
+        now_millis: i64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<Arc<Message>> {
-        self.windows.retry(channel, pending, events)
+        let message = self.windows.retry(channel, pending, events)?;
+        self.start_cooldown(channel, pending, now_millis);
+        Some(message)
     }
 
     pub(crate) fn discard(
@@ -857,7 +865,7 @@ impl State {
             .map_or(DEFAULT_LENGTH_LIMIT, |me| length_limit(me.premium_type))
     }
 
-    pub(crate) fn start_cooldown(&mut self, channel: ChannelId, send: MessageId, now_millis: i64) {
+    fn start_cooldown(&mut self, channel: ChannelId, send: MessageId, now_millis: i64) {
         if let Some(interval) = self.cooldown_interval(channel, now_millis) {
             self.cooldowns
                 .start(channel, send, Instant::now(), interval);
