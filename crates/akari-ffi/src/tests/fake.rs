@@ -46,12 +46,20 @@ impl FakeGateway {
     }
 
     pub async fn serve_ready(&self) -> WebSocketStream<TcpStream> {
+        self.serve_ready_with(|_| {}).await
+    }
+
+    pub async fn serve_ready_with(
+        &self,
+        edit: impl FnOnce(&mut Value),
+    ) -> WebSocketStream<TcpStream> {
         let mut ws = accept(&self.listener).await;
         assert_eq!(handshake(&mut ws).await["op"], 2);
         let mut ready: Value = fixture(include_str!(
             "../../../akari-core/tests/fixtures/ready.json"
         ));
         ready["d"]["resume_gateway_url"] = format!("ws://{}/resume", self.address).into();
+        edit(&mut ready["d"]);
         send(&mut ws, ready).await;
         ws
     }

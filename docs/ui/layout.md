@@ -32,6 +32,8 @@ The member list on the right (264 wide) is not part of Akari yet.
 - 32 tall, in the `frame` color (see [theme.md](theme.md)).
 - On macOS it holds the traffic lights, and its own content starts after the rail plus 16.
 - A centered title says where the user is: the server's name, or "Direct Messages" at home.
+- Nothing scrolls under it or the traffic lights: the rail, the channel or DM list and the
+  message list all stop at its lower edge or below.
 - Discord also puts back/forward buttons and an Inbox button there. Akari leaves those out
   until it has navigation history and an inbox.
 
@@ -58,9 +60,9 @@ The rail and the channel list together form the sidebar.
 
 ## Channel header
 
-- 48 tall, plus a 1 pt `borderSubtle` line at the bottom. The server name above the channel
-  list has the same height, and the line runs on under it: one line at one height across both
-  columns.
+- 48 tall, plus a 1 pt `borderSubtle` line at the bottom. The header above the channel list
+  (the server's name, or "Direct Messages" at home) has the same height, and the line runs on
+  under it: one line at one height across both columns.
 - 16 padding on the left, 8 between toolbar buttons on the right.
 - A guild channel shows its icon, its name, a short divider and the topic on one line. A DM
   shows the other person's name.
@@ -85,7 +87,24 @@ Akari shows the avatar, the display name and the username. It leaves out the sta
 
 - The message list fills the rest; its layout is in [message-list.md](message-list.md).
 - The composer at the bottom is 56 tall for one line, with 8 margin on the sides and the
-  bottom and corner radius 8.
+  bottom and corner radius 8, so it lines up with the user panel; a thin status strip sits
+  directly above it. Details in [composer.md](composer.md).
+
+## Connection bar
+
+Akari shows a bar across the window, right under the title bar, while it isn't connected to
+Discord. It is 32 tall and pushes the content below it down.
+
+- Connecting for the first time, or reconnecting after the connection dropped, after a second:
+  `panel` background, `textMuted` text and a small spinner ("Connecting to Discord…",
+  "Connection lost. Reconnecting…").
+- Offline while the Mac sleeps: "Offline".
+- Closed for good by an error: `danger` background, white text naming the error, and a
+  "Reconnect" button. A rejected login goes back to the login screen instead.
+
+The official desktop client shows no such bar for short drops: messages just stay gray and
+then turn red, and a long outage brings back its full-window loading screen (**unverified**).
+Its mobile app shows "Connecting…" at the top. Akari's bar is its own design.
 
 ## Window size
 

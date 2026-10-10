@@ -33,14 +33,16 @@ This is the intended layout. So far `akari-core` has the wire models, gateway de
 shared `DiscordClient` with both login flows (email/password and QR code), the token
 storage trait, the gateway connection (zstd-stream, heartbeats, resume, rate-limited
 sends), the state store (`akari_core::state`) and `Account`, which keeps the store current
-from the gateway, loads message history and sends messages over rate-limited REST;
+from the gateway, loads message history and sends messages over rate-limited REST, applying
+the message length limit and slowmode;
 `akari-cli` can log in, log out, connect, list guilds and channels, and read, send and tail
 messages. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
-and the message APIs through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+and the message APIs, including the send rules and `end_session`, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
-login, session, guild, channel, DM and message lists) and the message timeline.
-`apps/macos` is the first app: the login screen and the main window with the server rail,
-the channel and DM lists and a read-only message list. `akari-markdown` is still an empty
+login, session, guild, channel, DM and message lists, and the composer) and the message
+timeline. `apps/macos` is the first app: the login screen and the main window with the server
+rail, the channel and DM lists, a message list that loads history in both directions, and the
+composer; it shows the connection state and reconnects. `akari-markdown` is still an empty
 skeleton, and the other app folders contain only a README.
 
 | Path | Contents |

@@ -113,9 +113,58 @@ every stale window with the latest 100 messages:
   back; if it fails, the message is still sent. Sending into a stale window just queues;
   the refresh brings the confirmed message.
 - **Content.** Empty or whitespace-only content is refused before any request
-  (`RequestError::InvalidRequest`); Discord would answer 50006. The length isn't checked
-  locally: the limit is 2,000 characters, or 4,000 with Nitro (**unverified**), and Discord
-  answers 50035 when it's too long.
+  (`RequestError::InvalidRequest`); Discord would answer 50006.
+- **Length.** The limit is 2,000 characters without Nitro and with Nitro Basic, 4,000 with
+  Nitro (`premium_type` 2) ([Discord's support article on Nitro](https://support.discord.com/hc/en-us/articles/115000435108)
+  and its [Nitro Basic article](https://support.discord.com/hc/en-us/articles/33694251638295)).
+  Nitro Classic (1) doesn't list longer messages among its perks, so it gets 2,000
+  (**unverified**). Discord counts Unicode code points, not UTF-16 units or graphemes: a
+  community test of an 80-character limit accepted 80 emoji and refused 81
+  ([openclaw#156096](https://github.com/openclaw/openclaw/pull/156096); **unverified** by
+  Akari until the manual check). Too long content is answered with HTTP 400, code 50035, and
+  `errors.content._errors[0].code` `BASE_TYPE_MAX_LENGTH` with the message "Must be 2000 or
+  fewer in length." ([a write-up of Discord's responses](https://github.com/mymoomin/RSStoWebhook/blob/3fabc7c5441f360d2f7d0b9331d3a2522e16b1cc/design/discord-api.md)).
+  Discord's OpenAPI description gives `content` a maximum length of 4,000
+  ([discord-api-spec](https://github.com/discord/discord-api-spec)).
+
+- **Queueing and delivering.** `send_message` is `queue_message` followed by
+  `deliver_message`. `queue_message` refuses empty or too long content and a closed account
+  before anything is queued, and returns the pending ID; a UI that keeps a draft clears it only
+  then. `deliver_message` sends a queued message (jumping a detached window to the present).
+  A pending message is delivered by one call at a time: a second `deliver_message` or a
+  `retry_message` for it while it's on its way fails with `InvalidRequest` and sends nothing.
+- **Akari's check.** `message_length(content)` counts code points, and
+  `Store::message_length_limit()` gives the limit for the current user's `premium_type`
+  (2,000 before READY). `send_message` refuses longer content with
+  `RequestError::TooLong { limit }` before anything is queued or sent. Discord's own refusal
+  (50035 with `BASE_TYPE_MAX_LENGTH` on `content`) becomes the same `TooLong`, with the limit
+  read from Discord's message, or Akari's limit when the message holds no number; the message
+  then stays failed like any other. So a count that differs from Discord's never shows as a
+  generic error.
+
+## Slowmode
+
+`Store::slowmode(channel)` says how a channel's slowmode applies to the current user:
+`interval` (the channel's or thread's `rate_limit_per_user`), `exempt`, and `until`, when the
+user may send again. It is `None` for channels without slowmode, for DMs and group DMs, and
+for unknown channels.
+
+- **Exempt:** the user's permissions in the channel contain `BYPASS_SLOWMODE` (bit 52); the
+  owner and administrators hold every bit ([models.md](models.md)). An exempt user never has a
+  cooldown.
+- **A cooldown starts** when `send_message` or `retry_message` queues a message, as the
+  official client starts it when the user sends, so a second send right after the first can
+  be held back by the UI instead of failing at Discord. A message of the current user from
+  another device (MESSAGE_CREATE whose nonce isn't the send that started the cooldown)
+  starts it too, since Discord counts per user.
+- **A failed send** clears the cooldown it started, unless something moved it since: Discord
+  didn't count that message. A `RateLimited { retry_after }` answer (Discord's 20016, see
+  [rate-limits.md](rate-limits.md)) instead holds the cooldown until at least `retry_after`
+  from now.
+- **The clock:** cooldowns are kept as monotonic instants and turned into wall-clock time
+  when read, so changing the system clock doesn't stretch or cut them.
+- No event reports a cooldown. It only changes with the user's own sends and messages, which
+  already bring window events, so a UI re-reads `slowmode` for its channel on those.
 
 ## Errors
 
@@ -130,10 +179,13 @@ every stale window with the latest 100 messages:
   yet. A send that needs one stays in the outbox as failed.
 - `ServerError { status }`: a 5xx; trying again later may work.
 - `Discord { status, code, message }`: an API error, e.g. 50013 Missing Permissions,
-  50001 Missing Access, 10003 Unknown Channel, 20016 slowmode, 50035 invalid form body
+  50001 Missing Access, 50007 a user who doesn't accept the message (a 403), 10003 Unknown
+  Channel, 50035 invalid form body
   ([JSON error codes](https://docs.discord.food/topics/errors#json-error-codes)).
+- `TooLong { limit }`: the message is longer than the limit, Akari's or Discord's (above).
 - `Network(TransportError)`, `UnexpectedResponse`, `InvalidRequest` (empty content, a
-  failed message that isn't there), `Closed` (the account is closed).
+  failed message that isn't there, a message already being delivered), `Closed` (the account
+  is closed).
 
 None of them carries the token or message content.
 

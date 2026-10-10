@@ -5,12 +5,15 @@ mod convert;
 mod events;
 mod order;
 mod permissions;
+mod send;
 mod store;
 mod types;
 mod windows;
 
 pub use events::{ConnectionState, StoreEvent};
 pub use order::display_order;
+pub(crate) use send::limit_in;
+pub use send::{Slowmode, message_length};
 pub use store::{Store, Subscription};
 pub use types::*;
 pub use windows::MessageWindow;

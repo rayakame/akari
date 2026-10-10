@@ -197,6 +197,35 @@ final class SessionModelTests {
     }
 
     @Test
+    func theNoticeFollowsTheConnection() async {
+        let session = makeSession()
+        #expect(session.notice == .connecting)
+        session.start()
+
+        subscription.send(.connection(state: .connecting))
+        await subscription.batches.pulled(2)
+        #expect(session.notice == .connecting)
+        subscription.send(.connection(state: .online))
+        await subscription.batches.pulled(3)
+        #expect(session.notice == nil)
+        subscription.send(.connection(state: .connecting))
+        await subscription.batches.pulled(4)
+        #expect(session.notice == .reconnecting)
+        session.suspend()
+        subscription.send(.connection(state: .offline))
+        await subscription.batches.pulled(5)
+        #expect(session.notice == .offline)
+        session.resume()
+        subscription.send(.connection(state: .connecting))
+        await subscription.batches.pulled(6)
+        #expect(session.notice == .reconnecting)
+        subscription.send(.connection(state: .closed(error: .Stopped)))
+        await subscription.batches.pulled(7)
+        #expect(session.notice == .closed(.Stopped))
+        session.close()
+    }
+
+    @Test
     func aDeletedOrHiddenOpenChannelOpensAnother() async {
         store.update { state in
             state.add(guild(1))
@@ -281,6 +310,33 @@ final class SessionModelTests {
         #expect(session.channels == nil)
         #expect(session.messages == nil)
         #expect(session.guilds.guilds.isEmpty)
+        session.close()
+    }
+
+    @Test
+    func draftsSurviveChannelSwitches() {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(12), channel(13)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(12))
+
+        session.messages?.composer.draft = "half"
+        session.open(channel: id(13))
+        #expect(session.messages?.composer.draft == "")
+        session.open(channel: id(12))
+
+        #expect(session.messages?.composer.draft == "half")
+        let next = SessionModel(
+            userId: id(1), account: FakeAccount(store: store), memory: memory,
+            drafts: session.drafts
+        ) { _ in }
+        next.open(.guild(id(1)))
+        next.open(channel: id(12))
+        #expect(next.messages?.composer.draft == "half")
         session.close()
     }
 

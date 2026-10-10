@@ -60,6 +60,13 @@ may be `null` with `?` before the type
   highest documented bit is `1 << 53`, so `u64` is enough for now
   ([permissions](https://docs.discord.food/topics/permissions)). `Permissions` has
   constants for the bits Akari uses and the bit operators; unknown bits are kept.
+- **Bypass Slowmode** (`1 << 52`) is, since 2026-02-23, the only permission that exempts a
+  member from slowmode; Manage Messages, Manage Channels and Manage Threads no longer do
+  ([Discord's change log, 2025-11-24](https://discord.com/developers/docs/change-log),
+  [permissions](https://discord.com/developers/docs/topics/permissions),
+  [Slowmode FAQ](https://support.discord.com/hc/en-us/articles/360016150952-Slowmode-FAQ)).
+  docs.discord.food lists the bit but still describes the old rule. The owner and
+  administrators hold every bit, so they stay exempt.
 - **Flags** are JSON integers and stay raw `u64`. User flags already reach bit 51.
 - **Integer enums** (channel type, message type, …) get an `Unknown(u16)` variant, so a
   value Discord adds later doesn't fail the payload around it. The reference lists removed

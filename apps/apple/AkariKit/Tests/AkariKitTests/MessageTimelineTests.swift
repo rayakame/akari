@@ -96,4 +96,22 @@ struct MessageTimelineTests {
         #expect(both.items.first?.id == second.items.first?.id)
         #expect(second.shape == ["day", "+2"])
     }
+
+    @Test
+    func edgesWrapTheRowsAndStartNoGroup() {
+        let rows = [row(1, at: noon), row(2, at: noon + 60)]
+
+        let wrapped = MessageTimeline(rows: rows, calendar: berlin, edges: [.older, .newer])
+
+        #expect(wrapped.shape == ["older", "day", "+1", "2", "newer"])
+        #expect(
+            MessageTimeline(rows: [], calendar: berlin, edges: [.older, .newer]).shape == ["older"])
+        #expect(MessageTimeline(rows: [], calendar: berlin, edges: [.beginning]).items.isEmpty)
+        #expect(
+            MessageTimeline(rows: rows, calendar: berlin, edges: [.older]).shape
+                == ["older", "day", "+1", "2"])
+        #expect(
+            MessageTimeline(rows: rows, calendar: berlin, edges: [.beginning, .newer]).shape
+                == ["beginning", "day", "+1", "2", "newer"])
+    }
 }

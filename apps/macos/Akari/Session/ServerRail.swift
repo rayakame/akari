@@ -37,10 +37,11 @@ struct ServerRail: View {
                             ? "1 server unavailable" : "\(unavailable) servers unavailable")
                 }
             }
-            .padding(.top, 4)
             .padding(.bottom, 72)
             .frame(maxWidth: .infinity)
         }
+        // Outside the scroll view: one that touches the title bar's safe area stretches under it.
+        .padding(.top, 4)
     }
 }
 

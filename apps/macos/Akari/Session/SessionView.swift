@@ -3,13 +3,21 @@ import SwiftUI
 
 struct SessionView<MessageArea: View>: View {
     let session: SessionModel
-    @ViewBuilder let messageArea: (MessageListModel) -> MessageArea
+    var warning: AppModel.Warning?
+    var dismissWarning: () -> Void = {}
+    var reconnect: () -> Void = {}
+    @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     @State private var collapsed = CollapsedCategories()
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
 
     var body: some View {
         VStack(spacing: 0) {
             Color(nsColor: Palette.frame).frame(height: 32)
+            ConnectionBar(notice: session.notice, reconnect: reconnect)
+            // The login screen shows the logout warning; only this one belongs to a session.
+            if warning == .tokenNotSaved, let warning {
+                WarningLine(text: warning.text, dismiss: dismissWarning)
+            }
             HStack(spacing: 0) {
                 sidebar.frame(width: sidebarWidth)
                 page
@@ -46,9 +54,13 @@ struct SessionView<MessageArea: View>: View {
         Rectangle()
             .fill(Color(nsColor: Palette.borderSubtle))
             .frame(height: 1)
-            .padding(.leading, session.channels == nil ? sidebarWidth : SidebarWidth.rail + 1)
+            .padding(.leading, hasListHeader ? SidebarWidth.rail + 1 : sidebarWidth)
             .offset(y: ChannelHeader.height)
             .allowsHitTesting(false)
+    }
+
+    private var hasListHeader: Bool {
+        session.place == .home || session.channels != nil
     }
 
     @ViewBuilder private var list: some View {
@@ -68,7 +80,7 @@ struct SessionView<MessageArea: View>: View {
         VStack(spacing: 0) {
             ChannelHeader(channel: openChannel, name: openName)
             if let messages = session.messages {
-                messageArea(messages)
+                messageArea(messages, channelName)
             } else if session.currentUser == nil {
                 EmptyState(text: nil)
             } else if session.place == .home {
@@ -103,5 +115,9 @@ struct SessionView<MessageArea: View>: View {
 
     private var openName: String {
         conversation?.name ?? openChannel?.name ?? ""
+    }
+
+    private var channelName: ChannelName {
+        ChannelName(inGuild: openChannel?.guildId != nil, name: openName)
     }
 }

@@ -22,8 +22,21 @@ public final class SessionModel {
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
     /// with `.task(id: messages.channelId) { await messages.open() }`.
     public private(set) var messages: MessageListModel?
+    /// What the connection bar says; `nil` while online.
+    public var notice: ConnectionNotice? {
+        switch connection {
+        case .online: nil
+        case .offline where suspended: .offline
+        case .offline, .connecting: wasOnline ? .reconnecting : .connecting
+        case .closed(let error): .closed(error)
+        }
+    }
 
     let loop = EventLoop()
+    let drafts: Drafts
+    private var wasOnline = false
+    // Before the first connect the store says offline too; only a suspend is "offline".
+    private var suspended = false
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let onClosed: @MainActor (GatewayError?) -> Void
@@ -31,19 +44,31 @@ public final class SessionModel {
     @ObservationIgnored private var subscription: StoreSubscription?
     @ObservationIgnored private var lastChannels: [GuildId: ChannelId] = [:]
     @ObservationIgnored private var lastHomeChannel: ChannelId?
+    // Only channels opened here can hold this session's unsent messages.
+    @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
 
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
     /// means the user has to log in again. The first READY reopens the place and channel
     /// `memory` holds for the account.
-    public init(
+    public convenience init(
         userId: UserId, account: Account, memory: AccountMemory = AccountMemory(),
+        onClosed: @escaping @MainActor (GatewayError?) -> Void
+    ) {
+        self.init(
+            userId: userId, account: account, memory: memory, drafts: Drafts(),
+            onClosed: onClosed)
+    }
+
+    init(
+        userId: UserId, account: Account, memory: AccountMemory, drafts: Drafts,
         onClosed: @escaping @MainActor (GatewayError?) -> Void
     ) {
         self.userId = userId
         self.account = account
         self.memory = memory
+        self.drafts = drafts
         self.onClosed = onClosed
         spotToRestore = memory.lastSpot(of: userId)
         store = account.store()
@@ -90,7 +115,9 @@ public final class SessionModel {
         // The store keeps a window for a channel it doesn't know yet, so the last channel's
         // messages load while the gateway connects; READY then places it.
         if let channel = spotToRestore?.channel {
-            messages = MessageListModel(channelId: channel, account: account, store: store)
+            openedChannels.insert(channel)
+            messages = MessageListModel(
+                channelId: channel, account: account, store: store, drafts: drafts)
         }
     }
 
@@ -136,19 +163,34 @@ public final class SessionModel {
         guard messages?.channelId != id else {
             return
         }
-        messages = MessageListModel(channelId: id, account: account, store: store)
+        openedChannels.insert(id)
+        messages = MessageListModel(channelId: id, account: account, store: store, drafts: drafts)
     }
 
     /// Disconnects but keeps the session, e.g. before the Mac sleeps.
     public func suspend() {
+        suspended = true
         account.disconnect()
     }
 
     public func resume() {
+        suspended = false
         do {
             try account.connect()
         } catch {
             closed(error as? GatewayError)
+        }
+    }
+
+    // A new account starts with an empty outbox, so its text moves into the drafts.
+    func keepUnsentAsDrafts() {
+        for channel in openedChannels.sorted() {
+            guard let pending = store.window(channelId: channel)?.pendingIds, !pending.isEmpty
+            else {
+                continue
+            }
+            let lines = store.messages(channelId: channel, ids: pending).map(\.content)
+            drafts.append(lines, to: channel)
         }
     }
 
@@ -170,6 +212,9 @@ public final class SessionModel {
                 closed(error)
             } else {
                 connection = state
+                if state == .online {
+                    wasOnline = true
+                }
             }
         }
         if batch.ready || batch.currentUserChanged {

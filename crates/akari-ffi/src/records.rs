@@ -182,6 +182,26 @@ impl From<state::Delivery> for Delivery {
     }
 }
 
+/// A channel's slowmode as it applies to the current user.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Slowmode {
+    pub interval: Duration,
+    /// The user's permissions bypass it.
+    pub exempt: bool,
+    /// When the user may send again; `None` when they may now.
+    pub until: Option<SystemTime>,
+}
+
+impl From<state::Slowmode> for Slowmode {
+    fn from(slowmode: state::Slowmode) -> Self {
+        Self {
+            interval: slowmode.interval,
+            exempt: slowmode.exempt,
+            until: slowmode.until,
+        }
+    }
+}
+
 /// The message IDs and state of a viewed channel.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct MessageWindow {

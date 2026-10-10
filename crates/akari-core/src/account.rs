@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -11,7 +11,9 @@ use crate::gateway::{
 };
 use crate::model::{ChannelId, GuildId, MessageId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
-use crate::state::{ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits};
+use crate::state::{
+    ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
+};
 use crate::{DiscordClient, Token};
 
 const REFRESH_LIMIT: u8 = 100;
@@ -66,6 +68,7 @@ pub(crate) struct Shared {
     subscribed: Mutex<BTreeMap<GuildId, GuildSubscription>>,
     member_lists: AtomicBool,
     runtime: tokio::runtime::Handle,
+    delivering: Mutex<BTreeSet<MessageId>>,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -126,6 +129,22 @@ impl Drop for Unanswered<'_> {
     }
 }
 
+// One delivery per pending message at a time: a second caller is refused instead of posting
+// the message again and settling it twice.
+struct Delivering<'a> {
+    delivering: &'a Mutex<BTreeSet<MessageId>>,
+    pending: MessageId,
+}
+
+impl Drop for Delivering<'_> {
+    fn drop(&mut self) {
+        self.delivering
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.pending);
+    }
+}
+
 fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -135,6 +154,21 @@ fn now_millis() -> i64 {
 }
 
 impl Shared {
+    fn claim(&self, pending: MessageId) -> Result<Delivering<'_>, RequestError> {
+        let claimed = self
+            .delivering
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(pending);
+        if !claimed {
+            return Err(RequestError::InvalidRequest);
+        }
+        Ok(Delivering {
+            delivering: &self.delivering,
+            pending,
+        })
+    }
+
     async fn load(
         self: &Arc<Self>,
         channel: ChannelId,
@@ -302,12 +336,17 @@ impl Shared {
     }
 
     fn queue(self: &Arc<Self>, channel: ChannelId, content: &str) -> Result<Queued, RequestError> {
+        self.rest.usable()?;
         let author = self
             .store
             .current_user()
             .ok_or(RequestError::InvalidRequest)?;
         if content.trim().is_empty() {
             return Err(RequestError::InvalidRequest);
+        }
+        let limit = self.store.message_length_limit();
+        if message_length(content) > limit {
+            return Err(RequestError::TooLong { limit });
         }
         let detached = match self.store.messages(channel) {
             Some(window) => !window.latest,
@@ -329,6 +368,28 @@ impl Shared {
         Ok(Queued { pending, detached })
     }
 
+    // Like the official client, a detached window jumps to the present; a stale one waits for
+    // its refresh. The send doesn't wait for the jump.
+    async fn deliver_queued(
+        self: &Arc<Self>,
+        channel: ChannelId,
+        pending: MessageId,
+        content: String,
+        detached: bool,
+    ) -> Result<MessageId, RequestError> {
+        if detached {
+            let (jumped, delivered) = tokio::join!(
+                self.load(channel, LoadKind::Latest, JUMP_LIMIT),
+                self.deliver(channel, pending, content),
+            );
+            if let Err(err) = jumped {
+                tracing::debug!(error = %err, "couldn't jump to the present before sending");
+            }
+            return delivered;
+        }
+        self.deliver(channel, pending, content).await
+    }
+
     async fn deliver(
         &self,
         channel: ChannelId,
@@ -348,7 +409,20 @@ impl Shared {
                 Ok(id)
             }
             Err(err) => {
+                // The core can't count what Discord refused; the 0 asks for our own limit.
+                let err = match err {
+                    RequestError::TooLong { limit: 0 } => RequestError::TooLong {
+                        limit: self.store.message_length_limit(),
+                    },
+                    err => err,
+                };
                 self.store.fail_message(channel, pending);
+                match &err {
+                    RequestError::RateLimited {
+                        retry_after: Some(wait),
+                    } => self.store.hold_cooldown(channel, *wait),
+                    _ => self.store.drop_cooldown(channel, pending),
+                }
                 self.failed(&err);
                 Err(err)
             }
@@ -423,6 +497,7 @@ impl Account {
             status: Mutex::default(),
             subscribed: Mutex::default(),
             member_lists: AtomicBool::new(true),
+            delivering: Mutex::default(),
             runtime: runtime.clone(),
         });
         // Built before the task starts, so it runs even if the task is never polled.
@@ -482,21 +557,45 @@ impl Account {
         channel: ChannelId,
         content: String,
     ) -> Result<MessageId, RequestError> {
+        let Queued { pending, detached } = self.shared.queue(channel, &content)?;
+        let _delivering = self.shared.claim(pending)?;
+        self.shared
+            .deliver_queued(channel, pending, content, detached)
+            .await
+    }
+
+    /// The first half of [`Account::send_message`]: shows the message as pending and returns
+    /// its provisional ID, or refuses (empty or too long content, a closed account) before
+    /// anything is queued. [`Account::deliver_message`] sends it.
+    pub fn queue_message(
+        &self,
+        channel: ChannelId,
+        content: &str,
+    ) -> Result<MessageId, RequestError> {
+        Ok(self.shared.queue(channel, content)?.pending)
+    }
+
+    /// Sends a message [`Account::queue_message`] queued, like [`Account::send_message`].
+    /// Fails with [`RequestError::InvalidRequest`] if it isn't pending or is already being
+    /// delivered.
+    pub async fn deliver_message(
+        &self,
+        channel: ChannelId,
+        pending: MessageId,
+    ) -> Result<MessageId, RequestError> {
         let shared = &self.shared;
-        let Queued { pending, detached } = shared.queue(channel, &content)?;
-        // Like the official client, a detached window jumps to the present; a stale one waits
-        // for its refresh. The send doesn't wait for the jump.
-        if detached {
-            let (jumped, delivered) = tokio::join!(
-                shared.load(channel, LoadKind::Latest, JUMP_LIMIT),
-                shared.deliver(channel, pending, content),
-            );
-            if let Err(err) = jumped {
-                tracing::debug!(error = %err, "couldn't jump to the present before sending");
-            }
-            return delivered;
-        }
-        shared.deliver(channel, pending, content).await
+        let _delivering = shared.claim(pending)?;
+        let message = shared
+            .store
+            .pending_message(channel, pending)
+            .ok_or(RequestError::InvalidRequest)?;
+        let detached = shared
+            .store
+            .messages(channel)
+            .is_some_and(|window| !window.latest);
+        shared
+            .deliver_queued(channel, pending, message.content.to_string(), detached)
+            .await
     }
 
     /// Dev only: sends like [`Account::send_message`], then posts the same body with the same
@@ -510,6 +609,7 @@ impl Account {
     ) -> Result<(MessageId, Result<MessageId, RequestError>), RequestError> {
         let shared = &self.shared;
         let Queued { pending, .. } = shared.queue(channel, &content)?;
+        let _delivering = shared.claim(pending)?;
         let first = shared.deliver(channel, pending, content.clone()).await?;
         let body = CreateMessage::new(content, pending.get().to_string());
         let repeat = shared
@@ -533,6 +633,7 @@ impl Account {
         channel: ChannelId,
         pending: MessageId,
     ) -> Result<MessageId, RequestError> {
+        let _delivering = self.shared.claim(pending)?;
         let message = self
             .shared
             .store

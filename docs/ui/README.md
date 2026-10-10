@@ -16,12 +16,16 @@ app can mirror it and Discord users can switch with zero relearning.
 
 ## Files
 
-- [layout.md](layout.md): how the window is divided, and the size of each part
+- [layout.md](layout.md): how the window is divided, the size of each part, and the connection
+  bar
 - [server-list.md](server-list.md): the server rail, its order, icons, pill and initials
 - [channel-list.md](channel-list.md): categories, channel rows, and the DM list at home
-- [message-list.md](message-list.md): message layout, the grouping rule, times, day dividers
-  and system messages
+- [message-list.md](message-list.md): message layout, the grouping rule, times, day dividers,
+  system messages, loading history, jump to present, edits and deletes
 - [theme.md](theme.md): the dark and light color tokens
+- [composer.md](composer.md): the composer, sending, failed messages, slowmode and the length
+  limit
+- [shortcuts.md](shortcuts.md): keyboard shortcuts and which ones Akari has
 - [login.md](login.md): the login screen
 
 ## Conventions

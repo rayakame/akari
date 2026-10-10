@@ -110,6 +110,72 @@ async fn forget_token_deletes_without_a_request() {
     assert_eq!(store.calls(), [Call::Delete(USER.get())]);
 }
 
+#[tokio::test]
+async fn end_session_posts_logout_with_that_token_and_keeps_the_store() {
+    use wiremock::matchers::{body_json, header, method, path};
+    let server = super::support::rest_server().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v9/auth/logout"))
+        .and(header("authorization", "session.token"))
+        .and(body_json(serde_json::json!({})))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let store = MemoryStore::with(USER, "stored.token");
+    let client = local_client(rest_endpoints(&server), store.clone());
+
+    client.end_session(token("session.token")).await.unwrap();
+
+    assert_eq!(store.token(USER).as_deref(), Some("stored.token"));
+    assert!(store.calls().is_empty(), "{:?}", store.calls());
+}
+
+#[tokio::test]
+async fn end_session_counts_a_rejected_token_as_done() {
+    use wiremock::matchers::{method, path};
+    let server = super::support::rest_server().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v9/auth/logout"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_json(serde_json::json!({"message": "401: Unauthorized", "code": 0})),
+        )
+        .mount(&server)
+        .await;
+    let client = local_client(rest_endpoints(&server), Arc::new(MemoryStore::default()));
+
+    assert_eq!(client.end_session(token("old.token")).await, Ok(()));
+}
+
+#[tokio::test]
+async fn end_session_reports_rate_limits_and_network_errors() {
+    use wiremock::matchers::{method, path};
+    let server = super::support::rest_server().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v9/auth/logout"))
+        .respond_with(ResponseTemplate::new(429).set_body_json(
+            serde_json::json!({"message": "You are being rate limited.", "retry_after": 2.5, "global": false}),
+        ))
+        .mount(&server)
+        .await;
+    let limited = local_client(rest_endpoints(&server), Arc::new(MemoryStore::default()));
+    let unreachable = unreachable_client(Arc::new(MemoryStore::default()));
+
+    assert!(matches!(
+        limited.end_session(token("t")).await,
+        Err(LogoutError::RateLimited {
+            retry_after: Some(_)
+        })
+    ));
+    assert_eq!(
+        unreachable.end_session(token("t")).await,
+        Err(LogoutError::Network {
+            kind: NetworkErrorKind::Connect
+        })
+    );
+}
+
 #[test]
 fn logout_deletes_the_token_when_discord_is_unreachable() {
     let store = MemoryStore::with(USER, "stored.token");

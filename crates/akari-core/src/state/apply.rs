@@ -1,9 +1,11 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::events::StoreEvent;
 use super::permissions::compute;
+use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
 use super::windows::{LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
@@ -189,6 +191,7 @@ pub(crate) struct State {
     entities: Entities,
     ready: bool,
     windows: Windows,
+    cooldowns: Cooldowns,
 }
 
 impl State {
@@ -202,6 +205,7 @@ impl State {
             entities: Entities::default(),
             ready: false,
             windows: Windows::new(limits),
+            cooldowns: Cooldowns::default(),
         }
     }
 
@@ -338,9 +342,17 @@ impl State {
             }
             E::UserUpdate(update) => self.user_update(*update, events),
             E::MessageCreate(message) => {
-                let (channel, id) = (message.channel_id, message.id);
+                let (channel, id, author) = (message.channel_id, message.id, message.author.id);
+                let nonce = message
+                    .nonce
+                    .as_ref()
+                    .and_then(model::Nonce::as_u64)
+                    .map(MessageId::new);
                 self.windows.live(*message, &self.entities.users, events);
                 self.note_message(channel, id, events);
+                if Some(author) == self.entities.me() {
+                    self.note_own_message(channel, nonce);
+                }
             }
             E::MessageUpdate(update) => self.windows.update(*update, &self.entities.users, events),
             E::MessageDelete(delete) => self.windows.delete(delete.channel_id, delete.id, events),
@@ -415,6 +427,34 @@ impl State {
         if Arc::make_mut(stored).note_message(id.cast()) && stored.guild_id.is_none() {
             events.push(StoreEvent::ChannelUpdated(stored.clone()));
         }
+    }
+
+    // Discord enforces slowmode per user, so a message from another device starts it too.
+    fn note_own_message(&mut self, channel: ChannelId, nonce: Option<MessageId>) {
+        if let Some(interval) = self.cooldown_interval(channel, wall_millis()) {
+            self.cooldowns
+                .seen(channel, nonce, Instant::now(), interval);
+        }
+    }
+
+    fn cooldown_interval(&self, channel: ChannelId, now_millis: i64) -> Option<Duration> {
+        let slowmode = self.slowmode_parts(channel, now_millis)?;
+        (!slowmode.1).then_some(slowmode.0)
+    }
+
+    fn slowmode_parts(&self, channel: ChannelId, now_millis: i64) -> Option<(Duration, bool)> {
+        let stored = self.entities.channels.get(&channel)?;
+        stored.guild_id?;
+        if stored.rate_limit_per_user == 0 {
+            return None;
+        }
+        let exempt = self
+            .permissions(channel, now_millis)
+            .is_some_and(|permissions| permissions.contains(Permissions::BYPASS_SLOWMODE));
+        Some((
+            Duration::from_secs(u64::from(stored.rate_limit_per_user)),
+            exempt,
+        ))
     }
 
     fn channel_update(&mut self, update: ChannelUpdate, events: &mut Vec<StoreEvent>) {
@@ -685,13 +725,18 @@ impl State {
             .collect()
     }
 
+    // The cooldown starts in the same write, so a UI that reads slowmode on the pending
+    // message's event sees it.
     pub(crate) fn queue(
         &mut self,
         channel: ChannelId,
         message: Arc<Message>,
+        now_millis: i64,
         events: &mut Vec<StoreEvent>,
     ) {
+        let send = message.id;
         self.windows.queue(channel, message, events);
+        self.start_cooldown(channel, send, now_millis);
     }
 
     pub(crate) fn confirm(
@@ -718,9 +763,12 @@ impl State {
         &mut self,
         channel: ChannelId,
         pending: MessageId,
+        now_millis: i64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<Arc<Message>> {
-        self.windows.retry(channel, pending, events)
+        let message = self.windows.retry(channel, pending, events)?;
+        self.start_cooldown(channel, pending, now_millis);
+        Some(message)
     }
 
     pub(crate) fn discard(
@@ -734,6 +782,10 @@ impl State {
 
     pub(crate) fn messages(&self, channel: ChannelId) -> Option<MessageWindow> {
         self.windows.snapshot(channel)
+    }
+
+    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+        self.windows.pending(channel, id)
     }
 
     pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
@@ -791,6 +843,49 @@ impl State {
         self.channels_where(|channel| channel.guild_id.is_none())
     }
 
+    pub(crate) fn slowmode(
+        &self,
+        channel: ChannelId,
+        now_millis: i64,
+        now: Instant,
+        wall: SystemTime,
+    ) -> Option<Slowmode> {
+        let (interval, exempt) = self.slowmode_parts(channel, now_millis)?;
+        Some(Slowmode {
+            interval,
+            exempt,
+            until: if exempt {
+                None
+            } else {
+                self.cooldowns.until(channel, now, wall)
+            },
+        })
+    }
+
+    pub(crate) fn length_limit(&self) -> usize {
+        self.entities
+            .current_user
+            .as_ref()
+            .map_or(DEFAULT_LENGTH_LIMIT, |me| length_limit(me.premium_type))
+    }
+
+    fn start_cooldown(&mut self, channel: ChannelId, send: MessageId, now_millis: i64) {
+        if let Some(interval) = self.cooldown_interval(channel, now_millis) {
+            self.cooldowns
+                .start(channel, send, Instant::now(), interval);
+        }
+    }
+
+    pub(crate) fn drop_cooldown(&mut self, channel: ChannelId, send: MessageId) {
+        self.cooldowns.drop_started_by(channel, send);
+    }
+
+    pub(crate) fn hold_cooldown(&mut self, channel: ChannelId, wait: Duration, now_millis: i64) {
+        if self.slowmode_parts(channel, now_millis).is_some() {
+            self.cooldowns.hold(channel, Instant::now(), wait);
+        }
+    }
+
     pub(crate) fn permissions(&self, channel: ChannelId, now_millis: i64) -> Option<Permissions> {
         let channel = self.entities.channels.get(&channel)?;
         let guild_id = channel.guild_id?;
@@ -804,6 +899,14 @@ impl State {
         };
         Some(compute(guild, me, member, channel, parent, now_millis))
     }
+}
+
+fn wall_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        })
 }
 
 #[cfg(test)]

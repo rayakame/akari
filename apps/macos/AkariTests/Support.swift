@@ -24,7 +24,8 @@ func author(_ raw: UInt64, _ name: String = "Mira", bot: Bool = false) -> User {
 func row(
     _ raw: UInt64, by user: User = author(1), at time: Date, kind: MessageType = .default,
     content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false,
-    attachments: [String] = [], embedCount: UInt32 = 0, stickers: [String] = []
+    attachments: [String] = [], embedCount: UInt32 = 0, stickers: [String] = [],
+    delivery: Delivery = .sent, edited: Date? = nil
 ) -> MessageListModel.Row {
     let files = attachments.enumerated().map { index, name in
         Attachment(
@@ -34,9 +35,9 @@ func row(
     let message = Message(
         id: MessageId(rawValue: raw), channelId: ChannelId(rawValue: 10), kind: kind,
         author: user, fromWebhook: false, content: content ?? "message \(raw)", timestamp: time,
-        editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: files,
+        editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
         embedCount: embedCount, stickerNames: stickers, componentsV2: componentsV2,
-        delivery: .sent)
+        delivery: delivery)
     return MessageListModel.Row(id: MessageId(rawValue: key ?? raw), message: message)
 }
 

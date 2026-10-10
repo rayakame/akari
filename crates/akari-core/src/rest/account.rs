@@ -11,9 +11,11 @@ use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
 use crate::lenient::parse_list;
 use crate::model::{self, ChannelId, MessageId};
+use crate::state::limit_in;
 use crate::{DiscordClient, Token};
 
 const MESSAGES: &str = "channels/{}/messages";
+const INVALID_FORM_BODY: u32 = 50035;
 const RATE_LIMIT_RETRIES: u32 = 3;
 // Longer waits, such as slowmode, fail so the UI can say so instead of showing a pending message.
 const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(10);
@@ -44,6 +46,10 @@ pub enum RequestError {
     Network(#[source] TransportError),
     #[error("unexpected response from Discord")]
     UnexpectedResponse,
+    /// Longer than `Store::message_length_limit()`, or refused by Discord as too long;
+    /// `limit` is Discord's limit then.
+    #[error("the message is longer than {limit} characters")]
+    TooLong { limit: usize },
     /// Empty content, a send before the account is online, a retry of a message that isn't
     /// failed, or a token that isn't a valid header value.
     #[error("invalid request")]
@@ -67,6 +73,22 @@ impl From<RestError> for RequestError {
             RestError::Captcha(challenge) => Self::CaptchaRequired(challenge),
             RestError::UnexpectedStatus { status } if status >= 500 => Self::ServerError { status },
             RestError::Api(api) if api.status >= 500 => Self::ServerError { status: api.status },
+            RestError::Api(api) if api.code == INVALID_FORM_BODY => {
+                match api
+                    .field_errors
+                    .iter()
+                    .find(|error| error.path == "content" && error.code == "BASE_TYPE_MAX_LENGTH")
+                {
+                    Some(error) => Self::TooLong {
+                        limit: limit_in(&error.message).unwrap_or(0),
+                    },
+                    None => Self::Discord {
+                        status: api.status,
+                        code: api.code,
+                        message: api.message,
+                    },
+                }
+            }
             RestError::Api(api) => Self::Discord {
                 status: api.status,
                 code: api.code,
@@ -144,7 +166,7 @@ impl AccountRest {
         self.unauthorized.load(Ordering::Acquire)
     }
 
-    fn usable(&self) -> Result<(), RequestError> {
+    pub(crate) fn usable(&self) -> Result<(), RequestError> {
         if self.closed.load(Ordering::Acquire) {
             return Err(RequestError::Closed);
         }

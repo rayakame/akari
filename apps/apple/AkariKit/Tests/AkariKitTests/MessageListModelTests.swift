@@ -66,7 +66,10 @@ struct MessageListModelTests {
             ])
         )
 
-        #expect(store.reads == [.window(here), .messages(here, [id(3), id(4), id(5)])])
+        #expect(
+            store.reads == [
+                .window(here), .messages(here, [id(3), id(4), id(5)]), .slowmode(here),
+            ])
         #expect(model.rows.map(\.message) == [message(3, content: "edited"), message(4), message(5)])
     }
 
@@ -124,7 +127,7 @@ struct MessageListModelTests {
         )
 
         #expect(model.rows.map(\.id) == [id(1), id(2), id(3)])
-        #expect(store.reads == [.window(here)])
+        #expect(store.reads == [.window(here), .slowmode(here)])
     }
 
     @Test
@@ -140,7 +143,7 @@ struct MessageListModelTests {
 
         #expect(model.rows.map(\.id) == [id(1), id(7)])
         #expect(model.rows.map(\.message.id) == [id(1), id(8)])
-        #expect(store.reads == [.window(here), .messages(here, [id(8)])])
+        #expect(store.reads == [.window(here), .messages(here, [id(8)]), .slowmode(here)])
 
         shown(window([1, 8, 9]))
         model.apply(EventBatch([.messageInserted(channelId: here, messageId: id(9))]))
@@ -165,7 +168,7 @@ struct MessageListModelTests {
         )
 
         #expect(model.rows.map(\.id) == [id(1)])
-        #expect(store.reads == [.window(here)])
+        #expect(store.reads == [.window(here), .slowmode(here)])
     }
 
     @Test
@@ -180,7 +183,7 @@ struct MessageListModelTests {
         shown(nil)
         model.apply(EventBatch([.messagesCleared(channelId: here)]))
         #expect(model.rows.isEmpty)
-        #expect(store.reads == [.window(here), .window(here)])
+        #expect(store.reads == [.window(here), .slowmode(here), .window(here), .slowmode(here)])
     }
 
     @Test
@@ -303,11 +306,11 @@ struct MessageListModelTests {
         model.apply(EventBatch([.messagesTrimmed(channelId: here, first: id(3), last: id(3))]))
         account.loadError.withLock { $0 = .Network(kind: .timeout) }
         await model.loadNewer()
-        #expect(model.loadError == .Network(kind: .timeout))
+        #expect(model.failedLoads == [.newer: .Network(kind: .timeout)])
 
         account.loadError.withLock { $0 = nil }
         await model.loadNewer()
-        #expect(model.loadError == nil)
+        #expect(model.failedLoads.isEmpty)
         #expect(store.log.actions == [.load(here, .newer(limit: 50)), .load(here, .newer(limit: 50))])
     }
 
@@ -328,54 +331,22 @@ struct MessageListModelTests {
     }
 
     @Test
-    func sendErrorsShowAndTheFailedMessageStays() async {
-        store.update { $0.show(message(7, delivery: .failed)) }
-        shown(window([1]))
+    func aSuccessAtOneEdgeKeepsTheOtherEdgesFailure() async {
+        shown(window([1, 2], latest: false))
         let model = loaded()
-        account.sendError.withLock { $0 = .RateLimited(retryAfter: 2) }
-
-        await model.send("hello")
-        shown(window([1], pending: [7]))
-        model.apply(EventBatch([.messageInserted(channelId: here, messageId: id(7))]))
-        #expect(model.sendError == .RateLimited(retryAfter: 2))
-        #expect(model.rows.last?.message.delivery == .failed)
-
-        account.sendError.withLock { $0 = nil }
-        await model.retry(id(7))
-        #expect(model.sendError == nil)
-        model.discard(id(7))
-
+        account.loadError.withLock { $0 = .ServerError(status: 500) }
+        await model.loadOlder()
+        await model.loadNewer()
         #expect(
-            store.log.actions == [.send(here, "hello"), .retry(here, id(7)), .discard(here, id(7))]
-        )
-    }
+            model.failedLoads == [
+                .older: .ServerError(status: 500), .newer: .ServerError(status: 500),
+            ])
 
-    @Test
-    func canSendFollowsPermissionsAndDms() {
-        store.update { $0.permissions[id(10)] = [.viewChannel] }
-        let model = loaded()
-        #expect(!model.canSend)
+        account.loadError.withLock { $0 = nil }
+        await model.loadNewer()
+        #expect(model.failedLoads == [.older: .ServerError(status: 500)])
 
-        store.update { $0.permissions[id(10)] = [.viewChannel, .sendMessages] }
-        model.apply(EventBatch([.currentMemberUpdated(guildId: id(1))]))
-        #expect(model.canSend)
-
-        store.update { $0.permissions[id(10)] = [.viewChannel] }
-        model.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
-        #expect(!model.canSend)
-
-        store.update { $0.permissions[id(10)] = [.administrator, .sendMessages] }
-        model.apply(EventBatch([.guildUpdated(guildId: id(1))]))
-        #expect(model.canSend)
-
-        store.update { $0.permissions[id(10)] = [] }
-        model.apply(EventBatch([.ready]))
-        #expect(!model.canSend)
-
-        store.update { $0.channels[id(20)] = channel(20, guild: nil, kind: .dm) }
-        let dm = MessageListModel(channelId: id(20), account: account, store: store)
-        let unknown = MessageListModel(channelId: id(30), account: account, store: store)
-        #expect(dm.canSend)
-        #expect(!unknown.canSend)
+        await model.jumpToPresent()
+        #expect(model.failedLoads.isEmpty)
     }
 }

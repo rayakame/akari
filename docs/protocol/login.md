@@ -240,8 +240,11 @@ for 24 hours.
 ## Logout
 
 `DiscordClient::logout(account)` loads the stored token, sends `POST /auth/logout {}` with
-it, and then deletes it from the token store. The body's push-token fields are optional,
-and Akari registers none. The token is deleted even when Discord can't be reached. A 401
+it, and then deletes it from the token store. The body's fields (`provider`, `token`,
+`voip_provider`, `voip_token`) are all optional push-notification tokens, so `{}` is valid,
+and Akari registers none ([Logout](https://docs.discord.food/authentication#logout)). What
+happens to a gateway connection that is still open isn't documented (**unverified**: likely a
+4004 close). The token is deleted even when Discord can't be reached. A 401
 counts as logged out, since the session is gone either way. Only `LogoutError::Storage`
 means the token is still stored.
 
@@ -251,6 +254,13 @@ doesn't hear about. When Discord can't confirm the logout, the host should tell 
 that the session may still be active, and that it can be ended under User Settings →
 Devices in an official client. akari-cli does this, and it also ends a replaced token's
 session after logging in again, so no live session is left behind a deleted token.
+
+The apps log out in the other order: `forget_token` first, so the Keychain item is gone before
+the login screen shows, then `end_session` with the open session's token, which the app keeps
+in memory, in the background. The UI never waits for Discord, and a new login with the same
+account can't have its token deleted by a late logout. If the token can't be deleted, the app
+stays logged in and says so; if Discord doesn't confirm, the login screen says the session may
+still be active.
 
 ## Token storage
 

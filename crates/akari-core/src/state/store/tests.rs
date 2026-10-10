@@ -1,6 +1,6 @@
 use std::sync::mpsc as std_mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
 
@@ -861,4 +861,138 @@ fn private_channel_list_follows_the_latest_message() {
 
     assert_eq!(before, [group, dm]);
     assert_eq!(ids(&store.private_channel_list()), [dm, group]);
+}
+
+const ME: u64 = 100_000_000_000_000_001;
+const DM: u64 = 300_000_000_000_000_010;
+
+// The fixture's user owns guild 1 and holds an administrator role; slowmode applies only to a
+// plain member.
+fn member_ready(slowmode: u32, roles: Value, member_roles: &[&str]) -> DispatchEvent {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    let guild = &mut data["guilds"][0];
+    guild["properties"]["owner_id"] = "100000000000000099".into();
+    guild["channels"][1]["rate_limit_per_user"] = slowmode.into();
+    if let Value::Array(extra) = roles {
+        guild["roles"].as_array_mut().unwrap().extend(extra);
+    }
+    data["merged_members"][0][0]["roles"] = json!(member_roles);
+    dispatch("READY", &data)
+}
+
+fn role(id: u64, permissions: u64) -> Value {
+    json!({"id": id.to_string(), "name": "r", "permissions": permissions.to_string(), "position": 2})
+}
+
+fn slowmode_store(roles: Value, member_roles: &[&str]) -> Store {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(member_ready(30, roles, member_roles));
+    store
+}
+
+#[test]
+fn slowmode_is_none_without_it_in_dms_and_for_unknown_channels() {
+    let store = ready_store();
+    assert_eq!(store.slowmode(Snowflake::new(GENERAL)), None);
+    assert_eq!(store.slowmode(Snowflake::new(DM)), None);
+    assert_eq!(store.slowmode(Snowflake::new(1)), None);
+
+    let store = slowmode_store(json!([]), &[]);
+    let slowmode = store.slowmode(Snowflake::new(GENERAL)).unwrap();
+    assert_eq!(slowmode.interval, Duration::from_secs(30));
+    assert!(!slowmode.exempt);
+    assert_eq!(slowmode.until, None);
+}
+
+#[test]
+fn bypass_slowmode_owners_and_admins_are_exempt_and_managers_arent() {
+    let view_and_send = Permissions::VIEW_CHANNEL.0 | Permissions::SEND_MESSAGES.0;
+    let bypass = slowmode_store(
+        json!([role(600, view_and_send | Permissions::BYPASS_SLOWMODE.0)]),
+        &["600"],
+    );
+    let managers = slowmode_store(
+        json!([role(600, view_and_send | 1 << 13 | 1 << 4)]),
+        &["600"],
+    );
+    let admin = slowmode_store(json!([]), &["500000000000000002"]);
+    let owner = Store::new(DEFAULT_LIMITS);
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    data["guilds"][0]["channels"][1]["rate_limit_per_user"] = 30.into();
+    owner.apply(dispatch("READY", &data));
+
+    let exempt = |store: &Store| store.slowmode(Snowflake::new(GENERAL)).unwrap().exempt;
+    assert!(exempt(&bypass));
+    assert!(exempt(&admin));
+    assert!(exempt(&owner));
+    assert!(!exempt(&managers));
+}
+
+#[test]
+fn the_limit_reads_the_current_user() {
+    assert_eq!(Store::new(DEFAULT_LIMITS).message_length_limit(), 2000);
+    assert_eq!(ready_store().message_length_limit(), 2000);
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    data["user"]["premium_type"] = 2.into();
+    let nitro = Store::new(DEFAULT_LIMITS);
+    nitro.apply(dispatch("READY", &data));
+    assert_eq!(nitro.message_length_limit(), 4000);
+}
+
+#[test]
+fn a_message_from_another_device_starts_the_cooldown() {
+    let store = slowmode_store(json!([]), &[]);
+    let mut theirs = message_template();
+    theirs.author.id = Snowflake::new(ME + 5);
+    store.apply(message_create(&theirs, 400_000_000_000_000_100));
+    assert_eq!(store.slowmode(Snowflake::new(GENERAL)).unwrap().until, None);
+
+    let before = SystemTime::now();
+    let mut mine = message_template();
+    mine.author.id = Snowflake::new(ME);
+    mine.nonce = None;
+    store.apply(message_create(&mine, 400_000_000_000_000_101));
+    let until = store
+        .slowmode(Snowflake::new(GENERAL))
+        .unwrap()
+        .until
+        .unwrap();
+    assert!(until > before + Duration::from_secs(29), "{until:?}");
+    assert!(
+        until <= SystemTime::now() + Duration::from_secs(30),
+        "{until:?}"
+    );
+
+    let mut in_dm = message_template();
+    in_dm.author.id = Snowflake::new(ME);
+    in_dm.channel_id = Snowflake::new(DM);
+    store.apply(message_create(&in_dm, 400_000_000_000_000_102));
+    assert_eq!(store.slowmode(Snowflake::new(DM)), None);
+}
+
+#[test]
+fn queueing_or_retrying_a_send_starts_its_cooldown_in_the_same_write() {
+    let store = slowmode_store(json!([]), &[]);
+    let general = Snowflake::new(GENERAL);
+    let me = store.current_user().unwrap();
+    let pending = Snowflake::new(500);
+    store.view_channel(general);
+
+    store.queue_message(
+        general,
+        Arc::new(Message::pending(
+            pending,
+            general,
+            Arc::new(me.user.clone()),
+            "hi".to_owned(),
+            0,
+        )),
+    );
+    assert!(store.slowmode(general).unwrap().until.is_some());
+
+    store.fail_message(general, pending);
+    store.drop_cooldown(general, pending);
+    assert_eq!(store.slowmode(general).unwrap().until, None);
+    store.retry_message(general, pending).unwrap();
+    assert!(store.slowmode(general).unwrap().until.is_some());
 }

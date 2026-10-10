@@ -27,6 +27,7 @@ struct RootView: View {
 
 private struct AppScreen: View {
     let app: AppModel
+    @State private var power: PowerEvents?
 
     var body: some View {
         ZStack {
@@ -35,16 +36,38 @@ private struct AppScreen: View {
                 Color(nsColor: Palette.frame)
             case .login(let login):
                 LoginView(model: login)
+                    .overlay(alignment: .top) {
+                        if app.warning == .logoutNotConfirmed, let warning = app.warning {
+                            WarningLine(text: warning.text) { app.dismissWarning() }
+                                .padding(.top, 32)
+                        }
+                    }
                     .transition(.opacity)
             case .session(let session):
-                SessionView(session: session) { messages in
-                    MessageArea(messages: messages)
-                }
+                SessionScreen(
+                    session: session, warning: app.warning,
+                    dismissWarning: { app.dismissWarning() }, reconnect: { app.reconnect() }
+                )
                 .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: app.screen.key)
-        .task { await app.start() }
+        .alert(
+            "Akari couldn't log out",
+            isPresented: Binding(
+                get: { app.logoutError != nil }, set: { if !$0 { app.dismissLogoutError() } }),
+            presenting: app.logoutError
+        ) { _ in
+            Button("OK") { app.dismissLogoutError() }
+        } message: { error in
+            Text(
+                "Akari couldn't remove your login from the Keychain, so you're still logged in. "
+                    + error.localizedDescription)
+        }
+        .task {
+            power = PowerEvents(sleep: { app.suspend() }, wake: { app.resume() })
+            await app.start()
+        }
     }
 }
 
@@ -56,5 +79,24 @@ extension AppModel.Screen {
         case .login(let login): ObjectIdentifier(login)
         case .session(let session): ObjectIdentifier(session)
         }
+    }
+}
+
+struct SessionScreen: View {
+    let session: SessionModel
+    var warning: AppModel.Warning?
+    var dismissWarning: () -> Void = {}
+    var reconnect: () -> Void = {}
+
+    var body: some View {
+        SessionView(
+            session: session, warning: warning, dismissWarning: dismissWarning,
+            reconnect: reconnect
+        ) { messages, name in
+            MessageArea(messages: messages, name: name)
+        }
+        // A reconnect brings a new session for the same channel; without a new identity its
+        // views would keep the old one's state and never open the channel.
+        .id(ObjectIdentifier(session))
     }
 }

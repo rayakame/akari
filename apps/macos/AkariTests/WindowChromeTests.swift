@@ -20,7 +20,7 @@ struct WindowChromeTests {
     @Test
     func theStripUnderTheTitleBarIsTheSidebarColorAcrossTheWindow() throws {
         let session = SessionModel(userId: UserId(rawValue: 1), account: EmptyAccount()) { _ in }
-        let image = try Rendered(SessionView(session: session) { _ in EmptyView() })
+        let image = try Rendered(SessionView(session: session) { _, _ in EmptyView() })
         let right = image.width - 20
 
         // The rail is `frame`.

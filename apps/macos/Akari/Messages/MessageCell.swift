@@ -21,6 +21,9 @@ final class MessageCell: NSTableCellView {
     private let hoverTime = CellText.label()
     private let content = CellText.label(wrapping: true)
     private let extras = CellText.label(wrapping: true)
+    private let failed = FailedLine()
+    var onRetry: () -> Void = {}
+    var onDelete: () -> Void = {}
     private let stack = NSStackView()
     private var top: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
@@ -63,11 +66,25 @@ final class MessageCell: NSTableCellView {
         hoverTime.toolTip = fullDate
         hoverTime.isHidden = !isHovered || startsGroup
         reply.isHidden = !(startsGroup && message.kind == .reply)
-        content.attributedStringValue = CellText.body(message.content, color: Palette.textDefault)
+        let body = NSMutableAttributedString(
+            attributedString: CellText.body(message.content, color: Self.color(message.delivery)))
+        let lines = NSMutableAttributedString(attributedString: Self.extras(message))
+        if message.editedTimestamp != nil {
+            (message.content.isEmpty ? lines : body).append(CellText.editedMark())
+        }
+        content.attributedStringValue = body
         content.isHidden = message.content.isEmpty
-        let lines = Self.extras(message)
         extras.attributedStringValue = lines
         extras.isHidden = lines.length == 0
+        failed.isHidden = message.delivery != .failed
+    }
+
+    private static func color(_ delivery: Delivery) -> NSColor {
+        switch delivery {
+        case .pending: Palette.textMuted
+        case .failed: Palette.danger
+        default: Palette.textDefault
+        }
     }
 
     /// The row height for `message` at `width`, as Auto Layout would size the cell.
@@ -82,9 +99,13 @@ final class MessageCell: NSTableCellView {
         let textWidth = width - Self.textLeading - Self.textTrailing
         content.preferredMaxLayoutWidth = textWidth
         extras.preferredMaxLayoutWidth = textWidth
-        let shown = [reply, header, content, extras].filter { !$0.isHidden }
+        let shown = [reply, header, content, extras, failed].filter { !$0.isHidden }
         let stacked =
-            shown.map { $0 === header ? self.header.height : $0.intrinsicContentSize.height }
+            shown.map { view in
+                view === header
+                    ? self.header.height
+                    : view === failed ? FailedLine.height : view.intrinsicContentSize.height
+            }
             .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
         let top = showsHeader ? Self.groupTop : Self.continuationTop
         let height = top + stacked + Self.bottomInset
@@ -120,7 +141,11 @@ final class MessageCell: NSTableCellView {
         stack.alignment = .leading
         stack.spacing = Self.spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.setViews([reply, header, content, extras], in: .top)
+        failed.retry.target = self
+        failed.retry.action = #selector(retryClicked)
+        failed.delete.target = self
+        failed.delete.action = #selector(deleteClicked)
+        stack.setViews([reply, header, content, extras, failed], in: .top)
         for view in [avatar, stack, hoverTime] as [NSView] {
             addSubview(view)
         }
@@ -145,6 +170,14 @@ final class MessageCell: NSTableCellView {
             hoverTime.trailingAnchor.constraint(equalTo: leadingAnchor, constant: 56),
             hoverTime.firstBaselineAnchor.constraint(equalTo: content.firstBaselineAnchor),
         ])
+    }
+
+    @objc private func retryClicked() {
+        onRetry()
+    }
+
+    @objc private func deleteClicked() {
+        onDelete()
     }
 
     private static func extras(_ message: Message) -> NSAttributedString {
@@ -288,5 +321,43 @@ private final class TagCell: NSTextFieldCell {
             y: cellFrame.midY + (flipped ? 1 : -1) * font.capHeight / 2)
         CTLineDraw(line, context)
         context.restoreGState()
+    }
+}
+
+private final class FailedLine: NSView {
+    static let height: CGFloat = 20
+    let retry = FailedLine.button("Retry")
+    let delete = FailedLine.button("Delete")
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let label = CellText.label()
+        label.stringValue = "Not sent."
+        label.font = .systemFont(ofSize: 14)
+        label.textColor = Palette.danger
+        let row = NSStackView(views: [label, retry, delete])
+        row.orientation = .horizontal
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Self.height),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private static func button(_ title: String) -> NSButton {
+        let button = NSButton(title: title, target: nil, action: nil)
+        button.isBordered = false
+        button.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: Palette.textLink])
+        return button
     }
 }
