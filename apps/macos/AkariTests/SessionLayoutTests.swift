@@ -44,8 +44,10 @@ struct SessionLayoutTests {
             }
         #expect(!title.isEmpty, "the list's header shows no title")
 
-        // Up from just under both headers to where they end.
-        let listContent = try #require(image.firstChange(at: listX, above: 32 + 52)) + 1
+        // Up from just under both headers to where they end. Mid-column: with scroll bars always
+        // shown, as on CI, the rows narrow and the selected row's rounded corner reaches listX.
+        let middle = (SidebarWidth.rail + 1 + sidebar) / 2
+        let listContent = try #require(image.firstChange(at: middle, above: 32 + 52)) + 1
         let pageContent = try #require(image.firstChange(at: pageX, above: 300)) + 1
         #expect(
             listContent == pageContent,
