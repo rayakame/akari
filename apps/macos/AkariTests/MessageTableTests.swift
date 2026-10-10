@@ -169,6 +169,23 @@ struct MessageTableTests {
     }
 
     @Test
+    func leavingThePresentWithoutNewRowsStopsPinning() {
+        let rows = messages(80, longText: true)
+        show(rows)
+        let clip = controller.scrollView.contentView
+
+        controller.show(rows, atPresent: false)
+        window.layoutIfNeeded()
+        let first = visibleRows.lowerBound
+        let offset = table.rect(ofRow: first).minY - clip.bounds.minY
+        window.setContentSize(NSSize(width: 300, height: 400))
+        window.layoutIfNeeded()
+
+        #expect(visibleRows.lowerBound == first)
+        #expect(abs(table.rect(ofRow: first).minY - clip.bounds.minY - offset) <= 1)
+    }
+
+    @Test
     func newMessagesFollowTheBottomOnlyWhenPinned() {
         var rows = messages(80, longText: true)
         show(rows)

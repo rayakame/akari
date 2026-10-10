@@ -30,12 +30,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     func show(_ rows: [MessageListModel.Row], atPresent: Bool) {
+        // Before the early return: leaving the present ends pinning even without new rows.
+        self.atPresent = atPresent
         let next = MessageTimeline(rows: rows, calendar: calendar)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         guard !changes.isEmpty else {
             return
         }
-        self.atPresent = atPresent
         let firstFill = !filled && !next.items.isEmpty
         let pin = firstFill || pinsToBottom
         if !pin {
