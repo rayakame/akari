@@ -142,6 +142,34 @@ struct MessageTableTests {
     }
 
     @Test
+    func aListScrolledUpStaysPutWhenRowsChangeAboveIt() throws {
+        var rows = messages(200)
+        show(rows)
+        let clip = controller.scrollView.contentView
+        clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: 100).minY))
+        controller.scrollView.reflectScrolledClipView(clip)
+        for name in [
+            NSScrollView.willStartLiveScrollNotification, NSScrollView.didLiveScrollNotification,
+            NSScrollView.didEndLiveScrollNotification,
+        ] {
+            NotificationCenter.default.post(name: name, object: controller.scrollView)
+        }
+        window.layoutIfNeeded()
+        let first = visibleRows.lowerBound
+        let key = controller.timeline.items[first].id
+        let offset = table.rect(ofRow: first).minY - clip.bounds.minY
+
+        rows.removeFirst()
+        rows += messages(1, from: 201)
+        show(rows)
+        rows.remove(at: 10)
+        show(rows)
+
+        let moved = try #require(controller.timeline.items.firstIndex { $0.id == key })
+        #expect(abs(table.rect(ofRow: moved).minY - clip.bounds.minY - offset) <= 1)
+    }
+
+    @Test
     func cellsMatchTheirItemKinds() throws {
         show([
             row(1, at: noon), row(2, at: noon + 60), row(3, at: noon + 120, kind: .userJoin),

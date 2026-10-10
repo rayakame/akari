@@ -12,6 +12,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var filled = false
     // Follows the user's scrolling: at the bottom, new messages and re-wrapping keep it there.
     private var sticksToBottom = true
+    // Where the reader is while scrolled up: the first visible item and its offset in the view.
+    private var anchor: (id: MessageTimeline.ItemId, offset: CGFloat)?
 
     init(
         tableView: MessageTableView = MessageTableView(), calendar: Calendar = .current,
@@ -31,6 +33,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard !changes.isEmpty else {
             return
         }
+        let firstFill = !filled && !next.items.isEmpty
+        let pin = firstFill || (sticksToBottom && atPresent)
+        if !pin {
+            anchor = visibleAnchor(skipping: changes.removed) ?? anchor
+        }
         timeline = next
         tableView.beginUpdates()
         if !changes.removed.isEmpty {
@@ -44,14 +51,15 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             tableView.reloadData(forRowIndexes: changes.reloaded, columnIndexes: [0])
             tableView.noteHeightOfRows(withIndexesChanged: changes.reloaded)
         }
-        let firstFill = !filled && !next.items.isEmpty
         if firstFill {
             filled = true
             sticksToBottom = true
             FirstChannelTimer.tableShowedRows()
         }
-        if firstFill || (sticksToBottom && atPresent) {
+        if pin {
             scrollToBottom()
+        } else {
+            restoreAnchor()
         }
     }
 
@@ -122,10 +130,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 16, right: 0)
         tableView.didLayout = { [weak self] in
-            guard let self, self.filled, self.sticksToBottom, !self.isPinnedToBottom else {
+            guard let self, self.filled else {
                 return
             }
-            self.scrollToBottom()
+            if self.sticksToBottom {
+                if !self.isPinnedToBottom {
+                    self.scrollToBottom()
+                }
+            } else {
+                self.restoreAnchor()
+            }
         }
         let center = NotificationCenter.default
         center.addObserver(
@@ -139,13 +153,39 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
     }
 
-    // While the user scrolls, nothing pulls the list back down.
+    // While the user scrolls, nothing pulls the list back down or back to the old place.
     @objc private func userStartedScrolling(_ notification: Notification) {
         sticksToBottom = false
+        anchor = nil
     }
 
     @objc private func userScrolled(_ notification: Notification) {
         sticksToBottom = isPinnedToBottom
+        anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
+    }
+
+    // Read before the update: `timeline` and the table still hold the old rows.
+    private func visibleAnchor(skipping removed: IndexSet) -> (id: MessageTimeline.ItemId, offset: CGFloat)? {
+        let top = scrollView.contentView.bounds.minY
+        let visible = tableView.rows(in: scrollView.contentView.bounds)
+        for row in visible.location..<(visible.location + visible.length)
+        where !removed.contains(row) && row < timeline.items.count {
+            return (timeline.items[row].id, tableView.rect(ofRow: row).minY - top)
+        }
+        return nil
+    }
+
+    private func restoreAnchor() {
+        guard let anchor, let row = timeline.items.firstIndex(where: { $0.id == anchor.id }) else {
+            return
+        }
+        let clip = scrollView.contentView
+        let y = tableView.rect(ofRow: row).minY - anchor.offset
+        guard abs(clip.bounds.minY - y) > 0.5 else {
+            return
+        }
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
+        scrollView.reflectScrolledClipView(clip)
     }
 
     private func reuse(_ identifier: NSUserInterfaceItemIdentifier) -> NSView? {
