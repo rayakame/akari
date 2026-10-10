@@ -206,6 +206,7 @@ public final class SessionModel {
         case .guild(let guildId):
             guard guilds.guilds.contains(where: { $0.id == guildId }) else {
                 messages = nil
+                rememberSpot()
                 return
             }
             if let channel = spot.channel {
@@ -220,6 +221,7 @@ public final class SessionModel {
                 open(channel: channel)
             } else {
                 messages = nil
+                rememberSpot()
             }
         }
     }

@@ -424,6 +424,8 @@ final class SessionModelTests {
 
         #expect(session.place == .home)
         #expect(session.messages == nil)
+        // The next launch mustn't load the gone channel again.
+        #expect(memory.lastSpot(of: id(1)) == .init(place: .home, channel: nil))
         session.close()
     }
 
@@ -439,6 +441,8 @@ final class SessionModelTests {
 
         #expect(session.place == .home)
         #expect(session.messages == nil)
+        // The next launch mustn't load the gone channel again.
+        #expect(memory.lastSpot(of: id(1)) == .init(place: .home, channel: nil))
         session.close()
     }
 
