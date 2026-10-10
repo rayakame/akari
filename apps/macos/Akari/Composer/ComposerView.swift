@@ -5,7 +5,7 @@ import SwiftUI
 struct ComposerView: View {
     let composer: ComposerModel
     let placeholder: String
-    /// The message area's height; the composer grows to half of it.
+    // The composer grows to half of it.
     let areaHeight: CGFloat
     var onSend: () -> Void = {}
     var onEscape: () -> Void = {}

@@ -1,7 +1,6 @@
 import AppKit
 
-// The first row, and the last while detached: a spinner while a page loads, the error with a
-// way to try again, or where the channel begins. One height in every state, so nothing moves.
+// One height in every state, so a change of state never moves the rows.
 final class EdgeCell: NSTableCellView {
     enum Look: Equatable {
         case idle

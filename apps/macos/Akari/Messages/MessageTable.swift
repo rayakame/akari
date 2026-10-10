@@ -99,7 +99,6 @@ struct MessageArea: View {
     }
 }
 
-// The table's actions on the channel's models.
 final class MessageListBridge: MessageListActions {
     let messages: MessageListModel
     let link: MessageTableLink

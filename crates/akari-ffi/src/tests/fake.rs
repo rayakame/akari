@@ -49,7 +49,6 @@ impl FakeGateway {
         self.serve_ready_with(|_| {}).await
     }
 
-    /// Like `serve_ready`, after `edit` changed READY's `d`.
     pub async fn serve_ready_with(
         &self,
         edit: impl FnOnce(&mut Value),

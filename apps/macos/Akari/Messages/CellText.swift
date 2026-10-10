@@ -45,7 +45,6 @@ enum CellText {
         return line
     }
 
-    // Smaller than the text, on its baseline, in the timestamps' color.
     static func editedMark() -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = 22

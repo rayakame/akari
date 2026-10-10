@@ -1,7 +1,6 @@
 import AkariKit
 import SwiftUI
 
-// The strip under the composer: what went wrong on the left, slowmode on the right.
 struct ComposerStatus: View {
     let composer: ComposerModel
 
@@ -41,7 +40,7 @@ struct ComposerStatus: View {
         }
     }
 
-    /// m:ss, or h:mm:ss past an hour, rounded up so it never shows 0:00 while waiting.
+    // Rounded up, so it never shows 0:00 while the user still has to wait.
     static func countdown(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded(.up))
         let (hours, minutes, rest) = (total / 3600, total / 60 % 60, total % 60)

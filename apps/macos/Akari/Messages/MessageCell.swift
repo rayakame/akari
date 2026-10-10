@@ -70,7 +70,6 @@ final class MessageCell: NSTableCellView {
             attributedString: CellText.body(message.content, color: Self.color(message.delivery)))
         let lines = NSMutableAttributedString(attributedString: Self.extras(message))
         if message.editedTimestamp != nil {
-            // After the text, or after the last line when there's no text.
             (message.content.isEmpty ? lines : body).append(CellText.editedMark())
         }
         content.attributedStringValue = body
@@ -325,7 +324,6 @@ private final class TagCell: NSTextFieldCell {
     }
 }
 
-// Under a message that wasn't sent: what happened, and what the user can do about it.
 private final class FailedLine: NSView {
     static let height: CGFloat = 20
     let retry = FailedLine.button("Retry")

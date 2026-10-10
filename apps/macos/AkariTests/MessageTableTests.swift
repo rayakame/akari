@@ -686,8 +686,6 @@ struct MessageTableTests {
         #expect(try #require(plain.first).stringValue == "message 3")
     }
 
-    // MARK: history
-
     // 100 one-line messages, 101...200, two minutes apart on one day.
     var page: [MessageListModel.Row] { messages(100, from: 101) }
 

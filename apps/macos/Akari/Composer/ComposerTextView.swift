@@ -12,7 +12,6 @@ final class ComposerTextView: NSTextView {
     var onEditLastMessage: (() -> Void)?
     var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
 
-    /// A text view in a scroll view that scrolls only once the text outgrows it.
     static func scrollable() -> (NSScrollView, ComposerTextView) {
         let scrollView = NSScrollView()
         let textView = ComposerTextView(frame: .zero)
@@ -52,7 +51,6 @@ final class ComposerTextView: NSTextView {
         insertionPointColor = Palette.textDefault
     }
 
-    /// One line is 56; at most `maxHeight`, then the text scrolls.
     func fittingHeight(maxHeight: CGFloat) -> CGFloat {
         guard let layoutManager, let textContainer else {
             return Self.lineHeight + 2 * Self.insets.height

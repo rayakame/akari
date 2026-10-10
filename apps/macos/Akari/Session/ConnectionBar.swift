@@ -1,8 +1,7 @@
 import AkariKit
 import SwiftUI
 
-// Under the title bar while the session isn't online; a notice shows once it has lasted its
-// delay, so a quick resume doesn't flash it.
+// A notice shows once it has lasted its delay, so a quick resume doesn't flash it.
 struct ConnectionBar: View {
     let notice: ConnectionNotice?
     let reconnect: () -> Void

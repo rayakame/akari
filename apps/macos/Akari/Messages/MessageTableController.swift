@@ -1,7 +1,6 @@
 import AkariKit
 import AppKit
 
-// What the table shows: the model's rows and where its loads stand.
 struct MessageTableState: Equatable {
     var rows: [MessageListModel.Row]
     var atPresent = true
@@ -120,8 +119,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
     }
 
-    // "Today at" and day dividers depend on the date, the time zone and the locale. Every height
-    // is measured again: system rows carry the time in their wrapped text.
+    // Every height is measured again: system rows carry the time in their wrapped text.
     func refreshTimes() {
         calendar = calendarSource()
         locale = localeSource()
@@ -158,8 +156,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             edges: state.atPresent ? [.older] : [.older, .newer])
     }
 
-    // Loads the newest messages when needed and follows the bottom once they're there; a
-    // scroll before then cancels following.
+    // A scroll before the newest page lands cancels following the bottom.
     func jumpToPresent(load: Bool) {
         sticksToBottom = true
         anchor = nil
@@ -245,7 +242,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 + "\(clipView.bounds.minY), live \(isLiveScrolling)")
     }
 
-    // Asks for the next page once the reader is within a view's height of a loaded end.
     private func askForMore() {
         guard filled, !requested, state.loading == nil, !state.rows.isEmpty else {
             return
@@ -444,8 +440,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         center.addObserver(
             self, selector: #selector(columnResized), name: NSTableView.columnDidResizeNotification,
             object: tableView)
-        // Posted at midnight (and after a wake that crossed it), or when the zone or locale
-        // changes; not necessarily on the main thread.
+        // Not necessarily posted on the main thread.
         for name in [
             Notification.Name.NSCalendarDayChanged, .NSSystemTimeZoneDidChange,
             NSLocale.currentLocaleDidChangeNotification,

@@ -1,6 +1,5 @@
 import SwiftUI
 
-// Above the composer while older messages are shown.
 struct JumpBar: View {
     let text: String
     let jump: () -> Void
@@ -23,7 +22,6 @@ struct JumpBar: View {
         .padding(.bottom, 4)
     }
 
-    /// `nil` while the newest messages are loaded.
     static func text(atPresent: Bool, isStale: Bool, hasRows: Bool) -> String? {
         guard !atPresent, hasRows else {
             return nil

@@ -437,7 +437,6 @@ impl State {
         }
     }
 
-    // The slowmode a send in `channel` must wait for: `None` without one, or when exempt.
     fn cooldown_interval(&self, channel: ChannelId, now_millis: i64) -> Option<Duration> {
         let slowmode = self.slowmode_parts(channel, now_millis)?;
         (!slowmode.1).then_some(slowmode.0)
