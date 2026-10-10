@@ -164,8 +164,11 @@ is an open point for a later milestone.
 A message with the `IS_COMPONENTS_V2` flag (`1 << 15`,
 [message flags](https://docs.discord.food/resources/message#message-flags)) is laid out
 entirely by its `components`: text displays, sections, containers, media galleries and so on.
-It has no `content` and no embeds, so without its components it would show as an empty row.
+Its `content` and `embeds` don't work, polls and stickers are disabled, and attachments show
+only where a component exposes them
+([components](https://docs.discord.food/resources/components)). Without its components it
+would show as an empty row.
 
 Akari doesn't model `components` yet. The state message keeps the flag, the FFI record says
-`components_v2`, and the apps show a one-line placeholder instead of the layout. Reading and
-rendering the components is a later milestone.
+`components_v2`, and the apps show a one-line placeholder instead of the layout; the row still
+lists the message's attachments. Reading and rendering the components is a later milestone.
