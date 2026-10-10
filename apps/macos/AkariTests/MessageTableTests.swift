@@ -224,6 +224,28 @@ struct MessageTableTests {
     }
 
     @Test
+    func aShortConversationSitsAtTheBottom() {
+        var rows = messages(3)
+        show(rows)
+        let clip = controller.scrollView.contentView
+
+        let below = { clip.bounds.maxY - self.table.rect(ofRow: self.table.numberOfRows - 1).maxY }
+        #expect(abs(below() - 16) <= 1)
+        #expect(table.rect(ofRow: 0).minY - clip.bounds.minY > 100)
+
+        rows += messages(1, from: 4)
+        show(rows)
+        #expect(abs(below() - 16) <= 1)
+
+        // A short list is at its bottom, so a resize doesn't unpin it and later messages follow.
+        window.setContentSize(NSSize(width: 600, height: 300))
+        window.layoutIfNeeded()
+        rows += messages(60, from: 5, longText: true)
+        show(rows)
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    @Test
     func cellsMatchTheirItemKinds() throws {
         show([
             row(1, at: noon), row(2, at: noon + 60), row(3, at: noon + 120, kind: .userJoin),

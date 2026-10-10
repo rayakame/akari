@@ -74,7 +74,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     var isPinnedToBottom: Bool {
-        scrollView.contentView.bounds.maxY >= tableView.frame.height - 2
+        scrollView.contentView.bounds.maxY >= tableView.contentHeight - 2
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -135,6 +135,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         tableView.dataSource = self
         tableView.delegate = self
+        scrollView.contentView = BottomClipView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -154,6 +155,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             } else {
                 self.restoreAnchor()
             }
+            self.alignShortContent()
         }
         // Wheel, keyboard and accessibility scrolls post no live-scroll notifications; every
         // scroll moves the clip view.
@@ -200,6 +202,18 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.reflectScrolledClipView(clip)
     }
 
+    // The table's frame stretches to fill the view, so new rows never re-constrain the clip
+    // view on their own.
+    private func alignShortContent() {
+        let clip = scrollView.contentView
+        let origin = clip.constrainBoundsRect(clip.bounds).origin
+        guard origin != clip.bounds.origin else {
+            return
+        }
+        clip.setBoundsOrigin(origin)
+        scrollView.reflectScrolledClipView(clip)
+    }
+
     private func reuse(_ identifier: NSUserInterfaceItemIdentifier) -> NSView? {
         tableView.makeView(withIdentifier: identifier, owner: nil)
     }
@@ -212,9 +226,24 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.scrollRowToVisible(last)
         let clip = scrollView.contentView
         let insets = scrollView.contentInsets
-        let bottom = max(-insets.top, tableView.frame.height - clip.bounds.height + insets.bottom)
+        let bottom = max(-insets.top, tableView.contentHeight - clip.bounds.height + insets.bottom)
         clip.scroll(to: NSPoint(x: clip.bounds.minX, y: bottom))
         scrollView.reflectScrolledClipView(clip)
+    }
+}
+
+// A conversation shorter than the view sits at its bottom, as in Discord: a negative origin in
+// the flipped clip view moves the table down.
+final class BottomClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var bounds = super.constrainBoundsRect(proposedBounds)
+        if let table = documentView as? MessageTableView {
+            let content = table.contentHeight + contentInsets.bottom
+            if content < bounds.height {
+                bounds.origin.y = content - bounds.height
+            }
+        }
+        return bounds
     }
 }
 
@@ -222,6 +251,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
     private(set) var isLayingOut = false
+
+    // The rows' extent; the frame itself stretches to fill a taller clip view.
+    var contentHeight: CGFloat {
+        numberOfRows > 0 ? rect(ofRow: numberOfRows - 1).maxY : 0
+    }
 
     override func layout() {
         isLayingOut = true
