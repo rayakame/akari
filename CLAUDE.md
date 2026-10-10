@@ -57,6 +57,7 @@ skeleton, and the other app folders contain only a README.
 | `apps/linux` | Later: gtk4-rs + libadwaita, uses `akari-core` directly |
 | `docs/protocol` | Notes on the user-account Discord API (main reference: https://docs.discord.food) |
 | `docs/ui` | Notes on Discord's layout, behavior and shortcuts that the apps mirror |
+| `assets` | Akari's logo (white, on transparent) and app icon master as SVG; each app derives its own icon formats from them |
 
 ## Crate boundaries
 
