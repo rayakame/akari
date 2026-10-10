@@ -8,6 +8,8 @@ final class FakeAccount: Account, @unchecked Sendable {
     let holdLoads = Locked(false)
     let loadReplies = AsyncQueue<RequestError?>()
     let loadError = Locked<RequestError?>(nil)
+    // The window a successful load leaves in the store, as akari-core's load would.
+    let windowAfterLoad = Locked<MessageWindow?>(nil)
     // Fails sends and retries.
     let sendError = Locked<RequestError?>(nil)
 
@@ -53,6 +55,9 @@ final class FakeAccount: Account, @unchecked Sendable {
         let error = holdLoads.current ? await loadReplies.next() ?? nil : loadError.current
         if let error {
             throw error
+        }
+        if let window = windowAfterLoad.current {
+            fakeStore.update { $0.windows[channelId] = window }
         }
     }
 

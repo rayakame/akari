@@ -177,6 +177,62 @@ struct SessionModelTests {
     }
 
     @Test
+    func aDeletedOrHiddenOpenChannelOpensAnother() async {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(13), channel(14), channel(15)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+
+        store.update { state in
+            state.channelLists[id(1)] = [id(14), id(15)]
+            state.channels[id(13)] = nil
+        }
+        subscription.send(.channelRemoved(channelId: id(13), guildId: id(1)))
+        await subscription.batches.pulled(2)
+        #expect(session.messages?.channelId == id(14))
+
+        session.open(channel: id(15))
+        store.update { $0.channelLists[id(1)] = [id(14)] }
+        subscription.send(.currentMemberUpdated(guildId: id(1)))
+        await subscription.batches.pulled(3)
+        #expect(session.messages?.channelId == id(14))
+
+        store.update { $0.channelLists[id(1)] = [] }
+        subscription.send(.channelUpdated(channelId: id(14), guildId: id(1)))
+        await subscription.batches.pulled(4)
+        #expect(session.messages == nil)
+        session.close()
+    }
+
+    @Test
+    func aChannelOutsideTheListStaysOpenUntilRemoved() async {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(13)], in: 1)
+            state.channels[id(50)] = channel(50, guild: nil, kind: .dm)
+            state.channels[id(90)] = channel(90, kind: .publicThread)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(90))
+
+        subscription.send(.channelUpdated(channelId: id(13), guildId: id(1)))
+        await subscription.batches.pulled(2)
+        #expect(session.messages?.channelId == id(90))
+
+        session.open(.home)
+        session.open(channel: id(50))
+        subscription.send(.channelRemoved(channelId: id(50), guildId: nil))
+        await subscription.batches.pulled(3)
+        #expect(session.messages == nil)
+        session.close()
+    }
+
+    @Test
     func aRemovedGuildFallsBackHome() async {
         store.update { state in
             state.add(guild(1), guild(2))

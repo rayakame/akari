@@ -204,6 +204,23 @@ struct MessageListModelTests {
     }
 
     @Test
+    func rowsArriveWithTheLoad() async {
+        let model = loaded()
+        account.windowAfterLoad.withLock { $0 = window([1, 2]) }
+
+        await model.open()
+
+        #expect(model.loading == nil)
+        #expect(model.rows.map(\.id) == [id(1), id(2)])
+
+        account.windowAfterLoad.withLock { $0 = window([0, 1, 2], latest: true, oldest: true) }
+        store.update { $0.show(message(0)) }
+        await model.loadOlder()
+        #expect(model.rows.map(\.id) == [id(0), id(1), id(2)])
+        #expect(model.reachedOldest)
+    }
+
+    @Test
     func loadOlderStopsAtTheOldestAndWhileLoading() async {
         shown(window([3, 4]))
         let model = loaded()

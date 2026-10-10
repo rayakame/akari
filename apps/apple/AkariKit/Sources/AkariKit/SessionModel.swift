@@ -90,14 +90,7 @@ public final class SessionModel {
         }
         let list = ChannelListModel(guildId: guildId, store: store)
         channels = list
-        let last = lastChannels[guildId].flatMap { last in list.channels.first { $0.id == last } }
-        // Forum and media channels hold posts, not a message list.
-        let first = list.channels.first { $0.kind == .guildText || $0.kind == .guildNews }
-        if let channel = last ?? first {
-            open(channel: channel.id)
-        } else {
-            messages = nil
-        }
+        openListedChannel(in: list, guildId: guildId)
     }
 
     public func open(channel id: ChannelId) {
@@ -148,9 +141,34 @@ public final class SessionModel {
         {
             open(.home)
         }
+        let open = messages?.channelId
+        let wasListed = open.map(isListed) ?? false
         guilds.apply(batch)
         channels?.apply(batch)
+        // Threads and DMs aren't in the channel list; they leave only when removed.
+        if let open, batch.removedChannels.contains(open) || (wasListed && !isListed(open)) {
+            if case .guild(let guildId) = place, let list = channels {
+                openListedChannel(in: list, guildId: guildId)
+            } else {
+                messages = nil
+            }
+        }
         messages?.apply(batch)
+    }
+
+    private func isListed(_ channel: ChannelId) -> Bool {
+        channels?.channels.contains { $0.id == channel } == true
+    }
+
+    private func openListedChannel(in list: ChannelListModel, guildId: GuildId) {
+        let last = lastChannels[guildId].flatMap { last in list.channels.first { $0.id == last } }
+        // Forum and media channels hold posts, not a message list.
+        let first = list.channels.first { $0.kind == .guildText || $0.kind == .guildNews }
+        if let channel = last ?? first {
+            open(channel: channel.id)
+        } else {
+            messages = nil
+        }
     }
 
     private func closed(_ error: GatewayError?) {

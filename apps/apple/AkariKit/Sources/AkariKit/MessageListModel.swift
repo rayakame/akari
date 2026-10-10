@@ -130,6 +130,8 @@ public final class MessageListModel {
         do {
             try await account.loadMessages(channelId: channelId, load: request)
             loadError = nil
+            // The batch with the loaded range may come later; the rows shouldn't lag `loading`.
+            reload(rereading: [])
         } catch {
             loadError = error as? RequestError
         }
