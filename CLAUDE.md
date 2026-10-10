@@ -37,7 +37,8 @@ from the gateway, loads message history and sends messages over rate-limited RES
 `akari-cli` can log in, log out, connect, list guilds and channels, and read, send and tail
 messages. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
-XCFramework and generated bindings. `akari-markdown` is still an empty skeleton, and the
+XCFramework and generated bindings, with a Keychain token store and the view models (app,
+login, session, guild, channel and message lists). `akari-markdown` is still an empty skeleton, and the
 other app folders contain only a README.
 
 | Path | Contents |
