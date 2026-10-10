@@ -12,6 +12,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var filled = false
     private var sticksToBottom = true
     private var anchor: (id: MessageTimeline.ItemId, offset: CGFloat)?
+    // Clip moves from the controller's own updates and scrolls aren't the user's.
+    private var ownChanges = 0
+    private var lastClipOrigin = NSPoint.zero
 
     init(
         tableView: MessageTableView = MessageTableView(), calendar: Calendar = .current,
@@ -36,6 +39,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if !pin {
             anchor = visibleAnchor(skipping: changes.removed) ?? anchor
         }
+        ownChanges += 1
+        defer { ownChanges -= 1 }
         timeline = next
         tableView.beginUpdates()
         if !changes.removed.isEmpty {
@@ -133,6 +138,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             guard let self, self.filled else {
                 return
             }
+            self.ownChanges += 1
+            defer { self.ownChanges -= 1 }
             if self.sticksToBottom {
                 if !self.isPinnedToBottom {
                     self.scrollToBottom()
@@ -141,25 +148,21 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 self.restoreAnchor()
             }
         }
-        let center = NotificationCenter.default
-        center.addObserver(
-            self, selector: #selector(userStartedScrolling),
-            name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
-        for name in [
-            NSScrollView.didLiveScrollNotification, NSScrollView.didEndLiveScrollNotification,
-        ] {
-            center.addObserver(
-                self, selector: #selector(userScrolled), name: name, object: scrollView)
+        // Wheel, keyboard and accessibility scrolls post no live-scroll notifications; every
+        // scroll moves the clip view.
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(clipMoved), name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView)
+    }
+
+    @objc private func clipMoved(_ notification: Notification) {
+        let origin = scrollView.contentView.bounds.origin
+        defer { lastClipOrigin = origin }
+        // The table re-anchors inside its own layout; that isn't the user scrolling either.
+        guard ownChanges == 0, !tableView.isLayingOut, origin != lastClipOrigin else {
+            return
         }
-    }
-
-    // While the user scrolls, nothing pulls the list back down or back to the old place.
-    @objc private func userStartedScrolling(_ notification: Notification) {
-        sticksToBottom = false
-        anchor = nil
-    }
-
-    @objc private func userScrolled(_ notification: Notification) {
         sticksToBottom = isPinnedToBottom
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
     }
@@ -211,9 +214,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 // NSTableView re-anchors the scroll position inside its layout, so pinning comes after it.
 class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
+    private(set) var isLayingOut = false
 
     override func layout() {
+        isLayingOut = true
         super.layout()
+        isLayingOut = false
         didLayout?()
     }
 }

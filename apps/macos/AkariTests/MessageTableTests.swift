@@ -132,6 +132,25 @@ struct MessageTableTests {
     }
 
     @Test
+    func aScrollWithoutLiveScrollNotificationsUnpins() {
+        var rows = messages(80, longText: true)
+        show(rows)
+        let clip = controller.scrollView.contentView
+
+        // Like a classic mouse wheel, Page Up or an arrow key: no live-scroll notification.
+        clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: 30).minY))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        let first = visibleRows.lowerBound
+        let offset = table.rect(ofRow: first).minY - clip.bounds.minY
+        rows += messages(1, from: 81)
+        show(rows)
+
+        #expect(visibleRows.lowerBound == first)
+        #expect(abs(table.rect(ofRow: first).minY - clip.bounds.minY - offset) <= 1)
+    }
+
+    @Test
     func newMessagesFollowTheBottomOnlyWhenPinned() {
         var rows = messages(80, longText: true)
         show(rows)
