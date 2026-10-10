@@ -314,6 +314,33 @@ final class SessionModelTests {
     }
 
     @Test
+    func draftsSurviveChannelSwitches() {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(12), channel(13)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(12))
+
+        session.messages?.composer.draft = "half"
+        session.open(channel: id(13))
+        #expect(session.messages?.composer.draft == "")
+        session.open(channel: id(12))
+
+        #expect(session.messages?.composer.draft == "half")
+        let next = SessionModel(
+            userId: id(1), account: FakeAccount(store: store), memory: memory,
+            drafts: session.drafts
+        ) { _ in }
+        next.open(.guild(id(1)))
+        next.open(channel: id(12))
+        #expect(next.messages?.composer.draft == "half")
+        session.close()
+    }
+
+    @Test
     func homeReopensTheLastConversation() {
         store.update { state in
             state.add(guild(1))

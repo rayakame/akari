@@ -12,6 +12,9 @@ final class FakeAccount: Account, @unchecked Sendable {
     let windowAfterLoad = Locked<MessageWindow?>(nil)
     // Fails sends and retries.
     let sendError = Locked<RequestError?>(nil)
+    // While set, each send waits for a reply: `nil` succeeds, an error fails it.
+    let holdSends = Locked(false)
+    let sendReplies = AsyncQueue<RequestError?>()
 
     init(store: FakeStore = FakeStore()) {
         fakeStore = store
@@ -63,7 +66,8 @@ final class FakeAccount: Account, @unchecked Sendable {
 
     override func sendMessage(channelId: ChannelId, content: String) async throws -> MessageId {
         log.append(.send(channelId, content))
-        if let error = sendError.current {
+        let held = holdSends.current ? await sendReplies.next() ?? nil : nil
+        if let error = held ?? sendError.current {
             throw error
         }
         return id(900)

@@ -113,7 +113,8 @@ public final class SessionModel {
         // The store keeps a window for a channel it doesn't know yet, so the last channel's
         // messages load while the gateway connects; READY then places it.
         if let channel = spotToRestore?.channel {
-            messages = MessageListModel(channelId: channel, account: account, store: store)
+            messages = MessageListModel(
+                channelId: channel, account: account, store: store, drafts: drafts)
         }
     }
 
@@ -159,7 +160,7 @@ public final class SessionModel {
         guard messages?.channelId != id else {
             return
         }
-        messages = MessageListModel(channelId: id, account: account, store: store)
+        messages = MessageListModel(channelId: id, account: account, store: store, drafts: drafts)
     }
 
     /// Disconnects but keeps the session, e.g. before the Mac sleeps.

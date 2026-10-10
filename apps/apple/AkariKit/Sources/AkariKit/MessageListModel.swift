@@ -26,27 +26,27 @@ public final class MessageListModel {
     public private(set) var reachedOldest = false
     public private(set) var atPresent = true
     public private(set) var isStale = false
-    public private(set) var canSend = false
     public private(set) var loading: Load?
     public private(set) var loadError: RequestError?
-    public private(set) var sendError: RequestError?
+    /// The channel's composer; created with the model.
+    public let composer: ComposerModel
 
     private static let pageSize: UInt8 = 50
 
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
-    @ObservationIgnored private var guildId: GuildId?
     @ObservationIgnored private var hasMessages = false
     // Confirmed message ID → the pending ID its row keeps as key.
     @ObservationIgnored private var pendingKeys: [MessageId: MessageId] = [:]
     @ObservationIgnored private var loads = 0
     @ObservationIgnored private var activeLoads: [Int: Load] = [:]
 
-    init(channelId: ChannelId, account: Account, store: Store) {
+    init(channelId: ChannelId, account: Account, store: Store, drafts: Drafts = Drafts()) {
         self.channelId = channelId
         self.account = account
         self.store = store
-        readCanSend()
+        composer = ComposerModel(
+            channelId: channelId, account: account, store: store, drafts: drafts)
         reload(rereading: [])
     }
 
@@ -77,38 +77,7 @@ public final class MessageListModel {
         await load(.latest)
     }
 
-    /// The message shows as pending at once; a failure leaves it as failed.
-    public func send(_ content: String) async {
-        do {
-            _ = try await account.sendMessage(channelId: channelId, content: content)
-            sendError = nil
-        } catch {
-            sendError = error as? RequestError
-        }
-    }
-
-    public func retry(_ id: MessageId) async {
-        do {
-            _ = try await account.retryMessage(channelId: channelId, pendingId: id)
-            sendError = nil
-        } catch {
-            sendError = error as? RequestError
-        }
-    }
-
-    public func discard(_ id: MessageId) {
-        account.discardMessage(channelId: channelId, pendingId: id)
-    }
-
     func apply(_ batch: EventBatch) {
-        let guildChanged = guildId.map {
-            batch.guildsChanged.contains($0) || batch.membersChanged.contains($0)
-        }
-        if batch.ready || guildChanged == true
-            || batch.channelsChanged[guildId]?.contains(channelId) == true
-        {
-            readCanSend()
-        }
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
         let updated = batch.updatedMessages[channelId] ?? []
         if batch.windowsChanged.contains(channelId) {
@@ -116,6 +85,7 @@ public final class MessageListModel {
         } else if !updated.isEmpty {
             reread(updated)
         }
+        composer.apply(batch)
     }
 
     private func load(_ kind: Load) async {
@@ -144,18 +114,6 @@ public final class MessageListModel {
         } catch {
             loadError = error as? RequestError
         }
-    }
-
-    private func readCanSend() {
-        guard let channel = store.channel(id: channelId) else {
-            canSend = false
-            return
-        }
-        guildId = channel.guildId
-        // DMs have no permissions to check.
-        canSend =
-            channel.guildId == nil
-            || store.permissions(channelId: channelId)?.contains(.sendMessages) == true
     }
 
     private func reload(rereading changed: Set<MessageId>) {
