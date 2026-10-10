@@ -23,7 +23,10 @@ enum Launch {
             return .testing
         }
         LaunchLog.mark("app started")
-        enableLoggingIfAsked(defaults) { try enableLogging(filter: $0) }
+        enableLoggingIfAsked(defaults) { filter in
+            ScrollLog.enabled = ScrollLog.isAsked(by: filter)
+            try enableLogging(filter: filter)
+        }
         do {
             let client = try DiscordClient(host: .current, tokenStore: KeychainTokenStore())
             LaunchLog.mark("client created")

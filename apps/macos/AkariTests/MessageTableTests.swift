@@ -455,6 +455,35 @@ struct MessageTableTests {
     }
 
     @Test
+    func theClipViewCantLeaveTheRowsWhateverMovesIt() {
+        show(variedMessages(80))
+        let clip = controller.scrollView.contentView
+        let bottom = clip.bounds.origin.y
+
+        // None of these goes through constrainBoundsRect.
+        clip.setBoundsOrigin(NSPoint(x: 0, y: bottom + 300))
+        #expect(clip.bounds.origin.y == bottom)
+        clip.setBoundsOrigin(NSPoint(x: 0, y: -300))
+        #expect(clip.bounds.origin.y == 0)
+        clip.scroll(to: NSPoint(x: 0, y: bottom + 300))
+        #expect(clip.bounds.origin.y == bottom)
+        clip.bounds = NSRect(origin: NSPoint(x: 0, y: bottom + 300), size: clip.bounds.size)
+        #expect(clip.bounds.origin.y == bottom)
+    }
+
+    @Test
+    func aShortConversationCantBeMovedOffTheBottom() {
+        show(messages(3))
+        let clip = controller.scrollView.contentView
+        let origin = clip.bounds.origin.y
+
+        clip.setBoundsOrigin(NSPoint(x: 0, y: 0))
+        #expect(clip.bounds.origin.y == origin)
+        clip.setBoundsOrigin(NSPoint(x: 0, y: origin - 200))
+        #expect(clip.bounds.origin.y == origin)
+    }
+
+    @Test
     func aLiveScrollHoldsTheListUntilItsNotificationsStop() async throws {
         var rows = messages(80, longText: true)
         show(rows)

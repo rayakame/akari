@@ -22,4 +22,12 @@ struct LaunchTests {
 
         #expect(filters == ["akari_core=info"])
     }
+
+    @Test(arguments: [
+        ("scroll", true), ("akari_core=info,scroll", true), ("scroll=info", true),
+        ("akari_core=info", false), ("scrollbar", false),
+    ])
+    func theScrollLogIsOnlyOnWhenItsCategoryIsAsked(filter: String, asked: Bool) {
+        #expect(ScrollLog.isAsked(by: filter) == asked)
+    }
 }

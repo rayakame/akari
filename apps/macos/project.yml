@@ -57,6 +57,7 @@ schemes:
       config: Debug
       commandLineArguments:
         "-AkariLog akari_core=info": false
+        "-AkariLog scroll": false
     test:
       config: Debug
       targets:

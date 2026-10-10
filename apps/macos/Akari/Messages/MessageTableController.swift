@@ -5,6 +5,10 @@ import AppKit
 final class MessageTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     let tableView: MessageTableView
     let scrollView = NSScrollView()
+    private let clipView = BottomClipView()
+    private static var created = 0
+    // Tells tables apart in the scroll log, so a replaced scroll view shows.
+    private let number: Int
     private(set) var timeline: MessageTimeline
     private let calendar: Calendar
     private let locale = Locale.current
@@ -45,8 +49,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 return window.mouseLocationOutsideOfEventStream
             }
         timeline = MessageTimeline(rows: [], calendar: calendar)
+        Self.created += 1
+        number = Self.created
         super.init()
         configure()
+        ScrollLog.log(
+            "table \(number) created, elasticity "
+                + ScrollLog.name(scrollView.verticalScrollElasticity))
     }
 
     func show(_ rows: [MessageListModel.Row], atPresent: Bool) {
@@ -208,7 +217,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         tableView.dataSource = self
         tableView.delegate = self
-        scrollView.contentView = BottomClipView()
+        scrollView.contentView = clipView
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -275,6 +284,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     @objc private func liveScrollStarted(_ notification: Notification) {
+        ScrollLog.log("table \(number) live scroll starts")
         liveScrollEnded = false
         liveScrolled(notification)
     }
@@ -288,11 +298,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             guard let self, self.liveScrollGeneration == generation else {
                 return
             }
+            ScrollLog.log("table \(self.number) live scroll went quiet")
             self.settle()
         }
     }
 
     @objc private func liveScrollEnded(_ notification: Notification) {
+        ScrollLog.log("table \(number) live scroll ends")
         liveScrollEnded = true
         settle()
     }
@@ -316,6 +328,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     @objc private func clipMoved(_ notification: Notification) {
         let origin = scrollView.contentView.bounds.origin
         defer { lastClipOrigin = origin }
+        ScrollLog.log(
+            "table \(number) y \(origin.y) range \(clipView.originRange) rows "
+                + "\(tableView.contentHeight) frame \(tableView.frame.height) clip "
+                + "\(clipView.bounds.height) elasticity "
+                + "\(ScrollLog.name(scrollView.verticalScrollElasticity)) live \(isLiveScrolling) "
+                + "own \(ownChanges > 0) layout \(tableView.isLayingOut)")
         // Content moves under a still pointer on every scroll, the controller's own included.
         updateHover()
         // The table re-anchors inside its own layout; that isn't the user scrolling either.
@@ -343,25 +361,27 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard let anchor, let row = timeline.items.firstIndex(where: { $0.id == anchor.id }) else {
             return
         }
-        let clip = scrollView.contentView
-        let y = tableView.rect(ofRow: row).minY - anchor.offset
-        guard abs(clip.bounds.minY - y) > 0.5 else {
+        let range = clipView.originRange
+        let target = tableView.rect(ofRow: row).minY - anchor.offset
+        let y = min(max(target, range.lowerBound), range.upperBound)
+        guard abs(clipView.bounds.minY - y) > 0.5 else {
             return
         }
-        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: y))
-        scrollView.reflectScrolledClipView(clip)
+        ScrollLog.log("table \(number) restores its anchor: y \(clipView.bounds.minY) to \(y)")
+        clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: y))
+        scrollView.reflectScrolledClipView(clipView)
     }
 
     // The table's frame stretches to fill the view, so new rows never re-constrain the clip
     // view on their own.
     private func alignShortContent() {
-        let clip = scrollView.contentView
-        let origin = clip.constrainBoundsRect(clip.bounds).origin
-        guard origin != clip.bounds.origin else {
+        let origin = clipView.constrainBoundsRect(clipView.bounds).origin
+        guard origin != clipView.bounds.origin else {
             return
         }
-        clip.setBoundsOrigin(origin)
-        scrollView.reflectScrolledClipView(clip)
+        ScrollLog.log("table \(number) realigns: y \(clipView.bounds.minY) to \(origin.y)")
+        clipView.setBoundsOrigin(origin)
+        scrollView.reflectScrolledClipView(clipView)
     }
 
     private func reuse(_ identifier: NSUserInterfaceItemIdentifier) -> NSView? {
@@ -369,31 +389,67 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func scrollToBottom() {
-        let last = tableView.numberOfRows - 1
-        guard last >= 0 else {
+        let bottom = clipView.originRange.upperBound
+        guard tableView.numberOfRows > 0, clipView.bounds.minY != bottom else {
             return
         }
-        tableView.scrollRowToVisible(last)
-        let clip = scrollView.contentView
-        let insets = scrollView.contentInsets
-        let bottom = max(-insets.top, tableView.contentHeight - clip.bounds.height + insets.bottom)
-        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: bottom))
-        scrollView.reflectScrolledClipView(clip)
+        ScrollLog.log(
+            "table \(number) scrolls to the bottom: y \(clipView.bounds.minY) to \(bottom)")
+        clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: bottom))
+        scrollView.reflectScrolledClipView(clipView)
     }
 }
 
 // A conversation shorter than the view sits at its bottom, as in Discord: a negative origin in
-// the flipped clip view moves the table down.
+// the flipped clip view moves the table down. The origin never leaves the rows, so nothing,
+// momentum included, scrolls past either end.
 final class BottomClipView: NSClipView {
+    // A single origin, below zero, while the rows are shorter than the view.
+    var originRange: ClosedRange<CGFloat> {
+        origins(height: bounds.height)
+    }
+
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var bounds = super.constrainBoundsRect(proposedBounds)
-        if let table = documentView as? MessageTableView {
-            let content = table.contentHeight + contentInsets.bottom
-            if content < bounds.height {
-                bounds.origin.y = content - bounds.height
-            }
-        }
+        bounds.origin.y = clamped(bounds.origin.y, height: bounds.height)
         return bounds
+    }
+
+    // scroll(to:), setBoundsOrigin and the bounds setter all skip constrainBoundsRect.
+    override func scroll(to newOrigin: NSPoint) {
+        super.scroll(to: clamped(newOrigin, height: bounds.height, by: "scroll(to:)"))
+    }
+
+    override func setBoundsOrigin(_ newOrigin: NSPoint) {
+        super.setBoundsOrigin(clamped(newOrigin, height: bounds.height, by: "setBoundsOrigin"))
+    }
+
+    override var bounds: NSRect {
+        get { super.bounds }
+        set {
+            let origin = clamped(newValue.origin, height: newValue.height, by: "bounds")
+            super.bounds = NSRect(origin: origin, size: newValue.size)
+        }
+    }
+
+    private func origins(height: CGFloat) -> ClosedRange<CGFloat> {
+        let rows = (documentView as? MessageTableView)?.contentHeight ?? 0
+        let top = -contentInsets.top
+        let bottom = rows + contentInsets.bottom - height
+        return bottom < top ? bottom...bottom : top...bottom
+    }
+
+    private func clamped(_ y: CGFloat, height: CGFloat) -> CGFloat {
+        let range = origins(height: height)
+        return min(max(y, range.lowerBound), range.upperBound)
+    }
+
+    private func clamped(_ origin: NSPoint, height: CGFloat, by path: String) -> NSPoint {
+        let y = clamped(origin.y, height: height)
+        if y != origin.y {
+            ScrollLog.log("clip clamps y \(origin.y) to \(y) (\(path))")
+        }
+        return NSPoint(x: origin.x, y: y)
     }
 }
 
