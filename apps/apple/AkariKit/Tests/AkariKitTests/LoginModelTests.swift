@@ -339,6 +339,20 @@ struct LoginModelTests {
     }
 
     @Test
+    func releasingTheModelCancelsItsLogins() async {
+        var model: LoginModel? = filledIn()
+        model?.appear()
+        password.reply(.mfa(challenge: mfa([.totp])))
+        await model?.submit()
+        await qr.events.pulled(1)
+
+        model = nil
+
+        await qr.cancelled.wait()
+        await password.cancelled.wait()
+    }
+
+    @Test
     func disappearCancelsBothFlows() async {
         let model = filledIn()
         model.appear()

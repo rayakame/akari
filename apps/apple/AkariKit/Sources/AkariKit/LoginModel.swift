@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 /// Why the login screen shows instead of the last session.
 public enum LoginNotice: Equatable, Sendable {
@@ -40,12 +41,10 @@ public final class LoginModel {
     public private(set) var rateLimitedUntil: Date?
     public let notice: LoginNotice?
 
-    @ObservationIgnored var qrLoop: Task<Void, Never>?
     @ObservationIgnored private let client: DiscordClient
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let onLogin: @MainActor (LoginSuccess) async -> Void
-    @ObservationIgnored private var passwordLogin: PasswordLogin?
-    @ObservationIgnored private var qrLogin: QrLogin?
+    private let flows = LoginFlows()
     @ObservationIgnored private var loggedIn = false
 
     /// `onLogin` runs once, for the flow that finishes first; the login waits for it.
@@ -66,6 +65,14 @@ public final class LoginModel {
         self.onLogin = onLogin
     }
 
+    deinit {
+        flows.cancel()
+    }
+
+    var qrLoop: Task<Void, Never>? {
+        flows.qrLoop
+    }
+
     public func canSubmit(at now: Date) -> Bool {
         if isSubmitting || loggedIn {
             return false
@@ -82,7 +89,7 @@ public final class LoginModel {
 
     /// Starts the QR login; the screen appeared.
     public func appear() {
-        guard qrLogin == nil, !loggedIn else {
+        guard flows.qr == nil, !loggedIn else {
             return
         }
         startQr()
@@ -101,8 +108,8 @@ public final class LoginModel {
         guard canSubmit(at: now()) else {
             return
         }
-        let flow = passwordLogin ?? client.passwordLogin()
-        passwordLogin = flow
+        let flow = flows.password ?? client.passwordLogin()
+        flows.password = flow
         await run {
             switch self.step {
             case .credentials:
@@ -121,7 +128,7 @@ public final class LoginModel {
 
     /// SMS texts a code first.
     public func choose(_ method: MfaMethod) async {
-        guard case .mfa(let challenge, _) = step, !isSubmitting, let flow = passwordLogin else {
+        guard case .mfa(let challenge, _) = step, !isSubmitting, let flow = flows.password else {
             return
         }
         code = ""
@@ -141,8 +148,8 @@ public final class LoginModel {
     }
 
     public func backToForm() {
-        passwordLogin?.cancel()
-        passwordLogin = nil
+        flows.password?.cancel()
+        flows.password = nil
         step = .credentials
         code = ""
         fieldError = nil
@@ -156,8 +163,8 @@ public final class LoginModel {
     /// Cancels both flows; the screen went away.
     public func disappear() {
         stopQr()
-        passwordLogin?.cancel()
-        passwordLogin = nil
+        flows.password?.cancel()
+        flows.password = nil
     }
 
     // `request` returns nil when it already set the step.
@@ -223,11 +230,11 @@ public final class LoginModel {
         switch other {
         case .qr:
             stopQr()
-            passwordLogin = nil
+            flows.password = nil
         case .password:
-            passwordLogin?.cancel()
-            passwordLogin = nil
-            qrLogin = nil
+            flows.password?.cancel()
+            flows.password = nil
+            flows.qr = nil
         }
         await onLogin(success)
     }
@@ -241,15 +248,15 @@ public final class LoginModel {
             qr = .failed(error as? LoginError ?? .UnexpectedResponse)
             return
         }
-        qrLogin = flow
-        qrLoop = Task { [weak self] in
+        flows.qr = flow
+        flows.qrLoop = Task { [weak self] in
             while true {
                 let event: QrEvent
                 do {
                     event = try await flow.next()
                 } catch {
                     let error = error as? LoginError ?? .UnexpectedResponse
-                    if error != .Cancelled, let self, self.qrLogin === flow {
+                    if error != .Cancelled, let self, self.flows.qr === flow {
                         self.qr = .failed(error)
                     }
                     return
@@ -258,7 +265,7 @@ public final class LoginModel {
                     flow.cancel()
                     return
                 }
-                guard self.qrLogin === flow else {
+                guard self.flows.qr === flow else {
                     return
                 }
                 switch event {
@@ -281,7 +288,43 @@ public final class LoginModel {
     }
 
     private func stopQr() {
-        qrLogin?.cancel()
-        qrLogin = nil
+        flows.qr?.cancel()
+        flows.qr = nil
+    }
+}
+
+// A Sendable holder, so the model's nonisolated deinit can cancel the logins.
+final class LoginFlows: Sendable {
+    private struct State {
+        var qr: QrLogin?
+        var qrLoop: Task<Void, Never>?
+        var password: PasswordLogin?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    var qr: QrLogin? {
+        get { state.withLock { $0.qr } }
+        set { state.withLock { $0.qr = newValue } }
+    }
+
+    var qrLoop: Task<Void, Never>? {
+        get { state.withLock { $0.qrLoop } }
+        set { state.withLock { $0.qrLoop = newValue } }
+    }
+
+    var password: PasswordLogin? {
+        get { state.withLock { $0.password } }
+        set { state.withLock { $0.password = newValue } }
+    }
+
+    func cancel() {
+        let flows = state.withLock { state in
+            defer { state = State() }
+            return state
+        }
+        flows.qrLoop?.cancel()
+        flows.qr?.cancel()
+        flows.password?.cancel()
     }
 }
