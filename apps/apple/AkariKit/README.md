@@ -110,7 +110,8 @@ Rules every Apple app shows the same way, so they live here rather than in the a
   local day and where author groups start, by the rule in `docs/ui/message-list.md`, wrapped
   in edge items when asked: `.edge(.older)` and `.edge(.newer)` where more history lies beyond
   the loaded messages (the app shows placeholder rows there), `.edge(.beginning)` where the
-  channel begins.
+  channel begins. Without rows only `.edge(.older)` is left, standing in for messages that
+  aren't loaded yet.
 - `TimelineChanges` diffs two timelines by item keys into the removed, inserted and reloaded
   indexes a table or collection view applies, so a list never reloads as a whole. A
   confirmation keeps its row key (above) and reloads one row.

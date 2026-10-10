@@ -39,12 +39,18 @@ public struct MessageTimeline: Equatable, Sendable {
 
     public let items: [Item]
 
-    /// `edges` wrap the rows when there are any: `.beginning` or `.older` first, `.newer` last.
+    /// `edges` wrap the rows: `.beginning` or `.older` first, `.newer` last. Without rows only
+    /// `.older` stays, for messages that aren't loaded yet.
     public init(
         rows: [MessageListModel.Row], calendar: Calendar = .current, edges: Set<Edge> = []
     ) {
         var items: [Item] = []
-        if !rows.isEmpty, let top = [Edge.beginning, .older].first(where: edges.contains) {
+        if rows.isEmpty {
+            self.items =
+                edges.contains(.older) && !edges.contains(.beginning) ? [.edge(.older)] : []
+            return
+        }
+        if let top = [Edge.beginning, .older].first(where: edges.contains) {
             items.append(.edge(top))
         }
         var previous: Message?
@@ -62,7 +68,7 @@ public struct MessageTimeline: Equatable, Sendable {
             items.append(.message(row, startsGroup: startsGroup))
             previous = row.message
         }
-        if !rows.isEmpty && edges.contains(.newer) {
+        if edges.contains(.newer) {
             items.append(.edge(.newer))
         }
         self.items = items

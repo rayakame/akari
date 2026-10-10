@@ -4,7 +4,9 @@ import os
 
 // One server with one text channel (11), and no messages.
 nonisolated final class GuildAccount: Account, @unchecked Sendable {
-    init() {
+    // Holding loads keeps the channel unloaded: its first page never lands.
+    init(holdsLoads: Bool = false) {
+        self.holdsLoads = holdsLoads
         super.init(noHandle: NoHandle())
     }
 
@@ -13,6 +15,7 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
     }
 
     let loads = OSAllocatedUnfairLock(initialState: 0)
+    private let holdsLoads: Bool
 
     override func store() -> Store {
         GuildStore()
@@ -20,6 +23,9 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
 
     override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws {
         loads.withLock { $0 += 1 }
+        if holdsLoads {
+            try await Task.sleep(for: .seconds(60))
+        }
     }
 
     override func viewChannel(channelId: ChannelId) {}

@@ -1049,7 +1049,7 @@ struct MessageTableTests {
         postLiveScroll(NSScrollView.didLiveScrollNotification)
 
         show(page)
-        #expect(table.numberOfRows == 0)
+        #expect(table.numberOfRows == 1)
 
         postLiveScroll(NSScrollView.didEndLiveScrollNotification)
         window.layoutIfNeeded()
@@ -1204,5 +1204,58 @@ struct MessageTableTests {
         #expect(fills.count == 1, "\(lines)")
         #expect(fills.first?.contains("inserted 50") == true, "\(fills)")
         #expect(fills.first?.contains("visible true") == true, "\(fills)")
+    }
+
+    @Test
+    func anUnloadedChannelsPlaceholdersFillTheAreaFromTheBottom() throws {
+        show(MessageTableState(rows: [], loading: .latest))
+
+        #expect(table.numberOfRows == 1)
+        #expect(try cell(at: 0) is PlaceholderCell)
+        #expect(table.rect(ofRow: 0).height >= clip.bounds.height)
+        #expect(controller.isPinnedToBottom)
+        #expect(table.rect(ofRow: 0).maxY <= clip.bounds.maxY)
+        #expect(table.rect(ofRow: 0).minY < clip.bounds.minY)
+    }
+
+    @Test
+    func theFirstPageReplacesThePlaceholdersPinnedToTheBottom() {
+        show(MessageTableState(rows: [], loading: .latest))
+        // Even after the reader moved the placeholders.
+        clip.scroll(to: NSPoint(x: 0, y: clip.bounds.minY - 100))
+        controller.scrollView.reflectScrolledClipView(clip)
+
+        show(page)
+
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+        #expect(abs(gapBelowTheRows) <= 0.5)
+        #expect(controller.timeline.items.first?.id == .edge(.older))
+    }
+
+    @Test
+    func aShortFirstPageSitsAtTheBottom() {
+        show(MessageTableState(rows: [], loading: .latest))
+
+        show(MessageTableState(rows: messages(3), reachedOldest: true))
+
+        let bottom = clip.bounds.maxY - table.rect(ofRow: table.numberOfRows - 1).maxY
+        #expect(abs(bottom - 8) <= 1)
+    }
+
+    @Test
+    func aFailedFirstLoadOffersTryAgainInThePlaceholders() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(MessageTableState(rows: [], failedLoads: [.latest: .Network(kind: .timeout)]))
+
+        let placeholders = try cell(at: 0)
+        #expect(placeholders is PlaceholderCell)
+        #expect(
+            textFields(in: placeholders).contains {
+                $0.stringValue == "Couldn't load messages." && !$0.isHiddenOrHasHiddenAncestor
+            })
+        try #require(buttons(in: placeholders).first { $0.title == "Try again" }).performClick(nil)
+
+        #expect(actions.calls == ["latest"])
     }
 }

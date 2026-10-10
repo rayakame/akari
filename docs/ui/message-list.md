@@ -108,6 +108,11 @@ Akari doesn't know. A type Akari doesn't know shows its content like an ordinary
   fill about one and a half views above them, so a fling carries on into them instead of
   stopping at the top. While the list is detached from the present, the same placeholders sit
   below the newest loaded message. The official client does the same.
+- A channel whose messages aren't loaded yet shows only placeholders, filling the area from
+  the bottom as if it were at its newest messages, instead of a spinner; the official client
+  does the same. The first page takes their place pinned to the bottom, and a channel shorter
+  than the view shows its few messages at the bottom. If that page can't be loaded, the
+  placeholders say so and offer "Try again".
 - Pages of 50 load well before the reader gets there: once the top of the view is within three
   view heights of the oldest loaded message (or the bottom within three of the newest), and
   again right after a page lands while the reader is still that close.

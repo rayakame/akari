@@ -46,6 +46,34 @@ struct SessionScreenTests {
 
         #expect(second.loads.withLock { $0 } == 1)
     }
+
+    func views<View: NSView>(_ type: View.Type, in view: NSView) -> [View] {
+        view.subviews.flatMap { subview in
+            [subview as? View].compactMap { $0 } + views(type, in: subview)
+        }
+    }
+
+    @Test
+    func anUnloadedChannelShowsPlaceholdersAndNoSpinner() async throws {
+        let suite = "app.akari.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = GuildAccount(holdsLoads: true)
+        let host = NSHostingView(
+            rootView: SessionScreen(session: session(account, defaults: defaults)))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 600), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        try await waitForLoad(account)
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+
+        #expect(!views(PlaceholderCell.self, in: host).isEmpty)
+        #expect(views(NSProgressIndicator.self, in: host).isEmpty)
+    }
 }
 
 @MainActor

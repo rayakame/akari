@@ -179,7 +179,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func apply(_ next: MessageTimeline, _ changes: TimelineChanges) {
-        let firstFill = !filled && !next.items.isEmpty
+        let firstFill = !filled && !state.rows.isEmpty
         let pin = firstFill || pinsToBottom
         // Taken right before the update, live scroll or not: compensating for it moves nothing
         // the user sees, so it never fights a gesture.
@@ -349,12 +349,24 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if let cell = cell as? EdgeCell {
             cell.show(state.beginning)
         } else if let cell = cell as? PlaceholderCell {
-            let load: MessageListModel.Load = edge == .older ? .older : .newer
-            let failure =
-                state.failedLoads[load] == nil
-                ? nil
-                : edge == .older ? "Couldn't load older messages." : "Couldn't load newer messages."
+            let failure: String? =
+                if state.rows.isEmpty {
+                    state.failedLoads[.latest] == nil ? nil : "Couldn't load messages."
+                } else if edge == .older {
+                    state.failedLoads[.older] == nil ? nil : "Couldn't load older messages."
+                } else {
+                    state.failedLoads[.newer] == nil ? nil : "Couldn't load newer messages."
+                }
             cell.show(edge, height: placeholderHeight, failure: failure)
+        }
+    }
+
+    // Without rows the placeholders stand in for the latest page.
+    private func retry(_ edge: MessageTimeline.Edge) {
+        if state.rows.isEmpty {
+            actions?.jumpToLatest()
+        } else {
+            actions?.loadMore(edge)
         }
     }
 
@@ -461,7 +473,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return cell
         case .edge(let edge):
             let cell = reuse(PlaceholderCell.identifier) as? PlaceholderCell ?? PlaceholderCell()
-            cell.onRetry = { [weak self] in self?.actions?.loadMore(edge) }
+            cell.onRetry = { [weak self] in self?.retry(edge) }
             configure(cell, edge)
             return cell
         case .day(let day):
@@ -596,7 +608,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // to AppKit; here it's the frame, so a pinned list goes to the exact bottom.
     @objc private func listResized(_ notification: Notification) {
         updatePlaceholderHeight()
-        if filled, pinsToBottom, !isLiveScrolling {
+        if pinsToBottom, !isLiveScrolling {
             ownChanges += 1
             defer { ownChanges -= 1 }
             scrollToBottom()

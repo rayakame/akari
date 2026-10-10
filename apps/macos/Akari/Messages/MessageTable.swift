@@ -40,7 +40,6 @@ struct MessageArea: View {
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
                     .id(messages.channelId)
-                    .overlay { status }
                     .overlay(alignment: .top) {
                         if StaleCapsule.isShown(
                             atPresent: messages.atPresent, isStale: messages.isStale,
@@ -78,22 +77,6 @@ struct MessageArea: View {
             rows: messages.rows, atPresent: messages.atPresent,
             reachedOldest: messages.reachedOldest, loading: messages.loading,
             failedLoads: messages.failedLoads, beginning: name.beginning)
-    }
-
-    @ViewBuilder private var status: some View {
-        if messages.rows.isEmpty {
-            if let error = messages.failedLoads[.latest] ?? messages.failedLoads.values.first {
-                VStack(spacing: 12) {
-                    Text(error.localizedDescription)
-                        .foregroundStyle(Color(nsColor: Palette.textMuted))
-                    Button("Try again") {
-                        Task { await messages.jumpToPresent() }
-                    }
-                }
-            } else if messages.loading != nil {
-                ProgressView()
-            }
-        }
     }
 }
 
