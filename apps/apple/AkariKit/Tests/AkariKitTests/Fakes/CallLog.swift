@@ -40,6 +40,13 @@ final class CallLog: Sendable {
         }
     }
 
+    /// Everything but reads: subscriptions and account actions.
+    var actions: [Call] {
+        calls.filter { call in
+            if case .read = call { false } else { true }
+        }
+    }
+
     /// Store reads made off the main thread; view models only read on it.
     var readsOffTheMainThread: Int { state.current.offMainThread }
 

@@ -4,6 +4,12 @@ import Foundation
 final class FakeAccount: Account, @unchecked Sendable {
     let fakeStore: FakeStore
     let connectError = Locked<GatewayError?>(nil)
+    /// While set, each load waits for a reply: `nil` succeeds, an error fails it.
+    let holdLoads = Locked(false)
+    let loadReplies = AsyncQueue<RequestError?>()
+    let loadError = Locked<RequestError?>(nil)
+    /// Fails sends and retries.
+    let sendError = Locked<RequestError?>(nil)
 
     init(store: FakeStore = FakeStore()) {
         fakeStore = store
@@ -40,5 +46,35 @@ final class FakeAccount: Account, @unchecked Sendable {
 
     override func viewChannel(channelId: ChannelId) {
         log.append(.view(channelId))
+    }
+
+    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws {
+        log.append(.load(channelId, load))
+        let error = holdLoads.current ? await loadReplies.next() ?? nil : loadError.current
+        if let error {
+            throw error
+        }
+    }
+
+    override func sendMessage(channelId: ChannelId, content: String) async throws -> MessageId {
+        log.append(.send(channelId, content))
+        if let error = sendError.current {
+            throw error
+        }
+        return id(900)
+    }
+
+    override func retryMessage(channelId: ChannelId, pendingId: MessageId) async throws
+        -> MessageId
+    {
+        log.append(.retry(channelId, pendingId))
+        if let error = sendError.current {
+            throw error
+        }
+        return id(901)
+    }
+
+    override func discardMessage(channelId: ChannelId, pendingId: MessageId) {
+        log.append(.discard(channelId, pendingId))
     }
 }

@@ -5,7 +5,7 @@ final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
     private struct State {
         var buffered: [Element] = []
         var finished = false
-        var waiting: [CheckedContinuation<Element?, Never>] = []
+        var waiting: [(key: UUID, continuation: CheckedContinuation<Element?, Never>)] = []
         var pulls = 0
         var pullWaiters: [UUID: (count: Int, continuation: CheckedContinuation<Void, Never>)] = [:]
     }
@@ -17,7 +17,7 @@ final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
             if state.waiting.isEmpty {
                 state.buffered.append(element)
             } else {
-                state.waiting.removeFirst().resume(returning: element)
+                state.waiting.removeFirst().continuation.resume(returning: element)
             }
         }
     }
@@ -26,7 +26,7 @@ final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
     func finish() {
         state.withLock { state in
             state.finished = true
-            state.waiting.forEach { $0.resume(returning: nil) }
+            state.waiting.forEach { $0.continuation.resume(returning: nil) }
             state.waiting = []
         }
     }
@@ -39,20 +39,31 @@ final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
         finish()
     }
 
+    /// The next value; `nil` once finished, or when the pulling task is cancelled (a test's
+    /// time limit).
     func next() async -> Element? {
-        await withCheckedContinuation { continuation in
-            state.withLock { state in
-                state.pulls += 1
-                for (key, waiter) in state.pullWaiters where waiter.count <= state.pulls {
-                    waiter.continuation.resume()
-                    state.pullWaiters[key] = nil
+        let key = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                state.withLock { state in
+                    state.pulls += 1
+                    for (key, waiter) in state.pullWaiters where waiter.count <= state.pulls {
+                        waiter.continuation.resume()
+                        state.pullWaiters[key] = nil
+                    }
+                    if !state.buffered.isEmpty {
+                        continuation.resume(returning: state.buffered.removeFirst())
+                    } else if state.finished || Task.isCancelled {
+                        continuation.resume(returning: nil)
+                    } else {
+                        state.waiting.append((key, continuation))
+                    }
                 }
-                if !state.buffered.isEmpty {
-                    continuation.resume(returning: state.buffered.removeFirst())
-                } else if state.finished {
-                    continuation.resume(returning: nil)
-                } else {
-                    state.waiting.append(continuation)
+            }
+        } onCancel: {
+            state.withLock { state in
+                if let index = state.waiting.firstIndex(where: { $0.key == key }) {
+                    state.waiting.remove(at: index).continuation.resume(returning: nil)
                 }
             }
         }
