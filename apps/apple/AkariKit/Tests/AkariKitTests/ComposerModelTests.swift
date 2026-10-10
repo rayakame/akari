@@ -53,6 +53,44 @@ struct ComposerModelTests {
     }
 
     @Test
+    func theDraftClearsOnlyOnceTheMessageIsQueued() async {
+        let composer = makeComposer()
+        composer.draft = "hi"
+        let seen = Locked<String?>(nil)
+        account.onQueue.withLock {
+            $0 = { [composer] in
+                MainActor.assumeIsolated { seen.withLock { $0 = composer.draft } }
+            }
+        }
+
+        await composer.submit()
+
+        #expect(seen.current == "hi")
+        #expect(composer.draft == "")
+        #expect(store.log.actions.contains(.deliver(here, id(900))))
+    }
+
+    @Test
+    func aRefusalBeforeQueueingKeepsTheDraftExactly() async {
+        let composer = makeComposer()
+        let draft = "  hi \n"
+        composer.draft = draft
+
+        account.queueError.withLock { $0 = .TooLong(limit: 2000) }
+        await composer.submit()
+        #expect(composer.draft == draft)
+        #expect(composer.problem == .failed(.TooLong(limit: 2000)))
+
+        account.queueError.withLock { $0 = .Closed }
+        await composer.submit()
+        #expect(composer.draft == draft)
+        #expect(
+            composer.problem?.text(locale: Locale(identifier: "en_US"))
+                == "Akari isn't connected. Reconnect to send messages.")
+        #expect(!store.log.actions.contains { if case .deliver = $0 { true } else { false } })
+    }
+
+    @Test
     func blankDraftsSendNothing() async {
         let composer = makeComposer()
         for blank in ["", " \n\t"] {
@@ -222,7 +260,7 @@ struct ComposerModelTests {
         let composer = makeComposer()
         var calls = 0
         let willSend = { [store] in
-            #expect(!store.log.actions.contains { if case .send = $0 { true } else { false } })
+            #expect(!store.log.actions.contains { if case .deliver = $0 { true } else { false } })
             calls += 1
         }
 
@@ -327,7 +365,7 @@ struct ComposerModelTests {
                 "Akari couldn't reach Discord. Check your connection, then retry."
             ),
             (.failed(.TooLong(limit: 2000)), "This message is longer than 2,000 characters."),
-            (.failed(.Closed), "Akari isn't connected. Reconnect, then retry."),
+            (.failed(.Closed), "Akari isn't connected. Reconnect to send messages."),
             (.failed(.InvalidRequest), RequestError.InvalidRequest.localizedDescription),
         ]
         for (problem, text) in cases {

@@ -117,6 +117,7 @@ private struct NoticeBanner: View {
     private var text: String {
         switch notice {
         case .sessionExpired: "Your session ended. Log in again."
+        case .reconnectFailed: "Akari couldn't reconnect. Log in again."
         case .tokenUnreadable:
             "Akari couldn't read your saved login from the Keychain. Log in again."
         }

@@ -67,8 +67,9 @@ struct MessageListModelTests {
         )
 
         #expect(
-            store.reads == [.window(here), .messages(here, [id(3), id(4), id(5)]), .slowmode(here)]
-        )
+            store.reads == [
+                .window(here), .messages(here, [id(3), id(4), id(5)]), .slowmode(here),
+            ])
         #expect(model.rows.map(\.message) == [message(3, content: "edited"), message(4), message(5)])
     }
 
@@ -305,11 +306,11 @@ struct MessageListModelTests {
         model.apply(EventBatch([.messagesTrimmed(channelId: here, first: id(3), last: id(3))]))
         account.loadError.withLock { $0 = .Network(kind: .timeout) }
         await model.loadNewer()
-        #expect(model.loadFailure == .init(load: .newer, error: .Network(kind: .timeout)))
+        #expect(model.failedLoads == [.newer: .Network(kind: .timeout)])
 
         account.loadError.withLock { $0 = nil }
         await model.loadNewer()
-        #expect(model.loadFailure == nil)
+        #expect(model.failedLoads.isEmpty)
         #expect(store.log.actions == [.load(here, .newer(limit: 50)), .load(here, .newer(limit: 50))])
     }
 
@@ -330,16 +331,22 @@ struct MessageListModelTests {
     }
 
     @Test
-    func aFailedLoadSaysWhichLoadFailed() async {
+    func aSuccessAtOneEdgeKeepsTheOtherEdgesFailure() async {
         shown(window([1, 2], latest: false))
         let model = loaded()
         account.loadError.withLock { $0 = .ServerError(status: 500) }
-
         await model.loadOlder()
-        #expect(model.loadFailure == .init(load: .older, error: .ServerError(status: 500)))
+        await model.loadNewer()
+        #expect(
+            model.failedLoads == [
+                .older: .ServerError(status: 500), .newer: .ServerError(status: 500),
+            ])
 
         account.loadError.withLock { $0 = nil }
         await model.loadNewer()
-        #expect(model.loadFailure == nil)
+        #expect(model.failedLoads == [.older: .ServerError(status: 500)])
+
+        await model.jumpToPresent()
+        #expect(model.failedLoads.isEmpty)
     }
 }

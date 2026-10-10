@@ -115,8 +115,11 @@ public final class AppModel {
         else {
             return
         }
+        old.keepUnsentAsDrafts()
         old.close()
-        open(old.userId, token, drafts: old.drafts)
+        if !open(old.userId, token, drafts: old.drafts, failure: .reconnectFailed) {
+            self.token = nil
+        }
     }
 
     /// Disconnects the open session, e.g. before the system sleeps.
@@ -158,12 +161,16 @@ public final class AppModel {
         open(success.userId, success.token)
     }
 
-    private func open(_ userId: UserId, _ token: Token, drafts: Drafts = Drafts()) {
+    @discardableResult
+    private func open(
+        _ userId: UserId, _ token: Token, drafts: Drafts = Drafts(), failure: LoginNotice? = nil
+    ) -> Bool {
         let account: Account
         do {
             account = try client.account(token: token)
         } catch {
-            return showLogin(nil)
+            showLogin(failure)
+            return false
         }
         self.token = token
         let session = SessionModel(
@@ -173,6 +180,7 @@ public final class AppModel {
         }
         screen = .session(session)
         session.start()
+        return true
     }
 
     private func closed(_ userId: UserId, _ error: GatewayError?) {

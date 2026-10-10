@@ -60,8 +60,13 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
         return qrLogins.withLock { $0.isEmpty ? FakeQrLogin() : $0.removeFirst() }
     }
 
+    let accountError = Locked<GatewayError?>(nil)
+
     override func account(token: Token) throws -> Account {
         record(.account(token: (token as? FakeToken)?.value ?? "?"))
+        if let error = accountError.current {
+            throw error
+        }
         let account = FakeAccount()
         accounts.withLock { $0.append(account) }
         return account

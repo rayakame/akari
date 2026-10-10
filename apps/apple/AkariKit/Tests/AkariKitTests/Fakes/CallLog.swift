@@ -12,6 +12,7 @@ final class CallLog: Sendable {
         case view(ChannelId)
         case load(ChannelId, MessageLoad)
         case send(ChannelId, String)
+        case deliver(ChannelId, MessageId)
         case retry(ChannelId, MessageId)
         case discard(ChannelId, MessageId)
     }

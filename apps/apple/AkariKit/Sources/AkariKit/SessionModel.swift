@@ -44,6 +44,8 @@ public final class SessionModel {
     @ObservationIgnored private var subscription: StoreSubscription?
     @ObservationIgnored private var lastChannels: [GuildId: ChannelId] = [:]
     @ObservationIgnored private var lastHomeChannel: ChannelId?
+    // Only channels opened here can hold this session's unsent messages.
+    @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
 
@@ -113,6 +115,7 @@ public final class SessionModel {
         // The store keeps a window for a channel it doesn't know yet, so the last channel's
         // messages load while the gateway connects; READY then places it.
         if let channel = spotToRestore?.channel {
+            openedChannels.insert(channel)
             messages = MessageListModel(
                 channelId: channel, account: account, store: store, drafts: drafts)
         }
@@ -160,6 +163,7 @@ public final class SessionModel {
         guard messages?.channelId != id else {
             return
         }
+        openedChannels.insert(id)
         messages = MessageListModel(channelId: id, account: account, store: store, drafts: drafts)
     }
 
@@ -175,6 +179,18 @@ public final class SessionModel {
             try account.connect()
         } catch {
             closed(error as? GatewayError)
+        }
+    }
+
+    // A new account starts with an empty outbox, so its text moves into the drafts.
+    func keepUnsentAsDrafts() {
+        for channel in openedChannels.sorted() {
+            guard let pending = store.window(channelId: channel)?.pendingIds, !pending.isEmpty
+            else {
+                continue
+            }
+            let lines = store.messages(channelId: channel, ids: pending).map(\.content)
+            drafts.append(lines, to: channel)
         }
     }
 

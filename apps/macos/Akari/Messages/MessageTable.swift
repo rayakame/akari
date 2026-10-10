@@ -72,12 +72,12 @@ struct MessageArea: View {
         MessageTableState(
             rows: messages.rows, atPresent: messages.atPresent,
             reachedOldest: messages.reachedOldest, loading: messages.loading,
-            loadFailure: messages.loadFailure, beginning: name.beginning)
+            failedLoads: messages.failedLoads, beginning: name.beginning)
     }
 
     @ViewBuilder private var status: some View {
         if messages.rows.isEmpty {
-            if let error = messages.loadFailure?.error {
+            if let error = messages.failedLoads[.latest] ?? messages.failedLoads.values.first {
                 VStack(spacing: 12) {
                     Text(error.localizedDescription)
                         .foregroundStyle(Color(nsColor: Palette.textMuted))

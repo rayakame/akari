@@ -865,8 +865,7 @@ struct MessageTableTests {
     func aFailedEdgeWaitsForTryAgain() throws {
         let actions = RecordingActions()
         controller.actions = actions
-        let failure = MessageListModel.LoadFailure(load: .older, error: .ServerError(status: 500))
-        show(MessageTableState(rows: page, loadFailure: failure))
+        show(MessageTableState(rows: page, failedLoads: [.older: .ServerError(status: 500)]))
 
         scroll(toRowOf: 102)
         #expect(actions.calls.isEmpty)
@@ -909,11 +908,11 @@ struct MessageTableTests {
 
     @Test
     func edgesKeepOneHeightInEveryState() throws {
-        let failure = MessageListModel.LoadFailure(load: .older, error: .ServerError(status: 500))
+        let failed: [MessageListModel.Load: RequestError] = [.older: .ServerError(status: 500)]
         let states = [
             MessageTableState(rows: page),
             MessageTableState(rows: page, loading: .older),
-            MessageTableState(rows: page, loadFailure: failure),
+            MessageTableState(rows: page, failedLoads: failed),
             MessageTableState(
                 rows: page, reachedOldest: true, beginning: "This is the beginning of #general."),
         ]
@@ -1046,5 +1045,39 @@ struct MessageTableTests {
 
         show(page)
         #expect(controller.scrollView.contentInsets.bottom == 16)
+    }
+
+    @Test
+    func anEmptyListReleasesAPageHeldDuringTheTopBounce() throws {
+        show(MessageTableState(rows: [], loading: .latest))
+        let bottomClip = try #require(clip as? BottomClipView)
+        clip.scroll(to: NSPoint(x: 0, y: bottomClip.originRange.lowerBound - 40))
+        controller.scrollView.reflectScrolledClipView(clip)
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+
+        show(page)
+        #expect(table.numberOfRows == 0)
+
+        postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+        window.layoutIfNeeded()
+        #expect(table.numberOfRows == controller.timeline.items.count)
+        #expect(table.numberOfRows > 100)
+    }
+
+    @Test
+    func aRestingFingerPastTheTopIsNeverSnappedBack() async throws {
+        show(page)
+        let bottomClip = try #require(clip as? BottomClipView)
+        let past = bottomClip.originRange.lowerBound - 40
+        clip.scroll(to: NSPoint(x: 0, y: past))
+        controller.scrollView.reflectScrolledClipView(clip)
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+
+        try await Task.sleep(for: .seconds(0.9))
+        window.layoutIfNeeded()
+
+        #expect(clip.bounds.minY == past)
     }
 }

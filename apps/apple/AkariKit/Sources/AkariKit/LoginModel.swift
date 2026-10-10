@@ -6,6 +6,7 @@ import os
 public enum LoginNotice: Equatable, Sendable {
     case sessionExpired
     case tokenUnreadable
+    case reconnectFailed
 }
 
 /// The login screen: a QR code login running beside an email/password form. Whichever

@@ -7,4 +7,9 @@ final class Drafts {
         get { texts[channel] ?? "" }
         set { texts[channel] = newValue.isEmpty ? nil : newValue }
     }
+
+    // After what's there, a line each.
+    func append(_ lines: [String], to channel: ChannelId) {
+        self[channel] = ([self[channel]] + lines).filter { !$0.isEmpty }.joined(separator: "\n")
+    }
 }

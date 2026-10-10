@@ -321,6 +321,44 @@ final class AppModelTests {
     }
 
     @Test
+    func reconnectTurnsUnsentMessagesIntoDrafts() async throws {
+        let (app, session, account) = try await restored()
+        account.fakeStore.update { state in
+            state.channels[id(5)] = dm(5, with: 50)
+            state.windows[id(5)] = window([], pending: [7, 8])
+            state.show(
+                message(7, in: 5, content: "one", delivery: .failed),
+                message(8, in: 5, content: "two", delivery: .pending))
+        }
+        session.messages?.composer.draft = "draft"
+        account.fakeStore.subscription.send(.connection(state: .closed(error: .Stopped)))
+        await account.fakeStore.subscription.batches.pulled(2)
+
+        app.reconnect()
+
+        let next = try #require(app.screen.session)
+        #expect(next.messages?.channelId == id(5))
+        #expect(next.messages?.composer.draft == "draft\none\ntwo")
+        next.close()
+    }
+
+    @Test
+    func aReconnectThatCantOpenTheAccountShowsLogin() async throws {
+        let (app, _, account) = try await restored()
+        account.fakeStore.subscription.send(.connection(state: .closed(error: .Stopped)))
+        await account.fakeStore.subscription.batches.pulled(2)
+        client.accountError.withLock { $0 = .Stopped }
+
+        app.reconnect()
+        #expect(try #require(app.screen.login).notice == .reconnectFailed)
+        #expect(account.log.calls.contains(.close))
+        app.reconnect()
+
+        #expect(client.calls.current.filter { $0 == .account(token: "stored.token") }.count == 2)
+        #expect(memory.lastAccount == id(42))
+    }
+
+    @Test
     func reconnectWaitsForALogOut() async throws {
         let (app, _, account) = try await restored()
         account.fakeStore.subscription.send(.connection(state: .closed(error: .Stopped)))

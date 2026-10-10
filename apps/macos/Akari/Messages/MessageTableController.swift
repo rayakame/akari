@@ -6,7 +6,7 @@ struct MessageTableState: Equatable {
     var atPresent = true
     var reachedOldest = false
     var loading: MessageListModel.Load?
-    var loadFailure: MessageListModel.LoadFailure?
+    var failedLoads: [MessageListModel.Load: RequestError] = [:]
     var beginning = ""
 }
 
@@ -106,7 +106,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if !changes.isEmpty {
             apply(next, changes)
         }
-        if previous.loading != state.loading || previous.loadFailure != state.loadFailure
+        if previous.loading != state.loading || previous.failedLoads != state.failedLoads
             || previous.reachedOldest != state.reachedOldest
             || previous.beginning != state.beginning
         {
@@ -250,13 +250,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let bounds = clipView.bounds
         let distance = max(bounds.height, 600)
-        if !state.reachedOldest, state.loadFailure?.load != .older,
+        if !state.reachedOldest, state.failedLoads[.older] == nil,
             bounds.minY - clipView.originRange.lowerBound < distance
         {
             requested = true
             ScrollLog.log("table \(number) asks for older messages at y \(bounds.minY)")
             actions?.loadMore(.older)
-        } else if !state.atPresent, state.loadFailure?.load != .newer,
+        } else if !state.atPresent, state.failedLoads[.newer] == nil,
             tableView.contentHeight - bounds.maxY < distance
         {
             requested = true
@@ -282,7 +282,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if state.loading == load {
             return .loading
         }
-        if state.loadFailure?.load == load {
+        if state.failedLoads[load] != nil {
             return .failed(
                 edge == .older ? "Couldn't load older messages." : "Couldn't load newer messages.")
         }
@@ -301,8 +301,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         updateHover()
     }
 
+    // Fingers resting past an edge post nothing, yet the gesture still holds the list.
     private var isLiveScrolling: Bool {
-        !liveScrollEnded && Date().timeIntervalSince(lastLiveScroll) < Self.liveScrollQuiet
+        !liveScrollEnded
+            && (Date().timeIntervalSince(lastLiveScroll) < Self.liveScrollQuiet || isPastAnEdge)
+    }
+
+    private var isPastAnEdge: Bool {
+        let range = clipView.originRange
+        let y = clipView.bounds.minY
+        return y < range.lowerBound - 0.5 || y > range.upperBound + 0.5
     }
 
     var isPinnedToBottom: Bool {
@@ -465,11 +473,15 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     // After a layout, a live scroll's end, or its quiet timeout: pin or keep the reader's place.
     private func settle() {
-        guard filled, !isLiveScrolling else {
+        guard !isLiveScrolling else {
             return
         }
+        // Also the first page of an empty list, which isn't filled until it lands.
         if let held = heldState {
             show(held)
+        }
+        guard filled else {
+            return
         }
         ownChanges += 1
         defer { ownChanges -= 1 }
@@ -506,8 +518,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         liveScrollGeneration += 1
         let generation = liveScrollGeneration
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.liveScrollQuiet + 0.05))
-            guard let self, self.liveScrollGeneration == generation else {
+            repeat {
+                try? await Task.sleep(for: .seconds(Self.liveScrollQuiet + 0.05))
+                guard let self, self.liveScrollGeneration == generation else {
+                    return
+                }
+            } while self?.isLiveScrolling == true
+            guard let self else {
                 return
             }
             ScrollLog.log("table \(self.number) live scroll went quiet")

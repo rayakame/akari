@@ -48,7 +48,7 @@ public final class ComposerModel {
             case .TooLong(let limit):
                 return "This message is longer than \(number(Int(limit))) characters."
             case .Closed:
-                return "Akari isn't connected. Reconnect, then retry."
+                return "Akari isn't connected. Reconnect to send messages."
             case .Unauthorized, .InvalidRequest, .UnexpectedResponse:
                 return error.localizedDescription
             }
@@ -131,10 +131,19 @@ public final class ComposerModel {
         if let until = slowmode?.until, until > now {
             return
         }
+        // The draft goes only once the core holds the message: a refusal (closed, too long)
+        // leaves it exactly as typed.
+        let pending: MessageId
+        do {
+            pending = try account.queueMessage(channelId: channelId, content: content)
+        } catch {
+            problem = .failed(error as? RequestError ?? .UnexpectedResponse)
+            return
+        }
         draft = ""
         willSend()
         do {
-            _ = try await account.sendMessage(channelId: channelId, content: content)
+            _ = try await account.deliverMessage(channelId: channelId, pendingId: pending)
             problem = nil
         } catch {
             problem = .failed(error as? RequestError ?? .UnexpectedResponse)

@@ -92,7 +92,7 @@ struct ComposerField: NSViewRepresentable {
             return
         }
         if textView.string != text {
-            textView.string = text
+            context.coordinator.replaceText(with: text)
         }
         textView.isEditable = enabled
         textView.isSelectable = enabled
@@ -104,6 +104,8 @@ struct ComposerField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerField
         weak var textView: ComposerTextView?
+        // The window's shared undo manager would replay typing against text replaced in code.
+        private let undo = UndoManager()
 
         init(_ parent: ComposerField) {
             self.parent = parent
@@ -117,6 +119,15 @@ struct ComposerField: NSViewRepresentable {
             NotificationCenter.default.addObserver(
                 self, selector: #selector(resized), name: NSView.frameDidChangeNotification,
                 object: textView)
+        }
+
+        func replaceText(with text: String) {
+            textView?.string = text
+            undo.removeAllActions()
+        }
+
+        func undoManager(for view: NSTextView) -> UndoManager? {
+            undo
         }
 
         @objc private func resized(_ notification: Notification) {

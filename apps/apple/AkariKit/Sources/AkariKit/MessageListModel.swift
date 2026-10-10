@@ -3,20 +3,10 @@ import Observation
 /// A channel's messages, as the store's window holds them.
 @MainActor @Observable
 public final class MessageListModel {
-    public enum Load: Equatable, Sendable {
+    public enum Load: Hashable, Sendable {
         case latest
         case older
         case newer
-    }
-
-    public struct LoadFailure: Equatable, Sendable {
-        public let load: Load
-        public let error: RequestError
-
-        public init(load: Load, error: RequestError) {
-            self.load = load
-            self.error = error
-        }
     }
 
     public struct Row: Identifiable, Equatable, Sendable {
@@ -37,8 +27,8 @@ public final class MessageListModel {
     public private(set) var atPresent = true
     public private(set) var isStale = false
     public private(set) var loading: Load?
-    /// The last load's failure, until a load works.
-    public private(set) var loadFailure: LoadFailure?
+    /// Each kind of load's last failure, until that kind works; a latest page clears them all.
+    public private(set) var failedLoads: [Load: RequestError] = [:]
     /// The channel's composer; created with the model.
     public let composer: ComposerModel
 
@@ -119,12 +109,15 @@ public final class MessageListModel {
         do {
             try await account.loadMessages(channelId: channelId, load: request)
             LaunchLog.mark("first message load finished")
-            loadFailure = nil
+            if kind == .latest {
+                failedLoads = [:]
+            } else {
+                failedLoads[kind] = nil
+            }
             // The batch with the loaded range may come later; the rows shouldn't lag `loading`.
             reload(rereading: [])
         } catch {
-            loadFailure = LoadFailure(
-                load: kind, error: error as? RequestError ?? .UnexpectedResponse)
+            failedLoads[kind] = error as? RequestError ?? .UnexpectedResponse
         }
     }
 

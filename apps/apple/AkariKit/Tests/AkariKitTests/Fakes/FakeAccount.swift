@@ -64,6 +64,31 @@ final class FakeAccount: Account, @unchecked Sendable {
         }
     }
 
+    // Refuses queueing, as the core does before anything is queued.
+    let queueError = Locked<RequestError?>(nil)
+    // Runs inside queueMessage, so a test can look at the caller's state at that moment.
+    let onQueue = Locked<(@Sendable () -> Void)?>(nil)
+
+    override func queueMessage(channelId: ChannelId, content: String) throws -> MessageId {
+        onQueue.current?()
+        if let error = queueError.current {
+            throw error
+        }
+        log.append(.send(channelId, content))
+        return id(900)
+    }
+
+    override func deliverMessage(channelId: ChannelId, pendingId: MessageId) async throws
+        -> MessageId
+    {
+        log.append(.deliver(channelId, pendingId))
+        let held = holdSends.current ? await sendReplies.next() ?? nil : nil
+        if let error = held ?? sendError.current {
+            throw error
+        }
+        return id(901)
+    }
+
     override func sendMessage(channelId: ChannelId, content: String) async throws -> MessageId {
         log.append(.send(channelId, content))
         let held = holdSends.current ? await sendReplies.next() ?? nil : nil

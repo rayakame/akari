@@ -31,6 +31,8 @@ final class ComposerTextView: NSTextView {
         isAutomaticQuoteSubstitutionEnabled = false
         isAutomaticDashSubstitutionEnabled = false
         isAutomaticTextReplacementEnabled = false
+        isAutomaticSpellingCorrectionEnabled = false
+        isContinuousSpellCheckingEnabled = true
         drawsBackground = false
         textContainerInset = Self.insets
         textContainer?.lineFragmentPadding = 0
@@ -80,6 +82,10 @@ final class ComposerTextView: NSTextView {
                 return false
             }
             onSubmit()
+            return true
+        case #selector(NSResponder.insertLineBreak(_:)):
+            // Ctrl+Return would insert a line separator (U+2028).
+            insertNewlineIgnoringFieldEditor(nil)
             return true
         case #selector(NSResponder.moveUp(_:)) where string.isEmpty:
             // Reserved for editing the last message.

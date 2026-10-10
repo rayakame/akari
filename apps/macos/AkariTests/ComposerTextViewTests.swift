@@ -47,6 +47,14 @@ final class ComposerTextViewTests {
     }
 
     @Test
+    func controlReturnAddsAPlainNewline() {
+        type("a")
+        textView.doCommand(by: #selector(NSResponder.insertLineBreak(_:)))
+        #expect(submits == 0)
+        #expect(textView.string == "a\n")
+    }
+
+    @Test
     func optionReturnAddsALine() {
         type("a")
         textView.doCommand(by: #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)))
@@ -114,6 +122,8 @@ final class ComposerTextViewTests {
         #expect(!textView.isAutomaticQuoteSubstitutionEnabled)
         #expect(!textView.isAutomaticDashSubstitutionEnabled)
         #expect(!textView.isAutomaticTextReplacementEnabled)
+        #expect(!textView.isAutomaticSpellingCorrectionEnabled)
+        #expect(textView.isContinuousSpellCheckingEnabled)
     }
 
     @Test
@@ -152,5 +162,53 @@ final class ComposerTextViewTests {
             await Task.yield()
         }
         #expect(height == 100)
+    }
+
+    func field() -> (ComposerField.Coordinator, ComposerTextView) {
+        var current = ""
+        let field = ComposerField(
+            text: Binding(get: { current }, set: { current = $0 }), enabled: true,
+            maxHeight: 300, height: .constant(56), onSubmit: {}, onEscape: {})
+        let coordinator = field.makeCoordinator()
+        let (scroll, view) = ComposerTextView.scrollable()
+        scroll.frame = NSRect(x: 0, y: 0, width: 400, height: 56)
+        window.contentView?.addSubview(scroll)
+        coordinator.attach(view)
+        return (coordinator, view)
+    }
+
+    // Typing groups undo by event; a turn of the run loop closes the group.
+    func typeAndSettle(_ text: String, into view: ComposerTextView) {
+        window.makeFirstResponder(view)
+        view.insertText(text, replacementRange: view.selectedRange())
+        RunLoop.current.run(until: Date() + 0.05)
+    }
+
+    @Test
+    func sendingLeavesNothingToUndo() {
+        let (coordinator, view) = field()
+        typeAndSettle("hello", into: view)
+        #expect(view.undoManager?.canUndo == true)
+
+        coordinator.replaceText(with: "")
+
+        #expect(view.undoManager?.canUndo == false)
+        view.undoManager?.undo()
+        #expect(view.string == "")
+    }
+
+    @Test
+    func eachChannelHasItsOwnUndo() {
+        let (first, firstView) = field()
+        let (second, secondView) = field()
+        typeAndSettle("abc", into: firstView)
+        typeAndSettle("x", into: secondView)
+
+        #expect(firstView.undoManager !== secondView.undoManager)
+        secondView.undoManager?.undo()
+
+        #expect(secondView.string == "")
+        #expect(firstView.string == "abc")
+        _ = (first, second)
     }
 }
