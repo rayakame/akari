@@ -63,6 +63,20 @@ struct DirectMessageListModelTests {
     }
 
     @Test
+    func groupsCountEveryMemberTheStoreKnowsOrNot() {
+        store.update { state in
+            state.talk(
+                group(1, with: [20, 99]), group(2, with: []), dm(3, with: 20),
+                with: user(20, name: "Ann"))
+        }
+
+        let model = loaded()
+
+        #expect(model.conversations.map(\.memberCount) == [3, 1, 2])
+        #expect(model.conversations[0].recipients.count == 1)
+    }
+
+    @Test
     func aRenamedRecipientRenamesTheirConversations() {
         store.update { state in
             state.talk(

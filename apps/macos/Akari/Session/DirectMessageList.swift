@@ -27,6 +27,12 @@ struct DirectMessageList: View {
     }
 }
 
+extension DirectMessageList {
+    static func memberLine(_ count: Int) -> String {
+        count == 1 ? "1 Member" : "\(count) Members"
+    }
+}
+
 private struct ConversationRow: View {
     let conversation: DirectMessageListModel.Conversation
     let selected: Bool
@@ -47,7 +53,7 @@ private struct ConversationRow: View {
                         )
                         .lineLimit(1)
                     if conversation.channel.kind == .groupDm {
-                        Text("\(conversation.recipients.count + 1) Members")
+                        Text(DirectMessageList.memberLine(conversation.memberCount))
                             .font(.system(size: 12))
                             .foregroundStyle(Color(nsColor: Palette.textMuted))
                     }
