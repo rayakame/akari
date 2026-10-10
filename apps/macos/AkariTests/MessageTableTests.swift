@@ -1032,4 +1032,19 @@ struct MessageTableTests {
             JumpBar.text(atPresent: false, isStale: true, hasRows: true)
                 == "Some messages may be missing")
     }
+
+    @Test
+    func theJumpBarLeavesTheNewerEdgeClear() throws {
+        show(MessageTableState(rows: page, atPresent: false))
+        let bottomClip = try #require(clip as? BottomClipView)
+        clip.scroll(to: NSPoint(x: 0, y: bottomClip.originRange.upperBound))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+
+        let edge = table.rect(ofRow: table.numberOfRows - 1)
+        #expect(edge.maxY <= clip.bounds.maxY - JumpBar.height - JumpBar.margin)
+
+        show(page)
+        #expect(controller.scrollView.contentInsets.bottom == 16)
+    }
 }

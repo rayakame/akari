@@ -6,8 +6,7 @@ struct SessionView<MessageArea: View>: View {
     var warning: AppModel.Warning?
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
-    // The open channel's messages and the composer's placeholder.
-    @ViewBuilder let messageArea: (MessageListModel, String) -> MessageArea
+    @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     @State private var collapsed = CollapsedCategories()
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
 
@@ -77,7 +76,7 @@ struct SessionView<MessageArea: View>: View {
         VStack(spacing: 0) {
             ChannelHeader(channel: openChannel, name: openName)
             if let messages = session.messages {
-                messageArea(messages, placeholder)
+                messageArea(messages, channelName)
             } else if session.currentUser == nil {
                 EmptyState(text: nil)
             } else if session.place == .home {
@@ -114,7 +113,7 @@ struct SessionView<MessageArea: View>: View {
         conversation?.name ?? openChannel?.name ?? ""
     }
 
-    private var placeholder: String {
-        ComposerView.placeholder(guildChannel: openChannel?.guildId != nil, name: openName)
+    private var channelName: ChannelName {
+        ChannelName(inGuild: openChannel?.guildId != nil, name: openName)
     }
 }

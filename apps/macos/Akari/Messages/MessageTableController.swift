@@ -7,7 +7,6 @@ struct MessageTableState: Equatable {
     var reachedOldest = false
     var loading: MessageListModel.Load?
     var loadFailure: MessageListModel.LoadFailure?
-    // The line at the top once the oldest message is loaded.
     var beginning = ""
 }
 
@@ -22,7 +21,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // Tells tables apart in the scroll log, so a replaced scroll view shows.
     private let number: Int
     private(set) var timeline: MessageTimeline
-    // Read again when the day, time zone or locale changes.
     private let calendarSource: () -> Calendar
     private let localeSource: () -> Locale
     private var calendar: Calendar
@@ -52,6 +50,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var lastLiveScroll = Date.distantPast
     private var liveScrollGeneration = 0
     private static let liveScrollQuiet: TimeInterval = 0.5
+    private static let bottomInset: CGFloat = 16
     // Exact heights before a row shows: automatic heights start as estimates and change when a
     // fling first reaches a row, which moves the bottom under it.
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
@@ -99,6 +98,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         requested = false
         // Before the early return: leaving the present ends pinning even without new rows.
         atPresent = state.atPresent
+        // The jump bar covers the bottom while older messages are shown.
+        scrollView.contentInsets.bottom =
+            Self.bottomInset + (atPresent ? 0 : JumpBar.height + JumpBar.margin)
         let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
@@ -417,7 +419,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         // The native bounce at both ends; the list never scrolls sideways.
         scrollView.verticalScrollElasticity = .automatic
         scrollView.horizontalScrollElasticity = .none
-        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 16, right: 0)
+        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: Self.bottomInset, right: 0)
         tableView.didLayout = { [weak self] in
             self?.settle()
         }

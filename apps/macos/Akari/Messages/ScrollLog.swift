@@ -14,7 +14,6 @@ enum ScrollLog {
         }
     }
 
-    // Where lines go; the tests read them here.
     static var write: (String) -> Void = { text in
         logger.info("\(text, privacy: .public)")
     }

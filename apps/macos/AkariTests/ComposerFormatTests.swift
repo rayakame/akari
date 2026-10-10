@@ -26,12 +26,16 @@ struct ComposerFormatTests {
     }
 
     @Test
-    func placeholdersNameTheChannelOrPerson() {
-        #expect(
-            ComposerView.placeholder(guildChannel: true, name: "general")
-                == "Write a message in #general")
-        #expect(
-            ComposerView.placeholder(guildChannel: false, name: "Mira")
-                == "Write a message to Mira")
+    func namesGivePlaceholdersAndBeginnings() {
+        let general = ChannelName(inGuild: true, name: "general")
+        let mira = ChannelName(inGuild: false, name: "Mira")
+        let unknown = ChannelName(inGuild: false, name: "")
+
+        #expect(general.placeholder == "Write a message in #general")
+        #expect(mira.placeholder == "Write a message to Mira")
+        #expect(unknown.placeholder == "Write a message")
+        #expect(general.beginning == "This is the beginning of #general.")
+        #expect(mira.beginning == "This is the beginning of your conversation with Mira.")
+        #expect(unknown.beginning == "")
     }
 }

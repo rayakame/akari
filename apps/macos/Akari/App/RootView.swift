@@ -44,12 +44,10 @@ private struct AppScreen: View {
                     }
                     .transition(.opacity)
             case .session(let session):
-                SessionView(
+                SessionScreen(
                     session: session, warning: app.warning,
                     dismissWarning: { app.dismissWarning() }, reconnect: { app.reconnect() }
-                ) { messages, placeholder in
-                    MessageArea(messages: messages, placeholder: placeholder)
-                }
+                )
                 .transition(.opacity)
             }
         }
@@ -81,5 +79,24 @@ extension AppModel.Screen {
         case .login(let login): ObjectIdentifier(login)
         case .session(let session): ObjectIdentifier(session)
         }
+    }
+}
+
+struct SessionScreen: View {
+    let session: SessionModel
+    var warning: AppModel.Warning?
+    var dismissWarning: () -> Void = {}
+    var reconnect: () -> Void = {}
+
+    var body: some View {
+        SessionView(
+            session: session, warning: warning, dismissWarning: dismissWarning,
+            reconnect: reconnect
+        ) { messages, name in
+            MessageArea(messages: messages, name: name)
+        }
+        // A reconnect brings a new session for the same channel; without a new identity its
+        // views would keep the old one's state and never open the channel.
+        .id(ObjectIdentifier(session))
     }
 }

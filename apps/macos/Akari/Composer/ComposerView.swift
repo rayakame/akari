@@ -15,16 +15,15 @@ struct ComposerView: View {
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
                 ComposerField(
-                    text: Bindable(composer).draft, enabled: composer.canSend,
+                    text: Bindable(composer).draft, enabled: !denied,
                     maxHeight: areaHeight / 2, height: $height,
                     onSubmit: {
-                        onSend()
-                        Task { await composer.submit() }
+                        Task { await composer.submit(willSend: onSend) }
                     },
                     onEscape: onEscape)
                 if composer.draft.isEmpty {
                     Text(
-                        composer.canSend ? placeholder : "You can't send messages in this channel."
+                        denied ? "You can't send messages in this channel." : placeholder
                     )
                     .font(.system(size: 16))
                     .foregroundStyle(Color(nsColor: Palette.textMuted))
@@ -37,10 +36,15 @@ struct ComposerView: View {
             .frame(height: height)
             .background(Color(nsColor: Palette.composer), in: RoundedRectangle(cornerRadius: 8))
             .overlay(alignment: .bottomTrailing) { counter }
-            .opacity(composer.canSend ? 1 : 0.5)
+            .opacity(denied ? 0.5 : 1)
             ComposerStatus(composer: composer)
         }
         .padding(.horizontal, 8)
+    }
+
+    // Before the store knows the channel the user can already type.
+    private var denied: Bool {
+        composer.canSend == false
     }
 
     @ViewBuilder private var counter: some View {
@@ -52,10 +56,6 @@ struct ComposerView: View {
                 .padding(.trailing, 12)
                 .padding(.bottom, 6)
         }
-    }
-
-    static func placeholder(guildChannel: Bool, name: String) -> String {
-        guildChannel ? "Write a message in #\(name)" : "Write a message to \(name)"
     }
 }
 

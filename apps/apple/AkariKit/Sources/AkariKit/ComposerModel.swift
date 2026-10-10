@@ -85,9 +85,12 @@ public final class ComposerModel {
         let left = lengthLimit - length
         return left <= Self.counterFrom ? left : nil
     }
-    /// Whether the user's permissions allow sending here; DMs always do.
-    public private(set) var canSend = false
-    public private(set) var slowmode: Slowmode?
+    /// Whether the user's permissions allow sending here; DMs always do. `nil` until the store
+    /// knows the channel, e.g. before READY.
+    public private(set) var canSend: Bool?
+    public private(set) var slowmode: Slowmode? {
+        didSet { awaitCooldownEnd() }
+    }
     public private(set) var problem: Problem?
 
     private static let counterFrom = 200
@@ -96,6 +99,7 @@ public final class ComposerModel {
     @ObservationIgnored private let store: Store
     @ObservationIgnored private let drafts: Drafts
     @ObservationIgnored private var guildId: GuildId?
+    @ObservationIgnored private var cooldownEnd: Task<Void, Never>?
 
     init(channelId: ChannelId, account: Account, store: Store, drafts: Drafts) {
         self.channelId = channelId
@@ -107,13 +111,16 @@ public final class ComposerModel {
         lengthLimit = Int(store.messageLengthLimit())
         readCanSend()
         slowmode = store.slowmode(channelId: channelId)
+        awaitCooldownEnd()
     }
 
     /// Sends the trimmed draft and clears it, unless it is blank, too long, or held back by
     /// slowmode.
-    public func submit(at now: Date = Date()) async {
+    /// `willSend` runs right before a message is sent, not when nothing is.
+    public func submit(at now: Date = Date(), willSend: () -> Void = {}) async {
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty else {
+        // Before the store knows the channel the core would refuse it after the draft is gone.
+        guard !content.isEmpty, canSend == true else {
             return
         }
         let length = Self.length(of: content)
@@ -125,6 +132,7 @@ public final class ComposerModel {
             return
         }
         draft = ""
+        willSend()
         do {
             _ = try await account.sendMessage(channelId: channelId, content: content)
             problem = nil
@@ -169,9 +177,25 @@ public final class ComposerModel {
         }
     }
 
+    // Nothing else reads slowmode when a cooldown runs out in a quiet channel.
+    private func awaitCooldownEnd() {
+        cooldownEnd?.cancel()
+        guard let until = slowmode?.until else {
+            return
+        }
+        let wait = max(0, until.timeIntervalSinceNow) + 0.05
+        cooldownEnd = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled, let self else {
+                return
+            }
+            slowmode = store.slowmode(channelId: channelId)
+        }
+    }
+
     private func readCanSend() {
         guard let channel = store.channel(id: channelId) else {
-            canSend = false
+            canSend = nil
             return
         }
         guildId = channel.guildId

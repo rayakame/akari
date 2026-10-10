@@ -30,7 +30,7 @@ final class MessageTableLink {
 
 struct MessageArea: View {
     let messages: MessageListModel
-    let placeholder: String
+    let name: ChannelName
     @State private var link = MessageTableLink()
 
     var body: some View {
@@ -57,7 +57,7 @@ struct MessageArea: View {
                         }
                     }
                 ComposerView(
-                    composer: messages.composer, placeholder: placeholder,
+                    composer: messages.composer, placeholder: name.placeholder,
                     areaHeight: geometry.size.height,
                     onSend: { link.controller?.jumpToPresent(load: false) },
                     onEscape: { bridge.escape() }
@@ -72,14 +72,7 @@ struct MessageArea: View {
         MessageTableState(
             rows: messages.rows, atPresent: messages.atPresent,
             reachedOldest: messages.reachedOldest, loading: messages.loading,
-            loadFailure: messages.loadFailure, beginning: beginning)
-    }
-
-    private var beginning: String {
-        placeholder.hasPrefix("Write a message in ")
-            ? "This is the beginning of \(placeholder.dropFirst("Write a message in ".count))."
-            : "This is the beginning of your conversation with "
-                + "\(placeholder.dropFirst("Write a message to ".count))."
+            loadFailure: messages.loadFailure, beginning: name.beginning)
     }
 
     @ViewBuilder private var status: some View {

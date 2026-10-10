@@ -157,30 +157,88 @@ struct ComposerModelTests {
     func canSendFollowsPermissionsAndDms() {
         store.update { $0.permissions[id(10)] = [.viewChannel] }
         let composer = makeComposer()
-        #expect(!composer.canSend)
+        #expect(composer.canSend == false)
 
         store.update { $0.permissions[id(10)] = [.viewChannel, .sendMessages] }
         composer.apply(EventBatch([.currentMemberUpdated(guildId: id(1))]))
-        #expect(composer.canSend)
+        #expect(composer.canSend == true)
 
         store.update { $0.permissions[id(10)] = [.viewChannel] }
         composer.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
-        #expect(!composer.canSend)
+        #expect(composer.canSend == false)
 
         store.update { $0.permissions[id(10)] = [.administrator, .sendMessages] }
         composer.apply(EventBatch([.guildUpdated(guildId: id(1))]))
-        #expect(composer.canSend)
+        #expect(composer.canSend == true)
 
         store.update { $0.permissions[id(10)] = [] }
         composer.apply(EventBatch([.ready]))
-        #expect(!composer.canSend)
+        #expect(composer.canSend == false)
 
         store.update { $0.channels[id(20)] = channel(20, guild: nil, kind: .dm) }
         let dm = ComposerModel(channelId: id(20), account: account, store: store, drafts: Drafts())
         let unknown = ComposerModel(
             channelId: id(30), account: account, store: store, drafts: Drafts())
-        #expect(dm.canSend)
-        #expect(!unknown.canSend)
+        #expect(dm.canSend == true)
+        #expect(unknown.canSend == nil)
+    }
+
+    @Test
+    func aChannelNotKnownYetIsNeitherAllowedNorDenied() async {
+        let unknown = ComposerModel(
+            channelId: id(30), account: account, store: store, drafts: Drafts())
+        #expect(unknown.canSend == nil)
+
+        unknown.draft = "hi"
+        await unknown.submit()
+        #expect(sends.isEmpty)
+        #expect(unknown.draft == "hi")
+
+        store.update { $0.channels[id(30)] = channel(30, guild: nil, kind: .dm) }
+        unknown.apply(EventBatch([.ready]))
+        #expect(unknown.canSend == true)
+        await unknown.submit()
+        #expect(sends == [.send(id(30), "hi")])
+    }
+
+    @Test
+    func aCooldownEndingReadsSlowmodeAgain() async {
+        slowmode(until: Date() + 0.3)
+        let composer = makeComposer()
+        #expect(composer.slowmode?.until != nil)
+
+        slowmode(until: nil)
+        for _ in 0..<40 where composer.slowmode?.until != nil {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
+        #expect(composer.slowmode?.until == nil)
+        #expect(composer.slowmode?.interval == 10)
+    }
+
+    @Test
+    func willSendRunsOnlyForASend() async {
+        let now = Date()
+        let composer = makeComposer()
+        var calls = 0
+        let willSend = { [store] in
+            #expect(!store.log.actions.contains { if case .send = $0 { true } else { false } })
+            calls += 1
+        }
+
+        composer.draft = "  "
+        await composer.submit(at: now, willSend: willSend)
+        composer.draft = String(repeating: "a", count: 2001)
+        await composer.submit(at: now, willSend: willSend)
+        slowmode(until: now + 10)
+        composer.apply(EventBatch([.ready]))
+        composer.draft = "hi"
+        await composer.submit(at: now, willSend: willSend)
+        #expect(calls == 0)
+
+        await composer.submit(at: now + 11, willSend: willSend)
+        #expect(calls == 1)
+        #expect(sends == [.send(here, "hi")])
     }
 
     @Test

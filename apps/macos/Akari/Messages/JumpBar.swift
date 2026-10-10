@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct JumpBar: View {
+    static let height: CGFloat = 32
+    static let margin: CGFloat = 4
+
     let text: String
     let jump: () -> Void
 
@@ -16,10 +19,10 @@ struct JumpBar: View {
         .font(.system(size: 14, weight: .medium))
         .foregroundStyle(.white)
         .padding(.horizontal, 12)
-        .frame(height: 32)
+        .frame(height: Self.height)
         .background(Color(nsColor: Palette.brand), in: RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal, 16)
-        .padding(.bottom, 4)
+        .padding(.bottom, Self.margin)
     }
 
     static func text(atPresent: Bool, isStale: Bool, hasRows: Bool) -> String? {
