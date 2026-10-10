@@ -94,6 +94,8 @@ public final class SessionModel {
         guard place != self.place else {
             return
         }
+        // Where the user went before the first READY wins over where they were last time.
+        spotToRestore = nil
         self.place = place
         defer { rememberSpot() }
         guard case .guild(let guildId) = place else {
@@ -113,6 +115,7 @@ public final class SessionModel {
     }
 
     public func open(channel id: ChannelId) {
+        spotToRestore = nil
         switch place {
         case .guild(let guildId): lastChannels[guildId] = id
         case .home: lastHomeChannel = id

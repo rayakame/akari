@@ -369,6 +369,27 @@ final class SessionModelTests {
     }
 
     @Test
+    func aPlaceOpenedBeforeReadyWinsOverTheLastOne() async {
+        memory.remember(.init(place: .guild(id(1)), channel: id(12)), of: id(1))
+        store.update { state in
+            state.add(guild(1), guild(2))
+            state.list([channel(11), channel(12)], in: 1)
+            state.list([channel(21, guild: 2), channel(22, guild: 2)], in: 2)
+        }
+        let session = makeSession()
+        session.start()
+
+        session.open(.guild(id(2)))
+        session.open(channel: id(22))
+        subscription.send(.ready)
+        await subscription.batches.pulled(2)
+
+        #expect(session.place == .guild(id(2)))
+        #expect(session.messages?.channelId == id(22))
+        session.close()
+    }
+
+    @Test
     func aGoneGuildFallsBackHome() async {
         memory.remember(.init(place: .guild(id(9)), channel: id(90)), of: id(1))
         let session = makeSession()
