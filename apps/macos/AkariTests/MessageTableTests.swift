@@ -370,6 +370,31 @@ struct MessageTableTests {
         #expect(abs(tagFrame.minX - nameText.maxX - 4) <= 1)
     }
 
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theAppTagCentersItsCapitalsInThePill(appearance: NSAppearance.Name) throws {
+        show([row(1, by: author(9, "Ferris", bot: true), at: noon)])
+        let tag = try #require(textFields(in: try cell(at: 1)).first { $0.stringValue == "APP" })
+        tag.appearance = NSAppearance(named: appearance)
+        let rep = try #require(tag.bitmapImageRepForCachingDisplay(in: tag.bounds))
+        tag.cacheDisplay(in: tag.bounds, to: rep)
+
+        // The text is white; the pill isn't, and an unrendered background is transparent.
+        let glyphRows = (0..<rep.pixelsHigh).filter { y in
+            (0..<rep.pixelsWide).contains { x in
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+                    return false
+                }
+                let lightest = min(color.redComponent, color.greenComponent, color.blueComponent)
+                return lightest * color.alphaComponent > 0.6
+            }
+        }
+        let first = try #require(glyphRows.first)
+        let last = try #require(glyphRows.last)
+        let above = first
+        let below = rep.pixelsHigh - 1 - last
+        #expect(abs(above - below) <= 1, "\(above) px above the capitals, \(below) below")
+    }
+
     @Test
     func aComponentsV2MessageShowsAPlaceholder() throws {
         show([row(1, at: noon, content: "", componentsV2: true)])

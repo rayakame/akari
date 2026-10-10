@@ -219,8 +219,34 @@ private final class TagLabel: NSTextField {
         return NSSize(width: size.width + 8, height: size.height + 2)
     }
 
+    override class var cellClass: AnyClass? {
+        get { TagCell.self }
+        set {}
+    }
+
     // The pill is the whole frame, so layout gaps measure from its edge.
     override var alignmentRectInsets: NSEdgeInsets {
         NSEdgeInsetsZero
+    }
+}
+
+// Centers the capitals by their height; the line's ascender and descender would push them up.
+private final class TagCell: NSTextFieldCell {
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        guard let font, let context = NSGraphicsContext.current?.cgContext else {
+            return
+        }
+        let text = NSAttributedString(
+            string: stringValue, attributes: [.font: font, .foregroundColor: textColor ?? .white])
+        let line = CTLineCreateWithAttributedString(text)
+        let width = CTLineGetTypographicBounds(line, nil, nil, nil)
+        let flipped = controlView.isFlipped
+        context.saveGState()
+        context.textMatrix = flipped ? CGAffineTransform(scaleX: 1, y: -1) : .identity
+        context.textPosition = CGPoint(
+            x: cellFrame.midX - width / 2,
+            y: cellFrame.midY + (flipped ? 1 : -1) * font.capHeight / 2)
+        CTLineDraw(line, context)
+        context.restoreGState()
     }
 }
