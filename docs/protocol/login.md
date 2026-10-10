@@ -240,8 +240,11 @@ for 24 hours.
 ## Logout
 
 `DiscordClient::logout(account)` loads the stored token, sends `POST /auth/logout {}` with
-it, and then deletes it from the token store. The body's push-token fields are optional,
-and Akari registers none. The token is deleted even when Discord can't be reached. A 401
+it, and then deletes it from the token store. The body's fields (`provider`, `token`,
+`voip_provider`, `voip_token`) are all optional push-notification tokens, so `{}` is valid,
+and Akari registers none ([Logout](https://docs.discord.food/authentication#logout)). What
+happens to a gateway connection that is still open isn't documented (**unverified**: likely a
+4004 close). The token is deleted even when Discord can't be reached. A 401
 counts as logged out, since the session is gone either way. Only `LogoutError::Storage`
 means the token is still stored.
 

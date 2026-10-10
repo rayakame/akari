@@ -85,7 +85,23 @@ Akari shows the avatar, the display name and the username. It leaves out the sta
 
 - The message list fills the rest; its layout is in [message-list.md](message-list.md).
 - The composer at the bottom is 56 tall for one line, with 8 margin on the sides and the
-  bottom and corner radius 8.
+  bottom and corner radius 8; details in [composer.md](composer.md).
+
+## Connection bar
+
+Akari shows a bar across the window, right under the title bar, while it isn't connected to
+Discord. It is 32 tall and pushes the content below it down.
+
+- Connecting for the first time, or reconnecting after the connection dropped, after a second:
+  `panel` background, `textMuted` text and a small spinner ("Connecting to Discord…",
+  "Connection lost. Reconnecting…").
+- Offline while the Mac sleeps: "Offline".
+- Closed for good by an error: `danger` background, white text naming the error, and a
+  "Reconnect" button. A rejected login goes back to the login screen instead.
+
+The official desktop client shows no such bar for short drops: messages just stay gray and
+then turn red, and a long outage brings back its full-window loading screen (**unverified**).
+Its mobile app shows "Connecting…" at the top. Akari's bar is its own design.
 
 ## Window size
 

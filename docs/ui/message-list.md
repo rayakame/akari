@@ -68,8 +68,10 @@ The time in a group's first line:
 | Yesterday | "Yesterday at 11:59 PM" |
 | Earlier, or a date in the future | numeric date and short time, "10/03/2026, 2:05 PM" |
 
-All of them follow the user's locale and time zone. Hovering the time shows the full date and
-time. Discord writes the older form without the comma; Akari uses the platform's date format
+All of them follow the user's locale and time zone, also when those change while the app
+runs: at midnight "Today at" becomes "Yesterday at", and a new time zone or locale redraws the
+times and moves day dividers without reopening the channel. Hovering the time shows the full
+date and time. Discord writes the older form without the comma; Akari uses the platform's date format
 for the locale.
 
 ## Day dividers
@@ -99,12 +101,60 @@ doesn't reuse Discord's texts, such as its random welcome lines.
 replies, slash-command and context-menu command results, thread starter messages, and types
 Akari doesn't know. A type Akari doesn't know shows its content like an ordinary message.
 
+## Loading history
+
+- The list holds up to 200 messages of a channel. Older ones load in pages of 50 when the
+  user scrolls up, before the top is reached: once the top of the view is within one view
+  height (at least 600) of the oldest loaded message.
+- When a page lands, the text the user is reading doesn't move, also while a fling or the
+  bounce at the top is still running. The new messages appear above it.
+- Past 200 messages the newest are dropped, and the list no longer reaches the present
+  ("detached"). Scrolling back down then loads newer pages near the bottom the same way,
+  dropping the oldest.
+- The official client shows gray placeholder rows while a page loads (**unverified**). Akari
+  shows a small spinner in a 48 tall row at that end of the list.
+- If a page can't be loaded, that row says so and offers "Try again". Nothing retries on its
+  own, so a failing request doesn't repeat on every scroll.
+- At the beginning of a channel the row says "This is the beginning of #general." (a DM:
+  "This is the beginning of your conversation with Mira."), in Akari's words.
+- The row keeps its height in every state, so its changes never move the messages.
+
+## Jump to present
+
+- While the list is detached, a bar sits at the bottom of the list, attached above the
+  composer: on the left a note that older messages are shown, on the right "Jump to present"
+  with a down arrow. It doesn't show after a short scroll up, only when the newest messages
+  aren't loaded, as in the official client.
+- Clicking it, or pressing Escape ([shortcuts.md](shortcuts.md)), loads the newest messages
+  and scrolls to the bottom. At the present, Escape only scrolls to the bottom.
+- Sending a message also jumps to the present.
+- Akari's bar: 32 tall, 16 from the sides, corner radius 8, `brand` with white 14 medium text:
+  "You're reading older messages" and "Jump to present".
+
+## Catching up
+
+After a new session (a reconnect that couldn't resume), Akari checks the open channel for
+messages it missed. While it does, a small capsule at the top of the list says "Catching up…"
+with a spinner, in `textMuted` on `panel`. If the check can't join the missed messages to the
+list (more than 100 missed, or the request failed), the list becomes detached and the jump
+bar says "Some messages may be missing" instead.
+
+## Edits and deletes
+
+- An edited message ends with "(edited)" right after its text, smaller (12) and in
+  `chatTextMuted`, like the timestamps. A message without text puts it after its last line.
+  The official client's mark has a tooltip with the edit time (**unverified**); Akari adds it
+  later.
+- An edit that makes a message taller or shorter doesn't move the text the user is reading.
+- A deleted message leaves the list without moving the text the user is reading, whether it
+  was above, below or at the top of what's visible. At the bottom, the list stays at the
+  bottom.
+
 ## Later
 
 - A red (`#d22d39`) "new messages" line with a "NEW" tag at its right end, at the first unread
   message.
 - Messages that mention the user, tinted with `#f8a300` at 8% and a 2 wide bar on the left.
-- An "(edited)" mark after edited messages.
 - Markdown, mentions, emoji, embeds and images. Until markdown rendering exists, Akari shows
   message content as plain text: a mention looks like `<@123>` and markdown symbols show as
   typed.

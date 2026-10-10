@@ -41,9 +41,16 @@ their 429s are reported to the caller.
   when they disagree. A 429 with none of them isn't retried, and the caller gets
   `RequestError::RateLimited`.
 - **At most 10 s of waiting.** A request that would wait longer for a pause or a bucket
-  reset, such as a send in slowmode (**unverified** whether slowmode answers 429), fails
-  at once with `RequestError::RateLimited { retry_after }` instead, so a UI can say how
-  long to wait and a send shows as failed rather than pending.
+  reset, such as a send in a channel with a long slowmode, fails at once with
+  `RequestError::RateLimited { retry_after }` instead, so a UI can say how long to wait and
+  a send shows as failed rather than pending.
+- **Slowmode** answers a send with HTTP 429, JSON code 20016 ("blocked by slowmode",
+  [JSON error codes](https://discord.com/developers/docs/topics/opcodes-and-status-codes#json))
+  and the remaining cooldown in `retry_after`. Discord's documentation has no example of this
+  answer; a Discord-compatible server and a client patch both use exactly this shape
+  ([Slowmode.ts](https://github.com/meowcorded/meowcord/blob/1b9d7223b58eef91d2af869371611b2617a42cba/src/api/util/handlers/Slowmode.ts)),
+  so it's **unverified** until the manual check sees it. With a slowmode of 10 s or less the
+  429 is waited out like any other; longer, the send fails with `RateLimited`.
 - **502 and 504** are retried once after 1 s.
 - **A 401** marks the token as rejected: every later request fails at once with
   `RequestError::Unauthorized` instead of adding to the invalid-request count, and the

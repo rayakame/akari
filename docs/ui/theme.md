@@ -35,6 +35,7 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `inputBackground` | text fields | `#000000` at 12% | `#000000` at 2% |
 | `danger` | error messages, e.g. above the login button | `#f23f43` | `#da373c` |
 | `brand` | Home when selected, a hovered or selected server, primary buttons | `#5865f2` | `#5865f2` |
+| `composer` | the composer card | `#222327` | `#ffffff` |
 
 On the dark message list (`#1a1a1e`), `hoverBackground` comes out at about `#29292d` and
 `selectedBackground` at about `#333338`.
@@ -59,7 +60,6 @@ Values Akari doesn't use yet:
 
 | Use | Dark | Light |
 |---|---|---|
-| Composer background | `#222327` | `#ffffff` |
 | Tooltips and menus | `#242429` | `#ffffff` |
 | Mention badges, the new-messages line | `#d22d39` | `#d22d39` |
 | Status: online, idle, do not disturb, offline | `#45a366`, `#ffc04e`, `#da3e44`, `#84858d` | same |
