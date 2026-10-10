@@ -47,3 +47,35 @@ struct SessionScreenTests {
         #expect(second.loads.withLock { $0 } == 1)
     }
 }
+
+@MainActor
+struct ComposerAlignmentTests {
+    // Bottom and top edges in pixels, found by scanning a column for color changes.
+    func edges(_ image: Rendered, x: CGFloat) throws -> (top: Int, bottom: Int) {
+        let height = CGFloat(image.rep.pixelsHigh) / image.scale
+        let below = try #require(image.firstChange(at: x, above: height - 1))
+        let top = try #require(image.firstChange(at: x, above: CGFloat(below - 3) / image.scale))
+        return (top, below)
+    }
+
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theComposerLinesUpWithTheUserPanel(appearance: NSAppearance.Name) throws {
+        let suite = "app.akari.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let session = SessionModel(
+            userId: UserId(rawValue: 1), account: GuildAccount(),
+            memory: AccountMemory(defaults: defaults)
+        ) { _ in }
+        session.open(.guild(GuildId(rawValue: 1)))
+        let image = try Rendered(SessionScreen(session: session), appearance: appearance)
+
+        let panel = try edges(image, x: 40)
+        let composer = try edges(image, x: image.width - 60)
+
+        #expect(abs(panel.bottom - composer.bottom) <= 1, "panel \(panel), composer \(composer)")
+        #expect(
+            abs((panel.bottom - panel.top) - (composer.bottom - composer.top)) <= 2,
+            "panel \(panel), composer \(composer)")
+    }
+}

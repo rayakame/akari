@@ -56,6 +56,9 @@ struct MessageArea: View {
                             JumpBar(text: text) { bridge.escape() }
                         }
                     }
+                // Above the composer, as in the official client: send errors on the left,
+                // slowmode on the right.
+                ComposerStatus(composer: messages.composer)
                 ComposerView(
                     composer: messages.composer, placeholder: name.placeholder,
                     areaHeight: geometry.size.height,

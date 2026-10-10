@@ -2,6 +2,8 @@ import AkariKit
 import SwiftUI
 
 struct ComposerStatus: View {
+    static let height: CGFloat = 24
+
     let composer: ComposerModel
 
     var body: some View {
@@ -19,8 +21,8 @@ struct ComposerStatus: View {
             }
         }
         .font(.system(size: 12))
-        .padding(.horizontal, 8)
-        .frame(height: 24)
+        .padding(.horizontal, 16)
+        .frame(height: Self.height)
     }
 
     @ViewBuilder private func slowmodeView(_ slowmode: Slowmode) -> some View {

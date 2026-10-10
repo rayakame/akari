@@ -300,12 +300,12 @@ struct MessageTableTests {
         let clip = controller.scrollView.contentView
 
         let below = { clip.bounds.maxY - self.table.rect(ofRow: self.table.numberOfRows - 1).maxY }
-        #expect(abs(below() - 16) <= 1)
+        #expect(abs(below() - 8) <= 1)
         #expect(table.rect(ofRow: 0).minY - clip.bounds.minY > 100)
 
         rows += messages(1, from: 4)
         show(rows)
-        #expect(abs(below() - 16) <= 1)
+        #expect(abs(below() - 8) <= 1)
 
         // A short list is at its bottom, so a resize doesn't unpin it and later messages follow.
         window.setContentSize(NSSize(width: 600, height: 300))
@@ -1044,7 +1044,7 @@ struct MessageTableTests {
         #expect(edge.maxY <= clip.bounds.maxY - JumpBar.height - JumpBar.margin)
 
         show(page)
-        #expect(controller.scrollView.contentInsets.bottom == 16)
+        #expect(controller.scrollView.contentInsets.bottom == 8)
     }
 
     @Test
@@ -1079,5 +1079,51 @@ struct MessageTableTests {
         window.layoutIfNeeded()
 
         #expect(clip.bounds.minY == past)
+    }
+
+    // The composer above changes the list's height the way SwiftUI does: the frame alone.
+    func hostInContainer() -> NSView {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        window.contentView = container
+        container.addSubview(controller.scrollView)
+        controller.scrollView.frame = container.bounds
+        window.layoutIfNeeded()
+        return container
+    }
+
+    func setListHeight(_ height: CGFloat) {
+        controller.scrollView.frame = NSRect(x: 0, y: 400 - height, width: 600, height: height)
+        window.layoutIfNeeded()
+    }
+
+    var gapBelowTheRows: CGFloat {
+        clip.bounds.maxY - (table.contentHeight + controller.scrollView.contentInsets.bottom)
+    }
+
+    @Test
+    func aPinnedListFollowsTheComposerBothWays() {
+        _ = hostInContainer()
+        show(page)
+
+        setListHeight(300)
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+        #expect(abs(gapBelowTheRows) <= 0.5)
+
+        setListHeight(400)
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+        #expect(abs(gapBelowTheRows) <= 0.5, "a gap of \(gapBelowTheRows) below the rows")
+    }
+
+    @Test
+    func aScrolledUpListKeepsItsPlaceWhenTheComposerChanges() {
+        _ = hostInContainer()
+        show(page)
+        scroll(toRowOf: 130)
+        let before = place(of: 130)
+
+        setListHeight(300)
+        #expect(abs(place(of: 130) - before) <= 0.5)
+        setListHeight(400)
+        #expect(abs(place(of: 130) - before) <= 0.5)
     }
 }

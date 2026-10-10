@@ -50,7 +50,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var lastLiveScroll = Date.distantPast
     private var liveScrollGeneration = 0
     private static let liveScrollQuiet: TimeInterval = 0.5
-    private static let bottomInset: CGFloat = 16
+    private static let bottomInset: CGFloat = 8
     // Exact heights before a row shows: automatic heights start as estimates and change when a
     // fling first reaches a row, which moves the bottom under it.
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
@@ -431,6 +431,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.didLayout = { [weak self] in
             self?.settle()
         }
+        // The composer below grows and shrinks the list without a layout of the table.
+        scrollView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(listResized), name: NSView.frameDidChangeNotification,
+            object: scrollView)
         tableView.onEscape = { [weak self] in
             self?.actions?.escape()
         }
@@ -493,6 +498,17 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             restoreAnchor()
         }
         alignShortContent()
+    }
+
+    // A list that grew below its rows looks like a bounce past the bottom, which settling leaves
+    // to AppKit; here it's the frame, so a pinned list goes to the exact bottom.
+    @objc private func listResized(_ notification: Notification) {
+        if filled, pinsToBottom, !isLiveScrolling {
+            ownChanges += 1
+            defer { ownChanges -= 1 }
+            scrollToBottom()
+        }
+        settle()
     }
 
     @objc private func columnResized(_ notification: Notification) {

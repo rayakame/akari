@@ -12,34 +12,35 @@ struct ComposerView: View {
     @State private var height: CGFloat = 56
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                ComposerField(
-                    text: Bindable(composer).draft, enabled: !denied,
-                    maxHeight: areaHeight / 2, height: $height,
-                    onSubmit: {
-                        Task { await composer.submit(willSend: onSend) }
-                    },
-                    onEscape: onEscape)
-                if composer.draft.isEmpty {
-                    Text(
-                        denied ? "You can't send messages in this channel." : placeholder
-                    )
-                    .font(.system(size: 16))
-                    .foregroundStyle(Color(nsColor: Palette.textMuted))
-                    .lineLimit(1)
-                    .padding(.leading, ComposerTextView.insets.width)
-                    .padding(.top, ComposerTextView.insets.height + 2)
-                    .allowsHitTesting(false)
-                }
+        ZStack(alignment: .topLeading) {
+            ComposerField(
+                text: Bindable(composer).draft, enabled: !denied,
+                maxHeight: areaHeight / 2, height: $height,
+                onSubmit: {
+                    Task { await composer.submit(willSend: onSend) }
+                },
+                onEscape: onEscape
+            )
+            // Room for the counter at the right edge.
+            .padding(.trailing, composer.remaining == nil ? 0 : 48)
+            if composer.draft.isEmpty {
+                Text(
+                    denied ? "You can't send messages in this channel." : placeholder
+                )
+                .font(.system(size: 16))
+                .foregroundStyle(Color(nsColor: Palette.textMuted))
+                .lineLimit(1)
+                .padding(.leading, ComposerTextView.insets.width)
+                .padding(.top, ComposerTextView.insets.height + 2)
+                .allowsHitTesting(false)
             }
-            .frame(height: height)
-            .background(Color(nsColor: Palette.composer), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(alignment: .bottomTrailing) { counter }
-            .opacity(denied ? 0.5 : 1)
-            ComposerStatus(composer: composer)
         }
-        .padding(.horizontal, 8)
+        .frame(height: height)
+        .background(Color(nsColor: Palette.composer), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(alignment: .bottomTrailing) { counter }
+        .opacity(denied ? 0.5 : 1)
+        // The user panel's margins, so both bottom edges line up.
+        .padding([.horizontal, .bottom], 8)
     }
 
     // Before the store knows the channel the user can already type.
@@ -53,8 +54,8 @@ struct ComposerView: View {
                 .font(.system(size: 12))
                 .monospacedDigit()
                 .foregroundStyle(Color(nsColor: remaining < 0 ? Palette.danger : Palette.textMuted))
-                .padding(.trailing, 12)
-                .padding(.bottom, 6)
+                .padding(.trailing, 14)
+                .padding(.bottom, 20)
         }
     }
 }
