@@ -72,6 +72,30 @@ struct MessageTableTests {
         }
     }
 
+    // From one line to many, so no two neighbours are likely to share a height.
+    func variedMessages(_ count: Int) -> [MessageListModel.Row] {
+        (0..<count).map { index in
+            let raw = UInt64(index + 1)
+            return row(
+                raw, by: author(raw % 3 == 0 ? 2 : 1), at: noon + Double(raw) * 120,
+                content: String(repeating: "words that wrap ", count: Int(raw % 7) * 6 + 1))
+        }
+    }
+
+    // What Auto Layout gives the row's cell at the table's width, as automatic row heights do.
+    func fittingHeight(ofRow row: Int) -> CGFloat {
+        let cell = controller.cell(for: controller.timeline.items[row])
+        cell.translatesAutoresizingMaskIntoConstraints = false
+        let width = cell.widthAnchor.constraint(equalToConstant: table.tableColumns[0].width)
+        width.isActive = true
+        defer {
+            width.isActive = false
+            cell.translatesAutoresizingMaskIntoConstraints = true
+        }
+        cell.layoutSubtreeIfNeeded()
+        return cell.fittingSize.height
+    }
+
     func show(_ rows: [MessageListModel.Row]) {
         controller.show(rows, atPresent: true)
         window.layoutIfNeeded()
@@ -368,6 +392,66 @@ struct MessageTableTests {
         show(rows)
         window.layoutIfNeeded()
         #expect(visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    @Test
+    func aFlingToTheBottomNeitherMovesTheBottomNorScrollsOnItsOwn() {
+        show(variedMessages(150))
+        let clip = controller.scrollView.contentView
+        let content = table.contentHeight
+        let bottom = clip.bounds.origin.y
+
+        // AppKit moves the clip by large steps per frame, so rows in between never show.
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        var heights: Set<CGFloat> = []
+        var moves: [String] = []
+        var y: CGFloat = 0
+        while true {
+            clip.scroll(to: NSPoint(x: 0, y: y))
+            controller.scrollView.reflectScrolledClipView(clip)
+            postLiveScroll(NSScrollView.didLiveScrollNotification)
+            window.layoutIfNeeded()
+            heights.insert(table.contentHeight)
+            if clip.bounds.origin.y != y {
+                moves.append("\(y) → \(clip.bounds.origin.y)")
+            }
+            if y >= bottom {
+                break
+            }
+            y = min(clip.bounds.origin.y + 700, bottom)
+        }
+        postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+        window.layoutIfNeeded()
+
+        #expect(heights == [content], "the document was \(heights.sorted()) tall")
+        #expect(moves.isEmpty, "the list moved itself: \(moves)")
+        #expect(clip.bounds.origin.y == bottom)
+    }
+
+    @Test
+    func everyRowIsAsTallAsItsCellAtEveryWidth() {
+        let later = noon + 2 * 86_400
+        let rows =
+            variedMessages(30) + [
+                row(40, by: author(9, "Ferris", bot: true), at: later, kind: .reply),
+                row(41, by: author(9, "Ferris", bot: true), at: later + 10, content: ""),
+                row(42, at: later + 20, kind: .userJoin),
+                row(43, by: author(3), at: later + 30, content: "", componentsV2: true),
+                row(
+                    44, by: author(3), at: later + 40, attachments: ["a.png", "b.txt"],
+                    embedCount: 2, stickers: ["wave"]),
+                row(45, by: author(3), at: later + 50, content: "", attachments: ["c.zip"]),
+            ]
+        show(rows)
+
+        for width: CGFloat in [600, 380, 900] {
+            window.setContentSize(NSSize(width: width, height: 400))
+            window.layoutIfNeeded()
+            let wrong = (0..<table.numberOfRows).filter { row in
+                table.rect(ofRow: row).height != fittingHeight(ofRow: row)
+            }
+            #expect(wrong.isEmpty, "at \(width): rows \(wrong) differ from their cells")
+        }
     }
 
     @Test

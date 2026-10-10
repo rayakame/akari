@@ -25,6 +25,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var lastLiveScroll = Date.distantPast
     private var liveScrollGeneration = 0
     private static let liveScrollQuiet: TimeInterval = 0.5
+    // Exact heights before a row shows: automatic heights start as estimates and change when a
+    // fling first reaches a row, which moves the bottom under it.
+    private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
+    private var rowHeightsWidth: CGFloat = 0
 
     init(
         tableView: MessageTableView = MessageTableView(), calendar: Calendar = .current,
@@ -60,6 +64,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         ownChanges += 1
         defer { ownChanges -= 1 }
+        for index in changes.removed {
+            rowHeights[timeline.items[index].id] = nil
+        }
+        for index in changes.reloaded {
+            rowHeights[next.items[index].id] = nil
+        }
         timeline = next
         tableView.beginUpdates()
         if !changes.removed.isEmpty {
@@ -110,6 +120,40 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         timeline.items.count
     }
 
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        let width = tableView.tableColumns.first?.width ?? 0
+        guard width > 0 else {
+            return 1
+        }
+        if width != rowHeightsWidth {
+            rowHeights.removeAll()
+            rowHeightsWidth = width
+        }
+        let item = timeline.items[row]
+        if let height = rowHeights[item.id] {
+            return height
+        }
+        let height = height(of: item, width: width)
+        rowHeights[item.id] = height
+        return height
+    }
+
+    private func height(of item: MessageTimeline.Item, width: CGFloat) -> CGFloat {
+        switch item {
+        case .day(let day):
+            return DayDividerCell.height(
+                MessageFormat.dayDivider(day, calendar: calendar, locale: locale))
+        case .message(let row, let startsGroup):
+            let message = row.message
+            if let notice = message.notice {
+                let time = MessageFormat.groupTime(
+                    message.timestamp, now: now(), calendar: calendar, locale: locale)
+                return NoticeCell.height(message, notice: notice, time: time, width: width)
+            }
+            return MessageCell.height(message, startsGroup: startsGroup, width: width)
+        }
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int)
         -> NSView?
     {
@@ -118,7 +162,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return cell
     }
 
-    private func cell(for item: MessageTimeline.Item) -> NSTableCellView {
+    func cell(for item: MessageTimeline.Item) -> NSTableCellView {
         switch item {
         case .day(let day):
             let cell = reuse(DayDividerCell.identifier) as? DayDividerCell ?? DayDividerCell()
@@ -156,8 +200,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.style = .plain
-        tableView.usesAutomaticRowHeights = true
-        tableView.rowHeight = 30
+        tableView.usesAutomaticRowHeights = false
         tableView.intercellSpacing = .zero
         tableView.selectionHighlightStyle = .none
         tableView.gridStyleMask = []
@@ -191,6 +234,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         center.addObserver(
             self, selector: #selector(liveScrollEnded(_:)),
             name: NSScrollView.didEndLiveScrollNotification, object: scrollView)
+        center.addObserver(
+            self, selector: #selector(columnResized), name: NSTableView.columnDidResizeNotification,
+            object: tableView)
         // Wheel, keyboard and accessibility scrolls post no live-scroll notifications; every
         // scroll moves the clip view.
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -214,6 +260,18 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             restoreAnchor()
         }
         alignShortContent()
+    }
+
+    @objc private func columnResized(_ notification: Notification) {
+        guard let width = tableView.tableColumns.first?.width, width != rowHeightsWidth else {
+            return
+        }
+        // The table keeps no row in place when heights change; settle() restores this one.
+        if !pinsToBottom, let place = visibleAnchor(skipping: []) {
+            anchor = place
+        }
+        tableView.noteHeightOfRows(
+            withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows))
     }
 
     @objc private func liveScrollStarted(_ notification: Notification) {

@@ -4,6 +4,9 @@ final class DayDividerCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("day")
 
     private let label = CellText.label()
+    private static let top: CGFloat = 16
+    private static let bottom: CGFloat = 4
+    private static let sizing = DayDividerCell()
 
     init() {
         super.init(frame: .zero)
@@ -12,14 +15,20 @@ final class DayDividerCell: NSTableCellView {
         label.textColor = Palette.textMuted
         addSubview(label)
         NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 16),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: Self.top),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
         ])
     }
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// The row height for a divider, as Auto Layout would size the cell.
+    static func height(_ text: String) -> CGFloat {
+        sizing.configure(text)
+        return top + sizing.label.intrinsicContentSize.height + bottom
     }
 
     func configure(_ text: String) {

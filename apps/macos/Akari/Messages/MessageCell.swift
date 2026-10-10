@@ -25,6 +25,16 @@ final class MessageCell: NSTableCellView {
     private var top: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
 
+    private static let groupTop: CGFloat = 18
+    private static let continuationTop: CGFloat = 2
+    private static let bottomInset: CGFloat = 2
+    private static let textLeading: CGFloat = 72
+    private static let textTrailing: CGFloat = 16
+    private static let spacing: CGFloat = 2
+    private static let avatarSize: CGFloat = 40
+    private static let avatarLift: CGFloat = 2
+    private static let sizing = MessageCell()
+
     init() {
         super.init(frame: .zero)
         identifier = Self.identifier
@@ -43,7 +53,7 @@ final class MessageCell: NSTableCellView {
         header.isHidden = !startsGroup
         avatar.isHidden = !startsGroup
         avatarBottom?.isActive = startsGroup
-        top?.constant = startsGroup ? 18 : 2
+        top?.constant = startsGroup ? Self.groupTop : Self.continuationTop
         avatar.name = message.author.displayName
         avatar.userId = message.author.id.rawValue
         header.show(
@@ -58,6 +68,31 @@ final class MessageCell: NSTableCellView {
         let lines = Self.extras(message)
         extras.attributedStringValue = lines
         extras.isHidden = lines.length == 0
+    }
+
+    /// The row height for `message` at `width`, as Auto Layout would size the cell.
+    static func height(_ message: Message, startsGroup: Bool, width: CGFloat) -> CGFloat {
+        sizing.configure(
+            message, startsGroup: startsGroup, groupTime: "", shortTime: "", fullDate: "")
+        return sizing.height(width: width)
+    }
+
+    // The constraints of build() in arithmetic; the stack leaves hidden views out.
+    private func height(width: CGFloat) -> CGFloat {
+        let textWidth = width - Self.textLeading - Self.textTrailing
+        content.preferredMaxLayoutWidth = textWidth
+        extras.preferredMaxLayoutWidth = textWidth
+        let shown = [reply, header, content, extras].filter { !$0.isHidden }
+        let stacked =
+            shown.map { $0 === header ? self.header.height : $0.intrinsicContentSize.height }
+            .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
+        let top = showsHeader ? Self.groupTop : Self.continuationTop
+        let height = top + stacked + Self.bottomInset
+        guard showsHeader else {
+            return height
+        }
+        let replyHeight = reply.isHidden ? 0 : reply.intrinsicContentSize.height + Self.spacing
+        return max(height, top + replyHeight - Self.avatarLift + Self.avatarSize + Self.bottomInset)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -83,30 +118,30 @@ final class MessageCell: NSTableCellView {
 
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 2
+        stack.spacing = Self.spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.setViews([reply, header, content, extras], in: .top)
         for view in [avatar, stack, hoverTime] as [NSView] {
             addSubview(view)
         }
 
-        let top = stack.topAnchor.constraint(equalTo: topAnchor, constant: 2)
+        let top = stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.continuationTop)
         let avatarBottom = bottomAnchor.constraint(
-            greaterThanOrEqualTo: avatar.bottomAnchor, constant: 2)
+            greaterThanOrEqualTo: avatar.bottomAnchor, constant: Self.bottomInset)
         self.top = top
         self.avatarBottom = avatarBottom
         NSLayoutConstraint.activate([
             top,
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 72),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.textTrailing),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottomInset),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             content.widthAnchor.constraint(equalTo: stack.widthAnchor),
             extras.widthAnchor.constraint(equalTo: stack.widthAnchor),
             avatar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            avatar.topAnchor.constraint(equalTo: header.topAnchor, constant: -2),
-            avatar.widthAnchor.constraint(equalToConstant: 40),
-            avatar.heightAnchor.constraint(equalToConstant: 40),
+            avatar.topAnchor.constraint(equalTo: header.topAnchor, constant: -Self.avatarLift),
+            avatar.widthAnchor.constraint(equalToConstant: Self.avatarSize),
+            avatar.heightAnchor.constraint(equalToConstant: Self.avatarSize),
             hoverTime.trailingAnchor.constraint(equalTo: leadingAnchor, constant: 56),
             hoverTime.firstBaselineAnchor.constraint(equalTo: content.firstBaselineAnchor),
         ])
@@ -183,6 +218,11 @@ private final class HeaderRow: NSView {
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    // The name sets the row's height; the tag and the time hang off it.
+    var height: CGFloat {
+        name.intrinsicContentSize.height
     }
 
     func show(name: String, tagged: Bool, time: String, fullDate: String) {

@@ -6,6 +6,11 @@ final class NoticeCell: NSTableCellView {
 
     private let icon = NSImageView()
     private let text = CellText.label(wrapping: true)
+    private static let top: CGFloat = 18
+    private static let bottom: CGFloat = 2
+    private static let leading: CGFloat = 72
+    private static let trailing: CGFloat = 16
+    private static let sizing = NoticeCell()
 
     init() {
         super.init(frame: .zero)
@@ -16,10 +21,10 @@ final class NoticeCell: NSTableCellView {
         addSubview(icon)
         addSubview(text)
         NSLayoutConstraint.activate([
-            text.topAnchor.constraint(equalTo: topAnchor, constant: 18),
-            text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
-            text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 72),
-            text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            text.topAnchor.constraint(equalTo: topAnchor, constant: Self.top),
+            text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
+            text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leading),
+            text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailing),
             icon.centerXAnchor.constraint(equalTo: leadingAnchor, constant: 36),
             icon.centerYAnchor.constraint(equalTo: text.topAnchor, constant: 11),
         ])
@@ -27,6 +32,15 @@ final class NoticeCell: NSTableCellView {
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// The row height for a notice at `width`, as Auto Layout would size the cell.
+    static func height(_ message: Message, notice: String, time: String, width: CGFloat)
+        -> CGFloat
+    {
+        sizing.configure(message, notice: notice, time: time, fullDate: "")
+        sizing.text.preferredMaxLayoutWidth = width - leading - trailing
+        return top + sizing.text.intrinsicContentSize.height + bottom
     }
 
     func configure(_ message: Message, notice: String, time: String, fullDate: String) {

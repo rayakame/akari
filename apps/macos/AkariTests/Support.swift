@@ -23,13 +23,20 @@ func author(_ raw: UInt64, _ name: String = "Mira", bot: Bool = false) -> User {
 
 func row(
     _ raw: UInt64, by user: User = author(1), at time: Date, kind: MessageType = .default,
-    content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false
+    content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false,
+    attachments: [String] = [], embedCount: UInt32 = 0, stickers: [String] = []
 ) -> MessageListModel.Row {
+    let files = attachments.enumerated().map { index, name in
+        Attachment(
+            id: AttachmentId(rawValue: raw * 100 + UInt64(index)), filename: name,
+            contentType: nil, size: 2_000_000)
+    }
     let message = Message(
         id: MessageId(rawValue: raw), channelId: ChannelId(rawValue: 10), kind: kind,
         author: user, fromWebhook: false, content: content ?? "message \(raw)", timestamp: time,
-        editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-        embedCount: 0, stickerNames: [], componentsV2: componentsV2, delivery: .sent)
+        editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: files,
+        embedCount: embedCount, stickerNames: stickers, componentsV2: componentsV2,
+        delivery: .sent)
     return MessageListModel.Row(id: MessageId(rawValue: key ?? raw), message: message)
 }
 
