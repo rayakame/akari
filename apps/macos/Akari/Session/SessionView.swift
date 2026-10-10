@@ -54,9 +54,13 @@ struct SessionView<MessageArea: View>: View {
         Rectangle()
             .fill(Color(nsColor: Palette.borderSubtle))
             .frame(height: 1)
-            .padding(.leading, session.channels == nil ? sidebarWidth : SidebarWidth.rail + 1)
+            .padding(.leading, hasListHeader ? SidebarWidth.rail + 1 : sidebarWidth)
             .offset(y: ChannelHeader.height)
             .allowsHitTesting(false)
+    }
+
+    private var hasListHeader: Bool {
+        session.place == .home || session.channels != nil
     }
 
     @ViewBuilder private var list: some View {

@@ -9,16 +9,7 @@ struct ChannelSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(guildName)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color(nsColor: Palette.textStrong))
-                .lineLimit(1)
-                .padding(.horizontal, 16)
-                .frame(
-                    maxWidth: .infinity, minHeight: ChannelHeader.height,
-                    maxHeight: ChannelHeader.height, alignment: .leading
-                )
-                .padding(.bottom, 1)
+            ListHeader(title: guildName)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     let open = session.messages?.channelId

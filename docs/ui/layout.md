@@ -32,6 +32,8 @@ The member list on the right (264 wide) is not part of Akari yet.
 - 32 tall, in the `frame` color (see [theme.md](theme.md)).
 - On macOS it holds the traffic lights, and its own content starts after the rail plus 16.
 - A centered title says where the user is: the server's name, or "Direct Messages" at home.
+- Nothing scrolls under it or the traffic lights: the rail, the channel or DM list and the
+  message list all stop at its lower edge or below.
 - Discord also puts back/forward buttons and an Inbox button there. Akari leaves those out
   until it has navigation history and an inbox.
 
@@ -58,9 +60,9 @@ The rail and the channel list together form the sidebar.
 
 ## Channel header
 
-- 48 tall, plus a 1 pt `borderSubtle` line at the bottom. The server name above the channel
-  list has the same height, and the line runs on under it: one line at one height across both
-  columns.
+- 48 tall, plus a 1 pt `borderSubtle` line at the bottom. The header above the channel list
+  (the server's name, or "Direct Messages" at home) has the same height, and the line runs on
+  under it: one line at one height across both columns.
 - 16 padding on the left, 8 between toolbar buttons on the right.
 - A guild channel shows its icon, its name, a short divider and the topic on one line. A DM
   shows the other person's name.

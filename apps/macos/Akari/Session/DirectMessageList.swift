@@ -5,24 +5,22 @@ struct DirectMessageList: View {
     let session: SessionModel
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 2) {
-                Text("Direct Messages")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color(nsColor: Palette.textMuted))
-                    .padding(.horizontal, 16)
-                    .frame(height: 24)
-                    .padding(.top, 12)
-                ForEach(session.directMessages.conversations) { conversation in
-                    ConversationRow(
-                        conversation: conversation,
-                        selected: session.messages?.channelId == conversation.id
-                    ) {
-                        session.open(channel: conversation.id)
+        VStack(spacing: 0) {
+            ListHeader(title: "Direct Messages")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(session.directMessages.conversations) { conversation in
+                        ConversationRow(
+                            conversation: conversation,
+                            selected: session.messages?.channelId == conversation.id
+                        ) {
+                            session.open(channel: conversation.id)
+                        }
                     }
                 }
+                .padding(.top, 8)
+                .padding(.bottom, 72)
             }
-            .padding(.bottom, 72)
         }
     }
 }

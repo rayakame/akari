@@ -11,7 +11,11 @@ look and behave.
 ## Header
 
 The server's name at the top of the column, 48 tall like the channel header next to it.
-Discord opens a server menu from it; Akari only shows the name for now.
+Discord opens a server menu from it; Akari only shows the name for now. At home the same
+header says "Direct Messages" (see [Home](#home)).
+
+The header stays in place; only the list under it scrolls, so no row ever slides under the
+title bar.
 
 ## Categories
 
@@ -64,9 +68,14 @@ Discord opens a server menu from it; Akari only shows the name for now.
 
 At home the column holds the DM list instead of a server's channels.
 
+- At the top, in a header as tall as a server's, Discord has a "Find or start a conversation"
+  button that opens the quick switcher. *Akari: the header says "Direct Messages" until the
+  quick switcher exists; then it can become that button.* The line under it runs on under the
+  channel header, as with a server.
 - Above the list, Discord has entries for Friends, Nitro and the Shop. *Akari: left out.*
-- A "Direct Messages" header, 24 tall, with a + button for a new DM on its right.
-  *Akari: the header without the button.*
+- A "Direct Messages" label, 24 tall, with a + button for a new DM on its right. *Akari: left
+  out while the header above says the same; it comes back with the + button or when the
+  header becomes the switcher button.* The rows start 8 below the header line.
 - One row per conversation: the avatar, the name, and for a group the number of members on a
   second line ("3 Members"). **Unverified**: the exact wording of the member line.
 - A conversation's name is the other person's display name. A group shows its own name, or
