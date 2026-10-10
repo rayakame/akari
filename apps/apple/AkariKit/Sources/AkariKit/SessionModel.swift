@@ -124,6 +124,9 @@ public final class SessionModel {
         account.close()
         subscription?.close()
         loop.cancel()
+        if case .closed = connection {
+            return
+        }
         connection = .closed(error: nil)
     }
 

@@ -109,6 +109,18 @@ struct SessionModelTests {
     }
 
     @Test
+    func closingAfterAnAuthenticationFailureKeepsTheError() async {
+        let session = makeSession()
+        session.start()
+        subscription.send(.connection(state: .closed(error: .AuthenticationFailed)))
+        await subscription.batches.pulled(2)
+
+        session.close()
+
+        #expect(session.connection == .closed(error: .AuthenticationFailed))
+    }
+
+    @Test
     func aFailedConnectClosesTheSession() {
         account.connectError.withLock { $0 = .Closed }
         let session = makeSession()
