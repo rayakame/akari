@@ -39,14 +39,21 @@ struct MessageTableTests {
         }
     }
 
+    // Where the pointer is, in window coordinates; nil while it's outside the window.
+    final class Pointer {
+        var location: NSPoint?
+    }
+
     let noon = berlinTime(2026, 10, 10, 12, 0)
     let table = CountingTableView()
+    let pointer = Pointer()
     let controller: MessageTableController
     let window: NSWindow
 
     init() {
         controller = MessageTableController(
-            tableView: table, calendar: berlin, now: { berlinTime(2026, 10, 10, 15, 0) })
+            tableView: table, calendar: berlin, now: { berlinTime(2026, 10, 10, 15, 0) },
+            pointer: { [pointer] in pointer.location })
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -260,6 +267,115 @@ struct MessageTableTests {
         rows += messages(60, from: 5, longText: true)
         show(rows)
         #expect(visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    func textFields(in view: NSView) -> [NSTextField] {
+        view.subviews.flatMap { subview in
+            (subview as? NSTextField).map { [$0] } ?? textFields(in: subview)
+        }
+    }
+
+    func cell(at row: Int) throws -> NSView {
+        let cell = try #require(table.view(atColumn: 0, row: row, makeIfNecessary: true))
+        cell.layoutSubtreeIfNeeded()
+        return cell
+    }
+
+    var hoveredRows: [Int] {
+        visibleRows.filter { row in
+            (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageCell)?
+                .isHovered == true
+        }
+    }
+
+    func postLiveScroll(_ name: Notification.Name) {
+        NotificationCenter.default.post(name: name, object: controller.scrollView)
+    }
+
+    @Test
+    func theHoveredRowFollowsThePointerOnEveryScroll() {
+        show(messages(80, longText: true))
+        let clip = controller.scrollView.contentView
+        pointer.location = NSPoint(x: 300, y: 200)
+        let underPointer = {
+            self.table.row(at: self.table.convert(NSPoint(x: 300, y: 200), from: nil))
+        }
+
+        controller.pointerMoved()
+        #expect(hoveredRows == [underPointer()])
+
+        // Scrolled under a still pointer, with no live-scroll notification.
+        clip.scroll(to: NSPoint(x: 0, y: clip.bounds.minY - 300))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        #expect(hoveredRows == [underPointer()])
+
+        pointer.location = nil
+        controller.pointerMoved()
+        #expect(hoveredRows.isEmpty)
+    }
+
+    @Test
+    func clickingMessageTextKeepsItsFont() throws {
+        show([row(1, at: noon, content: "hello there")])
+        let field = try #require(
+            textFields(in: try cell(at: 1)).first { $0.stringValue == "hello there" })
+
+        // What a click on selectable text does: the field editor takes over the text.
+        field.selectText(nil)
+
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        let attribute = { (key: NSAttributedString.Key) in
+            editor.textStorage?.attribute(key, at: 0, effectiveRange: nil)
+        }
+        #expect((attribute(.font) as? NSFont)?.pointSize == 16)
+        #expect((attribute(.paragraphStyle) as? NSParagraphStyle)?.minimumLineHeight == 22)
+    }
+
+    @Test
+    func aBouncePastTheBottomStaysPinnedWithoutProgrammaticScrolls() {
+        var rows = messages(80, longText: true)
+        show(rows)
+        let clip = controller.scrollView.contentView
+        let bottom = clip.bounds.origin
+
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        clip.setBoundsOrigin(NSPoint(x: bottom.x, y: bottom.y + 40))
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+        let bounced = clip.bounds.origin
+        table.needsLayout = true
+        window.layoutIfNeeded()
+        rows += messages(1, from: 81)
+        show(rows)
+        #expect(clip.bounds.origin == bounced)
+
+        clip.setBoundsOrigin(bottom)
+        postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+        window.layoutIfNeeded()
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    @Test
+    func theAppTagSitsCenteredBesideTheName() throws {
+        show([row(1, by: author(9, "Ferris", bot: true), at: noon)])
+        let cell = try cell(at: 1)
+        let fields = textFields(in: cell)
+        let name = try #require(fields.first { $0.stringValue == "Ferris" })
+        let tag = try #require(fields.first { $0.stringValue == "APP" })
+
+        // The name's alignment rect ends where its text ends; the tag's pill fills its frame.
+        let nameText = name.convert(name.alignmentRect(forFrame: name.bounds), to: cell)
+        let tagFrame = tag.convert(tag.bounds, to: cell)
+        #expect(abs(tagFrame.midY - nameText.midY) <= 1)
+        #expect(abs(tagFrame.minX - nameText.maxX - 4) <= 1)
+    }
+
+    @Test
+    func aComponentsV2MessageShowsAPlaceholder() throws {
+        show([row(1, at: noon, content: "", componentsV2: true)])
+
+        let shown = textFields(in: try cell(at: 1)).filter { !$0.isHidden }.map(\.stringValue)
+        #expect(shown.contains { $0.contains("This message uses a layout Akari can't show yet") })
     }
 
     @Test

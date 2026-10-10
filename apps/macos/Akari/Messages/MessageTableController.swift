@@ -9,6 +9,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private let calendar: Calendar
     private let locale = Locale.current
     private let now: () -> Date
+    // Where the pointer is, in window coordinates; nil when hover shouldn't show.
+    private let pointer: () -> NSPoint?
     private var filled = false
     private var sticksToBottom = true
     private var atPresent = true
@@ -16,14 +18,28 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // Clip moves from the controller's own updates and scrolls aren't the user's.
     private var ownChanges = 0
     private var lastClipOrigin = NSPoint.zero
+    private var hovered: MessageTimeline.ItemId?
+    // Paging posts willStart and didLive but no didEnd, so a live scroll also ends when its
+    // notifications stop.
+    private var liveScrollEnded = true
+    private var lastLiveScroll = Date.distantPast
+    private var liveScrollGeneration = 0
+    private static let liveScrollQuiet: TimeInterval = 0.5
 
     init(
         tableView: MessageTableView = MessageTableView(), calendar: Calendar = .current,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init, pointer: (() -> NSPoint?)? = nil
     ) {
         self.tableView = tableView
         self.calendar = calendar
         self.now = now
+        self.pointer =
+            pointer ?? { [weak tableView] in
+                guard let window = tableView?.window, window.isKeyWindow else {
+                    return nil
+                }
+                return window.mouseLocationOutsideOfEventStream
+            }
         timeline = MessageTimeline(rows: [], calendar: calendar)
         super.init()
         configure()
@@ -39,7 +55,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let firstFill = !filled && !next.items.isEmpty
         let pin = firstFill || pinsToBottom
-        if !pin {
+        if !pin && !isLiveScrolling {
             anchor = visibleAnchor(skipping: changes.removed) ?? anchor
         }
         ownChanges += 1
@@ -60,18 +76,30 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if firstFill {
             filled = true
             sticksToBottom = true
-            FirstChannelTimer.tableShowedRows()
+            LaunchLog.mark("first channel rendered")
         }
-        if pin {
-            scrollToBottom()
-        } else {
-            restoreAnchor()
+        // Nothing scrolls under the user's hands; settling catches up once they let go.
+        if !isLiveScrolling {
+            if pin {
+                scrollToBottom()
+            } else {
+                restoreAnchor()
+            }
         }
+        updateHover()
     }
 
     // Away from the present, rows below the reader are an older page's continuation, not news.
     private var pinsToBottom: Bool {
         sticksToBottom && atPresent
+    }
+
+    func pointerMoved() {
+        updateHover()
+    }
+
+    private var isLiveScrolling: Bool {
+        !liveScrollEnded && Date().timeIntervalSince(lastLiveScroll) < Self.liveScrollQuiet
     }
 
     var isPinnedToBottom: Bool {
@@ -108,6 +136,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 return cell
             }
             let cell = reuse(MessageCell.identifier) as? MessageCell ?? MessageCell()
+            cell.isHovered = item.id == hovered
             cell.configure(
                 message, startsGroup: startsGroup, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
@@ -144,20 +173,21 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 16, right: 0)
         tableView.didLayout = { [weak self] in
-            guard let self, self.filled else {
-                return
-            }
-            self.ownChanges += 1
-            defer { self.ownChanges -= 1 }
-            if self.pinsToBottom {
-                if !self.isPinnedToBottom {
-                    self.scrollToBottom()
-                }
-            } else {
-                self.restoreAnchor()
-            }
-            self.alignShortContent()
+            self?.settle()
         }
+        tableView.pointerMoved = { [weak self] in
+            self?.updateHover()
+        }
+        let center = NotificationCenter.default
+        center.addObserver(
+            self, selector: #selector(liveScrollStarted),
+            name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
+        center.addObserver(
+            self, selector: #selector(liveScrolled), name: NSScrollView.didLiveScrollNotification,
+            object: scrollView)
+        center.addObserver(
+            self, selector: #selector(liveScrollEnded(_:)),
+            name: NSScrollView.didEndLiveScrollNotification, object: scrollView)
         // Wheel, keyboard and accessibility scrolls post no live-scroll notifications; every
         // scroll moves the clip view.
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -166,9 +196,67 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             object: scrollView.contentView)
     }
 
+    // After a layout, a live scroll's end, or its quiet timeout: pin or keep the reader's place.
+    private func settle() {
+        guard filled, !isLiveScrolling else {
+            return
+        }
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        if pinsToBottom {
+            if !isPinnedToBottom {
+                scrollToBottom()
+            }
+        } else {
+            restoreAnchor()
+        }
+        alignShortContent()
+    }
+
+    @objc private func liveScrollStarted(_ notification: Notification) {
+        liveScrollEnded = false
+        liveScrolled(notification)
+    }
+
+    @objc private func liveScrolled(_ notification: Notification) {
+        lastLiveScroll = Date()
+        liveScrollGeneration += 1
+        let generation = liveScrollGeneration
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.liveScrollQuiet + 0.05))
+            guard let self, self.liveScrollGeneration == generation else {
+                return
+            }
+            self.settle()
+        }
+    }
+
+    @objc private func liveScrollEnded(_ notification: Notification) {
+        liveScrollEnded = true
+        settle()
+    }
+
+    private func updateHover() {
+        var row = -1
+        if let location = pointer() {
+            let point = tableView.convert(location, from: nil)
+            if tableView.visibleRect.contains(point) {
+                row = tableView.row(at: point)
+            }
+        }
+        hovered = timeline.items.indices.contains(row) ? timeline.items[row].id : nil
+        let visible = tableView.rows(in: tableView.visibleRect)
+        for index in visible.location..<(visible.location + visible.length) {
+            let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+            (cell as? MessageCell)?.isHovered = index == row
+        }
+    }
+
     @objc private func clipMoved(_ notification: Notification) {
         let origin = scrollView.contentView.bounds.origin
         defer { lastClipOrigin = origin }
+        // Content moves under a still pointer on every scroll, the controller's own included.
+        updateHover()
         // The table re-anchors inside its own layout; that isn't the user scrolling either.
         guard ownChanges == 0, !tableView.isLayingOut, origin != lastClipOrigin else {
             return
@@ -251,6 +339,7 @@ final class BottomClipView: NSClipView {
 // NSTableView re-anchors the scroll position inside its layout, so pinning comes after it.
 class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
+    var pointerMoved: (() -> Void)?
     private(set) var isLayingOut = false
 
     // The rows' extent; the frame itself stretches to fill a taller clip view.
@@ -263,5 +352,32 @@ class MessageTableView: NSTableView {
         super.layout()
         isLayingOut = false
         didLayout?()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero,
+                options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        pointerMoved?()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        pointerMoved?()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        pointerMoved?()
     }
 }
