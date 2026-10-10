@@ -255,6 +255,13 @@ that the session may still be active, and that it can be ended under User Settin
 Devices in an official client. akari-cli does this, and it also ends a replaced token's
 session after logging in again, so no live session is left behind a deleted token.
 
+The apps log out in the other order: `forget_token` first, so the Keychain item is gone before
+the login screen shows, then `end_session` with the open session's token, which the app keeps
+in memory, in the background. The UI never waits for Discord, and a new login with the same
+account can't have its token deleted by a late logout. If the token can't be deleted, the app
+stays logged in and says so; if Discord doesn't confirm, the login screen says the session may
+still be active.
+
 ## Token storage
 
 `TokenStore` is implemented by the host: Keychain on Apple platforms, Android Keystore,

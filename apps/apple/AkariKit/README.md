@@ -36,10 +36,17 @@ All of them are `@MainActor @Observable` classes. They hold Swift copies of what
 screen, so views render from them without calling into Rust.
 
 - `AppModel` restores the last account or shows the login screen. `AccountMemory` keeps only
-  the user ID; the token stays in the Keychain. After a login it saves the token and opens
-  the session. A session that ends with `AuthenticationFailed` returns to the login screen
-  and deletes the token with `forgetToken`, without sending it to Discord again; `logOut()`
-  logs out on Discord.
+  the user ID; the token stays in the Keychain, and the open session's `Token` object stays in
+  memory. After a login it saves the token and opens the session. A session that ends with
+  `AuthenticationFailed` returns to the login screen and deletes the token with `forgetToken`,
+  without sending it to Discord again. Any other close keeps the session on screen;
+  `reconnect()` opens a new one from the token in memory, with the same drafts.
+  `suspend()` and `resume()` disconnect and reconnect the open session around sleep.
+  `logOut()` runs once: it deletes the token with `forgetToken` first, and if that fails it
+  stays on the session and sets `logoutError`; otherwise it shows the login screen and ends
+  the session on Discord in the background (`endSession(token:)`), setting
+  `warning = .logoutNotConfirmed` if Discord doesn't confirm. A new login can't lose its token
+  to a late logout, since the Keychain item is gone before the login screen shows.
 - `LoginModel` runs the QR code login beside the email/password form (MFA, SMS, new
   location); whichever finishes first logs in and cancels the other. A captcha shows as not
   supported yet.
@@ -47,9 +54,16 @@ screen, so views render from them without calling into Rust.
   the channel last opened in each guild and at home. It owns `GuildListModel` (the server
   list), `DirectMessageListModel` (the DM list, the latest conversation first, with each
   one's recipients and name), `ChannelListModel` (the open guild's channels) and
-  `MessageListModel` (the open channel's messages, loads, sends and whether the user may send
-  there). `AccountMemory` keeps the last place and channel per account, and the session's
-  first READY reopens them, as Discord does after a restart.
+  `MessageListModel` (the open channel's messages and loads; `loadFailure` says which load
+  failed). `AccountMemory` keeps the last place and channel per account, and the session's
+  first READY reopens them, as Discord does after a restart. `notice` is what a connection bar
+  says (`ConnectionNotice`: connecting, reconnecting, offline after `suspend()`, or closed with
+  its error), with the delay before a bar shows it.
+- `ComposerModel` (`messages.composer`) holds the channel's draft, kept per channel for the
+  session, its length as Discord counts it and the limit, whether the user may send there,
+  the slowmode from akari-core, and the problem shown under the composer in Akari's words.
+  `submit()` sends the trimmed draft unless it is blank, too long or held back by slowmode;
+  `retry(_:)` and `discard(_:)` act on failed messages.
 - `CollapsedCategories` keeps the collapsed categories per guild across launches; a collapsed
   category still shows the open channel.
 
@@ -91,7 +105,9 @@ one row instead of removing and inserting it.
 Rules every Apple app shows the same way, so they live here rather than in the app:
 
 - `MessageTimeline` turns `MessageListModel.rows` into table items: a divider before each
-  local day and where author groups start, by the rule in `docs/ui/message-list.md`.
+  local day and where author groups start, by the rule in `docs/ui/message-list.md`, wrapped
+  in `.edge(.older)` and `.edge(.newer)` items when asked, where a list shows its loading
+  state, an error or the beginning of the channel.
 - `TimelineChanges` diffs two timelines by item keys into the removed, inserted and reloaded
   indexes a table or collection view applies, so a list never reloads as a whole. A
   confirmation keeps its row key (above) and reloads one row.

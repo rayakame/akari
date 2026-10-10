@@ -65,9 +65,21 @@ read.
   kind. Display texts are akari-core's safe-to-show wording; Swift gets them as
   `localizedDescription`. A Rust panic reaches the host as UniFFI's internal error.
 - A token is an opaque `Token` object; the host can only hand it back (`save_token`,
-  `account`). Only the host's `TokenStore` sees the string, to put it into the platform's
+  `account`, `end_session`). `end_session` ends that token's session on Discord without
+  touching the token store, so an app can delete the stored token first and end the session
+  afterwards, in the background. Only the host's `TokenStore` sees the string, to put it into the platform's
   secret store. Swift's default printing of a struct includes every field, so a string in a
   login result would end up in logs.
+
+## Send rules
+
+The length limit and slowmode are akari-core's rules, so every app applies them the same way:
+`message_length(content)` counts code points as Discord does, `Store::message_length_limit()`
+gives the current user's limit, and `Store::slowmode(channel_id)` says whether the channel has
+slowmode, whether the user is exempt and when they may send again. `send_message` refuses a
+message over the limit with `RequestError::TooLong` before anything is queued, and Discord's own
+refusal for length maps to the same error. No event reports a cooldown; re-read `slowmode` on
+the open channel's window events and after a send.
 
 ## Changing the API
 

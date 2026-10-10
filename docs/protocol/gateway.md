@@ -379,6 +379,8 @@ of the repo.
   [Status Settings](https://docs.discord.food/resources/user-settings-proto#status-settings-structure)).
   A later milestone has to find out how Discord combines the sessions' statuses and set
   the status through the settings as well, so another device doesn't override Akari's.
-- A pause/resume API for suspend and wake. Open point: on suspend it has to
-  `disconnect()` and on wake `connect()`, because the gateway's own timers don't notice a
-  sleep (see [Heartbeat](#heartbeat)).
+- A pause/resume API of the core's own for mobile backgrounding. On the Mac the hosts call
+  `disconnect()` before the system sleeps and `connect()` after it wakes, because the
+  gateway's own timers don't notice a sleep (see [Heartbeat](#heartbeat)); the macOS app does
+  this through `AppModel.suspend()`/`resume()`. iOS and Android will map their app lifecycle
+  onto the same two calls.
