@@ -39,6 +39,9 @@ public final class AppModel {
     // the session on Discord after the Keychain item is gone.
     @ObservationIgnored private var token: Token?
     @ObservationIgnored private var loggingOut = false
+    // A reconnect that couldn't open the account keeps its drafts for the next session, which
+    // gets them only if it's the same account.
+    @ObservationIgnored private var keptDrafts: (userId: UserId, drafts: Drafts)?
     @ObservationIgnored var endingSession: Task<Void, Never>?
 
     public init(client: DiscordClient, memory: AccountMemory = AccountMemory()) {
@@ -119,6 +122,7 @@ public final class AppModel {
         old.close()
         if !open(old.userId, token, drafts: old.drafts, failure: .reconnectFailed) {
             self.token = nil
+            keptDrafts = (old.userId, old.drafts)
         }
     }
 
@@ -163,7 +167,7 @@ public final class AppModel {
 
     @discardableResult
     private func open(
-        _ userId: UserId, _ token: Token, drafts: Drafts = Drafts(), failure: LoginNotice? = nil
+        _ userId: UserId, _ token: Token, drafts: Drafts? = nil, failure: LoginNotice? = nil
     ) -> Bool {
         let account: Account
         do {
@@ -173,8 +177,10 @@ public final class AppModel {
             return false
         }
         self.token = token
+        let kept = keptDrafts?.userId == userId ? keptDrafts?.drafts : nil
+        keptDrafts = nil
         let session = SessionModel(
-            userId: userId, account: account, memory: memory, drafts: drafts
+            userId: userId, account: account, memory: memory, drafts: drafts ?? kept ?? Drafts()
         ) { [weak self] error in
             self?.closed(userId, error)
         }

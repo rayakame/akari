@@ -154,7 +154,8 @@ final class AppModelTests {
     func otherClosesStayOnTheSession() async throws {
         let (app, session, account) = try await restored()
 
-        account.fakeStore.subscription.send(.connection(state: .closed(error: .Rejected(code: 4000))))
+        account.fakeStore.subscription.send(
+            .connection(state: .closed(error: .Rejected(code: 4000))))
         await account.fakeStore.subscription.batches.pulled(2)
 
         #expect(app.screen.session === session)
@@ -356,6 +357,51 @@ final class AppModelTests {
 
         #expect(client.calls.current.filter { $0 == .account(token: "stored.token") }.count == 2)
         #expect(memory.lastAccount == id(42))
+    }
+
+    // A failed reconnect with a failed and a pending message and a draft in DM 5, then a login.
+    func loginAfterAFailedReconnect(as user: UInt64) async throws -> SessionModel {
+        let (app, session, account) = try await restored()
+        account.fakeStore.update { state in
+            state.channels[id(5)] = dm(5, with: 50)
+            state.windows[id(5)] = window([], pending: [7, 8])
+            state.show(
+                message(7, in: 5, content: "one", delivery: .failed),
+                message(8, in: 5, content: "two", delivery: .pending))
+        }
+        session.messages?.composer.draft = "draft"
+        account.fakeStore.subscription.send(.connection(state: .closed(error: .Stopped)))
+        await account.fakeStore.subscription.batches.pulled(2)
+        client.accountError.withLock { $0 = .Stopped }
+        app.reconnect()
+        client.accountError.withLock { $0 = nil }
+        let password = FakePasswordLogin()
+        client.passwordLogins.withLock { $0 = [password] }
+
+        let login = try #require(app.screen.login)
+        login.login = "me@example.com"
+        login.password = "hunter2"
+        password.reply(.done(success: success(user)))
+        await login.submit()
+
+        return try #require(app.screen.session)
+    }
+
+    @Test
+    func draftsFromAFailedReconnectReturnWithTheSameAccount() async throws {
+        let next = try await loginAfterAFailedReconnect(as: 42)
+
+        #expect(next.drafts[id(5)] == "draft\none\ntwo")
+        next.close()
+    }
+
+    @Test
+    func draftsFromAFailedReconnectNeverReachAnotherAccount() async throws {
+        let next = try await loginAfterAFailedReconnect(as: 7)
+
+        #expect(next.userId == id(7))
+        #expect(next.drafts[id(5)] == "")
+        next.close()
     }
 
     @Test
