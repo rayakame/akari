@@ -103,21 +103,26 @@ Akari doesn't know. A type Akari doesn't know shows its content like an ordinary
 
 ## Loading history
 
-- The list holds up to 200 messages of a channel. Older ones load in pages of 50 when the
-  user scrolls up, before the top is reached: once the top of the view is within one view
-  height (at least 600) of the oldest loaded message.
-- When a page lands, the text the user is reading doesn't move, also while a fling or the
-  bounce at the top is still running. The new messages appear above it.
+- The list holds up to 200 messages of a channel. Beyond the loaded messages, while older ones
+  exist, gray placeholder rows (an avatar circle and text bars, in a fixed mix of heights)
+  fill about one and a half views above them, so a fling carries on into them instead of
+  stopping at the top. While the list is detached from the present, the same placeholders sit
+  below the newest loaded message. The official client does the same.
+- Pages of 50 load well before the reader gets there: once the top of the view is within three
+  view heights of the oldest loaded message (or the bottom within three of the newest), and
+  again right after a page lands while the reader is still that close.
+- When a page lands, the real messages take the place of the placeholders and nothing the
+  reader looks at moves: the first real message keeps its place on screen, also when only
+  placeholders were in view, also while a fling or the bounce at the top is still running.
 - Past 200 messages the newest are dropped, and the list no longer reaches the present
-  ("detached"). Scrolling back down then loads newer pages near the bottom the same way,
-  dropping the oldest.
-- The official client shows gray placeholder rows while a page loads (**unverified**). Akari
-  shows a small spinner in a 48 tall row at that end of the list.
-- If a page can't be loaded, that row says so and offers "Try again". Nothing retries on its
-  own, so a failing request doesn't repeat on every scroll.
-- At the beginning of a channel the row says "This is the beginning of #general." (a DM:
+  ("detached"); scrolling back down loads newer pages the same way, dropping the oldest.
+- If a page can't be loaded, the placeholders next to the loaded messages say so and offer
+  "Try again". Nothing retries on its own, so a failing request doesn't repeat on every
+  scroll, and a success at the other end doesn't retry it either.
+- At the beginning of a channel a single row says "This is the beginning of #general." (a DM:
   "This is the beginning of your conversation with Mira."), in Akari's words.
-- The row keeps its height in every state, so its changes never move the messages.
+- Placeholder rows keep their height in every state, so their changes never move the
+  messages.
 
 ## Jump to present
 

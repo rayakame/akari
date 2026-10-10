@@ -7,13 +7,15 @@ from Discord's documentation.
 
 ## Layout
 
-- A card at the bottom of the message area, 8 from its sides, in the `composer` color, with
-  corner radius 8.
+- A card at the bottom of the message area, 8 from its sides and its bottom, in the `composer`
+  color, with corner radius 8. Its bottom edge lines up with the user panel's in the sidebar,
+  and a one-line card is as tall as the panel (56).
 - One line is 56 tall: text at 16 on a 22 line, 17 above and below, 16 inset on the left and
   right.
-- Under the card runs a 24 tall strip. The official client shows typing indicators on its
-  left and the slowmode stopwatch on its right (**unverified** height). Akari shows errors on
-  the left and slowmode on the right.
+- Directly above the card runs a thin strip (24) over the bottom of the message area, as in the
+  official client: typing indicators on its left (later in Akari; send errors and notices
+  there now) and the slowmode note or countdown with a stopwatch on its right. Nothing sits
+  below the card.
 - Discord puts buttons for attachments, gifts, GIFs, stickers and emoji into the card. Akari
   has none of them yet.
 
@@ -88,7 +90,7 @@ hours). Its rules:
   (**unverified** for the official client; Akari does the same). A message the user sent from
   another device starts it too.
 
-What Akari shows on the right of the strip:
+What Akari shows on the right of the strip above the card:
 
 - with slowmode and no cooldown running: a stopwatch symbol and "Slowmode: one message every
   10 seconds";
@@ -104,7 +106,7 @@ the card; Akari doesn't.
   does Nitro Classic as far as its perk list says.
 - Discord counts Unicode code points: an emoji with a skin tone counts as 2, a family emoji
   as 5, a custom emoji as its full `<:name:id>` text. Akari's core counts the same way.
-- A counter appears at the card's bottom right once 200 or fewer characters are left. It
+- A counter appears inside the card at its right edge once 200 or fewer characters are left. It
   counts down and turns negative and red (`danger`) past the limit, like the official
   client's.
 - Return past the limit sends nothing; the strip says by how much the message is too long.

@@ -85,7 +85,8 @@ Akari shows the avatar, the display name and the username. It leaves out the sta
 
 - The message list fills the rest; its layout is in [message-list.md](message-list.md).
 - The composer at the bottom is 56 tall for one line, with 8 margin on the sides and the
-  bottom and corner radius 8; details in [composer.md](composer.md).
+  bottom and corner radius 8, so it lines up with the user panel; a thin status strip sits
+  directly above it. Details in [composer.md](composer.md).
 
 ## Connection bar
 
