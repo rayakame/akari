@@ -163,7 +163,7 @@ public final class SessionModel {
     }
 }
 
-/// The session's event loop, reachable from the model's nonisolated `deinit`.
+// A Sendable holder, so the model's nonisolated deinit can cancel the loop.
 final class EventLoop: Sendable {
     private let task = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
 

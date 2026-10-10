@@ -1,21 +1,17 @@
-/// What one batch of store events touched, so each model reads only what changed.
+// What one batch touched, so each model reads only what changed.
 struct EventBatch {
     var ready = false
-    /// The last connection state in the batch.
     var connection: ConnectionState?
     var currentUserChanged = false
-    /// Added, updated, removed or unavailable guilds.
     var guildsChanged: Set<GuildId> = []
-    /// A guild was added, removed or became unavailable.
     var guildListChanged = false
     var membersChanged: Set<GuildId> = []
-    /// Added, updated or removed channels per guild; `nil` holds DMs and group DMs.
+    // The `nil` guild holds DMs and group DMs.
     var channelsChanged: [GuildId?: Set<ChannelId>] = [:]
     var removedChannels: Set<ChannelId> = []
-    /// Channels whose window gained, lost or replaced messages, or changed its state.
     var windowsChanged: Set<ChannelId> = []
     var updatedMessages: [ChannelId: Set<MessageId>] = [:]
-    /// Confirmed message ID → the pending ID it replaced, per channel.
+    // Confirmed message ID → the pending ID it replaced.
     var confirmed: [ChannelId: [MessageId: MessageId]] = [:]
 
     init(_ events: [StoreEvent]) {

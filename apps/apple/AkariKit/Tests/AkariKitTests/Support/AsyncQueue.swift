@@ -1,6 +1,6 @@
 import Foundation
 
-/// Scripted values for a fake's async pull, e.g. `StoreSubscription.next()`.
+// Scripted values for a fake's async pull, e.g. `StoreSubscription.next()`.
 final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
     private struct State {
         var buffered: [Element] = []
@@ -22,7 +22,7 @@ final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
         }
     }
 
-    /// Pulls return what is buffered, then `nil`.
+    // Pulls return what is buffered, then `nil`.
     func finish() {
         state.withLock { state in
             state.finished = true
@@ -31,7 +31,7 @@ final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
         }
     }
 
-    /// Pulls return `nil` at once, without what is buffered.
+    // Pulls return `nil` at once, without what is buffered.
     func close() {
         state.withLock { state in
             state.buffered = []
@@ -39,8 +39,8 @@ final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
         finish()
     }
 
-    /// The next value; `nil` once finished, or when the pulling task is cancelled (a test's
-    /// time limit).
+    // The next value; `nil` once finished, or when the pulling task is cancelled (a test's
+    // time limit).
     func next() async -> Element? {
         let key = UUID()
         return await withTaskCancellationHandler {
@@ -71,8 +71,8 @@ final class AsyncQueue<Element: Sendable>: @unchecked Sendable {
 
     var pulls: Int { state.current.pulls }
 
-    /// Returns once `next()` was called `count` times (or the task is cancelled). A consumer
-    /// that handles each value before pulling again has then handled the first `count - 1`.
+    // Returns once `next()` was called `count` times (or the task is cancelled). A consumer
+    // that handles each value before pulling again has then handled the first `count - 1`.
     func pulled(_ count: Int) async {
         let key = UUID()
         await withTaskCancellationHandler {

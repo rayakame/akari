@@ -13,14 +13,14 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
     }
 
     let calls = Locked<[Call]>([])
-    /// Handed out in order by `passwordLogin()` and `qrLogin()`; fresh fakes after that.
+    // Handed out in order by `passwordLogin()` and `qrLogin()`; fresh fakes after that.
     let passwordLogins = Locked<[FakePasswordLogin]>([])
     let qrLogins = Locked<[FakeQrLogin]>([])
     let qrError = Locked<LoginError?>(nil)
     let tokens = Locked<[UserId: String]>([:])
     let loadError = Locked<TokenStoreError?>(nil)
     let saveError = Locked<TokenStoreError?>(nil)
-    /// Every account `account(token:)` returned.
+    // Every account `account(token:)` returned.
     let accounts = Locked<[FakeAccount]>([])
     let forgotten = Signal()
 

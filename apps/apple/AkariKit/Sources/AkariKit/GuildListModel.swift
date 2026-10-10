@@ -32,7 +32,7 @@ public final class GuildListModel {
         }
     }
 
-    /// Re-reads the order, then the guilds it doesn't hold and `rereading` (all when `nil`).
+    // `nil` re-reads every guild, e.g. after a new session.
     private func rebuild(rereading changed: Set<GuildId>?) {
         let ids = store.guildIds()
         unavailableIds = store.unavailableGuildIds()

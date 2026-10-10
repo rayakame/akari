@@ -32,7 +32,7 @@ public final class MessageListModel {
     @ObservationIgnored private let store: Store
     @ObservationIgnored private var guildId: GuildId?
     @ObservationIgnored private var hasMessages = false
-    /// Confirmed message ID → the pending ID its row keeps as key.
+    // Confirmed message ID → the pending ID its row keeps as key.
     @ObservationIgnored private var pendingKeys: [MessageId: MessageId] = [:]
     @ObservationIgnored private var loads = 0
 
@@ -147,7 +147,6 @@ public final class MessageListModel {
             || store.permissions(channelId: channelId)?.contains(.sendMessages) == true
     }
 
-    /// Re-reads the window, then the messages it doesn't hold and those in `changed`.
     private func reload(rereading changed: Set<MessageId>) {
         guard let window = store.window(channelId: channelId) else {
             rows = []

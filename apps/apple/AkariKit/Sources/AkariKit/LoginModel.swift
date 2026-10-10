@@ -160,7 +160,7 @@ public final class LoginModel {
         passwordLogin = nil
     }
 
-    /// Runs one password step and moves to the step it returns, if any.
+    // `request` returns nil when it already set the step.
     private func run(_ request: @MainActor () async throws -> LoginStep?) async {
         isSubmitting = true
         fieldError = nil

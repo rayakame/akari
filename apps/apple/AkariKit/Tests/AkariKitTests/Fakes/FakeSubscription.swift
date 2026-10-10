@@ -17,7 +17,7 @@ final class FakeSubscription: StoreSubscription, @unchecked Sendable {
         batches.send(events)
     }
 
-    /// Like an account that closed: `next()` returns what is buffered, then `nil`.
+    // Like an account that closed: `next()` returns what is buffered, then `nil`.
     func end() {
         batches.finish()
     }

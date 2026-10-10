@@ -25,7 +25,7 @@ final class FakePasswordLogin: PasswordLogin, @unchecked Sendable {
     }
 
     let calls = Locked<[Call]>([])
-    /// One reply per step, in order.
+    // One reply per step, in order.
     let replies = AsyncQueue<Result<LoginStep, LoginError>>()
     let cancelled = Signal()
 

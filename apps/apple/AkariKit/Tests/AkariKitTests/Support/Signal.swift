@@ -1,7 +1,7 @@
 import Foundation
 
-/// Fires once; `wait()` returns at once afterwards, or when the waiting task is cancelled
-/// (a test's time limit), so a missing signal fails the test instead of hanging the run.
+// Fires once; `wait()` returns at once afterwards, or when the waiting task is cancelled
+// (a test's time limit), so a missing signal fails the test instead of hanging the run.
 final class Signal: Sendable {
     private struct State {
         var fired = false

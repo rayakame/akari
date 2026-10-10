@@ -28,7 +28,7 @@ public final class ChannelListModel {
         }
     }
 
-    /// Re-reads the list, then the channels it doesn't hold and `rereading` (all when `nil`).
+    // `nil` re-reads every channel, e.g. after a new session.
     private func reload(rereading changed: Set<ChannelId>?) {
         let ids = store.channelList(guildId: guildId)
         var held = Dictionary(channels.map { ($0.id, $0) }) { first, _ in first }

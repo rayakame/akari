@@ -4,11 +4,11 @@ import Foundation
 final class FakeAccount: Account, @unchecked Sendable {
     let fakeStore: FakeStore
     let connectError = Locked<GatewayError?>(nil)
-    /// While set, each load waits for a reply: `nil` succeeds, an error fails it.
+    // While set, each load waits for a reply: `nil` succeeds, an error fails it.
     let holdLoads = Locked(false)
     let loadReplies = AsyncQueue<RequestError?>()
     let loadError = Locked<RequestError?>(nil)
-    /// Fails sends and retries.
+    // Fails sends and retries.
     let sendError = Locked<RequestError?>(nil)
 
     init(store: FakeStore = FakeStore()) {

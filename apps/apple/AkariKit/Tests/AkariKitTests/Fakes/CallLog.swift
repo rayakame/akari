@@ -1,7 +1,7 @@
 import AkariKit
 import Foundation
 
-/// What the fakes were asked to do, in order, shared by a fake account and its store.
+// What the fakes were asked to do, in order, shared by a fake account and its store.
 final class CallLog: Sendable {
     enum Call: Equatable {
         case subscribe
@@ -40,14 +40,14 @@ final class CallLog: Sendable {
         }
     }
 
-    /// Everything but reads: subscriptions and account actions.
+    // Everything but reads: subscriptions and account actions.
     var actions: [Call] {
         calls.filter { call in
             if case .read = call { false } else { true }
         }
     }
 
-    /// Store reads made off the main thread; view models only read on it.
+    // Store reads made off the main thread; view models only read on it.
     var readsOffTheMainThread: Int { state.current.offMainThread }
 
     func append(_ call: Call) {
