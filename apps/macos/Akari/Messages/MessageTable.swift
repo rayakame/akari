@@ -4,9 +4,9 @@ import SwiftUI
 
 // Fed with values read in a SwiftUI body, so Observation drives the updates.
 struct MessageTable: NSViewRepresentable {
-    let rows: [MessageListModel.Row]
-    let atPresent: Bool
+    let state: MessageTableState
     let actions: MessageListActions
+    let link: MessageTableLink
 
     func makeCoordinator() -> MessageTableController {
         MessageTableController()
@@ -18,31 +18,68 @@ struct MessageTable: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.actions = actions
-        context.coordinator.show(rows, atPresent: atPresent)
+        link.controller = context.coordinator
+        context.coordinator.show(state)
     }
+}
+
+// Lets the SwiftUI parts around the table (jump bar, composer) reach its controller.
+final class MessageTableLink {
+    weak var controller: MessageTableController?
 }
 
 struct MessageArea: View {
     let messages: MessageListModel
     let placeholder: String
+    @State private var link = MessageTableLink()
 
     var body: some View {
+        let bridge = MessageListBridge(messages: messages, link: link)
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                MessageTable(
-                    rows: messages.rows, atPresent: messages.atPresent,
-                    actions: MessageListBridge(messages: messages)
-                )
-                .id(messages.channelId)
-                .overlay { status }
+                MessageTable(state: state, actions: bridge, link: link)
+                    .id(messages.channelId)
+                    .overlay { status }
+                    .overlay(alignment: .top) {
+                        if StaleCapsule.isShown(
+                            atPresent: messages.atPresent, isStale: messages.isStale,
+                            hasRows: !messages.rows.isEmpty)
+                        {
+                            StaleCapsule()
+                        }
+                    }
+                    .overlay(alignment: .bottom) {
+                        if let text = JumpBar.text(
+                            atPresent: messages.atPresent, isStale: messages.isStale,
+                            hasRows: !messages.rows.isEmpty)
+                        {
+                            JumpBar(text: text) { bridge.escape() }
+                        }
+                    }
                 ComposerView(
                     composer: messages.composer, placeholder: placeholder,
-                    areaHeight: geometry.size.height
+                    areaHeight: geometry.size.height,
+                    onSend: { link.controller?.jumpToPresent(load: false) },
+                    onEscape: { bridge.escape() }
                 )
                 .id(messages.channelId)
             }
         }
         .task(id: messages.channelId) { await messages.open() }
+    }
+
+    private var state: MessageTableState {
+        MessageTableState(
+            rows: messages.rows, atPresent: messages.atPresent,
+            reachedOldest: messages.reachedOldest, loading: messages.loading,
+            loadFailure: messages.loadFailure, beginning: beginning)
+    }
+
+    private var beginning: String {
+        placeholder.hasPrefix("Write a message in ")
+            ? "This is the beginning of \(placeholder.dropFirst("Write a message in ".count))."
+            : "This is the beginning of your conversation with "
+                + "\(placeholder.dropFirst("Write a message to ".count))."
     }
 
     @ViewBuilder private var status: some View {
@@ -65,9 +102,11 @@ struct MessageArea: View {
 // The table's actions on the channel's models.
 final class MessageListBridge: MessageListActions {
     let messages: MessageListModel
+    let link: MessageTableLink
 
-    init(messages: MessageListModel) {
+    init(messages: MessageListModel, link: MessageTableLink) {
         self.messages = messages
+        self.link = link
     }
 
     func retry(_ message: MessageId) {
@@ -76,5 +115,22 @@ final class MessageListBridge: MessageListActions {
 
     func delete(_ message: MessageId) {
         messages.composer.discard(message)
+    }
+
+    func loadMore(_ edge: MessageTimeline.Edge) {
+        Task {
+            switch edge {
+            case .older: await messages.loadOlder()
+            case .newer: await messages.loadNewer()
+            }
+        }
+    }
+
+    func jumpToLatest() {
+        Task { await messages.jumpToPresent() }
+    }
+
+    func escape() {
+        link.controller?.jumpToPresent(load: true)
     }
 }

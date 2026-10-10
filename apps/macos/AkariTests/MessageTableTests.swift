@@ -97,9 +97,31 @@ struct MessageTableTests {
     }
 
     func show(_ rows: [MessageListModel.Row]) {
-        controller.show(rows, atPresent: true)
+        show(MessageTableState(rows: rows))
+    }
+
+    func show(_ state: MessageTableState) {
+        controller.show(state)
         window.layoutIfNeeded()
         #expect(table.numberOfRows == controller.timeline.items.count)
+    }
+
+    var clip: NSClipView { controller.scrollView.contentView }
+
+    func index(of raw: UInt64) -> Int {
+        controller.timeline.items.firstIndex { $0.id == .message(MessageId(rawValue: raw)) } ?? -1
+    }
+
+    // Where the message's row starts, measured from the top of what's visible.
+    func place(of raw: UInt64) -> CGFloat {
+        table.rect(ofRow: index(of: raw)).minY - clip.bounds.minY
+    }
+
+    // As the user would: a scroll that isn't the controller's own.
+    func scroll(toRowOf raw: UInt64) {
+        clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: index(of: raw)).minY))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
     }
 
     // Every row's view shows the item at its index, not just the right number of rows.
@@ -190,7 +212,7 @@ struct MessageTableTests {
         let offset = table.rect(ofRow: first).minY - clip.bounds.minY
 
         rows += messages(5, from: 81)
-        controller.show(rows, atPresent: false)
+        show(MessageTableState(rows: rows, atPresent: false))
         window.layoutIfNeeded()
         table.needsLayout = true
         window.layoutIfNeeded()
@@ -205,7 +227,7 @@ struct MessageTableTests {
         show(rows)
         let clip = controller.scrollView.contentView
 
-        controller.show(rows, atPresent: false)
+        show(MessageTableState(rows: rows, atPresent: false))
         window.layoutIfNeeded()
         let first = visibleRows.lowerBound
         let offset = table.rect(ofRow: first).minY - clip.bounds.minY
@@ -299,6 +321,10 @@ struct MessageTableTests {
         }
     }
 
+    func cell(of raw: UInt64) throws -> NSView {
+        try cell(at: index(of: raw))
+    }
+
     func cell(at row: Int) throws -> NSView {
         let cell = try #require(table.view(atColumn: 0, row: row, makeIfNecessary: true))
         cell.layoutSubtreeIfNeeded()
@@ -360,7 +386,7 @@ struct MessageTableTests {
     func clickingMessageTextKeepsItsFont() throws {
         show([row(1, at: noon, content: "hello there")])
         let field = try #require(
-            textFields(in: try cell(at: 1)).first { $0.stringValue == "hello there" })
+            textFields(in: try cell(of: 1)).first { $0.stringValue == "hello there" })
 
         // What a click on selectable text does: the field editor takes over the text.
         field.selectText(nil)
@@ -514,7 +540,7 @@ struct MessageTableTests {
     @Test
     func theAppTagSitsCenteredBesideTheName() throws {
         show([row(1, by: author(9, "Ferris", bot: true), at: noon)])
-        let cell = try cell(at: 1)
+        let cell = try cell(of: 1)
         let fields = textFields(in: cell)
         let name = try #require(fields.first { $0.stringValue == "Ferris" })
         let tag = try #require(fields.first { $0.stringValue == "APP" })
@@ -529,7 +555,7 @@ struct MessageTableTests {
     @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
     func theAppTagCentersItsCapitalsInThePill(appearance: NSAppearance.Name) throws {
         show([row(1, by: author(9, "Ferris", bot: true), at: noon)])
-        let tag = try #require(textFields(in: try cell(at: 1)).first { $0.stringValue == "APP" })
+        let tag = try #require(textFields(in: try cell(of: 1)).first { $0.stringValue == "APP" })
         tag.appearance = NSAppearance(named: appearance)
         let rep = try #require(tag.bitmapImageRepForCachingDisplay(in: tag.bounds))
         tag.cacheDisplay(in: tag.bounds, to: rep)
@@ -555,7 +581,7 @@ struct MessageTableTests {
     func aComponentsV2MessageShowsAPlaceholder() throws {
         show([row(1, at: noon, content: "", componentsV2: true)])
 
-        let shown = textFields(in: try cell(at: 1)).filter { !$0.isHidden }.map(\.stringValue)
+        let shown = textFields(in: try cell(of: 1)).filter { !$0.isHidden }.map(\.stringValue)
         #expect(shown.contains { $0.contains("This message uses a layout Akari can't show yet") })
     }
 
@@ -569,10 +595,11 @@ struct MessageTableTests {
             table.view(atColumn: 0, row: $0, makeIfNecessary: true)
         }
 
-        #expect(cells[0] is DayDividerCell)
-        #expect((cells[1] as? MessageCell)?.showsHeader == true)
-        #expect((cells[2] as? MessageCell)?.showsHeader == false)
-        #expect(cells[3] is NoticeCell)
+        #expect(cells[0] is EdgeCell)
+        #expect(cells[1] is DayDividerCell)
+        #expect((cells[2] as? MessageCell)?.showsHeader == true)
+        #expect((cells[3] as? MessageCell)?.showsHeader == false)
+        #expect(cells[4] is NoticeCell)
     }
 
     final class RecordingActions: MessageListActions {
@@ -585,11 +612,23 @@ struct MessageTableTests {
         func delete(_ message: MessageId) {
             calls.append("delete \(message.rawValue)")
         }
+
+        func loadMore(_ edge: MessageTimeline.Edge) {
+            calls.append(edge == .older ? "more older" : "more newer")
+        }
+
+        func jumpToLatest() {
+            calls.append("latest")
+        }
+
+        func escape() {
+            calls.append("escape")
+        }
     }
 
-    func contentColor(at row: Int, text: String) throws -> NSColor? {
+    func contentColor(of raw: UInt64, text: String) throws -> NSColor? {
         let field = try #require(
-            textFields(in: try cell(at: row)).first { $0.stringValue.hasPrefix(text) })
+            textFields(in: try cell(of: raw)).first { $0.stringValue.hasPrefix(text) })
         return field.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil)
             as? NSColor
     }
@@ -603,19 +642,20 @@ struct MessageTableTests {
             row(3, at: noon + 20, delivery: .failed),
         ])
 
-        #expect(try contentColor(at: 1, text: "message 1") == Palette.textDefault)
-        #expect(try contentColor(at: 2, text: "message 2") == Palette.textMuted)
-        #expect(try contentColor(at: 3, text: "message 3") == Palette.danger)
-        let failed = try cell(at: 3)
+        #expect(try contentColor(of: 1, text: "message 1") == Palette.textDefault)
+        #expect(try contentColor(of: 2, text: "message 2") == Palette.textMuted)
+        #expect(try contentColor(of: 3, text: "message 3") == Palette.danger)
+        let failed = try cell(of: 3)
         let visible = { (cell: NSView) in
             self.textFields(in: cell).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
         }
         #expect(visible(failed).contains("Not sent."))
-        #expect(!visible(try cell(at: 2)).contains("Not sent."))
+        #expect(!visible(try cell(of: 2)).contains("Not sent."))
         let buttons = buttons(in: failed)
         try #require(buttons.first { $0.title == "Retry" }).performClick(nil)
         try #require(buttons.first { $0.title == "Delete" }).performClick(nil)
-        #expect(actions.calls == ["retry 3", "delete 3"])
+        // The short list also asks for older messages; only the row's actions matter here.
+        #expect(actions.calls.filter { !$0.hasPrefix("more") } == ["retry 3", "delete 3"])
     }
 
     func buttons(in view: NSView) -> [NSButton] {
@@ -632,7 +672,7 @@ struct MessageTableTests {
             row(3, at: noon + 20),
         ])
 
-        let fields = textFields(in: try cell(at: 1)).filter {
+        let fields = textFields(in: try cell(of: 1)).filter {
             $0.stringValue.hasPrefix("message 1")
         }
         let text = try #require(fields.first).attributedStringValue
@@ -640,9 +680,358 @@ struct MessageTableTests {
         let marker = text.attributes(at: text.length - 1, effectiveRange: nil)
         #expect((marker[.font] as? NSFont)?.pointSize == 12)
         #expect(marker[.foregroundColor] as? NSColor == Palette.chatTextMuted)
-        let extras = textFields(in: try cell(at: 2)).filter { $0.stringValue.contains("a.zip") }
+        let extras = textFields(in: try cell(of: 2)).filter { $0.stringValue.contains("a.zip") }
         #expect(try #require(extras.first).stringValue.hasSuffix(" (edited)"))
-        let plain = textFields(in: try cell(at: 3)).filter { $0.stringValue.hasPrefix("message 3") }
+        let plain = textFields(in: try cell(of: 3)).filter { $0.stringValue.hasPrefix("message 3") }
         #expect(try #require(plain.first).stringValue == "message 3")
+    }
+
+    // MARK: history
+
+    // 100 one-line messages, 101...200, two minutes apart on one day.
+    var page: [MessageListModel.Row] { messages(100, from: 101) }
+
+    func heights(_ raws: ClosedRange<UInt64>) -> CGFloat {
+        raws.reduce(0) { $0 + table.rect(ofRow: index(of: $1)).height }
+    }
+
+    @Test
+    func anOlderPageKeepsTheReaderExactlyInPlace() {
+        show(page)
+        scroll(toRowOf: 130)
+        let before = place(of: 130)
+        let y = clip.bounds.minY
+
+        show(messages(50, from: 51) + page)
+
+        // The new rows went in above; 101 losing its header takes a little back.
+        #expect(abs(place(of: 130) - before) <= 0.5)
+        #expect(clip.bounds.minY - y > heights(52...100))
+        #expect(
+            controller.timeline.items[visibleRows.lowerBound].id
+                == .message(MessageId(rawValue: 130)))
+    }
+
+    @Test
+    func anOlderPageDuringALiveScrollKeepsTheReaderInPlace() {
+        show(page)
+        scroll(toRowOf: 130)
+        let before = place(of: 130)
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+
+        show(messages(50, from: 51) + page)
+
+        #expect(abs(place(of: 130) - before) <= 0.5)
+    }
+
+    @Test
+    func aPageThatLandsDuringTheTopBounceWaitsForItToEnd() {
+        show(page)
+        clip.scroll(to: NSPoint(x: 0, y: -40))
+        controller.scrollView.reflectScrolledClipView(clip)
+        let before = place(of: 101)
+        let shown = table.numberOfRows
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+
+        show(MessageTableState(rows: messages(50, from: 51) + page))
+        #expect(table.numberOfRows == shown)
+        #expect(abs(place(of: 101) - before) <= 0.5)
+
+        postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+        window.layoutIfNeeded()
+        #expect(table.numberOfRows == 152)
+        #expect(abs(place(of: 101) - before) <= 0.5)
+    }
+
+    @Test
+    func aPageThatTrimsTheOtherEndMovesNothing() {
+        show(page)
+        scroll(toRowOf: 130)
+        let before = place(of: 130)
+
+        let older = messages(50, from: 51) + page.prefix(50)
+        show(MessageTableState(rows: older, atPresent: false))
+        #expect(abs(place(of: 130) - before) <= 0.5)
+
+        let newer = Array(page.prefix(50)) + messages(50, from: 151)
+        show(MessageTableState(rows: newer, atPresent: false))
+        #expect(abs(place(of: 130) - before) <= 0.5)
+    }
+
+    @Test
+    func deletingAboveBelowOrTheFirstVisibleRowMovesNothing() {
+        var rows = page
+        show(rows)
+        scroll(toRowOf: 150)
+        let before = place(of: 150)
+
+        rows.removeAll { $0.id.rawValue == 140 }
+        show(rows)
+        #expect(abs(place(of: 150) - before) <= 0.5)
+
+        rows.removeAll { $0.id.rawValue == 195 }
+        show(rows)
+        #expect(abs(place(of: 150) - before) <= 0.5)
+
+        let next = place(of: 151)
+        rows.removeAll { $0.id.rawValue == 150 }
+        show(rows)
+        #expect(abs(place(of: 151) - next) <= 0.5)
+    }
+
+    @Test
+    func aDeleteWhilePinnedStaysPinned() {
+        var rows = page
+        show(rows)
+        rows.removeLast()
+        show(rows)
+
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+        #expect(controller.isPinnedToBottom)
+    }
+
+    @Test
+    func anEditAboveTheReaderThatGrowsMovesNothing() {
+        var rows = page
+        show(rows)
+        scroll(toRowOf: 150)
+        let before = place(of: 150)
+        let long = String(repeating: "words that wrap ", count: 30)
+
+        rows[39] = row(
+            140, by: rows[39].message.author, at: rows[39].message.timestamp, content: long)
+        show(rows)
+        #expect(abs(place(of: 150) - before) <= 0.5)
+
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+        rows[44] = row(
+            145, by: rows[44].message.author, at: rows[44].message.timestamp, content: long)
+        show(rows)
+        #expect(abs(place(of: 150) - before) <= 0.5)
+    }
+
+    @Test
+    func everyCompensationIsLogged() {
+        var lines: [String] = []
+        let enabled = ScrollLog.enabled
+        let write = ScrollLog.write
+        ScrollLog.enabled = true
+        ScrollLog.write = { lines.append($0) }
+        defer {
+            ScrollLog.enabled = enabled
+            ScrollLog.write = write
+        }
+        show(page)
+        scroll(toRowOf: 130)
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+
+        show(messages(50, from: 51) + page)
+
+        let compensations = lines.filter { $0.contains("compensates") }
+        #expect(compensations.count == 1, "\(compensations)")
+        let line = compensations.first ?? ""
+        #expect(line.contains("inserted 50 reloaded 1 above"), "\(line)")
+        #expect(line.contains("live true"), "\(line)")
+        #expect(line.contains("delta"), "\(line)")
+    }
+
+    @Test
+    func nearTheTopAsksForOlderOnceUntilItLands() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        #expect(actions.calls.isEmpty)
+
+        scroll(toRowOf: 103)
+        #expect(actions.calls == ["more older"])
+        // Before the model says it's loading.
+        scroll(toRowOf: 104)
+        #expect(actions.calls == ["more older"])
+        show(MessageTableState(rows: page, loading: .older))
+        scroll(toRowOf: 102)
+        #expect(actions.calls == ["more older"])
+
+        show(messages(5, from: 96) + page)
+        #expect(actions.calls == ["more older", "more older"])
+
+        show(MessageTableState(rows: messages(5, from: 96) + page, reachedOldest: true))
+        scroll(toRowOf: 97)
+        #expect(actions.calls == ["more older", "more older"])
+    }
+
+    @Test
+    func aFailedEdgeWaitsForTryAgain() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        let failure = MessageListModel.LoadFailure(load: .older, error: .ServerError(status: 500))
+        show(MessageTableState(rows: page, loadFailure: failure))
+
+        scroll(toRowOf: 102)
+        #expect(actions.calls.isEmpty)
+        let edge = try cell(at: 0)
+        #expect(textFields(in: edge).contains { $0.stringValue == "Couldn't load older messages." })
+        try #require(buttons(in: edge).first { $0.title == "Try again" }).performClick(nil)
+        #expect(actions.calls == ["more older"])
+    }
+
+    @Test
+    func nearTheBottomAsksForNewerOnlyWhileDetached() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        #expect(actions.calls.isEmpty)
+
+        show(MessageTableState(rows: page, atPresent: false))
+        #expect(actions.calls == ["more newer"])
+    }
+
+    @Test
+    func noLoadsBeforeTheFirstFill() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(MessageTableState(rows: [], loading: .latest))
+        show(MessageTableState(rows: []))
+        #expect(actions.calls.isEmpty)
+    }
+
+    @Test
+    func aShortChannelLoadsUntilItFillsOrBegins() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(messages(5))
+        #expect(actions.calls == ["more older"])
+
+        show(MessageTableState(rows: messages(5), reachedOldest: true))
+        #expect(actions.calls == ["more older"])
+    }
+
+    @Test
+    func edgesKeepOneHeightInEveryState() throws {
+        let failure = MessageListModel.LoadFailure(load: .older, error: .ServerError(status: 500))
+        let states = [
+            MessageTableState(rows: page),
+            MessageTableState(rows: page, loading: .older),
+            MessageTableState(rows: page, loadFailure: failure),
+            MessageTableState(
+                rows: page, reachedOldest: true, beginning: "This is the beginning of #general."),
+        ]
+        var heights: [CGFloat] = []
+        for state in states {
+            show(state)
+            heights.append(table.rect(ofRow: 0).height)
+        }
+        #expect(Set(heights) == [48])
+
+        let edge = try cell(at: 0)
+        #expect(
+            textFields(in: edge).contains {
+                $0.stringValue == "This is the beginning of #general."
+                    && !$0.isHiddenOrHasHiddenAncestor
+            })
+        show(MessageTableState(rows: page, loading: .older))
+        let spinner = try #require(spinners(in: try cell(at: 0)).first)
+        #expect(!spinner.isHiddenOrHasHiddenAncestor)
+    }
+
+    func spinners(in view: NSView) -> [NSProgressIndicator] {
+        view.subviews.flatMap { subview in
+            (subview as? NSProgressIndicator).map { [$0] } ?? spinners(in: subview)
+        }
+    }
+
+    @Test
+    func jumpingToThePresentPinsWhenThePageLands() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(MessageTableState(rows: page, atPresent: false))
+        scroll(toRowOf: 150)
+        actions.calls = []
+
+        controller.jumpToPresent(load: true)
+        #expect(actions.calls == ["latest"])
+        show(messages(100, from: 301))
+
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    @Test
+    func aScrollBeforeTheJumpLandsCancelsIt() {
+        show(MessageTableState(rows: page, atPresent: false))
+        scroll(toRowOf: 150)
+        controller.jumpToPresent(load: true)
+        scroll(toRowOf: 140)
+
+        show(messages(100, from: 301))
+
+        #expect(!visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    @Test
+    func jumpingAtThePresentScrollsWithoutLoading() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        scroll(toRowOf: 120)
+
+        controller.jumpToPresent(load: true)
+        window.layoutIfNeeded()
+
+        #expect(!actions.calls.contains("latest"))
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+    }
+
+    @Test
+    func escapeInTheListJumpsToThePresent() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+
+        table.cancelOperation(nil)
+
+        #expect(actions.calls == ["escape"])
+    }
+
+    @Test
+    func sendingPinsTheList() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        var rows = page
+        show(rows)
+        scroll(toRowOf: 120)
+
+        controller.jumpToPresent(load: false)
+        rows.append(row(201, at: noon + 201 * 120, delivery: .pending))
+        show(rows)
+        #expect(visibleRows.contains(table.numberOfRows - 1))
+
+        show(MessageTableState(rows: rows, atPresent: false))
+        scroll(toRowOf: 120)
+        actions.calls = []
+        controller.jumpToPresent(load: false)
+        #expect(!actions.calls.contains("latest"))
+    }
+
+    @Test
+    func theJumpBarShowsOnlyWhileDetached() {
+        #expect(JumpBar.text(atPresent: true, isStale: false, hasRows: true) == nil)
+        #expect(JumpBar.text(atPresent: false, isStale: false, hasRows: false) == nil)
+        #expect(
+            JumpBar.text(atPresent: false, isStale: false, hasRows: true)
+                == "You're reading older messages")
+    }
+
+    @Test
+    func aStaleWindowSaysCatchingUpOrMissingMessages() {
+        #expect(StaleCapsule.isShown(atPresent: true, isStale: true, hasRows: true))
+        #expect(!StaleCapsule.isShown(atPresent: false, isStale: true, hasRows: true))
+        #expect(!StaleCapsule.isShown(atPresent: true, isStale: false, hasRows: true))
+        #expect(!StaleCapsule.isShown(atPresent: true, isStale: true, hasRows: false))
+        #expect(
+            JumpBar.text(atPresent: false, isStale: true, hasRows: true)
+                == "Some messages may be missing")
     }
 }

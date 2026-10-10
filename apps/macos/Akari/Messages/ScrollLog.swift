@@ -14,12 +14,16 @@ enum ScrollLog {
         }
     }
 
+    // Where lines go; the tests read them here.
+    static var write: (String) -> Void = { text in
+        logger.info("\(text, privacy: .public)")
+    }
+
     static func log(_ message: @autoclosure () -> String) {
         guard enabled else {
             return
         }
-        let text = message()
-        logger.info("\(text, privacy: .public)")
+        write(message())
     }
 
     static func name(_ elasticity: NSScrollView.Elasticity) -> String {
