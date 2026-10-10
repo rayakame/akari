@@ -1,7 +1,6 @@
 import AkariKit
 import SwiftUI
 
-/// The QR column: a code to scan, then who scanned it.
 struct QrPanel: View {
     let model: LoginModel
 

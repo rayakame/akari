@@ -1,6 +1,5 @@
 import AppKit
 
-/// The table's version of `InitialsAvatar`.
 final class AvatarView: NSView {
     var name = "" {
         didSet { needsDisplay = true }

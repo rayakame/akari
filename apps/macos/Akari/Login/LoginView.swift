@@ -1,8 +1,6 @@
 import AkariKit
 import SwiftUI
 
-/// The login screen of docs/ui/login.md: the form and the QR code side by side, one column
-/// when the window is narrow.
 struct LoginView: View {
     @Bindable var model: LoginModel
 
@@ -72,7 +70,6 @@ struct StepHeading: View {
     }
 }
 
-/// The error or the rate-limit countdown, then the step's button.
 struct SubmitArea: View {
     let model: LoginModel
     let title: String

@@ -1,7 +1,6 @@
 import AkariKit
 import SwiftUI
 
-/// The DM list at home (docs/ui/channel-list.md).
 struct DirectMessageList: View {
     let session: SessionModel
 

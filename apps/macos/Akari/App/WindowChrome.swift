@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Makes the native title bar transparent over full-size content, like the 32 pt title bar of
-/// docs/ui/layout.md, while keeping the traffic lights, dragging and zooming native.
+// A transparent native title bar keeps dragging, zooming and the traffic lights native.
 struct WindowChrome: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         ChromeView()

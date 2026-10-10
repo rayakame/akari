@@ -1,8 +1,7 @@
 import AkariKit
 import AppKit
 
-/// Shows a channel's rows in an `NSTableView` by applying row updates: removals, insertions
-/// and reloads of changed rows, never `reloadData()` (docs: D14 in the PR 3 plan).
+// Row updates only: a full reloadData() would lose the scroll position.
 final class MessageTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     let tableView: MessageTableView
     let scrollView = NSScrollView()
@@ -167,8 +166,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 }
 
-/// Reports each finished layout. While measuring rows, NSTableView re-anchors the scroll
-/// position inside its layout, so pinning to the bottom has to happen after it.
+// NSTableView re-anchors the scroll position inside its layout, so pinning comes after it.
 class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
 

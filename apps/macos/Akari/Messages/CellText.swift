@@ -1,6 +1,5 @@
 import AppKit
 
-// Shared text styling for the message cells.
 enum CellText {
     static func label(wrapping: Bool = false) -> NSTextField {
         let label =
@@ -14,7 +13,6 @@ enum CellText {
         return label
     }
 
-    /// 16 pt on a 22 pt line, as message bodies are.
     static func body(_ text: String, color: NSColor) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = 22
@@ -27,7 +25,6 @@ enum CellText {
             ])
     }
 
-    /// A line with an SF Symbol in front, for replies, attachments, embeds and stickers.
     static func symbolLine(_ symbol: String, _ text: String, size: CGFloat = 14)
         -> NSAttributedString
     {

@@ -2,8 +2,7 @@ import Darwin
 import Foundation
 import OSLog
 
-/// Logs once per process how long it took from launch until a message list showed rows, for
-/// the launch measurement in the PR. Only the duration is logged.
+// For the launch measurement; only the duration is logged.
 enum FirstChannelTimer {
     private static var reported = false
 

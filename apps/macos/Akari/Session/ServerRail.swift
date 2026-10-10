@@ -1,7 +1,6 @@
 import AkariKit
 import SwiftUI
 
-/// The server rail of docs/ui/server-list.md.
 struct ServerRail: View {
     let session: SessionModel
 
@@ -66,7 +65,6 @@ private struct RailItem<Icon: View>: View {
     }
 }
 
-/// The bar on the rail's left edge: 4 wide where it shows, its height by state.
 private struct RailPill: View {
     let height: CGFloat
 
@@ -79,7 +77,6 @@ private struct RailPill: View {
     }
 }
 
-/// A 40 pt rounded square: `hoverBackground`, or the brand color when hovered or selected.
 struct RailIcon<Content: View>: View {
     let highlighted: Bool
     @ViewBuilder let content: Content
@@ -96,7 +93,6 @@ struct RailIcon<Content: View>: View {
     }
 }
 
-/// A server without an icon shows its initials, smaller the longer they are.
 struct GuildIcon: View {
     let name: String
     let highlighted: Bool

@@ -1,6 +1,6 @@
 import AppKit
 
-/// View → Theme: dark by default, as CLAUDE.md asks.
+// Dark by default, as CLAUDE.md asks.
 enum ThemeChoice: String, CaseIterable, Identifiable {
     case dark
     case light
@@ -18,7 +18,6 @@ enum ThemeChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    /// `nil` follows the system.
     var appearance: NSAppearance? {
         switch self {
         case .dark: NSAppearance(named: .darkAqua)

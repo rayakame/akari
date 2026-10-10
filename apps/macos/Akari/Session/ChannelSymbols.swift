@@ -1,8 +1,6 @@
 import AkariKit
 
-/// SF Symbols for Discord's channel icons (docs/ui/channel-list.md).
 enum ChannelSymbols {
-    /// Added to a channel's symbol when it's marked NSFW.
     static let nsfwBadge = "exclamationmark.triangle.fill"
 
     static func name(for kind: ChannelType) -> String {
@@ -22,7 +20,6 @@ enum ChannelSymbols {
         }
     }
 
-    /// What a row that doesn't open says on hover.
     static func unsupported(_ kind: ChannelType) -> String {
         switch kind {
         case .guildVoice: "Voice channels aren't supported yet"

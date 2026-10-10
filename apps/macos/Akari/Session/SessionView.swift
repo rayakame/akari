@@ -1,7 +1,6 @@
 import AkariKit
 import SwiftUI
 
-/// The main window of docs/ui/layout.md.
 struct SessionView<MessageArea: View>: View {
     let session: SessionModel
     @ViewBuilder let messageArea: (MessageListModel) -> MessageArea

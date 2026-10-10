@@ -1,7 +1,7 @@
 import AkariKit
 import SwiftUI
 
-/// Akari → Log Out. Discord keeps it in Settings, which Akari doesn't have yet.
+// Discord keeps Log Out in Settings, which Akari doesn't have yet.
 struct AccountCommands: Commands {
     let app: AppModel?
 

@@ -1,6 +1,5 @@
 import Foundation
 
-/// The resizable sidebar: the server rail and the channel list together (docs/ui/layout.md).
 enum SidebarWidth {
     static let range: ClosedRange<CGFloat> = 264...432
     static let standard: CGFloat = 375
@@ -11,7 +10,6 @@ enum SidebarWidth {
         min(max(width, range.lowerBound), range.upperBound)
     }
 
-    /// The channel list: the sidebar without the rail and the line between them.
     static func listWidth(for total: CGFloat) -> CGFloat {
         total - rail - 1
     }

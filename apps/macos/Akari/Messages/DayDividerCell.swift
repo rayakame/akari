@@ -1,6 +1,5 @@
 import AppKit
 
-/// A line across the list with the day's date in the middle.
 final class DayDividerCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("day")
 

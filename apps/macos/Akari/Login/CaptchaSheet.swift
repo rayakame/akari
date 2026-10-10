@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Captchas need a web view, which comes later; QR login doesn't ask for one.
+// Captchas need a web view, which comes later; QR login doesn't ask for one.
 struct CaptchaSheet: View {
     let dismiss: () -> Void
 

@@ -1,8 +1,6 @@
 import AkariKit
 import AppKit
 
-/// One message: with the author's avatar, name and time when it starts a group, else just the
-/// content with the time in the gutter on hover (docs/ui/message-list.md).
 final class MessageCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("message")
 
@@ -167,7 +165,6 @@ final class MessageCell: NSTableCellView {
     }
 }
 
-/// The small tag after a bot's or webhook's name.
 private final class TagLabel: NSTextField {
     init() {
         super.init(frame: .zero)

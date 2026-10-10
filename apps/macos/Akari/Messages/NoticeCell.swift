@@ -1,7 +1,6 @@
 import AkariKit
 import AppKit
 
-/// A system message: an icon, Akari's sentence for it and the time.
 final class NoticeCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("notice")
 

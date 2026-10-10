@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// A form field with its label above it; an error shows in the label line, in red.
 struct LabeledField<Field: View>: View {
     let label: String
     let error: String?
@@ -32,7 +31,6 @@ struct LabeledField<Field: View>: View {
     }
 }
 
-/// The full-width button at the bottom of each step.
 struct PrimaryButton: View {
     let title: String
     let busy: Bool
@@ -59,7 +57,6 @@ struct PrimaryButton: View {
     }
 }
 
-/// A text button in the link color.
 struct LinkButton: View {
     let title: String
     let action: () -> Void

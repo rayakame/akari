@@ -1,6 +1,5 @@
 import Foundation
 
-/// Message times as docs/ui/message-list.md shows them, in the user's locale and time zone.
 enum MessageFormat {
     static func groupTime(_ date: Date, now: Date, calendar: Calendar, locale: Locale) -> String {
         let time = shortTime(date, calendar: calendar, locale: locale)

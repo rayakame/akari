@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// A drag handle on the sidebar's right edge.
 struct SidebarResizer: View {
     @Binding var width: CGFloat
     @State private var start: CGFloat?

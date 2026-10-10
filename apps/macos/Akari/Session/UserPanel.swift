@@ -1,8 +1,7 @@
 import AkariKit
 import SwiftUI
 
-/// The card at the bottom of the sidebar. Discord's status dot and voice and settings buttons
-/// wait for presence, voice and settings.
+// Discord's status dot and voice and settings buttons wait for presence, voice and settings.
 struct UserPanel: View {
     let user: User?
 

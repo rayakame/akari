@@ -3,7 +3,7 @@ import Foundation
 
 enum Launch {
     enum State {
-        /// Under tests nothing starts: no client, no Keychain, no network.
+        // Under tests nothing starts: no client, no Keychain, no network.
         case testing
         case failed(String)
         case running(AppModel)
@@ -33,7 +33,6 @@ enum Launch {
         }
     }
 
-    /// `-AkariLog <filter>` as a launch argument, e.g. `akari_core=info`.
     static func enableLoggingIfAsked(_ defaults: UserDefaults, enable: (String) throws -> Void) {
         guard let filter = defaults.string(forKey: "AkariLog") else {
             return

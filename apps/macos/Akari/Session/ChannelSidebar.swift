@@ -1,7 +1,6 @@
 import AkariKit
 import SwiftUI
 
-/// A guild's column: its name, then its channels (docs/ui/channel-list.md).
 struct ChannelSidebar: View {
     let session: SessionModel
     let list: ChannelListModel
@@ -135,7 +134,6 @@ struct ChannelRow: View {
     }
 }
 
-/// A channel's symbol, with the warning badge for NSFW channels.
 struct ChannelSymbol: View {
     let channel: Channel
     var size: CGFloat = 20

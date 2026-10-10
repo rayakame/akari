@@ -1,7 +1,6 @@
 import AkariKit
 import SwiftUI
 
-/// The bar above the messages: the channel's symbol, its name and topic.
 struct ChannelHeader: View {
     let channel: Channel?
     let name: String

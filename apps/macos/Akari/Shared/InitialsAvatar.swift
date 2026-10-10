@@ -1,7 +1,6 @@
 import AkariKit
 import SwiftUI
 
-/// A colored circle with up to two initials, for users without a picture.
 struct InitialsAvatar: View {
     let name: String
     let id: UInt64

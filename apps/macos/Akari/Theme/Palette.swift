@@ -1,6 +1,6 @@
 import AppKit
 
-/// The color tokens of docs/ui/theme.md, each resolving to its dark or light value.
+// The tokens of docs/ui/theme.md; each resolves to its dark or light value.
 enum Palette {
     static let frame = token("frame", dark: "#121214", light: "#f3f3f4")
     static let chat = token("chat", dark: "#1a1a1e", light: "#fbfbfb")
@@ -30,7 +30,6 @@ enum Palette {
         "inputBackground", dark: "#000000", light: "#000000", alpha: (0.12, 0.02))
     static let danger = token("danger", dark: "#f23f43", light: "#da373c")
     static let brand = NSColor(hex: "#5865f2")
-    /// Initials avatars, picked by user ID modulo 6.
     static let avatars = ["#5865f2", "#3e8e7e", "#c06c2b", "#a352b5", "#c2445a", "#4f7fba"]
         .map { NSColor(hex: $0) }
 

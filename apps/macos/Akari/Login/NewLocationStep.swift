@@ -1,8 +1,7 @@
 import AkariKit
 import SwiftUI
 
-/// Discord's confirmation link opens the official client, so Akari asks for the address it
-/// opened instead (docs/ui/login.md).
+// Discord's email link opens the official client, so Akari asks for the address it opened.
 struct NewLocationStep: View {
     @Bindable var model: LoginModel
     let via: NewLocation

@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// View → Theme.
 struct ThemeCommands: Commands {
     @AppStorage(ThemeChoice.key) private var theme = ThemeChoice.dark
 

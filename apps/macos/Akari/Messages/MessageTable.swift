@@ -2,7 +2,7 @@ import AkariKit
 import AppKit
 import SwiftUI
 
-/// The table, fed with values read in a SwiftUI body so Observation drives its updates.
+// Fed with values read in a SwiftUI body, so Observation drives the updates.
 struct MessageTable: NSViewRepresentable {
     let rows: [MessageListModel.Row]
     let atPresent: Bool
@@ -20,7 +20,6 @@ struct MessageTable: NSViewRepresentable {
     }
 }
 
-/// The open channel's messages: one table per channel, loaded when it appears.
 struct MessageArea: View {
     let messages: MessageListModel
 

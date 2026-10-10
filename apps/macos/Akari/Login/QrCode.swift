@@ -2,14 +2,11 @@ import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
-/// QR codes for the login screen, drawn by the app.
 enum QrCode {
-    /// The modules per side, the generator's margin included.
     static func moduleCount(for text: String) -> Int? {
         code(for: text).map { Int($0.extent.width) }
     }
 
-    /// Black on white, scaled by a whole factor so every module stays sharp; at most `side`.
     static func image(for text: String, side: CGFloat) -> NSImage? {
         guard let code = code(for: text) else {
             return nil
