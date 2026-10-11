@@ -502,6 +502,25 @@ fn gzip(body: &[u8]) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
+fn zlib(body: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(body).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn brotli_compressed(body: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut out = Vec::new();
+    {
+        let mut writer = brotli::CompressorWriter::new(&mut out, 4096, 5, 22);
+        writer.write_all(body).unwrap();
+    }
+    out
+}
+
+// Each encoding Akari advertises in Accept-Encoding must decode, or a dropped reqwest feature
+// would break every page.
 #[tokio::test]
 async fn pages_arrive_compressed_or_not() {
     let server = MockServer::start().await;
@@ -513,6 +532,8 @@ async fn pages_arrive_compressed_or_not() {
             Some("zstd"),
             zstd::stream::encode_all(page.as_slice(), 3).unwrap(),
         ),
+        ("/api/v9/br", Some("br"), brotli_compressed(&page)),
+        ("/api/v9/deflate", Some("deflate"), zlib(&page)),
         ("/api/v9/plain", None, page.clone()),
     ] {
         let mut response = ResponseTemplate::new(200)
@@ -534,7 +555,7 @@ async fn pages_arrive_compressed_or_not() {
     }
     let client = client(&server).await;
 
-    for route in ["gzip", "zstd", "plain"] {
+    for route in ["gzip", "zstd", "br", "deflate", "plain"] {
         let body: Value = client
             .get_json(route, &RequestExtras::default())
             .await

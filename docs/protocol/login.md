@@ -18,13 +18,14 @@ login worked end to end against Discord on 2026-10-08 (`akari-cli login --qr`).
 REST goes to `https://discord.com/api/v9` (v9 is the client default,
 [API versioning](https://docs.discord.food/reference#api-versioning)). Every request
 carries the client headers from [client-properties.md](client-properties.md):
-`User-Agent`, `X-Super-Properties` and `X-Discord-Locale`. Authenticated requests carry
-the bare token in `Authorization`, with no `Bearer` prefix.
+`User-Agent`, `X-Super-Properties` and `X-Discord-Locale`, plus the official client's
+`Accept-Encoding: gzip, deflate, br, zstd`. Authenticated requests carry the bare token in
+`Authorization`, with no `Bearer` prefix.
 
 The REST client only speaks HTTPS and never follows redirects, so the `Authorization`
 header can't be sent anywhere a response points to. A redirect reaches the caller as an
-unexpected status. Response bodies are capped at 4 MiB; a larger one ends the request
-with `UnexpectedResponse`. Plain `http://` and `ws://` endpoints need
+unexpected status. Response bodies are capped at 4 MiB after decompression; a larger one
+ends the request with `UnexpectedResponse`. Plain `http://` and `ws://` endpoints need
 `Endpoints::allow_plaintext`, which only local test servers set.
 
 Requests before login also carry `X-Fingerprint`

@@ -46,6 +46,7 @@ tracing = "0.1"
 wiremock = "0.6"
 # Test-only: compresses bodies the way Discord's CDN would.
 flate2 = "1.1"
+brotli = { version = "9", default-features = false, features = ["std"] }
 
 # Without "tracing-log": tungstenite logs whole frames, the token included, through `log`.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
