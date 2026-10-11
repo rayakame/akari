@@ -190,6 +190,7 @@ pub(crate) struct ReadyDiff {
 pub(crate) struct State {
     entities: Entities,
     ready: bool,
+    restored: bool,
     windows: Windows,
     cooldowns: Cooldowns,
 }
@@ -204,6 +205,7 @@ impl State {
         Self {
             entities: Entities::default(),
             ready: false,
+            restored: false,
             windows: Windows::new(limits),
             cooldowns: Cooldowns::default(),
         }
@@ -214,9 +216,9 @@ impl State {
         self.swap(next, diff, events);
     }
 
-    // `None` before the first READY, which has nothing to diff against.
+    // `None` before the first READY or a restore, which leave nothing to diff against.
     pub(crate) fn ready_diff(&self, next: &Entities) -> Option<ReadyDiff> {
-        if !self.ready {
+        if !self.ready && !self.restored {
             return None;
         }
         let mut events = Vec::new();
@@ -246,7 +248,10 @@ impl State {
             for channel in diff.removed_channels {
                 self.windows.drop_channel(channel);
             }
-            self.windows.mark_stale(events);
+            // Windows loaded since a restore are as fresh as this READY.
+            if self.ready {
+                self.windows.mark_stale(events);
+            }
         }
         self.ready = true;
         events.push(StoreEvent::Ready);
@@ -255,6 +260,17 @@ impl State {
 
     pub(crate) fn me(&self) -> Option<UserId> {
         self.entities.me()
+    }
+
+    // Only before the first READY: a READY that came first is fresher than any cache.
+    pub(crate) fn restore(&mut self, cached: Entities, events: &mut Vec<StoreEvent>) -> bool {
+        if self.ready || self.restored {
+            return false;
+        }
+        self.entities = cached;
+        self.restored = true;
+        events.push(StoreEvent::Restored);
+        true
     }
 
     fn diff(&self, next: &Entities, events: &mut Vec<StoreEvent>) {
@@ -712,6 +728,15 @@ impl State {
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {
         self.windows.abort_load(ticket, events);
+    }
+
+    pub(crate) fn fill_from_cache(
+        &mut self,
+        ticket: LoadTicket,
+        messages: Vec<Arc<Message>>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.fill_from_cache(ticket, messages, events);
     }
 
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {

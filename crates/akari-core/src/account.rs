@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::cache::{DiskCache, Flusher};
+use crate::cache::{CacheThread, DiskCache, Flusher};
 use crate::gateway::session::Timing;
 use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
@@ -107,6 +107,7 @@ pub(crate) struct Shared {
     runtime: tokio::runtime::Handle,
     delivering: Mutex<BTreeSet<MessageId>>,
     flusher: Option<Flusher>,
+    cache: Option<CacheThread>,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -234,14 +235,41 @@ impl Shared {
         } else {
             0
         };
-        let mut attempt = 0;
-        let loaded = loop {
-            match self.rest.list_messages(channel, query, limit).await {
-                Err(err) if attempt < retries && err.is_transient() => {
-                    tokio::time::sleep(SERVER_ERROR_RETRY * 2u32.pow(attempt)).await;
-                    attempt += 1;
+        let request = async {
+            let mut attempt = 0;
+            loop {
+                match self.rest.list_messages(channel, query, limit).await {
+                    Err(err) if attempt < retries && err.is_transient() => {
+                        tokio::time::sleep(SERVER_ERROR_RETRY * 2u32.pow(attempt)).await;
+                        attempt += 1;
+                    }
+                    loaded => break loaded,
                 }
-                loaded => break loaded,
+            }
+        };
+        let loaded = match self.cache_for(channel, ticket) {
+            None => request.await,
+            // A page never waits for the disk; cached messages show if they come first, or
+            // when the page failed, e.g. offline.
+            Some(cache) => {
+                let fill = async {
+                    if let Some(messages) = cache.read_window(channel).await
+                        && !messages.is_empty()
+                    {
+                        self.store.fill_from_cache(ticket, messages);
+                    }
+                };
+                let mut request = std::pin::pin!(request);
+                let mut fill = std::pin::pin!(fill);
+                tokio::select! {
+                    loaded = &mut request => {
+                        if loaded.is_err() {
+                            fill.await;
+                        }
+                        loaded
+                    }
+                    () = &mut fill => request.await,
+                }
             }
         };
         unfinished.ticket = None;
@@ -272,6 +300,16 @@ impl Shared {
                 Err(err)
             }
         }
+    }
+
+    // Only the first page of an empty window can use the cache's copy of the channel.
+    fn cache_for(&self, channel: ChannelId, ticket: LoadTicket) -> Option<&CacheThread> {
+        let cache = self.cache.as_ref()?;
+        let empty = self
+            .store
+            .messages(channel)
+            .is_some_and(|window| window.messages.is_empty());
+        (ticket.kind == LoadKind::Latest && empty).then_some(cache)
     }
 
     // A 401 means the token is gone, like the gateway's 4004: the UI has to log in again.
@@ -557,6 +595,17 @@ impl Account {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
         let rest = AccountRest::new(client.clone(), token.clone(), SERVER_ERROR_RETRY);
         let store = Store::new(limits);
+        let thread = cache.as_ref().map(|cache| cache.thread.clone());
+        if let Some(thread) = thread.clone() {
+            let store = store.clone();
+            runtime.spawn(async move {
+                if let Some(cached) = thread.read_entities().await
+                    && cached.current_user.is_some()
+                {
+                    store.restore(cached);
+                }
+            });
+        }
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
         let shared = Arc::new(Shared {
             gateway: Gateway::start(client, token, timing)?,
@@ -569,6 +618,7 @@ impl Account {
             delivering: Mutex::default(),
             runtime: runtime.clone(),
             flusher,
+            cache: thread,
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());

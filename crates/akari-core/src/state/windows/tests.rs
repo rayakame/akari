@@ -1197,3 +1197,56 @@ fn viewing_again_moves_the_viewed_time() {
 
     assert!(harness.windows.cache_windows(3)[0].1.viewed_at > first);
 }
+
+impl Harness {
+    fn fill(&mut self, ticket: LoadTicket, ids: &[u64]) -> Vec<String> {
+        let mut events = Vec::new();
+        let cached = ids.iter().map(|id| stored(*id)).collect();
+        self.windows.fill_from_cache(ticket, cached, &mut events);
+        describe(&events)
+    }
+}
+
+#[test]
+fn cached_messages_fill_an_empty_loading_window_as_stale() {
+    let mut harness = Harness::viewing(LOADS);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+
+    let filled = harness.fill(ticket, &[1, 2, 3]);
+
+    assert_eq!(filled, ["Loaded(1..3)", "Stale(1)"]);
+    let window = harness.window();
+    assert!(window.stale && window.latest);
+    let held = harness.live(wire(9));
+    assert!(held.is_empty(), "{held:?}");
+
+    let landed = harness.finish(ticket, &[2, 3, 4], 3);
+
+    assert_eq!(landed, ["Loaded(4..4)", "Loaded(9..9)"]);
+    assert_eq!(harness.ids(), [1, 2, 3, 4, 9]);
+    let window = harness.window();
+    assert!(!window.stale && window.latest);
+}
+
+#[test]
+fn cached_messages_after_the_page_change_nothing() {
+    let mut harness = Harness::viewing(LOADS);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(ticket, &[2, 3, 4], 3);
+
+    assert!(harness.fill(ticket, &[1, 2, 3]).is_empty());
+
+    assert_eq!(harness.ids(), [2, 3, 4]);
+    assert!(!harness.window().stale);
+}
+
+#[test]
+fn cached_messages_never_replace_loaded_ones() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+
+    assert!(harness.fill(ticket, &[1, 2, 3]).is_empty());
+
+    assert_eq!(harness.ids(), [10]);
+}

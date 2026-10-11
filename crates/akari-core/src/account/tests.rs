@@ -2612,6 +2612,7 @@ mod cache {
     use crate::cache::tests::TempDir;
     use crate::cache::{CacheThread, DiskCache};
     use crate::model::UserId;
+    use crate::state::apply::Entities;
 
     const OWNER: u64 = 100_000_000_000_000_001;
 
@@ -2742,5 +2743,365 @@ mod cache {
             }
         }
         release.send(()).unwrap();
+    }
+
+    fn start_cached_with(
+        fake: &FakeGateway,
+        server: &wiremock::MockServer,
+        dir: &TempDir,
+    ) -> (Account, CacheThread) {
+        let thread = CacheThread::start(dir.file(OWNER), UserId::new(OWNER));
+        let account = Account::start_with_cache(
+            crate::gateway::fake::client_with(fake.url(), format!("{}/api/v9/", server.uri())),
+            Token::new(TOKEN.to_owned()),
+            timing(),
+            DEFAULT_LIMITS,
+            Some(DiskCache {
+                thread: thread.clone(),
+                every: Duration::from_secs(3600),
+            }),
+        )
+        .unwrap();
+        (account, thread)
+    }
+
+    fn ready_entities(fake: &FakeGateway, edit: impl FnOnce(&mut Value)) -> Entities {
+        let payload = ready_payload(1, fake, edit);
+        match crate::gateway::decode(payload.to_string().as_bytes()) {
+            Ok(crate::gateway::GatewayEvent::Dispatch {
+                event: DispatchEvent::Ready(ready),
+                ..
+            }) => Entities::from_ready(*ready),
+            other => panic!("not a READY: {other:?}"),
+        }
+    }
+
+    fn stored(ids: impl IntoIterator<Item = u64>) -> Vec<Arc<Message>> {
+        ids.into_iter()
+            .map(|id| {
+                let wire: crate::model::Message =
+                    serde_json::from_str(&message(0, id)["d"].to_string()).unwrap();
+                Arc::new(Message::from_wire(wire, &mut |user| {
+                    Arc::new(crate::state::User::from_wire(user))
+                }))
+            })
+            .collect()
+    }
+
+    // A cache as a previous session would have left it: READY's state and channel GENERAL's
+    // newest messages.
+    async fn seed(fake: &FakeGateway, dir: &TempDir, window: impl IntoIterator<Item = u64>) {
+        let thread = CacheThread::start(dir.file(OWNER), UserId::new(OWNER));
+        thread
+            .flush(crate::cache::Snapshot {
+                entities: ready_entities(fake, |_| {}),
+                windows: [(
+                    general(),
+                    crate::state::CachedWindow {
+                        viewed_at: 1,
+                        messages: stored(window),
+                    },
+                )]
+                .into(),
+            })
+            .await
+            .unwrap();
+    }
+
+    // Subscribed before the restore, and past its event.
+    async fn restored(account: &Account) -> Subscription {
+        let subscription = account.store().subscribe();
+        events_until(&subscription, "Restored").await;
+        subscription
+    }
+
+    async fn mock_latest(
+        server: &wiremock::MockServer,
+        ids: &[u64],
+        edited: &[u64],
+        delay: Duration,
+    ) {
+        use wiremock::matchers::{path, query_param};
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("limit", "50"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(page_with(ids, edited))
+                    .set_delay(delay),
+            )
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn the_cache_is_restored_before_the_gateway_connects() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        seed(&fake, &dir, []).await;
+        let (account, _thread) = start_cached(&fake, &dir, Duration::from_secs(3600));
+
+        let _subscription = restored(&account).await;
+
+        assert!(matches!(
+            account.store().connection(),
+            ConnectionState::Offline
+        ));
+        assert_eq!(account.store().guilds().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_cached_window_is_stale_until_a_page_reconciles_it() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        mock_latest(
+            &server,
+            &(2..=51).collect::<Vec<_>>(),
+            &[],
+            Duration::from_millis(300),
+        )
+        .await;
+
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            events_until(&subscription, "MessagesLoaded(51..51)").await,
+            [
+                "MessagesLoaded(1..50)",
+                "MessagesStale(300000000000000002)",
+                "MessagesLoaded(51..51)"
+            ]
+        );
+        assert_eq!(ids(&account), (1..=51).collect::<Vec<_>>());
+        let window = account.store().messages(general()).unwrap();
+        assert!(window.latest && !window.stale);
+    }
+
+    #[tokio::test]
+    async fn an_edit_or_delete_made_offline_is_fixed_when_the_channel_opens() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        let page: Vec<u64> = (1..=50).filter(|id| *id != 20).collect();
+        mock_latest(&server, &page, &[10], Duration::from_millis(300)).await;
+
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+
+        let events = events_until(&subscription, "MessageUpdated(10)").await;
+        assert!(
+            events.contains(&"MessageDeleted(20)".to_owned()),
+            "{events:?}"
+        );
+        assert_eq!(
+            account
+                .store()
+                .message(general(), Snowflake::new(10))
+                .unwrap()
+                .content
+                .as_ref(),
+            "edited"
+        );
+        assert!(
+            account
+                .store()
+                .message(general(), Snowflake::new(20))
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cached_window_a_page_cannot_join_is_replaced_by_the_present() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        mock_latest(
+            &server,
+            &(200..=249).collect::<Vec<_>>(),
+            &[],
+            Duration::from_millis(300),
+        )
+        .await;
+
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            events_until(&subscription, "MessagesLoaded(200..249)").await,
+            [
+                "MessagesLoaded(1..50)",
+                "MessagesStale(300000000000000002)",
+                "MessagesCleared",
+                "MessagesLoaded(200..249)"
+            ]
+        );
+        let window = account.store().messages(general()).unwrap();
+        assert!(window.latest && !window.stale);
+    }
+
+    #[tokio::test]
+    async fn a_cache_read_after_the_page_changes_nothing() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        mock_latest(&server, &(2..=51).collect::<Vec<_>>(), &[], Duration::ZERO).await;
+        let release = thread.hold();
+
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+        release.send(()).unwrap();
+
+        let mut events = Vec::new();
+        while let Ok(Some(event)) = timeout(Duration::from_millis(200), subscription.next()).await {
+            events.push(describe(&event));
+        }
+        assert_eq!(events, ["MessagesLoaded(2..51)"]);
+    }
+
+    #[tokio::test]
+    async fn the_network_never_waits_for_the_disk() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, thread) = start_cached_with(&fake, &server, &dir);
+        let _subscription = restored(&account).await;
+        mock_latest(&server, &(2..=51).collect::<Vec<_>>(), &[], Duration::ZERO).await;
+        let release = thread.hold();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let _ = release.send(());
+        });
+        let started = std::time::Instant::now();
+
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(ids(&account), (2..=51).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn a_restored_ready_marks_no_fresh_window_stale() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, []).await;
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        mock_latest(&server, &[10, 11, 12], &[], Duration::ZERO).await;
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(!account.store().messages(general()).unwrap().stale);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_channel_gone_after_ready_loses_its_cached_messages() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, thread) = start_cached_with(&fake, &server, &dir);
+        let account = Arc::new(account);
+        let subscription = restored(&account).await;
+        mock_latest(&server, &[51], &[], Duration::from_secs(30)).await;
+        let loading = tokio::spawn({
+            let account = account.clone();
+            async move {
+                let _ = account
+                    .load_messages(general(), MessageLoad::Latest { limit: 50 })
+                    .await;
+            }
+        });
+        events_until(&subscription, "MessagesStale(300000000000000002)").await;
+
+        account.connect().unwrap();
+        let mut connection = fake.accept().await;
+        connection.handshake(60_000).await;
+        let without_general = ready_payload(1, &fake, |data| {
+            let general = GENERAL.to_string();
+            let channels = data["guilds"][0]["channels"].as_array_mut().unwrap();
+            channels.retain(|channel| channel["id"].as_str() != Some(general.as_str()));
+        });
+        connection.send(without_general).await;
+        events_until(&subscription, "Online").await;
+
+        assert!(account.store().messages(general()).is_none());
+        account.flush_cache().await;
+        assert!(thread.read_window(general()).await.unwrap().is_empty());
+        loading.abort();
+    }
+
+    #[tokio::test]
+    async fn a_window_opened_offline_refreshes_after_ready() {
+        use wiremock::matchers::{path, query_param};
+
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("limit", "50"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("limit", "100"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(page(&(2..=51).collect::<Vec<_>>())),
+            )
+            .mount(&server)
+            .await;
+
+        let offline = account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await;
+
+        assert!(offline.is_err());
+        assert!(account.store().messages(general()).unwrap().stale);
+        assert_eq!(ids(&account), (1..=50).collect::<Vec<_>>());
+
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "MessagesLoaded(51..51)").await;
+
+        assert!(!account.store().messages(general()).unwrap().stale);
     }
 }

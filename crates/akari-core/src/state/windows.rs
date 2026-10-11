@@ -779,6 +779,34 @@ impl Windows {
         window.release_or_drop_held(channel_id, window_limit, events);
     }
 
+    // Cached messages show while the window's first page loads; they may be outdated, so the
+    // window is stale and the page reconciles or replaces them. Too late, they change nothing.
+    pub(crate) fn fill_from_cache(
+        &mut self,
+        ticket: LoadTicket,
+        messages: Vec<Arc<Message>>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let channel_id = ticket.channel;
+        let Some(window) = self.windows.get_mut(&channel_id).filter(|window| {
+            window.generation == ticket.generation
+                && window.loading > 0
+                && window.messages.is_empty()
+                && window.latest
+        }) else {
+            return;
+        };
+        let mut added = Added::default();
+        for message in &messages {
+            added.add(message.id);
+        }
+        window.messages = messages;
+        window.messages.sort_by_key(|message| message.id);
+        window.stale = true;
+        added.push(channel_id, events);
+        events.push(StoreEvent::MessagesStale { channel_id });
+    }
+
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {
         let limit = self.limits.messages;
         let channel_id = ticket.channel;

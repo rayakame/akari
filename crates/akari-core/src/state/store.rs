@@ -321,6 +321,24 @@ impl Store {
         });
     }
 
+    /// Fills the store from the disk cache before the first READY; `false` once a READY or
+    /// another restore came first.
+    pub(crate) fn restore(&self, cached: Entities) -> bool {
+        let restored = self.write("restore", |inner, events| {
+            inner.state.restore(cached, events)
+        });
+        if !restored {
+            tracing::info!(target: "akari_core::cache", reason = "ready_first", "cache not used");
+        }
+        restored
+    }
+
+    pub(crate) fn fill_from_cache(&self, ticket: LoadTicket, messages: Vec<Arc<Message>>) {
+        self.write("load", |inner, events| {
+            inner.state.fill_from_cache(ticket, messages, events);
+        });
+    }
+
     pub(crate) fn abort_load(&self, ticket: LoadTicket) {
         self.write("load", |inner, events| {
             inner.state.abort_load(ticket, events)
