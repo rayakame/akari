@@ -95,6 +95,10 @@ struct Window {
     // Edits and deletes while a load runs; its page may predate them.
     missed: Vec<Missed>,
     viewed_at: i64,
+    // A page landed; until then the window holds at most live messages and isn't cached.
+    filled: bool,
+    // Filled by the disk cache; the first page checks only its own range, so older rows go.
+    from_disk: bool,
 }
 
 #[cfg_attr(test, derive(PartialEq))]
@@ -248,6 +252,34 @@ impl Window {
         }
     }
 
+    fn drop_before(
+        &mut self,
+        first: Option<MessageId>,
+        channel_id: ChannelId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let Some(first) = first else {
+            return;
+        };
+        let older = self
+            .messages
+            .iter()
+            .take_while(|message| message.id < first)
+            .count();
+        if older == 0 {
+            return;
+        }
+        self.messages.drain(..older);
+        self.oldest = false;
+        if let Some((first, last)) = self.range() {
+            events.push(StoreEvent::MessagesTrimmed {
+                channel_id,
+                first,
+                last,
+            });
+        }
+    }
+
     fn reaches(&self, page: &[Arc<Message>]) -> bool {
         match (page.first(), self.messages.last()) {
             (Some(first), Some(last)) => first.id <= last.id,
@@ -390,7 +422,7 @@ impl Windows {
             .iter()
             .filter_map(|channel| {
                 let window = self.windows.get(channel)?;
-                if !window.latest || window.stale {
+                if !window.filled || window.loading > 0 || !window.latest || window.stale {
                     return None;
                 }
                 let skip = window.messages.len().saturating_sub(per_window);
@@ -736,7 +768,11 @@ impl Windows {
             }
             LoadKind::Refresh if !window.stale => {}
             LoadKind::Latest | LoadKind::Refresh if window.stale && window.reaches(&page) => {
+                let first = page.first().map(|message| message.id);
                 window.reconcile(channel_id, page, reached_end, window_limit, events);
+                if window.from_disk {
+                    window.drop_before(first, channel_id, events);
+                }
             }
             LoadKind::Refresh => {
                 window.latest = false;
@@ -775,6 +811,8 @@ impl Windows {
                 window.trim(channel_id, window_limit, End::Older, events);
             }
         }
+        window.filled = true;
+        window.from_disk = false;
         window.release_or_drop_held(channel_id, window_limit, events);
     }
 
@@ -802,6 +840,7 @@ impl Windows {
         window.messages = messages;
         window.messages.sort_by_key(|message| message.id);
         window.stale = true;
+        window.from_disk = true;
         added.push(channel_id, events);
         events.push(StoreEvent::MessagesStale { channel_id });
     }

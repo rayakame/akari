@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -35,6 +35,8 @@ struct Shared {
     inner: RwLock<Inner>,
     // Bumped by every write, so the disk cache skips snapshots while nothing changed.
     changes: AtomicU64,
+    // A READY between its diff and its swap; a restore then would go undiffed.
+    preparing_ready: AtomicBool,
     #[cfg(test)]
     park: std::sync::Mutex<Option<Park>>,
     #[cfg(test)]
@@ -153,6 +155,7 @@ impl Store {
         Self {
             shared: Arc::new(Shared {
                 changes: AtomicU64::new(0),
+                preparing_ready: AtomicBool::new(false),
                 inner: RwLock::new(Inner {
                     state: State::with_limits(limits),
                     connection: ConnectionState::Offline,
@@ -255,6 +258,7 @@ impl Store {
     // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
     // it. Only the pump changes entities, so the diff still holds at the swap.
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
+        self.shared.preparing_ready.store(true, Ordering::SeqCst);
         let entities = Entities::from_ready(ready);
         let diff = self.read(|inner| inner.state.ready_diff(&entities));
         #[cfg(test)]
@@ -269,6 +273,7 @@ impl Store {
 
     pub(crate) fn replace(&self, next: PreparedReady) {
         let old = self.write("READY", |inner, events| {
+            self.shared.preparing_ready.store(false, Ordering::SeqCst);
             inner.state.swap(next.entities, next.diff, events)
         });
         drop(old);
@@ -323,7 +328,8 @@ impl Store {
 
     pub(crate) fn restore(&self, cached: Entities) -> bool {
         let restored = self.write("restore", |inner, events| {
-            inner.state.restore(cached, events)
+            !self.shared.preparing_ready.load(Ordering::SeqCst)
+                && inner.state.restore(cached, events)
         });
         if !restored {
             tracing::info!(target: "akari_core::cache", reason = "ready_first", "cache not used");

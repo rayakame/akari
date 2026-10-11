@@ -2874,15 +2874,22 @@ mod cache {
             .await
             .unwrap();
 
+        let events = events_until(&subscription, "MessagesLoaded(51..51)").await;
         assert_eq!(
-            events_until(&subscription, "MessagesLoaded(51..51)").await,
+            events,
             [
                 "MessagesLoaded(1..50)",
                 "MessagesStale(300000000000000002)",
                 "MessagesLoaded(51..51)"
             ]
         );
-        assert_eq!(ids(&account), (1..=51).collect::<Vec<_>>());
+        assert!(
+            next(&subscription)
+                .await
+                .unwrap()
+                .starts_with("MessagesTrimmed")
+        );
+        assert_eq!(ids(&account), (2..=51).collect::<Vec<_>>());
         let window = account.store().messages(general()).unwrap();
         assert!(window.latest && !window.stale);
     }
@@ -3013,25 +3020,51 @@ mod cache {
     }
 
     #[tokio::test]
-    async fn a_restored_ready_marks_no_fresh_window_stale() {
+    async fn a_page_loaded_before_ready_is_refreshed_after_it() {
+        use wiremock::matchers::{path, query_param};
+
         let dir = TempDir::new();
         let mut fake = FakeGateway::start().await;
         let server = wiremock::MockServer::start().await;
         seed(&fake, &dir, []).await;
-        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let (account, thread) = start_cached_with(&fake, &server, &dir);
         let subscription = restored(&account).await;
         mock_latest(&server, &[10, 11, 12], &[], Duration::ZERO).await;
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("limit", "100"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(page(&[10, 11, 12, 13])),
+            )
+            .mount(&server)
+            .await;
         account
             .load_messages(general(), MessageLoad::Latest { limit: 50 })
             .await
             .unwrap();
+        account.flush_cache().await;
+        assert!(thread.read_window(general()).await.unwrap().is_empty());
 
         let _connection = online(&mut fake, &account).await;
-        events_until(&subscription, "Online").await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
 
+        events_until(&subscription, "MessagesLoaded(13..13)").await;
         assert!(!account.store().messages(general()).unwrap().stale);
-        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_window_still_loading_keeps_the_cached_messages() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+
+        account.view_channel(general());
+        account.flush_cache().await;
+
+        assert_eq!(thread.read_window(general()).await.unwrap().len(), 50);
     }
 
     #[tokio::test]
@@ -3457,25 +3490,31 @@ mod cache {
         let mut fake = FakeGateway::start().await;
         let server = wiremock::MockServer::start().await;
         let client = cached_client(&fake, &server, &dir, Arc::default());
-        let account = client.account(token(), UserId::new(OWNER)).unwrap();
+        let account = Arc::new(client.account(token(), UserId::new(OWNER)).unwrap());
         let subscription = account.store().subscribe();
         let _connection = online(&mut fake, &account).await;
         events_until(&subscription, "Online").await;
-        account.view_channel(general());
+        mock_latest(&server, &[10, 11, 12], &[], Duration::from_millis(300)).await;
+        let loading = tokio::spawn({
+            let account = account.clone();
+            async move {
+                account
+                    .load_messages(general(), MessageLoad::Latest { limit: 50 })
+                    .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
 
         account.close();
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let windows = |dir: &TempDir| -> i64 {
-            rusqlite::Connection::open(dir.file(OWNER))
-                .unwrap()
-                .query_row("SELECT count(*) FROM windows", [], |row| row.get(0))
-                .unwrap()
-        };
-        assert_eq!(windows(&dir), 1);
-        account.view_channel(Snowflake::new(300_000_000_000_000_001));
+        loading.await.unwrap().unwrap();
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        assert_eq!(windows(&dir), 1);
+        assert_eq!(ids(&account), [10, 11, 12]);
+        let windows: i64 = rusqlite::Connection::open(dir.file(OWNER))
+            .unwrap()
+            .query_row("SELECT count(*) FROM windows", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(windows, 0);
     }
 
     #[tokio::test]

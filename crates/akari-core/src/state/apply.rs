@@ -248,10 +248,9 @@ impl State {
             for channel in diff.removed_channels {
                 self.windows.drop_channel(channel);
             }
-            // Windows loaded since a restore are as fresh as this READY.
-            if self.ready {
-                self.windows.mark_stale(events);
-            }
+            // Pages loaded since a restore predate this session too: what happened in between
+            // never comes as a dispatch.
+            self.windows.mark_stale(events);
         }
         self.ready = true;
         events.push(StoreEvent::Ready);
@@ -751,10 +750,13 @@ impl State {
         &self,
         per_window: usize,
     ) -> (Entities, Vec<(ChannelId, CachedWindow)>) {
-        (
-            self.entities.clone(),
-            self.windows.cache_windows(per_window),
-        )
+        // Before a session nothing confirms a window is still current.
+        let windows = if self.ready {
+            self.windows.cache_windows(per_window)
+        } else {
+            Vec::new()
+        };
+        (self.entities.clone(), windows)
     }
 
     pub(crate) fn viewed_channels(&self) -> Vec<Arc<Channel>> {
