@@ -75,7 +75,9 @@ never touches it: it only bumps a change counter in the store.
 - **Caps:** the newest 50 messages of the 50 most recently viewed channels. A window that
   drops out of memory keeps its rows in the file; past the 50th channel the least recently
   viewed lose theirs, and so do channels that are gone. Free pages past 256 go back to the
-  file system; the WAL is checkpointed and truncated when the file closes.
+  file system. After every write that changed something the WAL is checkpointed and
+  truncated: the app quits without closing the file, and the WAL would otherwise keep rows
+  that `secure_delete` already cleared from the database.
 - **A failed write** is logged and rolled back; the next flush tries everything again.
 
 ## Cold start
@@ -95,7 +97,9 @@ cache read start together. If the cache answers first, its messages fill the emp
 stale ("Catching up…"), and the page then reconciles them like a refresh (edits, deletes and
 new messages within its range) or, when it can't reach them, replaces them with the present.
 A page never waits for the disk. If the page fails, e.g. offline, the cached messages still
-show and stay stale until a READY refreshes them.
+show and stay stale: before the first READY, READY's refresh takes them; after it, a refresh
+starts at once, with its retries, and a window it can't refresh leaves the present (live
+messages aren't held back behind it).
 
 ## The account READY says
 

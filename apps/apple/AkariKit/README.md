@@ -39,18 +39,19 @@ screen, so views render from them without calling into Rust.
   the user ID; the token stays in the Keychain, and the open session's `Token` object stays in
   memory. After a login it saves the token and opens the session. A session that ends with
   `AuthenticationFailed` returns to the login screen and deletes the token and the account's
-  cache with `forgetAccount`, without sending the token to Discord again. Any other close keeps the session on screen;
-  `reconnect()` opens a new one from the token in memory, with the same drafts; the old
-  account's pending and failed messages become drafts of their channels.
+  cache with `forgetAccount`, without sending the token to Discord again. Any other close
+  keeps the session on screen; `reconnect()` opens a new one from the token in memory, with
+  the same drafts; the old account's pending and failed messages become drafts of their
+  channels.
   `suspend()` and `resume()` disconnect and reconnect the open session around sleep.
   A restored launch and a wake call `client.warmUp()` first, so the first message load finds
   an open REST connection; a restored launch also calls `client.preload(userId:)`, so the disk
   cache is read while the token is. A launch without an account calls `clearCaches()` in the
   background. `prepareToQuit(limit:)` writes the open session's cache and returns within the
   limit (1 s by default) either way.
-  `logOut()` runs once: it deletes the token and the cache with `forgetAccount` first, and if that fails it
-  stays on the session and sets `logoutError`; otherwise it shows the login screen and ends
-  the session on Discord in the background (`endSession(token:)`), setting
+  `logOut()` runs once: it deletes the token and the cache with `forgetAccount` first, and if
+  that fails it stays on the session and sets `logoutError`; otherwise it shows the login
+  screen and ends the session on Discord in the background (`endSession(token:)`), setting
   `warning = .logoutNotConfirmed` if Discord doesn't confirm. A new login can't lose its token
   to a late logout, since the Keychain item is gone before the login screen shows.
 - `LoginModel` runs the QR code login beside the email/password form (MFA, SMS, new

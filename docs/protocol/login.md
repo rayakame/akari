@@ -258,8 +258,8 @@ Devices in an official client. akari-cli does this, and it also ends a replaced 
 session after logging in again, so no live session is left behind a deleted token.
 
 The apps log out in the other order: `forget_account` first, which deletes the token and then
-the account's disk cache, so both are gone before the login screen shows, then `end_session` with the open session's token, which the app keeps
-in memory, in the background. The UI never waits for Discord, and a new login with the same
+the account's disk cache, so both are gone before the login screen shows, then `end_session`
+with the open session's token, which the app keeps in memory, in the background. The UI never waits for Discord, and a new login with the same
 account can't have its token deleted by a late logout. If the token can't be deleted, the app
 stays logged in and says so; if Discord doesn't confirm, the login screen says the session may
 still be active.
