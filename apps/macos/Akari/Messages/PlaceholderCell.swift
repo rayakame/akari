@@ -31,6 +31,8 @@ final class PlaceholderCell: NSTableCellView {
     private var heightConstraint: NSLayoutConstraint?
     private var atTop: NSLayoutConstraint?
     private var atBottom: NSLayoutConstraint?
+    // Plain colored layers: a drawn bitmap of a block this tall was most of the launch's memory.
+    private let shapes = CALayer()
 
     override var isFlipped: Bool { true }
 
@@ -61,6 +63,8 @@ final class PlaceholderCell: NSTableCellView {
         NSLayoutConstraint.activate([
             height, errorRow.centerXAnchor.constraint(equalTo: centerXAnchor), atBottom,
         ])
+        wantsLayer = true
+        layer?.insertSublayer(shapes, at: 0)
     }
 
     required init?(coder: NSCoder) {
@@ -76,11 +80,20 @@ final class PlaceholderCell: NSTableCellView {
         atTop?.isActive = edge == .newer
         label.stringValue = failure ?? ""
         errorRow.isHidden = failure == nil
-        needsDisplay = true
+        needsLayout = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        Palette.hoverBackground.setFill()
+    override func layout() {
+        super.layout()
+        layOutShapes()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layOutShapes()
+    }
+
+    private func layOutShapes() {
         let band =
             !failed
             ? nil
@@ -88,36 +101,58 @@ final class PlaceholderCell: NSTableCellView {
                 ? NSRect(x: 0, y: 0, width: bounds.width, height: Self.band)
                 : NSRect(x: 0, y: bounds.height - Self.band, width: bounds.width, height: Self.band)
         let text = max(bounds.width - 72 - 16, 40)
+        var frames: [(NSRect, CGFloat)] = []
         var y: CGFloat = 0
         var index = 0
         while y < bounds.height {
             let height = Self.rows[index % Self.rows.count]
-            var shapes: [NSBezierPath] = []
             let width = { (offset: Int) in text * Self.widths[(index + offset) % Self.widths.count]
             }
             if height >= 66 {
-                shapes.append(NSBezierPath(ovalIn: NSRect(x: 16, y: y + 18, width: 40, height: 40)))
-                shapes.append(bar(x: 72, y: y + 20, width: min(width(0), 160)))
+                frames.append((NSRect(x: 16, y: y + 18, width: 40, height: 40), 20))
+                frames.append((bar(x: 72, y: y + 20, width: min(width(0), 160)), 6))
                 for line in 0..<Int((height - 44) / 22) {
-                    shapes.append(
-                        bar(x: 72, y: y + 42 + CGFloat(line) * 22, width: width(line + 1)))
+                    frames.append(
+                        (bar(x: 72, y: y + 42 + CGFloat(line) * 22, width: width(line + 1)), 6))
                 }
             } else {
                 for line in 0..<max(1, Int(height / 22)) {
-                    shapes.append(bar(x: 72, y: y + 7 + CGFloat(line) * 22, width: width(line)))
+                    frames.append(
+                        (bar(x: 72, y: y + 7 + CGFloat(line) * 22, width: width(line)), 6))
                 }
-            }
-            for shape in shapes where band.map({ !$0.intersects(shape.bounds) }) ?? true {
-                shape.fill()
             }
             y += height
             index += 1
         }
+        frames.removeAll { frame, _ in band.map { $0.intersects(frame) } ?? false }
+        var color: CGColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = Palette.hoverBackground.cgColor
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        shapes.frame = bounds
+        shapes.isGeometryFlipped = true
+        var sublayers = shapes.sublayers ?? []
+        while sublayers.count < frames.count {
+            let shape = CALayer()
+            shapes.addSublayer(shape)
+            sublayers.append(shape)
+        }
+        for (shape, placed) in zip(
+            sublayers,
+            frames + Array(repeating: (.zero, 0), count: max(0, sublayers.count - frames.count)))
+        {
+            shape.frame = placed.0
+            shape.cornerRadius = placed.1
+            shape.backgroundColor = color
+            shape.isHidden = placed.0.isEmpty
+        }
+        CATransaction.commit()
     }
 
-    private func bar(x: CGFloat, y: CGFloat, width: CGFloat) -> NSBezierPath {
-        NSBezierPath(
-            roundedRect: NSRect(x: x, y: y, width: width, height: 12), xRadius: 6, yRadius: 6)
+    private func bar(x: CGFloat, y: CGFloat, width: CGFloat) -> NSRect {
+        NSRect(x: x, y: y, width: width, height: 12)
     }
 
     @objc private func retryClicked() {
