@@ -268,6 +268,9 @@ impl AccountRest {
         let mut server_errors = 0;
         let mut permit: Option<Permit<'_>> = None;
         let mut report = LoadReport::default();
+        let waiting = Instant::now();
+        self.client.rest().after_warm_up().await;
+        let behind_warm_up = waiting.elapsed();
         loop {
             self.usable()?;
             let request = build()?;
@@ -282,7 +285,7 @@ impl AccountRest {
                         .acquire(route.clone())
                         .await
                         .map_err(too_long)?;
-                    report.queued = acquired.queued;
+                    report.queued = behind_warm_up + acquired.queued;
                     report.limited = acquired.limited;
                     permit.insert(acquired)
                 }

@@ -345,7 +345,46 @@ async fn a_load_after_the_warm_up_reuses_its_connection() {
 }
 
 #[tokio::test]
-async fn the_warm_up_never_fails_and_never_holds_a_load() {
+async fn a_load_during_the_warm_up_uses_its_connection() {
+    let server = MockServer::start().await;
+    mount_gateway(&server, Duration::from_millis(150)).await;
+    mount_messages(&server).await;
+    let client = Arc::new(client(&server, Arc::new(MemoryStore::default())));
+    let account = client
+        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .unwrap_or_else(|err| panic!("{err}"));
+    let warming = tokio::spawn({
+        let client = client.clone();
+        async move { client.warm_up().await }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the warm-up never arrived"));
+
+    let report = account
+        .load_messages(
+            Snowflake::new(CHANNEL),
+            akari_core::MessageLoad::Latest { limit: 50 },
+        )
+        .await
+        .unwrap_or_else(|err| panic!("{err}"))
+        .unwrap_or_else(|| panic!("a page was loaded"));
+    warming.await.unwrap_or_else(|err| panic!("{err}"));
+
+    assert!(!report.new_connection, "{report:?}");
+}
+
+#[tokio::test]
+async fn the_warm_up_never_fails_and_holds_a_load_briefly_at_most() {
     let server = MockServer::start().await;
     mount_gateway(&server, Duration::from_secs(2)).await;
     mount_messages(&server).await;

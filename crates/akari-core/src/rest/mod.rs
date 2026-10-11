@@ -16,9 +16,9 @@ pub(crate) use error::{ApiError, RestError};
 
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use tokio::sync::watch;
 use tokio::time::Instant;
 
 use connections::{Connections, TimedConnectLayer};
@@ -32,7 +32,7 @@ pub(crate) struct RestClient {
     http: reqwest::Client,
     base: Url,
     connections: Arc<Connections>,
-    warming: Arc<AtomicBool>,
+    warming: Arc<watch::Sender<bool>>,
 }
 
 #[derive(Default)]
@@ -51,6 +51,8 @@ fn sensitive(value: &str) -> Result<HeaderValue, RestError> {
 
 // Login responses are a few KiB; anything near this is not Discord.
 const MAX_BODY: usize = 4 * 1024 * 1024;
+// A connect usually takes well under this; past it a connection of its own is the better bet.
+const WARM_UP_WAIT: Duration = Duration::from_millis(500);
 
 #[derive(Clone)]
 pub(crate) struct CaptchaSolution {
@@ -137,7 +139,7 @@ impl RestClient {
             http,
             base,
             connections,
-            warming: Arc::new(AtomicBool::new(false)),
+            warming: Arc::new(watch::Sender::new(false)),
         })
     }
 
@@ -222,7 +224,7 @@ impl RestClient {
 
     // Unauthenticated and harmless; only its connection is wanted.
     pub(crate) async fn warm_up(&self) {
-        if self.warming.swap(true, Ordering::AcqRel) {
+        if self.warming.send_replace(true) {
             return;
         }
         let started = Instant::now();
@@ -231,7 +233,7 @@ impl RestClient {
             Ok(request) => self.send_raw(request).await.ok(),
             Err(_) => None,
         };
-        self.warming.store(false, Ordering::Release);
+        self.warming.send_replace(false);
         tracing::debug!(
             after_ms = crate::millis(started.elapsed()),
             new_connection = warmed
@@ -240,6 +242,12 @@ impl RestClient {
             ok = warmed.is_some(),
             "rest warmed up"
         );
+    }
+
+    // A request that starts while the warm-up still connects would open a second connection.
+    pub(crate) async fn after_warm_up(&self) {
+        let mut warming = self.warming.subscribe();
+        let _ = tokio::time::timeout(WARM_UP_WAIT, warming.wait_for(|warming| !warming)).await;
     }
 
     pub(crate) async fn send_raw(&self, request: RequestBuilder) -> Result<RawResponse, RestError> {

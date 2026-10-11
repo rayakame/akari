@@ -351,7 +351,7 @@ pub enum MessageType {
 /// Where one history load's time went. Numbers only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct LoadReport {
-    /// Behind earlier requests on the same channel; they run one at a time.
+    /// Behind earlier requests on the same channel (they run one at a time) or a warm-up.
     pub queued: Duration,
     /// Waiting for Discord's limits: a bucket reset, a 429 pause or the global limit.
     pub limited: Duration,
