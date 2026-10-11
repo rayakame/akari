@@ -175,6 +175,15 @@ What the Performance and cache milestone found, so later changes don't bring it 
   (Release, restored channel: a peak of 112–125 MB, 69 MB of it graphics memory, for about a
   second). They are plain colored layers now (peak 45 MB). A view that overrides
   `draw(_:)` gets a bitmap as large as itself, so large rows shouldn't.
+- **Long messages bring in a GPU renderer for a second.** AppKit has views that draw about
+  40,000 pt² or more (text fields included: a message of three lines or more at usual widths)
+  rendered by Core Animation's Metal renderer. While such views are drawn, as when paging or
+  opening a channel, the renderer's working memory of about 64 MB counts in Akari's
+  footprint as graphics memory, released about a second after the last one. That is the
+  paging peak (recorded: 161–169 MB, 74 MB of it this, 76 MB between pages). Its switch, the
+  undocumented `CAEnableMetalWhippet`, makes it worse: the CPU fallback keeps uncompressed
+  bitmaps, and in the probe's paging the peak rose from 159 to 175 MB and memory stayed at
+  170 MB instead of settling at 73 MB.
 - **Buttons are expensive to build.** On current macOS every `NSButton`'s `sizeToFit` runs a
   SwiftUI layout pass. Each message cell built a hidden "Not sent." line with two buttons;
   it's built only for a failed message now, which made building a row about four times
