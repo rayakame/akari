@@ -81,6 +81,19 @@ struct RowDrawingTests {
     }
 
     @Test
+    func placeholdersFollowTheirSize() throws {
+        let cell = shown(placeholders())
+        // The second row's bar spans 0.8 of the text width: to 642 at 800 wide, 322 at 400.
+        #expect(try LayerImage(cell).alpha(350, 79) > 0.05)
+
+        cell.setFrameSize(NSSize(width: 400, height: 600))
+        cell.layoutSubtreeIfNeeded()
+
+        #expect(try LayerImage(cell).alpha(350, 79) < 0.01)
+        #expect(try LayerImage(cell).alpha(300, 79) > 0.05)
+    }
+
+    @Test
     func aFailureLeavesItsBandEmpty() throws {
         let plain = try LayerImage(shown(placeholders()))
         let failed = try LayerImage(shown(placeholders(failure: "Couldn't load older messages.")))
@@ -107,7 +120,6 @@ struct ConstraintConflictTests {
 
     let noon = berlinTime(2026, 10, 10, 12, 0)
 
-    // Runs the steps in a table and counts the conflicts AppKit reports meanwhile.
     func conflicts(
         width: CGFloat = 1000, height: CGFloat = 900,
         _ steps: [(MessageTableController) -> MessageTableState]

@@ -4,7 +4,8 @@ import Testing
 
 @testable import Akari
 
-@MainActor
+// The log is global, and these tests suspend while a frame is committed.
+@MainActor @Suite(.serialized)
 struct LoadLineTests {
     final class Lines {
         var all: [String] = []
@@ -74,7 +75,11 @@ struct LoadLineTests {
 
     // The line waits for the frame's commit, whose completion reaches the main queue only
     // once this test lets go of it.
-    func settle(until done: () -> Bool = { false }) async {
+    func settle(until done: (() -> Bool)? = nil) async {
+        guard let done else {
+            try? await Task.sleep(for: .milliseconds(200))
+            return
+        }
         let deadline = ContinuousClock.now + .seconds(1)
         repeat {
             try? await Task.sleep(for: .milliseconds(10))

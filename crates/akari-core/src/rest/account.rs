@@ -151,7 +151,6 @@ pub(crate) struct Page {
     pub(crate) messages: Vec<model::Message>,
     // Skipped messages count too: a short page means the end is reached.
     pub(crate) received: usize,
-    // Everything but the store's part.
     pub(crate) report: LoadReport,
 }
 

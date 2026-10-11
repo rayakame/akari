@@ -8,7 +8,6 @@ struct MessageTableState: Equatable {
     var loading: MessageListModel.Load?
     var failedLoads: [MessageListModel.Load: RequestError] = [:]
     var beginning = ""
-    // For the load log.
     var channelId: ChannelId?
     var lastLoad: LoadTrace?
     var openedAt: ContinuousClock.Instant?
@@ -61,7 +60,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
     private var rowHeightsWidth: CGFloat = 0
     private var placeholderHeight = PlaceholderCell.height(forViewHeight: 0)
-    // The load log: the last update's start, how long it took, and when its frame was committed.
     private var lastApply:
         (started: ContinuousClock.Instant, render: Duration, shown: ContinuousClock.Instant?)?
     private var loggedLoad = 0

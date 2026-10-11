@@ -430,7 +430,7 @@ final class AppModelTests {
         session.close()
     }
 
-    // Reqwest drops connections idle for 90 s, so a wake usually finds none.
+    // After a sleep the pooled connection is usually gone.
     @Test
     func aWakeWarmsUpAgain() async throws {
         let fresh = makeApp()
