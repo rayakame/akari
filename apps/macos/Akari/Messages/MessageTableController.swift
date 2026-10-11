@@ -76,6 +76,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var openLogged = false
     // A channel opened from disk logs its line once the page that refreshed it is shown.
     private var diskOpen: (channel: ChannelId, at: ContinuousClock.Instant, after: Duration)?
+    private var latestShown: ContinuousClock.Instant?
     private var freshShown = false
     var milestone: (String) -> Void = { LaunchLog.mark($0) }
     private var pendingOpen:
@@ -224,15 +225,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 continue
             }
             LoadLog.log(line)
-            if load.kind == .latest, let open = diskOpen {
-                diskOpen = nil
-                LoadLog.log(
-                    LoadLog.opened(
-                        open.channel, from: .disk, after: open.after,
-                        fresh: open.at.duration(to: shown)))
+            if load.kind == .latest, latestShown == nil {
+                latestShown = shown
             }
         }
         pendingLoads = waiting
+        // An empty fresh page can be shown before the rows from disk are.
+        if let open = diskOpen, let latestShown {
+            diskOpen = nil
+            LoadLog.log(
+                LoadLog.opened(
+                    open.channel, from: .disk, after: open.after,
+                    fresh: open.at.duration(to: latestShown)))
+        }
     }
 
     private func pageLine(_ load: LoadTrace) -> (String, ContinuousClock.Instant)? {

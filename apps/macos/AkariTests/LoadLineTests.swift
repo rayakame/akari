@@ -315,6 +315,23 @@ struct LoadLineTests {
     }
 
     @Test
+    func anEmptyFreshPageBeforeTheDiskRowsShowStillLogsTheOpen() async {
+        await logging {
+            show(state([]))
+            show(state(rows(50...99), from: .disk))
+            let fresh = trace(1, started: opened, page: nil, kind: .latest)
+            show(state(rows(50...99), load: fresh, from: .disk))
+            await settle { lines.all.contains { $0.contains("opened") } }
+
+            let opens = lines.all.filter { $0.contains("opened") }
+            #expect(opens.count == 1)
+            let open = opens.first ?? ""
+            #expect(open.hasPrefix("channel 10 opened: rows from disk after "), "\(open)")
+            #expect(open.contains(", fresh after "), "\(open)")
+        }
+    }
+
+    @Test
     func theFirstFreshPageMarksTheLaunch() async {
         var marks: [String] = []
         controller.milestone = { marks.append($0) }
