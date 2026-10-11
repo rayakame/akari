@@ -18,6 +18,40 @@ pub(crate) struct ZstdStream {
     decoder: Decoder<'static>,
     buffer: Vec<u8>,
     limit: usize,
+    window_logged: bool,
+}
+
+const MAGIC: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
+
+// RFC 8878 3.1.1.1: the history a decoder keeps for the frame, which Discord chooses.
+pub(crate) fn window_size(frame: &[u8]) -> Option<u64> {
+    let (magic, rest) = frame.split_first_chunk::<4>()?;
+    if *magic != MAGIC {
+        return None;
+    }
+    let (&descriptor, rest) = rest.split_first()?;
+    if descriptor & 0x20 == 0 {
+        let &window = rest.first()?;
+        let base = 1u64 << (10 + u32::from(window >> 3));
+        return Some(base + base / 8 * u64::from(window & 7));
+    }
+    let dictionary = match descriptor & 3 {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        _ => 4,
+    };
+    let content = match descriptor >> 6 {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        _ => 8,
+    };
+    let field = rest.get(dictionary..dictionary + content)?;
+    let mut bytes = [0u8; 8];
+    bytes[..content].copy_from_slice(field);
+    let size = u64::from_le_bytes(bytes);
+    Some(if content == 2 { size + 256 } else { size })
 }
 
 impl ZstdStream {
@@ -26,6 +60,7 @@ impl ZstdStream {
             decoder: Decoder::new().map_err(DecompressError::Zstd)?,
             buffer: Vec::with_capacity(INITIAL.min(limit.saturating_add(1))),
             limit,
+            window_logged: false,
         })
     }
 
@@ -35,6 +70,12 @@ impl ZstdStream {
         message: &[u8],
         read: impl FnOnce(&[u8]) -> R,
     ) -> Result<R, DecompressError> {
+        if !self.window_logged {
+            self.window_logged = true;
+            if let Some(size) = window_size(message) {
+                tracing::debug!(size_kib = size / 1024, "zstd window");
+            }
+        }
         self.buffer.clear();
         let result = self.fill(message).map(|()| read(&self.buffer));
         if self.buffer.capacity() > RETAINED {
@@ -113,6 +154,40 @@ impl ZstdCompressor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn frame_with_window_log(log: u32) -> Vec<u8> {
+        use zstd::stream::raw::CParameter;
+        let mut encoder = zstd::stream::raw::Encoder::new(3).unwrap();
+        encoder.set_parameter(CParameter::WindowLog(log)).unwrap();
+        ZstdCompressor(encoder).message(&messages(1, 4096)[0])
+    }
+
+    #[test]
+    fn the_window_size_is_read_from_the_frame_header() {
+        for log in [17, 20, 23] {
+            assert_eq!(
+                window_size(&frame_with_window_log(log)),
+                Some(1 << log),
+                "{log}"
+            );
+        }
+        assert_eq!(window_size(b"not zstd"), None);
+        assert_eq!(window_size(&[0x28, 0xb5, 0x2f, 0xfd]), None);
+    }
+
+    #[test]
+    fn a_window_descriptor_with_a_mantissa_adds_eighths() {
+        // Exponent 10 (2^20), mantissa 3: 2^20 + 3 × 2^17.
+        let header = [0x28, 0xb5, 0x2f, 0xfd, 0x00, (10 << 3) | 3];
+        assert_eq!(window_size(&header), Some((1 << 20) + 3 * (1 << 17)));
+    }
+
+    #[test]
+    fn a_single_segment_frame_uses_its_content_size() {
+        // Single segment, a 1-byte content size of 200, no dictionary.
+        let header = [0x28, 0xb5, 0x2f, 0xfd, 0x20, 200];
+        assert_eq!(window_size(&header), Some(200));
+    }
 
     fn messages(count: usize, size: usize) -> Vec<Vec<u8>> {
         (0..count)

@@ -25,6 +25,7 @@ enum Launch {
         LaunchLog.mark("app started")
         enableLoggingIfAsked(defaults) { filter in
             ScrollLog.enabled = ScrollLog.isAsked(by: filter)
+            LoadLog.enabled = LoadLog.isAsked(by: filter)
             try enableLogging(filter: filter)
         }
         do {

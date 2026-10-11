@@ -105,3 +105,10 @@ func same(_ color: NSColor?, _ other: NSColor?) -> Bool {
         && abs(color.greenComponent - other.greenComponent) < 0.5 / 255
         && abs(color.blueComponent - other.blueComponent) < 0.5 / 255
 }
+
+func loadReport(newConnection: Bool = false) -> LoadReport {
+    LoadReport(
+        queued: 0, limited: 0, headers: 0.182, newConnection: newConnection, body: 0.012,
+        bytes: 48_213, decode: 0.0021, store: 0.0004, received: 50, retries: 0, remaining: 4,
+        resetAfter: 1.2)
+}

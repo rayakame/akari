@@ -8,6 +8,11 @@ struct MessageTableState: Equatable {
     var loading: MessageListModel.Load?
     var failedLoads: [MessageListModel.Load: RequestError] = [:]
     var beginning = ""
+    // For the load log.
+    var channelId: ChannelId?
+    var lastLoad: LoadTrace?
+    var openedAt: ContinuousClock.Instant?
+    var openedFrom = MessageListModel.Origin.network
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -56,6 +61,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
     private var rowHeightsWidth: CGFloat = 0
     private var placeholderHeight = PlaceholderCell.height(forViewHeight: 0)
+    // The load log: the last update's start, how long it took, and when its frame was committed.
+    private var lastApply:
+        (started: ContinuousClock.Instant, render: Duration, shown: ContinuousClock.Instant?)?
+    private var loggedLoad = 0
+    private var pendingLoad: LoadTrace?
+    private var openLogged = false
+    private var pendingOpen:
+        (channel: ChannelId, from: MessageListModel.Origin, at: ContinuousClock.Instant)?
 
     init(
         tableView: MessageTableView = MessageTableView(),
@@ -94,6 +107,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         heldState = nil
+        let started = ContinuousClock.now
         let previous = self.state
         self.state = state
         requested = false
@@ -105,7 +119,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
-            apply(next, changes)
+            Signposts.interval("page lands") { apply(next, changes) }
+            noteApply(started)
         }
         if previous.loading != state.loading || previous.failedLoads != state.failedLoads
             || previous.reachedOldest != state.reachedOldest
@@ -114,6 +129,68 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             configureEdges()
         }
         askForMore()
+        noteLoad(state)
+    }
+
+    private func noteApply(_ started: ContinuousClock.Instant) {
+        guard LoadLog.enabled else {
+            return
+        }
+        lastApply = (started, started.duration(to: .now), nil)
+        // A nested transaction's completion runs once the outermost one is committed.
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            self?.applyShown(started)
+        }
+        CATransaction.commit()
+    }
+
+    private func applyShown(_ started: ContinuousClock.Instant) {
+        if lastApply?.started == started {
+            lastApply?.shown = .now
+        }
+        writeLoadLines()
+    }
+
+    private func noteLoad(_ state: MessageTableState) {
+        guard LoadLog.enabled else {
+            return
+        }
+        if !openLogged, filled, let channel = state.channelId, let openedAt = state.openedAt {
+            openLogged = true
+            pendingOpen = (channel, state.openedFrom, openedAt)
+        }
+        if let load = state.lastLoad, load.sequence > loggedLoad {
+            loggedLoad = load.sequence
+            if load.failure != nil {
+                LoadLog.log(LoadLog.failure(load))
+            } else if load.report != nil {
+                pendingLoad = load
+            }
+        }
+        writeLoadLines()
+    }
+
+    // A page's rows may have come in an earlier update than its trace, with the store's batch.
+    private func writeLoadLines() {
+        if let open = pendingOpen, let shown = lastApply?.shown {
+            pendingOpen = nil
+            LoadLog.log(
+                LoadLog.opened(open.channel, from: open.from, after: open.at.duration(to: shown)))
+        }
+        guard let load = pendingLoad else {
+            return
+        }
+        if let apply = lastApply, apply.started >= load.started {
+            guard let shown = apply.shown else {
+                return
+            }
+            LoadLog.log(
+                LoadLog.page(load, render: apply.render, shown: load.started.duration(to: shown)))
+        } else {
+            LoadLog.log(LoadLog.page(load, render: nil, shown: load.started.duration(to: .now)))
+        }
+        pendingLoad = nil
     }
 
     deinit {
@@ -201,17 +278,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             rowHeights[next.items[index].id] = nil
         }
         timeline = next
-        tableView.beginUpdates()
-        if !changes.removed.isEmpty {
-            tableView.removeRows(at: changes.removed, withAnimation: [])
-        }
-        if !changes.inserted.isEmpty {
-            tableView.insertRows(at: changes.inserted, withAnimation: [])
-        }
-        tableView.endUpdates()
-        if !changes.reloaded.isEmpty {
-            tableView.reloadData(forRowIndexes: changes.reloaded, columnIndexes: [0])
-            tableView.noteHeightOfRows(withIndexesChanged: changes.reloaded)
+        Signposts.interval("row heights") {
+            tableView.beginUpdates()
+            if !changes.removed.isEmpty {
+                tableView.removeRows(at: changes.removed, withAnimation: [])
+            }
+            if !changes.inserted.isEmpty {
+                tableView.insertRows(at: changes.inserted, withAnimation: [])
+            }
+            tableView.endUpdates()
+            if !changes.reloaded.isEmpty {
+                tableView.reloadData(forRowIndexes: changes.reloaded, columnIndexes: [0])
+                tableView.noteHeightOfRows(withIndexesChanged: changes.reloaded)
+            }
         }
         if firstFill {
             filled = true
@@ -323,12 +402,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             bounds.minY - tableView.rect(ofRow: rows.first).minY < distance
         {
             requested = true
+            Signposts.event("page requested")
             ScrollLog.log("table \(number) asks for older messages at y \(bounds.minY)")
             actions?.loadMore(.older)
         } else if !state.atPresent, state.failedLoads[.newer] == nil,
             tableView.rect(ofRow: rows.last).maxY - bounds.maxY < distance
         {
             requested = true
+            Signposts.event("page requested")
             ScrollLog.log("table \(number) asks for newer messages at y \(bounds.minY)")
             actions?.loadMore(.newer)
         }
@@ -491,7 +572,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 cell.configure(message, notice: notice, time: groupTime, fullDate: fullDate)
                 return cell
             }
-            let cell = reuse(MessageCell.identifier) as? MessageCell ?? MessageCell()
+            let cell =
+                reuse(MessageCell.identifier) as? MessageCell
+                ?? Signposts.interval("message cell made") { MessageCell() }
             cell.isHovered = item.id == hovered
             cell.onRetry = { [weak self] in self?.actions?.retry(message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
@@ -630,6 +713,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     @objc private func liveScrollStarted(_ notification: Notification) {
         ScrollLog.log("table \(number) live scroll starts")
+        Signposts.event("live scroll starts")
         liveScrollEnded = false
         liveScrolled(notification)
     }
@@ -649,12 +733,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 return
             }
             ScrollLog.log("table \(self.number) live scroll went quiet")
+            Signposts.event("live scroll settles")
             self.settle()
         }
     }
 
     @objc private func liveScrollEnded(_ notification: Notification) {
         ScrollLog.log("table \(number) live scroll ends")
+        Signposts.event("live scroll settles")
         liveScrollEnded = true
         settle()
     }
