@@ -34,13 +34,20 @@ enum Launch {
         }
         do {
             let client = try DiscordClient(
-                host: .current, tokenStore: KeychainTokenStore(),
+                host: .current,
+                tokenStore: KeychainTokenStore(
+                    service: tokenService(for: Bundle.main.bundleIdentifier)),
                 cacheDirectory: cache?.path(percentEncoded: false))
             LaunchLog.mark("client created")
             return .running(AppModel(client: client))
         } catch {
             return .failed(error.localizedDescription)
         }
+    }
+
+    // Debug builds and the test host share the login keychain with the release app.
+    static func tokenService(for bundleIdentifier: String?) -> String {
+        bundleIdentifier == "app.akari.Akari" ? "app.akari.tokens" : "app.akari.dev.tokens"
     }
 
     static func enableLoggingIfAsked(_ defaults: UserDefaults, enable: (String) throws -> Void) {

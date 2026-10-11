@@ -73,15 +73,20 @@ Without `Local.xcconfig` the app still builds and runs, signed ad hoc, with the 
 The app uses App Sandbox with outgoing network connections only, so it needs no
 provisioning profile.
 
+Debug builds and the test host are `app.akari.Akari.dev`, with their own container (settings
+and cache) and their own Keychain service, `app.akari.dev.tokens`; a Debug run logs in
+separately. Release builds are `app.akari.Akari` with `app.akari.tokens`.
+
 ## Tests
 
 ```sh
 xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari -destination 'platform=macOS'
 ```
 
-The tests run inside the app (a hosted test bundle), which starts nothing under tests: no
-client, no Keychain and no network. The logic the iOS app will share lives in AkariKit and
-is tested there with `swift test`.
+The tests run inside the Debug app (a hosted test bundle, `app.akari.Akari.dev`), which
+starts nothing under tests: no client, no Keychain and no network. Their settings live in
+`MemoryDefaults`, never in the app's defaults or a suite. The logic the iOS app will share
+lives in AkariKit and is tested there with `swift test`.
 
 ## Logs and launch time
 
@@ -231,7 +236,8 @@ beside its tracks. Delete recordings after use: they come from a real account.
 ## Disk cache
 
 Each account's state and its recently viewed channels' newest messages are kept in
-`~/Library/Containers/app.akari.Akari/Data/Library/Application Support/Akari/Cache`, one
+`~/Library/Containers/app.akari.Akari/Data/Library/Application Support/Akari/Cache` (Debug
+builds: in `app.akari.Akari.dev`'s container), one
 `<user id>.sqlite` (with `-wal` and `-shm`) per account, excluded from backups. What it holds,
 when it's written and when it's deleted: [cache.md](../../docs/protocol/cache.md). Quitting
 waits for a last write, at most about a second.

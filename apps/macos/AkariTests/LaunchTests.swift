@@ -10,6 +10,20 @@ struct LaunchTests {
     }
 
     @Test
+    func testsRunInTheDevelopmentAppsOwnContainer() {
+        #expect(Bundle.main.bundleIdentifier == "app.akari.Akari.dev")
+        #expect(NSHomeDirectory().hasSuffix("/Library/Containers/app.akari.Akari.dev/Data"))
+        #expect(Launch.tokenService(for: Bundle.main.bundleIdentifier) == "app.akari.dev.tokens")
+    }
+
+    @Test
+    func onlyTheReleaseAppUsesItsTokens() {
+        #expect(Launch.tokenService(for: "app.akari.Akari") == "app.akari.tokens")
+        #expect(Launch.tokenService(for: "app.akari.Akari.dev") == "app.akari.dev.tokens")
+        #expect(Launch.tokenService(for: nil) == "app.akari.dev.tokens")
+    }
+
+    @Test
     func loggingIsOnlyEnabledWhenAsked() {
         let defaults = MemoryDefaults()
         var filters: [String] = []
