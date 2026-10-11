@@ -756,8 +756,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard let width = tableView.tableColumns.first?.width, width != rowHeightsWidth else {
             return
         }
-        // The table keeps no row in place when heights change; settle() restores this one.
-        if !pinsToBottom, let place = visibleAnchor(skipping: []) {
+        // The table keeps no row in place when heights change; settle() restores this one. Not in
+        // our own update: a scroller appearing in it narrows the column before the rows are placed.
+        if ownChanges == 0, !pinsToBottom, let place = visibleAnchor(skipping: []) {
             anchor = place
         }
         tableView.noteHeightOfRows(

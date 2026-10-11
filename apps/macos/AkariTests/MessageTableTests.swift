@@ -221,6 +221,17 @@ struct MessageTableTests {
         #expect(abs(table.rect(ofRow: first).minY - clip.bounds.minY - offset) <= 1)
     }
 
+    // A mouse or "Show scroll bars: Always": the scroller appears when the rows outgrow the
+    // view, which narrows the column in the middle of the update.
+    @Test
+    func aFirstFillAwayFromThePresentShowsTheBottomWithLegacyScrollers() {
+        controller.scrollView.scrollerStyle = .legacy
+
+        show(MessageTableState(rows: messages(80, longText: true), atPresent: false))
+
+        #expect(controller.isPinnedToBottom)
+    }
+
     @Test
     func leavingThePresentWithoutNewRowsStopsPinning() {
         let rows = messages(80, longText: true)
