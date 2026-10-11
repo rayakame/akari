@@ -106,7 +106,10 @@ async fn caches_cross_the_boundary() {
     assert!(dir.file().exists());
     let again = client.account(token("t"), USER).unwrap();
     let restored = again.store().subscribe();
-    until(&restored, &StoreEvent::Restored).await;
+    // As a host does: a restore that landed before the subscription sends no event to it.
+    if again.store().current_user().is_none() {
+        until(&restored, &StoreEvent::Restored).await;
+    }
     assert_eq!(again.store().guild_ids().len(), 1);
 
     client.forget_account(USER).await.unwrap();
