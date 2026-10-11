@@ -324,7 +324,7 @@ async fn message_actions_work_without_a_tokio_context() {
     .join()
     .unwrap();
 
-    assert_eq!(loaded, Ok(()));
+    assert!(matches!(loaded, Ok(Some(_))), "{loaded:?}");
     assert_eq!(sent, Ok(MessageId::new(400_000_000_000_000_050)));
     online.account.close();
 }
@@ -431,4 +431,37 @@ async fn queueing_and_delivering_cross_the_boundary() {
         online.account.queue_message(GENERAL, "again".to_owned()),
         Err(RequestError::Closed)
     );
+}
+
+#[tokio::test]
+async fn load_reports_cross_the_boundary() {
+    let server = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .and(query_param("limit", "50"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixture(include_str!(
+                "../../../akari-core/tests/fixtures/messages_page.json"
+            ))),
+        )
+        .mount(&server)
+        .await;
+    let online = online_with(&server).await;
+
+    let report = online
+        .account
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+    let nothing = online
+        .account
+        .load_messages(GENERAL, MessageLoad::Newer { limit: 50 })
+        .await
+        .unwrap();
+
+    assert_eq!(report.received, 3);
+    assert!(report.headers > Duration::ZERO, "{report:?}");
+    assert!(report.new_connection, "{report:?}");
+    assert_eq!(nothing, None);
+    online.account.close();
 }

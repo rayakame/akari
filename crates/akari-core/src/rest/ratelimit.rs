@@ -181,6 +181,9 @@ pub(crate) struct RateLimiter {
 pub(crate) struct Permit<'a> {
     limiter: &'a RateLimiter,
     route: RouteKey,
+    // Behind earlier requests on the route, then waiting for Discord's limits.
+    pub(crate) queued: Duration,
+    pub(crate) limited: Duration,
     _lane: OwnedMutexGuard<()>,
 }
 
@@ -199,17 +202,23 @@ impl RateLimiter {
             lanes.retain(|_, lane| Arc::strong_count(lane) > 1);
             lanes.entry(route.clone()).or_default().clone()
         };
+        let asked = Instant::now();
         // tokio's Mutex is fair, so waiters on one route start in the order they came.
         let guard = lane.lock_owned().await;
-        self.reserve(&route).await?;
+        let queued = asked.elapsed();
+        let limited = self.reserve(&route).await?;
         Ok(Permit {
             limiter: self,
             route,
+            queued,
+            limited,
             _lane: guard,
         })
     }
 
-    async fn reserve(&self, route: &RouteKey) -> Result<(), Duration> {
+    // Ok: how long it waited.
+    async fn reserve(&self, route: &RouteKey) -> Result<Duration, Duration> {
+        let started = Instant::now();
         loop {
             let now = Instant::now();
             let wait = self
@@ -222,7 +231,7 @@ impl RateLimiter {
                     return Err(at.duration_since(now));
                 }
                 Some(at) => sleep_until(at).await,
-                None => return Ok(()),
+                None => return Ok(started.elapsed()),
             }
         }
     }
@@ -230,7 +239,7 @@ impl RateLimiter {
 
 impl Permit<'_> {
     /// Waits until the route may start again, so a retry goes before later requests.
-    pub(crate) async fn renew(&self) -> Result<(), Duration> {
+    pub(crate) async fn renew(&self) -> Result<Duration, Duration> {
         self.limiter.reserve(&self.route).await
     }
 

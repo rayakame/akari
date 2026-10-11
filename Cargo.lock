@@ -64,6 +64,8 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
+ "tower-layer",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
  "wiremock",

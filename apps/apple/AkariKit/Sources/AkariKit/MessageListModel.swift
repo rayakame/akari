@@ -107,7 +107,7 @@ public final class MessageListModel {
             }
         LaunchLog.mark("first message load started")
         do {
-            try await account.loadMessages(channelId: channelId, load: request)
+            _ = try await account.loadMessages(channelId: channelId, load: request)
             LaunchLog.mark("first message load finished")
             if kind == .latest {
                 failedLoads = [:]

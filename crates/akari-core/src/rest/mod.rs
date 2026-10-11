@@ -1,4 +1,5 @@
 mod account;
+mod connections;
 mod error;
 mod ratelimit;
 
@@ -14,6 +15,12 @@ pub(crate) use error::FieldError;
 pub(crate) use error::{ApiError, RestError};
 
 use std::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::time::Instant;
+
+use connections::{Connections, TimedConnectLayer};
 
 use crate::error::TransportError;
 use crate::properties::ClientProperties;
@@ -23,6 +30,7 @@ use crate::{Secret, Token};
 pub(crate) struct RestClient {
     http: reqwest::Client,
     base: Url,
+    connections: Arc<Connections>,
 }
 
 #[derive(Default)]
@@ -69,6 +77,13 @@ pub(crate) struct RawResponse {
     pub(crate) status: u16,
     pub(crate) headers: HeaderMap,
     pub(crate) body: Vec<u8>,
+    pub(crate) timing: ResponseTiming,
+}
+
+pub(crate) struct ResponseTiming {
+    pub(crate) headers: Duration,
+    pub(crate) body: Duration,
+    pub(crate) new_connection: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -100,8 +115,10 @@ impl RestClient {
         insert("x-super-properties", &properties.super_properties())?;
         insert("x-discord-locale", &properties.system_locale)?;
 
+        let connections = Arc::new(Connections::default());
         let http = reqwest::Client::builder()
             .tls_backend_preconfigured(tls)
+            .connector_layer(TimedConnectLayer(connections.clone()))
             .default_headers(headers)
             .https_only(https_only)
             // A redirect would carry the Authorization header to wherever Discord points.
@@ -110,7 +127,11 @@ impl RestClient {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|err| BuildError::Transport(TransportError::from_reqwest(err)))?;
-        Ok(Self { http, base })
+        Ok(Self {
+            http,
+            base,
+            connections,
+        })
     }
 
     pub(crate) async fn get_json<R: DeserializeOwned>(
@@ -183,6 +204,7 @@ impl RestClient {
             status,
             headers,
             body,
+            ..
         } = self.send_raw(request).await?;
         if (200..300).contains(&status) {
             Ok(body)
@@ -193,7 +215,10 @@ impl RestClient {
 
     pub(crate) async fn send_raw(&self, request: RequestBuilder) -> Result<RawResponse, RestError> {
         let transport = |err| RestError::Transport(TransportError::from_reqwest(err));
+        let opened = self.connections.opened();
+        let started = Instant::now();
         let mut response = request.send().await.map_err(transport)?;
+        let headers_at = Instant::now();
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         if response
@@ -209,10 +234,16 @@ impl RestClient {
             }
             body.extend_from_slice(&chunk);
         }
+        let timing = ResponseTiming {
+            headers: headers_at - started,
+            body: headers_at.elapsed(),
+            new_connection: self.connections.opened() > opened,
+        };
         Ok(RawResponse {
             status,
             headers,
             body,
+            timing,
         })
     }
 }

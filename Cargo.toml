@@ -23,6 +23,9 @@ rustls-platform-verifier = "0.7"
 # The same aws-lc-rs build rustls uses; remote auth needs its RSA-OAEP directly.
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# Only the traits, for timing reqwest's connector (ClientBuilder::connector_layer).
+tower-layer = "0.3"
+tower-service = "0.3"
 tokio-util = { version = "0.7", default-features = false }
 base64 = "0.23"
 percent-encoding = "2.3"

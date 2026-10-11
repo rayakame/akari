@@ -21,11 +21,14 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
         GuildStore()
     }
 
-    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws {
+    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
+        -> LoadReport?
+    {
         loads.withLock { $0 += 1 }
         if holdsLoads {
             try await Task.sleep(for: .seconds(60))
         }
+        return nil
     }
 
     override func viewChannel(channelId: ChannelId) {}

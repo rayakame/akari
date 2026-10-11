@@ -2249,3 +2249,251 @@ async fn a_closed_account_refuses_before_anything_is_queued() {
     assert!(outbox(&account).is_empty());
     assert!(sends.bodies().is_empty());
 }
+
+async fn mock_delayed_page(
+    server: &wiremock::MockServer,
+    query: (&str, &str),
+    body: Value,
+    delay: Duration,
+) {
+    use wiremock::matchers::{path, query_param};
+    wiremock::Mock::given(path(MESSAGES))
+        .and(query_param(query.0, query.1))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(body)
+                .set_delay(delay),
+        )
+        .mount(server)
+        .await;
+}
+
+fn fifty() -> Vec<u64> {
+    (10..60).collect()
+}
+
+#[tokio::test]
+async fn a_load_reports_where_its_time_went() {
+    let fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let body = page(&fifty());
+    let served = serde_json::to_vec(&body).unwrap().len();
+    mock_delayed_page(&server, ("limit", "50"), body, Duration::from_millis(200)).await;
+
+    let report = account
+        .load_messages(general(), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+
+    assert!(report.headers >= Duration::from_millis(200), "{report:?}");
+    assert_eq!(report.received, 50);
+    assert_eq!(report.bytes as usize, served);
+    assert_eq!(report.retries, 0);
+}
+
+#[tokio::test]
+async fn the_stages_never_add_up_to_more_than_the_load() {
+    let fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    mock_delayed_page(
+        &server,
+        ("limit", "50"),
+        page(&fifty()),
+        Duration::from_millis(50),
+    )
+    .await;
+
+    let started = std::time::Instant::now();
+    let report = account
+        .load_messages(general(), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+    let wall = started.elapsed();
+
+    let stages = report.queued
+        + report.limited
+        + report.headers
+        + report.body
+        + report.decode
+        + report.store;
+    assert!(stages <= wall, "{stages:?} > {wall:?}: {report:?}");
+}
+
+#[tokio::test]
+async fn nothing_to_load_reports_nothing() {
+    let fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    mock_page(&server, ("limit", "3"), page(&[10, 11])).await;
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 3 })
+        .await
+        .unwrap();
+    server.reset().await;
+
+    let report = account
+        .load_messages(general(), MessageLoad::Newer { limit: 3 })
+        .await
+        .unwrap();
+
+    assert_eq!(report, None);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn waiting_behind_the_same_channel_counts_as_queued() {
+    let fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = Arc::new(start_with(&fake, &server));
+    mock_delayed_page(
+        &server,
+        ("limit", "3"),
+        page(&[10, 11, 12]),
+        Duration::from_millis(300),
+    )
+    .await;
+    mock_page(&server, ("limit", "4"), page(&[10, 11, 12])).await;
+    let other = "/api/v9/channels/300000000000000009/messages";
+    {
+        use wiremock::matchers::path;
+        wiremock::Mock::given(path(other))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(page(&[5])))
+            .mount(&server)
+            .await;
+    }
+    let first = tokio::spawn({
+        let account = account.clone();
+        async move {
+            account
+                .load_messages(general(), MessageLoad::Latest { limit: 3 })
+                .await
+        }
+    });
+    timeout(WAIT, async {
+        while server.received_requests().await.unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let (second, elsewhere) = tokio::join!(
+        account.load_messages(general(), MessageLoad::Latest { limit: 4 }),
+        account.load_messages(
+            Snowflake::new(300_000_000_000_000_009),
+            MessageLoad::Latest { limit: 3 }
+        ),
+    );
+    first.await.unwrap().unwrap();
+
+    let second = second.unwrap().expect("a page was loaded");
+    let elsewhere = elsewhere.unwrap().expect("a page was loaded");
+    assert!(second.queued >= Duration::from_millis(250), "{second:?}");
+    assert!(
+        elsewhere.queued < Duration::from_millis(250),
+        "{elsewhere:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_bucket_at_zero_counts_as_limited() {
+    use wiremock::matchers::{path, query_param};
+    let fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    wiremock::Mock::given(path(MESSAGES))
+        .and(query_param("limit", "3"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(page(&[10, 11, 12]))
+                .insert_header("x-ratelimit-bucket", "messages")
+                .insert_header("x-ratelimit-remaining", "0")
+                .insert_header("x-ratelimit-reset-after", "0.3"),
+        )
+        .mount(&server)
+        .await;
+    mock_page(&server, ("before", "10"), page(&[7, 8, 9])).await;
+
+    let first = account
+        .load_messages(general(), MessageLoad::Latest { limit: 3 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+    let second = account
+        .load_messages(general(), MessageLoad::Older { limit: 3 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+
+    assert_eq!(first.remaining, Some(0));
+    assert_eq!(first.reset_after, Some(Duration::from_millis(300)));
+    assert!(second.limited >= Duration::from_millis(250), "{second:?}");
+}
+
+#[tokio::test]
+async fn retries_and_their_waits_are_counted() {
+    use wiremock::matchers::{path, query_param};
+    let fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    wiremock::Mock::given(path(MESSAGES))
+        .and(query_param("limit", "4"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(429).set_body_json(
+                json!({"message": "slow down", "retry_after": 0.2, "global": false}),
+            ),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    mock_page(&server, ("limit", "4"), page(&[10, 11, 12])).await;
+    wiremock::Mock::given(path(MESSAGES))
+        .and(query_param("before", "10"))
+        .respond_with(wiremock::ResponseTemplate::new(502))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    mock_page(&server, ("before", "10"), page(&[7, 8, 9])).await;
+
+    let limited = account
+        .load_messages(general(), MessageLoad::Latest { limit: 4 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+    let failed_once = account
+        .load_messages(general(), MessageLoad::Older { limit: 3 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+
+    assert_eq!(limited.retries, 1);
+    assert!(limited.limited >= Duration::from_millis(150), "{limited:?}");
+    assert_eq!(failed_once.retries, 1);
+}
+
+#[tokio::test]
+async fn a_second_load_reuses_the_connection() {
+    let fake = FakeGateway::start().await;
+    let server = wiremock::MockServer::start().await;
+    let account = start_with(&fake, &server);
+    mock_page(&server, ("limit", "3"), page(&[10, 11, 12])).await;
+    mock_page(&server, ("before", "10"), page(&[7, 8, 9])).await;
+
+    let first = account
+        .load_messages(general(), MessageLoad::Latest { limit: 3 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+    let second = account
+        .load_messages(general(), MessageLoad::Older { limit: 3 })
+        .await
+        .unwrap()
+        .expect("a page was loaded");
+
+    assert!(first.new_connection, "{first:?}");
+    assert!(!second.new_connection, "{second:?}");
+}

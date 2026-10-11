@@ -4,6 +4,7 @@ use akari_core::model::{ChannelId, MessageId};
 use tokio::runtime::Runtime;
 
 use crate::errors::{GatewayError, RequestError};
+use crate::records::LoadReport;
 use crate::runtime::run;
 use crate::store::Store;
 
@@ -53,16 +54,18 @@ impl Account {
 
     /// Loads messages into the channel's window within Discord's rate limits. `Latest` and
     /// `Around` view the channel first; `Older` and `Newer` do nothing without a window.
+    /// Returns where the load's time went, or `None` when there was nothing to load.
     pub async fn load_messages(
         &self,
         channel_id: ChannelId,
         load: MessageLoad,
-    ) -> Result<(), RequestError> {
+    ) -> Result<Option<LoadReport>, RequestError> {
         let core = self.core.clone();
         run(self.runtime, async move {
             core.load_messages(channel_id, load.into()).await
         })
         .await
+        .map(|report| report.map(Into::into))
         .map_err(Into::into)
     }
 

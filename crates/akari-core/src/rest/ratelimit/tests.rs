@@ -199,7 +199,7 @@ async fn a_retry_keeps_its_place_on_the_route() {
     permit.finish(&limited(SECOND, false));
     let renewed = timeout(2 * SECOND, permit.renew()).await;
 
-    assert!(matches!(renewed, Ok(Ok(()))));
+    assert!(matches!(renewed, Ok(Ok(_))));
     assert!(!waiting.is_finished());
     drop(permit);
     waiting.await.unwrap();

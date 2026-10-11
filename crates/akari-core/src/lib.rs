@@ -9,6 +9,7 @@ mod error;
 pub mod gateway;
 mod heartbeat;
 mod lenient;
+mod load_report;
 pub mod model;
 pub mod properties;
 mod random;
@@ -27,6 +28,7 @@ pub(crate) fn millis(duration: std::time::Duration) -> u64 {
 pub use account::{Account, MessageLoad};
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{JsonError, JsonErrorKind, TransportError, TransportErrorKind};
+pub use load_report::LoadReport;
 pub use rest::RequestError;
 pub use secret::{Secret, Token};
 pub use state::message_length;
