@@ -1,4 +1,5 @@
 import Observation
+import os
 
 /// The app's top level: restores the last account or shows the login screen, and returns to
 /// it when the session ends for good.
@@ -57,10 +58,14 @@ public final class AppModel {
         }
         started = true
         guard let userId = memory.lastAccount else {
+            // Files a crash between forgetting a token and deleting its cache left behind.
+            Task { [client] in await client.clearCaches() }
             return showLogin(nil)
         }
-        // The first message load then finds a connection instead of paying the handshake.
+        // The first message load then finds a connection instead of paying the handshake, and
+        // the cache is read while the Keychain is.
         client.warmUp()
+        client.preload(userId: userId)
         let token: Token?
         do {
             token = try await client.loadToken(account: userId)
@@ -125,6 +130,33 @@ public final class AppModel {
         if !open(old.userId, token, drafts: old.drafts, failure: .reconnectFailed) {
             self.token = nil
             keptDrafts = (old.userId, old.drafts)
+        }
+    }
+
+    /// Writes the open session's cache; returns within `limit` either way.
+    public func prepareToQuit(limit: Duration = .seconds(1)) async {
+        guard case .session(let session) = screen else {
+            return
+        }
+        let finished = OSAllocatedUnfairLock(initialState: false)
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            let finish = {
+                let first = finished.withLock { finished in
+                    defer { finished = true }
+                    return !finished
+                }
+                if first {
+                    done.resume()
+                }
+            }
+            Task {
+                await session.flushCache()
+                finish()
+            }
+            Task {
+                try? await Task.sleep(for: limit)
+                finish()
+            }
         }
     }
 

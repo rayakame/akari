@@ -64,4 +64,12 @@ struct EventBatchTests {
 
         #expect(batch.connection == .online)
     }
+
+    @Test
+    func aRestoreChangesEverythingLikeReady() {
+        #expect(EventBatch([.restored]).everythingChanged)
+        #expect(EventBatch([.ready]).everythingChanged)
+        #expect(!EventBatch([.restored]).ready)
+        #expect(!EventBatch([.currentUserUpdated]).everythingChanged)
+    }
 }

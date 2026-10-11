@@ -38,7 +38,9 @@ final class AppModelTests {
 
         #expect(session.userId == id(42))
         #expect(
-            client.calls.current == [.warmUp, .loadToken(id(42)), .account(token: "stored.token")])
+            client.calls.current == [
+                .warmUp, .preload(id(42)), .loadToken(id(42)), .account(token: "stored.token"),
+            ])
         #expect(account.log.calls.contains(.connect))
         session.close()
     }
@@ -423,11 +425,59 @@ final class AppModelTests {
     }
 
     @Test
-    func aRestoredLaunchWarmsUpBeforeTheTokenLoads() async throws {
+    func aLaunchPreloadsAndWarmsUpBeforeTheTokenLoads() async throws {
         let (_, session, _) = try await restored()
 
-        #expect(Array(client.calls.current.prefix(2)) == [.warmUp, .loadToken(id(42))])
+        #expect(
+            Array(client.calls.current.prefix(3)) == [
+                .warmUp, .preload(id(42)), .loadToken(id(42)),
+            ]
+        )
+        #expect(!client.calls.current.contains(.clearCaches))
         session.close()
+    }
+
+    @Test
+    func aLaunchWithoutAnAccountClearsCaches() async {
+        let app = makeApp()
+
+        await app.start()
+        await client.cleared.wait()
+
+        #expect(client.calls.current.contains(.clearCaches))
+        #expect(app.screen.login != nil)
+    }
+
+    @Test
+    func quittingWaitsForTheFlushAtMostTheLimit() async throws {
+        let (app, session, account) = try await restored()
+        account.holdFlushes.withLock { $0 = true }
+
+        let started = ContinuousClock.now
+        await app.prepareToQuit(limit: .milliseconds(200))
+        let waited = started.duration(to: .now)
+
+        #expect(waited >= .milliseconds(200))
+        #expect(waited < .seconds(2))
+        #expect(account.log.actions.contains(.flushCache))
+        account.flushes.send(())
+
+        account.holdFlushes.withLock { $0 = false }
+        let quick = ContinuousClock.now
+        await app.prepareToQuit(limit: .seconds(10))
+        #expect(quick.duration(to: .now) < .seconds(2))
+        session.close()
+    }
+
+    @Test
+    func quittingWithoutASessionReturnsAtOnce() async {
+        let app = makeApp()
+        await app.start()
+
+        let started = ContinuousClock.now
+        await app.prepareToQuit(limit: .seconds(10))
+
+        #expect(started.duration(to: .now) < .seconds(1))
     }
 
     // After a sleep the pooled connection is usually gone.

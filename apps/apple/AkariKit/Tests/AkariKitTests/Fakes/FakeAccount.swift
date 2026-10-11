@@ -116,4 +116,15 @@ final class FakeAccount: Account, @unchecked Sendable {
     override func discardMessage(channelId: ChannelId, pendingId: MessageId) {
         log.append(.discard(channelId, pendingId))
     }
+
+    // While set, each cache flush waits for one value here.
+    let holdFlushes = Locked(false)
+    let flushes = AsyncQueue<Void>()
+
+    override func flushCache() async {
+        log.append(.flushCache)
+        if holdFlushes.current {
+            _ = await flushes.next()
+        }
+    }
 }

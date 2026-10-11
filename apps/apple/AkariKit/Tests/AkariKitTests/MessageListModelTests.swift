@@ -70,7 +70,8 @@ struct MessageListModelTests {
             store.reads == [
                 .window(here), .messages(here, [id(3), id(4), id(5)]), .slowmode(here),
             ])
-        #expect(model.rows.map(\.message) == [message(3, content: "edited"), message(4), message(5)])
+        #expect(
+            model.rows.map(\.message) == [message(3, content: "edited"), message(4), message(5)])
     }
 
     @Test
@@ -311,7 +312,8 @@ struct MessageListModelTests {
         account.loadError.withLock { $0 = nil }
         await model.loadNewer()
         #expect(model.failedLoads.isEmpty)
-        #expect(store.log.actions == [.load(here, .newer(limit: 50)), .load(here, .newer(limit: 50))])
+        #expect(
+            store.log.actions == [.load(here, .newer(limit: 50)), .load(here, .newer(limit: 50))])
     }
 
     @Test
@@ -418,5 +420,33 @@ struct MessageListModelTests {
 
         #expect(empty.openedFrom == .network)
         #expect(held.openedFrom == .window)
+    }
+
+    @Test
+    func theFirstRowsSayTheyCameFromDisk() {
+        shown(window([]))
+        let model = loaded()
+        #expect(model.openedFrom == .network)
+
+        shown(window([1, 2], stale: true))
+        model.apply(
+            EventBatch([
+                .messagesLoaded(channelId: here, first: id(1), last: id(2)),
+                .messagesStale(channelId: here),
+            ]))
+
+        #expect(model.openedFrom == .disk)
+        #expect(model.rows.map(\.id) == [id(1), id(2)])
+    }
+
+    @Test
+    func rowsFromTheNetworkStayFromTheNetwork() {
+        shown(window([]))
+        let model = loaded()
+
+        shown(window([1, 2]))
+        model.apply(EventBatch([.messagesLoaded(channelId: here, first: id(1), last: id(2))]))
+
+        #expect(model.openedFrom == .network)
     }
 }

@@ -13,6 +13,7 @@ public final class MessageListModel {
     public enum Origin: Sendable {
         /// A window the store already held.
         case window
+        case disk
         case network
     }
 
@@ -96,10 +97,15 @@ public final class MessageListModel {
     func apply(_ batch: EventBatch) {
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
         let updated = batch.updatedMessages[channelId] ?? []
+        let hadRows = hasMessages
         if batch.windowsChanged.contains(channelId) {
             reload(rereading: updated)
         } else if !updated.isEmpty {
             reread(updated)
+        }
+        // The cache's copy comes stale, before the page that refreshes it.
+        if !hadRows, hasMessages, isStale, openedFrom == .network, lastLoad == nil {
+            openedFrom = .disk
         }
         composer.apply(batch)
     }

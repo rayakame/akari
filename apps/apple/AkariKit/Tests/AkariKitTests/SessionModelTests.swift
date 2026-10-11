@@ -557,4 +557,104 @@ final class SessionModelTests {
         #expect(later.lastSpot(of: id(2)) == nil)
         session.close()
     }
+
+    func restoreGuilds() {
+        store.update { state in
+            state.currentUser = user(1, name: "me")
+            state.add(guild(1), guild(2))
+            state.list([channel(11), channel(12)], in: 1)
+            state.list([channel(21, guild: 2), channel(22, guild: 2)], in: 2)
+            state.talk(dm(5, with: 50), with: user(50))
+        }
+    }
+
+    @Test
+    func aRestoredSessionShowsTheCacheBeforeReady() async {
+        memory.remember(.init(place: .guild(id(1)), channel: id(12)), of: id(1))
+        let session = makeSession()
+        session.start()
+        #expect(session.place == .home)
+
+        restoreGuilds()
+        subscription.send(.restored)
+        await subscription.batches.pulled(2)
+
+        #expect(session.currentUser == user(1, name: "me"))
+        #expect(session.guilds.guilds == [guild(1), guild(2)])
+        #expect(session.directMessages.conversations.map(\.id) == [id(5)])
+        #expect(session.place == .guild(id(1)))
+        #expect(session.messages?.channelId == id(12))
+        session.close()
+    }
+
+    @Test
+    func aSessionStartingAfterTheRestoreOpensTheCachedPlace() {
+        memory.remember(.init(place: .guild(id(1)), channel: id(12)), of: id(1))
+        restoreGuilds()
+        let session = makeSession()
+
+        session.start()
+
+        #expect(session.place == .guild(id(1)))
+        #expect(session.messages?.channelId == id(12))
+        #expect(store.log.calls.last == .connect)
+        session.close()
+    }
+
+    @Test
+    func aGoneCachedPlaceFallsBackAtReady() async {
+        memory.remember(.init(place: .guild(id(2)), channel: id(22)), of: id(1))
+        restoreGuilds()
+        let session = makeSession()
+        session.start()
+        #expect(session.messages?.channelId == id(22))
+
+        store.update { state in
+            state.guildIds.removeAll { $0 == id(2) }
+            state.guilds[id(2)] = nil
+            state.channelLists[id(2)] = nil
+        }
+        subscription.send(.guildRemoved(guildId: id(2)), .ready)
+        await subscription.batches.pulled(2)
+
+        #expect(session.place == .home)
+        #expect(session.messages == nil)
+        #expect(memory.lastSpot(of: id(1)) == .init(place: .home, channel: nil))
+        session.close()
+    }
+
+    @Test
+    func aGoneCachedConversationIsClosedAtReady() async {
+        memory.remember(.init(place: .home, channel: id(5)), of: id(1))
+        restoreGuilds()
+        let session = makeSession()
+        session.start()
+        #expect(session.messages?.channelId == id(5))
+
+        store.update { $0.privateChannels = [] }
+        subscription.send(.channelRemoved(channelId: id(5), guildId: nil), .ready)
+        await subscription.batches.pulled(2)
+
+        #expect(session.messages == nil)
+        #expect(memory.lastSpot(of: id(1)) == .init(place: .home, channel: nil))
+        session.close()
+    }
+
+    @Test
+    func aCachedPlaceThatSurvivesReadyStaysOpen() async {
+        memory.remember(.init(place: .guild(id(1)), channel: id(12)), of: id(1))
+        restoreGuilds()
+        let session = makeSession()
+        session.start()
+        let channels = session.channels
+        let messages = session.messages
+
+        subscription.send(.ready)
+        await subscription.batches.pulled(2)
+
+        #expect(session.place == .guild(id(1)))
+        #expect(session.channels === channels)
+        #expect(session.messages === messages)
+        session.close()
+    }
 }

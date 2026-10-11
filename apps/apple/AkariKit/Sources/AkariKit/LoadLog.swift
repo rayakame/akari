@@ -61,6 +61,7 @@ public enum LoadLog {
         let source =
             switch origin {
             case .window: "the window"
+            case .disk: "disk"
             case .network: "the network"
             }
         return "channel \(channel.rawValue) opened: rows from \(source) after \(ms(after))"

@@ -10,6 +10,8 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
         case loadToken(UserId)
         case logout(UserId)
         case forgetAccount(UserId)
+        case preload(UserId)
+        case clearCaches
         case endSession(String)
         case warmUp
     }
@@ -50,6 +52,17 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
 
     override func warmUp() {
         record(.warmUp)
+    }
+
+    override func preload(userId: UserId) {
+        record(.preload(userId))
+    }
+
+    let cleared = Signal()
+
+    override func clearCaches() async {
+        record(.clearCaches)
+        cleared.fire()
     }
 
     override func passwordLogin() -> PasswordLogin {
