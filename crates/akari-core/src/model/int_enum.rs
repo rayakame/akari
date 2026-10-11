@@ -23,6 +23,15 @@ macro_rules! int_enum {
             }
         }
 
+        impl From<$name> for u16 {
+            fn from(value: $name) -> Self {
+                match value {
+                    $($name::$variant => $value,)+
+                    $name::Unknown(other) => other,
+                }
+            }
+        }
+
         impl<'de> serde::Deserialize<'de> for $name {
             fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
                 <u16 as serde::Deserialize>::deserialize(deserializer).map(Self::from)
@@ -45,6 +54,12 @@ mod tests {
     #[test]
     fn maps_known_values() {
         assert_eq!(serde_json::from_str::<Color>("1").unwrap(), Color::Green);
+    }
+
+    #[test]
+    fn converts_back_to_the_value() {
+        assert_eq!(u16::from(Color::Green), 1);
+        assert_eq!(u16::from(Color::Unknown(42)), 42);
     }
 
     #[test]

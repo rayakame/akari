@@ -17,14 +17,14 @@ use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
 #[derive(Default)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct Entities {
-    current_user: Option<Arc<CurrentUser>>,
+    pub(crate) current_user: Option<Arc<CurrentUser>>,
     // DM and group DM recipients only.
-    users: HashMap<UserId, Arc<User>>,
-    guilds: HashMap<GuildId, Arc<Guild>>,
-    unavailable: HashSet<GuildId>,
+    pub(crate) users: HashMap<UserId, Arc<User>>,
+    pub(crate) guilds: HashMap<GuildId, Arc<Guild>>,
+    pub(crate) unavailable: HashSet<GuildId>,
     // Only the current user's member in each guild.
-    members: HashMap<GuildId, Arc<Member>>,
-    channels: HashMap<ChannelId, Arc<Channel>>,
+    pub(crate) members: HashMap<GuildId, Arc<Member>>,
+    pub(crate) channels: HashMap<ChannelId, Arc<Channel>>,
 }
 
 impl Entities {
