@@ -946,3 +946,23 @@ async fn a_held_thread_queues_its_commands() {
     release.send(()).unwrap();
     assert!(flush.await.unwrap().is_some());
 }
+
+#[tokio::test]
+async fn replaced_messages_leave_no_text_after_a_flush() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread
+        .flush(snapshot([(
+            10,
+            window(5, messages(10, 1..4, "deleted-secret-42")),
+        )]))
+        .await
+        .unwrap();
+
+    thread
+        .flush(snapshot([(10, window(6, messages(10, 5..8, "text")))]))
+        .await
+        .unwrap();
+
+    assert!(!files_contain(&dir.file(ME), b"deleted-secret-42"));
+}

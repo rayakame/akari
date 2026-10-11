@@ -180,6 +180,11 @@ pub(crate) fn flush(
     written
         .windows
         .retain(|channel, _| !evicted.contains(channel));
-    cache.release_free_pages(FREE_PAGES)?;
+    if flushed.rows() > 0 || flushed.deleted > 0 {
+        cache.release_free_pages(FREE_PAGES)?;
+        // The app quits without closing the file, and the WAL would keep replaced and deleted
+        // rows that secure_delete has already cleared from the database.
+        cache.checkpoint()?;
+    }
     Ok(flushed)
 }
