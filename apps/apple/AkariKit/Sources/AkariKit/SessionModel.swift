@@ -263,11 +263,23 @@ public final class SessionModel {
     // Once per session: the cache's state shows the last place before READY.
     private func restoreFromCache() {
         LaunchLog.mark("cache restored")
-        guard let spot = spotToRestore else {
+        // A place the cache doesn't have, e.g. a guild unavailable at the last write, is READY's.
+        guard let spot = spotToRestore, isCached(spot) else {
             return
         }
         spotToRestore = nil
         restore(spot)
+    }
+
+    private func isCached(_ spot: AccountMemory.Spot) -> Bool {
+        switch spot.place {
+        case .guild(let guildId):
+            return guilds.guilds.contains { $0.id == guildId }
+        case .home:
+            return spot.channel.map { channel in
+                directMessages.conversations.contains { $0.id == channel }
+            } ?? true
+        }
     }
 
     private func isListed(_ channel: ChannelId) -> Bool {

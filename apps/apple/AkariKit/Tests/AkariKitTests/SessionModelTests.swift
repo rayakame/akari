@@ -641,6 +641,59 @@ final class SessionModelTests {
     }
 
     @Test
+    func aGuildMissingFromTheCacheWaitsForReady() async {
+        memory.remember(.init(place: .guild(id(9)), channel: id(90)), of: id(1))
+        let session = makeSession()
+        session.start()
+        let messages = session.messages
+        #expect(messages?.channelId == id(90))
+
+        restoreGuilds()
+        subscription.send(.restored)
+        await subscription.batches.pulled(2)
+
+        #expect(session.place == .home)
+        #expect(session.messages === messages)
+        #expect(memory.lastSpot(of: id(1)) == .init(place: .guild(id(9)), channel: id(90)))
+
+        store.update { state in
+            state.add(guild(9))
+            state.list([channel(90, guild: 9)], in: 9)
+        }
+        subscription.send(.ready)
+        await subscription.batches.pulled(3)
+
+        #expect(session.place == .guild(id(9)))
+        #expect(session.messages === messages)
+        session.close()
+    }
+
+    @Test
+    func aConversationMissingFromTheCacheWaitsForReady() async {
+        memory.remember(.init(place: .home, channel: id(7)), of: id(1))
+        let session = makeSession()
+        session.start()
+        let messages = session.messages
+        #expect(messages?.channelId == id(7))
+
+        restoreGuilds()
+        subscription.send(.restored)
+        await subscription.batches.pulled(2)
+
+        #expect(session.messages === messages)
+        #expect(memory.lastSpot(of: id(1)) == .init(place: .home, channel: id(7)))
+
+        store.update { $0.talk(dm(7, with: 70), with: user(70)) }
+        subscription.send(.ready)
+        await subscription.batches.pulled(3)
+
+        #expect(session.place == .home)
+        #expect(session.messages === messages)
+        #expect(memory.lastSpot(of: id(1)) == .init(place: .home, channel: id(7)))
+        session.close()
+    }
+
+    @Test
     func aCachedPlaceThatSurvivesReadyStaysOpen() async {
         memory.remember(.init(place: .guild(id(1)), channel: id(12)), of: id(1))
         restoreGuilds()
