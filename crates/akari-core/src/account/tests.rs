@@ -2497,3 +2497,112 @@ async fn a_second_load_reuses_the_connection() {
     assert!(first.new_connection, "{first:?}");
     assert!(!second.new_connection, "{second:?}");
 }
+
+// Answers history pages below `before` like a bucket of `size` requests per second: a fixed
+// window from its first request, as Discord's headers describe, and a 429 past it.
+struct BucketServer {
+    size: u32,
+    state: std::sync::Mutex<(Option<std::time::Instant>, u32)>,
+    refused: std::sync::atomic::AtomicUsize,
+}
+
+impl BucketServer {
+    fn answer(&self, request: &wiremock::Request) -> wiremock::ResponseTemplate {
+        let now = std::time::Instant::now();
+        let mut state = self.state.lock().unwrap();
+        if state
+            .0
+            .is_none_or(|start| now >= start + Duration::from_secs(1))
+        {
+            *state = (Some(now), 0);
+        }
+        state.1 += 1;
+        let reset = (state.0.unwrap() + Duration::from_secs(1)).saturating_duration_since(now);
+        if state.1 > self.size {
+            self.refused
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return wiremock::ResponseTemplate::new(429).set_body_json(
+                json!({"message": "slow down", "retry_after": reset.as_secs_f64(), "global": false}),
+            );
+        }
+        let before: u64 = request
+            .url
+            .query_pairs()
+            .find(|(key, _)| key == "before")
+            .and_then(|(_, value)| value.parse().ok())
+            .unwrap_or(10_000);
+        wiremock::ResponseTemplate::new(200)
+            .set_body_json(page(&[before - 3, before - 2, before - 1]))
+            .insert_header("x-ratelimit-bucket", "messages")
+            .insert_header("x-ratelimit-limit", self.size.to_string().as_str())
+            .insert_header(
+                "x-ratelimit-remaining",
+                (self.size - state.1).to_string().as_str(),
+            )
+            .insert_header(
+                "x-ratelimit-reset-after",
+                format!("{:.3}", reset.as_secs_f64()).as_str(),
+            )
+    }
+}
+
+async fn bucket_server(size: u32) -> (wiremock::MockServer, Arc<BucketServer>) {
+    let server = wiremock::MockServer::start().await;
+    let bucket = Arc::new(BucketServer {
+        size,
+        state: std::sync::Mutex::new((None, 0)),
+        refused: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let answering = bucket.clone();
+    wiremock::Mock::given(wiremock::matchers::path(MESSAGES))
+        .respond_with(move |request: &wiremock::Request| answering.answer(request))
+        .mount(&server)
+        .await;
+    (server, bucket)
+}
+
+#[tokio::test]
+async fn fast_paging_stays_within_the_bucket() {
+    let fake = FakeGateway::start().await;
+    let (server, bucket) = bucket_server(5).await;
+    let account = start_with(&fake, &server);
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 3 })
+        .await
+        .unwrap();
+
+    let mut reports = Vec::new();
+    for _ in 0..12 {
+        reports.push(
+            account
+                .load_messages(general(), MessageLoad::Older { limit: 3 })
+                .await
+                .unwrap()
+                .expect("a page was loaded"),
+        );
+    }
+
+    assert_eq!(bucket.refused.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(reports.iter().all(|report| report.retries == 0));
+    assert!(reports.iter().any(|report| report.limited > Duration::ZERO));
+}
+
+#[tokio::test]
+async fn paging_with_a_bucket_left_never_waits() {
+    let fake = FakeGateway::start().await;
+    let (server, _bucket) = bucket_server(50).await;
+    let account = start_with(&fake, &server);
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 3 })
+        .await
+        .unwrap();
+
+    for _ in 0..8 {
+        let report = account
+            .load_messages(general(), MessageLoad::Older { limit: 3 })
+            .await
+            .unwrap()
+            .expect("a page was loaded");
+        assert_eq!(report.limited, Duration::ZERO, "{report:?}");
+    }
+}

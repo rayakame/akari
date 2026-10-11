@@ -87,6 +87,7 @@ pub(crate) struct RawResponse {
 pub(crate) struct ResponseTiming {
     pub(crate) headers: Duration,
     pub(crate) body: Duration,
+    pub(crate) headers_at: Instant,
     pub(crate) new_connection: bool,
 }
 
@@ -274,6 +275,7 @@ impl RestClient {
         let timing = ResponseTiming {
             headers: headers_at - started,
             body: headers_at.elapsed(),
+            headers_at,
             new_connection: self.connections.opened() > opened,
         };
         Ok(RawResponse {

@@ -216,9 +216,10 @@ impl RateLimiter {
         })
     }
 
-    // Ok: how long it waited.
+    // Ok: how long it waited for a limit; zero when it didn't have to.
     async fn reserve(&self, route: &RouteKey) -> Result<Duration, Duration> {
         let started = Instant::now();
+        let mut waited = false;
         loop {
             let now = Instant::now();
             let wait = self
@@ -230,8 +231,12 @@ impl RateLimiter {
                 Some(at) if at.duration_since(now) > self.max_wait => {
                     return Err(at.duration_since(now));
                 }
-                Some(at) => sleep_until(at).await,
-                None => return Ok(started.elapsed()),
+                Some(at) => {
+                    waited = true;
+                    sleep_until(at).await;
+                }
+                None if waited => return Ok(started.elapsed()),
+                None => return Ok(Duration::ZERO),
             }
         }
     }
@@ -243,12 +248,13 @@ impl Permit<'_> {
         self.limiter.reserve(&self.route).await
     }
 
-    pub(crate) fn finish(&self, limits: &ResponseLimits) {
+    // Discord's Reset-After counts from its answer; the headers are the closest we see of it.
+    pub(crate) fn finish(&self, limits: &ResponseLimits, headers_at: Instant) {
         self.limiter
             .limits
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .finished(&self.route, limits, Instant::now());
+            .finished(&self.route, limits, headers_at);
     }
 }
 

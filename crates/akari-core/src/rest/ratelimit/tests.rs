@@ -48,7 +48,7 @@ async fn requests_on_one_route_run_one_at_a_time_in_order() {
             order.lock().unwrap().push(index);
             tokio::time::sleep(Duration::from_millis(10)).await;
             active.fetch_sub(1, Ordering::SeqCst);
-            permit.finish(&ResponseLimits::default());
+            permit.finish(&ResponseLimits::default(), Instant::now());
         }));
         tokio::task::yield_now().await;
     }
@@ -82,15 +82,14 @@ async fn different_channels_run_in_parallel() {
 async fn known_limits_wait_for_the_reset() {
     let limiter = RateLimiter::new(HOUR);
     let started = Instant::now();
-    limiter
-        .acquire(send(1))
-        .await
-        .unwrap()
-        .finish(&ResponseLimits {
+    limiter.acquire(send(1)).await.unwrap().finish(
+        &ResponseLimits {
             remaining: Some(0),
             reset_after: Some(2 * SECOND),
             ..ResponseLimits::default()
-        });
+        },
+        Instant::now(),
+    );
 
     let _next = limiter.acquire(send(1)).await.unwrap();
 
@@ -111,13 +110,13 @@ async fn a_shared_bucket_header_joins_two_routes() {
         .acquire(other.clone())
         .await
         .unwrap()
-        .finish(&bucket(5, SECOND));
+        .finish(&bucket(5, SECOND), Instant::now());
     let started = Instant::now();
     limiter
         .acquire(send(1))
         .await
         .unwrap()
-        .finish(&bucket(0, 2 * SECOND));
+        .finish(&bucket(0, 2 * SECOND), Instant::now());
 
     let _next = limiter.acquire(other).await.unwrap();
 
@@ -134,7 +133,7 @@ async fn never_more_than_50_requests_in_any_second() {
             tokio::spawn(async move {
                 let permit = limiter.acquire(send(channel)).await.unwrap();
                 starts.lock().unwrap().push(Instant::now());
-                permit.finish(&ResponseLimits::default());
+                permit.finish(&ResponseLimits::default(), Instant::now());
             })
         })
         .collect();
@@ -162,7 +161,7 @@ async fn a_route_429_pauses_only_that_route() {
         .acquire(send(1))
         .await
         .unwrap()
-        .finish(&limited(3 * SECOND, false));
+        .finish(&limited(3 * SECOND, false), Instant::now());
 
     assert!(starts_within(&limiter, send(2), Duration::from_millis(1)).await);
     let _again = limiter.acquire(send(1)).await.unwrap();
@@ -177,7 +176,7 @@ async fn a_global_429_pauses_every_route() {
         .acquire(send(1))
         .await
         .unwrap()
-        .finish(&limited(3 * SECOND, true));
+        .finish(&limited(3 * SECOND, true), Instant::now());
 
     let _other = limiter.acquire(send(2)).await.unwrap();
 
@@ -196,7 +195,7 @@ async fn a_retry_keeps_its_place_on_the_route() {
     });
     tokio::task::yield_now().await;
 
-    permit.finish(&limited(SECOND, false));
+    permit.finish(&limited(SECOND, false), Instant::now());
     let renewed = timeout(2 * SECOND, permit.renew()).await;
 
     assert!(matches!(renewed, Ok(Ok(_))));
@@ -212,7 +211,7 @@ async fn a_wait_past_the_limit_fails_at_once() {
         .acquire(send(1))
         .await
         .unwrap()
-        .finish(&limited(60 * SECOND, false));
+        .finish(&limited(60 * SECOND, false), Instant::now());
 
     let refused = timeout(Duration::from_millis(1), limiter.acquire(send(1))).await;
     let other = timeout(Duration::from_millis(1), limiter.acquire(send(2))).await;
@@ -313,4 +312,25 @@ async fn expired_limits_are_forgotten() {
 
     assert_eq!(limits.paused.keys().collect::<Vec<_>>(), [&send(4)]);
     assert!(limits.buckets.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reset_counts_from_the_headers_never_earlier() {
+    let limiter = RateLimiter::new(HOUR);
+    let permit = limiter.acquire(route(Method::Get, 1)).await.unwrap();
+    let headers_at = Instant::now();
+    // The body takes a while after the headers.
+    tokio::time::advance(Duration::from_millis(300)).await;
+    let exhausted = ResponseLimits {
+        bucket: Some("messages".to_owned()),
+        remaining: Some(0),
+        reset_after: Some(SECOND),
+        ..ResponseLimits::default()
+    };
+    permit.finish(&exhausted, headers_at);
+    drop(permit);
+
+    limiter.acquire(route(Method::Get, 1)).await.unwrap();
+
+    assert_eq!(Instant::now(), headers_at + SECOND);
 }

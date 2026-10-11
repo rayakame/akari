@@ -299,7 +299,7 @@ impl AccountRest {
                 timing,
             } = self.client.rest().send_raw(request).await?;
             let limits = ResponseLimits::from_response(status, &headers, &body);
-            permit.finish(&limits);
+            permit.finish(&limits, timing.headers_at);
             report.headers += timing.headers;
             report.body += timing.body;
             report.new_connection |= timing.new_connection;
