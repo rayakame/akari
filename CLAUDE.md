@@ -42,8 +42,10 @@ XCFramework and generated bindings, with a Keychain token store, the view models
 login, session, guild, channel, DM and message lists, and the composer) and the message
 timeline. `apps/macos` is the first app: the login screen and the main window with the server
 rail, the channel and DM lists, a message list that loads history in both directions, and the
-composer; it shows the connection state and reconnects. `akari-markdown` is still an empty
-skeleton, and the other app folders contain only a README.
+composer; it shows the connection state and reconnects. akari-core also has the SQLite disk
+cache (`akari_core::cache`): one file per account with the last session's state and recent
+messages, which the macOS app restores before the gateway connects. `akari-markdown` is
+still an empty skeleton, and the other app folders contain only a README.
 
 | Path | Contents |
 |---|---|
@@ -103,7 +105,9 @@ Decided up front; changing them later is expensive.
   OS trust store via rustls-platform-verifier. The gateway WebSocket uses the same
   rustls `ClientConfig` as REST, never tokio-tungstenite's default connector.
   `deny.toml` bans `openssl`, `openssl-sys`, `native-tls` and `ring`.
-- **SQLite**: rusqlite with the `bundled` feature.
+- **SQLite**: rusqlite, linking the system `libsqlite3` on Apple targets (macOS and iOS ship
+  it) and with the `bundled` feature everywhere else. akari-core adds `bundled` for non-Apple
+  targets; AkariKit links `sqlite3`.
 - **Token storage** is not done in Rust. The core defines a trait / UniFFI callback
   interface that each host app implements (Keychain on Apple, Android Keystore,
   libsecret on Linux).
