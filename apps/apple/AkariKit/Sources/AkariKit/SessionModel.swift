@@ -47,8 +47,6 @@ public final class SessionModel {
     // Only channels opened here can hold this session's unsent messages.
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
-    // The place came from the disk cache; the first READY checks it's still there.
-    @ObservationIgnored private var placeFromCache = false
     @ObservationIgnored private var ended = false
 
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
@@ -188,11 +186,11 @@ public final class SessionModel {
         }
     }
 
-    // A new account starts with an empty outbox, so its text moves into the drafts.
     func flushCache() async {
         await account.flushCache()
     }
 
+    // A new account starts with an empty outbox, so its text moves into the drafts.
     func keepUnsentAsDrafts() {
         for channel in openedChannels.sorted() {
             guard let pending = store.window(channelId: channel)?.pendingIds, !pending.isEmpty
@@ -255,10 +253,6 @@ public final class SessionModel {
         if batch.ready {
             LaunchLog.mark("READY in the app")
         }
-        if batch.ready, placeFromCache {
-            placeFromCache = false
-            confirmCachedPlace()
-        }
         if batch.ready, let spot = spotToRestore {
             spotToRestore = nil
             restore(spot)
@@ -273,26 +267,7 @@ public final class SessionModel {
             return
         }
         spotToRestore = nil
-        placeFromCache = true
         restore(spot)
-    }
-
-    private func confirmCachedPlace() {
-        switch place {
-        case .guild(let guildId):
-            if store.guild(id: guildId) == nil {
-                open(.home)
-            } else if let open = messages?.channelId, let list = channels, !isListed(open) {
-                openListedChannel(in: list, guildId: guildId)
-            }
-        case .home:
-            if let open = messages?.channelId,
-                !directMessages.conversations.contains(where: { $0.id == open })
-            {
-                messages = nil
-                rememberSpot()
-            }
-        }
     }
 
     private func isListed(_ channel: ChannelId) -> Bool {
