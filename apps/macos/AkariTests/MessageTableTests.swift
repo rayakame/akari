@@ -810,6 +810,23 @@ struct MessageTableTests {
     }
 
     @Test
+    func aVisibleRowThatFailsGrowsByItsFailedLine() {
+        var rows = messages(20)
+        let last = rows.count - 1
+        show(rows)
+        #expect(visibleRows.contains(index(of: 20)))
+        let before = table.rect(ofRow: index(of: 20)).height
+
+        rows[last] = row(20, by: author(1), at: noon + 20 * 120, delivery: .failed)
+        show(rows)
+
+        let after = table.rect(ofRow: index(of: 20)).height
+        #expect(after > before)
+        #expect(abs(after - fittingHeight(ofRow: index(of: 20))) <= 0.5)
+        #expect(visibleRows.contains(index(of: 20)))
+    }
+
+    @Test
     func anOlderPageKeepsTheReaderExactlyInPlace() {
         show(page)
         scroll(toRowOf: 130)
