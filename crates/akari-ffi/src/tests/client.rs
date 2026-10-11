@@ -280,3 +280,37 @@ fn concurrent_first_starts_build_one_runtime() {
     assert_eq!(builds.load(Ordering::SeqCst), 1);
     assert!(started.iter().all(|runtime| *runtime == started[0]));
 }
+
+#[tokio::test]
+async fn warm_up_returns_at_once() {
+    use wiremock::matchers::{method, path};
+    let server = super::support::rest_server().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v9/gateway"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(2)))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = local_client(
+        rest_endpoints(&server),
+        MemoryStore::with(USER, "stored.token"),
+    );
+
+    let started = std::time::Instant::now();
+    client.warm_up();
+    let returned = started.elapsed();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    assert!(returned < Duration::from_millis(500), "{returned:?}");
+}

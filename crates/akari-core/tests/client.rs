@@ -274,3 +274,104 @@ async fn forget_token_deletes_without_a_request() {
 
     assert!(!store.holds(ACCOUNT));
 }
+
+const CHANNEL: u64 = 300_000_000_000_000_002;
+
+async fn mount_gateway(server: &MockServer, delay: Duration) {
+    Mock::given(method("GET"))
+        .and(path("/api/v9/gateway"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"url": "wss://gateway.discord.gg"}))
+                .set_delay(delay),
+        )
+        .mount(server)
+        .await;
+}
+
+async fn mount_messages(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v9/channels/{CHANNEL}/messages")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn the_warm_up_sends_no_token() {
+    let server = MockServer::start().await;
+    mount_gateway(&server, Duration::ZERO).await;
+    let client = client(&server, Arc::new(MemoryStore::default()));
+    let _account = client
+        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .unwrap_or_else(|err| panic!("{err}"));
+
+    client.warm_up().await;
+
+    let requests = server
+        .received_requests()
+        .await
+        .unwrap_or_else(|| panic!("recording is on"));
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(request.url.path(), "/api/v9/gateway");
+    assert!(request.headers.get("authorization").is_none());
+    assert!(request.headers.get("x-fingerprint").is_none());
+    assert!(request.headers.get("user-agent").is_some());
+    assert!(request.headers.get("x-super-properties").is_some());
+}
+
+#[tokio::test]
+async fn a_load_after_the_warm_up_reuses_its_connection() {
+    let server = MockServer::start().await;
+    mount_gateway(&server, Duration::ZERO).await;
+    mount_messages(&server).await;
+    let client = client(&server, Arc::new(MemoryStore::default()));
+    let account = client
+        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .unwrap_or_else(|err| panic!("{err}"));
+
+    client.warm_up().await;
+    let report = account
+        .load_messages(
+            Snowflake::new(CHANNEL),
+            akari_core::MessageLoad::Latest { limit: 50 },
+        )
+        .await
+        .unwrap_or_else(|err| panic!("{err}"))
+        .unwrap_or_else(|| panic!("a page was loaded"));
+
+    assert!(!report.new_connection, "{report:?}");
+}
+
+#[tokio::test]
+async fn the_warm_up_never_fails_and_never_holds_a_load() {
+    let server = MockServer::start().await;
+    mount_gateway(&server, Duration::from_secs(2)).await;
+    mount_messages(&server).await;
+    let client = Arc::new(client(&server, Arc::new(MemoryStore::default())));
+    let account = client
+        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .unwrap_or_else(|err| panic!("{err}"));
+    let warming = tokio::spawn({
+        let client = client.clone();
+        async move { client.warm_up().await }
+    });
+
+    let loaded = tokio::time::timeout(
+        Duration::from_secs(1),
+        account.load_messages(
+            Snowflake::new(CHANNEL),
+            akari_core::MessageLoad::Latest { limit: 50 },
+        ),
+    )
+    .await;
+    let unreachable = client_with(
+        "http://127.0.0.1:9/api/v9/".to_owned(),
+        Arc::new(MemoryStore::default()),
+    );
+    unreachable.warm_up().await;
+
+    assert!(matches!(loaded, Ok(Ok(_))), "{loaded:?}");
+    warming.await.unwrap_or_else(|err| panic!("{err}"));
+}

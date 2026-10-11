@@ -11,6 +11,7 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
         case logout(UserId)
         case forgetToken(UserId)
         case endSession(String)
+        case warmUp
     }
 
     let calls = Locked<[Call]>([])
@@ -45,6 +46,10 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
 
     private func record(_ call: Call) {
         calls.withLock { $0.append(call) }
+    }
+
+    override func warmUp() {
+        record(.warmUp)
     }
 
     override func passwordLogin() -> PasswordLogin {

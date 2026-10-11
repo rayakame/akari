@@ -494,3 +494,81 @@ async fn secret_headers_are_marked_sensitive() {
         assert!(!output.contains(value), "{output}");
     }
 }
+
+fn gzip(body: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(body).unwrap();
+    encoder.finish().unwrap()
+}
+
+#[tokio::test]
+async fn pages_arrive_compressed_or_not() {
+    let server = MockServer::start().await;
+    let page = serde_json::to_vec(&json!({"messages": ["a", "b", "c"]})).unwrap();
+    for (route, encoding, body) in [
+        ("/api/v9/gzip", Some("gzip"), gzip(&page)),
+        (
+            "/api/v9/zstd",
+            Some("zstd"),
+            zstd::stream::encode_all(page.as_slice(), 3).unwrap(),
+        ),
+        ("/api/v9/plain", None, page.clone()),
+    ] {
+        let mut response = ResponseTemplate::new(200)
+            .insert_header("content-type", "application/json")
+            .set_body_bytes(body);
+        if let Some(encoding) = encoding {
+            response = response.insert_header("content-encoding", encoding);
+        }
+        Mock::given(path(route))
+            .and(|request: &wiremock::Request| {
+                request
+                    .headers
+                    .get("accept-encoding")
+                    .is_some_and(|value| value == "gzip, deflate, br, zstd")
+            })
+            .respond_with(response)
+            .mount(&server)
+            .await;
+    }
+    let client = client(&server).await;
+
+    for route in ["gzip", "zstd", "plain"] {
+        let body: Value = client
+            .get_json(route, &RequestExtras::default())
+            .await
+            .unwrap_or_else(|err| panic!("{route}: {err:?}"));
+        assert_eq!(body, json!({"messages": ["a", "b", "c"]}), "{route}");
+    }
+}
+
+#[tokio::test]
+async fn a_compressed_body_over_the_cap_is_refused() {
+    let bomb = gzip(&vec![b'['; 5 * 1024 * 1024]);
+    assert!(bomb.len() < 64 * 1024);
+
+    let err = error_for(
+        ResponseTemplate::new(200)
+            .insert_header("content-encoding", "gzip")
+            .set_body_bytes(bomb),
+    )
+    .await;
+
+    assert!(matches!(err, RestError::TooLarge), "{err:?}");
+}
+
+#[tokio::test]
+async fn a_corrupt_compressed_body_is_a_protocol_error() {
+    let err = error_for(
+        ResponseTemplate::new(200)
+            .insert_header("content-encoding", "gzip")
+            .set_body_bytes(b"this is not gzip".to_vec()),
+    )
+    .await;
+
+    assert!(
+        matches!(&err, RestError::Transport(transport) if transport.kind() == crate::TransportErrorKind::Protocol),
+        "{err:?}"
+    );
+}

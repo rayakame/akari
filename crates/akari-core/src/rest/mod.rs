@@ -16,6 +16,7 @@ pub(crate) use error::{ApiError, RestError};
 
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tokio::time::Instant;
@@ -31,6 +32,7 @@ pub(crate) struct RestClient {
     http: reqwest::Client,
     base: Url,
     connections: Arc<Connections>,
+    warming: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -114,6 +116,8 @@ impl RestClient {
         insert("user-agent", &properties.browser_user_agent)?;
         insert("x-super-properties", &properties.super_properties())?;
         insert("x-discord-locale", &properties.system_locale)?;
+        // Chromium's value; reqwest's own would name the same encodings in another order.
+        insert("accept-encoding", "gzip, deflate, br, zstd")?;
 
         let connections = Arc::new(Connections::default());
         let http = reqwest::Client::builder()
@@ -125,12 +129,15 @@ impl RestClient {
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30))
+            // A channel switch after a short break shouldn't pay a new handshake.
+            .pool_idle_timeout(std::time::Duration::from_secs(300))
             .build()
             .map_err(|err| BuildError::Transport(TransportError::from_reqwest(err)))?;
         Ok(Self {
             http,
             base,
             connections,
+            warming: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -211,6 +218,28 @@ impl RestClient {
         } else {
             Err(RestError::from_response(status, &headers, &body))
         }
+    }
+
+    // Unauthenticated and harmless; only its connection is wanted.
+    pub(crate) async fn warm_up(&self) {
+        if self.warming.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let started = Instant::now();
+        let warmed = match self.request(reqwest::Method::GET, "gateway", &RequestExtras::default())
+        {
+            Ok(request) => self.send_raw(request).await.ok(),
+            Err(_) => None,
+        };
+        self.warming.store(false, Ordering::Release);
+        tracing::debug!(
+            after_ms = crate::millis(started.elapsed()),
+            new_connection = warmed
+                .as_ref()
+                .is_some_and(|response| response.timing.new_connection),
+            ok = warmed.is_some(),
+            "rest warmed up"
+        );
     }
 
     pub(crate) async fn send_raw(&self, request: RequestBuilder) -> Result<RawResponse, RestError> {

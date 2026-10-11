@@ -226,6 +226,12 @@ impl DiscordClient {
         }
     }
 
+    /// Opens a REST connection ahead of the first request, e.g. while the host reads the
+    /// token. Sends no token; never fails, and returns once the request ended either way.
+    pub async fn warm_up(&self) {
+        self.inner.rest.warm_up().await;
+    }
+
     pub(crate) fn rest(&self) -> &RestClient {
         &self.inner.rest
     }
