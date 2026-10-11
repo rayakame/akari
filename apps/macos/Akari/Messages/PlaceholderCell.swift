@@ -53,6 +53,9 @@ final class PlaceholderCell: NSTableCellView {
         errorRow.translatesAutoresizingMaskIntoConstraints = false
         addSubview(errorRow)
         let height = heightAnchor.constraint(equalToConstant: Self.height(forViewHeight: 0))
+        // The table sizes the row; while it moves row views during an update, a required
+        // height would conflict with a row of another height and log at length.
+        height.priority = .init(999)
         let atTop = errorRow.centerYAnchor.constraint(
             equalTo: topAnchor, constant: Self.band / 2)
         let atBottom = errorRow.centerYAnchor.constraint(

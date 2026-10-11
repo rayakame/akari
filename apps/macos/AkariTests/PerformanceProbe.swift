@@ -150,4 +150,38 @@ struct PerformanceProbe {
                     "PROBE footprint MB: before %.1f, after fill %.1f, after up %.1f, after %.1f, lifetime peak %.1f",
                 before.current, afterFill.current, afterUp.current, after.current, after.peak))
     }
+
+    // The launch's long frame: a first page replacing the placeholders, again and again, so a
+    // sampler attached meanwhile sees mostly this.
+    @Test
+    func firstPagesRepeatedly() {
+        checkpoint("first pages")
+        var times: [Double] = []
+        for round in 0..<30 {
+            let controller = MessageTableController(
+                calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
+            let window = NSWindow(
+                contentRect: NSRect(x: 100, y: 100, width: 1000, height: 900),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = controller.scrollView
+            window.orderFrontRegardless()
+            controller.show(MessageTableState(rows: []))
+            window.displayIfNeeded()
+            let first = UInt64(round * 1000 + 1)
+            times.append(
+                milliseconds {
+                    controller.show(MessageTableState(rows: rows(first...(first + 49))))
+                    window.layoutIfNeeded()
+                    window.displayIfNeeded()
+                    CATransaction.flush()
+                })
+            window.orderOut(nil)
+        }
+        let sorted = times.sorted()
+        print(
+            String(
+                format: "PROBE first pages: median %.1f ms, fastest %.1f, slowest %.1f",
+                sorted[sorted.count / 2], sorted[0], sorted[sorted.count - 1]))
+    }
 }

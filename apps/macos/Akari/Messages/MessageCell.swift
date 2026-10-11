@@ -21,7 +21,8 @@ final class MessageCell: NSTableCellView {
     private let hoverTime = CellText.label()
     private let content = CellText.label(wrapping: true)
     private let extras = CellText.label(wrapping: true)
-    private let failed = FailedLine()
+    // Built for the first failed message: its buttons cost a layout pass each.
+    private var failed: FailedLine?
     var onRetry: () -> Void = {}
     var onDelete: () -> Void = {}
     private let stack = NSStackView()
@@ -76,7 +77,17 @@ final class MessageCell: NSTableCellView {
         content.isHidden = message.content.isEmpty
         extras.attributedStringValue = lines
         extras.isHidden = lines.length == 0
-        failed.isHidden = message.delivery != .failed
+        let isFailed = message.delivery == .failed
+        if isFailed && failed == nil {
+            let line = FailedLine()
+            line.retry.target = self
+            line.retry.action = #selector(retryClicked)
+            line.delete.target = self
+            line.delete.action = #selector(deleteClicked)
+            stack.addView(line, in: .top)
+            failed = line
+        }
+        failed?.isHidden = !isFailed
     }
 
     private static func color(_ delivery: Delivery) -> NSColor {
@@ -99,7 +110,9 @@ final class MessageCell: NSTableCellView {
         let textWidth = width - Self.textLeading - Self.textTrailing
         content.preferredMaxLayoutWidth = textWidth
         extras.preferredMaxLayoutWidth = textWidth
-        let shown = [reply, header, content, extras, failed].filter { !$0.isHidden }
+        let shown = ([reply, header, content, extras] + [failed].compactMap { $0 }).filter {
+            !$0.isHidden
+        }
         let stacked =
             shown.map { view in
                 view === header
@@ -141,11 +154,7 @@ final class MessageCell: NSTableCellView {
         stack.alignment = .leading
         stack.spacing = Self.spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
-        failed.retry.target = self
-        failed.retry.action = #selector(retryClicked)
-        failed.delete.target = self
-        failed.delete.action = #selector(deleteClicked)
-        stack.setViews([reply, header, content, extras, failed], in: .top)
+        stack.setViews([reply, header, content, extras], in: .top)
         for view in [avatar, stack, hoverTime] as [NSView] {
             addSubview(view)
         }
@@ -153,6 +162,9 @@ final class MessageCell: NSTableCellView {
         let top = stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.continuationTop)
         let avatarBottom = bottomAnchor.constraint(
             greaterThanOrEqualTo: avatar.bottomAnchor, constant: Self.bottomInset)
+        // While the table moves row views in an update, a group start can sit in a shorter row
+        // for a moment; required, this would conflict with it and log at length.
+        avatarBottom.priority = .init(999)
         self.top = top
         self.avatarBottom = avatarBottom
         NSLayoutConstraint.activate([

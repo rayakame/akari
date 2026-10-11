@@ -92,3 +92,127 @@ struct RowDrawingTests {
         #expect(failed.alpha(36, 516) > 0.05)
     }
 }
+
+// AppKit hands unsatisfiable constraints to visualizeConstraints(_:) when asked to; each one is
+// a long log message on the frame it happens in.
+@MainActor
+struct ConstraintConflictTests {
+    final class RecordingWindow: NSWindow {
+        var conflicts = 0
+
+        override func visualizeConstraints(_ constraints: [NSLayoutConstraint]?) {
+            conflicts += 1
+        }
+    }
+
+    let noon = berlinTime(2026, 10, 10, 12, 0)
+
+    // Runs the steps in a table and counts the conflicts AppKit reports meanwhile.
+    func conflicts(
+        width: CGFloat = 1000, height: CGFloat = 900,
+        _ steps: [(MessageTableController) -> MessageTableState]
+    ) -> Int {
+        let key = "NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints"
+        UserDefaults.standard.set(true, forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let controller = MessageTableController(
+            calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
+        let window = RecordingWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentView = controller.scrollView
+        window.layoutIfNeeded()
+        for step in steps {
+            controller.show(step(controller))
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+        }
+        return window.conflicts
+    }
+
+    func rows(_ range: ClosedRange<Int>, by authorOf: (Int) -> UInt64 = { UInt64($0 % 3) })
+        -> [MessageListModel.Row]
+    {
+        range.map { raw in
+            row(
+                UInt64(raw), by: author(authorOf(raw)), at: noon + Double(raw) * 60,
+                content: String(repeating: "words that wrap ", count: raw % 9 * 4 + 1))
+        }
+    }
+
+    @Test
+    func theFirstPageReplacesThePlaceholdersWithoutAConflict() {
+        #expect(
+            conflicts([
+                { _ in MessageTableState(rows: []) },
+                { _ in MessageTableState(rows: rows(1...100)) },
+            ]) == 0)
+    }
+
+    @Test
+    func aShortChannelThatGrowsKeepsItsBeginningWithoutAConflict() {
+        let plain = { (range: ClosedRange<UInt64>, long: Bool) in
+            range.map { raw in
+                row(
+                    raw, by: author(raw % 3 == 0 ? 2 : 1), at: self.noon + Double(raw) * 120,
+                    content: long ? String(repeating: "words that wrap ", count: 12) : nil)
+            }
+        }
+        let short = plain(1...3, false)
+        let four = short + plain(4...4, false)
+        let long = four + plain(5...64, true)
+        #expect(
+            conflicts(
+                width: 600, height: 400,
+                [
+                    { _ in MessageTableState(rows: short, reachedOldest: true) },
+                    { _ in MessageTableState(rows: four, reachedOldest: true) },
+                    { controller in
+                        controller.scrollView.window?.setContentSize(
+                            NSSize(width: 600, height: 300))
+                        controller.scrollView.window?.layoutIfNeeded()
+                        return MessageTableState(rows: long, reachedOldest: true)
+                    },
+                ]) == 0)
+    }
+
+    @Test
+    func aDeletedGroupStartGivesItsPlaceWithoutAConflict() {
+        let grouped = rows(1...40, by: { UInt64($0 / 4) })
+        #expect(
+            conflicts([
+                { _ in MessageTableState(rows: grouped) },
+                { _ in MessageTableState(rows: grouped.filter { $0.id.rawValue % 4 != 0 }) },
+            ]) == 0)
+    }
+}
+
+// Building a cell is what a fling pays when the reuse pool runs dry, and a first page pays for
+// every visible row; buttons are the costly part.
+@MainActor
+struct CellBuildingTests {
+    func buttons(in view: NSView) -> [NSButton] {
+        view.subviews.flatMap { ($0 as? NSButton).map { [$0] } ?? buttons(in: $0) }
+    }
+
+    func configure(_ cell: MessageCell, _ delivery: Delivery) {
+        let message = row(1, at: berlinTime(2026, 10, 10, 12, 0), delivery: delivery).message
+        cell.configure(
+            message, startsGroup: true, groupTime: "Today at 12:00", shortTime: "12:00",
+            fullDate: "Saturday, 10 October 2026 at 12:00")
+    }
+
+    @Test
+    func aMessageCellBuildsItsRetryButtonsOnlyForAFailedMessage() {
+        let cell = MessageCell()
+        configure(cell, .sent)
+        #expect(buttons(in: cell).isEmpty)
+
+        configure(cell, .failed)
+        let shown = buttons(in: cell).filter { !$0.isHiddenOrHasHiddenAncestor }
+        #expect(shown.map(\.title) == ["Retry", "Delete"])
+
+        configure(cell, .sent)
+        #expect(buttons(in: cell).allSatisfy { $0.isHiddenOrHasHiddenAncestor })
+    }
+}
