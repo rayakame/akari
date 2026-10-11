@@ -4,18 +4,29 @@ import Testing
 @testable import Akari
 
 struct CacheDirectoryTests {
-    let base = FileManager.default.temporaryDirectory.appending(
+    // Beside the app's own directory: backup exclusion may read differently in a temporary one.
+    let root = URL.applicationSupportDirectory.appending(
         path: "akari-cache-directory-\(UUID().uuidString)", directoryHint: .isDirectory)
 
+    var base: URL {
+        root.appending(path: "base", directoryHint: .isDirectory)
+    }
+
     @Test
-    func theCacheDirectoryIsInApplicationSupport() throws {
-        defer { try? FileManager.default.removeItem(at: base) }
+    func theCacheDirectoryIsInApplicationSupport() {
+        #expect(
+            CacheDirectory.location().pathComponents.suffix(4) == [
+                "Library", "Application Support", "Akari", "Cache",
+            ])
+    }
+
+    @Test
+    func theCacheDirectoryIsCreated() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
 
         let directory = try #require(CacheDirectory.make(base: base))
 
-        #expect(
-            directory.standardizedFileURL == base.appending(path: "Akari/Cache").standardizedFileURL
-        )
+        #expect(directory.pathComponents == base.pathComponents + ["Akari", "Cache"])
         var isDirectory: ObjCBool = false
         #expect(FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory))
         #expect(isDirectory.boolValue)
@@ -23,18 +34,21 @@ struct CacheDirectoryTests {
 
     @Test
     func theCacheDirectoryIsExcludedFromBackups() throws {
-        defer { try? FileManager.default.removeItem(at: base) }
+        defer { try? FileManager.default.removeItem(at: root) }
 
         let directory = try #require(CacheDirectory.make(base: base))
 
-        let values = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        var read = URL(filePath: directory.path(percentEncoded: false), directoryHint: .isDirectory)
+        read.removeAllCachedResourceValues()
+        let values = try read.resourceValues(forKeys: [.isExcludedFromBackupKey])
         #expect(values.isExcludedFromBackup == true)
     }
 
     @Test
     func anUnusableBaseMeansNoCache() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try Data("not a directory".utf8).write(to: base)
-        defer { try? FileManager.default.removeItem(at: base) }
 
         #expect(CacheDirectory.make(base: base) == nil)
     }

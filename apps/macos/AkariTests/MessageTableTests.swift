@@ -249,6 +249,20 @@ struct MessageTableTests {
     }
 
     @Test
+    func cachedRowsOlderThanTheFreshPageLeaveAScrolledReaderInPlace() {
+        let cached = messages(80, longText: true)
+        show(cached)
+        scroll(toRowOf: 40)
+        let offset = place(of: 40)
+        let reader = table.rowView(atRow: index(of: 40), makeIfNecessary: false)
+
+        show(Array(refreshed(cached).dropFirst(3)) + messages(2, from: 82))
+
+        #expect(abs(place(of: 40) - offset) <= 1)
+        #expect(table.rowView(atRow: index(of: 40), makeIfNecessary: false) === reader)
+    }
+
+    @Test
     func aFreshPageOverCachedRowsKeepsTheBottomPinned() {
         let cached = messages(80, longText: true)
         show(cached)
