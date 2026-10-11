@@ -207,4 +207,83 @@ struct PerformanceProbe {
                 format: "PROBE first pages: median %.1f ms, fastest %.1f, slowest %.1f",
                 sorted[sorted.count / 2], sorted[0], sorted[sorted.count - 1]))
     }
+
+    // The paging check: flings up through ten older pages that arrive a moment after they're
+    // asked for, the window trimmed to 200 as the store does, then a jump to the present. Frames
+    // yield to the run loop, so Core Animation commits and cleans up as it does in the app.
+    @Test
+    func pagingTenPagesAndJumpingToThePresent() async throws {
+        let controller = MessageTableController(
+            calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
+        let window = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 1000, height: 900),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = controller.scrollView
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        let clip = controller.scrollView.contentView
+        let table = controller.tableView
+        func post(_ name: Notification.Name) {
+            NotificationCenter.default.post(name: name, object: controller.scrollView)
+        }
+        func frame() async throws {
+            window.displayIfNeeded()
+            try await Task.sleep(for: .milliseconds(8))
+        }
+        var shown = rows(951...1000)
+        var atPresent = true
+        controller.show(MessageTableState(rows: []))
+        try await frame()
+        controller.show(MessageTableState(rows: shown))
+        try await frame()
+        checkpoint("paging starts")
+        var pages = 0
+        var arrivesIn: Int?
+        while pages < 10 {
+            post(NSScrollView.willStartLiveScrollNotification)
+            for _ in 0..<60 {
+                clip.scroll(to: NSPoint(x: 0, y: max(clip.bounds.minY - 150, 0)))
+                controller.scrollView.reflectScrolledClipView(clip)
+                post(NSScrollView.didLiveScrollNotification)
+                let firstMessage = controller.timeline.items.firstIndex {
+                    if case .message = $0 { true } else { false }
+                }
+                let distance = table.rect(ofRow: firstMessage ?? 0).minY - clip.bounds.minY
+                if arrivesIn == nil, distance > -3 * clip.bounds.height {
+                    arrivesIn = 25
+                }
+                if let wait = arrivesIn {
+                    if wait == 0, pages < 10 {
+                        let first = shown.first?.id.rawValue ?? 1
+                        shown = rows((first - 50)...(first - 1)) + shown
+                        if shown.count > 200 {
+                            shown.removeLast(shown.count - 200)
+                            atPresent = false
+                        }
+                        controller.show(MessageTableState(rows: shown, atPresent: atPresent))
+                        pages += 1
+                        arrivesIn = nil
+                    } else {
+                        arrivesIn = wait - 1
+                    }
+                }
+                try await frame()
+            }
+            post(NSScrollView.didEndLiveScrollNotification)
+            try await Task.sleep(for: .milliseconds(300))
+        }
+        checkpoint("ten pages")
+        controller.jumpToPresent(load: false)
+        controller.show(MessageTableState(rows: rows(951...1000)))
+        for _ in 0..<30 {
+            try await frame()
+        }
+        checkpoint("present")
+        let footprint = Self.footprint()
+        print(
+            String(
+                format: "PROBE paging: footprint %.1f MB, lifetime peak %.1f MB", footprint.current,
+                footprint.peak))
+    }
 }
