@@ -41,7 +41,11 @@ struct CacheDirectoryTests {
         var read = URL(filePath: directory.path(percentEncoded: false), directoryHint: .isDirectory)
         read.removeAllCachedResourceValues()
         let values = try read.resourceValues(forKeys: [.isExcludedFromBackupKey])
-        #expect(values.isExcludedFromBackup == true)
+        let marked = getxattr(
+            directory.path, "com.apple.metadata:com_apple_backup_excludeItem", nil, 0, 0, 0)
+        #expect(
+            values.isExcludedFromBackup == true,
+            "backup attribute: \(marked >= 0 ? "set" : "missing, errno \(errno)")")
     }
 
     @Test
