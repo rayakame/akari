@@ -28,9 +28,14 @@ enum Launch {
             LoadLog.enabled = LoadLog.isAsked(by: filter)
             try enableLogging(filter: filter)
         }
+        let cache = CacheDirectory.make()
+        if cache == nil {
+            LaunchLog.mark("cache unavailable")
+        }
         do {
             let client = try DiscordClient(
-                host: .current, tokenStore: KeychainTokenStore(), cacheDirectory: nil)
+                host: .current, tokenStore: KeychainTokenStore(),
+                cacheDirectory: cache?.path(percentEncoded: false))
             LaunchLog.mark("client created")
             return .running(AppModel(client: client))
         } catch {

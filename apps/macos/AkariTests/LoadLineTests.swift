@@ -51,10 +51,11 @@ struct LoadLineTests {
     // By default the page is 1...49, which the tests' landings add above 50...99.
     func trace(
         _ sequence: Int, started: ContinuousClock.Instant, failure: RequestError? = nil,
-        report: LoadReport? = loadReport(), page: ClosedRange<UInt64>? = 1...49
+        report: LoadReport? = loadReport(), page: ClosedRange<UInt64>? = 1...49,
+        kind: MessageListModel.Load = .older
     ) -> LoadTrace {
         LoadTrace(
-            sequence: sequence, channelId: ChannelId(rawValue: 10), kind: .older,
+            sequence: sequence, channelId: ChannelId(rawValue: 10), kind: kind,
             report: failure == nil ? report : nil, failure: failure,
             page: Set((page.map(Array.init) ?? []).map { MessageId(rawValue: $0) }),
             read: .microseconds(900), started: started, duration: .milliseconds(412))
@@ -291,5 +292,41 @@ struct LoadLineTests {
 
             #expect(lines.all.isEmpty)
         }
+    }
+
+    @Test
+    func aChannelOpenedFromDiskLogsWhenTheFreshPageCame() async {
+        await logging {
+            show(state([]))
+            show(state(rows(50...99), from: .disk))
+            await settle()
+            #expect(!lines.all.contains { $0.contains("opened") })
+
+            let fresh = trace(1, started: opened, page: 100...100, kind: .latest)
+            show(state(rows(50...100), load: fresh, from: .disk))
+            await settle { lines.all.contains { $0.contains("opened") } }
+
+            let opens = lines.all.filter { $0.contains("opened") }
+            #expect(opens.count == 1)
+            let open = opens.first ?? ""
+            #expect(open.hasPrefix("channel 10 opened: rows from disk after "), "\(open)")
+            #expect(open.contains(", fresh after "), "\(open)")
+        }
+    }
+
+    @Test
+    func theFirstFreshPageMarksTheLaunch() async {
+        var marks: [String] = []
+        controller.milestone = { marks.append($0) }
+
+        show(state([]))
+        show(state(rows(50...99), from: .disk))
+        #expect(!marks.contains("first fresh page rendered"))
+
+        show(state(rows(50...100), load: trace(1, started: opened, page: 100...100, kind: .latest)))
+        show(state(rows(1...100), load: trace(2, started: opened, page: 1...49)))
+
+        #expect(marks.filter { $0 == "first fresh page rendered" }.count == 1)
+        #expect(marks.contains("first channel rendered"))
     }
 }

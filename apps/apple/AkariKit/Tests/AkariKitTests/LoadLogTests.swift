@@ -87,4 +87,12 @@ struct LoadLogTests {
             LoadLog.opened(id(1234), from: .network, after: .milliseconds(402))
                 == "channel 1234 opened: rows from the network after 402 ms")
     }
+
+    @Test
+    func aChannelOpenedFromDiskSaysWhenItWasFresh() {
+        #expect(
+            LoadLog.opened(
+                id(1234), from: .disk, after: .milliseconds(24), fresh: .milliseconds(380))
+                == "channel 1234 opened: rows from disk after 24 ms, fresh after 380 ms")
+    }
 }

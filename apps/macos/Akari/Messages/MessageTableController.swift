@@ -74,6 +74,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // Pages waiting for their rows to be shown; one whose rows never show drops out after a few.
     private var pendingLoads: [LoadTrace] = []
     private var openLogged = false
+    // A channel opened from disk logs its line once the page that refreshed it is shown.
+    private var diskOpen: (channel: ChannelId, at: ContinuousClock.Instant, after: Duration)?
+    private var freshShown = false
+    var milestone: (String) -> Void = { LaunchLog.mark($0) }
     private var pendingOpen:
         (
             channel: ChannelId, from: MessageListModel.Origin, at: ContinuousClock.Instant,
@@ -142,6 +146,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             configureEdges()
         }
         askForMore()
+        if !freshShown, let load = state.lastLoad, load.report != nil {
+            freshShown = true
+            milestone("first fresh page rendered")
+        }
         noteLoad(state)
     }
 
@@ -202,33 +210,47 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let shown = applied.last(where: { $0.started == open.update })?.shown
         {
             pendingOpen = nil
-            LoadLog.log(
-                LoadLog.opened(open.channel, from: open.from, after: open.at.duration(to: shown)))
+            let after = open.at.duration(to: shown)
+            if open.from == .disk {
+                diskOpen = (open.channel, open.at, after)
+            } else {
+                LoadLog.log(LoadLog.opened(open.channel, from: open.from, after: after))
+            }
         }
         var waiting: [LoadTrace] = []
         for load in pendingLoads {
-            if let line = pageLine(load) {
-                LoadLog.log(line)
-            } else {
+            guard let (line, shown) = pageLine(load) else {
                 waiting.append(load)
+                continue
+            }
+            LoadLog.log(line)
+            if load.kind == .latest, let open = diskOpen {
+                diskOpen = nil
+                LoadLog.log(
+                    LoadLog.opened(
+                        open.channel, from: .disk, after: open.after,
+                        fresh: open.at.duration(to: shown)))
             }
         }
         pendingLoads = waiting
     }
 
-    private func pageLine(_ load: LoadTrace) -> String? {
+    private func pageLine(_ load: LoadTrace) -> (String, ContinuousClock.Instant)? {
         if load.page.isEmpty {
-            return LoadLog.page(
-                load, render: nil, rows: 0, held: nil, shown: load.started.duration(to: .now))
+            let now = ContinuousClock.now
+            let line = LoadLog.page(
+                load, render: nil, rows: 0, held: nil, shown: load.started.duration(to: now))
+            return (line, now)
         }
         guard let update = applied.last(where: { !$0.inserted.isDisjoint(with: load.page) }),
             let shown = update.shown
         else {
             return nil
         }
-        return LoadLog.page(
+        let line = LoadLog.page(
             load, render: update.render, rows: update.inserted.intersection(load.page).count,
             held: update.held, shown: load.started.duration(to: shown))
+        return (line, shown)
     }
 
     deinit {
@@ -336,7 +358,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if firstFill {
             filled = true
             sticksToBottom = true
-            LaunchLog.mark("first channel rendered")
+            milestone("first channel rendered")
         }
         measureRows()
         if pin {

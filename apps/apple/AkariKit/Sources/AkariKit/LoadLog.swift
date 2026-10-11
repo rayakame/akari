@@ -55,8 +55,10 @@ public enum LoadLog {
             + (trace.failure.map(kind) ?? "unknown")
     }
 
+    /// `fresh`: for rows from disk, when the page that refreshed them was shown.
     public static func opened(
-        _ channel: ChannelId, from origin: MessageListModel.Origin, after: Duration
+        _ channel: ChannelId, from origin: MessageListModel.Origin, after: Duration,
+        fresh: Duration? = nil
     ) -> String {
         let source =
             switch origin {
@@ -64,7 +66,8 @@ public enum LoadLog {
             case .disk: "disk"
             case .network: "the network"
             }
-        return "channel \(channel.rawValue) opened: rows from \(source) after \(ms(after))"
+        let opened = "channel \(channel.rawValue) opened: rows from \(source) after \(ms(after))"
+        return fresh.map { "\(opened), fresh after \(ms($0))" } ?? opened
     }
 
     private static func name(_ trace: LoadTrace) -> String {
