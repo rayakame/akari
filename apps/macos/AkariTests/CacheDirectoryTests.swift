@@ -4,7 +4,6 @@ import Testing
 @testable import Akari
 
 struct CacheDirectoryTests {
-    // Beside the app's own directory: backup exclusion may read differently in a temporary one.
     let root = URL.applicationSupportDirectory.appending(
         path: "akari-cache-directory-\(UUID().uuidString)", directoryHint: .isDirectory)
 
@@ -38,14 +37,11 @@ struct CacheDirectoryTests {
 
         let directory = try #require(CacheDirectory.make(base: base))
 
-        var read = URL(filePath: directory.path(percentEncoded: false), directoryHint: .isDirectory)
-        read.removeAllCachedResourceValues()
-        let values = try read.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        // Time Machine reads this attribute; isExcludedFromBackup reads false on CI's macOS 26
+        // runner although the attribute is set.
         let marked = getxattr(
             directory.path, "com.apple.metadata:com_apple_backup_excludeItem", nil, 0, 0, 0)
-        #expect(
-            values.isExcludedFromBackup == true,
-            "backup attribute: \(marked >= 0 ? "set" : "missing, errno \(errno)")")
+        #expect(marked >= 0, "errno \(errno)")
     }
 
     @Test
