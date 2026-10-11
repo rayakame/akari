@@ -19,6 +19,7 @@ let package = Package(
                 .linkedFramework("CoreFoundation"),
                 .linkedFramework("Security"),
                 .linkedLibrary("iconv"),
+                .linkedLibrary("sqlite3"),
             ]
         ),
         .target(name: "AkariKit", dependencies: ["AkariFFI"]),

@@ -29,6 +29,10 @@ tracing.workspace = true
 zeroize.workspace = true
 zstd.workspace = true
 
+# macOS and iOS ship SQLite; every other target builds it in.
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+rusqlite = { workspace = true, features = ["bundled"] }
+
 [features]
 # Hands out the raw READY for checking the models against real traffic. Only akari-cli
 # enables it; apps build with `-p akari-ffi`, so workspace feature unification can't add it.
