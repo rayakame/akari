@@ -453,6 +453,10 @@ fn any_other_schema_version_is_discarded() {
 fn an_unwritable_directory_runs_without_a_cache() {
     let dir = TempDir::new();
     fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o500)).unwrap();
+    // Root ignores the permissions, so there is nothing to test.
+    if fs::write(dir.path().join("probe"), b"").is_ok() {
+        return;
+    }
 
     let opened = Cache::open_or_rebuild(&dir.file(ME), UserId::new(ME));
 
@@ -965,4 +969,45 @@ async fn replaced_messages_leave_no_text_after_a_flush() {
         .unwrap();
 
     assert!(!files_contain(&dir.file(ME), b"deleted-secret-42"));
+}
+
+#[tokio::test]
+async fn a_failed_checkpoint_is_retried_until_it_succeeds() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread
+        .flush(snapshot([(
+            10,
+            window(5, messages(10, 1..4, "deleted-secret-43")),
+        )]))
+        .await
+        .unwrap();
+    let replaced = || snapshot([(10, window(6, messages(10, 5..8, "text")))]);
+
+    thread.fail_next_checkpoint();
+    assert!(thread.flush(replaced()).await.is_none());
+    assert!(files_contain(&dir.file(ME), b"deleted-secret-43"));
+
+    assert!(thread.flush(replaced()).await.is_some());
+    assert!(!files_contain(&dir.file(ME), b"deleted-secret-43"));
+}
+
+#[tokio::test]
+async fn a_forgotten_account_is_not_recreated_by_its_session() {
+    let dir = TempDir::new();
+    let caches = Arc::new(Caches::default());
+    caches.set(dir.path().to_owned(), std::time::Duration::from_secs(3600));
+    caches
+        .thread(UserId::new(ME))
+        .unwrap()
+        .read_entities()
+        .await
+        .unwrap();
+    assert!(dir.file(ME).exists());
+
+    caches.forget(UserId::new(ME)).await;
+
+    assert!(caches.thread(UserId::new(ME)).is_none());
+    assert!(!dir.file(ME).exists());
+    assert!(caches.account(UserId::new(ME)).is_some());
 }

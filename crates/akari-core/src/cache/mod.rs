@@ -131,6 +131,8 @@ pub(crate) struct Cache {
     conn: Connection,
     #[cfg(test)]
     pub(crate) fail_next_write: bool,
+    #[cfg(test)]
+    pub(crate) fail_next_checkpoint: bool,
 }
 
 impl Cache {
@@ -149,9 +151,6 @@ impl Cache {
         if version == 0 && tables == 0 {
             // Before the first table, or it can't be turned on.
             conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
-            conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| {
-                row.get::<_, String>(0)
-            })?;
             schema::create(&conn, user)?;
         } else if version != schema::CURRENT {
             return Err(CacheError::OtherSchema);
@@ -169,6 +168,11 @@ impl Cache {
                 return Err(CacheError::OtherUser);
             }
         }
+        let journal: String =
+            conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))?;
+        if !journal.eq_ignore_ascii_case("wal") {
+            tracing::info!(target: LOG, reason = "journal_mode", "cache not in WAL mode");
+        }
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         // Deleted message text is overwritten in the file, not left in free pages.
         conn.pragma_update(None, "secure_delete", "ON")?;
@@ -180,6 +184,8 @@ impl Cache {
             conn,
             #[cfg(test)]
             fail_next_write: false,
+            #[cfg(test)]
+            fail_next_checkpoint: false,
         })
     }
 
@@ -328,9 +334,18 @@ impl Cache {
         Ok(())
     }
 
-    pub(crate) fn checkpoint(&self) -> Result<(), CacheError> {
-        self.conn
-            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    pub(crate) fn checkpoint(&mut self) -> Result<(), CacheError> {
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_next_checkpoint) {
+            return Err(CacheError::Busy);
+        }
+        // The first column says whether a reader or writer kept it from finishing.
+        let busy: i64 = self
+            .conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
+        if busy != 0 {
+            return Err(CacheError::Busy);
+        }
         Ok(())
     }
 
@@ -370,7 +385,7 @@ fn unavailable(reason: Unavailable) -> Unavailable {
 
 pub(crate) fn delete_files(path: &Path) -> std::io::Result<()> {
     let mut result = Ok(());
-    for suffix in ["", "-wal", "-shm"] {
+    for suffix in ["", "-wal", "-shm", "-journal"] {
         let mut name = path.as_os_str().to_owned();
         name.push(suffix);
         match fs::remove_file(PathBuf::from(name)) {

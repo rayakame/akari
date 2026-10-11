@@ -51,6 +51,8 @@ impl Flushed {
 pub(crate) struct Written {
     pub(crate) entities: Entities,
     windows: HashMap<ChannelId, CachedWindow>,
+    // Until a checkpoint succeeds, rows the last writes replaced can still be in the files.
+    checkpoint_due: bool,
 }
 
 impl Written {
@@ -58,6 +60,7 @@ impl Written {
         Self {
             entities,
             windows: HashMap::new(),
+            checkpoint_due: false,
         }
     }
 }
@@ -180,11 +183,13 @@ pub(crate) fn flush(
     written
         .windows
         .retain(|channel, _| !evicted.contains(channel));
-    if flushed.rows() > 0 || flushed.deleted > 0 {
+    written.checkpoint_due |= flushed.rows() > 0 || flushed.deleted > 0;
+    if written.checkpoint_due {
         cache.release_free_pages(FREE_PAGES)?;
         // The app quits without closing the file, and the WAL would keep replaced and deleted
         // rows that secure_delete has already cleared from the database.
         cache.checkpoint()?;
+        written.checkpoint_due = false;
     }
     Ok(flushed)
 }

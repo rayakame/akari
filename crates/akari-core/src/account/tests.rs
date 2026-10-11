@@ -3468,6 +3468,11 @@ mod cache {
         let leftover = CacheThread::start(dir.file(LEFT_BEHIND), UserId::new(LEFT_BEHIND));
         leftover.read_entities().await.unwrap();
         drop(leftover);
+        std::fs::write(
+            dir.path().join(format!("{LEFT_BEHIND}.sqlite-journal")),
+            "x",
+        )
+        .unwrap();
         let client = cached_client(&fake, &server, &dir, Arc::default());
         let account = client.account(token(), UserId::new(OWNER)).unwrap();
         let subscription = account.store().subscribe();

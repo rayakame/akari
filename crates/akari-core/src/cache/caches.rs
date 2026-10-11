@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -20,9 +20,31 @@ struct Entry {
 }
 
 #[derive(Default)]
+struct Registry {
+    entries: HashMap<UserId, Entry>,
+    // Forgotten in this process: only the host opening the account again brings a file back.
+    forgotten: HashSet<UserId>,
+}
+
+impl Registry {
+    fn start(&mut self, place: &Place, user: UserId) -> CacheThread {
+        let entry = self.entries.entry(user).or_default();
+        if let Some(thread) = entry.preloaded.take() {
+            return thread;
+        }
+        if let Some(thread) = entry.open.upgrade() {
+            return thread;
+        }
+        let thread = CacheThread::start(file(&place.directory, user), user);
+        entry.open = thread.downgrade();
+        thread
+    }
+}
+
+#[derive(Default)]
 pub(crate) struct Caches {
     place: OnceLock<Place>,
-    threads: Mutex<HashMap<UserId, Entry>>,
+    registry: Mutex<Registry>,
 }
 
 impl Caches {
@@ -32,9 +54,14 @@ impl Caches {
         }
     }
 
+    fn registry(&self) -> std::sync::MutexGuard<'_, Registry> {
+        self.registry.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[cfg(test)]
     pub(crate) fn running(&self, user: UserId) -> Option<CacheThread> {
-        let threads = self.threads.lock().unwrap_or_else(PoisonError::into_inner);
-        let entry = threads.get(&user)?;
+        let registry = self.registry();
+        let entry = registry.entries.get(&user)?;
         entry.preloaded.clone().or_else(|| entry.open.upgrade())
     }
 
@@ -42,8 +69,9 @@ impl Caches {
         let Some(place) = self.place.get() else {
             return;
         };
-        let mut threads = self.threads.lock().unwrap_or_else(PoisonError::into_inner);
-        let entry = threads.entry(user).or_default();
+        let mut registry = self.registry();
+        registry.forgotten.remove(&user);
+        let entry = registry.entries.entry(user).or_default();
         if entry.preloaded.is_none() && entry.open.upgrade().is_none() {
             let thread = CacheThread::start(file(&place.directory, user), user);
             entry.open = thread.downgrade();
@@ -51,27 +79,27 @@ impl Caches {
         }
     }
 
+    // For a session that turned out to be another account's; never for a forgotten one.
     pub(crate) fn thread(&self, user: UserId) -> Option<CacheThread> {
         let place = self.place.get()?;
-        let mut threads = self.threads.lock().unwrap_or_else(PoisonError::into_inner);
-        let entry = threads.entry(user).or_default();
-        if let Some(thread) = entry.preloaded.take() {
-            return Some(thread);
+        let mut registry = self.registry();
+        if registry.forgotten.contains(&user) {
+            return None;
         }
-        if let Some(thread) = entry.open.upgrade() {
-            return Some(thread);
-        }
-        let thread = CacheThread::start(file(&place.directory, user), user);
-        entry.open = thread.downgrade();
-        Some(thread)
+        Some(registry.start(place, user))
     }
 
     pub(crate) fn account(self: &Arc<Self>, user: UserId) -> Option<DiskCache> {
-        let every = self.place.get()?.every;
+        let place = self.place.get()?;
+        let thread = {
+            let mut registry = self.registry();
+            registry.forgotten.remove(&user);
+            registry.start(place, user)
+        };
         Some(DiskCache {
-            thread: self.thread(user)?,
+            thread,
             user,
-            every,
+            every: place.every,
             caches: Some(self.clone()),
         })
     }
@@ -80,11 +108,14 @@ impl Caches {
         let Some(place) = self.place.get() else {
             return;
         };
-        let running = self.running(user);
-        self.threads
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&user);
+        let running = {
+            let mut registry = self.registry();
+            registry.forgotten.insert(user);
+            registry
+                .entries
+                .remove(&user)
+                .and_then(|entry| entry.preloaded.or_else(|| entry.open.upgrade()))
+        };
         if let Some(thread) = running {
             thread.delete().await;
         }
@@ -100,9 +131,8 @@ impl Caches {
             return;
         };
         let running: BTreeSet<u64> = self
-            .threads
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .registry()
+            .entries
             .iter()
             .filter(|(_, entry)| entry.preloaded.is_some() || entry.open.upgrade().is_some())
             .map(|(user, _)| user.get())
@@ -122,7 +152,7 @@ fn clear(directory: &std::path::Path, running: &BTreeSet<u64>) -> std::io::Resul
         let Some(name) = name.to_str() else {
             continue;
         };
-        let stem = ["-wal", "-shm", ""]
+        let stem = ["-wal", "-shm", "-journal", ""]
             .iter()
             .find_map(|suffix| name.strip_suffix(suffix)?.strip_suffix(".sqlite"));
         if let Some(user) = stem.and_then(|stem| stem.parse::<u64>().ok())

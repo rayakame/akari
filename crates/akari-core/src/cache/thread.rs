@@ -20,6 +20,8 @@ enum Command {
     #[cfg(test)]
     FailNextWrite,
     #[cfg(test)]
+    FailNextCheckpoint,
+    #[cfg(test)]
     Checkpoint(oneshot::Sender<()>),
     #[cfg(test)]
     ThreadName(oneshot::Sender<Option<String>>),
@@ -102,6 +104,11 @@ impl CacheThread {
     #[cfg(test)]
     pub(crate) fn fail_next_write(&self) {
         let _ = self.send(Command::FailNextWrite);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_checkpoint(&self) {
+        let _ = self.send(Command::FailNextCheckpoint);
     }
 
     #[cfg(test)]
@@ -190,6 +197,8 @@ fn run(path: &std::path::Path, user: UserId, commands: &mpsc::Receiver<Command>)
             }
             #[cfg(test)]
             Command::FailNextWrite => cache.fail_next_write = true,
+            #[cfg(test)]
+            Command::FailNextCheckpoint => cache.fail_next_checkpoint = true,
             #[cfg(test)]
             Command::Checkpoint(reply) => {
                 let _ = cache.checkpoint();
