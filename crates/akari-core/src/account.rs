@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::cache::{DiskCache, Flusher};
 use crate::gateway::session::Timing;
 use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
@@ -105,6 +106,7 @@ pub(crate) struct Shared {
     member_lists: AtomicBool,
     runtime: tokio::runtime::Handle,
     delivering: Mutex<BTreeSet<MessageId>>,
+    flusher: Option<Flusher>,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -529,6 +531,9 @@ impl Shared {
     fn close(&self) {
         self.gateway.close();
         self.rest.close();
+        if let Some(flusher) = &self.flusher {
+            flusher.close();
+        }
     }
 }
 
@@ -539,11 +544,23 @@ impl Account {
         timing: Timing,
         limits: WindowLimits,
     ) -> Result<Self, GatewayError> {
+        Self::start_with_cache(client, token, timing, limits, None)
+    }
+
+    pub(crate) fn start_with_cache(
+        client: DiscordClient,
+        token: Token,
+        timing: Timing,
+        limits: WindowLimits,
+        cache: Option<DiskCache>,
+    ) -> Result<Self, GatewayError> {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
         let rest = AccountRest::new(client.clone(), token.clone(), SERVER_ERROR_RETRY);
+        let store = Store::new(limits);
+        let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
         let shared = Arc::new(Shared {
             gateway: Gateway::start(client, token, timing)?,
-            store: Store::new(limits),
+            store,
             rest,
             nonces: Nonces::default(),
             status: Mutex::default(),
@@ -551,6 +568,7 @@ impl Account {
             member_lists: AtomicBool::new(true),
             delivering: Mutex::default(),
             runtime: runtime.clone(),
+            flusher,
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
@@ -576,11 +594,22 @@ impl Account {
     pub fn disconnect(&self) {
         self.shared.gateway.disconnect();
         self.shared.store.set_connection(ConnectionState::Offline);
+        if let Some(flusher) = &self.shared.flusher {
+            flusher.flush_soon();
+        }
     }
 
     /// Ends the session. Subscriptions end once the connection is closed.
     pub fn close(&self) {
         self.shared.close();
+    }
+
+    /// Writes what changed to the disk cache now, e.g. before the app quits. Resolves when
+    /// it's written, or at once without a cache.
+    pub async fn flush_cache(&self) {
+        if let Some(flusher) = &self.shared.flusher {
+            flusher.flush().await;
+        }
     }
 
     /// Marks the channel as viewed: the store keeps its messages and adds new ones from

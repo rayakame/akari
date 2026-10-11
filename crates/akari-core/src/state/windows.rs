@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use super::apply::wall_millis;
 use super::events::StoreEvent;
 use super::types::{Delivery, Message, User};
 use crate::gateway::MessageUpdate;
@@ -52,6 +53,14 @@ pub(crate) struct LoadTicket {
     holds: bool,
 }
 
+/// A window as the disk cache keeps it: when it was last viewed and its newest messages.
+#[derive(Debug, Clone)]
+pub(crate) struct CachedWindow {
+    // Milliseconds since the Unix epoch, so it orders against earlier sessions' windows.
+    pub(crate) viewed_at: i64,
+    pub(crate) messages: Vec<Arc<Message>>,
+}
+
 /// A snapshot of a viewed channel's loaded messages.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -86,6 +95,7 @@ struct Window {
     loading: u32,
     // Edits and deletes while a load runs; its page may predate them.
     missed: Vec<Missed>,
+    viewed_at: i64,
 }
 
 #[cfg_attr(test, derive(PartialEq))]
@@ -338,8 +348,12 @@ impl Windows {
     }
 
     pub(crate) fn view(&mut self, channel: ChannelId, events: &mut Vec<StoreEvent>) {
+        let now = wall_millis();
         if let Some(index) = self.order.iter().position(|viewed| *viewed == channel) {
             self.order.remove(index);
+            if let Some(window) = self.windows.get_mut(&channel) {
+                window.viewed_at = now;
+            }
         } else {
             let generation = self.next_generation();
             self.windows.insert(
@@ -347,6 +361,7 @@ impl Windows {
                 Window {
                     latest: true,
                     generation,
+                    viewed_at: now,
                     ..Window::default()
                 },
             );
@@ -368,6 +383,27 @@ impl Windows {
                 });
             }
         }
+    }
+
+    // Only windows at the present that no new session made stale; others could be wrong.
+    pub(crate) fn cache_windows(&self, per_window: usize) -> Vec<(ChannelId, CachedWindow)> {
+        self.order
+            .iter()
+            .filter_map(|channel| {
+                let window = self.windows.get(channel)?;
+                if !window.latest || window.stale {
+                    return None;
+                }
+                let skip = window.messages.len().saturating_sub(per_window);
+                Some((
+                    *channel,
+                    CachedWindow {
+                        viewed_at: window.viewed_at,
+                        messages: window.messages[skip..].to_vec(),
+                    },
+                ))
+            })
+            .collect()
     }
 
     pub(crate) fn snapshot(&self, channel: ChannelId) -> Option<MessageWindow> {

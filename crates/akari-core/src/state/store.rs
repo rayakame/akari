@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -11,7 +11,7 @@ use super::send::Slowmode;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
-use super::windows::{LoadKind, LoadTicket, MessageWindow, WindowLimits};
+use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits};
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
@@ -33,6 +33,8 @@ pub struct Store {
 
 struct Shared {
     inner: RwLock<Inner>,
+    // Bumped by every write, so the disk cache skips snapshots while nothing changed.
+    changes: AtomicU64,
     #[cfg(test)]
     park: std::sync::Mutex<Option<Park>>,
     #[cfg(test)]
@@ -150,6 +152,7 @@ impl Store {
     pub(crate) fn new(limits: WindowLimits) -> Self {
         Self {
             shared: Arc::new(Shared {
+                changes: AtomicU64::new(0),
                 inner: RwLock::new(Inner {
                     state: State::with_limits(limits),
                     connection: ConnectionState::Offline,
@@ -192,6 +195,7 @@ impl Store {
         let taken = Instant::now();
         let mut events = Vec::new();
         let value = write(&mut inner, &mut events);
+        self.shared.changes.fetch_add(1, Ordering::Relaxed);
         inner.publish(events);
         #[cfg(test)]
         self.slow_down();
@@ -321,6 +325,18 @@ impl Store {
         self.write("load", |inner, events| {
             inner.state.abort_load(ticket, events)
         });
+    }
+
+    pub(crate) fn changes(&self) -> u64 {
+        self.shared.changes.load(Ordering::Relaxed)
+    }
+
+    // Arc clones under the read lock; the disk work happens elsewhere.
+    pub(crate) fn cache_parts(
+        &self,
+        per_window: usize,
+    ) -> (Entities, Vec<(ChannelId, CachedWindow)>) {
+        self.read(|inner| inner.state.cache_parts(per_window))
     }
 
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {

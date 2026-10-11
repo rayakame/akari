@@ -17,4 +17,6 @@ pub use send::{Slowmode, message_length};
 pub use store::{Store, Subscription};
 pub use types::*;
 pub use windows::MessageWindow;
-pub(crate) use windows::{Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket, WindowLimits};
+pub(crate) use windows::{
+    CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket, WindowLimits,
+};

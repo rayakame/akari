@@ -7,14 +7,14 @@ use super::events::StoreEvent;
 use super::permissions::compute;
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
-use super::windows::{LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
+use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct Entities {
     pub(crate) current_user: Option<Arc<CurrentUser>>,
@@ -718,6 +718,16 @@ impl State {
         self.windows.stale_channels()
     }
 
+    pub(crate) fn cache_parts(
+        &self,
+        per_window: usize,
+    ) -> (Entities, Vec<(ChannelId, CachedWindow)>) {
+        (
+            self.entities.clone(),
+            self.windows.cache_windows(per_window),
+        )
+    }
+
     pub(crate) fn viewed_channels(&self) -> Vec<Arc<Channel>> {
         self.windows
             .channels()
@@ -901,7 +911,7 @@ impl State {
     }
 }
 
-fn wall_millis() -> i64 {
+pub(super) fn wall_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| {

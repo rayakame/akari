@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use super::snapshot::Flushed;
 use super::*;
 use crate::model::{
     ChannelType, MessageReferenceType, MessageType, OverwriteType, Permissions, PremiumType,
     Snowflake, StickerFormatType, Timestamp,
 };
+use crate::state::CachedWindow;
 use crate::state::apply::Entities;
 use crate::state::{
     Attachment, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
@@ -565,4 +567,383 @@ fn snowflakes_round_trip_as_integers() {
         cache.read_window(Snowflake::new(big)).unwrap().value,
         vec![sent]
     );
+}
+
+fn window(viewed_at: i64, messages: Vec<Arc<Message>>) -> CachedWindow {
+    CachedWindow {
+        viewed_at,
+        messages,
+    }
+}
+
+fn messages(channel: u64, ids: std::ops::Range<u64>, content: &str) -> Vec<Arc<Message>> {
+    ids.map(|id| Arc::new(message(channel, id, content)))
+        .collect()
+}
+
+// Each window's channel exists, or the flush drops the window as gone.
+fn snapshot(windows: impl IntoIterator<Item = (u64, CachedWindow)>) -> Snapshot {
+    let mut entities = entities();
+    let windows: std::collections::HashMap<_, _> = windows
+        .into_iter()
+        .map(|(channel, cached)| (Snowflake::new(channel), cached))
+        .collect();
+    for id in windows.keys() {
+        entities
+            .channels
+            .entry(*id)
+            .or_insert_with(|| Arc::new(channel(id.get(), Some(100), "cached")));
+    }
+    Snapshot { entities, windows }
+}
+
+// Every Arc rebuilt with equal values, as a later READY makes them.
+fn rebuilt(entities: &Entities) -> Entities {
+    fn copy<K: Copy + Eq + std::hash::Hash, T: Clone>(
+        map: &std::collections::HashMap<K, Arc<T>>,
+    ) -> std::collections::HashMap<K, Arc<T>> {
+        map.iter()
+            .map(|(key, value)| (*key, Arc::new((**value).clone())))
+            .collect()
+    }
+    Entities {
+        current_user: entities
+            .current_user
+            .as_ref()
+            .map(|current| Arc::new((**current).clone())),
+        users: copy(&entities.users),
+        guilds: copy(&entities.guilds),
+        unavailable: entities.unavailable.clone(),
+        members: copy(&entities.members),
+        channels: copy(&entities.channels),
+    }
+}
+
+fn stored_ids(path: &Path, sql: &str) -> Vec<u64> {
+    let conn = raw(path);
+    let mut statement = conn.prepare(sql).unwrap();
+    statement
+        .query_map([], |row| row.get::<_, i64>(0))
+        .unwrap()
+        .map(|id| id.unwrap().cast_unsigned())
+        .collect()
+}
+
+fn files_size(path: &Path) -> u64 {
+    ["", "-wal", "-shm"]
+        .iter()
+        .filter_map(|suffix| {
+            let mut name = path.as_os_str().to_owned();
+            name.push(suffix);
+            fs::metadata(PathBuf::from(name)).ok()
+        })
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+fn files_contain(path: &Path, needle: &[u8]) -> bool {
+    ["", "-wal"].iter().any(|suffix| {
+        let mut name = path.as_os_str().to_owned();
+        name.push(suffix);
+        fs::read(PathBuf::from(name))
+            .is_ok_and(|bytes| bytes.windows(needle.len()).any(|window| window == needle))
+    })
+}
+
+async fn started(dir: &TempDir) -> CacheThread {
+    let thread = CacheThread::start(dir.file(ME), UserId::new(ME));
+    thread.read_entities().await.unwrap();
+    thread
+}
+
+#[tokio::test]
+async fn sqlite_runs_on_its_own_thread() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+
+    assert_eq!(thread.thread_name().await.as_deref(), Some("akari-cache"));
+}
+
+#[tokio::test]
+async fn the_cache_keeps_the_newest_fifty_of_the_fifty_latest_channels() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let windows = (1..=60).map(|channel| {
+        let first = channel * 1000;
+        (
+            channel,
+            window(
+                i64::try_from(channel).unwrap(),
+                messages(channel, first..first + 80, "text"),
+            ),
+        )
+    });
+
+    thread.flush(snapshot(windows)).await.unwrap();
+
+    let channels = stored_ids(
+        &dir.file(ME),
+        "SELECT DISTINCT channel_id FROM messages ORDER BY channel_id",
+    );
+    assert_eq!(channels, (11..=60).collect::<Vec<_>>());
+    let windows = stored_ids(
+        &dir.file(ME),
+        "SELECT channel_id FROM windows ORDER BY channel_id",
+    );
+    assert_eq!(windows, (11..=60).collect::<Vec<_>>());
+    let ids: Vec<u64> = thread
+        .read_window(Snowflake::new(60))
+        .await
+        .unwrap()
+        .iter()
+        .map(|message| message.id.get())
+        .collect();
+    assert_eq!(ids, (60_030..60_080).collect::<Vec<_>>());
+}
+
+#[tokio::test]
+async fn an_equal_state_writes_nothing() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let state = snapshot([(10, window(5, messages(10, 1..4, "text")))]);
+    let again = Snapshot {
+        entities: state.entities.clone(),
+        windows: state.windows.clone(),
+    };
+
+    let first = thread.flush(state).await.unwrap();
+    let second = thread.flush(again).await.unwrap();
+
+    assert!(first.rows() > 0);
+    assert_eq!(second, Flushed::default());
+}
+
+#[tokio::test]
+async fn a_ready_with_equal_values_rewrites_nothing() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let state = snapshot([]);
+    let after_ready = Snapshot {
+        entities: rebuilt(&state.entities),
+        windows: std::collections::HashMap::new(),
+    };
+
+    thread.flush(state).await.unwrap();
+    let flushed = thread.flush(after_ready).await.unwrap();
+
+    assert_eq!(flushed, Flushed::default());
+}
+
+#[tokio::test]
+async fn a_restart_with_the_same_state_writes_nothing() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread.flush(snapshot([])).await.unwrap();
+    drop(thread);
+
+    let thread = started(&dir).await;
+    let flushed = thread
+        .flush(Snapshot {
+            entities: rebuilt(&entities()),
+            windows: std::collections::HashMap::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(flushed, Flushed::default());
+}
+
+#[tokio::test]
+async fn entities_gone_since_the_last_write_are_deleted() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread.flush(snapshot([])).await.unwrap();
+    let mut fewer = entities();
+    fewer.guilds.remove(&Snowflake::new(200));
+    fewer.channels.remove(&Snowflake::new(11));
+    fewer.users.clear();
+
+    let flushed = thread
+        .flush(Snapshot {
+            entities: fewer,
+            windows: std::collections::HashMap::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(flushed.deleted, 3);
+    let read = thread.read_entities().await.unwrap();
+    assert!(!read.guilds.contains_key(&Snowflake::new(200)));
+    assert!(!read.channels.contains_key(&Snowflake::new(11)));
+    assert!(read.users.is_empty());
+}
+
+#[tokio::test]
+async fn a_window_left_out_of_a_snapshot_keeps_its_rows() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread
+        .flush(snapshot([(10, window(5, messages(10, 1..4, "text")))]))
+        .await
+        .unwrap();
+
+    thread.flush(snapshot([])).await.unwrap();
+
+    assert_eq!(
+        thread.read_window(Snowflake::new(10)).await.unwrap().len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn pending_and_failed_messages_are_never_written() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let mut unsent = messages(10, 1..4, "text");
+    for (index, delivery) in [(1, Delivery::Pending), (2, Delivery::Failed)] {
+        let mut message = (*unsent[index]).clone();
+        message.delivery = delivery;
+        unsent[index] = Arc::new(message);
+    }
+
+    thread
+        .flush(snapshot([(10, window(5, unsent))]))
+        .await
+        .unwrap();
+
+    let ids: Vec<u64> = thread
+        .read_window(Snowflake::new(10))
+        .await
+        .unwrap()
+        .iter()
+        .map(|message| message.id.get())
+        .collect();
+    assert_eq!(ids, [1]);
+}
+
+#[tokio::test]
+async fn a_removed_channel_loses_its_messages() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread
+        .flush(snapshot([(10, window(5, messages(10, 1..4, "text")))]))
+        .await
+        .unwrap();
+    let mut without = entities();
+    without.channels.remove(&Snowflake::new(10));
+
+    thread
+        .flush(Snapshot {
+            entities: without,
+            windows: std::collections::HashMap::new(),
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        thread
+            .read_window(Snowflake::new(10))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(stored_ids(&dir.file(ME), "SELECT channel_id FROM windows").is_empty());
+}
+
+#[tokio::test]
+async fn the_file_stays_bounded_after_many_flushes() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let round = |round: u64| {
+        snapshot((1..=10).map(move |channel| {
+            let first = round * 1_000_000 + channel * 1000;
+            (
+                channel,
+                window(5, messages(channel, first..first + 50, &"text ".repeat(40))),
+            )
+        }))
+    };
+    thread.flush(round(0)).await.unwrap();
+    thread.checkpoint().await;
+    let first = files_size(&dir.file(ME));
+
+    for n in 1..=200 {
+        thread.flush(round(n)).await.unwrap();
+    }
+    thread.checkpoint().await;
+
+    let after = files_size(&dir.file(ME));
+    assert!(
+        after < 2 * first,
+        "{after} after 200 flushes, {first} after the first"
+    );
+}
+
+#[tokio::test]
+async fn evicted_messages_leave_no_text_in_the_file() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let mut windows: Vec<(u64, CachedWindow)> = (1..=50)
+        .map(|channel| {
+            (
+                channel,
+                window(
+                    100 + i64::try_from(channel).unwrap(),
+                    messages(channel, 1..3, "text"),
+                ),
+            )
+        })
+        .collect();
+    windows[0].1 = window(1, messages(1, 1..3, "evict-me-77"));
+    thread.flush(snapshot(windows.clone())).await.unwrap();
+    assert!(files_contain(&dir.file(ME), b"evict-me-77"));
+
+    windows.push((51, window(1000, messages(51, 1..3, "text"))));
+    thread.flush(snapshot(windows)).await.unwrap();
+    thread.checkpoint().await;
+
+    assert!(!files_contain(&dir.file(ME), b"evict-me-77"));
+}
+
+#[tokio::test]
+async fn a_failed_write_keeps_the_account_running() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread.flush(snapshot([])).await.unwrap();
+    let mut renamed = entities();
+    let mut guild = (*renamed.guilds[&Snowflake::new(100)]).clone();
+    guild.name = "Renamed".into();
+    renamed.guilds.insert(guild.id, Arc::new(guild));
+    let next = || Snapshot {
+        entities: Entities {
+            guilds: renamed.guilds.clone(),
+            ..entities()
+        },
+        windows: std::collections::HashMap::new(),
+    };
+
+    thread.fail_next_write();
+    assert!(thread.flush(next()).await.is_none());
+    let retried = thread.flush(next()).await.unwrap();
+
+    assert_eq!(retried.guilds, 1);
+    let read = thread.read_entities().await.unwrap();
+    assert_eq!(&*read.guilds[&Snowflake::new(100)].name, "Renamed");
+}
+
+#[tokio::test]
+async fn a_held_thread_queues_its_commands() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let release = thread.hold();
+
+    let flush = tokio::spawn({
+        let thread = thread.clone();
+        async move { thread.flush(snapshot([])).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!flush.is_finished());
+
+    release.send(()).unwrap();
+    assert!(flush.await.unwrap().is_some());
 }

@@ -1156,3 +1156,44 @@ fn a_dropped_channel_keeps_its_unsent_messages() {
             .is_some()
     );
 }
+
+#[test]
+fn only_fresh_windows_at_the_present_are_written() {
+    let mut fresh = Harness::viewing(LOADS);
+    for id in 10..15 {
+        fresh.live(wire(id));
+    }
+    fresh.queue(pending(500, "unsent"));
+
+    let taken = fresh.windows.cache_windows(3);
+
+    assert_eq!(taken.len(), 1);
+    let (channel_id, cached) = &taken[0];
+    assert_eq!(*channel_id, channel(CH));
+    let ids: Vec<u64> = cached
+        .messages
+        .iter()
+        .map(|message| message.id.get())
+        .collect();
+    assert_eq!(ids, [12, 13, 14]);
+    assert!(cached.viewed_at > 0);
+
+    let mut stale = Harness::viewing(LOADS);
+    stale.live(wire(10));
+    stale.windows.mark_stale(&mut Vec::new());
+    assert!(stale.windows.cache_windows(3).is_empty());
+
+    let detached = Harness::detached(LOADS, &[19, 20, 21]);
+    assert!(detached.windows.cache_windows(3).is_empty());
+}
+
+#[test]
+fn viewing_again_moves_the_viewed_time() {
+    let mut harness = Harness::viewing(LOADS);
+    let first = harness.windows.cache_windows(3)[0].1.viewed_at;
+    std::thread::sleep(std::time::Duration::from_millis(5));
+
+    harness.view(CH);
+
+    assert!(harness.windows.cache_windows(3)[0].1.viewed_at > first);
+}

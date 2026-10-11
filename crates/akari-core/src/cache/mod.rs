@@ -1,8 +1,11 @@
 //! The disk cache: one SQLite file per account with what a cold start draws before the gateway
 //! connects. Only its own thread touches the file.
 
+mod flusher;
 mod rows;
 mod schema;
+mod snapshot;
+mod thread;
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,12 +15,21 @@ use std::time::Duration;
 
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 
+pub(crate) use self::flusher::Flusher;
 use self::rows::{ChannelRow, CurrentUserRow, GuildRow, MemberRow, MessageRow, UserRow};
+pub(crate) use self::snapshot::Snapshot;
+pub(crate) use self::thread::CacheThread;
 use crate::model::{ChannelId, GuildId, Snowflake, UserId};
 use crate::state::apply::Entities;
 use crate::state::{Channel, CurrentUser, Delivery, Guild, Member, Message, User};
 
 const LOG: &str = "akari_core::cache";
+
+/// An account's cache and how often its changes are written.
+pub(crate) struct DiskCache {
+    pub(crate) thread: CacheThread,
+    pub(crate) every: Duration,
+}
 
 /// Where `user`'s cache lives in `directory`.
 pub(crate) fn file(directory: &Path, user: UserId) -> PathBuf {
@@ -115,6 +127,8 @@ pub(crate) struct Read<T> {
 
 pub(crate) struct Cache {
     conn: Connection,
+    #[cfg(test)]
+    pub(crate) fail_next_write: bool,
 }
 
 impl Cache {
@@ -160,7 +174,11 @@ impl Cache {
         conn.pragma_update(None, "temp_store", "MEMORY")?;
         // Another process holding the file shows here rather than at the first flush.
         conn.execute_batch("BEGIN IMMEDIATE; COMMIT;")?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            #[cfg(test)]
+            fail_next_write: false,
+        })
     }
 
     /// Opens `user`'s file, deleting it and starting over when it can't be used as it is.
@@ -293,14 +311,57 @@ impl Cache {
         body: impl FnOnce(&mut Writer<'_>) -> rusqlite::Result<T>,
     ) -> Result<T, CacheError> {
         let transaction = self.conn.transaction()?;
-        let mut writer = Writer {
-            conn: &transaction,
-            written: 0,
-            deleted: 0,
-        };
-        let value = body(&mut writer)?;
+        let value = body(&mut Writer { conn: &transaction })?;
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_next_write) {
+            return Err(CacheError::Io);
+        }
         transaction.commit()?;
         Ok(value)
+    }
+
+    pub(crate) fn release_free_pages(&self, above: i64) -> Result<(), CacheError> {
+        let free: i64 = self
+            .conn
+            .pragma_query_value(None, "freelist_count", |row| row.get(0))?;
+        if free > above {
+            self.conn.execute_batch("PRAGMA incremental_vacuum")?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn checkpoint(&self) -> Result<(), CacheError> {
+        self.conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    pub(crate) fn file_kib(&self) -> u64 {
+        let Some(path) = self.conn.path() else {
+            return 0;
+        };
+        let size = |suffix: &str| {
+            let mut name = std::ffi::OsString::from(path);
+            name.push(suffix);
+            fs::metadata(PathBuf::from(name)).map_or(0, |metadata| metadata.len())
+        };
+        (size("") + size("-wal")) / 1024
+    }
+
+    pub(crate) fn counts(&self) -> Result<[i64; 4], CacheError> {
+        let count = |table: &str| -> Result<i64, CacheError> {
+            Ok(self
+                .conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })?)
+        };
+        Ok([
+            count("guilds")?,
+            count("channels")?,
+            count("windows")?,
+            count("messages")?,
+        ])
     }
 }
 
@@ -327,23 +388,19 @@ fn json<T: serde::Serialize>(row: &T) -> rusqlite::Result<String> {
     serde_json::to_string(row).map_err(|err| rusqlite::Error::ToSqlConversionFailure(err.into()))
 }
 
-/// Puts and deletes rows inside [`Cache::write`]'s transaction, counting them.
+/// Puts and deletes rows inside [`Cache::write`]'s transaction.
 pub(crate) struct Writer<'a> {
     conn: &'a Connection,
-    pub(crate) written: usize,
-    pub(crate) deleted: usize,
 }
 
 impl Writer<'_> {
     fn put(&mut self, sql: &str, id: u64, data: String) -> rusqlite::Result<()> {
         self.conn.execute(sql, params![sql_id(id), data])?;
-        self.written += 1;
         Ok(())
     }
 
-    fn delete(&mut self, sql: &str, id: u64) -> rusqlite::Result<()> {
-        self.deleted += self.conn.execute(sql, [sql_id(id)])?;
-        Ok(())
+    fn delete(&mut self, sql: &str, id: u64) -> rusqlite::Result<usize> {
+        self.conn.execute(sql, [sql_id(id)])
     }
 
     pub(crate) fn put_current_user(&mut self, current: &CurrentUser) -> rusqlite::Result<()> {
@@ -366,7 +423,8 @@ impl Writer<'_> {
     }
 
     pub(crate) fn delete_user(&mut self, id: UserId) -> rusqlite::Result<()> {
-        self.delete("DELETE FROM users WHERE id = ?1", id.get())
+        self.delete("DELETE FROM users WHERE id = ?1", id.get())?;
+        Ok(())
     }
 
     pub(crate) fn put_guild(&mut self, guild: &Guild) -> rusqlite::Result<()> {
@@ -379,7 +437,8 @@ impl Writer<'_> {
     }
 
     pub(crate) fn delete_guild(&mut self, id: GuildId) -> rusqlite::Result<()> {
-        self.delete("DELETE FROM guilds WHERE id = ?1", id.get())
+        self.delete("DELETE FROM guilds WHERE id = ?1", id.get())?;
+        Ok(())
     }
 
     pub(crate) fn put_unavailable(&mut self, id: GuildId) -> rusqlite::Result<()> {
@@ -387,12 +446,12 @@ impl Writer<'_> {
             "INSERT OR REPLACE INTO unavailable_guilds (id) VALUES (?1)",
             [sql_id(id.get())],
         )?;
-        self.written += 1;
         Ok(())
     }
 
     pub(crate) fn delete_unavailable(&mut self, id: GuildId) -> rusqlite::Result<()> {
-        self.delete("DELETE FROM unavailable_guilds WHERE id = ?1", id.get())
+        self.delete("DELETE FROM unavailable_guilds WHERE id = ?1", id.get())?;
+        Ok(())
     }
 
     pub(crate) fn put_member(&mut self, member: &Member) -> rusqlite::Result<()> {
@@ -405,7 +464,8 @@ impl Writer<'_> {
     }
 
     pub(crate) fn delete_member(&mut self, guild: GuildId) -> rusqlite::Result<()> {
-        self.delete("DELETE FROM members WHERE guild_id = ?1", guild.get())
+        self.delete("DELETE FROM members WHERE guild_id = ?1", guild.get())?;
+        Ok(())
     }
 
     pub(crate) fn put_channel(&mut self, channel: &Channel) -> rusqlite::Result<()> {
@@ -418,12 +478,12 @@ impl Writer<'_> {
                 data
             ],
         )?;
-        self.written += 1;
         Ok(())
     }
 
     pub(crate) fn delete_channel(&mut self, id: ChannelId) -> rusqlite::Result<()> {
-        self.delete("DELETE FROM channels WHERE id = ?1", id.get())
+        self.delete("DELETE FROM channels WHERE id = ?1", id.get())?;
+        Ok(())
     }
 
     /// Replaces the channel's cached messages; pending and failed ones are never written.
@@ -450,16 +510,34 @@ impl Writer<'_> {
                 sql_id(message.id.get()),
                 json(&MessageRow::from(&**message))?
             ])?;
-            self.written += 1;
         }
         Ok(())
     }
 
-    pub(crate) fn delete_window(&mut self, channel: ChannelId) -> rusqlite::Result<()> {
-        self.delete("DELETE FROM windows WHERE channel_id = ?1", channel.get())?;
-        self.delete("DELETE FROM messages WHERE channel_id = ?1", channel.get())
+    /// Drops the windows of channels that are gone and those viewed before the `keep` most
+    /// recent; returns those channels and how many rows went with them.
+    pub(crate) fn evict(&mut self, keep: usize) -> rusqlite::Result<(Vec<ChannelId>, usize)> {
+        let mut statement = self.conn.prepare(
+            "SELECT channel_id FROM windows WHERE channel_id NOT IN (SELECT id FROM channels)
+             UNION
+             SELECT channel_id FROM (
+                 SELECT channel_id FROM windows ORDER BY viewed_at DESC, channel_id DESC
+                 LIMIT -1 OFFSET ?1
+             )",
+        )?;
+        let keep = i64::try_from(keep).unwrap_or(i64::MAX);
+        let channels = statement
+            .query_map([keep], |row| row.get::<_, i64>(0))?
+            .map(|id| id.map(|id| ChannelId::new(row_id(id))))
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut deleted = 0;
+        for channel in &channels {
+            deleted += self.delete("DELETE FROM windows WHERE channel_id = ?1", channel.get())?;
+            deleted += self.delete("DELETE FROM messages WHERE channel_id = ?1", channel.get())?;
+        }
+        Ok((channels, deleted))
     }
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

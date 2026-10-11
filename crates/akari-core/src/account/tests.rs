@@ -2606,3 +2606,141 @@ async fn paging_with_a_bucket_left_never_waits() {
         assert_eq!(report.limited, Duration::ZERO, "{report:?}");
     }
 }
+
+mod cache {
+    use super::*;
+    use crate::cache::tests::TempDir;
+    use crate::cache::{CacheThread, DiskCache};
+    use crate::model::UserId;
+
+    const OWNER: u64 = 100_000_000_000_000_001;
+
+    fn start_cached(fake: &FakeGateway, dir: &TempDir, every: Duration) -> (Account, CacheThread) {
+        let thread = CacheThread::start(dir.file(OWNER), UserId::new(OWNER));
+        let account = Account::start_with_cache(
+            client(fake),
+            Token::new(TOKEN.to_owned()),
+            timing(),
+            DEFAULT_LIMITS,
+            Some(DiskCache {
+                thread: thread.clone(),
+                every,
+            }),
+        )
+        .unwrap();
+        (account, thread)
+    }
+
+    async fn cached_guilds(thread: &CacheThread) -> usize {
+        thread.read_entities().await.unwrap().guilds.len()
+    }
+
+    async fn wait_for_guilds(thread: &CacheThread) {
+        timeout(WAIT, async {
+            while cached_guilds(thread).await == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("nothing was written");
+    }
+
+    #[tokio::test]
+    async fn changes_reach_the_disk_within_the_interval() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let (account, thread) = start_cached(&fake, &dir, Duration::from_millis(50));
+        let subscription = account.store().subscribe();
+
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+
+        wait_for_guilds(&thread).await;
+    }
+
+    #[tokio::test]
+    async fn flush_cache_writes_at_once() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let (account, thread) = start_cached(&fake, &dir, Duration::from_secs(3600));
+        let subscription = account.store().subscribe();
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+        assert_eq!(cached_guilds(&thread).await, 0);
+
+        account.flush_cache().await;
+
+        assert_eq!(cached_guilds(&thread).await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_disconnect_flushes_the_cache() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let (account, thread) = start_cached(&fake, &dir, Duration::from_secs(3600));
+        let subscription = account.store().subscribe();
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+
+        account.disconnect();
+
+        wait_for_guilds(&thread).await;
+    }
+
+    #[tokio::test]
+    async fn closing_writes_a_last_flush() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let (account, thread) = start_cached(&fake, &dir, Duration::from_secs(3600));
+        let subscription = account.store().subscribe();
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+
+        account.close();
+
+        wait_for_guilds(&thread).await;
+    }
+
+    #[tokio::test]
+    async fn nothing_is_written_before_a_session_or_restore() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let (account, thread) = start_cached(&fake, &dir, Duration::from_secs(3600));
+        thread
+            .flush(crate::cache::Snapshot {
+                entities: crate::cache::tests::entities(),
+                windows: std::collections::HashMap::new(),
+            })
+            .await
+            .unwrap();
+
+        account.flush_cache().await;
+
+        assert_eq!(cached_guilds(&thread).await, 2);
+    }
+
+    #[tokio::test]
+    async fn the_pump_never_waits_for_the_disk() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let (account, thread) = start_cached(&fake, &dir, Duration::from_millis(20));
+        let release = thread.hold();
+        let subscription = account.store().subscribe();
+        let mut connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+        account.view_channel(general());
+
+        for n in 0..1000 {
+            connection.send(message(2 + n, 1_000 + n)).await;
+        }
+
+        let mut inserted = 0;
+        while inserted < 1000 {
+            let event = next(&subscription).await.expect("the store closed");
+            if event.starts_with("MessageInserted") {
+                inserted += 1;
+            }
+        }
+        release.send(()).unwrap();
+    }
+}
