@@ -7,7 +7,9 @@ import Testing
 // Rows draw with layers rather than bitmaps: a drawn bitmap of the placeholder block, at
 // least one and a half views tall, was most of the launch's memory peak.
 @MainActor
-struct RowDrawingTests {
+final class RowDrawingTests {
+    // The controller of a table-hosted test, alive while the test reads its cells.
+    var hold: MessageTableController?
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
         styleMask: [.titled], backing: .buffered, defer: false)
@@ -54,6 +56,13 @@ struct RowDrawingTests {
         func alpha(_ x: Int, _ y: Int) -> CGFloat {
             rep.colorAt(x: x, y: y)?.alphaComponent ?? 0
         }
+
+        func rgb(_ x: Int, _ y: Int) -> [CGFloat] {
+            guard let color = rep.colorAt(x: x, y: y) else {
+                return []
+            }
+            return [color.redComponent, color.greenComponent, color.blueComponent]
+        }
     }
 
     // A view that implements draw(_:) gets a bitmap backing as large as itself.
@@ -91,6 +100,82 @@ struct RowDrawingTests {
 
         #expect(try LayerImage(cell).alpha(350, 79) < 0.01)
         #expect(try LayerImage(cell).alpha(300, 79) > 0.05)
+    }
+
+    // As the app hosts it: a row of the message table, which is flipped.
+    func tableRow(_ state: MessageTableState, edge: MessageTimeline.Edge) throws -> PlaceholderCell
+    {
+        let controller = MessageTableController(
+            calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
+        hold = controller
+        window.contentView = controller.scrollView
+        window.layoutIfNeeded()
+        controller.show(state)
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        let row = try #require(controller.timeline.items.firstIndex { $0.id == .edge(edge) })
+        return try #require(
+            controller.tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                as? PlaceholderCell)
+    }
+
+    // Whether any shape covers the band of rows from `top` to `bottom`, measured from the top.
+    func shapes(in image: LayerImage, from top: Int, to bottom: Int) -> Bool {
+        (top..<bottom).contains { y in
+            stride(from: 20, to: 400, by: 4).contains { x in image.alpha(x, y) > 0.05 }
+        }
+    }
+
+    @Test
+    func olderPlaceholdersInATableRowStartAtTheTopAndClearTheirBottomOnAFailure() throws {
+        let plain = try tableRow(MessageTableState(rows: []), edge: .older)
+        let image = try LayerImage(plain)
+        let height = Int(plain.bounds.height)
+        #expect(image.alpha(36, 38) > 0.05)
+        #expect(image.alpha(36, 5) < 0.01)
+        #expect(shapes(in: image, from: height - 48, to: height))
+
+        let failed = try tableRow(
+            MessageTableState(rows: [], failedLoads: [.latest: .ServerError(status: 500)]),
+            edge: .older)
+        let failedImage = try LayerImage(failed)
+        #expect(!shapes(in: failedImage, from: height - 48, to: height))
+        #expect(failedImage.alpha(36, 38) > 0.05)
+    }
+
+    @Test
+    func newerPlaceholdersInATableRowClearTheirTopOnAFailure() throws {
+        let rows = (1...3).map { raw in
+            row(UInt64(raw), at: berlinTime(2026, 10, 10, 12, 0) + Double(raw) * 60)
+        }
+        let plain = try tableRow(MessageTableState(rows: rows, atPresent: false), edge: .newer)
+        #expect(shapes(in: try LayerImage(plain), from: 0, to: 48))
+
+        let failed = try tableRow(
+            MessageTableState(
+                rows: rows, atPresent: false, failedLoads: [.newer: .ServerError(status: 500)]),
+            edge: .newer)
+        let image = try LayerImage(failed)
+        #expect(!shapes(in: image, from: 0, to: 48))
+        #expect(shapes(in: image, from: 48, to: 140))
+    }
+
+    // Without a layout pass in between: a theme switch changes nothing else about the cell.
+    // hoverBackground is the same in both themes today, so the cell gets a color that isn't.
+    @Test
+    func anAppearanceChangeRecolorsShownPlaceholders() throws {
+        let placeholders = placeholders()
+        placeholders.color = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .systemRed : .systemBlue
+        }
+        let cell = shown(placeholders)
+        let dark = try LayerImage(cell).rgb(36, 38)
+
+        window.appearance = NSAppearance(named: .aqua)
+        let light = try LayerImage(cell).rgb(36, 38)
+
+        #expect(dark.count == 3 && light.count == 3)
+        #expect(zip(dark, light).contains { abs($0 - $1) > 2 / 255 }, "\(dark) vs \(light)")
     }
 
     @Test

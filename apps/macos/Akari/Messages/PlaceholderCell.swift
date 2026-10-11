@@ -33,6 +33,9 @@ final class PlaceholderCell: NSTableCellView {
     private var atBottom: NSLayoutConstraint?
     // Plain colored layers: a drawn bitmap of a block this tall was most of the launch's memory.
     private let shapes = CALayer()
+    var color = Palette.hoverBackground {
+        didSet { layOutShapes() }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -128,9 +131,9 @@ final class PlaceholderCell: NSTableCellView {
             index += 1
         }
         frames.removeAll { frame, _ in band.map { $0.intersects(frame) } ?? false }
-        var color: CGColor?
+        var resolved: CGColor?
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            color = Palette.hoverBackground.cgColor
+            resolved = color.cgColor
         }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -148,7 +151,7 @@ final class PlaceholderCell: NSTableCellView {
         {
             shape.frame = placed.0
             shape.cornerRadius = placed.1
-            shape.backgroundColor = color
+            shape.backgroundColor = resolved
             shape.isHidden = placed.0.isEmpty
         }
         CATransaction.commit()
