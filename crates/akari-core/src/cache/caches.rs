@@ -19,7 +19,6 @@ struct Entry {
     open: WeakCacheThread,
 }
 
-/// The client's caches: where they live, and each account's running cache thread.
 #[derive(Default)]
 pub(crate) struct Caches {
     place: OnceLock<Place>,
@@ -52,7 +51,6 @@ impl Caches {
         }
     }
 
-    /// The running or preloaded thread for `user`, or a new one.
     pub(crate) fn thread(&self, user: UserId) -> Option<CacheThread> {
         let place = self.place.get()?;
         let mut threads = self.threads.lock().unwrap_or_else(PoisonError::into_inner);
@@ -78,7 +76,6 @@ impl Caches {
         })
     }
 
-    /// Deletes `user`'s files, stopping its thread first if one runs.
     pub(crate) async fn forget(&self, user: UserId) {
         let Some(place) = self.place.get() else {
             return;
@@ -98,7 +95,6 @@ impl Caches {
         }
     }
 
-    /// Deletes the files of every account without a running cache in this process.
     pub(crate) async fn clear(&self) {
         let Some(place) = self.place.get() else {
             return;

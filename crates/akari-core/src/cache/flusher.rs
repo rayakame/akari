@@ -14,8 +14,7 @@ enum Request {
     Delete,
 }
 
-/// Writes an account's store to its cache: every interval while the store changes, and when
-/// asked. The gateway's pump never waits for it.
+// The gateway's pump never waits for it: the pump only bumps the store's change counter.
 pub(crate) struct Flusher {
     requests: mpsc::UnboundedSender<Request>,
 }
@@ -37,7 +36,6 @@ impl Flusher {
         Self { requests }
     }
 
-    /// Resolves once the store as it is now was written, or the write failed.
     pub(crate) async fn flush(&self) {
         let (reply, done) = oneshot::channel();
         if self.requests.send(Request::Flush(Some(reply))).is_ok() {
@@ -49,12 +47,10 @@ impl Flusher {
         let _ = self.requests.send(Request::Flush(None));
     }
 
-    /// A last flush; nothing is written after it.
     pub(crate) fn close(&self) {
         let _ = self.requests.send(Request::Close);
     }
 
-    /// Deletes the cache instead of a last flush, e.g. for a session Discord ended.
     pub(crate) fn delete(&self) {
         let _ = self.requests.send(Request::Delete);
     }

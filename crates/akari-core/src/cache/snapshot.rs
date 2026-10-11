@@ -12,14 +12,13 @@ pub(crate) const CHANNELS_WITH_MESSAGES: usize = 50;
 // Free pages past this are given back to the file system after a flush.
 const FREE_PAGES: i64 = 256;
 
-/// What the cache would hold now: the store's entities and its fresh windows at the present.
 pub(crate) struct Snapshot {
     pub(crate) entities: Entities,
     pub(crate) windows: HashMap<ChannelId, CachedWindow>,
 }
 
 impl Snapshot {
-    /// `None` while the store holds no session yet: writing that would empty the file.
+    // None before a session or a restore: writing that would delete the file's state.
     pub(crate) fn take(store: &Store) -> Option<Self> {
         let (entities, windows) = store.cache_parts(MESSAGES_PER_CHANNEL);
         entities.current_user.as_ref()?;
@@ -30,7 +29,6 @@ impl Snapshot {
     }
 }
 
-/// Rows a flush wrote, by kind, and rows it deleted.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Flushed {
     pub(crate) guilds: usize,
@@ -48,7 +46,7 @@ impl Flushed {
     }
 }
 
-/// What the file holds, as far as this session knows: everything compared against it.
+// What the file holds as far as this session knows; a flush writes only the difference.
 #[derive(Default)]
 pub(crate) struct Written {
     pub(crate) entities: Entities,
@@ -74,7 +72,6 @@ fn same_window(a: &CachedWindow, b: &CachedWindow) -> bool {
         && a.messages.iter().zip(&b.messages).all(|(a, b)| same(a, b))
 }
 
-// Puts what's new or changed, deletes what's gone; returns (put, deleted).
 fn diff<'w, K: Copy + Eq + Hash, T: PartialEq>(
     old: &HashMap<K, Arc<T>>,
     new: &HashMap<K, Arc<T>>,
@@ -96,8 +93,7 @@ fn diff<'w, K: Copy + Eq + Hash, T: PartialEq>(
     Ok(counts)
 }
 
-/// Writes what differs from `written` in one transaction; `written` follows only once it
-/// committed, so a failed write is retried in full by the next flush.
+// `written` follows only once the transaction committed, so a failed write is retried in full.
 pub(crate) fn flush(
     cache: &mut Cache,
     written: &mut Written,

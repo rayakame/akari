@@ -18,7 +18,6 @@ use crate::state::{
     PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, User,
 };
 
-/// A directory of its own under the system's temporary directory, removed on drop.
 pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {

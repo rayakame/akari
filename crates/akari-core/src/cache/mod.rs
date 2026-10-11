@@ -27,7 +27,6 @@ use crate::state::{Channel, CurrentUser, Delivery, Guild, Member, Message, User}
 
 const LOG: &str = "akari_core::cache";
 
-/// An account's cache and how often its changes are written.
 pub(crate) struct DiskCache {
     pub(crate) thread: CacheThread,
     // Whose file `thread` has open.
@@ -37,7 +36,6 @@ pub(crate) struct DiskCache {
     pub(crate) caches: Option<Arc<Caches>>,
 }
 
-/// Where `user`'s cache lives in `directory`.
 pub(crate) fn file(directory: &Path, user: UserId) -> PathBuf {
     directory.join(format!("{}.sqlite", user.get()))
 }
@@ -84,7 +82,6 @@ impl From<rusqlite::Error> for CacheError {
     }
 }
 
-/// Why a file was deleted and started over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Discarded {
     Corrupt,
@@ -104,7 +101,7 @@ impl Discarded {
     }
 }
 
-/// Why there is no cache this session; the file, if any, stays.
+// No cache this session; the file, if any, stays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Unavailable {
     Busy,
@@ -125,7 +122,6 @@ pub(crate) struct Opened {
     pub(crate) discarded: Option<Discarded>,
 }
 
-/// What a read found, and how many rows it couldn't decode.
 pub(crate) struct Read<T> {
     pub(crate) value: T,
     pub(crate) skipped: usize,
@@ -187,7 +183,6 @@ impl Cache {
         })
     }
 
-    /// Opens `user`'s file, deleting it and starting over when it can't be used as it is.
     pub(crate) fn open_or_rebuild(path: &Path, user: UserId) -> Result<Opened, Unavailable> {
         let discarded = match Self::open(path, user) {
             Ok(cache) => {
@@ -260,7 +255,6 @@ impl Cache {
         })
     }
 
-    /// The channel's cached messages, oldest first.
     pub(crate) fn read_window(
         &self,
         channel: ChannelId,
@@ -291,7 +285,6 @@ impl Cache {
         })
     }
 
-    // Each row's ID and data; returns how many rows `read` couldn't decode.
     fn each(
         &self,
         sql: &str,
@@ -311,7 +304,6 @@ impl Cache {
         Ok(skipped)
     }
 
-    /// Runs `body` in one transaction.
     pub(crate) fn write<T>(
         &mut self,
         body: impl FnOnce(&mut Writer<'_>) -> rusqlite::Result<T>,
@@ -376,7 +368,6 @@ fn unavailable(reason: Unavailable) -> Unavailable {
     reason
 }
 
-/// Deletes the file with SQLite's `-wal` and `-shm` beside it.
 pub(crate) fn delete_files(path: &Path) -> std::io::Result<()> {
     let mut result = Ok(());
     for suffix in ["", "-wal", "-shm"] {
@@ -394,7 +385,6 @@ fn json<T: serde::Serialize>(row: &T) -> rusqlite::Result<String> {
     serde_json::to_string(row).map_err(|err| rusqlite::Error::ToSqlConversionFailure(err.into()))
 }
 
-/// Puts and deletes rows inside [`Cache::write`]'s transaction.
 pub(crate) struct Writer<'a> {
     conn: &'a Connection,
 }
@@ -492,7 +482,7 @@ impl Writer<'_> {
         Ok(())
     }
 
-    /// Replaces the channel's cached messages; pending and failed ones are never written.
+    // The outbox is never cached, even if a pending message slips into a window.
     pub(crate) fn put_window(
         &mut self,
         channel: ChannelId,
@@ -520,8 +510,6 @@ impl Writer<'_> {
         Ok(())
     }
 
-    /// Drops the windows of channels that are gone and those viewed before the `keep` most
-    /// recent; returns those channels and how many rows went with them.
     pub(crate) fn evict(&mut self, keep: usize) -> rusqlite::Result<(Vec<ChannelId>, usize)> {
         let mut statement = self.conn.prepare(
             "SELECT channel_id FROM windows WHERE channel_id NOT IN (SELECT id FROM channels)

@@ -53,7 +53,6 @@ pub(crate) struct LoadTicket {
     holds: bool,
 }
 
-/// A window as the disk cache keeps it: when it was last viewed and its newest messages.
 #[derive(Debug, Clone)]
 pub(crate) struct CachedWindow {
     // Milliseconds since the Unix epoch, so it orders against earlier sessions' windows.

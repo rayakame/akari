@@ -321,8 +321,6 @@ impl Store {
         });
     }
 
-    /// Fills the store from the disk cache before the first READY; `false` once a READY or
-    /// another restore came first.
     pub(crate) fn restore(&self, cached: Entities) -> bool {
         let restored = self.write("restore", |inner, events| {
             inner.state.restore(cached, events)

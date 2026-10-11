@@ -25,9 +25,8 @@ enum Command {
     ThreadName(oneshot::Sender<Option<String>>),
 }
 
-/// The thread that owns one account's cache file; every SQLite call runs on it, never on a
-/// runtime worker. Cheap to clone. Once every clone is dropped, the thread finishes the
-/// queued commands and stops. Without a usable file every call answers `None`.
+// Every SQLite call runs on this thread, never on a runtime worker. It stops once every clone
+// is dropped, after the queued commands.
 #[derive(Clone)]
 pub(crate) struct CacheThread {
     handle: Arc<Handle>,
@@ -37,7 +36,6 @@ struct Handle {
     commands: mpsc::Sender<Command>,
 }
 
-/// Reaches a [`CacheThread`] without keeping it running.
 #[derive(Clone, Default)]
 pub(crate) struct WeakCacheThread(Weak<Handle>);
 
@@ -75,24 +73,21 @@ impl CacheThread {
         answer.await.ok()
     }
 
-    /// The cached state at open, or as the last flush wrote it.
+    // What the file held at open or the last flush wrote, without reading the disk again.
     pub(crate) async fn read_entities(&self) -> Option<Entities> {
         self.ask(Command::ReadEntities).await
     }
 
-    /// The channel's cached messages, oldest first.
     pub(crate) async fn read_window(&self, channel: ChannelId) -> Option<Vec<Arc<Message>>> {
         self.ask(|reply| Command::ReadWindow(channel, reply)).await
     }
 
-    /// `None` when the write failed or there is no cache.
     pub(crate) async fn flush(&self, snapshot: Snapshot) -> Option<Flushed> {
         self.ask(|reply| Command::Flush(Box::new(snapshot), reply))
             .await
             .flatten()
     }
 
-    /// Deletes the file and stops the thread; later calls answer `None`.
     pub(crate) async fn delete(&self) {
         self.ask(Command::Delete).await;
     }

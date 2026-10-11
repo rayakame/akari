@@ -1,8 +1,7 @@
 import Foundation
 
 enum CacheDirectory {
-    /// `Akari/Cache` in Application Support, created and excluded from backups, so message
-    /// text doesn't spread into Time Machine or iCloud; `nil` if it can't be made.
+    // Excluded from backups, so message text doesn't spread into Time Machine or iCloud.
     static func make(base: URL = .applicationSupportDirectory) -> URL? {
         var directory = base.appending(path: "Akari/Cache", directoryHint: .isDirectory)
         do {

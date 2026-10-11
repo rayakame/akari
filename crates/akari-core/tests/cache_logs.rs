@@ -49,7 +49,6 @@ fn page() -> Value {
     }])
 }
 
-// Every name the READY fixture holds: guilds, channels, users.
 fn names(ready: &Value) -> Vec<String> {
     let mut names = Vec::new();
     let mut collect = |value: &Value| {
