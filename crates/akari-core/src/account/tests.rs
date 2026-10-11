@@ -3558,4 +3558,94 @@ mod cache {
         events_until(&subscription, "MessageInserted(52)").await;
         assert!(!account.store().messages(general()).unwrap().stale);
     }
+
+    const OTHER: u64 = 5;
+
+    fn start_as(
+        fake: &FakeGateway,
+        server: &wiremock::MockServer,
+        dir: &TempDir,
+        user: u64,
+    ) -> Account {
+        let thread = CacheThread::start(dir.file(user), UserId::new(user));
+        Account::start_with_cache(
+            crate::gateway::fake::client_with(fake.url(), format!("{}/api/v9/", server.uri())),
+            Token::new(TOKEN.to_owned()),
+            timing(),
+            DEFAULT_LIMITS,
+            Some(DiskCache {
+                thread,
+                user: UserId::new(user),
+                every: Duration::from_secs(3600),
+                caches: None,
+            }),
+        )
+        .unwrap()
+    }
+
+    // User OTHER's file, with GENERAL's messages, whose session is `session`'s.
+    async fn seed_other(fake: &FakeGateway, dir: &TempDir, session: u64) {
+        let mut entities = ready_entities(fake, |_| {});
+        let mut me = (**entities.current_user.as_ref().unwrap()).clone();
+        me.user.id = UserId::new(session);
+        entities.current_user = Some(Arc::new(me));
+        let thread = CacheThread::start(dir.file(OTHER), UserId::new(OTHER));
+        thread
+            .flush(crate::cache::Snapshot {
+                entities,
+                windows: [(
+                    general(),
+                    crate::state::CachedWindow {
+                        viewed_at: 1,
+                        messages: stored(1..=50),
+                    },
+                )]
+                .into(),
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cached_windows_of_another_account_are_never_read() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed_other(&fake, &dir, OTHER).await;
+        let account = start_as(&fake, &server, &dir, OTHER);
+        let subscription = restored(&account).await;
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+        mock_latest(&server, &[60, 61], &[], Duration::from_millis(300)).await;
+
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+
+        assert_eq!(ids(&account), [60, 61]);
+        let mut events = Vec::new();
+        while let Ok(Some(event)) = timeout(Duration::from_millis(100), subscription.next()).await {
+            events.push(describe(&event));
+        }
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.starts_with("MessagesStale")),
+            "{events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_whose_session_is_another_account_is_never_restored() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed_other(&fake, &dir, OWNER).await;
+
+        let account = start_as(&fake, &server, &dir, OTHER);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        assert!(account.store().current_user().is_none());
+    }
 }

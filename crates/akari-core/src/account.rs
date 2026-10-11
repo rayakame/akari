@@ -10,7 +10,7 @@ use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
     MemberLists, PresenceStatus, SendError,
 };
-use crate::model::{ChannelId, GuildId, MessageId};
+use crate::model::{ChannelId, GuildId, MessageId, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
     ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
@@ -107,7 +107,8 @@ pub(crate) struct Shared {
     runtime: tokio::runtime::Handle,
     delivering: Mutex<BTreeSet<MessageId>>,
     flusher: Option<Flusher>,
-    cache: Option<CacheThread>,
+    // The cache's thread and whose file it has open.
+    cache: Option<(CacheThread, UserId)>,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -304,12 +305,23 @@ impl Shared {
 
     // Only the first page of an empty window can use the cache's copy of the channel.
     fn cache_for(&self, channel: ChannelId, ticket: LoadTicket) -> Option<&CacheThread> {
-        let cache = self.cache.as_ref()?;
+        let (cache, owner) = self.cache.as_ref()?;
+        if ticket.kind != LoadKind::Latest {
+            return None;
+        }
+        // READY named another account than the host: that file isn't this session's.
+        if self
+            .store
+            .current_user()
+            .is_some_and(|current| current.user.id != *owner)
+        {
+            return None;
+        }
         let empty = self
             .store
             .messages(channel)
             .is_some_and(|window| window.messages.is_empty());
-        (ticket.kind == LoadKind::Latest && empty).then_some(cache)
+        empty.then_some(cache)
     }
 
     // A 401 means the token is gone, like the gateway's 4004: the UI has to log in again.
@@ -609,14 +621,23 @@ impl Account {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
         let rest = AccountRest::new(client.clone(), token.clone(), SERVER_ERROR_RETRY);
         let store = Store::new(limits);
-        let thread = cache.as_ref().map(|cache| cache.thread.clone());
-        if let Some(thread) = thread.clone() {
+        let thread = cache
+            .as_ref()
+            .map(|cache| (cache.thread.clone(), cache.user));
+        if let Some((thread, owner)) = thread.clone() {
             let store = store.clone();
             runtime.spawn(async move {
-                if let Some(cached) = thread.read_entities().await
-                    && cached.current_user.is_some()
-                {
-                    store.restore(cached);
+                let Some(cached) = thread.read_entities().await else {
+                    return;
+                };
+                match &cached.current_user {
+                    Some(current) if current.user.id == owner => {
+                        store.restore(cached);
+                    }
+                    Some(_) => {
+                        tracing::info!(target: "akari_core::cache", reason = "other_user", "cache not used");
+                    }
+                    None => {}
                 }
             });
         }
