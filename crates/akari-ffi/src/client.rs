@@ -153,7 +153,8 @@ impl DiscordClient {
     }
 
     /// Opens a REST connection ahead of the first request, e.g. while the token loads. Sends
-    /// no token, never fails, and returns at once.
+    /// no token, never fails, and returns at once. Account requests made meanwhile wait for it
+    /// to end, at most 500 ms, so they reuse its connection.
     pub fn warm_up(&self) {
         let core = self.core.clone();
         self.runtime.spawn(async move { core.warm_up().await });

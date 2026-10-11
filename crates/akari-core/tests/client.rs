@@ -384,6 +384,29 @@ async fn a_load_during_the_warm_up_uses_its_connection() {
 }
 
 #[tokio::test]
+async fn a_dropped_warm_up_holds_no_load() {
+    let server = MockServer::start().await;
+    mount_gateway(&server, Duration::from_secs(2)).await;
+    mount_messages(&server).await;
+    let client = client(&server, Arc::new(MemoryStore::default()));
+    let account = client
+        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .unwrap_or_else(|err| panic!("{err}"));
+
+    let _ = tokio::time::timeout(Duration::from_millis(100), client.warm_up()).await;
+    let report = account
+        .load_messages(
+            Snowflake::new(CHANNEL),
+            akari_core::MessageLoad::Latest { limit: 50 },
+        )
+        .await
+        .unwrap_or_else(|err| panic!("{err}"))
+        .unwrap_or_else(|| panic!("a page was loaded"));
+
+    assert!(report.queued < Duration::from_millis(250), "{report:?}");
+}
+
+#[tokio::test]
 async fn the_warm_up_never_fails_and_holds_a_load_briefly_at_most() {
     let server = MockServer::start().await;
     mount_gateway(&server, Duration::from_secs(2)).await;

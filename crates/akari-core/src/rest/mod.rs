@@ -77,6 +77,15 @@ impl fmt::Debug for CaptchaSolution {
     }
 }
 
+// A warm-up future dropped mid-request must not leave every later request waiting for it.
+struct Warming<'a>(&'a watch::Sender<bool>);
+
+impl Drop for Warming<'_> {
+    fn drop(&mut self) {
+        self.0.send_replace(false);
+    }
+}
+
 pub(crate) struct RawResponse {
     pub(crate) status: u16,
     pub(crate) headers: HeaderMap,
@@ -228,13 +237,13 @@ impl RestClient {
         if self.warming.send_replace(true) {
             return;
         }
+        let _warming = Warming(&self.warming);
         let started = Instant::now();
         let warmed = match self.request(reqwest::Method::GET, "gateway", &RequestExtras::default())
         {
             Ok(request) => self.send_raw(request).await.ok(),
             Err(_) => None,
         };
-        self.warming.send_replace(false);
         tracing::debug!(
             after_ms = crate::millis(started.elapsed()),
             new_connection = warmed
