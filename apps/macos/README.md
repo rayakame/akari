@@ -109,7 +109,7 @@ with channel IDs, counts and durations only:
 
 ```text
 channel 1234 latest page 1: queued 86 ms, limited 0.0 ms, headers 370 ms, connection reused,
-  body 1.3 ms, 69755 bytes, decode 0.7 ms, store 0.1 ms, read 0.1 ms, render 44 ms,
+  body 1.3 ms, 69755 bytes, decode 0.7 ms, store 0.1 ms, read 0.1 ms, render 44 ms for 50 rows,
   shown after 524 ms; 50 messages; no limit headers
 channel 1234 opened: rows from the network after 544 ms
 ```
@@ -121,9 +121,11 @@ channel 1234 opened: rows from the network after 544 ms
   "new connection", DNS, TCP and TLS are part of it.
 - **body:** reading the body; **bytes** is its size after decompression.
 - **decode:** JSON into messages; **store:** into the channel's window, under the store's lock.
-- **read:** AkariKit reading the window and the new messages; **render:** the table applying
-  the rows (row heights included); **shown after:** from the load's start until the frame with
-  the rows was committed.
+- **read:** AkariKit reading the window and the new messages; **render:** the table update
+  that inserted the page's rows (row heights included), with how many; a message arriving
+  meanwhile isn't counted. **held … for live scroll:** how long a scroll past the top held the
+  page back (it lands when the bounce ends). **shown after:** from the load's start until the
+  frame with the rows was committed.
 - **remaining, reset:** Discord's `X-RateLimit-Remaining` and `-Reset-After`, or "no limit
   headers".
 - A failed page says `failed after N ms:` and the error's kind; Discord's message isn't logged.

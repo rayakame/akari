@@ -48,14 +48,16 @@ struct LoadLineTests {
         }
     }
 
+    // By default the page is 1...49, which the tests' landings add above 50...99.
     func trace(
         _ sequence: Int, started: ContinuousClock.Instant, failure: RequestError? = nil,
-        report: LoadReport? = loadReport()
+        report: LoadReport? = loadReport(), page: ClosedRange<UInt64>? = 1...49
     ) -> LoadTrace {
         LoadTrace(
             sequence: sequence, channelId: ChannelId(rawValue: 10), kind: .older,
-            report: failure == nil ? report : nil, failure: failure, read: .microseconds(900),
-            started: started, duration: .milliseconds(412))
+            report: failure == nil ? report : nil, failure: failure,
+            page: Set((page.map(Array.init) ?? []).map { MessageId(rawValue: $0) }),
+            read: .microseconds(900), started: started, duration: .milliseconds(412))
     }
 
     func state(
@@ -149,10 +151,54 @@ struct LoadLineTests {
             show(state(rows(50...99)))
             await settle()
 
-            show(state(rows(50...99), load: trace(1, started: .now)))
+            show(state(rows(50...99), load: trace(1, started: .now, page: nil)))
             await settle { !pageLines(1).isEmpty }
 
             #expect(pageLines(1).first?.contains("render none (no rows changed)") == true)
+        }
+    }
+
+    @Test
+    func aMessageArrivingDuringALoadIsntChargedAsItsRender() async {
+        await logging {
+            show(state(rows(50...99)))
+            await settle()
+            let started = ContinuousClock.now
+            show(state(rows(1...99)))
+            show(state(rows(1...100)))
+            await settle()
+
+            show(state(rows(1...100), load: trace(1, started: started)))
+            await settle { !pageLines(1).isEmpty }
+
+            #expect(pageLines(1).first?.contains("for 49 rows") == true, "\(pageLines(1))")
+        }
+    }
+
+    @Test
+    func aPageHeldDuringALiveScrollSaysHowLong() async throws {
+        await logging {
+            show(state(rows(50...99)))
+            let clip = controller.scrollView.contentView
+            clip.scroll(to: NSPoint(x: 0, y: -40))
+            controller.scrollView.reflectScrolledClipView(clip)
+            let post = { (name: Notification.Name) in
+                NotificationCenter.default.post(name: name, object: self.controller.scrollView)
+            }
+            post(NSScrollView.willStartLiveScrollNotification)
+            post(NSScrollView.didLiveScrollNotification)
+
+            show(state(rows(1...99), load: trace(1, started: .now)))
+            try? await Task.sleep(for: .milliseconds(150))
+            #expect(pageLines(1).isEmpty)
+            post(NSScrollView.didEndLiveScrollNotification)
+            window.layoutIfNeeded()
+            await settle { !pageLines(1).isEmpty }
+
+            let line = pageLines(1).first ?? ""
+            let held = line.firstMatch(of: /held (\d+) ms for live scroll/).flatMap { Int($0.1) }
+            #expect((held ?? 0) >= 150, "\(line)")
+            #expect(line.contains("for 49 rows"), "\(line)")
         }
     }
 
@@ -191,7 +237,7 @@ struct LoadLineTests {
     func aChannelLoadedFromTheNetworkSaysSo() async {
         await logging {
             show(state([]))
-            show(state(rows(50...99), load: trace(1, started: opened)))
+            show(state(rows(50...99), load: trace(1, started: opened, page: 50...99)))
             await settle { lines.all.contains { $0.contains("opened") } }
 
             #expect(

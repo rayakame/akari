@@ -371,6 +371,21 @@ struct MessageListModelTests {
         #expect(model.lastLoad?.sequence == 2)
     }
 
+    // The table charges a page's render to the update that inserted these rows, not to a
+    // message that arrived meanwhile.
+    @Test
+    func aLoadKnowsWhichRowsItBrought() async {
+        shown(window([3, 4, 5]))
+        let model = loaded()
+        account.loadReport.withLock { $0 = loadReport() }
+        account.windowAfterLoad.withLock { $0 = window([1, 2, 3, 4, 5, 6]) }
+        store.update { $0.show(message(1), message(2), message(6)) }
+
+        await model.loadOlder()
+
+        #expect(model.lastLoad?.page == [id(1), id(2)])
+    }
+
     @Test
     func aLoadWithNothingToLoadHasNoReport() async {
         shown(window([3, 4, 5]))

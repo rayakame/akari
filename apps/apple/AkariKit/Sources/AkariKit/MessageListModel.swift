@@ -122,6 +122,8 @@ public final class MessageListModel {
             }
         LaunchLog.mark("first message load started")
         let started = ContinuousClock.now
+        let held = Set(rows.map(\.id))
+        let oldest = rows.first?.id
         do {
             let report = try await account.loadMessages(channelId: channelId, load: request)
             LaunchLog.mark("first message load finished")
@@ -133,9 +135,14 @@ public final class MessageListModel {
             let reading = ContinuousClock.now
             // The batch with the loaded range may come later; the rows shouldn't lag `loading`.
             reload(rereading: [])
+            let read = reading.duration(to: .now)
+            // A live message that arrived meanwhile is new too, but below an older page.
+            let page = rows.map(\.id).filter { id in
+                !held.contains(id) && (kind != .older || oldest.map { id < $0 } ?? true)
+            }
             lastLoad = LoadTrace(
                 sequence: ticket, channelId: channelId, kind: kind, report: report,
-                failure: nil, read: reading.duration(to: .now), started: started,
+                failure: nil, page: Set(page), read: read, started: started,
                 duration: started.duration(to: .now))
         } catch {
             let failure = error as? RequestError ?? .UnexpectedResponse

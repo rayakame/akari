@@ -26,8 +26,11 @@ public enum LoadLog {
         write(message())
     }
 
-    /// `render` is `nil` when the load changed no rows.
-    public static func page(_ trace: LoadTrace, render: Duration?, shown: Duration) -> String {
+    /// `render` is the table update that inserted `rows` of the page, `nil` when the load
+    /// changed no rows; `held` is how long a live scroll held that update back.
+    public static func page(
+        _ trace: LoadTrace, render: Duration?, rows: Int, held: Duration?, shown: Duration
+    ) -> String {
         guard let report = trace.report else {
             return "\(name(trace)): nothing to load"
         }
@@ -41,7 +44,9 @@ public enum LoadLog {
             + (report.newConnection ? "new connection" : "connection reused")
             + ", body \(ms(report.body)), \(report.bytes) bytes, decode \(ms(report.decode)), "
             + "store \(ms(report.store)), read \(ms(trace.read)), "
-            + "render \(render.map(ms) ?? "none (no rows changed)"), shown after \(ms(shown)); "
+            + "render \(render.map { "\(ms($0)) for \(rows) rows" } ?? "none (no rows changed)")"
+            + (held.map { ", held \(ms($0)) for live scroll" } ?? "")
+            + ", shown after \(ms(shown)); "
             + "\(report.received) messages; \(limits)"
     }
 

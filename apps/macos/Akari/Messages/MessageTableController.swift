@@ -60,13 +60,24 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
     private var rowHeightsWidth: CGFloat = 0
     private var placeholderHeight = PlaceholderCell.height(forViewHeight: 0)
-    private var lastApply:
-        (started: ContinuousClock.Instant, render: Duration, shown: ContinuousClock.Instant?)?
+    private struct Applied {
+        let started: ContinuousClock.Instant
+        let render: Duration
+        let inserted: Set<MessageId>
+        let held: Duration?
+        var shown: ContinuousClock.Instant?
+    }
+    // The last few updates, so a page's line finds the one that brought its rows.
+    private var applied: [Applied] = []
+    private var heldSince: ContinuousClock.Instant?
     private var loggedLoad = 0
     private var pendingLoad: LoadTrace?
     private var openLogged = false
     private var pendingOpen:
-        (channel: ChannelId, from: MessageListModel.Origin, at: ContinuousClock.Instant)?
+        (
+            channel: ChannelId, from: MessageListModel.Origin, at: ContinuousClock.Instant,
+            update: ContinuousClock.Instant?
+        )?
 
     init(
         tableView: MessageTableView = MessageTableView(),
@@ -102,9 +113,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     func show(_ state: MessageTableState) {
         if isLiveScrolling && isPastTheTop {
             heldState = state
+            heldSince = heldSince ?? .now
             return
         }
         heldState = nil
+        let held = heldSince.map { $0.duration(to: .now) }
+        heldSince = nil
         let started = ContinuousClock.now
         let previous = self.state
         self.state = state
@@ -118,7 +132,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
             Signposts.interval("page lands") { apply(next, changes) }
-            noteApply(started)
+            noteApply(started, inserting: changes.inserted, of: next, held: held)
         }
         if previous.loading != state.loading || previous.failedLoads != state.failedLoads
             || previous.reachedOldest != state.reachedOldest
@@ -130,11 +144,21 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         noteLoad(state)
     }
 
-    private func noteApply(_ started: ContinuousClock.Instant) {
+    private func noteApply(
+        _ started: ContinuousClock.Instant, inserting rows: IndexSet, of next: MessageTimeline,
+        held: Duration?
+    ) {
         guard LoadLog.enabled else {
             return
         }
-        lastApply = (started, started.duration(to: .now), nil)
+        let inserted = rows.compactMap { index -> MessageId? in
+            if case .message(let row, _) = next.items[index] { row.id } else { nil }
+        }
+        applied.append(
+            Applied(
+                started: started, render: started.duration(to: .now), inserted: Set(inserted),
+                held: held))
+        applied.removeFirst(max(0, applied.count - 8))
         // A nested transaction's completion runs once the outermost one is committed.
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak self] in
@@ -144,8 +168,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func applyShown(_ started: ContinuousClock.Instant) {
-        if lastApply?.started == started {
-            lastApply?.shown = .now
+        if let index = applied.lastIndex(where: { $0.started == started }) {
+            applied[index].shown = .now
         }
         writeLoadLines()
     }
@@ -156,7 +180,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         if !openLogged, filled, let channel = state.channelId, let openedAt = state.openedAt {
             openLogged = true
-            pendingOpen = (channel, state.openedFrom, openedAt)
+            pendingOpen = (channel, state.openedFrom, openedAt, applied.last?.started)
         }
         if let load = state.lastLoad, load.sequence > loggedLoad {
             loggedLoad = load.sequence
@@ -169,9 +193,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         writeLoadLines()
     }
 
-    // A page's rows may have come in an earlier update than its trace, with the store's batch.
+    // A page's rows may have come in an earlier update than its trace, with the store's batch,
+    // or in a later one, after a live scroll held them back.
     private func writeLoadLines() {
-        if let open = pendingOpen, let shown = lastApply?.shown {
+        if let open = pendingOpen,
+            let shown = applied.last(where: { $0.started == open.update })?.shown
+        {
             pendingOpen = nil
             LoadLog.log(
                 LoadLog.opened(open.channel, from: open.from, after: open.at.duration(to: shown)))
@@ -179,16 +206,23 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard let load = pendingLoad else {
             return
         }
-        if let apply = lastApply, apply.started >= load.started {
-            guard let shown = apply.shown else {
-                return
-            }
+        if load.page.isEmpty {
+            pendingLoad = nil
             LoadLog.log(
-                LoadLog.page(load, render: apply.render, shown: load.started.duration(to: shown)))
-        } else {
-            LoadLog.log(LoadLog.page(load, render: nil, shown: load.started.duration(to: .now)))
+                LoadLog.page(
+                    load, render: nil, rows: 0, held: nil, shown: load.started.duration(to: .now)))
+            return
+        }
+        guard let update = applied.last(where: { !$0.inserted.isDisjoint(with: load.page) }),
+            let shown = update.shown
+        else {
+            return
         }
         pendingLoad = nil
+        LoadLog.log(
+            LoadLog.page(
+                load, render: update.render, rows: update.inserted.intersection(load.page).count,
+                held: update.held, shown: load.started.duration(to: shown)))
     }
 
     deinit {

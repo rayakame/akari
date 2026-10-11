@@ -12,7 +12,8 @@ struct LoadLogTests {
     ) -> LoadTrace {
         LoadTrace(
             sequence: 7, channelId: id(1234), kind: kind, report: report, failure: failure,
-            read: .microseconds(900), started: started, duration: .milliseconds(412))
+            page: [id(1), id(2)], read: .microseconds(900), started: started,
+            duration: .milliseconds(412))
     }
 
     @Test(arguments: [
@@ -25,14 +26,25 @@ struct LoadLogTests {
 
     @Test
     func aPageLineHasEveryStage() {
-        let line = LoadLog.page(trace(), render: .microseconds(8_700), shown: .milliseconds(214))
+        let line = LoadLog.page(
+            trace(), render: .microseconds(8_700), rows: 50, held: nil, shown: .milliseconds(214))
 
         #expect(
             line
                 == "channel 1234 older page 7: queued 0.0 ms, limited 0.4 ms, headers 182 ms, "
                 + "connection reused, body 12 ms, 48213 bytes, decode 2.1 ms, store 0.4 ms, "
-                + "read 0.9 ms, render 8.7 ms, shown after 214 ms; 50 messages; "
+                + "read 0.9 ms, render 8.7 ms for 50 rows, shown after 214 ms; 50 messages; "
                 + "remaining 4, reset 1.2 s")
+    }
+
+    @Test
+    func aHeldPageSaysHowLongItWaited() {
+        let line = LoadLog.page(
+            trace(), render: .microseconds(8_700), rows: 50, held: .milliseconds(520),
+            shown: .milliseconds(834))
+
+        #expect(
+            line.contains("render 8.7 ms for 50 rows, held 520 ms for live scroll, shown after"))
     }
 
     @Test
@@ -40,7 +52,7 @@ struct LoadLogTests {
         let line = LoadLog.page(
             trace(
                 .latest, report: loadReport(newConnection: true, remaining: nil, resetAfter: nil)),
-            render: nil, shown: .milliseconds(300))
+            render: nil, rows: 0, held: nil, shown: .milliseconds(300))
 
         #expect(line.contains("latest page 7"))
         #expect(line.contains("new connection"))
