@@ -4,7 +4,6 @@ mod account;
 pub mod auth;
 mod backlog;
 mod backoff;
-#[allow(dead_code)]
 mod cache;
 mod client;
 mod error;

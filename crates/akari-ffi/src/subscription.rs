@@ -79,6 +79,8 @@ pub enum StoreEvent {
     Connection {
         state: ConnectionState,
     },
+    /// The disk cache's state is in place, before the first READY; read everything.
+    Restored,
     /// A new session's state is in place; read everything.
     Ready,
     CurrentUserUpdated,
@@ -167,6 +169,7 @@ impl StoreEvent {
             E::Connection(state) => Self::Connection {
                 state: ConnectionState::from(&state),
             },
+            E::Restored => Self::Restored,
             E::Ready => Self::Ready,
             E::CurrentUserUpdated(_) => Self::CurrentUserUpdated,
             E::UserUpdated(user) => Self::UserUpdated { user_id: user.id },

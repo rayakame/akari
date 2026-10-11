@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Weak, mpsc};
 use std::time::Instant;
 
 use tokio::sync::oneshot;
@@ -30,7 +30,21 @@ enum Command {
 /// queued commands and stops. Without a usable file every call answers `None`.
 #[derive(Clone)]
 pub(crate) struct CacheThread {
+    handle: Arc<Handle>,
+}
+
+struct Handle {
     commands: mpsc::Sender<Command>,
+}
+
+/// Reaches a [`CacheThread`] without keeping it running.
+#[derive(Clone, Default)]
+pub(crate) struct WeakCacheThread(Weak<Handle>);
+
+impl WeakCacheThread {
+    pub(crate) fn upgrade(&self) -> Option<CacheThread> {
+        self.0.upgrade().map(|handle| CacheThread { handle })
+    }
 }
 
 impl CacheThread {
@@ -42,12 +56,22 @@ impl CacheThread {
         if spawned.is_err() {
             tracing::warn!(target: LOG, "couldn't start the cache thread");
         }
-        Self { commands }
+        Self {
+            handle: Arc::new(Handle { commands }),
+        }
+    }
+
+    pub(crate) fn downgrade(&self) -> WeakCacheThread {
+        WeakCacheThread(Arc::downgrade(&self.handle))
+    }
+
+    fn send(&self, command: Command) -> Result<(), mpsc::SendError<Command>> {
+        self.handle.commands.send(command)
     }
 
     async fn ask<T>(&self, command: impl FnOnce(oneshot::Sender<T>) -> Command) -> Option<T> {
         let (reply, answer) = oneshot::channel();
-        self.commands.send(command(reply)).ok()?;
+        self.send(command(reply)).ok()?;
         answer.await.ok()
     }
 
@@ -76,13 +100,13 @@ impl CacheThread {
     #[cfg(test)]
     pub(crate) fn hold(&self) -> mpsc::Sender<()> {
         let (release, held) = mpsc::channel();
-        let _ = self.commands.send(Command::Hold(held));
+        let _ = self.send(Command::Hold(held));
         release
     }
 
     #[cfg(test)]
     pub(crate) fn fail_next_write(&self) {
-        let _ = self.commands.send(Command::FailNextWrite);
+        let _ = self.send(Command::FailNextWrite);
     }
 
     #[cfg(test)]
@@ -98,12 +122,16 @@ impl CacheThread {
 
 fn run(path: &std::path::Path, user: UserId, commands: &mpsc::Receiver<Command>) {
     let started = Instant::now();
-    let Ok(Opened { mut cache, .. }) = Cache::open_or_rebuild(path, user) else {
+    let Ok(Opened {
+        mut cache,
+        discarded,
+    }) = Cache::open_or_rebuild(path, user)
+    else {
         return;
     };
     let mut written = match cache.read_entities() {
         Ok(read) => {
-            log_opened(&cache, read.skipped, started);
+            log_opened(&cache, read.skipped, discarded.is_some(), started);
             Written::read(read.value)
         }
         Err(err) => {
@@ -130,7 +158,7 @@ fn run(path: &std::path::Path, user: UserId, commands: &mpsc::Receiver<Command>)
                 let started = Instant::now();
                 let flushed = match flush(&mut cache, &mut written, *snapshot) {
                     Ok(flushed) => {
-                        if flushed != Flushed::default() {
+                        if flushed.rows() > 0 || flushed.deleted > 0 {
                             tracing::info!(
                                 target: LOG,
                                 guilds = flushed.guilds,
@@ -183,7 +211,7 @@ fn run(path: &std::path::Path, user: UserId, commands: &mpsc::Receiver<Command>)
     }
 }
 
-fn log_opened(cache: &Cache, skipped: usize, started: Instant) {
+fn log_opened(cache: &Cache, skipped: usize, rebuilt: bool, started: Instant) {
     let [guilds, channels, windows, messages] = cache.counts().unwrap_or_default();
     tracing::info!(
         target: LOG,
@@ -192,6 +220,7 @@ fn log_opened(cache: &Cache, skipped: usize, started: Instant) {
         windows,
         messages,
         skipped,
+        rebuilt,
         read_ms = crate::millis(started.elapsed()),
         file_kib = cache.file_kib(),
         "cache opened"

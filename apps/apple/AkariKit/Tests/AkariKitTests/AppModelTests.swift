@@ -143,7 +143,7 @@ final class AppModelTests {
         )
         await client.forgotten.wait()
 
-        #expect(client.calls.current.filter { $0 == .forgetToken(id(42)) }.count == 1)
+        #expect(client.calls.current.filter { $0 == .forgetAccount(id(42)) }.count == 1)
         #expect(!client.calls.current.contains(.logout(id(42))))
         #expect(memory.lastAccount == nil)
         #expect(memory.lastSpot(of: id(42)) == nil)
@@ -161,7 +161,7 @@ final class AppModelTests {
 
         #expect(app.screen.session === session)
         #expect(memory.lastAccount == id(42))
-        #expect(!client.calls.current.contains(.forgetToken(id(42))))
+        #expect(!client.calls.current.contains(.forgetAccount(id(42))))
         session.close()
     }
 
@@ -179,7 +179,7 @@ final class AppModelTests {
         client.endSessions.send(())
         await app.endingSession?.value
         let calls = client.calls.current
-        let forgot = try #require(calls.firstIndex(of: .forgetToken(id(42))))
+        let forgot = try #require(calls.firstIndex(of: .forgetAccount(id(42))))
         let ended = try #require(calls.firstIndex(of: .endSession("stored.token")))
         #expect(forgot < ended)
         #expect(!calls.contains(.logout(id(42))))
@@ -215,7 +215,7 @@ final class AppModelTests {
         client.forgets.send(())
         await first
 
-        #expect(client.calls.current.filter { $0 == .forgetToken(id(42)) }.count == 1)
+        #expect(client.calls.current.filter { $0 == .forgetAccount(id(42)) }.count == 1)
         #expect(app.screen.login != nil)
     }
 
@@ -262,7 +262,7 @@ final class AppModelTests {
         let saved = try #require(calls.firstIndex(of: .saveToken(id(42), "token-2")))
         let storeCallsAfter = calls[(saved + 1)...].filter { call in
             switch call {
-            case .forgetToken, .logout, .saveToken: true
+            case .forgetAccount, .logout, .saveToken: true
             default: false
             }
         }

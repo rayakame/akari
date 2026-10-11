@@ -66,10 +66,16 @@ pub struct DiscordClient {
 #[uniffi::export]
 impl DiscordClient {
     /// A client for Discord's production service. The first client starts Akari's
-    /// background runtime. Fails on platforms Discord has no desktop client for.
+    /// background runtime. Fails on platforms Discord has no desktop client for. With
+    /// `cache_directory`, each account's state is kept there in a file of its own; without
+    /// it nothing is written.
     #[uniffi::constructor]
-    pub fn new(host: HostInfo, token_store: Arc<dyn TokenStore>) -> Result<Arc<Self>, ClientError> {
-        Self::with_endpoints(host, token_store, discord_endpoints())
+    pub fn new(
+        host: HostInfo,
+        token_store: Arc<dyn TokenStore>,
+        cache_directory: Option<String>,
+    ) -> Result<Arc<Self>, ClientError> {
+        Self::with_endpoints(host, token_store, discord_endpoints(), cache_directory)
     }
 
     /// For canary builds and tests; every endpoint must use TLS.
@@ -78,6 +84,7 @@ impl DiscordClient {
         host: HostInfo,
         token_store: Arc<dyn TokenStore>,
         endpoints: Endpoints,
+        cache_directory: Option<String>,
     ) -> Result<Arc<Self>, ClientError> {
         let runtime = runtime()?;
         let os = desktop_os().ok_or(ClientError::UnsupportedPlatform)?;
@@ -96,11 +103,14 @@ impl DiscordClient {
             origin: endpoints.origin,
             ..akari_core::Endpoints::default()
         };
-        let core = akari_core::DiscordClient::with_endpoints(
+        let mut core = akari_core::DiscordClient::with_endpoints(
             properties,
             Arc::new(HostStore(token_store)),
             endpoints,
         )?;
+        if let Some(directory) = cache_directory {
+            core = core.with_cache(directory.into());
+        }
         Ok(Arc::new(Self { core, runtime }))
     }
 
@@ -115,11 +125,22 @@ impl DiscordClient {
         Ok(QrLogin::new(self.core.qr_login()?))
     }
 
-    /// The account `token` belongs to, idle until `connect()`.
-    pub fn account(&self, token: Arc<Token>) -> Result<Arc<Account>, GatewayError> {
+    /// Starts reading `user_id`'s cache in the background, e.g. while the token loads, so
+    /// `account` finds it ready. Returns at once.
+    pub fn preload(&self, user_id: UserId) {
+        self.core.preload(user_id);
+    }
+
+    /// The account `token` belongs to, idle until `connect()`. `user_id`'s cached state
+    /// fills its store as soon as it's read (`Restored`); this never waits for it.
+    pub fn account(
+        &self,
+        token: Arc<Token>,
+        user_id: UserId,
+    ) -> Result<Arc<Account>, GatewayError> {
         let _entered = self.runtime.enter();
         Ok(Account::new(
-            self.core.account(token.core().clone())?,
+            self.core.account(token.core().clone(), user_id)?,
             self.runtime,
         ))
     }
@@ -143,8 +164,8 @@ impl DiscordClient {
         Ok(token.map(Token::new))
     }
 
-    /// Ends the session on Discord, then deletes the stored token, even when Discord can't
-    /// be reached.
+    /// Ends the session on Discord, then deletes the stored token and the account's cache,
+    /// even when Discord can't be reached.
     pub async fn logout(&self, account: UserId) -> Result<(), LogoutError> {
         let core = self.core.clone();
         run(self.runtime, async move { core.logout(account).await })
@@ -172,15 +193,22 @@ impl DiscordClient {
         .map_err(Into::into)
     }
 
-    /// Deletes the stored token without a request, for a token Discord already rejected.
-    pub async fn forget_token(&self, account: UserId) -> Result<(), TokenStoreError> {
+    /// Deletes the stored token without a request, for a token Discord already rejected,
+    /// then the account's cache, also while the account is open.
+    pub async fn forget_account(&self, account: UserId) -> Result<(), TokenStoreError> {
         let core = self.core.clone();
         run(
             self.runtime,
-            async move { core.forget_token(account).await },
+            async move { core.forget_account(account).await },
         )
         .await
         .map_err(Into::into)
+    }
+
+    /// Deletes the caches of all accounts that aren't open, e.g. at a login screen.
+    pub async fn clear_caches(&self) {
+        let core = self.core.clone();
+        run(self.runtime, async move { core.clear_caches().await }).await;
     }
 }
 

@@ -1,5 +1,7 @@
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use reqwest::Url;
 use reqwest::header::HeaderValue;
@@ -7,10 +9,11 @@ use serde::Deserialize;
 use tokio::sync::OnceCell;
 
 use crate::auth::{LoginError, LogoutError, PasswordLogin, QrLogin};
+use crate::cache::Caches;
 use crate::error::TransportError;
 use crate::gateway::session::Timing;
 use crate::gateway::{Gateway, GatewayError};
-use crate::model::{Snowflake, UserMarker};
+use crate::model::{Snowflake, UserId, UserMarker};
 use crate::properties::ClientProperties;
 use crate::rest::{BuildError, RequestExtras, RestClient};
 use crate::state::DEFAULT_LIMITS;
@@ -33,7 +36,12 @@ struct Inner {
     rest: RestClient,
     fingerprint: OnceCell<String>,
     store: Arc<dyn TokenStore>,
+    caches: Arc<Caches>,
 }
+
+// A cache write at most this often while the state changes, plus on disconnect, close and
+// `Account::flush_cache`.
+const CACHE_FLUSH_EVERY: Duration = Duration::from_secs(10);
 
 /// Where Discord lives. The default is Discord's production service; tests and canary
 /// builds point elsewhere.
@@ -127,8 +135,34 @@ impl DiscordClient {
                 rest,
                 fingerprint: OnceCell::new(),
                 store: token_store,
+                caches: Arc::default(),
             }),
         })
+    }
+
+    /// Keeps each account's disk cache in `directory`, one SQLite file per account. Without
+    /// it nothing is written. Set it before the first account.
+    #[must_use]
+    pub fn with_cache(self, directory: PathBuf) -> Self {
+        self.inner.caches.set(directory, CACHE_FLUSH_EVERY);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_cache_every(self, directory: PathBuf, every: Duration) -> Self {
+        self.inner.caches.set(directory, every);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cache_thread(&self, user: UserId) -> Option<crate::cache::CacheThread> {
+        self.inner.caches.running(user)
+    }
+
+    /// Starts reading `user`'s cache in the background, so [`DiscordClient::account`] finds
+    /// it ready. Never blocks; a missing or unreadable file reads as empty.
+    pub fn preload(&self, user: UserId) {
+        self.inner.caches.preload(user);
     }
 
     pub fn properties(&self) -> &ClientProperties {
@@ -153,12 +187,20 @@ impl DiscordClient {
     }
 
     /// The account `token` belongs to: a gateway connection and the [`Store`] it keeps
-    /// current. Idle until [`Account::connect`]. Fails with [`GatewayError::NoRuntime`]
-    /// outside a Tokio runtime.
+    /// current. Idle until [`Account::connect`]. With a cache, `user`'s cached state fills
+    /// the store as soon as it's read, never holding this call up; READY's account wins if
+    /// it isn't `user`. Fails with [`GatewayError::NoRuntime`] outside a Tokio runtime.
     ///
     /// [`Store`]: crate::state::Store
-    pub fn account(&self, token: Token) -> Result<Account, GatewayError> {
-        Account::start(self.clone(), token, Timing::default(), DEFAULT_LIMITS)
+    pub fn account(&self, token: Token, user: UserId) -> Result<Account, GatewayError> {
+        let cache = self.inner.caches.account(user);
+        Account::start_with_cache(
+            self.clone(),
+            token,
+            Timing::default(),
+            DEFAULT_LIMITS,
+            cache,
+        )
     }
 
     pub async fn save_token(
@@ -179,7 +221,7 @@ impl DiscordClient {
         blocking(move || store.load(account)).await
     }
 
-    /// Ends the session on Discord, then deletes the stored token.
+    /// Ends the session on Discord, then deletes the stored token and the account's cache.
     ///
     /// The token is deleted even when Discord can't be reached; a token Discord no longer
     /// accepts counts as logged out.
@@ -195,17 +237,25 @@ impl DiscordClient {
         blocking(move || store.delete(account))
             .await
             .map_err(LogoutError::Storage)?;
+        self.inner.caches.forget(account).await;
         remote
     }
 
     /// Deletes the stored token without a request to Discord, e.g. for a token Discord
-    /// already rejected.
-    pub async fn forget_token(
+    /// already rejected, then the account's cache, also while the account is open.
+    pub async fn forget_account(
         &self,
         account: Snowflake<UserMarker>,
     ) -> Result<(), TokenStoreError> {
         let store = self.inner.store.clone();
-        blocking(move || store.delete(account)).await
+        blocking(move || store.delete(account)).await?;
+        self.inner.caches.forget(account).await;
+        Ok(())
+    }
+
+    /// Deletes the caches of all accounts that aren't open, e.g. at a login screen.
+    pub async fn clear_caches(&self) {
+        self.inner.caches.clear().await;
     }
 
     /// Ends the session `token` belongs to, without touching the token store; for a token

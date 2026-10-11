@@ -22,6 +22,8 @@ struct EventBatch {
                 connection = state
             case .ready:
                 ready = true
+            case .restored:
+                break
             case .currentUserUpdated:
                 currentUserChanged = true
             case .userUpdated(let user):

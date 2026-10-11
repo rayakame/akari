@@ -16,7 +16,8 @@ struct FFISmokeTests {
     )
 
     static func client(_ store: MemoryTokenStore) throws -> DiscordClient {
-        try DiscordClient.withEndpoints(host: host, tokenStore: store, endpoints: unreachable)
+        try DiscordClient.withEndpoints(
+            host: host, tokenStore: store, endpoints: unreachable, cacheDirectory: nil)
     }
 
     @Test @MainActor
@@ -53,7 +54,7 @@ struct FFISmokeTests {
         let store = MemoryTokenStore(tokens: [Self.user: "stored.token"])
         let client = try Self.client(store)
         let token = try #require(try await client.loadToken(account: Self.user))
-        let account = try client.account(token: token)
+        let account = try client.account(token: token, userId: Self.user)
         let subscription = account.store().subscribe()
 
         try account.connect()
@@ -73,7 +74,7 @@ struct FFISmokeTests {
     func idsAreOrderedAndReadsOfUnknownIdsAreEmpty() async throws {
         let client = try Self.client(MemoryTokenStore(tokens: [Self.user: "stored.token"]))
         let token = try #require(try await client.loadToken(account: Self.user))
-        let account = try client.account(token: token)
+        let account = try client.account(token: token, userId: Self.user)
         let reads = account.store()
 
         #expect(ChannelId(rawValue: 2) > ChannelId(rawValue: 1))

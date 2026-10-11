@@ -1,14 +1,17 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, MissedTickBehavior};
 
-use super::{CacheThread, DiskCache, Snapshot};
+use super::{CacheThread, Caches, DiskCache, LOG, Snapshot};
+use crate::model::UserId;
 use crate::state::Store;
 
 enum Request {
     Flush(Option<oneshot::Sender<()>>),
     Close,
+    Delete,
 }
 
 /// Writes an account's store to its cache: every interval while the store changes, and when
@@ -20,7 +23,17 @@ pub(crate) struct Flusher {
 impl Flusher {
     pub(crate) fn start(runtime: &tokio::runtime::Handle, store: Store, cache: DiskCache) -> Self {
         let (requests, receiver) = mpsc::unbounded_channel();
-        runtime.spawn(run(store, cache.thread, cache.every, receiver));
+        let every = cache.every;
+        runtime.spawn(run(
+            store,
+            Target {
+                thread: cache.thread,
+                user: cache.user,
+                caches: cache.caches,
+            },
+            every,
+            receiver,
+        ));
         Self { requests }
     }
 
@@ -40,11 +53,22 @@ impl Flusher {
     pub(crate) fn close(&self) {
         let _ = self.requests.send(Request::Close);
     }
+
+    /// Deletes the cache instead of a last flush, e.g. for a session Discord ended.
+    pub(crate) fn delete(&self) {
+        let _ = self.requests.send(Request::Delete);
+    }
+}
+
+struct Target {
+    thread: CacheThread,
+    user: UserId,
+    caches: Option<Arc<Caches>>,
 }
 
 async fn run(
     store: Store,
-    cache: CacheThread,
+    mut target: Target,
     every: Duration,
     mut requests: mpsc::UnboundedReceiver<Request>,
 ) {
@@ -55,18 +79,25 @@ async fn run(
         tokio::select! {
             _ = ticks.tick() => {
                 if flushed != Some(store.changes()) {
-                    flush(&store, &cache, &mut flushed).await;
+                    flush(&store, &mut target, &mut flushed).await;
                 }
             }
             request = requests.recv() => match request {
                 Some(Request::Flush(reply)) => {
-                    flush(&store, &cache, &mut flushed).await;
+                    flush(&store, &mut target, &mut flushed).await;
                     if let Some(reply) = reply {
                         let _ = reply.send(());
                     }
                 }
                 Some(Request::Close) | None => {
-                    flush(&store, &cache, &mut flushed).await;
+                    flush(&store, &mut target, &mut flushed).await;
+                    return;
+                }
+                Some(Request::Delete) => {
+                    match &target.caches {
+                        Some(caches) => caches.forget(target.user).await,
+                        None => target.thread.delete().await,
+                    }
                     return;
                 }
             },
@@ -75,11 +106,28 @@ async fn run(
 }
 
 // A failed write leaves `flushed` behind, so the next tick tries again.
-async fn flush(store: &Store, cache: &CacheThread, flushed: &mut Option<u64>) {
+async fn flush(store: &Store, target: &mut Target, flushed: &mut Option<u64>) {
     let changes = store.changes();
-    if let Some(snapshot) = Snapshot::take(store)
-        && cache.flush(snapshot).await.is_some()
+    let Some(snapshot) = Snapshot::take(store) else {
+        return;
+    };
+    // The host named another account than READY's: that file stays for its own account.
+    if let Some(session) = snapshot
+        .entities
+        .current_user
+        .as_ref()
+        .map(|current| current.user.id)
+        && session != target.user
+        && let Some(caches) = &target.caches
     {
+        let Some(thread) = caches.thread(session) else {
+            return;
+        };
+        tracing::info!(target: LOG, "cache moved to the session's account");
+        target.thread = thread;
+        target.user = session;
+    }
+    if target.thread.flush(snapshot).await.is_some() {
         *flushed = Some(changes);
     }
 }

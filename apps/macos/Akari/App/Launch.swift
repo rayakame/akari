@@ -29,7 +29,8 @@ enum Launch {
             try enableLogging(filter: filter)
         }
         do {
-            let client = try DiscordClient(host: .current, tokenStore: KeychainTokenStore())
+            let client = try DiscordClient(
+                host: .current, tokenStore: KeychainTokenStore(), cacheDirectory: nil)
             LaunchLog.mark("client created")
             return .running(AppModel(client: client))
         } catch {

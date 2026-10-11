@@ -50,7 +50,8 @@ struct KeychainTokenStoreTests {
     func keychainWorksBehindTheClient() async throws {
         let client = try DiscordClient(
             host: HostInfo(osVersion: "25.0.0", systemLocale: "en-US"),
-            tokenStore: KeychainTokenStore(service: Self.uniqueService())
+            tokenStore: KeychainTokenStore(service: Self.uniqueService()),
+            cacheDirectory: nil
         )
 
         #expect(try await client.loadToken(account: Self.account) == nil)

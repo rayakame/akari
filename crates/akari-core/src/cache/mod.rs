@@ -1,6 +1,7 @@
 //! The disk cache: one SQLite file per account with what a cold start draws before the gateway
 //! connects. Only its own thread touches the file.
 
+mod caches;
 mod flusher;
 mod rows;
 mod schema;
@@ -15,6 +16,7 @@ use std::time::Duration;
 
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 
+pub(crate) use self::caches::Caches;
 pub(crate) use self::flusher::Flusher;
 use self::rows::{ChannelRow, CurrentUserRow, GuildRow, MemberRow, MessageRow, UserRow};
 pub(crate) use self::snapshot::Snapshot;
@@ -28,7 +30,11 @@ const LOG: &str = "akari_core::cache";
 /// An account's cache and how often its changes are written.
 pub(crate) struct DiskCache {
     pub(crate) thread: CacheThread,
+    // Whose file `thread` has open.
+    pub(crate) user: UserId,
     pub(crate) every: Duration,
+    // Without it the cache stays on `user`'s file whatever READY says.
+    pub(crate) caches: Option<Arc<Caches>>,
 }
 
 /// Where `user`'s cache lives in `directory`.

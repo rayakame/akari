@@ -26,7 +26,7 @@ const GROUP: ChannelId = ChannelId::new(300_000_000_000_000_011);
 #[tokio::test]
 async fn ready_crosses_as_ids_in_order() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
 
     account.connect().unwrap();
@@ -50,7 +50,7 @@ async fn ready_crosses_as_ids_in_order() {
 #[tokio::test]
 async fn store_reads_convert_after_ready() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let _ws = gateway.serve_ready().await;
@@ -93,7 +93,7 @@ async fn store_reads_convert_after_ready() {
 #[tokio::test]
 async fn channels_returns_known_ids_in_the_given_order() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let _ws = gateway.serve_ready().await;
@@ -113,7 +113,7 @@ async fn channels_returns_known_ids_in_the_given_order() {
 #[tokio::test]
 async fn live_messages_cross_as_ids_and_read_as_records() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let mut ws = gateway.serve_ready().await;
@@ -186,7 +186,7 @@ async fn live_messages_cross_as_ids_and_read_as_records() {
 #[tokio::test]
 async fn a_components_v2_message_says_so() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let mut ws = gateway.serve_ready().await;
@@ -216,7 +216,7 @@ async fn a_components_v2_message_says_so() {
 #[tokio::test]
 async fn a_dm_message_moves_its_conversation_up() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let mut ws = gateway.serve_ready().await;
@@ -254,7 +254,7 @@ async fn a_dm_message_moves_its_conversation_up() {
 #[tokio::test]
 async fn batches_keep_order_and_stop_at_256() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let mut ws = gateway.serve_ready().await;
@@ -304,7 +304,7 @@ async fn batches_keep_order_and_stop_at_256() {
 #[test]
 fn close_ends_a_waiting_next_and_stops_buffering() {
     let client = unreachable_client(Arc::new(MemoryStore::default()));
-    let account = client.account(token("t")).unwrap();
+    let account = client.account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     let inner = subscription.inner_for_tests();
 
@@ -325,7 +325,7 @@ fn close_ends_a_waiting_next_and_stops_buffering() {
 #[tokio::test]
 async fn the_subscription_ends_after_the_account_closes_with_buffered_events_first() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let mut ws = gateway.serve_ready().await;
@@ -356,7 +356,7 @@ async fn account_starts_outside_a_runtime() {
 
     let (account, subscription) = std::thread::spawn(move || {
         assert!(tokio::runtime::Handle::try_current().is_err());
-        let account = client.account(token("t")).unwrap();
+        let account = client.account(token("t"), USER).unwrap();
         let subscription = account.store().subscribe();
         account.connect().unwrap();
         (account, subscription)
@@ -387,7 +387,7 @@ async fn a_blocked_token_store_never_stalls_events() {
         .recv_timeout(WAIT)
         .expect("the token store was never called");
 
-    let account = client.account(token("t")).unwrap();
+    let account = client.account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let mut ws = gateway.serve_ready().await;

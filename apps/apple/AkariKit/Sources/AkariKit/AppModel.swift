@@ -86,7 +86,7 @@ public final class AppModel {
         defer { loggingOut = false }
         let token = self.token
         do {
-            try await client.forgetToken(account: session.userId)
+            try await client.forgetAccount(account: session.userId)
         } catch {
             logoutError = error as? TokenStoreError ?? .Unavailable
             return
@@ -174,7 +174,7 @@ public final class AppModel {
     ) -> Bool {
         let account: Account
         do {
-            account = try client.account(token: token)
+            account = try client.account(token: token, userId: userId)
         } catch {
             showLogin(failure)
             return false
@@ -202,7 +202,7 @@ public final class AppModel {
         forget(userId)
         showLogin(.sessionExpired)
         Task { [client] in
-            try? await client.forgetToken(account: userId)
+            try? await client.forgetAccount(account: userId)
         }
     }
 

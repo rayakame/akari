@@ -570,12 +570,26 @@ impl Shared {
         self.gateway.close();
         self.rest.close();
         if let Some(flusher) = &self.flusher {
-            flusher.close();
+            if self.expired() {
+                flusher.delete();
+            } else {
+                flusher.close();
+            }
         }
+    }
+
+    // Discord ended the session: the host logs in again, and the cache goes with the token.
+    fn expired(&self) -> bool {
+        matches!(
+            self.store.connection(),
+            ConnectionState::Closed { error: Some(error) }
+                if matches!(*error, GatewayError::AuthenticationFailed)
+        )
     }
 }
 
 impl Account {
+    #[cfg(test)]
     pub(crate) fn start(
         client: DiscordClient,
         token: Token,
@@ -817,8 +831,6 @@ impl Finish {
 
 impl Drop for Finish {
     fn drop(&mut self) {
-        // close() does nothing once the gateway has ended, so it runs on every path.
-        self.shared.close();
         let error = self
             .ended
             .take()
@@ -826,6 +838,9 @@ impl Drop for Finish {
         self.shared
             .store
             .set_connection(ConnectionState::Closed { error });
+        // close() does nothing once the gateway has ended, so it runs on every path. After the
+        // state, so it sees why the session ended.
+        self.shared.close();
         self.shared.store.finish();
     }
 }
