@@ -89,6 +89,8 @@ What Akari does with it (`gateway::decompress`):
 - The output buffer grows for large messages such as READY and shrinks back to 256 KiB
   afterwards.
 - Corrupt data drops the connection; the resume starts over with a fresh context.
+- The frame's window size (the history the decoder keeps for the connection) is logged once
+  per connection at debug. Observed on 2026-10-11: 64 KiB.
 - Discord honors `compress=zstd-stream` for user accounts: checked on 2026-10-08 with
   `akari-cli connect`, which received READY as zstd-compressed binary frames. Text frames
   are still decoded as plain JSON, in case that ever changes.
