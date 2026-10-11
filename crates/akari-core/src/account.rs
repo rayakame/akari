@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::gateway::session::Timing;
 use crate::gateway::{
@@ -14,7 +14,7 @@ use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
     ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
 };
-use crate::{DiscordClient, Token};
+use crate::{DiscordClient, LoadReport, Token};
 
 const REFRESH_LIMIT: u8 = 100;
 const JUMP_LIMIT: u8 = 50;
@@ -44,6 +44,42 @@ pub enum MessageLoad {
     Newer { limit: u8 },
     /// Replaces the window with the messages around `id`.
     Around { id: MessageId, limit: u8 },
+}
+
+fn kind_name(kind: LoadKind) -> &'static str {
+    match kind {
+        LoadKind::Latest => "latest",
+        LoadKind::Refresh => "refresh",
+        LoadKind::Older => "older",
+        LoadKind::Newer => "newer",
+        LoadKind::Around(_) => "around",
+    }
+}
+
+// Tenths of a millisecond: decoding and storing a page often take less than one.
+fn ms(duration: Duration) -> f64 {
+    (duration.as_secs_f64() * 10_000.0).round() / 10.0
+}
+
+fn log_page(channel: ChannelId, kind: LoadKind, report: &LoadReport) {
+    tracing::debug!(
+        target: "akari_core::load",
+        channel_id = channel.get(),
+        kind = kind_name(kind),
+        queued_ms = ms(report.queued),
+        limited_ms = ms(report.limited),
+        headers_ms = ms(report.headers),
+        new_connection = report.new_connection,
+        body_ms = ms(report.body),
+        bytes = report.bytes,
+        decode_ms = ms(report.decode),
+        store_ms = ms(report.store),
+        received = report.received,
+        retries = report.retries,
+        remaining = report.remaining,
+        reset_after_ms = report.reset_after.map(ms),
+        "history page loaded"
+    );
 }
 
 impl MessageLoad {
@@ -174,10 +210,11 @@ impl Shared {
         channel: ChannelId,
         kind: LoadKind,
         limit: u8,
-    ) -> Result<(), RequestError> {
+    ) -> Result<Option<LoadReport>, RequestError> {
         let Some(ticket) = self.store.begin_load(channel, kind) else {
-            return Ok(());
+            return Ok(None);
         };
+        let started = Instant::now();
         let mut unfinished = Unfinished {
             store: &self.store,
             ticket: Some(ticket),
@@ -207,14 +244,29 @@ impl Shared {
         };
         unfinished.ticket = None;
         match loaded {
-            Ok(Page { messages, received }) => {
+            Ok(Page {
+                messages,
+                received,
+                mut report,
+            }) => {
                 let reached_end = received < usize::from(limit);
+                let storing = Instant::now();
                 self.store.finish_load(ticket, messages, reached_end);
-                Ok(())
+                report.store = storing.elapsed();
+                log_page(channel, ticket.kind, &report);
+                Ok(Some(report))
             }
             Err(err) => {
                 self.store.abort_load(ticket);
                 self.failed(&err);
+                tracing::debug!(
+                    target: "akari_core::load",
+                    channel_id = channel.get(),
+                    kind = kind_name(ticket.kind),
+                    after_ms = ms(started.elapsed()),
+                    error = err.kind(),
+                    "history page failed"
+                );
                 Err(err)
             }
         }
@@ -541,11 +593,12 @@ impl Account {
     /// Loads messages into the channel's window within Discord's rate limits. `Latest` and
     /// `Around` view the channel first; `Older` and `Newer` continue a window and do nothing
     /// without one. A 401 closes the account like a rejected token.
+    /// `None` when there was nothing to load.
     pub async fn load_messages(
         &self,
         channel: ChannelId,
         load: MessageLoad,
-    ) -> Result<(), RequestError> {
+    ) -> Result<Option<LoadReport>, RequestError> {
         let (kind, limit) = load.parts();
         self.shared.load(channel, kind, limit).await
     }

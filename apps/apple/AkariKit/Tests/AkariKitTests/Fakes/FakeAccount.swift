@@ -10,6 +10,8 @@ final class FakeAccount: Account, @unchecked Sendable {
     let loadError = Locked<RequestError?>(nil)
     // The window a successful load leaves in the store, as akari-core's load would.
     let windowAfterLoad = Locked<MessageWindow?>(nil)
+    // What a successful load reports; `nil` is a load with nothing to load.
+    let loadReport = Locked<LoadReport?>(nil)
     // Fails sends and retries.
     let sendError = Locked<RequestError?>(nil)
     // While set, each send waits for a reply: `nil` succeeds, an error fails it.
@@ -53,7 +55,9 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.view(channelId))
     }
 
-    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws {
+    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
+        -> LoadReport?
+    {
         log.append(.load(channelId, load))
         let error = holdLoads.current ? await loadReplies.next() ?? nil : loadError.current
         if let error {
@@ -62,6 +66,7 @@ final class FakeAccount: Account, @unchecked Sendable {
         if let window = windowAfterLoad.current {
             fakeStore.update { $0.windows[channelId] = window }
         }
+        return loadReport.current
     }
 
     // Refuses queueing, as the core does before anything is queued.

@@ -13,8 +13,11 @@ final class EdgeCell: NSTableCellView {
         label.font = .systemFont(ofSize: 14)
         label.textColor = Palette.textMuted
         addSubview(label)
+        // The table sizes the row; a required height would conflict while it moves row views.
+        let height = heightAnchor.constraint(equalToConstant: Self.height)
+        height.priority = .init(999)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Self.height),
+            height,
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])

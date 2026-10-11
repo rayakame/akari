@@ -81,6 +81,14 @@ message over the limit with `RequestError::TooLong` before anything is queued, a
 refusal for length maps to the same error. No event reports a cooldown; re-read `slowmode` on
 the open channel's window events and after a send.
 
+## Measuring loads
+
+`load_messages` returns a `LoadReport` (or `None` when there was nothing to load): the time
+behind earlier requests and waiting for rate limits, until the headers, for the body,
+decoding and storing, whether a new connection was opened, and Discord's rate-limit headers.
+Numbers only; the apps log them. `DiscordClient::warm_up()` opens a REST connection ahead of
+the first request (an unauthenticated `GET /gateway`) and returns at once.
+
 ## Changing the API
 
 - A read: a `Store` method that returns a record built with `From<&state::X>`; never a core

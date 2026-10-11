@@ -13,8 +13,10 @@ their 429s are reported to the caller.
   guild or webhook ID in the path.
 - For user tokens these headers are usually missing: "User authorization _usually_ only
   returns the **Retry-After**, **X-RateLimit-Global**, and **X-RateLimit-Scope**
-  headers." Akari uses them when they come and doesn't depend on them. **Unverified**
-  which ones Discord sends to Akari.
+  headers." Akari uses them when they come and doesn't depend on them. Observed on
+  2026-10-11 (the macOS app's `load` log, second account): the first `GET
+  /channels/{id}/messages` after a launch carried no `X-RateLimit-*` headers. Whether fast
+  paging brings them, or 429s, is **unverified** until the paging check.
 - A 429 body has `message`, `retry_after` (float seconds) and `global`.
   `X-RateLimit-Global: true` or `"global": true` marks the global limit.
 - The global limit is 50 requests per second per account.
@@ -32,7 +34,9 @@ their 429s are reported to the caller.
   load (`GET`) never holds up a send (`POST`) in the same channel.
 - **Buckets** are learned: once a response names its `X-RateLimit-Bucket`, routes with the
   same hash and top-level ID share `Remaining` and `Reset-After`. With `Remaining: 0` the
-  next request waits for the reset.
+  next request waits for the reset, counted from when the response's headers arrived (Discord
+  counts from its answer, so this is never early), not from the end of the body. While
+  `Remaining` is above 0, or no bucket is known, nothing waits.
 - **The global limit** is enforced on the client as a sliding window of 50 request starts
   per second, across all routes of the account.
 - **A 429** pauses its route key (or, if global, every route) for the retry delay, then

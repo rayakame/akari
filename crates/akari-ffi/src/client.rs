@@ -152,6 +152,14 @@ impl DiscordClient {
             .map_err(Into::into)
     }
 
+    /// Opens a REST connection ahead of the first request, e.g. while the token loads. Sends
+    /// no token, never fails, and returns at once. Account requests made meanwhile wait for it
+    /// to end, at most 500 ms, so they reuse its connection.
+    pub fn warm_up(&self) {
+        let core = self.core.clone();
+        self.runtime.spawn(async move { core.warm_up().await });
+    }
+
     /// Ends the session `token` belongs to on Discord, without touching the token store. A
     /// token Discord no longer accepts counts as done.
     pub async fn end_session(&self, token: Arc<Token>) -> Result<(), LogoutError> {

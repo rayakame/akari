@@ -18,7 +18,9 @@ nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
 
     override func connect() throws {}
 
-    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws {}
+    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
+        -> LoadReport?
+    { nil }
 
     override func viewChannel(channelId: ChannelId) {}
 }

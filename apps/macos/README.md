@@ -33,7 +33,9 @@ come later.
   which opens a new session from the token in memory, without reading the Keychain. A
   rejected token returns to the login screen.
 - Before the Mac sleeps the session disconnects, and it reconnects after it wakes
-  (`NSWorkspace` notifications), since the gateway's own timers don't notice a sleep.
+  (`NSWorkspace` notifications), since the gateway's own timers don't notice a sleep. A wake
+  and a restored launch also open a REST connection ahead of the first message load (a
+  `GET /api/v9/gateway` without the token), so that load doesn't pay the TLS handshake.
 - Akari → Log Out deletes the token from the Keychain first and shows the login screen at
   once; the session is then ended on Discord in the background. If the Keychain item can't be
   deleted, the session stays open and an alert says why. If Discord doesn't confirm the
@@ -99,8 +101,52 @@ elasticity and whether a live scroll is running on every bounds change, plus eac
 app makes itself, each request for an older or newer page, and each time the list keeps the
 reader's place while rows change above it ("compensates": the rows removed, inserted and
 reloaded above, the height delta, y before and after, and whether a live scroll ran). Numbers
-only. Combine both as
+only. Combine them as
 `-AkariLog akari_core=info,scroll`; a second `-AkariLog` argument would replace the first.
+
+`-AkariLog load` (category `load`) logs one line per history page and one per channel open,
+with channel IDs, counts and durations only:
+
+```text
+channel 1234 latest page 1: queued 86 ms, limited 0.0 ms, headers 370 ms, connection reused,
+  body 1.3 ms, 69755 bytes, decode 0.7 ms, store 0.1 ms, read 0.1 ms, render 44 ms for 50 rows,
+  shown after 524 ms; 50 messages; no limit headers
+channel 1234 opened: rows from the network after 544 ms
+```
+
+- **queued:** behind an earlier request for the same channel, or a warm-up still connecting.
+- **limited:** waiting for Discord's rate limits (a bucket reset, a 429 pause, the global
+  limit); zero when nothing had to wait.
+- **headers:** from sending the request until the response headers, over all attempts; with
+  "new connection", DNS, TCP and TLS are part of it.
+- **body:** reading the body; **bytes** is its size after decompression.
+- **decode:** JSON into messages; **store:** into the channel's window, under the store's lock.
+- **read:** AkariKit reading the window and the new messages; **render:** the table update
+  that inserted the page's rows (row heights included), with how many; a message arriving
+  meanwhile isn't counted. **held … for live scroll:** how long a scroll past the top held the
+  page back (it lands when the bounce ends). **shown after:** from the load's start until the
+  frame with the rows was committed.
+- **remaining, reset:** Discord's `X-RateLimit-Remaining` and `-Reset-After`, or "no limit
+  headers".
+- A failed page says `failed after N ms:` and the error's kind; Discord's message isn't logged.
+
+akari-core logs the same stages itself at `akari_core::load` (debug, stderr), and new REST
+connections at `akari_core::rest` (debug, with their connect time).
+
+### Comparing a page load with the official client
+
+1. Same Mac, same network, same channel, one after the other. Akari runs with `-AkariLog load`.
+2. In Chrome, open the official web client logged in as the test account, then DevTools →
+   Network, filter `messages?limit`.
+3. Scroll up in each client until five older pages have loaded.
+4. For each request, Chrome's Timing tab against Akari's line:
+   - Queueing and Stalled ≈ `queued` + `limited`;
+   - DNS Lookup, Initial connection and SSL ≈ the connect time of a "new connection";
+   - Request sent and Waiting for server response ≈ `headers`;
+   - Content Download ≈ `body`.
+   The Size column shows the bytes on the wire against the page's size (compression), the
+   Protocol column `h2` or `h3` (Akari speaks h2; a browser on h3 can connect faster).
+5. Write down the medians only. Never export a HAR file: it holds the token.
 
 The app logs its launch milestones once each, in milliseconds since process start, to the
 unified log (subsystem `app.akari`, category `launch`): app started, client created, token
@@ -119,6 +165,66 @@ pid=$(pgrep -x Akari)
 vmmap --summary "$pid" | grep -E 'Physical footprint'
 top -l 13 -s 5 -pid "$pid" -stats pid,cpu | awk -v p="$pid" '$1==p {n++; if (n>1) {s+=$2; c++}} END {printf "%.2f%%\n", s/c}'
 ```
+
+## Performance
+
+What the Performance and cache milestone found, so later changes don't bring it back:
+
+- **Drawn rows cost memory.** The placeholder rows used to draw themselves into a bitmap; one
+  of them is at least one and a half views tall, and at launch it was most of the memory peak
+  (Release, restored channel: a peak of 112–125 MB, 69 MB of it graphics memory, for about a
+  second). They are plain colored layers now (peak 45 MB). A view that overrides
+  `draw(_:)` gets a bitmap as large as itself, so large rows shouldn't.
+- **Long messages bring in a GPU renderer for a second.** AppKit has views that draw about
+  40,000 pt² or more (text fields included: a message of three lines or more at usual widths)
+  rendered by Core Animation's Metal renderer. While such views are drawn, as when paging or
+  opening a channel, the renderer's working memory of about 64 MB counts in Akari's
+  footprint as graphics memory, released about a second after the last one. That is the
+  paging peak (recorded: 161–169 MB, 74 MB of it this, 76 MB between pages). Its switch, the
+  undocumented `CAEnableMetalWhippet`, makes it worse: the CPU fallback keeps uncompressed
+  bitmaps, and in the probe's paging the peak rose from 159 to 175 MB and memory stayed at
+  170 MB instead of settling at 73 MB.
+- **Buttons are expensive to build.** On current macOS every `NSButton`'s `sizeToFit` runs a
+  SwiftUI layout pass. Each message cell built a hidden "Not sent." line with two buttons;
+  it's built only for a failed message now, which made building a row about four times
+  cheaper (the first page's frame went from 56–60 to 37–41 ms in Release).
+- **No fixed height may be required in a cell.** While the table moves row views during an
+  update, a cell can sit in a row of another height for a moment; a required height then
+  conflicts, and AppKit logs a long message on that frame. Cell heights come from the
+  controller (`heightOfRow`); the cells' own height constraints are priority 999 and only
+  serve the tests' Auto Layout oracle.
+- **What's left in the first page's frame** is mostly Auto Layout of the new rows; only manual
+  layout in the cells would cut it.
+
+`AkariTests/PerformanceProbe.swift` measures the table offline (no account, synthetic
+messages, a window on screen) and only runs when asked:
+
+```sh
+TEST_RUNNER_AKARI_PROBE=1 xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari \
+  -destination 'platform=macOS' -only-testing:AkariTests/PerformanceProbe
+```
+
+It prints `PROBE` lines: frame times of a fling with pages landing, the first page's time, and
+the footprint. `TEST_RUNNER_AKARI_PROBE_PAUSE=4` pauses at each phase so `footprint` or
+`heap` can look at the test host, e.g.
+`footprint --pid "$(pgrep -x Akari)" --sample 1 --sample-duration 40`, which splits the
+footprint by kind (malloc, CoreAnimation, graphics).
+
+Recording the real app (Release, signed with an Apple Development identity, which carries the
+`get-task-allow` entitlement Instruments needs):
+
+```sh
+mkdir -p ~/akari-recordings
+footprint -p Akari --sample 0.5 --sample-duration 150 > ~/akari-recordings/footprint.txt
+xcrun xctrace record --template 'Animation Hitches' --attach Akari --time-limit 60s \
+  --output ~/akari-recordings/hitches.trace
+xcrun xctrace record --template 'Allocations' --attach Akari --time-limit 120s \
+  --output ~/akari-recordings/alloc.trace
+```
+
+The app marks its own work as Points of Interest (`page lands`, `row heights`,
+`message cell made`, `page requested`, live scroll start and settle), which Instruments shows
+beside its tracks. Delete recordings after use: they come from a real account.
 
 ## Theme
 

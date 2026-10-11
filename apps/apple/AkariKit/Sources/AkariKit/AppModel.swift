@@ -59,6 +59,8 @@ public final class AppModel {
         guard let userId = memory.lastAccount else {
             return showLogin(nil)
         }
+        // The first message load then finds a connection instead of paying the handshake.
+        client.warmUp()
         let token: Token?
         do {
             token = try await client.loadToken(account: userId)
@@ -135,6 +137,7 @@ public final class AppModel {
 
     public func resume() {
         if case .session(let session) = screen {
+            client.warmUp()
             session.resume()
         }
     }

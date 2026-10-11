@@ -9,6 +9,13 @@ public final class MessageListModel {
         case newer
     }
 
+    /// Where a channel's first rows came from.
+    public enum Origin: Sendable {
+        /// A window the store already held.
+        case window
+        case network
+    }
+
     public struct Row: Identifiable, Equatable, Sendable {
         /// Stable for the row's life: a sent message keeps its pending ID as its key.
         public let id: MessageId
@@ -31,6 +38,11 @@ public final class MessageListModel {
     public private(set) var failedLoads: [Load: RequestError] = [:]
     /// The channel's composer; created with the model.
     public let composer: ComposerModel
+    /// The last finished load; changes with the rows it brought.
+    public private(set) var lastLoad: LoadTrace?
+    /// When the session opened the channel, and where its first rows came from.
+    public let openedAt = ContinuousClock.now
+    public private(set) var openedFrom = Origin.network
 
     private static let pageSize: UInt8 = 50
 
@@ -49,6 +61,9 @@ public final class MessageListModel {
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
         reload(rereading: [])
+        if hasMessages {
+            openedFrom = .window
+        }
     }
 
     /// Views the channel; loads the latest page when it has no messages or is stale.
@@ -106,18 +121,36 @@ public final class MessageListModel {
             case .newer: .newer(limit: Self.pageSize)
             }
         LaunchLog.mark("first message load started")
+        let started = ContinuousClock.now
+        let held = Set(rows.map(\.id))
+        let oldest = rows.first?.id
         do {
-            try await account.loadMessages(channelId: channelId, load: request)
+            let report = try await account.loadMessages(channelId: channelId, load: request)
             LaunchLog.mark("first message load finished")
             if kind == .latest {
                 failedLoads = [:]
             } else {
                 failedLoads[kind] = nil
             }
+            let reading = ContinuousClock.now
             // The batch with the loaded range may come later; the rows shouldn't lag `loading`.
             reload(rereading: [])
+            let read = reading.duration(to: .now)
+            // A live message that arrived meanwhile is new too, but below an older page.
+            let page = rows.map(\.id).filter { id in
+                !held.contains(id) && (kind != .older || oldest.map { id < $0 } ?? true)
+            }
+            lastLoad = LoadTrace(
+                sequence: ticket, channelId: channelId, kind: kind, report: report,
+                failure: nil, page: Set(page), read: read, started: started,
+                duration: started.duration(to: .now))
         } catch {
-            failedLoads[kind] = error as? RequestError ?? .UnexpectedResponse
+            let failure = error as? RequestError ?? .UnexpectedResponse
+            failedLoads[kind] = failure
+            lastLoad = LoadTrace(
+                sequence: ticket, channelId: channelId, kind: kind, report: nil,
+                failure: failure, read: .zero, started: started,
+                duration: started.duration(to: .now))
         }
     }
 

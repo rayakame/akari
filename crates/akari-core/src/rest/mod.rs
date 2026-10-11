@@ -1,4 +1,5 @@
 mod account;
+mod connections;
 mod error;
 mod ratelimit;
 
@@ -14,6 +15,13 @@ pub(crate) use error::FieldError;
 pub(crate) use error::{ApiError, RestError};
 
 use std::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::sync::watch;
+use tokio::time::Instant;
+
+use connections::{Connections, TimedConnectLayer};
 
 use crate::error::TransportError;
 use crate::properties::ClientProperties;
@@ -23,6 +31,8 @@ use crate::{Secret, Token};
 pub(crate) struct RestClient {
     http: reqwest::Client,
     base: Url,
+    connections: Arc<Connections>,
+    warming: Arc<watch::Sender<bool>>,
 }
 
 #[derive(Default)]
@@ -41,6 +51,8 @@ fn sensitive(value: &str) -> Result<HeaderValue, RestError> {
 
 // Login responses are a few KiB; anything near this is not Discord.
 const MAX_BODY: usize = 4 * 1024 * 1024;
+// A connect usually takes well under this; past it a connection of its own is the better bet.
+const WARM_UP_WAIT: Duration = Duration::from_millis(500);
 
 #[derive(Clone)]
 pub(crate) struct CaptchaSolution {
@@ -65,10 +77,27 @@ impl fmt::Debug for CaptchaSolution {
     }
 }
 
+// A warm-up future dropped mid-request must not leave every later request waiting for it.
+struct Warming<'a>(&'a watch::Sender<bool>);
+
+impl Drop for Warming<'_> {
+    fn drop(&mut self) {
+        self.0.send_replace(false);
+    }
+}
+
 pub(crate) struct RawResponse {
     pub(crate) status: u16,
     pub(crate) headers: HeaderMap,
     pub(crate) body: Vec<u8>,
+    pub(crate) timing: ResponseTiming,
+}
+
+pub(crate) struct ResponseTiming {
+    pub(crate) headers: Duration,
+    pub(crate) body: Duration,
+    pub(crate) headers_at: Instant,
+    pub(crate) new_connection: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -99,18 +128,29 @@ impl RestClient {
         insert("user-agent", &properties.browser_user_agent)?;
         insert("x-super-properties", &properties.super_properties())?;
         insert("x-discord-locale", &properties.system_locale)?;
+        // Chromium's value; reqwest's own would name the same encodings in another order.
+        insert("accept-encoding", "gzip, deflate, br, zstd")?;
 
+        let connections = Arc::new(Connections::default());
         let http = reqwest::Client::builder()
             .tls_backend_preconfigured(tls)
+            .connector_layer(TimedConnectLayer(connections.clone()))
             .default_headers(headers)
             .https_only(https_only)
             // A redirect would carry the Authorization header to wherever Discord points.
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30))
+            // A channel switch after a short break shouldn't pay a new handshake.
+            .pool_idle_timeout(std::time::Duration::from_secs(300))
             .build()
             .map_err(|err| BuildError::Transport(TransportError::from_reqwest(err)))?;
-        Ok(Self { http, base })
+        Ok(Self {
+            http,
+            base,
+            connections,
+            warming: Arc::new(watch::Sender::new(false)),
+        })
     }
 
     pub(crate) async fn get_json<R: DeserializeOwned>(
@@ -183,6 +223,7 @@ impl RestClient {
             status,
             headers,
             body,
+            ..
         } = self.send_raw(request).await?;
         if (200..300).contains(&status) {
             Ok(body)
@@ -191,9 +232,40 @@ impl RestClient {
         }
     }
 
+    // Unauthenticated and harmless; only its connection is wanted.
+    pub(crate) async fn warm_up(&self) {
+        if self.warming.send_replace(true) {
+            return;
+        }
+        let _warming = Warming(&self.warming);
+        let started = Instant::now();
+        let warmed = match self.request(reqwest::Method::GET, "gateway", &RequestExtras::default())
+        {
+            Ok(request) => self.send_raw(request).await.ok(),
+            Err(_) => None,
+        };
+        tracing::debug!(
+            after_ms = crate::millis(started.elapsed()),
+            new_connection = warmed
+                .as_ref()
+                .is_some_and(|response| response.timing.new_connection),
+            ok = warmed.is_some(),
+            "rest warmed up"
+        );
+    }
+
+    // A request that starts while the warm-up still connects would open a second connection.
+    pub(crate) async fn after_warm_up(&self) {
+        let mut warming = self.warming.subscribe();
+        let _ = tokio::time::timeout(WARM_UP_WAIT, warming.wait_for(|warming| !warming)).await;
+    }
+
     pub(crate) async fn send_raw(&self, request: RequestBuilder) -> Result<RawResponse, RestError> {
         let transport = |err| RestError::Transport(TransportError::from_reqwest(err));
+        let opened = self.connections.opened();
+        let started = Instant::now();
         let mut response = request.send().await.map_err(transport)?;
+        let headers_at = Instant::now();
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         if response
@@ -209,10 +281,17 @@ impl RestClient {
             }
             body.extend_from_slice(&chunk);
         }
+        let timing = ResponseTiming {
+            headers: headers_at - started,
+            body: headers_at.elapsed(),
+            headers_at,
+            new_connection: self.connections.opened() > opened,
+        };
         Ok(RawResponse {
             status,
             headers,
             body,
+            timing,
         })
     }
 }

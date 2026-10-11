@@ -76,7 +76,9 @@ struct MessageArea: View {
         MessageTableState(
             rows: messages.rows, atPresent: messages.atPresent,
             reachedOldest: messages.reachedOldest, loading: messages.loading,
-            failedLoads: messages.failedLoads, beginning: name.beginning)
+            failedLoads: messages.failedLoads, beginning: name.beginning,
+            channelId: messages.channelId, lastLoad: messages.lastLoad,
+            openedAt: messages.openedAt, openedFrom: messages.openedFrom)
     }
 }
 

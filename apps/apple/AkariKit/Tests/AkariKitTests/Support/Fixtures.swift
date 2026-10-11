@@ -76,3 +76,14 @@ let captcha = CaptchaChallenge(
     service: "hcaptcha", sitekey: "site-key", rqdata: nil, rqtoken: nil, sessionId: nil,
     shouldServeInvisible: false
 )
+
+func loadReport(
+    headers: TimeInterval = 0.182, newConnection: Bool = false, received: UInt16 = 50,
+    remaining: UInt32? = 4, resetAfter: TimeInterval? = 1.2
+) -> LoadReport {
+    LoadReport(
+        queued: 0, limited: 0.0004, headers: headers, newConnection: newConnection, body: 0.012,
+        bytes: 48_213, decode: 0.0021, store: 0.0004, received: received, retries: 0,
+        remaining: remaining, resetAfter: resetAfter
+    )
+}

@@ -349,4 +349,74 @@ struct MessageListModelTests {
         await model.jumpToPresent()
         #expect(model.failedLoads.isEmpty)
     }
+
+    @Test
+    func aLoadKeepsItsTraceForTheLog() async {
+        shown(window([3, 4, 5]))
+        let model = loaded()
+        let report = loadReport()
+        account.loadReport.withLock { $0 = report }
+        account.windowAfterLoad.withLock { $0 = window([1, 2, 3, 4, 5]) }
+
+        await model.loadOlder()
+        let first = model.lastLoad
+        await model.loadOlder()
+
+        #expect(first?.sequence == 1)
+        #expect(first?.channelId == here)
+        #expect(first?.kind == .older)
+        #expect(first?.report == report)
+        #expect(first?.failure == nil)
+        #expect(first.map { $0.read > .zero } == true)
+        #expect(model.lastLoad?.sequence == 2)
+    }
+
+    // The table charges a page's render to the update that inserted these rows, not to a
+    // message that arrived meanwhile.
+    @Test
+    func aLoadKnowsWhichRowsItBrought() async {
+        shown(window([3, 4, 5]))
+        let model = loaded()
+        account.loadReport.withLock { $0 = loadReport() }
+        account.windowAfterLoad.withLock { $0 = window([1, 2, 3, 4, 5, 6]) }
+        store.update { $0.show(message(1), message(2), message(6)) }
+
+        await model.loadOlder()
+
+        #expect(model.lastLoad?.page == [id(1), id(2)])
+    }
+
+    @Test
+    func aLoadWithNothingToLoadHasNoReport() async {
+        shown(window([3, 4, 5]))
+        let model = loaded()
+
+        await model.loadOlder()
+
+        #expect(model.lastLoad?.sequence == 1)
+        #expect(model.lastLoad?.report == nil)
+        #expect(model.lastLoad?.failure == nil)
+    }
+
+    @Test
+    func aFailedLoadKeepsItsFailure() async {
+        shown(window([3, 4, 5]))
+        let model = loaded()
+        account.loadError.withLock { $0 = .ServerError(status: 500) }
+
+        await model.loadOlder()
+
+        #expect(model.lastLoad?.failure == .ServerError(status: 500))
+        #expect(model.lastLoad?.report == nil)
+    }
+
+    @Test
+    func theFirstRowsSayWhereTheyCameFrom() {
+        let empty = makeModel()
+        shown(window([3, 4, 5]))
+        let held = makeModel()
+
+        #expect(empty.openedFrom == .network)
+        #expect(held.openedFrom == .window)
+    }
 }

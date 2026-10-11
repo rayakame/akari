@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use reqwest::Method as HttpMethod;
 use serde::Serialize;
@@ -12,7 +12,7 @@ use crate::error::TransportError;
 use crate::lenient::parse_list;
 use crate::model::{self, ChannelId, MessageId};
 use crate::state::limit_in;
-use crate::{DiscordClient, Token};
+use crate::{DiscordClient, LoadReport, Token};
 
 const MESSAGES: &str = "channels/{}/messages";
 const INVALID_FORM_BODY: u32 = 50035;
@@ -62,6 +62,22 @@ pub enum RequestError {
 impl RequestError {
     pub(crate) fn is_transient(&self) -> bool {
         matches!(self, Self::Network(_) | Self::ServerError { .. })
+    }
+
+    // For logs: never Discord's message, which can quote what was sent.
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::Unauthorized => "unauthorized",
+            Self::RateLimited { .. } => "rate_limited",
+            Self::CaptchaRequired(_) => "captcha_required",
+            Self::Discord { .. } => "discord",
+            Self::ServerError { .. } => "server_error",
+            Self::Network(_) => "network",
+            Self::UnexpectedResponse => "unexpected_response",
+            Self::TooLong { .. } => "too_long",
+            Self::InvalidRequest => "invalid_request",
+            Self::Closed => "closed",
+        }
     }
 }
 
@@ -135,6 +151,12 @@ pub(crate) struct Page {
     pub(crate) messages: Vec<model::Message>,
     // Skipped messages count too: a short page means the end is reached.
     pub(crate) received: usize,
+    pub(crate) report: LoadReport,
+}
+
+struct Exchange {
+    body: Vec<u8>,
+    report: LoadReport,
 }
 
 pub(crate) struct AccountRest {
@@ -191,13 +213,21 @@ impl AccountRest {
         };
         let path = format!("channels/{}/messages?limit={limit}{cursor}", channel.get());
         let route = RouteKey::new(Method::Get, MESSAGES, channel.get());
-        let body = self
+        let Exchange { body, mut report } = self
             .send(route, || self.request(HttpMethod::GET, &path))
             .await?;
+        let decoding = Instant::now();
         let (mut messages, received): (Vec<model::Message>, usize) =
             parse_list(&body).map_err(|_| RequestError::UnexpectedResponse)?;
         messages.sort_by_key(|message| message.id);
-        Ok(Page { messages, received })
+        report.decode = decoding.elapsed();
+        report.bytes = u32::try_from(body.len()).unwrap_or(u32::MAX);
+        report.received = u16::try_from(received).unwrap_or(u16::MAX);
+        Ok(Page {
+            messages,
+            received,
+            report,
+        })
     }
 
     // Retries send the same body, so the nonce stays the same.
@@ -208,7 +238,7 @@ impl AccountRest {
     ) -> Result<model::Message, RequestError> {
         let path = format!("channels/{}/messages", channel.get());
         let route = RouteKey::new(Method::Post, MESSAGES, channel.get());
-        let body = self
+        let Exchange { body, .. } = self
             .send(route, || {
                 Ok(self.request(HttpMethod::POST, &path)?.json(message))
             })
@@ -232,24 +262,32 @@ impl AccountRest {
         &self,
         route: RouteKey,
         build: impl Fn() -> Result<reqwest::RequestBuilder, RequestError>,
-    ) -> Result<Vec<u8>, RequestError> {
+    ) -> Result<Exchange, RequestError> {
         let mut rate_limited = 0;
         let mut server_errors = 0;
         let mut permit: Option<Permit<'_>> = None;
+        let mut report = LoadReport::default();
+        let waiting = Instant::now();
+        self.client.rest().after_warm_up().await;
+        let behind_warm_up = waiting.elapsed();
         loop {
             self.usable()?;
             let request = build()?;
             let permit = match &permit {
                 Some(held) => {
-                    held.renew().await.map_err(too_long)?;
+                    report.limited += held.renew().await.map_err(too_long)?;
                     held
                 }
-                None => permit.insert(
-                    self.limiter
+                None => {
+                    let acquired = self
+                        .limiter
                         .acquire(route.clone())
                         .await
-                        .map_err(too_long)?,
-                ),
+                        .map_err(too_long)?;
+                    report.queued = behind_warm_up + acquired.queued;
+                    report.limited = acquired.limited;
+                    permit.insert(acquired)
+                }
             };
             // The wait for the route can be long; the account may have closed meanwhile.
             self.usable()?;
@@ -257,11 +295,17 @@ impl AccountRest {
                 status,
                 headers,
                 body,
+                timing,
             } = self.client.rest().send_raw(request).await?;
             let limits = ResponseLimits::from_response(status, &headers, &body);
-            permit.finish(&limits);
+            permit.finish(&limits, timing.headers_at);
+            report.headers += timing.headers;
+            report.body += timing.body;
+            report.new_connection |= timing.new_connection;
+            report.remaining = limits.remaining;
+            report.reset_after = limits.reset_after;
             match status {
-                200..=299 => return Ok(body),
+                200..=299 => return Ok(Exchange { body, report }),
                 401 => {
                     // 401s count toward Cloudflare's ban on invalid requests.
                     self.unauthorized.store(true, Ordering::Release);
@@ -269,6 +313,7 @@ impl AccountRest {
                 }
                 429 if limits.retry_after.is_some() && rate_limited < RATE_LIMIT_RETRIES => {
                     rate_limited += 1;
+                    report.retries += 1;
                 }
                 429 => {
                     return Err(RequestError::RateLimited {
@@ -277,6 +322,7 @@ impl AccountRest {
                 }
                 502 | 504 if server_errors == 0 => {
                     server_errors += 1;
+                    report.retries += 1;
                     tokio::time::sleep(self.retry_delay).await;
                 }
                 _ => return Err(RestError::from_response(status, &headers, &body).into()),

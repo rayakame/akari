@@ -43,6 +43,8 @@ screen, so views render from them without calling into Rust.
   `reconnect()` opens a new one from the token in memory, with the same drafts; the old
   account's pending and failed messages become drafts of their channels.
   `suspend()` and `resume()` disconnect and reconnect the open session around sleep.
+  A restored launch and a wake call `client.warmUp()` first, so the first message load finds
+  an open REST connection.
   `logOut()` runs once: it deletes the token with `forgetToken` first, and if that fails it
   stays on the session and sets `logoutError`; otherwise it shows the login screen and ends
   the session on Discord in the background (`endSession(token:)`), setting
@@ -56,7 +58,9 @@ screen, so views render from them without calling into Rust.
   list), `DirectMessageListModel` (the DM list, the latest conversation first, with each
   one's recipients and name), `ChannelListModel` (the open guild's channels) and
   `MessageListModel` (the open channel's messages and loads; `failedLoads` keeps each kind of
-  load's last failure). `AccountMemory` keeps the last place and channel per account, and the session's
+  load's last failure; `lastLoad` is the last load's `LoadTrace` with akari-core's
+  `LoadReport` and the model's read time, and `openedAt`/`openedFrom` say when the channel
+  opened and where its first rows came from, for the `load` log). `AccountMemory` keeps the last place and channel per account, and the session's
   first READY reopens them, as Discord does after a restart. `notice` is what a connection bar
   says (`ConnectionNotice`: connecting, reconnecting, offline after `suspend()`, or closed with
   its error), with the delay before a bar shows it.
@@ -118,6 +122,10 @@ Rules every Apple app shows the same way, so they live here rather than in the a
 - `Message.notice` is Akari's sentence for a system message; `Initials` gives the letters a
   server or avatar without an image shows; `Channel.opensMessageList` says which channels
   have a message list.
+
+`LoadLog` writes the `load` category's lines (`-AkariLog load` on macOS): one per page with
+where its time went, and one per channel open. The formats are here, so every Apple app logs
+the same lines; the app adds the render time it measures.
 
 ## Tests
 

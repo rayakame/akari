@@ -37,7 +37,8 @@ final class AppModelTests {
         let (_, session, account) = try await restored()
 
         #expect(session.userId == id(42))
-        #expect(client.calls.current == [.loadToken(id(42)), .account(token: "stored.token")])
+        #expect(
+            client.calls.current == [.warmUp, .loadToken(id(42)), .account(token: "stored.token")])
         #expect(account.log.calls.contains(.connect))
         session.close()
     }
@@ -419,6 +420,31 @@ final class AppModelTests {
         await logOut
 
         #expect(app.screen.login != nil)
+    }
+
+    @Test
+    func aRestoredLaunchWarmsUpBeforeTheTokenLoads() async throws {
+        let (_, session, _) = try await restored()
+
+        #expect(Array(client.calls.current.prefix(2)) == [.warmUp, .loadToken(id(42))])
+        session.close()
+    }
+
+    // After a sleep the pooled connection is usually gone.
+    @Test
+    func aWakeWarmsUpAgain() async throws {
+        let fresh = makeApp()
+        await fresh.start()
+        fresh.resume()
+        #expect(!client.calls.current.contains(.warmUp))
+
+        let (app, session, _) = try await restored()
+        client.calls.withLock { $0.removeAll() }
+        app.suspend()
+        app.resume()
+
+        #expect(client.calls.current == [.warmUp])
+        session.close()
     }
 
     @Test

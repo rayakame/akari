@@ -14,7 +14,9 @@ akari-core = { path = "crates/akari-core" }
 akari-markdown = { path = "crates/akari-markdown" }
 
 tokio = { version = "1.53", default-features = false }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+# The decoders behind the Accept-Encoding the official client sends; zstd shares the
+# gateway's zstd-sys.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "gzip", "deflate", "brotli", "zstd"] }
 # No public feature enables rustls without a root store. The native roots stay unused:
 # the core passes its own ClientConfig built with rustls-platform-verifier.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
@@ -23,6 +25,9 @@ rustls-platform-verifier = "0.7"
 # The same aws-lc-rs build rustls uses; remote auth needs its RSA-OAEP directly.
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# Only the traits, for timing reqwest's connector (ClientBuilder::connector_layer).
+tower-layer = "0.3"
+tower-service = "0.3"
 tokio-util = { version = "0.7", default-features = false }
 base64 = "0.23"
 percent-encoding = "2.3"
@@ -39,6 +44,9 @@ uniffi = { version = "0.32", default-features = false }
 thiserror = "2"
 tracing = "0.1"
 wiremock = "0.6"
+# Test-only: compresses bodies the way Discord's CDN would.
+flate2 = "1.1"
+brotli = { version = "9", default-features = false, features = ["std"] }
 
 # Without "tracing-log": tungstenite logs whole frames, the token included, through `log`.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }

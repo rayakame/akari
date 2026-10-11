@@ -26,7 +26,13 @@ Akari sorts every page by ID itself, so the order Discord uses doesn't matter fo
 correctness. A message in a page that fails to decode is skipped and logged by ID only.
 
 `Account::load_messages(channel, load)` takes an intent instead of raw IDs, so a window
-can't get a hole. The limit is clamped to 1–100.
+can't get a hole. The limit is clamped to 1–100. It returns a `LoadReport` with where the
+load's time went (rate-limit waits, headers, body, decoding, the store), or `None` when there
+was nothing to load.
+
+Requests ask for compressed bodies with the official client's
+`Accept-Encoding: gzip, deflate, br, zstd`; a page of 50 messages is about 70 KB of JSON
+before compression. The 4 MiB body limit applies to the decompressed body.
 
 | `MessageLoad` | Request | Window |
 |---|---|---|
