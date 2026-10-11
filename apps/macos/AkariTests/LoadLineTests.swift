@@ -329,4 +329,22 @@ struct LoadLineTests {
         #expect(marks.filter { $0 == "first fresh page rendered" }.count == 1)
         #expect(marks.contains("first channel rendered"))
     }
+
+    @Test
+    func aQuietChannelFromDiskSaysWhenItWasFresh() async {
+        await logging {
+            show(state([]))
+            show(state(rows(50...99), from: .disk))
+            await settle()
+
+            let fresh = trace(1, started: opened, page: nil, kind: .latest)
+            show(state(rows(50...99), load: fresh, from: .disk))
+            await settle { lines.all.contains { $0.contains("opened") } }
+
+            let open = lines.all.first { $0.contains("opened") } ?? ""
+            let numbers = open.split(separator: " ").compactMap { Double($0) }.dropFirst()
+            #expect(numbers.count == 2, "\(open)")
+            #expect((numbers.last ?? 0) - (numbers.first ?? 0) >= 150, "\(open)")
+        }
+    }
 }

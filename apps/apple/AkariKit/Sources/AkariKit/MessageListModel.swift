@@ -50,6 +50,8 @@ public final class MessageListModel {
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
     @ObservationIgnored private var hasMessages = false
+    // Rows the cache showed while the first page loaded; that page didn't bring them.
+    @ObservationIgnored private var fromDisk: Set<MessageId> = []
     // Confirmed message ID → the pending ID its row keeps as key.
     @ObservationIgnored private var pendingKeys: [MessageId: MessageId] = [:]
     @ObservationIgnored private var loads = 0
@@ -106,6 +108,7 @@ public final class MessageListModel {
         // The cache's copy comes stale, before the page that refreshes it.
         if !hadRows, hasMessages, isStale, openedFrom == .network, lastLoad == nil {
             openedFrom = .disk
+            fromDisk = Set(rows.map(\.message.id))
         }
         composer.apply(batch)
     }
@@ -144,7 +147,8 @@ public final class MessageListModel {
             let read = reading.duration(to: .now)
             // A live message that arrived meanwhile is new too, but below an older page.
             let page = rows.map(\.id).filter { id in
-                !held.contains(id) && (kind != .older || oldest.map { id < $0 } ?? true)
+                !held.contains(id) && !fromDisk.contains(id)
+                    && (kind != .older || oldest.map { id < $0 } ?? true)
             }
             lastLoad = LoadTrace(
                 sequence: ticket, channelId: channelId, kind: kind, report: report,

@@ -449,4 +449,28 @@ struct MessageListModelTests {
 
         #expect(model.openedFrom == .network)
     }
+
+    @Test
+    func aPageAfterRowsFromDiskCountsOnlyWhatTheNetworkAdded() async {
+        shown(window([]))
+        let model = loaded()
+        account.holdLoads.withLock { $0 = true }
+        account.windowAfterLoad.withLock { $0 = window([1, 2, 3]) }
+        let opening = Task { await model.open() }
+        while !store.log.actions.contains(where: { if case .load = $0 { true } else { false } }) {
+            await Task.yield()
+        }
+
+        shown(window([1, 2], stale: true))
+        model.apply(
+            EventBatch([
+                .messagesLoaded(channelId: here, first: id(1), last: id(2)),
+                .messagesStale(channelId: here),
+            ]))
+        account.loadReplies.send(nil)
+        await opening.value
+
+        #expect(model.openedFrom == .disk)
+        #expect(model.lastLoad?.page == [id(3)])
+    }
 }
