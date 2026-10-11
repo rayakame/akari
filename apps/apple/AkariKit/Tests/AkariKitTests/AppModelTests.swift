@@ -100,6 +100,7 @@ final class AppModelTests {
         client.passwordLogins.withLock { $0 = [password] }
         let app = makeApp()
         await app.start()
+        await client.cleared.wait()
         let login = try #require(app.screen.login)
 
         login.login = "me@example.com"
@@ -485,6 +486,8 @@ final class AppModelTests {
     func aWakeWarmsUpAgain() async throws {
         let fresh = makeApp()
         await fresh.start()
+        // A launch without an account clears the caches in the background.
+        await client.cleared.wait()
         fresh.resume()
         #expect(!client.calls.current.contains(.warmUp))
 
