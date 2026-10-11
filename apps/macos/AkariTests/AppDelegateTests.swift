@@ -45,27 +45,26 @@ struct AppDelegateTests {
     func quittingWaitsForTheFlush() async {
         final class Flush {
             var limit: Duration?
-            var release: CheckedContinuation<Void, Never>?
+            var released = false
         }
         let flush = Flush()
         let delegate = delegate { limit in
             flush.limit = limit
-            await withCheckedContinuation { flush.release = $0 }
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !flush.released, ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
         }
         delegate.limit = .seconds(30)
 
         let answer = delegate.applicationShouldTerminate(NSApplication.shared)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while flush.release == nil, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        try? await Task.sleep(for: .milliseconds(200))
+        try? await Task.sleep(for: .milliseconds(300))
 
         #expect(answer == .terminateLater)
         #expect(flush.limit == .seconds(30))
         #expect(replies.all.isEmpty)
 
-        flush.release?.resume()
+        flush.released = true
         await waitForReply()
 
         #expect(replies.all == [true])

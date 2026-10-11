@@ -525,7 +525,8 @@ struct MessageTableTests {
         var heights: Set<CGFloat> = []
         var moves: [String] = []
         var y: CGFloat = 0
-        while true {
+        // Bounded: a clip that stops moving short of the bottom fails below instead of spinning.
+        for _ in 0..<500 {
             clip.scroll(to: NSPoint(x: 0, y: y))
             controller.scrollView.reflectScrolledClipView(clip)
             postLiveScroll(NSScrollView.didLiveScrollNotification)

@@ -3,7 +3,7 @@ import Foundation
 import Security
 import Testing
 
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct KeychainTokenStoreTests {
     static let account = UserId(rawValue: 100_000_000_000_000_001)
 
