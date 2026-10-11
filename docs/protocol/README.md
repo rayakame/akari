@@ -24,6 +24,8 @@ surprises we found.
   within them
 - [user-settings.md](user-settings.md): the settings proto (server folders and order,
   status) and opt-in channels, which READY carries and Akari doesn't read yet
+- [cache.md](cache.md): the SQLite disk cache per account, the cold start from it, and when
+  it's written and deleted
 
 ## Conventions
 

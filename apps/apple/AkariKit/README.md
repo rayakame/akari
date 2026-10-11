@@ -38,14 +38,17 @@ screen, so views render from them without calling into Rust.
 - `AppModel` restores the last account or shows the login screen. `AccountMemory` keeps only
   the user ID; the token stays in the Keychain, and the open session's `Token` object stays in
   memory. After a login it saves the token and opens the session. A session that ends with
-  `AuthenticationFailed` returns to the login screen and deletes the token with `forgetToken`,
-  without sending it to Discord again. Any other close keeps the session on screen;
+  `AuthenticationFailed` returns to the login screen and deletes the token and the account's
+  cache with `forgetAccount`, without sending the token to Discord again. Any other close keeps the session on screen;
   `reconnect()` opens a new one from the token in memory, with the same drafts; the old
   account's pending and failed messages become drafts of their channels.
   `suspend()` and `resume()` disconnect and reconnect the open session around sleep.
   A restored launch and a wake call `client.warmUp()` first, so the first message load finds
-  an open REST connection.
-  `logOut()` runs once: it deletes the token with `forgetToken` first, and if that fails it
+  an open REST connection; a restored launch also calls `client.preload(userId:)`, so the disk
+  cache is read while the token is. A launch without an account calls `clearCaches()` in the
+  background. `prepareToQuit(limit:)` writes the open session's cache and returns within the
+  limit (1 s by default) either way.
+  `logOut()` runs once: it deletes the token and the cache with `forgetAccount` first, and if that fails it
   stays on the session and sets `logoutError`; otherwise it shows the login screen and ends
   the session on Discord in the background (`endSession(token:)`), setting
   `warning = .logoutNotConfirmed` if Discord doesn't confirm. A new login can't lose its token
@@ -54,7 +57,11 @@ screen, so views render from them without calling into Rust.
   location); whichever finishes first logs in and cancels the other. A captcha shows as not
   supported yet.
 - `SessionModel` holds the connection, the current user, the open place (home or a guild) and
-  the channel last opened in each guild and at home. It owns `GuildListModel` (the server
+  the channel last opened in each guild and at home. The disk cache's state (`restored`, or a
+  store already restored when the session starts) shows before READY: everything is read as
+  after READY and the last place and channel reopen once. The first READY then checks that
+  place and falls back as it would at a READY restore (a gone guild to home, a hidden channel
+  to the guild's first one, a gone conversation to nothing). It owns `GuildListModel` (the server
   list), `DirectMessageListModel` (the DM list, the latest conversation first, with each
   one's recipients and name), `ChannelListModel` (the open guild's channels) and
   `MessageListModel` (the open channel's messages and loads; `failedLoads` keeps each kind of
