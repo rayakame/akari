@@ -355,6 +355,10 @@ impl Store {
         self.read(|inner| inner.state.cache_parts(per_window))
     }
 
+    pub(crate) fn had_ready(&self) -> bool {
+        self.read(|inner| inner.state.had_ready())
+    }
+
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
         self.read(|inner| inner.state.stale_channels())
     }

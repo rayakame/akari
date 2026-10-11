@@ -3477,4 +3477,41 @@ mod cache {
 
         assert_eq!(windows(&dir), 1);
     }
+
+    #[tokio::test]
+    async fn a_failed_open_of_a_cached_channel_is_refreshed_after_ready() {
+        use wiremock::matchers::{path, query_param};
+
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        let mut connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("limit", "50"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(path(MESSAGES))
+            .and(query_param("limit", "100"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(page(&(2..=51).collect::<Vec<_>>())),
+            )
+            .mount(&server)
+            .await;
+
+        let failed = account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await;
+
+        assert!(failed.is_err());
+        events_until(&subscription, "MessagesLoaded(51..51)").await;
+        connection.send(message(2, 52)).await;
+        events_until(&subscription, "MessageInserted(52)").await;
+        assert!(!account.store().messages(general()).unwrap().stale);
+    }
 }

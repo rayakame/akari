@@ -693,7 +693,19 @@ impl Account {
         load: MessageLoad,
     ) -> Result<Option<LoadReport>, RequestError> {
         let (kind, limit) = load.parts();
-        self.shared.load(channel, kind, limit).await
+        let loaded = self.shared.load(channel, kind, limit).await;
+        // Cached messages left stale hold live ones back; before READY its refresh takes them.
+        if loaded.is_err()
+            && kind == LoadKind::Latest
+            && self.shared.store.had_ready()
+            && self.shared.store.stale_channels().contains(&channel)
+        {
+            let shared = self.shared.clone();
+            self.shared.runtime.spawn(async move {
+                let _ = shared.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
+            });
+        }
+        loaded
     }
 
     /// Shows the message as pending at once and sends it. Resolves with Discord's ID; on an

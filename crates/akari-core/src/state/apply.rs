@@ -262,6 +262,10 @@ impl State {
         self.entities.me()
     }
 
+    pub(crate) fn had_ready(&self) -> bool {
+        self.ready
+    }
+
     // Only before the first READY: a READY that came first is fresher than any cache.
     pub(crate) fn restore(&mut self, cached: Entities, events: &mut Vec<StoreEvent>) -> bool {
         if self.ready || self.restored {
