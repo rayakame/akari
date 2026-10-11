@@ -132,10 +132,8 @@ struct ThemeTests {
     }
 
     @Test
-    func darkIsTheDefaultAndChoicesRoundTrip() throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+    func darkIsTheDefaultAndChoicesRoundTrip() {
+        let defaults = MemoryDefaults()
 
         #expect(ThemeChoice.stored(in: defaults) == .dark)
         ThemeChoice.light.store(in: defaults)

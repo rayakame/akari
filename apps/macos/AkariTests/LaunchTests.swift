@@ -10,10 +10,8 @@ struct LaunchTests {
     }
 
     @Test
-    func loggingIsOnlyEnabledWhenAsked() throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+    func loggingIsOnlyEnabledWhenAsked() {
+        let defaults = MemoryDefaults()
         var filters: [String] = []
 
         Launch.enableLoggingIfAsked(defaults) { filters.append($0) }

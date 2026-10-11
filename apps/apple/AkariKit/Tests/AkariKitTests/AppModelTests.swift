@@ -6,16 +6,7 @@ import Testing
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class AppModelTests {
     let client = FakeClient()
-    let suite = "app.akari.tests.\(UUID().uuidString)"
-    let memory: AccountMemory
-
-    init() throws {
-        memory = AccountMemory(defaults: try #require(UserDefaults(suiteName: suite)))
-    }
-
-    deinit {
-        UserDefaults.standard.removePersistentDomain(forName: suite)
-    }
+    let memory = AccountMemory(defaults: MemoryDefaults())
 
     func makeApp() -> AppModel {
         AppModel(client: client, memory: memory)

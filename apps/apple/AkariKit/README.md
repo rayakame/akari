@@ -141,3 +141,8 @@ the same lines; the app adds the render time it measures.
 in `Tests/AkariKitTests/Fakes`: subclasses of the generated classes made with UniFFI's
 `init(noHandle:)`, which keep their state in memory and record every call and read. The
 Keychain tests use the login keychain with a new service name per run and delete their items.
+
+Settings in tests live in `MemoryDefaults`, never in a `UserDefaults` suite. Each suite a test
+removes holds one of cfprefsd's file descriptors for seconds, and a loop of test runs once used
+them all up: the real app's settings could then be neither read nor written until cfprefsd was
+restarted. A test fails if a test file in AkariKit or the macOS app creates a suite.

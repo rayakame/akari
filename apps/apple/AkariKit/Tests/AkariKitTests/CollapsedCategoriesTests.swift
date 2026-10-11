@@ -5,16 +5,7 @@ import Testing
 
 @MainActor
 final class CollapsedCategoriesTests {
-    let suite = "app.akari.tests.\(UUID().uuidString)"
-    let defaults: UserDefaults
-
-    init() throws {
-        defaults = try #require(UserDefaults(suiteName: suite))
-    }
-
-    deinit {
-        UserDefaults.standard.removePersistentDomain(forName: suite)
-    }
+    let defaults = MemoryDefaults()
 
     let channels = [
         channel(1), channel(10, kind: .guildCategory), channel(11, parent: 10),

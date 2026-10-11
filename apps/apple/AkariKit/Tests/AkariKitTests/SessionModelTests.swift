@@ -8,16 +8,12 @@ final class SessionModelTests {
     let store = FakeStore()
     let account: FakeAccount
     let closes = Locked<[GatewayError?]>([])
-    let suite = "app.akari.tests.\(UUID().uuidString)"
+    let defaults = MemoryDefaults()
     let memory: AccountMemory
 
-    init() throws {
+    init() {
         account = FakeAccount(store: store)
-        memory = AccountMemory(defaults: try #require(UserDefaults(suiteName: suite)))
-    }
-
-    deinit {
-        UserDefaults.standard.removePersistentDomain(forName: suite)
+        memory = AccountMemory(defaults: defaults)
     }
 
     var subscription: FakeSubscription { store.subscription }
@@ -552,7 +548,7 @@ final class SessionModelTests {
         session.open(.guild(id(1)))
         session.open(channel: id(12))
 
-        let later = AccountMemory(defaults: try #require(UserDefaults(suiteName: suite)))
+        let later = AccountMemory(defaults: defaults)
         #expect(later.lastSpot(of: id(1)) == .init(place: .guild(id(1)), channel: id(12)))
         #expect(later.lastSpot(of: id(2)) == nil)
         session.close()
