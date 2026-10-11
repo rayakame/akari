@@ -131,6 +131,23 @@ struct LoadLineTests {
     }
 
     @Test
+    func twoPagesLandingBeforeTheFirstIsShownEachGetALine() async {
+        await logging {
+            show(state(rows(50...99)))
+            await settle { !lines.all.isEmpty }
+
+            show(state(rows(25...99), load: trace(1, started: .now, page: 25...49)))
+            show(state(rows(1...99), load: trace(2, started: .now, page: 1...24)))
+            await settle { !pageLines(1).isEmpty && !pageLines(2).isEmpty }
+
+            #expect(pageLines(1).count == 1)
+            #expect(pageLines(2).count == 1)
+            #expect(pageLines(1).first?.contains("for 25 rows") == true)
+            #expect(pageLines(2).first?.contains("for 24 rows") == true)
+        }
+    }
+
+    @Test
     func aLoadWhoseRowsCameEarlierUsesThatRender() async {
         await logging {
             show(state(rows(50...99)))

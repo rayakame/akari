@@ -71,7 +71,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var applied: [Applied] = []
     private var heldSince: ContinuousClock.Instant?
     private var loggedLoad = 0
-    private var pendingLoad: LoadTrace?
+    // Pages waiting for their rows to be shown; one whose rows never show drops out after a few.
+    private var pendingLoads: [LoadTrace] = []
     private var openLogged = false
     private var pendingOpen:
         (
@@ -187,7 +188,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             if load.failure != nil {
                 LoadLog.log(LoadLog.failure(load))
             } else if load.report != nil {
-                pendingLoad = load
+                pendingLoads.append(load)
+                pendingLoads.removeFirst(max(0, pendingLoads.count - 8))
             }
         }
         writeLoadLines()
@@ -203,26 +205,30 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             LoadLog.log(
                 LoadLog.opened(open.channel, from: open.from, after: open.at.duration(to: shown)))
         }
-        guard let load = pendingLoad else {
-            return
+        var waiting: [LoadTrace] = []
+        for load in pendingLoads {
+            if let line = pageLine(load) {
+                LoadLog.log(line)
+            } else {
+                waiting.append(load)
+            }
         }
+        pendingLoads = waiting
+    }
+
+    private func pageLine(_ load: LoadTrace) -> String? {
         if load.page.isEmpty {
-            pendingLoad = nil
-            LoadLog.log(
-                LoadLog.page(
-                    load, render: nil, rows: 0, held: nil, shown: load.started.duration(to: .now)))
-            return
+            return LoadLog.page(
+                load, render: nil, rows: 0, held: nil, shown: load.started.duration(to: .now))
         }
         guard let update = applied.last(where: { !$0.inserted.isDisjoint(with: load.page) }),
             let shown = update.shown
         else {
-            return
+            return nil
         }
-        pendingLoad = nil
-        LoadLog.log(
-            LoadLog.page(
-                load, render: update.render, rows: update.inserted.intersection(load.page).count,
-                held: update.held, shown: load.started.duration(to: shown)))
+        return LoadLog.page(
+            load, render: update.render, rows: update.inserted.intersection(load.page).count,
+            held: update.held, shown: load.started.duration(to: shown))
     }
 
     deinit {
