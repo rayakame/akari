@@ -42,18 +42,37 @@ struct PerformanceProbe {
         }
     }
 
+    // Before the next layout pass: how far the visible row views sit from their rows, which is
+    // what the frame drawn right after a landing would show.
+    func staleOffset(_ controller: MessageTableController) -> Double {
+        let table = controller.tableView
+        let visible = table.rows(in: controller.scrollView.contentView.bounds)
+        var worst = 0.0
+        for row in visible.location..<(visible.location + visible.length) {
+            guard let view = table.rowView(atRow: row, makeIfNecessary: false) else {
+                continue
+            }
+            worst = max(worst, abs(view.frame.minY - table.rect(ofRow: row).minY))
+        }
+        return worst
+    }
+
     struct Frames {
         var times: [Double] = []
         var landings: [Double] = []
+        var stale: [Double] = []
 
         var summary: String {
             let sorted = times.sorted()
             let median = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
             let long = times.filter { $0 > 16.7 }.count
             return String(
-                format: "%d frames, median %.1f ms, longest %.1f ms, %d over 16.7 ms, landings %@",
+                format:
+                    "%d frames, median %.1f ms, longest %.1f ms, %d over 16.7 ms, landings %@, "
+                    + "rows out of place after a landing %@ pt",
                 times.count, median, sorted.last ?? 0, long,
-                landings.map { String(format: "%.1f", $0) }.joined(separator: "/"))
+                landings.map { String(format: "%.1f", $0) }.joined(separator: "/"),
+                stale.map { String(format: "%.0f", $0) }.joined(separator: "/"))
         }
     }
 
@@ -112,7 +131,11 @@ struct PerformanceProbe {
             if step == 30 || step == 80 || step == 130 {
                 let first = shown.first?.id.rawValue ?? 301
                 shown = rows((first - 50)...(first - 1)) + shown
-                up.landings.append(frame { controller.show(MessageTableState(rows: shown)) })
+                up.landings.append(
+                    frame {
+                        controller.show(MessageTableState(rows: shown))
+                        up.stale.append(staleOffset(controller))
+                    })
             }
             up.times.append(
                 frame {

@@ -269,6 +269,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let fills = placeholderPlaces()
         ownChanges += 1
         defer { ownChanges -= 1 }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         for index in changes.removed {
             rowHeights[timeline.items[index].id] = nil
         }
@@ -295,6 +298,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             sticksToBottom = true
             LaunchLog.mark("first channel rendered")
         }
+        measureRows()
         if pin {
             // Pinning moves the content, so it waits until the user lets go.
             if !isLiveScrolling {
@@ -304,8 +308,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             restoreAnchor()
             logCompensation(place, before: before, y: y, changes: changes)
         }
+        // Row views reach their rows only in the table's layout, which inside a SwiftUI update
+        // can come a frame later: that frame showed them out of place.
+        tableView.layoutSubtreeIfNeeded()
         logFills(fills, changes: changes)
         updateHover()
+    }
+
+    // The table measures new rows only when asked for spans from the top and answers estimates
+    // meanwhile; pinning or keeping the reader's place on estimates moves the text.
+    private func measureRows() {
+        for row in 0..<tableView.numberOfRows {
+            _ = tableView.rect(ofRow: row)
+        }
     }
 
     // Before an update: each placeholder block with the message next to it, where that message

@@ -693,6 +693,122 @@ struct MessageTableTests {
         raws.reduce(0) { $0 + table.rect(ofRow: index(of: $1)).height }
     }
 
+    // What the reader sees: each visible message's row view and where it sits on screen.
+    func visibleViews() -> [UInt64: (view: NSView?, y: CGFloat)] {
+        var shown: [UInt64: (view: NSView?, y: CGFloat)] = [:]
+        for row in visibleRows {
+            guard case .message(let item, _) = controller.timeline.items[row] else {
+                continue
+            }
+            let rowView = table.rowView(atRow: row, makeIfNecessary: false)
+            shown[item.id.rawValue] = (
+                table.view(atColumn: 0, row: row, makeIfNecessary: false),
+                (rowView?.frame.minY ?? .nan) - clip.bounds.minY
+            )
+        }
+        return shown
+    }
+
+    // Checked right after the update, before any layout pass: the frame AppKit would draw next.
+    func expectTheSameViewsInPlace(_ before: [UInt64: (view: NSView?, y: CGFloat)]) {
+        for (raw, was) in before {
+            let row = index(of: raw)
+            let view = table.view(atColumn: 0, row: row, makeIfNecessary: false)
+            #expect(view != nil && view === was.view, "message \(raw) got another view")
+            // Where its row view is now, not where the table will put it at its next layout.
+            let rowView = table.rowView(atRow: row, makeIfNecessary: false)
+            let y = (rowView?.frame.minY ?? .nan) - clip.bounds.minY
+            #expect(abs(y - was.y) <= 0.5, "message \(raw) moved from \(was.y) to \(y)")
+        }
+    }
+
+    @Test
+    func aPageLandingAboveKeepsTheVisibleRowsAndTheirViews() {
+        show(page)
+        scroll(toRowOf: 130)
+        let before = visibleViews()
+        #expect(!before.isEmpty)
+
+        controller.show(MessageTableState(rows: messages(50, from: 51) + page))
+
+        expectTheSameViewsInPlace(before)
+    }
+
+    @Test
+    func aPageLandingAboveDuringAFlingKeepsTheVisibleRowsAndTheirViews() {
+        show(page)
+        scroll(toRowOf: 130)
+        postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        postLiveScroll(NSScrollView.didLiveScrollNotification)
+        let before = visibleViews()
+
+        controller.show(MessageTableState(rows: messages(50, from: 51) + page))
+
+        expectTheSameViewsInPlace(before)
+    }
+
+    // A tall window and long messages, where the table's first answer for new rows is an
+    // estimate until it has measured them.
+    @Test
+    func aPageLandingAboveATallFlingStaysExactlyInPlace() {
+        let controller = MessageTableController(
+            calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 900),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentView = controller.scrollView
+        window.layoutIfNeeded()
+        let clip = controller.scrollView.contentView
+        let table = controller.tableView
+        let rows = { (range: ClosedRange<UInt64>) in
+            range.map { raw in
+                row(
+                    raw, by: author(raw % 4 == 0 ? 2 : 1), at: self.noon + Double(raw) * 40,
+                    content: String(
+                        repeating: "some words that wrap ",
+                        count: [1, 1, 2, 1, 6, 1, 3, 1, 14, 2][Int(raw % 10)] * 6))
+            }
+        }
+        controller.show(MessageTableState(rows: rows(301...400)))
+        window.layoutIfNeeded()
+        NotificationCenter.default.post(
+            name: NSScrollView.willStartLiveScrollNotification, object: controller.scrollView)
+        for _ in 0..<30 {
+            clip.scroll(to: NSPoint(x: 0, y: max(clip.bounds.minY - 90, 0)))
+            controller.scrollView.reflectScrolledClipView(clip)
+            NotificationCenter.default.post(
+                name: NSScrollView.didLiveScrollNotification, object: controller.scrollView)
+            window.layoutIfNeeded()
+        }
+        let place = { (raw: UInt64) -> (row: CGFloat, view: CGFloat) in
+            let index = controller.timeline.items.firstIndex {
+                $0.id == .message(MessageId(rawValue: raw))
+            }
+            guard let index else {
+                return (.nan, .nan)
+            }
+            let view = table.rowView(atRow: index, makeIfNecessary: false)?.frame.minY ?? .nan
+            return (table.rect(ofRow: index).minY - clip.bounds.minY, view - clip.bounds.minY)
+        }
+        let visible = table.rows(in: clip.bounds)
+        let watched = (visible.location..<(visible.location + visible.length)).compactMap {
+            row -> UInt64? in
+            if case .message(let item, _) = controller.timeline.items[row] {
+                return item.id.rawValue
+            }
+            return nil
+        }
+        let before = watched.map { place($0).row }
+
+        controller.show(MessageTableState(rows: rows(251...300) + rows(301...400)))
+
+        for (raw, was) in zip(watched, before) {
+            let now = place(raw)
+            #expect(abs(now.row - was) <= 0.5, "message \(raw) moved from \(was) to \(now.row)")
+            #expect(abs(now.view - was) <= 0.5, "message \(raw)'s view is at \(now.view)")
+        }
+    }
+
     @Test
     func anOlderPageKeepsTheReaderExactlyInPlace() {
         show(page)
