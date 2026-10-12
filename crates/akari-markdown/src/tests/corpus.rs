@@ -221,6 +221,10 @@ fn every_area_has_a_corpus_file() {
         "tokens.txt",
         "timestamps.txt",
         "emoji.txt",
+        "links.txt",
+        "urls.txt",
+        "samples.txt",
+        "parse-discord.txt",
     ] {
         assert!(names.iter().any(|n| n == area), "missing {area}");
     }

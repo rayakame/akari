@@ -192,10 +192,10 @@ p: "<" {l0}"https://a.co" " with space>"
 link0: <https://a.co/>
 
 == an email address
-<nelly@discordapp.com>
+<user@example.com>
 --
-p: {l0}"nelly@discordapp.com"
-link0: <mailto:nelly@discordapp.com> email
+p: {l0}"user@example.com"
+link0: <mailto:user@example.com> email
 
 == observe: an email address with mailto
 <mailto:a@b.co>
@@ -204,10 +204,10 @@ p: {l0}"mailto:a@b.co"
 link0: <mailto:a@b.co> email
 
 == an email address with headers
-<nelly@discord.com?subject=Title&body=Message%20Content>
+<user@example.com?subject=Title&body=Message%20Content>
 --
-p: {l0}"nelly@discord.com?subject=Title&body=Message%20Content"
-link0: <mailto:nelly@discord.com?subject=Title&body=Message%20Content> email
+p: {l0}"user@example.com?subject=Title&body=Message%20Content"
+link0: <mailto:user@example.com?subject=Title&body=Message%20Content> email
 
 == two email addresses aren't a link
 <a@b.co,c@d.co>
