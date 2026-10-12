@@ -2,8 +2,8 @@
 
 use crate::parse_with_steps;
 
-// The worst pathological input takes 4 steps per byte: an unclosed fence before 4,000 bytes.
-const K: u64 = 8;
+// 4,000 asterisks take 96 steps per byte: they nest 64 italics, each scanning its content again.
+const K: u64 = 128;
 
 fn steps(source: &str) -> u64 {
     parse_with_steps(source).1
@@ -30,6 +30,21 @@ pub(crate) fn pathological() -> Vec<String> {
         "`a".repeat(2000) + "``",
         "``a".repeat(1333),
         increasing_runs,
+        "*".repeat(4000),
+        "_".repeat(4000),
+        "~".repeat(4000),
+        "|".repeat(4000),
+        "*_".repeat(2000),
+        "_*".repeat(2000),
+        "**a".repeat(1333),
+        "__a".repeat(1333),
+        "||a".repeat(1333),
+        "~~a".repeat(1333),
+        "*a".repeat(2000),
+        "_a".repeat(2000),
+        "\\*".repeat(1333),
+        "**\\".repeat(1000),
+        "~~a~~_".repeat(666),
     ]
 }
 
@@ -63,4 +78,16 @@ fn step_ratios() {
             input.chars().take(30).collect::<String>()
         );
     }
+}
+
+#[test]
+fn asterisk_runs_nest_at_most_64_deep() {
+    // 2n + 2 asterisks nest n italics around "**"; at 65 the innermost level stays text.
+    let doc = crate::parse(&"*".repeat(132));
+    let inline = &doc.blocks()[0].inlines[0];
+    assert_eq!(
+        inline.kind,
+        crate::InlineKind::Text(crate::Span { start: 64, end: 68 })
+    );
+    assert_eq!(inline.style, crate::Style::ITALIC);
 }

@@ -8,6 +8,12 @@ use std::collections::HashMap;
 pub(super) struct Frame {
     /// No fence at or after this position.
     pub(super) no_fence_from: Option<usize>,
+    pub(super) no_bold_from: Option<usize>,
+    pub(super) no_underline_from: Option<usize>,
+    pub(super) no_strike_from: Option<usize>,
+    pub(super) no_spoiler_from: Option<usize>,
+    pub(super) doomed_star: Option<Doomed>,
+    pub(super) doomed_underscore: Option<Doomed>,
     pub(super) runs: Option<Runs>,
     /// Inline code failed in the run that ends here, so the rest of the run fails too.
     pub(super) code_dead_until: usize,
@@ -45,5 +51,35 @@ impl Runs {
         let runs = self.by_len.get(&len)?;
         let i = runs.partition_point(|&r| r < first);
         runs.get(i).map(|&r| self.starts[r])
+    }
+}
+
+/// Positions an italic search has passed without finding its closer. A later search that reaches
+/// one would go on exactly like the earlier one, so it fails there.
+pub(super) struct Doomed {
+    start: usize,
+    bits: Vec<u64>,
+}
+
+impl Doomed {
+    pub(super) fn new(range: std::ops::Range<usize>) -> Self {
+        Self {
+            start: range.start,
+            bits: vec![0; (range.len() + 1).div_ceil(64)],
+        }
+    }
+
+    pub(super) fn is(&self, at: usize) -> bool {
+        let i = at - self.start;
+        self.bits
+            .get(i / 64)
+            .is_some_and(|w| w & (1 << (i % 64)) != 0)
+    }
+
+    pub(super) fn set(&mut self, at: usize) {
+        let i = at - self.start;
+        if let Some(w) = self.bits.get_mut(i / 64) {
+            *w |= 1 << (i % 64);
+        }
     }
 }

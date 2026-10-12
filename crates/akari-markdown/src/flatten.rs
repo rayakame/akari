@@ -1,137 +1,157 @@
 //! The parse tree as a flat list of blocks, each with its runs.
 
-use crate::document::{Block, BlockKind, Container, Document, Inline, InlineKind, Span, Style};
+use crate::document::{
+    Block, BlockKind, Container, Document, Inline, InlineKind, Span, SpoilerId, Style,
+};
 use crate::parse::{Node, Piece};
 
 pub(crate) fn flatten(nodes: &[Node]) -> Document {
     let mut flat = Flat::default();
     let ctx = Context {
         kind: BlockKind::Paragraph,
-        containers: Vec::new(),
         style: Style::default(),
+        spoiler: None,
     };
-    flat.nodes(nodes, &ctx);
+    flat.nodes(nodes, ctx);
     flat.close();
-    Document::new(flat.blocks, Vec::new(), false, 0)
+    Document::new(flat.blocks, Vec::new(), false, flat.spoilers)
 }
 
 #[derive(Default)]
 struct Flat {
     blocks: Vec<Block>,
+    containers: Vec<Container>,
     open: Option<Open>,
+    spoilers: u16,
 }
 
+/// The paragraph, heading or subtext line being filled.
 struct Open {
     kind: BlockKind,
-    containers: Vec<Container>,
+    containers: Box<[Container]>,
+    /// The spoiler around the block when it opened, until a run outside it arrives.
+    spoiler: Option<SpoilerId>,
     inlines: Vec<Inline>,
     source: Span,
 }
 
+#[derive(Clone, Copy)]
 struct Context {
     kind: BlockKind,
-    containers: Vec<Container>,
     style: Style,
+    spoiler: Option<SpoilerId>,
 }
 
 impl Flat {
-    fn nodes(&mut self, nodes: &[Node], ctx: &Context) {
+    fn nodes(&mut self, nodes: &[Node], ctx: Context) {
         for node in nodes {
-            match node {
-                Node::Text(pieces) => {
-                    for piece in pieces {
-                        self.piece(*piece, ctx);
-                    }
+            self.node(node, ctx);
+        }
+    }
+
+    fn node(&mut self, node: &Node, ctx: Context) {
+        match node {
+            Node::Text(pieces) => {
+                for piece in pieces {
+                    self.piece(*piece, ctx);
                 }
-                Node::Code { code, source } => {
-                    for &piece in code {
-                        self.inline(
-                            Inline {
-                                kind: InlineKind::Code(piece),
-                                style: ctx.style,
-                                spoiler: None,
-                                link: None,
-                                source: *source,
-                            },
-                            ctx,
-                        );
-                    }
+            }
+            Node::Code { code, source } => {
+                for &piece in code {
+                    self.inline(InlineKind::Code(piece), *source, ctx);
                 }
-                Node::CodeBlock {
-                    language,
-                    code,
-                    source,
-                } => {
-                    self.close();
-                    let inlines = code.iter().map(|&piece| Inline {
-                        kind: InlineKind::Code(piece),
-                        style: Style::default(),
-                        spoiler: None,
-                        link: None,
-                        source: piece,
-                    });
-                    self.blocks.push(Block {
-                        kind: BlockKind::CodeBlock {
-                            language: *language,
-                        },
-                        containers: ctx.containers.clone().into(),
-                        spoiler: None,
-                        inlines: inlines.collect(),
-                        source: *source,
-                    });
-                }
+            }
+            Node::CodeBlock {
+                language,
+                code,
+                source,
+            } => {
+                self.close();
+                let inlines = code.iter().map(|&piece| Inline {
+                    kind: InlineKind::Code(piece),
+                    style: Style::default(),
+                    spoiler: ctx.spoiler,
+                    link: None,
+                    source: piece,
+                });
+                self.blocks.push(Block {
+                    kind: BlockKind::CodeBlock {
+                        language: *language,
+                    },
+                    containers: self.containers.clone().into(),
+                    spoiler: ctx.spoiler,
+                    inlines: inlines.collect(),
+                    source: *source,
+                });
+            }
+            Node::Style {
+                style, children, ..
+            } => self.nodes(
+                children,
+                Context {
+                    style: ctx.style.with(*style),
+                    ..ctx
+                },
+            ),
+            Node::Spoiler { children, .. } => {
+                let id = SpoilerId(self.spoilers.min(u16::MAX - 1));
+                self.spoilers = self.spoilers.saturating_add(1);
+                self.nodes(
+                    children,
+                    Context {
+                        spoiler: Some(id),
+                        ..ctx
+                    },
+                );
             }
         }
     }
 
-    fn piece(&mut self, piece: Piece, ctx: &Context) {
-        let (kind, source) = match piece {
+    fn piece(&mut self, piece: Piece, ctx: Context) {
+        match piece {
             Piece::Plain(span) => {
-                if let Some(last) = self.open.as_mut().and_then(|o| o.inlines.last_mut())
+                if let Some(open) = &mut self.open
+                    && let Some(last) = open.inlines.last_mut()
                     && let InlineKind::Text(shown) = &mut last.kind
                     && last.source == *shown
                     && shown.end == span.start
                     && last.style == ctx.style
+                    && last.spoiler == ctx.spoiler
                 {
                     shown.end = span.end;
                     last.source.end = span.end;
-                    self.extend(span);
+                    open.source.end = open.source.end.max(span.end);
                     return;
                 }
-                (InlineKind::Text(span), span)
+                self.inline(InlineKind::Text(span), span, ctx);
             }
-            Piece::Escape { display, source } => (InlineKind::Text(display), source),
-            Piece::Break(span) => (InlineKind::Break, span),
-        };
-        self.inline(
-            Inline {
-                kind,
-                style: ctx.style,
-                spoiler: None,
-                link: None,
-                source,
-            },
-            ctx,
-        );
+            Piece::Escape { display, source } => {
+                self.inline(InlineKind::Text(display), source, ctx)
+            }
+            Piece::Break(span) => self.inline(InlineKind::Break, span, ctx),
+        }
     }
 
-    fn inline(&mut self, inline: Inline, ctx: &Context) {
-        let source = inline.source;
+    fn inline(&mut self, kind: InlineKind, source: Span, ctx: Context) {
         let open = self.open.get_or_insert_with(|| Open {
             kind: ctx.kind,
-            containers: ctx.containers.clone(),
+            containers: self.containers.clone().into(),
+            spoiler: ctx.spoiler,
             inlines: Vec::new(),
             source,
         });
-        open.inlines.push(inline);
-        self.extend(source);
-    }
-
-    fn extend(&mut self, span: Span) {
-        if let Some(open) = &mut self.open {
-            open.source.start = open.source.start.min(span.start);
-            open.source.end = open.source.end.max(span.end);
+        if open.spoiler != ctx.spoiler {
+            open.spoiler = None;
         }
+        open.source.start = open.source.start.min(source.start);
+        open.source.end = open.source.end.max(source.end);
+        open.inlines.push(Inline {
+            kind,
+            style: ctx.style,
+            spoiler: ctx.spoiler,
+            link: None,
+            source,
+        });
     }
 
     fn close(&mut self) {
@@ -147,8 +167,8 @@ impl Flat {
         }
         self.blocks.push(Block {
             kind: open.kind,
-            containers: open.containers.into(),
-            spoiler: None,
+            containers: open.containers,
+            spoiler: open.spoiler,
             inlines: open.inlines.into(),
             source: open.source,
         });

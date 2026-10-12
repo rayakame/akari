@@ -174,6 +174,10 @@ impl Style {
     pub fn contains(self, other: Style) -> bool {
         self.0 & other.0 == other.0
     }
+
+    pub(crate) const fn with(self, other: Style) -> Style {
+        Style(self.0 | other.0)
+    }
 }
 
 /// Spoilers are numbered in source order; all parts of one spoiler share its id.

@@ -2,13 +2,14 @@
 //! rule's inner text is parsed again with what's known about its surroundings (`Ctx`).
 
 mod code;
+mod emphasis;
 mod memo;
 mod text;
 
 use std::borrow::Cow;
 use std::ops::Range;
 
-use crate::document::Span;
+use crate::document::{Span, Style};
 use memo::Frame;
 
 pub(crate) struct Parser {
@@ -61,22 +62,38 @@ impl<'a> Input<'a> {
     }
 }
 
+/// How deep rules may nest; a delimiter that would open the next level stays text (D73).
+pub(crate) const MAX_DEPTH: u8 = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LineStart {
+    /// Nothing before this on its line.
+    Nothing,
+    /// Only spaces before this on its line.
+    Space,
+    Text,
+}
+
 /// What a rule's inner text knows about its surroundings (parse-discord's `Context`).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Ctx {
+    pub(crate) line_start: LineStart,
     /// The match this text came from ended with a newline.
     pub(crate) trailing_newline: bool,
     /// Parsed to decide whether a masked link's text is allowed.
     pub(crate) testing_link: bool,
     /// A masked link's text.
     pub(crate) link_text: bool,
+    pub(crate) depth: u8,
 }
 
 impl Ctx {
     pub(crate) const ROOT: Ctx = Ctx {
+        line_start: LineStart::Nothing,
         trailing_newline: false,
         testing_link: false,
         link_text: false,
+        depth: 0,
     };
 
     fn escapes(self) -> bool {
@@ -95,6 +112,15 @@ pub(crate) enum Node {
     CodeBlock {
         language: Option<Span>,
         code: Vec<Span>,
+        source: Span,
+    },
+    Style {
+        style: Style,
+        children: Vec<Node>,
+        source: Span,
+    },
+    Spoiler {
+        children: Vec<Node>,
         source: Span,
     },
 }
@@ -163,13 +189,18 @@ impl Parser {
         input: &Input,
         at: usize,
         range: &Range<usize>,
-        _ctx: Ctx,
+        ctx: Ctx,
         frame: &mut Frame,
     ) -> Option<Match> {
+        let nest = ctx.depth < MAX_DEPTH;
         match input.text.as_bytes()[at] {
             b'`' => self
                 .code_block(input, at, range, frame)
                 .or_else(|| self.inline_code(input, at, range, frame)),
+            b'*' if nest => self.star(input, at, range, ctx, frame),
+            b'_' if nest => self.underscore(input, at, range, ctx, frame),
+            b'~' if nest => self.strike(input, at, range, ctx, frame),
+            b'|' if nest => self.spoiler(input, at, range, ctx, frame),
             _ => None,
         }
     }
