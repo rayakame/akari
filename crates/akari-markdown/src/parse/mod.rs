@@ -198,6 +198,11 @@ pub(crate) enum Node {
         children: Vec<Node>,
         source: Span,
     },
+    /// A Unicode emoji, or a known `:shortcode:` (shown as its text).
+    Emoji {
+        source: Span,
+        shortcode: bool,
+    },
     /// A mention, command, custom emoji, timestamp or navigation token.
     Token {
         kind: InlineKind,
@@ -244,6 +249,51 @@ impl Parser {
         Self { steps: 0 }
     }
 
+    /// A Unicode emoji; ©, ® and ™ match but stay text.
+    fn emoji(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
+        let len = crate::emoji::emoji_len(&input.text[..range.end], at, &mut self.steps)?;
+        let source = input.span(at..at + len);
+        let node = if crate::emoji::exempt(&input.text[at..at + len]) {
+            Node::Text(vec![Piece::Plain(source)])
+        } else {
+            Node::Emoji {
+                source,
+                shortcode: false,
+            }
+        };
+        Some(Match {
+            node,
+            next: at + len,
+        })
+    }
+
+    /// `:(\w+):`, consumed whole; shown as its text (D66).
+    fn shortcode(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
+        let text = &input.text[at + 1..range.end];
+        let name_len: usize = text
+            .chars()
+            .take_while(|&c| c.is_alphanumeric() || c == '_')
+            .map(char::len_utf8)
+            .sum();
+        self.steps += name_len as u64;
+        if name_len == 0 || !text[name_len..].starts_with(':') {
+            return None;
+        }
+        let end = at + name_len + 2;
+        let source = input.span(at..end);
+        let node = if crate::emoji::is_shortcode(&text[..name_len]) {
+            Node::Emoji {
+                source,
+                shortcode: true,
+            }
+        } else {
+            let mut pieces = Vec::new();
+            input.pieces(at..end, |span| pieces.push(Piece::Plain(span)));
+            Node::Text(pieces)
+        };
+        Some(Match { node, next: end })
+    }
+
     pub(crate) fn region(&mut self, input: &Input, range: Range<usize>, ctx: Ctx) -> Vec<Node> {
         let bytes = input.text.as_bytes();
         let mut nodes = Vec::new();
@@ -285,13 +335,20 @@ impl Parser {
                 .or_else(|| self.inline_code(input, at, range, frame)),
             b'*' if nest => self
                 .star(input, at, range, ctx, frame)
+                .or_else(|| self.emoji(input, at, range))
                 .or_else(|| self.list(input, at, range, ctx)),
             b'-' if nest => self
                 .subtext(input, at, range, ctx)
                 .or_else(|| self.list(input, at, range, ctx)),
-            b'#' if nest => self.heading(input, at, range, ctx),
+            b'#' => self
+                .emoji(input, at, range)
+                .or_else(|| self.heading(input, at, range, ctx).filter(|_| nest)),
             b'>' if nest => self.quote(input, at, range, ctx),
-            b'0'..=b'9' if nest => self.list(input, at, range, ctx),
+            b'0'..=b'9' => self
+                .emoji(input, at, range)
+                .or_else(|| self.list(input, at, range, ctx).filter(|_| nest)),
+            b':' => self.shortcode(input, at, range),
+            0x80.. => self.emoji(input, at, range),
             b'_' if nest => self.underscore(input, at, range, ctx, frame),
             b'~' if nest => self.strike(input, at, range, ctx, frame),
             b'|' if nest => self.spoiler(input, at, range, ctx, frame),

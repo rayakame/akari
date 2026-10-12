@@ -4,15 +4,11 @@ use std::ops::Range;
 
 use super::{Ctx, Input, LineStart, Match, Node, Parser};
 use crate::document::HeadingLevel;
+use crate::emoji::py_space;
 
 /// Lists nest this deep; the next level's bullet stays text (R§6).
 const MAX_LIST_DEPTH: u8 = 11;
 const MAX_LIST_NUMBER: u64 = 1_000_000_000;
-
-/// Python's `str.isspace`, which parse-discord's `rstrip` uses.
-fn py_space(c: char) -> bool {
-    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
-}
 
 fn trim_end(text: &str, range: Range<usize>, strip: impl Fn(char) -> bool) -> Range<usize> {
     let kept = text[range.clone()].trim_end_matches(strip).len();

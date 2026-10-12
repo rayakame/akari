@@ -1,5 +1,6 @@
 mod bounds;
 mod corpus;
+mod emoji;
 mod outline;
 mod text;
 

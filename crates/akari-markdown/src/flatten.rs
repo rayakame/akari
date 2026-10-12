@@ -5,7 +5,7 @@ use crate::document::{
 };
 use crate::parse::{Node, Piece};
 
-pub(crate) fn flatten(nodes: &[Node]) -> Document {
+pub(crate) fn flatten(nodes: &[Node], jumbo: bool) -> Document {
     let mut flat = Flat::default();
     let ctx = Context {
         kind: BlockKind::Paragraph,
@@ -14,7 +14,7 @@ pub(crate) fn flatten(nodes: &[Node]) -> Document {
     };
     flat.nodes(nodes, ctx);
     flat.close();
-    Document::new(flat.blocks, Vec::new(), false, flat.spoilers)
+    Document::new(flat.blocks, Vec::new(), jumbo, flat.spoilers)
 }
 
 #[derive(Default)]
@@ -96,6 +96,7 @@ impl Flat {
                 },
             ),
             Node::Token { kind, source } => self.inline(*kind, *source, ctx),
+            Node::Emoji { source, .. } => self.piece(Piece::Plain(*source), ctx),
             Node::Quote { children, source } => {
                 self.containers.push((Container::Quote, false));
                 self.container(children, *source, ctx);

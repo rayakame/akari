@@ -210,7 +210,18 @@ fn raw_and_escaped_inputs_are_the_same() {
 #[test]
 fn every_area_has_a_corpus_file() {
     let names: Vec<String> = files(&corpus_dir()).into_iter().map(|(n, _)| n).collect();
-    for area in ["text.txt", "escapes.txt"] {
+    for area in [
+        "text.txt",
+        "escapes.txt",
+        "code.txt",
+        "emphasis.txt",
+        "quotes.txt",
+        "headings.txt",
+        "lists.txt",
+        "tokens.txt",
+        "timestamps.txt",
+        "emoji.txt",
+    ] {
         assert!(names.iter().any(|n| n == area), "missing {area}");
     }
 }

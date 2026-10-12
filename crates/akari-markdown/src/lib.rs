@@ -1,6 +1,7 @@
 //! Discord-flavored markdown: the rules Discord's clients apply to message content.
 
 mod document;
+mod emoji;
 mod flatten;
 mod parse;
 
@@ -29,7 +30,8 @@ fn parse_counting(source: &str) -> (Document, u64) {
     }
     let mut parser = Parser::new();
     let nodes = parser.region(&Input::source(source), 0..source.len(), Ctx::ROOT);
-    (flatten::flatten(&nodes), parser.steps)
+    let jumbo = emoji::jumbo(&nodes, source);
+    (flatten::flatten(&nodes, jumbo), parser.steps)
 }
 
 #[cfg(test)]

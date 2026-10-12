@@ -64,6 +64,17 @@ pub(crate) fn pathological() -> Vec<String> {
         "</".to_owned() + &"a ".repeat(2000),
         "<id:".repeat(1000),
         "@".repeat(4000),
+        "😀".repeat(1000),
+        "😀\u{301}".repeat(666),
+        "🇦".repeat(1000),
+        "1\u{20e3}".repeat(1000),
+        "\u{301}".repeat(2000),
+        "👨\u{200d}".repeat(571),
+        ":a".repeat(2000),
+        ":".repeat(4000),
+        ":a:".repeat(1333),
+        "©".repeat(2000),
+        "日本語".repeat(444),
     ]
 }
 
@@ -77,7 +88,7 @@ fn pathological_inputs_stay_linear() {
 #[test]
 fn steps_grow_linearly() {
     for input in pathological() {
-        let half = &input[..input.len() / 2];
+        let half = &input[..input.floor_char_boundary(input.len() / 2)];
         let (once, twice) = (steps(half), steps(&input));
         assert!(
             twice * 10 <= once * 22 + 100,

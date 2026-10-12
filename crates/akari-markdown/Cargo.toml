@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[dependencies]
+unicode-segmentation.workspace = true
+emojis.workspace = true
+
 [lints]
 workspace = true
 
