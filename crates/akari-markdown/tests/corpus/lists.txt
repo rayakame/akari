@@ -1,0 +1,215 @@
+# Lists (R§6), with Discord's November 2025 rules: continuation lines need two spaces, items may
+# be indented by one space, and lists nest eleven deep.
+
+== a bulleted list
+input: "- a\n- b"
+--
+- p: "a"
+- p: "b"
+
+== asterisk bullets
+input: "* a\n* b"
+--
+- p: "a"
+- p: "b"
+
+== a numbered list
+input: "1. a\n2. b"
+--
+1. p: "a"
+2. p: "b"
+
+== a plus isn't a bullet
++ a
+--
+p: "+ a"
+
+== a parenthesis isn't a number
+1) a
+--
+p: "1) a"
+
+== a bullet needs a space
+-a
+--
+p: "-a"
+
+== a bullet in the middle of a line is text
+x - a
+--
+p: "x - a"
+
+== a continuation line needs two spaces
+input: "- a\n  b"
+--
+- p: "a" br "b"
+
+== one space ends the item
+input: "- a\n b"
+--
+- p: "a"
+p: "b"
+
+== the next item may be indented by one space
+input: "- a\n - b"
+--
+- p: "a"
+- p: "b"
+
+== a nested list
+input: "- a\n  - b"
+--
+- p: "a"
+. - p: "b"
+
+== a numbered item continued
+input: "1. a\n   b"
+--
+1. p: "a" br "b"
+
+== more indentation is kept
+input: "- a\n   b"
+--
+- p: "a" br " b"
+
+== a blank line ends the list
+input: "- a\n\n- b"
+--
+- p: "a"
+p:
+- p: "b"
+
+== a blank line then an indented line
+input: "- a\n\n  b"
+--
+- p: "a"
+p: br "  b"
+
+== an item starting on the next line
+input: "* \na"
+--
+- p: br "a"
+
+== a list ends at a line of text
+input: "- a\nb"
+--
+- p: "a"
+p: "b"
+
+== a list after text
+input: "a\n- b"
+--
+p: "a"
+- p: "b"
+
+== observe: leading spaces before a list
+  - a
+--
+p: "  "
+- p: "a"
+
+== numbering starts at the first number
+input: "3. a\n4. b"
+--
+3. p: "a"
+4. p: "b"
+
+== zero starts at one
+0. a
+--
+1. p: "a"
+
+== later numbers don't matter
+input: "1. a\n1. b"
+--
+1. p: "a"
+2. p: "b"
+
+== leading zeros
+007. a
+--
+7. p: "a"
+
+== numbers above a billion are clamped
+99999999999. a
+--
+1000000000. p: "a"
+
+== bullets after a number continue the numbering
+input: "1. a\n- b"
+--
+1. p: "a"
+2. p: "b"
+
+== numbers after a bullet are bullets
+input: "- a\n1. b"
+--
+- p: "a"
+- p: "b"
+
+== more spaces after a bullet
+-  a
+--
+- p: "a"
+
+== an empty item
+input: "- "
+--
+- p:
+
+== an empty item then another
+input: "-   \n- b"
+--
+- p:
+- p: "b"
+
+== trailing spaces stay in an item followed by another
+input: "- a  \n- b"
+--
+- p: "a  "
+- p: "b"
+
+== lists nest eleven deep
+1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. a
+--
+1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. p: "1. a"
+
+== an asterisk bullet with an asterisk after it
+* a*
+--
+- p: "a*"
+
+== italics then a list
+input: "*a*\n* b"
+--
+p: {i}"a"
+- p: "b"
+
+== task lists aren't supported
+- [ ] task
+--
+- p: "[ ] task"
+
+== a list starts before bold
+input: "- **a\n- b**"
+--
+- p: "**a"
+- p: "b**"
+
+== a list in a spoiler
+input: "||a\n- b||"
+--
+p{sp0}: {sp0}"a"
+- p{sp0}: {sp0}"b"
+
+== a quote in an item
+input: "- a\n  > b\n  > c"
+--
+- p: "a"
+. > p: "b" br "c"
+
+== a code block in an item
+input: "- a\n  ```\n  x\n  ```"
+--
+- p: "a"
+. code[]: "x"

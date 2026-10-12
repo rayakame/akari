@@ -3,13 +3,14 @@
 
 mod code;
 mod emphasis;
+mod lines;
 mod memo;
 mod text;
 
 use std::borrow::Cow;
 use std::ops::Range;
 
-use crate::document::{Span, Style};
+use crate::document::{HeadingLevel, Span, Style};
 use memo::Frame;
 
 pub(crate) struct Parser {
@@ -25,6 +26,8 @@ pub(crate) struct Input<'a> {
 
 enum Map {
     Source,
+    /// `(text offset, source offset)` where each contiguous piece starts.
+    Segments(Vec<(usize, usize)>),
 }
 
 impl<'a> Input<'a> {
@@ -35,15 +38,69 @@ impl<'a> Input<'a> {
         }
     }
 
+    /// The text of `ranges` one after another, mapped to where each piece came from.
+    pub(crate) fn derive(&self, ranges: &[Range<usize>]) -> Input<'static> {
+        let mut text = String::new();
+        let mut segments = Vec::new();
+        for range in ranges {
+            if segments.is_empty() || !range.is_empty() {
+                let offset = text.len();
+                self.split(range.clone(), |piece| {
+                    segments.push((offset + piece.start - range.start, self.start(piece.start)));
+                });
+                if range.is_empty() {
+                    segments.push((offset, self.start(range.start)));
+                }
+            }
+            text.push_str(&self.text[range.clone()]);
+        }
+        Input {
+            text: Cow::Owned(text),
+            map: Map::Segments(segments),
+        }
+    }
+
+    /// `range` in pieces that are contiguous in the source.
+    fn split(&self, range: Range<usize>, mut each: impl FnMut(Range<usize>)) {
+        let Map::Segments(segments) = &self.map else {
+            if !range.is_empty() {
+                each(range);
+            }
+            return;
+        };
+        let mut from = range.start;
+        let first = segments.partition_point(|&(t, _)| t <= from);
+        for &(t, _) in &segments[first..] {
+            if t >= range.end {
+                break;
+            }
+            each(from..t);
+            from = t;
+        }
+        if from < range.end {
+            each(from..range.end);
+        }
+    }
+
+    fn segment(segments: &[(usize, usize)], at: usize, left: bool) -> usize {
+        let i = segments.partition_point(|&(t, _)| if left { t < at } else { t <= at });
+        match i.checked_sub(1).and_then(|i| segments.get(i)) {
+            Some(&(t, s)) => s + (at - t),
+            None => segments.first().map_or(at, |&(_, s)| s),
+        }
+    }
+
     fn start(&self, at: usize) -> usize {
         match &self.map {
             Map::Source => at,
+            Map::Segments(segments) => Self::segment(segments, at, false),
         }
     }
 
     fn end(&self, at: usize) -> usize {
         match &self.map {
             Map::Source => at,
+            Map::Segments(segments) => Self::segment(segments, at, true),
         }
     }
 
@@ -58,7 +115,7 @@ impl<'a> Input<'a> {
 
     /// The source of `range` in contiguous pieces.
     pub(crate) fn pieces(&self, range: Range<usize>, mut each: impl FnMut(Span)) {
-        each(self.span(range));
+        self.split(range, |piece| each(self.span(piece)));
     }
 }
 
@@ -80,6 +137,8 @@ pub(crate) struct Ctx {
     pub(crate) line_start: LineStart,
     /// The match this text came from ended with a newline.
     pub(crate) trailing_newline: bool,
+    pub(crate) quote: bool,
+    pub(crate) list_depth: u8,
     /// Parsed to decide whether a masked link's text is allowed.
     pub(crate) testing_link: bool,
     /// A masked link's text.
@@ -91,6 +150,8 @@ impl Ctx {
     pub(crate) const ROOT: Ctx = Ctx {
         line_start: LineStart::Nothing,
         trailing_newline: false,
+        quote: false,
+        list_depth: 0,
         testing_link: false,
         link_text: false,
         depth: 0,
@@ -121,6 +182,25 @@ pub(crate) enum Node {
     },
     Spoiler {
         children: Vec<Node>,
+        source: Span,
+    },
+    Quote {
+        children: Vec<Node>,
+        source: Span,
+    },
+    Heading {
+        level: HeadingLevel,
+        children: Vec<Node>,
+        source: Span,
+    },
+    Subtext {
+        children: Vec<Node>,
+        source: Span,
+    },
+    /// `start`: the first number of an ordered list.
+    List {
+        start: Option<u32>,
+        items: Vec<(Vec<Node>, Span)>,
         source: Span,
     },
 }
@@ -197,7 +277,15 @@ impl Parser {
             b'`' => self
                 .code_block(input, at, range, frame)
                 .or_else(|| self.inline_code(input, at, range, frame)),
-            b'*' if nest => self.star(input, at, range, ctx, frame),
+            b'*' if nest => self
+                .star(input, at, range, ctx, frame)
+                .or_else(|| self.list(input, at, range, ctx)),
+            b'-' if nest => self
+                .subtext(input, at, range, ctx)
+                .or_else(|| self.list(input, at, range, ctx)),
+            b'#' if nest => self.heading(input, at, range, ctx),
+            b'>' if nest => self.quote(input, at, range, ctx),
+            b'0'..=b'9' if nest => self.list(input, at, range, ctx),
             b'_' if nest => self.underscore(input, at, range, ctx, frame),
             b'~' if nest => self.strike(input, at, range, ctx, frame),
             b'|' if nest => self.spoiler(input, at, range, ctx, frame),

@@ -1,0 +1,184 @@
+# Headings and subtext (R§5): only at a line's very start, not in lists.
+
+== a heading
+# a
+--
+h1: "a"
+
+== a second-level heading
+## a
+--
+h2: "a"
+
+== a third-level heading
+### a
+--
+h3: "a"
+
+== four hashes are text
+#### a
+--
+p: "#### a"
+
+== a hash needs a space
+#a
+--
+p: "#a"
+
+== a hash alone is text
+#
+--
+p: "#"
+
+== a hash after the space is text
+# # a
+--
+p: "# # a"
+
+== a closing hash is dropped
+# a #
+--
+h1: "a"
+
+== only the last run of closing hashes is dropped
+#    a #   ####
+--
+h1: "a #"
+
+== a heading ends at its line
+input: "# a\ning"
+--
+h1: "a"
+p: "ing"
+
+== a heading swallows the blank lines after it
+input: "# a\n\nb"
+--
+h1: "a"
+p: "b"
+
+== a hash on the next line is text
+input: "# a\n#b"
+--
+h1: "a"
+p: "#b"
+
+== headings on consecutive lines
+input: "# a\n## b\ntext"
+--
+h1: "a"
+h2: "b"
+p: "text"
+
+== a heading swallows the next line's indentation
+input: "# a\n  b"
+--
+h1: "a"
+p: "b"
+
+== styles in a heading
+# **a**
+--
+h1: {b}"a"
+
+== a code block in a heading
+# ```a```
+--
+code[]: "a"
+
+== a hash in the middle of a line is text
+a # foo
+--
+p: "a # foo"
+
+== a heading isn't parsed inside a style in the middle of a line
+a *# b*
+--
+p: "a " {i}"# b"
+
+== a heading inside a style at a line's start
+*# foo*ing
+--
+h1: {i}"foo"
+p: "ing"
+
+== a hash after more spaces
+#  #a
+--
+h1: " #a"
+
+== observe: a space before a hash
+#  # a
+--
+h1: " # a"
+
+== observe: a heading with a leading space
+ # a
+--
+p: " # a"
+
+== observe: a heading in a list
+- # a
+--
+- p: "# a"
+
+== observe: a hash and a newline
+input: "#\na"
+--
+h1: "a"
+
+== a subtext line
+-# a
+--
+sub: "a"
+
+== subtext needs a space
+-#a
+--
+p: "-#a"
+
+== subtext only at a line's very start
+ -# a
+--
+p: " -# a"
+
+== subtext doesn't start with subtext
+-# -# a
+--
+p: "-# -# a"
+
+== subtext after two spaces
+-#  -# a
+--
+sub: " -# a"
+
+== styles and code in subtext
+-# **x** `y`
+--
+sub: {b}"x" " " code"y"
+
+== subtext is one line
+input: "-# a\nb"
+--
+sub: "a"
+p: "b"
+
+== spaces after subtext are dropped
+input: "-# a  "
+--
+sub: "a"
+
+== subtext in a list
+- -# a
+--
+- sub: "a"
+
+== a heading in subtext
+-# # a
+--
+h1: "a"
+
+== subtext in a heading
+# -# a
+--
+sub: "a"

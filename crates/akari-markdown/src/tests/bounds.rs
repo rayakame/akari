@@ -45,6 +45,16 @@ pub(crate) fn pathological() -> Vec<String> {
         "\\*".repeat(1333),
         "**\\".repeat(1000),
         "~~a~~_".repeat(666),
+        "> a\n".repeat(1000),
+        "> ".repeat(2000),
+        "- a\n".repeat(1000),
+        "- ".repeat(2000),
+        "1. ".repeat(1333),
+        ("1. ".repeat(12) + "a\n").repeat(100),
+        "-# # ".repeat(800),
+        ">>> ".repeat(1000),
+        "# \n".repeat(1333),
+        "- a\n  ".repeat(571),
     ]
 }
 
@@ -90,4 +100,21 @@ fn asterisk_runs_nest_at_most_64_deep() {
         crate::InlineKind::Text(crate::Span { start: 64, end: 68 })
     );
     assert_eq!(inline.style, crate::Style::ITALIC);
+}
+
+#[test]
+fn line_rules_nest_at_most_64_deep() {
+    // Subtext and headings alternate without limit; the 65th level stays text.
+    let source = "-# # ".repeat(40) + "a";
+    let doc = crate::parse(&source);
+    assert_eq!(doc.blocks().len(), 1);
+    let block = &doc.blocks()[0];
+    assert_eq!(
+        block.kind,
+        crate::BlockKind::Heading(crate::HeadingLevel::One)
+    );
+    let crate::InlineKind::Text(shown) = block.inlines[0].kind else {
+        panic!("text expected: {block:?}");
+    };
+    assert_eq!(&source[shown.range()], "-# # ".repeat(8) + "a");
 }

@@ -20,7 +20,8 @@ pub(crate) fn flatten(nodes: &[Node]) -> Document {
 #[derive(Default)]
 struct Flat {
     blocks: Vec<Block>,
-    containers: Vec<Container>,
+    /// With whether a list item's marker was shown yet.
+    containers: Vec<(Container, bool)>,
     open: Option<Open>,
     spoilers: u16,
 }
@@ -74,11 +75,12 @@ impl Flat {
                     link: None,
                     source: piece,
                 });
+                let containers = self.block_containers();
                 self.blocks.push(Block {
                     kind: BlockKind::CodeBlock {
                         language: *language,
                     },
-                    containers: self.containers.clone().into(),
+                    containers,
                     spoiler: ctx.spoiler,
                     inlines: inlines.collect(),
                     source: *source,
@@ -93,6 +95,43 @@ impl Flat {
                     ..ctx
                 },
             ),
+            Node::Quote { children, source } => {
+                self.containers.push((Container::Quote, false));
+                self.container(children, *source, ctx);
+                self.containers.pop();
+            }
+            Node::Heading {
+                level,
+                children,
+                source,
+            } => self.container(
+                children,
+                *source,
+                Context {
+                    kind: BlockKind::Heading(*level),
+                    ..ctx
+                },
+            ),
+            Node::Subtext { children, source } => self.container(
+                children,
+                *source,
+                Context {
+                    kind: BlockKind::Subtext,
+                    ..ctx
+                },
+            ),
+            Node::List { start, items, .. } => {
+                for (i, (children, source)) in items.iter().enumerate() {
+                    let item = Container::ListItem {
+                        ordered: start.is_some(),
+                        number: start.unwrap_or(1).saturating_add(i as u32),
+                        marker: true,
+                    };
+                    self.containers.push((item, false));
+                    self.container(children, *source, ctx);
+                    self.containers.pop();
+                }
+            }
             Node::Spoiler { children, .. } => {
                 let id = SpoilerId(self.spoilers.min(u16::MAX - 1));
                 self.spoilers = self.spoilers.saturating_add(1);
@@ -105,6 +144,45 @@ impl Flat {
                 );
             }
         }
+    }
+
+    /// Blocks for a quote, heading, subtext line or list item: at least one, empty if need be.
+    fn container(&mut self, children: &[Node], source: Span, ctx: Context) {
+        self.close();
+        let before = self.blocks.len();
+        self.nodes(children, ctx);
+        self.close();
+        if self.blocks.len() == before {
+            let containers = self.block_containers();
+            self.blocks.push(Block {
+                kind: ctx.kind,
+                containers,
+                spoiler: ctx.spoiler,
+                inlines: Box::default(),
+                source,
+            });
+        }
+    }
+
+    /// The containers of a new block; a list item shows its marker on its first block only.
+    fn block_containers(&mut self) -> Box<[Container]> {
+        self.containers
+            .iter_mut()
+            .map(|(container, shown)| match container {
+                Container::ListItem {
+                    ordered, number, ..
+                } => {
+                    let marker = !*shown;
+                    *shown = true;
+                    Container::ListItem {
+                        ordered: *ordered,
+                        number: *number,
+                        marker,
+                    }
+                }
+                other => *other,
+            })
+            .collect()
     }
 
     fn piece(&mut self, piece: Piece, ctx: Context) {
@@ -133,13 +211,19 @@ impl Flat {
     }
 
     fn inline(&mut self, kind: InlineKind, source: Span, ctx: Context) {
-        let open = self.open.get_or_insert_with(|| Open {
-            kind: ctx.kind,
-            containers: self.containers.clone().into(),
-            spoiler: ctx.spoiler,
-            inlines: Vec::new(),
-            source,
-        });
+        if self.open.is_none() {
+            let containers = self.block_containers();
+            self.open = Some(Open {
+                kind: ctx.kind,
+                containers,
+                spoiler: ctx.spoiler,
+                inlines: Vec::new(),
+                source,
+            });
+        }
+        let Some(open) = &mut self.open else {
+            return;
+        };
         if open.spoiler != ctx.spoiler {
             open.spoiler = None;
         }
