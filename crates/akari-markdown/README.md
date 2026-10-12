@@ -41,17 +41,19 @@ inputs for the first version). The differences that remain are deliberate:
   and its `\w` takes combining marks into `:shortcode:` names. Akari uses ASCII digits, and
   letters and digits for names (Discord's own regexes are JavaScript, where both are ASCII).
 - **IDNA**: rust-url refuses some hosts ada accepts (the bidi rule, code points its tables
-  don't assign); such URLs stay text.
+  don't assign). Such URLs stay text, but in a masked link's text they still count as URLs, so
+  the link is refused (stricter than parse-discord where neither parser takes the host).
 - **Shortcodes** stay text (`:c:` isn't ©), commands, navigation, email and phone links and
   the `s`/`S` timestamp styles follow docs.discord.food, and IDs beyond `u64` stay text.
 
 ## Limits
 
 Every input parses. Rules nest at most 64 deep (a delimiter that would open the 65th level stays
-text) and lists 11 deep. Spoilers and links get at most 65,535 ids. The parser's work is linear:
-with the `fuzzing` feature, `parse_with_steps` counts it, and every corpus, property and fuzz
-input stays within `STEPS_PER_BYTE × (length + 1)` steps (256; the worst case, a chain of 64
-nested masked-link checks, takes about 200).
+text) and lists 11 deep. A masked link's text is checked with at most 8 levels left, because each
+check parses the text again. Spoilers and links get at most 65,535 ids. The parser's work is
+linear: with the `fuzzing` feature, `parse_with_steps` counts it, and every corpus, property and
+fuzz input stays within `STEPS_PER_BYTE × (length + 1)` steps (128; the worst case, 64 nested
+italics, takes about 100), also when nested deep inside links, styles and quotes.
 
 ## Tests
 

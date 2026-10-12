@@ -68,7 +68,6 @@ fn a_cache_of_capacity_zero_keeps_nothing() {
     assert_eq!(cache.len(), 0);
 }
 
-/// The heap a document holds, estimated from its parts.
 pub(crate) fn heap_size(doc: &crate::Document) -> usize {
     use std::mem::size_of;
     let blocks: usize = doc

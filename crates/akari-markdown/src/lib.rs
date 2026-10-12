@@ -24,10 +24,10 @@ pub fn parse(source: &str) -> Document {
     parse_counting(source).0
 }
 
-/// At most this many steps per byte of input, plus one (D73). About 200 at worst: a rejected
-/// masked link's text is parsed to check it, and holds the next link to check, 64 levels deep.
+/// At most this many steps per byte of input, plus one (D73). About 100 at worst: 64 nested
+/// italics, each reading its content again.
 #[cfg(any(test, feature = "fuzzing"))]
-pub const STEPS_PER_BYTE: u64 = 256;
+pub const STEPS_PER_BYTE: u64 = 128;
 
 /// `parse`, and the work it took in steps (D73).
 #[cfg(any(test, feature = "fuzzing"))]

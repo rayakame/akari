@@ -1,5 +1,5 @@
-//! Parse time, printed rather than asserted (D71); run it in release:
-//! `cargo test --release -p akari-markdown -- --ignored parse_cost --nocapture`.
+// Printed rather than asserted (D71); run it in release:
+// cargo test --release -p akari-markdown -- --ignored parse_cost --nocapture
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};

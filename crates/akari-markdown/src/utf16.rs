@@ -3,7 +3,6 @@
 /// Converts between UTF-8 byte offsets and UTF-16 offsets of one source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Utf16Map {
-    /// Each character outside ASCII: its byte offset, its UTF-16 offset and both lengths.
     wide: Box<[Wide]>,
     bytes: u32,
     units: u32,

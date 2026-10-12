@@ -315,3 +315,21 @@ p: "[a" br "b](ftp://x)"
 input: "x [a  \nb](ftp://x) y"
 --
 p: "x [a  " br "b](ftp://x) y"
+
+# A URL in the text is refused even when rust-url refuses its host but Discord's parser
+# doesn't (IDNA), so the text can't pass for another address.
+== a URL with a newer script in its host is refused in the text
+input: "[https://evil.example\u{10d4a}](https://good.example)"
+--
+p: "[https://evil.example𐵊](https://good.example)"
+
+== a URL with a newer script in its host is refused in the title
+input: "[a](https://good.example \"https://evil.example\u{10d4a}\")"
+--
+p: "[a](https://good.example \"https://evil.example𐵊\")"
+
+# Stricter than parse-discord, which accepts this: neither parser takes the host (bidi rule).
+== a URL whose host breaks the bidi rule is refused in the text
+input: "[https://\u{5d0}a.com](https://good.example)"
+--
+p: "[https://אa.com](https://good.example)"

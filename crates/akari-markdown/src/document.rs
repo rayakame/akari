@@ -7,7 +7,6 @@ pub struct Document {
     links: Box<[Link]>,
     jumbo: bool,
     spoiler_count: u16,
-    /// Each link's whole construct, `[text](url)` or `<url>` included.
     link_spans: Box<[Span]>,
 }
 

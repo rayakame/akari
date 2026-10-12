@@ -1,5 +1,3 @@
-//! Properties over generated input: markdown-heavy text, letters and any characters.
-
 use proptest::prelude::*;
 
 use super::bounds::assert_bounded;

@@ -1,12 +1,10 @@
-//! Rules that only start at a line's start: subtext, headings, quotes and lists (R§4–6).
-
 use std::ops::Range;
 
 use super::{Ctx, Input, LineStart, Match, Node, Parser};
 use crate::document::HeadingLevel;
 use crate::emoji::py_space;
 
-/// Lists nest this deep; the next level's bullet stays text (R§6).
+// Discord's limit; the next level's bullet stays text (R§6).
 const MAX_LIST_DEPTH: u8 = 11;
 const MAX_LIST_NUMBER: u64 = 1_000_000_000;
 
@@ -23,7 +21,7 @@ fn line_end(bytes: &[u8], from: usize) -> usize {
 }
 
 impl Parser {
-    /// `^`: the very start of a line.
+    // The regexes' ^.
     fn at_line_start(bytes: &[u8], at: usize, range: &Range<usize>, ctx: Ctx) -> bool {
         if at == range.start {
             ctx.line_start == LineStart::Nothing
@@ -32,7 +30,7 @@ impl Parser {
         }
     }
 
-    /// `(?<=^ *)`: only spaces before this on its line.
+    // The regexes' (?<=^ *).
     fn after_indent(&mut self, bytes: &[u8], at: usize, range: &Range<usize>, ctx: Ctx) -> bool {
         let mut i = at;
         while i > range.start {
@@ -47,7 +45,7 @@ impl Parser {
         ctx.line_start != LineStart::Text
     }
 
-    /// `^-# +(?!-#)([^\n]+)\n?`
+    // ^-# +(?!-#)([^\n]+)\n?
     pub(super) fn subtext(
         &mut self,
         input: &Input,
@@ -86,7 +84,7 @@ impl Parser {
         })
     }
 
-    /// `^(#{1,3})\s+(?!#)([^\n]*)\s*` (parse-discord's verbose regex makes the rest a comment).
+    // ^(#{1,3})\s+(?!#)([^\n]*)\s* (parse-discord's verbose regex makes its #*\s*\n? a comment).
     pub(super) fn heading(
         &mut self,
         input: &Input,
@@ -151,7 +149,7 @@ impl Parser {
         })
     }
 
-    /// `(?:(?<=^ *)> ([^\n]*)\n?)+`, or `(?<=^ *)>>> (.*)` to the end of the region.
+    // (?:(?<=^ *)> ([^\n]*)\n?)+ or (?<=^ *)>>> (.*)
     pub(super) fn quote(
         &mut self,
         input: &Input,
@@ -199,8 +197,7 @@ impl Parser {
         })
     }
 
-    /// Items of `(?:[*-]|\d+\.) +`; an item's lines continue with two spaces, the next item may be
-    /// indented by one space, and each item loses up to its bullet's width of indentation per line.
+    // Discord's November 2025 lists (R§6): continuation lines need two spaces.
     pub(super) fn list(
         &mut self,
         input: &Input,
@@ -268,7 +265,6 @@ impl Parser {
         })
     }
 
-    /// Parses `pieces` of `input` as one text: in place when they're one range, else joined.
     fn parse_pieces(&mut self, input: &Input, pieces: &[Range<usize>], ctx: Ctx) -> Vec<Node> {
         match pieces {
             [one] => self.region(input, one.clone(), ctx),
@@ -282,7 +278,6 @@ impl Parser {
     }
 }
 
-/// The bullet's width with its spaces: `- `, `* `, `12. `.
 fn bullet(bytes: &[u8], at: usize, steps: &mut u64) -> Option<usize> {
     let marker = match bytes.get(at)? {
         b'-' | b'*' => 1,
@@ -306,7 +301,6 @@ fn bullet(bytes: &[u8], at: usize, steps: &mut u64) -> Option<usize> {
     (spaces > 0).then_some(marker + spaces)
 }
 
-/// The number of an ordered item, saturated; `None` for a bullet.
 fn number(bytes: &[u8], at: usize) -> Option<u64> {
     let digits = bytes[at..].iter().take_while(|b| b.is_ascii_digit());
     let mut n: Option<u64> = None;
@@ -320,7 +314,7 @@ fn number(bytes: &[u8], at: usize) -> Option<u64> {
     n
 }
 
-/// `^ {1,width}` removed from each line of `item`.
+// parse-discord removes ^ {1,width} from each line before parsing the item.
 fn dedent(bytes: &[u8], item: Range<usize>, width: usize) -> Vec<Range<usize>> {
     let mut pieces: Vec<Range<usize>> = Vec::new();
     let mut line = item.start;

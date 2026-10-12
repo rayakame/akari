@@ -1,11 +1,13 @@
-//! Masked links, plain URLs, `<url>`, email addresses and phone numbers (R§7, R§8).
-
 use std::ops::Range;
 
 use super::memo::{Brackets, Frame, UrlPart};
 use super::phishing::special_whitespace;
 use super::{Ctx, Input, LineStart, Match, Node, Parser, literal};
 use crate::document::LinkKind;
+
+// A link's text is checked at this depth or deeper, so checks nest at most 8 deep and so do
+// styles inside one; each check parses its text again (D73).
+const CHECK_DEPTH: u8 = super::MAX_DEPTH - 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LinkData {
@@ -14,7 +16,6 @@ pub(crate) struct LinkData {
     pub(crate) suppress_embed: bool,
 }
 
-/// A URL Discord follows: WHATWG-valid with scheme http, https or discord.
 fn valid_url(text: &str) -> Option<String> {
     let url = url::Url::parse(text).ok()?;
     matches!(url.scheme(), "http" | "https" | "discord").then(|| url.as_str().to_owned())
@@ -32,7 +33,6 @@ fn whitespace_end(text: &str, from: usize) -> usize {
         .sum::<usize>()
 }
 
-/// `\X` with X not a letter, digit or whitespace becomes X.
 fn unescape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -73,12 +73,13 @@ impl Parser {
         }
     }
 
-    /// `(?:https?|steam)://[^\s<]+[^<.,:;"'\]\s]`, minus one `)` when they outnumber `(`.
+    // (?:https?|steam)://[^\s<]+[^<.,:;"'\]\s], minus one ")" when they outnumber "(".
     pub(super) fn plain_url(
         &mut self,
         input: &Input,
         at: usize,
         range: &Range<usize>,
+        ctx: Ctx,
     ) -> Option<Match> {
         let text = &input.text[..range.end];
         let rest = &text[at..];
@@ -108,26 +109,32 @@ impl Parser {
             end -= 1;
         }
         let url = &text[at..end];
-        Some(match valid_url(url) {
-            Some(target) => self.link(
-                input,
-                at,
-                at..end,
-                end,
-                LinkData {
-                    url: target,
-                    kind: LinkKind::Plain,
-                    suppress_embed: false,
+        // While a masked link's text is checked, a URL whose host rust-url refuses but other
+        // parsers take (IDNA) still counts as a URL, so the text can't pass for an address.
+        let refused_host =
+            || ctx.testing_link && matches!(url::Url::parse(url), Err(url::ParseError::IdnaError));
+        Some(
+            match valid_url(url).or_else(|| refused_host().then(|| url.to_owned())) {
+                Some(target) => self.link(
+                    input,
+                    at,
+                    at..end,
+                    end,
+                    LinkData {
+                        url: target,
+                        kind: LinkKind::Plain,
+                        suppress_embed: false,
+                    },
+                ),
+                None => Match {
+                    node: literal(input, at..end),
+                    next: end,
                 },
-            ),
-            None => Match {
-                node: literal(input, at..end),
-                next: end,
             },
-        })
+        )
     }
 
-    /// `<([^: >]+:/[^ >]+)>`: brackets hidden, embed suppressed; invalid, it's the text inside.
+    // <([^: >]+:/[^ >]+)>; without parse-discord's parenthesis trim, which loses a character.
     pub(super) fn angle_link(
         &mut self,
         input: &Input,
@@ -167,12 +174,13 @@ impl Parser {
         })
     }
 
-    /// `<user@example.com>`, optionally `mailto:` and `?headers`; one address only.
+    // docs.discord.food gives only examples; the grammar beyond them is Akari's.
     pub(super) fn email(
         &mut self,
         input: &Input,
         at: usize,
         range: &Range<usize>,
+        frame: &mut Frame,
     ) -> Option<Match> {
         let text = &input.text[..range.end];
         let start = at + 1;
@@ -198,13 +206,10 @@ impl Parser {
             return None;
         }
         let mut close = domain + domain_len;
-        if bytes.get(close) == Some(&b'?') {
-            close += bytes[close..]
-                .iter()
-                .take_while(|&&b| b != b'>' && !b.is_ascii_whitespace())
-                .count();
-        }
         self.steps += (close - at) as u64;
+        if bytes.get(close) == Some(&b'?') {
+            close = frame.next_gt_or_space(bytes, close, &mut self.steps);
+        }
         if bytes.get(close) != Some(&b'>') {
             return None;
         }
@@ -222,7 +227,7 @@ impl Parser {
         ))
     }
 
-    /// `<+1 (555) 123 4567>`, optionally `tel:` or `sms:`; the `+` is needed without a scheme.
+    // docs.discord.food gives only examples; the grammar beyond them is Akari's.
     pub(super) fn phone(
         &mut self,
         input: &Input,
@@ -271,8 +276,6 @@ impl Parser {
         ))
     }
 
-    /// `[text](url "title")`, matched as parse-discord's regex does, then checked: the URL must
-    /// be valid and the text and title allowed, or the whole link is text.
     pub(super) fn masked_link(
         &mut self,
         input: &Input,
@@ -301,7 +304,7 @@ impl Parser {
         let check = Ctx {
             testing_link: true,
             trailing_newline: false,
-            depth: ctx.depth + 1,
+            depth: ctx.depth.max(CHECK_DEPTH) + 1,
             ..self.inner(input, at, range, ctx, false)
         };
         let allowed = url.is_some()
@@ -352,8 +355,7 @@ impl Parser {
         })
     }
 
-    /// The `](url)` that closes a link whose text part ends at `text_end`: the last `]` before
-    /// the next `[` that a valid URL part follows (the regex's backtracking order).
+    // The regex's backtracking order: the last "](" before the next "[" whose URL part matches.
     fn link_close(
         &mut self,
         text: &str,
@@ -376,7 +378,7 @@ impl Parser {
         None
     }
 
-    /// `\(\s*(<)?((?:\([^)]*\)|[^\s\\]|\\[^\n])*?)(>)?(?:\s+['"](.*?)['"])?\s*\)` from after `(`.
+    // \(\s*(<)?((?:\([^)]*\)|[^\s\\]|\\[^\n])*?)(>)?(?:\s+['"](.*?)['"])?\s*\)
     fn url_part(&mut self, text: &str, from: usize, frame: &mut Frame) -> Option<UrlPart> {
         let start = whitespace_end(text, from);
         self.steps += (start - from) as u64;
@@ -388,9 +390,7 @@ impl Parser {
         self.url_units(text, start, false, frame)
     }
 
-    /// The lazy URL: the first end, in the regex's order, after which the rest matches. A
-    /// depth-first search over unit boundaries; a boundary from which nothing matched is
-    /// remembered for the region.
+    // The lazy URL in the regex's order; boundaries from which nothing matched are remembered.
     fn url_units(
         &mut self,
         text: &str,
@@ -402,7 +402,7 @@ impl Parser {
             return None;
         }
         let bytes = text.as_bytes();
-        // Each entry: a boundary and the next unit alternative to try there (0 = not finished yet).
+        // A boundary and the next alternative to try there; 0: the rest wasn't tried yet.
         let mut stack: Vec<(usize, u8)> = vec![(start, 0)];
         while let Some(&mut (pos, ref mut next_alternative)) = stack.last_mut() {
             self.steps += 1;
@@ -450,7 +450,7 @@ impl Parser {
         None
     }
 
-    /// `(>)?(?:\s+['"](.*?)['"])?\s*\)` at `pos`: whether `>` was there, the title and the end.
+    // (>)?(?:\s+['"](.*?)['"])?\s*\)
     fn url_finish(
         &mut self,
         text: &str,
@@ -472,7 +472,6 @@ impl Parser {
     }
 }
 
-/// `range` without special whitespace, as contiguous ranges.
 fn clean_ranges(text: &str, range: Range<usize>) -> Vec<Range<usize>> {
     let mut out: Vec<Range<usize>> = Vec::new();
     let mut from = range.start;

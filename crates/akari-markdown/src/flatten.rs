@@ -1,5 +1,3 @@
-//! The parse tree as a flat list of blocks, each with its runs.
-
 use crate::document::{
     Block, BlockKind, Container, Document, Inline, InlineKind, Link, LinkId, Span, SpoilerId, Style,
 };
@@ -22,17 +20,14 @@ pub(crate) fn flatten(nodes: &[Node], jumbo: bool) -> Document {
 struct Flat {
     blocks: Vec<Block>,
     links: Vec<(Link, Span)>,
-    /// With whether a list item's marker was shown yet.
     containers: Vec<(Container, bool)>,
     open: Option<Open>,
     spoilers: u16,
 }
 
-/// The paragraph, heading or subtext line being filled.
 struct Open {
     kind: BlockKind,
     containers: Box<[Container]>,
-    /// The spoiler around the block when it opened, until a run outside it arrives.
     spoiler: Option<SpoilerId>,
     inlines: Vec<Inline>,
     source: Span,
@@ -182,7 +177,7 @@ impl Flat {
         }
     }
 
-    /// Blocks for a quote, heading, subtext line or list item: at least one, empty if need be.
+    // At least one block, empty if need be, so an empty item or quote still shows.
     fn container(&mut self, children: &[Node], source: Span, ctx: Context) {
         self.close();
         let before = self.blocks.len();
@@ -200,7 +195,6 @@ impl Flat {
         }
     }
 
-    /// The containers of a new block; a list item shows its marker on its first block only.
     fn block_containers(&mut self) -> Box<[Container]> {
         self.containers
             .iter_mut()

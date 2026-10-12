@@ -1,12 +1,10 @@
-//! Discord's check on a masked link's text and title (parse-discord's `is_link_admissable`): the
-//! text is cleaned of special whitespace and scheme look-alikes, parsed, and may hold only text,
-//! styles, inline code, spoilers, timestamps and blocks (lists aren't looked into).
+// parse-discord's is_link_admissable; like Discord's, it doesn't look into lists.
 
 use super::{Ctx, Input, Node, Parser, Piece};
 use crate::document::InlineKind;
 use crate::emoji::py_space;
 
-/// Format, separator and control characters, other spaces, and fillers that show nothing.
+// parse-discord's bad_whitespace_regex.
 pub(crate) fn special_whitespace(c: char) -> bool {
     let n = u32::from(c);
     (c.is_control() && c != '\n')
@@ -42,7 +40,7 @@ pub(crate) fn special_whitespace(c: char) -> bool {
         )
 }
 
-/// The ASCII character a scheme look-alike stands for.
+// parse-discord's scheme confusables.
 fn unconfuse(c: char) -> char {
     match u32::from(c) {
         0x48 | 0x4BB | 0x570 | 0x13C2 | 0x210E | 0x1D421 | 0x1D489 | 0x1D4BD | 0x1D4F1
@@ -66,7 +64,7 @@ fn unconfuse(c: char) -> char {
 }
 
 impl Parser {
-    /// `None` when the text isn't allowed; otherwise whether it shows anything but whitespace.
+    // None: refused; otherwise whether it shows more than whitespace (empty text is refused too).
     pub(super) fn admissible(&mut self, text: &str, ctx: Ctx, allow_emoji: bool) -> Option<bool> {
         let cleaned: String = text
             .chars()

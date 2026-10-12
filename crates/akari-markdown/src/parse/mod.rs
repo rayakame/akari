@@ -1,6 +1,3 @@
-//! A port of Discord's rule matching: at each position the first rule that matches wins, and a
-//! rule's inner text is parsed again with what's known about its surroundings (`Ctx`).
-
 mod code;
 mod emphasis;
 mod lines;
@@ -20,8 +17,7 @@ pub(crate) struct Parser {
     pub(crate) steps: u64,
 }
 
-/// The text one parse runs over: the source itself, or text that parse-discord builds from it
-/// (a quote's lines without `> `), mapped back to source offsets.
+// parse-discord parses some text it builds (a quote's lines without "> "), mapped back here.
 pub(crate) struct Input<'a> {
     pub(crate) text: Cow<'a, str>,
     map: Map,
@@ -29,7 +25,6 @@ pub(crate) struct Input<'a> {
 
 enum Map {
     Source,
-    /// `(text offset, source offset)` where each contiguous piece starts.
     Segments(Vec<(usize, usize)>),
 }
 
@@ -41,7 +36,6 @@ impl<'a> Input<'a> {
         }
     }
 
-    /// The text of `ranges` one after another, mapped to where each piece came from.
     pub(crate) fn derive(&self, ranges: &[Range<usize>]) -> Input<'static> {
         let mut text = String::new();
         let mut segments = Vec::new();
@@ -63,7 +57,6 @@ impl<'a> Input<'a> {
         }
     }
 
-    /// `range` in pieces that are contiguous in the source.
     fn split(&self, range: Range<usize>, mut each: impl FnMut(Range<usize>)) {
         let Map::Segments(segments) = &self.map else {
             if !range.is_empty() {
@@ -107,7 +100,6 @@ impl<'a> Input<'a> {
         }
     }
 
-    /// The source of `range`; for derived text, from its first to its last character.
     pub(crate) fn span(&self, range: Range<usize>) -> Span {
         if range.is_empty() {
             let at = self.start(range.start);
@@ -116,35 +108,30 @@ impl<'a> Input<'a> {
         Span::new(self.start(range.start)..self.end(range.end))
     }
 
-    /// The source of `range` in contiguous pieces.
     pub(crate) fn pieces(&self, range: Range<usize>, mut each: impl FnMut(Span)) {
         self.split(range, |piece| each(self.span(piece)));
     }
 }
 
-/// How deep rules may nest; a delimiter that would open the next level stays text (D73).
+// D73: a delimiter that would open the next level stays text.
 pub(crate) const MAX_DEPTH: u8 = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LineStart {
-    /// Nothing before this on its line.
     Nothing,
-    /// Only spaces before this on its line.
     Space,
     Text,
 }
 
-/// What a rule's inner text knows about its surroundings (parse-discord's `Context`).
+// parse-discord's Context.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Ctx {
     pub(crate) line_start: LineStart,
-    /// The match this text came from ended with a newline.
+    // The match ended with a newline, so the text's final spaces aren't shown.
     pub(crate) trailing_newline: bool,
     pub(crate) quote: bool,
     pub(crate) list_depth: u8,
-    /// Parsed to decide whether a masked link's text is allowed.
     pub(crate) testing_link: bool,
-    /// A masked link's text.
     pub(crate) link_text: bool,
     pub(crate) depth: u8,
 }
@@ -168,7 +155,6 @@ impl Ctx {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Node {
     Text(Vec<Piece>),
-    /// The code in contiguous pieces of source.
     Code {
         code: Vec<Span>,
         source: Span,
@@ -200,28 +186,24 @@ pub(crate) enum Node {
         children: Vec<Node>,
         source: Span,
     },
-    /// A link: shows `shown` (a URL's text), or `children` (a masked link's text).
     Link {
         data: links::LinkData,
         shown: Vec<Span>,
         children: Vec<Node>,
         source: Span,
     },
-    /// Inline code inside a masked link's text while it's checked: its content counts.
+    // parse-discord parses inline code's content while it checks a masked link's text.
     TestingCode {
         children: Vec<Node>,
     },
-    /// A Unicode emoji, or a known `:shortcode:` (shown as its text).
     Emoji {
         source: Span,
         shortcode: bool,
     },
-    /// A mention, command, custom emoji, timestamp or navigation token.
     Token {
         kind: InlineKind,
         source: Span,
     },
-    /// `start`: the first number of an ordered list.
     List {
         start: Option<u32>,
         items: Vec<(Vec<Node>, Span)>,
@@ -232,16 +214,11 @@ pub(crate) enum Node {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Piece {
     Plain(Span),
-    /// `\*`: shows the character after the backslash.
-    Escape {
-        display: Span,
-        source: Span,
-    },
-    /// A newline, with the `\r` and the spaces before it that aren't shown.
+    Escape { display: Span, source: Span },
+    // Covers the \r and the spaces before the newline, which aren't shown.
     Break(Span),
 }
 
-/// Text a rule hands back as it is written: no escapes, but each newline is a break.
 pub(crate) fn literal(input: &Input, range: Range<usize>) -> Node {
     let bytes = input.text.as_bytes();
     let mut pieces = Vec::new();
@@ -268,7 +245,7 @@ pub(crate) fn literal(input: &Input, range: Range<usize>) -> Node {
 
 struct Match {
     node: Node,
-    /// Where parsing continues; usually the match's end.
+    // A URL's unbalanced ")" is read again as text.
     next: usize,
 }
 
@@ -287,7 +264,6 @@ impl Parser {
         Self { steps: 0 }
     }
 
-    /// A Unicode emoji; ©, ® and ™ match but stay text.
     fn emoji(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
         let len = crate::emoji::emoji_len(&input.text[..range.end], at, &mut self.steps)?;
         let source = input.span(at..at + len);
@@ -305,7 +281,7 @@ impl Parser {
         })
     }
 
-    /// `:(\w+):`, consumed whole; shown as its text (D66).
+    // `:\w+:` is consumed whole, as parse-discord does, and shown as text (D66).
     fn shortcode(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
         let text = &input.text[at + 1..range.end];
         let name_len: usize = text
@@ -372,8 +348,7 @@ impl Parser {
         let nest = ctx.depth < MAX_DEPTH;
         let byte = input.text.as_bytes()[at];
         if ctx.link_text {
-            // Inside a masked link's text, only these rules apply (parse-discord's
-            // allowed_in_links_source).
+            // parse-discord's allowed_in_links_source.
             return match byte {
                 b'*' => nest
                     .then(|| self.star(input, at, range, ctx, frame))
@@ -397,7 +372,7 @@ impl Parser {
                 .then(|| self.star(input, at, range, ctx, frame))
                 .flatten()
                 .or_else(|| self.emoji(input, at, range))
-                .or_else(|| self.list(input, at, range, ctx).filter(|_| nest)),
+                .or_else(|| nest.then(|| self.list(input, at, range, ctx)).flatten()),
             b'_' if nest => self.underscore(input, at, range, ctx, frame),
             b'~' if nest => self.strike(input, at, range, ctx, frame),
             b'|' if nest => self.spoiler(input, at, range, ctx, frame),
@@ -405,21 +380,21 @@ impl Parser {
                 .angle_in_link(input, at, range)
                 .or_else(|| self.angle_mention(input, at, range))
                 .or_else(|| self.angle_link(input, at, range, frame))
-                .or_else(|| self.email(input, at, range))
+                .or_else(|| self.email(input, at, range, frame))
                 .or_else(|| self.phone(input, at, range)),
             b'@' => self.everyone(input, at, range),
-            b'h' | b's' => self.plain_url(input, at, range),
+            b'h' | b's' => self.plain_url(input, at, range, ctx),
             b'[' if nest => self.masked_link(input, at, range, ctx, frame),
             b'-' if nest => self
                 .subtext(input, at, range, ctx)
                 .or_else(|| self.list(input, at, range, ctx)),
             b'#' => self
                 .emoji(input, at, range)
-                .or_else(|| self.heading(input, at, range, ctx).filter(|_| nest)),
+                .or_else(|| nest.then(|| self.heading(input, at, range, ctx)).flatten()),
             b'>' if nest => self.quote(input, at, range, ctx),
             b'0'..=b'9' => self
                 .emoji(input, at, range)
-                .or_else(|| self.list(input, at, range, ctx).filter(|_| nest)),
+                .or_else(|| nest.then(|| self.list(input, at, range, ctx)).flatten()),
             b':' => self.shortcode(input, at, range),
             0x80.. => self.emoji(input, at, range),
             _ => None,

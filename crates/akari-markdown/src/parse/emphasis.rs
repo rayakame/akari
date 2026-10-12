@@ -9,7 +9,7 @@ fn is_space(c: char) -> bool {
 }
 
 impl Parser {
-    /// `*italic*`, or `**bold**` when it starts here too and is longer.
+    // Bold wins when it starts here too and is longer (parse-discord's get_match).
     pub(super) fn star(
         &mut self,
         input: &Input,
@@ -34,7 +34,7 @@ impl Parser {
         Some(self.style(input, range, ctx, at, (style, content, end)))
     }
 
-    /// `_italic_`, or `__underline__` when it starts here too and is longer.
+    // Underline wins when it starts here too and is longer (parse-discord's get_match).
     pub(super) fn underscore(
         &mut self,
         input: &Input,
@@ -59,7 +59,7 @@ impl Parser {
         Some(self.style(input, range, ctx, at, (style, content, end)))
     }
 
-    /// `~~strike~~`: any characters up to the first `~~` not followed by `_`.
+    // ~~(.+?)~~(?!_)
     pub(super) fn strike(
         &mut self,
         input: &Input,
@@ -79,7 +79,7 @@ impl Parser {
         Some(self.style(input, range, ctx, at, (Style::STRIKE, content, end)))
     }
 
-    /// `||spoiler||`: any characters up to the first `||`.
+    // \|\|(.+?)\|\|
     pub(super) fn spoiler(
         &mut self,
         input: &Input,
@@ -121,7 +121,7 @@ impl Parser {
         }
     }
 
-    /// `\*(?!\s)((?:\\.|\*\*|[^*\\])+?)(?<!\s) {0,2}\*(?!\*)`: the content and the match's end.
+    // \*(?!\s)((?:\\.|\*\*|[^*\\])+?)(?<!\s) {0,2}\*(?!\*)
     fn italic_star(
         &mut self,
         input: &Input,
@@ -171,7 +171,7 @@ impl Parser {
         }
     }
 
-    /// `_((?:\\.|__|[^_\\])+?)_(?![a-zA-Z0-9_])`: the content and the match's end.
+    // _((?:\\.|__|[^_\\])+?)_(?![a-zA-Z0-9_])
     fn italic_underscore(
         &mut self,
         input: &Input,
@@ -210,8 +210,7 @@ impl Parser {
         }
     }
 
-    /// `**bold**` or `__underline__`: `((?:\\.|[^\\])+?)` up to a double delimiter not followed by
-    /// a third.
+    // \*\*((?:\\.|[^\\])+?)\*\*(?!\*), and the same with underscores.
     fn double(
         &mut self,
         input: &Input,
@@ -254,8 +253,6 @@ impl Parser {
         None
     }
 
-    /// A two-character delimiter, at least one character of content, and the same delimiter not
-    /// followed by `not_after`.
     fn any_until(
         &mut self,
         input: &Input,
@@ -289,7 +286,7 @@ impl Parser {
         None
     }
 
-    /// The context for a match's inner text (parse-discord's `Context.update`).
+    // parse-discord's Context.update.
     pub(super) fn inner(
         &mut self,
         input: &Input,

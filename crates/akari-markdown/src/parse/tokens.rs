@@ -1,5 +1,3 @@
-//! Mentions, commands, custom emoji, timestamps and server navigation (R§10, R§11).
-
 use std::ops::Range;
 
 use super::{Input, Match, Node, Parser, Piece};
@@ -36,7 +34,7 @@ impl Parser {
         }
     }
 
-    /// A token whose ID or value Akari can't hold: shown as its text, nothing inside parsed.
+    // An ID beyond u64 can't be a snowflake; such a token stays text, consumed whole.
     fn literal(&mut self, input: &Input, range: Range<usize>) -> Match {
         self.steps += range.len() as u64;
         let mut pieces = Vec::new();
@@ -47,7 +45,6 @@ impl Parser {
         }
     }
 
-    /// `<t:…>`, `<a:name:id>` and `<:name:id>`: the tokens a masked link's text may hold.
     pub(super) fn angle_in_link(
         &mut self,
         input: &Input,
@@ -58,7 +55,6 @@ impl Parser {
             .or_else(|| self.custom_emoji(input, at, range))
     }
 
-    /// `<@id>`, `<@!id>`, `<#id>`, `<@&id>`, `</name:id>` and `<id:…>`.
     pub(super) fn angle_mention(
         &mut self,
         input: &Input,
@@ -95,7 +91,7 @@ impl Parser {
         })
     }
 
-    /// `@everyone` and `@here`, case-sensitive, with no word boundary.
+    // No word boundary, as parse-discord has it (observe: "@everyonee").
     pub(super) fn everyone(
         &mut self,
         input: &Input,
@@ -112,7 +108,7 @@ impl Parser {
         }
     }
 
-    /// `<t:(-?\d+)(?::([tTdDfFsSR]))?>`; out of range it's text.
+    // <t:(-?\d+)(?::([tTdDfFsSR]))?>; out of JavaScript's date range it's text.
     fn timestamp(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
         let text = &input.text[..range.end];
         let bytes = text.as_bytes();
@@ -156,7 +152,7 @@ impl Parser {
         })
     }
 
-    /// `<(a?):([A-Za-z0-9_]+):(\d+)>`.
+    // <(a?):([A-Za-z0-9_]+):(\d+)>
     fn custom_emoji(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
         let text = &input.text[..range.end];
         let bytes = text.as_bytes();
@@ -195,8 +191,7 @@ impl Parser {
         })
     }
 
-    /// `</name:id>`, `</name sub:id>`, `</name group sub:id>`: words of 1–32 letters, digits,
-    /// `-`, `_` or `'`, and an ID of 17–21 digits.
+    // docs.discord.food's command mention: up to three words of 1-32 characters, IDs of 17-21 digits.
     fn command(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
         let text = &input.text[..range.end];
         let name_start = at + 2;
@@ -238,7 +233,6 @@ impl Parser {
         ))
     }
 
-    /// `<id:customize>`, `<id:browse>`, `<id:guide>` (or `home`), `<id:linked-roles[:role]>`.
     fn navigation(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
         let text = &input.text[..range.end];
         let rest = &text[at + 4..];

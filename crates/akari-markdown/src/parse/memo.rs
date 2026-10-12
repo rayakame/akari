@@ -1,23 +1,18 @@
-//! What one region's earlier searches found, so later searches in the same region don't scan the
-//! same text again (D73). A region is one call of `Parser::region`: its end and its context are
-//! fixed, so a search that failed from some position fails from any later one too.
+// D73. A region (one Parser::region call) has a fixed end and context, so a search that failed
+// from a position fails from any later one.
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 #[derive(Default)]
 pub(super) struct Frame {
-    /// The region's start.
     pub(super) start: usize,
-    /// No fence at or after this position.
     pub(super) no_fence_from: Option<usize>,
     pub(super) no_bold_from: Option<usize>,
     pub(super) no_underline_from: Option<usize>,
     pub(super) no_strike_from: Option<usize>,
     pub(super) no_spoiler_from: Option<usize>,
     pub(super) doomed_star: Option<Doomed>,
-    /// Masked links: the brackets, each text part's closing `](url)`, URL boundaries that
-    /// matched nothing, titles' possible ends, and the next `)` and `[: >]` searches.
     pub(super) brackets: Option<Brackets>,
     pub(super) links_from: HashMap<usize, Option<(usize, UrlPart)>>,
     pub(super) url_failed: HashSet<usize>,
@@ -25,13 +20,12 @@ pub(super) struct Frame {
     pub(super) close_paren: Option<(usize, Option<usize>)>,
     pub(super) colon_space_gt: Option<(usize, usize)>,
     pub(super) space_gt: Option<(usize, usize)>,
+    pub(super) gt_or_space: Option<(usize, usize)>,
     pub(super) doomed_underscore: Option<Doomed>,
     pub(super) runs: Option<Runs>,
-    /// Inline code failed in the run that ends here, so the rest of the run fails too.
     pub(super) code_dead_until: usize,
 }
 
-/// The region's maximal runs of backticks.
 pub(super) struct Runs {
     starts: Vec<usize>,
     by_len: HashMap<usize, Vec<usize>>,
@@ -57,7 +51,6 @@ impl Runs {
         Self { starts, by_len }
     }
 
-    /// The first run of exactly `len` backticks starting at or after `from`.
     pub(super) fn find(&self, len: usize, from: usize) -> Option<usize> {
         let first = self.starts.partition_point(|&s| s < from);
         let runs = self.by_len.get(&len)?;
@@ -66,8 +59,7 @@ impl Runs {
     }
 }
 
-/// Positions an italic search has passed without finding its closer. A later search that reaches
-/// one would go on exactly like the earlier one, so it fails there.
+// A later italic search that reaches a doomed position goes on exactly like the failed one.
 pub(super) struct Doomed {
     start: usize,
     bits: Vec<u64>,
@@ -96,7 +88,6 @@ impl Doomed {
     }
 }
 
-/// A masked link's `(url "title")` part.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct UrlPart {
     pub(super) url: Range<usize>,
@@ -105,7 +96,6 @@ pub(super) struct UrlPart {
     pub(super) end: usize,
 }
 
-/// The region's square brackets, and where text parts that started at a position end.
 pub(super) struct Brackets {
     end: usize,
     opens: Vec<usize>,
@@ -147,8 +137,7 @@ impl Brackets {
         self.closes[first..last].iter().copied()
     }
 
-    /// Where `(?:\[[^\]]*\]|[^\[\]])*` from `from` stops: a stray `]`, a `[` that never
-    /// closes, or the end.
+    // Where `(?:\[[^\]]*\]|[^\[\]])*` stops.
     pub(super) fn text_end(&mut self, from: usize, steps: &mut u64) -> usize {
         let mut visited = Vec::new();
         let mut pos = from;
@@ -178,7 +167,6 @@ impl Brackets {
 }
 
 impl Frame {
-    /// The first `)` at or after `from`.
     pub(super) fn next_close_paren(
         &mut self,
         bytes: &[u8],
@@ -200,7 +188,6 @@ impl Frame {
         found
     }
 
-    /// The first `:`, space or `>` at or after `from`, or the end.
     pub(super) fn next_colon_space_or_gt(
         &mut self,
         bytes: &[u8],
@@ -212,15 +199,19 @@ impl Frame {
         })
     }
 
-    /// The first space or `>` at or after `from`, or the end.
+    pub(super) fn next_gt_or_space(&mut self, bytes: &[u8], from: usize, steps: &mut u64) -> usize {
+        next_of(&mut self.gt_or_space, bytes, from, steps, |b| {
+            b == b'>' || b.is_ascii_whitespace()
+        })
+    }
+
     pub(super) fn next_space_or_gt(&mut self, bytes: &[u8], from: usize, steps: &mut u64) -> usize {
         next_of(&mut self.space_gt, bytes, from, steps, |b| {
             matches!(b, b' ' | b'>')
         })
     }
 
-    /// The first quote at or after `from` that whitespace and `)` follow: the title's closing
-    /// quote and the link's end.
+    // The title's lazy `.*?['"]\s*\)`: its first quote that whitespace and ")" follow.
     pub(super) fn title_close(
         &mut self,
         bytes: &[u8],
@@ -254,8 +245,6 @@ impl Frame {
     }
 }
 
-/// The first byte at or after `from` that `stop` accepts, or the end; `memo` keeps the last
-/// search, which answers any later one that starts inside it.
 fn next_of(
     memo: &mut Option<(usize, usize)>,
     bytes: &[u8],

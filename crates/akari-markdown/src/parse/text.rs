@@ -5,8 +5,7 @@ use super::{Ctx, Input, Node, Parser, Piece, char_len};
 const SHRUG: &str = "¯\\_(ツ)_/¯";
 
 impl Parser {
-    /// Text between matches: escapes, the shrug, and spaces before a newline, which aren't shown
-    /// (parse-discord's `advance`). `last`: the region's final text, which a newline may follow.
+    // parse-discord's advance; `last`: the region's final text, which the match's newline follows.
     pub(super) fn text(
         &mut self,
         input: &Input,

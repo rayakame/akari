@@ -10,8 +10,7 @@ fn is_language(b: u8) -> bool {
 }
 
 impl Parser {
-    /// ```` ```lang\ncode``` ````: the language only when a newline follows it right away; the code
-    /// needs a character that isn't a newline, and newlines around it are dropped.
+    // ```(?:([A-Za-z0-9_+\-.]*)\n)?(.*?[^\n].*?)```, then newlines stripped from both ends.
     pub(super) fn code_block(
         &mut self,
         input: &Input,
@@ -60,7 +59,6 @@ impl Parser {
         })
     }
 
-    /// The first fence after `start` with a character other than a newline before it.
     fn fence_after(&mut self, text: &str, start: usize, frame: &mut Frame) -> Option<usize> {
         let first = start
             + text.as_bytes()[start..]
@@ -83,8 +81,7 @@ impl Parser {
         found
     }
 
-    /// `` `code` ``: a run of backticks, closed by the next run of exactly that length; when there
-    /// is none, a shorter opening run is tried.
+    // (`+)(.+?)(?<!`)\1(?!`): the regex backtracks to a shorter opening run.
     pub(super) fn inline_code(
         &mut self,
         input: &Input,
@@ -138,7 +135,7 @@ fn trim_newlines(text: &str, range: Range<usize>) -> Range<usize> {
     start..end.max(start)
 }
 
-/// One space is dropped at an end whose next non-space character is a backtick.
+// Discord drops one space at an end whose next non-space character is a backtick (R§2).
 fn strip_spaces(text: &str, range: Range<usize>) -> Range<usize> {
     let s = &text[range.clone()];
     let inner = s.trim_matches(' ');

@@ -1,17 +1,13 @@
-//! Unicode emoji at a position, and jumbo messages (R§10, R§12).
-
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::document::InlineKind;
 use crate::parse::{Node, Piece};
 
-/// Jumbo needs at least one emoji and at most this many.
 const MAX_JUMBO: usize = 27;
 
-/// Longer than any emoji in the list, in bytes; the search looks no further.
+// Longer than any emoji in the list (a test checks), so the search looks no further.
 pub(crate) const MAX_EMOJI_LEN: usize = 64;
 
-/// Whether an emoji can start with `c`: keycap bases and the blocks that hold emoji.
 pub(crate) fn could_start(c: char) -> bool {
     matches!(c, '#' | '*' | '0'..='9')
         || matches!(
@@ -39,7 +35,7 @@ fn regional_indicator(c: char) -> bool {
     ('\u{1F1E6}'..='\u{1F1FF}').contains(&c)
 }
 
-/// A fully-qualified emoji, or a lone regional indicator, as Discord's list has them.
+// Discord's list has fully-qualified forms only, and the lone regional indicators.
 fn is_emoji(s: &str) -> bool {
     emojis::get(s).is_some_and(|e| e.as_str() == s) || {
         let mut chars = s.chars();
@@ -47,7 +43,6 @@ fn is_emoji(s: &str) -> bool {
     }
 }
 
-/// The length of the longest emoji starting at `at`, within one grapheme.
 pub(crate) fn emoji_len(text: &str, at: usize, steps: &mut u64) -> Option<usize> {
     let mut chars = text[at..].chars();
     let first = chars.next()?;
@@ -75,22 +70,21 @@ pub(crate) fn emoji_len(text: &str, at: usize, steps: &mut u64) -> Option<usize>
     None
 }
 
-/// ©, ® and ™ match as emoji but show as text.
+// parse-discord's EXEMPT_EMOJI.
 pub(crate) fn exempt(emoji: &str) -> bool {
     matches!(emoji.trim_end_matches('\u{fe0f}'), "©" | "®" | "™")
 }
 
-/// A known `:shortcode:` name. Akari shows shortcodes as text (D66); only masked links check them.
+// Shortcodes show as text (D66); only masked-link checks count them as emoji.
 pub(crate) fn is_shortcode(name: &str) -> bool {
     emojis::get_by_shortcode(name).is_some_and(|e| !exempt(e.as_str()))
 }
 
-/// Python's `str.isspace`, which parse-discord uses.
+// Python's str.isspace, which parse-discord uses.
 pub(crate) fn py_space(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }
 
-/// 1–27 emoji, Unicode or custom, and whitespace, nothing else (top-level nodes only).
 pub(crate) fn jumbo(nodes: &[Node], source: &str) -> bool {
     let mut count = 0;
     for node in nodes {

@@ -9,7 +9,6 @@ use crate::document::Document;
 pub struct Cache<K> {
     capacity: usize,
     index: HashMap<K, usize>,
-    /// A doubly linked list in a slab, most recently used at `head`.
     entries: Vec<Entry<K>>,
     head: Option<usize>,
     tail: Option<usize>,

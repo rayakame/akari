@@ -1,5 +1,4 @@
-//! The corpus notation (D74): one line per block, then the links, then `jumbo`. Uses the
-//! public API only, so the local differential run can reuse it.
+// The corpus notation (D74), on the public API only so a local differential run can reuse it.
 
 use std::fmt::Write as _;
 
