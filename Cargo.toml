@@ -56,6 +56,8 @@ unicode-segmentation = "1.13"
 emojis = { version = "0.9", default-features = false }
 # WHATWG URL parsing for links; already in the app through reqwest.
 url = "2.5"
+# Test-only: akari-markdown's property tests. Without fork and timeout, which spawn processes.
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 
 # akari-cli only
 clap = { version = "4.6", features = ["derive"] }
