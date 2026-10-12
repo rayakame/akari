@@ -49,8 +49,13 @@ fn is_emoji(s: &str) -> bool {
 
 /// The length of the longest emoji starting at `at`, within one grapheme.
 pub(crate) fn emoji_len(text: &str, at: usize, steps: &mut u64) -> Option<usize> {
-    let first = text[at..].chars().next()?;
+    let mut chars = text[at..].chars();
+    let first = chars.next()?;
     if !could_start(first) {
+        return None;
+    }
+    // A keycap base is an emoji only with its variation selector or keycap mark after it.
+    if first.is_ascii() && !matches!(chars.next(), Some('\u{fe0f}' | '\u{20e3}')) {
         return None;
     }
     let window = text.floor_char_boundary((at + MAX_EMOJI_LEN).min(text.len()));

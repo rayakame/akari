@@ -211,15 +211,15 @@ impl Parser {
         let text = &input.text[..range.end];
         let bytes = text.as_bytes();
         if ctx.list_depth >= MAX_LIST_DEPTH
-            || bullet(bytes, at).is_none()
             || !self.after_indent(bytes, at, range, ctx)
+            || bullet(bytes, at, &mut self.steps).is_none()
         {
             return None;
         }
         let mut items = Vec::new();
         let mut first_number = None;
         let mut pos = at;
-        while let Some(width) = bullet(bytes, pos) {
+        while let Some(width) = bullet(bytes, pos, &mut self.steps) {
             if first_number.is_none() {
                 first_number = Some(number(bytes, pos));
             }
@@ -227,7 +227,7 @@ impl Parser {
             let mut end = start;
             if bytes.get(end) == Some(&b'\n') {
                 let after = end + 1 + usize::from(bytes.get(end + 1) == Some(&b' '));
-                if bullet(bytes, after).is_none() {
+                if bullet(bytes, after, &mut self.steps).is_none() {
                     end += 1;
                 }
             }
@@ -283,7 +283,7 @@ impl Parser {
 }
 
 /// The bullet's width with its spaces: `- `, `* `, `12. `.
-fn bullet(bytes: &[u8], at: usize) -> Option<usize> {
+fn bullet(bytes: &[u8], at: usize, steps: &mut u64) -> Option<usize> {
     let marker = match bytes.get(at)? {
         b'-' | b'*' => 1,
         b'0'..=b'9' => {
@@ -291,6 +291,7 @@ fn bullet(bytes: &[u8], at: usize) -> Option<usize> {
                 .iter()
                 .take_while(|b| b.is_ascii_digit())
                 .count();
+            *steps += digits as u64;
             if bytes.get(at + digits) != Some(&b'.') {
                 return None;
             }
