@@ -1,0 +1,218 @@
+# Inline code (R§2) and code blocks (R§3). Nothing inside is parsed, not even escapes.
+
+== inline code
+a`b`c
+--
+p: "a" code"b" "c"
+
+== one space each side is dropped next to a backtick
+`` ` ``
+--
+p: code"`"
+
+== symmetric spaces are kept
+``  a  ``
+--
+p: code"  a  "
+
+== a space alone
+` `
+--
+p: code" "
+
+== two spaces alone
+`  `
+--
+p: code"  "
+
+== spaces next to text are kept
+` a `
+--
+p: code" a "
+
+== a leading space before text is kept
+`` a``
+--
+p: code" a"
+
+== spaces around backticks inside are dropped
+` `` `
+--
+p: code"``"
+
+== two backticks alone are text
+``
+--
+p: "``"
+
+== four backticks alone are text
+````
+--
+p: "````"
+
+== five backticks alone are text
+`````
+--
+p: "`````"
+
+== nothing inside inline code is parsed
+`<@123> :smile: **x**`
+--
+p: code"<@123> :smile: **x**"
+
+== a backslash in inline code
+`\`
+--
+p: code"\\"
+
+== a double-backtick span holds single backticks
+`` `a` ``
+--
+p: code"`a`"
+
+== a shorter opener when the longer one has no closer
+``a`
+--
+p: code"`a"
+
+== an unclosed backtick is text
+`a
+--
+p: "`a"
+
+== inline code across a newline
+input: "`a\nb`"
+--
+p: code"a\nb"
+
+== newlines only make inline code
+input: "```\n\n\n```"
+--
+p: code"\n\n\n"
+
+== code starts before bold and wins
+`a **b` c**
+--
+p: code"a **b" " c**"
+
+== observe: two backticks inside single ones
+`a``b`
+--
+p: code"a``b"
+
+== a code block with a language
+input: "```py\nfoo```"
+--
+code[py]: "foo"
+
+== any language tag is hidden
+input: "```notalang\nx```"
+--
+code[notalang]: "x"
+
+== language tags take plus signs
+input: "```c++\nx```"
+--
+code[c++]: "x"
+
+== a hash isn't a language character
+input: "```C#\nx```"
+--
+code[]: "C#\nx"
+
+== a space ends the language
+input: "```cpp foo\nbar```"
+--
+code[]: "cpp foo\nbar"
+
+== a block needs a character that isn't a newline
+input: "```py\n```"
+--
+code[]: "py"
+
+== a space is enough
+``` ```
+--
+code[]: " "
+
+== seven backticks
+```````
+--
+code[]: "`"
+
+== backticks inside a block
+input: "```\n```\n```"
+--
+code[]: "```"
+
+== a fourth backtick is content
+````foo````
+--
+code[]: "`foo"
+p: "`"
+
+== a block in the middle of a line
+a ```b``` c
+--
+p: "a "
+code[]: "b"
+p: " c"
+
+== a block right after text
+input: "pre```py\nx```"
+--
+p: "pre"
+code[py]: "x"
+
+== newlines around the code are dropped
+input: "```\n\nfoo\n\n```"
+--
+code[]: "foo"
+
+== a language and several lines
+input: "```py\nprint(1)\nprint(2)\n```"
+--
+code[py]: "print(1)\nprint(2)"
+
+== backticks inside a block's code
+input: "```a``b```"
+--
+code[]: "a``b"
+
+== an unclosed fence is text
+```a
+--
+p: "```a"
+
+== spoiler bars inside a block are code
+```||x||```
+--
+code[]: "||x||"
+
+== escapes and tokens inside a block are code
+input: "```\n\\* <@1> <t:0>\n```"
+--
+code[]: "\\* <@1> <t:0>"
+
+== the line before a block ends at the block
+input: "a\n```x```\nb"
+--
+p: "a"
+code[]: "x"
+p: br "b"
+
+== observe: a newline after a block
+input: "```\nx\n```\ny"
+--
+code[]: "x"
+p: br "y"
+
+== observe: a language followed by spaces
+input: "```js \nx```"
+--
+code[]: "js \nx"
+
+== observe: a fence with only a newline
+input: "```\n```"
+--
+p: code"\n"

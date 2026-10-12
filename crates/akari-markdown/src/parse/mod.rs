@@ -1,12 +1,15 @@
 //! A port of Discord's rule matching: at each position the first rule that matches wins, and a
 //! rule's inner text is parsed again with what's known about its surroundings (`Ctx`).
 
+mod code;
+mod memo;
 mod text;
 
 use std::borrow::Cow;
 use std::ops::Range;
 
 use crate::document::Span;
+use memo::Frame;
 
 pub(crate) struct Parser {
     pub(crate) steps: u64,
@@ -84,6 +87,16 @@ impl Ctx {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Node {
     Text(Vec<Piece>),
+    /// The code in contiguous pieces of source.
+    Code {
+        code: Vec<Span>,
+        source: Span,
+    },
+    CodeBlock {
+        language: Option<Span>,
+        code: Vec<Span>,
+        source: Span,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,13 +137,14 @@ impl Parser {
         let mut nodes = Vec::new();
         let mut text_from = range.start;
         let mut at = range.start;
+        let mut frame = Frame::default();
         while at < range.end {
             self.steps += 1;
             if ctx.escapes() && bytes[at] == b'\\' && at + 1 < range.end {
                 at += 1 + char_len(&input.text, at + 1);
                 continue;
             }
-            match self.rule(input, at, &range, ctx) {
+            match self.rule(input, at, &range, ctx, &mut frame) {
                 Some(m) => {
                     self.text(input, text_from..at, ctx, false, &mut nodes);
                     nodes.push(m.node);
@@ -146,11 +160,17 @@ impl Parser {
 
     fn rule(
         &mut self,
-        _input: &Input,
-        _at: usize,
-        _range: &Range<usize>,
+        input: &Input,
+        at: usize,
+        range: &Range<usize>,
         _ctx: Ctx,
+        frame: &mut Frame,
     ) -> Option<Match> {
-        None
+        match input.text.as_bytes()[at] {
+            b'`' => self
+                .code_block(input, at, range, frame)
+                .or_else(|| self.inline_code(input, at, range, frame)),
+            _ => None,
+        }
     }
 }

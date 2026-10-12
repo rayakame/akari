@@ -17,6 +17,12 @@ pub fn parse(source: &str) -> Document {
     parse_counting(source).0
 }
 
+/// `parse`, and the work it took in steps (D73).
+#[cfg(any(test, feature = "fuzzing"))]
+pub fn parse_with_steps(source: &str) -> (Document, u64) {
+    parse_counting(source)
+}
+
 fn parse_counting(source: &str) -> (Document, u64) {
     if u32::try_from(source.len()).is_err() {
         return (Document::default(), 0);

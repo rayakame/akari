@@ -43,6 +43,43 @@ impl Flat {
                         self.piece(*piece, ctx);
                     }
                 }
+                Node::Code { code, source } => {
+                    for &piece in code {
+                        self.inline(
+                            Inline {
+                                kind: InlineKind::Code(piece),
+                                style: ctx.style,
+                                spoiler: None,
+                                link: None,
+                                source: *source,
+                            },
+                            ctx,
+                        );
+                    }
+                }
+                Node::CodeBlock {
+                    language,
+                    code,
+                    source,
+                } => {
+                    self.close();
+                    let inlines = code.iter().map(|&piece| Inline {
+                        kind: InlineKind::Code(piece),
+                        style: Style::default(),
+                        spoiler: None,
+                        link: None,
+                        source: piece,
+                    });
+                    self.blocks.push(Block {
+                        kind: BlockKind::CodeBlock {
+                            language: *language,
+                        },
+                        containers: ctx.containers.clone().into(),
+                        spoiler: None,
+                        inlines: inlines.collect(),
+                        source: *source,
+                    });
+                }
             }
         }
     }

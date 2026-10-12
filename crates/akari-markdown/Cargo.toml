@@ -9,3 +9,7 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# The fuzz targets' step count; nothing else enables it.
+fuzzing = []
