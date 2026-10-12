@@ -234,3 +234,49 @@ pub enum LinkKind {
     /// `<+1 555 123 4567>`.
     Phone,
 }
+
+impl Link {
+    /// A link to a Discord channel or message (discord.com, ptb., canary., discordapp.com).
+    pub fn discord_channel(&self) -> Option<DiscordChannelLink> {
+        let url = url::Url::parse(&self.url).ok()?;
+        if !matches!(url.scheme(), "https" | "http") {
+            return None;
+        }
+        let host = url.host_str()?;
+        let base = host
+            .strip_prefix("ptb.")
+            .or_else(|| host.strip_prefix("canary."))
+            .unwrap_or(host);
+        if !matches!(base, "discord.com" | "discordapp.com") {
+            return None;
+        }
+        let mut segments = url.path_segments()?.filter(|s| !s.is_empty());
+        if segments.next()? != "channels" {
+            return None;
+        }
+        let guild = segments.next()?;
+        let guild_id = match guild {
+            "@me" => None,
+            id => Some(id.parse().ok()?),
+        };
+        let channel_id = segments.next()?.parse().ok()?;
+        let message_id = segments.next().map(str::parse).transpose().ok()?;
+        if segments.next().is_some() {
+            return None;
+        }
+        Some(DiscordChannelLink {
+            guild_id,
+            channel_id,
+            message_id,
+        })
+    }
+}
+
+/// Where a Discord channel or message URL points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiscordChannelLink {
+    /// `None` for direct messages (`@me`).
+    pub guild_id: Option<u64>,
+    pub channel_id: u64,
+    pub message_id: Option<u64>,
+}

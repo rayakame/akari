@@ -4,7 +4,9 @@
 mod code;
 mod emphasis;
 mod lines;
+mod links;
 mod memo;
+mod phishing;
 mod text;
 mod tokens;
 
@@ -198,6 +200,17 @@ pub(crate) enum Node {
         children: Vec<Node>,
         source: Span,
     },
+    /// A link: shows `shown` (a URL's text), or `children` (a masked link's text).
+    Link {
+        data: links::LinkData,
+        shown: Vec<Span>,
+        children: Vec<Node>,
+        source: Span,
+    },
+    /// Inline code inside a masked link's text while it's checked: its content counts.
+    TestingCode {
+        children: Vec<Node>,
+    },
     /// A Unicode emoji, or a known `:shortcode:` (shown as its text).
     Emoji {
         source: Span,
@@ -299,7 +312,10 @@ impl Parser {
         let mut nodes = Vec::new();
         let mut text_from = range.start;
         let mut at = range.start;
-        let mut frame = Frame::default();
+        let mut frame = Frame {
+            start: range.start,
+            ..Frame::default()
+        };
         while at < range.end {
             self.steps += 1;
             if ctx.escapes() && bytes[at] == b'\\' && at + 1 < range.end {
@@ -329,14 +345,46 @@ impl Parser {
         frame: &mut Frame,
     ) -> Option<Match> {
         let nest = ctx.depth < MAX_DEPTH;
-        match input.text.as_bytes()[at] {
+        let byte = input.text.as_bytes()[at];
+        if ctx.link_text {
+            // Inside a masked link's text, only these rules apply (parse-discord's
+            // allowed_in_links_source).
+            return match byte {
+                b'*' => nest
+                    .then(|| self.star(input, at, range, ctx, frame))
+                    .flatten()
+                    .or_else(|| self.emoji(input, at, range)),
+                b'_' if nest => self.underscore(input, at, range, ctx, frame),
+                b'~' if nest => self.strike(input, at, range, ctx, frame),
+                b'|' if nest => self.spoiler(input, at, range, ctx, frame),
+                b'`' => self.inline_code(input, at, range, ctx, frame),
+                b'<' => self.angle_in_link(input, at, range),
+                b':' => self.shortcode(input, at, range),
+                b'#' | b'0'..=b'9' | 0x80.. => self.emoji(input, at, range),
+                _ => None,
+            };
+        }
+        match byte {
             b'`' => self
                 .code_block(input, at, range, frame)
-                .or_else(|| self.inline_code(input, at, range, frame)),
-            b'*' if nest => self
-                .star(input, at, range, ctx, frame)
+                .or_else(|| self.inline_code(input, at, range, ctx, frame)),
+            b'*' => nest
+                .then(|| self.star(input, at, range, ctx, frame))
+                .flatten()
                 .or_else(|| self.emoji(input, at, range))
-                .or_else(|| self.list(input, at, range, ctx)),
+                .or_else(|| self.list(input, at, range, ctx).filter(|_| nest)),
+            b'_' if nest => self.underscore(input, at, range, ctx, frame),
+            b'~' if nest => self.strike(input, at, range, ctx, frame),
+            b'|' if nest => self.spoiler(input, at, range, ctx, frame),
+            b'<' => self
+                .angle_in_link(input, at, range)
+                .or_else(|| self.angle_mention(input, at, range))
+                .or_else(|| self.angle_link(input, at, range, frame))
+                .or_else(|| self.email(input, at, range))
+                .or_else(|| self.phone(input, at, range)),
+            b'@' => self.everyone(input, at, range),
+            b'h' | b's' => self.plain_url(input, at, range),
+            b'[' if nest => self.masked_link(input, at, range, ctx, frame),
             b'-' if nest => self
                 .subtext(input, at, range, ctx)
                 .or_else(|| self.list(input, at, range, ctx)),
@@ -349,13 +397,6 @@ impl Parser {
                 .or_else(|| self.list(input, at, range, ctx).filter(|_| nest)),
             b':' => self.shortcode(input, at, range),
             0x80.. => self.emoji(input, at, range),
-            b'_' if nest => self.underscore(input, at, range, ctx, frame),
-            b'~' if nest => self.strike(input, at, range, ctx, frame),
-            b'|' if nest => self.spoiler(input, at, range, ctx, frame),
-            b'<' => self
-                .angle_in_link(input, at, range)
-                .or_else(|| self.angle_mention(input, at, range)),
-            b'@' => self.everyone(input, at, range),
             _ => None,
         }
     }

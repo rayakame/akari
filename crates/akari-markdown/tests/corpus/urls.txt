@@ -1,0 +1,249 @@
+# Plain URLs (R§8): http and https, trailing punctuation left out, one closing parenthesis left
+# out when unbalanced; nothing inside a URL is parsed. <url> hides the brackets and the embed.
+# Email and phone links follow docs.discord.food.
+
+== a URL
+https://example.com
+--
+p: {l0}"https://example.com"
+link0: <https://example.com/>
+
+== a trailing period isn't part of the URL
+https://example.com.
+--
+p: {l0}"https://example.com" "."
+link0: <https://example.com/>
+
+== a trailing comma isn't part of the URL
+https://example.com,
+--
+p: {l0}"https://example.com" ","
+link0: <https://example.com/>
+
+== a trailing quote isn't part of the URL
+https://a.co'
+--
+p: {l0}"https://a.co" "'"
+link0: <https://a.co/>
+
+== a URL in parentheses
+(https://example.com)
+--
+p: "(" {l0}"https://example.com" ")"
+link0: <https://example.com/>
+
+== balanced parentheses stay in the URL
+https://en.wikipedia.org/wiki/Foo_(bar)
+--
+p: {l0}"https://en.wikipedia.org/wiki/Foo_(bar)"
+link0: <https://en.wikipedia.org/wiki/Foo_(bar)>
+
+== only one unbalanced parenthesis is left out
+https://a))
+--
+p: {l0}"https://a)" ")"
+link0: <https://a)/>
+
+== parentheses that balance overall stay
+https://(a)b)
+--
+p: {l0}"https://(a)b)"
+link0: <https://(a)b)/>
+
+== a period before a parenthesis
+https://a.)
+--
+p: {l0}"https://a." ")"
+link0: <https://a./>
+
+== two characters are needed after the slashes
+http://a
+--
+p: "http://a"
+
+== two characters are enough
+http://ab
+--
+p: {l0}"http://ab"
+link0: <http://ab/>
+
+== the scheme is case-sensitive
+HTTPS://A.CO
+--
+p: "HTTPS://A.CO"
+
+== www alone isn't a link
+www.example.com
+--
+p: "www.example.com"
+
+== a domain alone isn't a link
+example.com
+--
+p: "example.com"
+
+== observe: steam links are text
+steam://run/1
+--
+p: "steam://run/1"
+
+== nothing inside a steam link is parsed
+steam://*a*
+--
+p: "steam://*a*"
+
+== asterisks inside a URL
+https://example.com/*a*
+--
+p: {l0}"https://example.com/*a*"
+link0: <https://example.com/*a*>
+
+== underscores inside a URL
+https://a.co/_b_
+--
+p: {l0}"https://a.co/_b_"
+link0: <https://a.co/_b_>
+
+== a less-than sign ends a URL
+https://a.co/<b
+--
+p: {l0}"https://a.co/" "<b"
+link0: <https://a.co/>
+
+== a port, a query and a fragment
+https://a.co:8080/p?q=1#f
+--
+p: {l0}"https://a.co:8080/p?q=1#f"
+link0: <https://a.co:8080/p?q=1#f>
+
+== a URL in a sentence
+x https://a.co y
+--
+p: "x " {l0}"https://a.co" " y"
+link0: <https://a.co/>
+
+== a URL in italics
+*https://a.co*
+--
+p: {i l0}"https://a.co"
+link0: <https://a.co/>
+
+== a URL in bold
+**https://a.co**
+--
+p: {b l0}"https://a.co"
+link0: <https://a.co/>
+
+== a backslash in a URL is a slash
+https://a.co\*
+--
+p: {l0}"https://a.co\\*"
+link0: <https://a.co/*>
+
+== an international domain
+https://ä.co
+--
+p: {l0}"https://ä.co"
+link0: <https://xn--4ca.co/>
+
+== a non-ascii path
+https://a.co/ä
+--
+p: {l0}"https://a.co/ä"
+link0: <https://a.co/%C3%A4>
+
+== an invalid host is text
+https://a.co]x
+--
+p: "https://a.co]x"
+
+== a Discord channel URL is a plain link
+https://discord.com/channels/1/2/3
+--
+p: {l0}"https://discord.com/channels/1/2/3"
+link0: <https://discord.com/channels/1/2/3>
+
+== a discord scheme in text isn't a link
+discord://-/channels/1/2
+--
+p: "discord://-/channels/1/2"
+
+== an angle-bracket link
+<https://a.co>
+--
+p: {l0}"https://a.co"
+link0: <https://a.co/> suppress
+
+== an invalid angle-bracket link drops its brackets
+<blah:/*a*>
+--
+p: "blah:/*a*"
+
+== observe: a parenthesis at the end of an angle-bracket link
+<https://a.co/x)>
+--
+p: {l0}"https://a.co/x)"
+link0: <https://a.co/x)> suppress
+
+== a space ends an angle-bracket link
+<https://a.co with space>
+--
+p: "<" {l0}"https://a.co" " with space>"
+link0: <https://a.co/>
+
+== an email address
+<nelly@discordapp.com>
+--
+p: {l0}"nelly@discordapp.com"
+link0: <mailto:nelly@discordapp.com> email
+
+== observe: an email address with mailto
+<mailto:a@b.co>
+--
+p: {l0}"mailto:a@b.co"
+link0: <mailto:a@b.co> email
+
+== an email address with headers
+<nelly@discord.com?subject=Title&body=Message%20Content>
+--
+p: {l0}"nelly@discord.com?subject=Title&body=Message%20Content"
+link0: <mailto:nelly@discord.com?subject=Title&body=Message%20Content> email
+
+== two email addresses aren't a link
+<a@b.co,c@d.co>
+--
+p: "<a@b.co,c@d.co>"
+
+== an email address needs a domain with a dot
+<a@b>
+--
+p: "<a@b>"
+
+== a phone number
+<+1 (555) 123 4567>
+--
+p: {l0}"+1 (555) 123 4567"
+link0: <tel:+15551234567> phone
+
+== a phone number with tel
+<tel:+1 555 1234567>
+--
+p: {l0}"tel:+1 555 1234567"
+link0: <tel:+15551234567> phone
+
+== a phone number for text messages
+<sms:5551234567>
+--
+p: {l0}"sms:5551234567"
+link0: <sms:5551234567> phone
+
+== a phone number needs a plus without a scheme
+<555 1234567>
+--
+p: "<555 1234567>"
+
+== observe: a phone number with dashes
+<+1-555-123-4567>
+--
+p: {l0}"+1-555-123-4567"
+link0: <tel:+15551234567> phone

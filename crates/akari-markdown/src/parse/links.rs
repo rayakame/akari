@@ -1,0 +1,498 @@
+//! Masked links, plain URLs, `<url>`, email addresses and phone numbers (R§7, R§8).
+
+use std::ops::Range;
+
+use super::memo::{Brackets, Frame, UrlPart};
+use super::phishing::special_whitespace;
+use super::{Ctx, Input, LineStart, Match, Node, Parser, Piece};
+use crate::document::LinkKind;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LinkData {
+    pub(crate) url: String,
+    pub(crate) kind: LinkKind,
+    pub(crate) suppress_embed: bool,
+}
+
+/// A URL Discord follows: WHATWG-valid with scheme http, https or discord.
+fn valid_url(text: &str) -> Option<String> {
+    let url = url::Url::parse(text).ok()?;
+    matches!(url.scheme(), "http" | "https" | "discord").then(|| url.as_str().to_owned())
+}
+
+fn is_space(c: char) -> bool {
+    c.is_whitespace()
+}
+
+fn whitespace_end(text: &str, from: usize) -> usize {
+    from + text[from..]
+        .chars()
+        .take_while(|&c| is_space(c))
+        .map(char::len_utf8)
+        .sum::<usize>()
+}
+
+/// `\X` with X not a letter, digit or whitespace becomes X.
+fn unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\'
+            && let Some(&next) = chars.peek()
+            && !(next.is_ascii_alphanumeric() || next.is_whitespace())
+        {
+            out.push(next);
+            chars.next();
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn text_node(input: &Input, range: Range<usize>) -> Node {
+    let mut pieces = Vec::new();
+    input.pieces(range, |span| pieces.push(Piece::Plain(span)));
+    Node::Text(pieces)
+}
+
+impl Parser {
+    fn link(
+        &mut self,
+        input: &Input,
+        at: usize,
+        display: Range<usize>,
+        end: usize,
+        data: LinkData,
+    ) -> Match {
+        self.steps += (end - at) as u64;
+        let mut shown = Vec::new();
+        input.pieces(display, |span| shown.push(span));
+        Match {
+            node: Node::Link {
+                data,
+                shown,
+                children: Vec::new(),
+                source: input.span(at..end),
+            },
+            next: end,
+        }
+    }
+
+    /// `(?:https?|steam)://[^\s<]+[^<.,:;"'\]\s]`, minus one `)` when they outnumber `(`.
+    pub(super) fn plain_url(
+        &mut self,
+        input: &Input,
+        at: usize,
+        range: &Range<usize>,
+    ) -> Option<Match> {
+        let text = &input.text[..range.end];
+        let rest = &text[at..];
+        let scheme = ["https://", "http://", "steam://"]
+            .into_iter()
+            .find(|s| rest.starts_with(s))?;
+        let after = at + scheme.len();
+        let run_end = after
+            + text[after..]
+                .chars()
+                .take_while(|&c| !is_space(c) && c != '<')
+                .map(char::len_utf8)
+                .sum::<usize>();
+        self.steps += (run_end - at) as u64;
+        let mut end = run_end;
+        while let Some(last) = text[after..end].chars().next_back()
+            && matches!(last, '.' | ',' | ':' | ';' | '"' | '\'' | ']')
+        {
+            end -= last.len_utf8();
+        }
+        if text[after..end].chars().count() < 2 {
+            return None;
+        }
+        let url = &text[at..end];
+        let closing = url.len() - url.trim_end_matches(')').len();
+        if closing > url.matches('(').count() {
+            end -= 1;
+        }
+        let url = &text[at..end];
+        Some(match valid_url(url) {
+            Some(target) => self.link(
+                input,
+                at,
+                at..end,
+                end,
+                LinkData {
+                    url: target,
+                    kind: LinkKind::Plain,
+                    suppress_embed: false,
+                },
+            ),
+            None => Match {
+                node: text_node(input, at..end),
+                next: end,
+            },
+        })
+    }
+
+    /// `<([^: >]+:/[^ >]+)>`: brackets hidden, embed suppressed; invalid, it's the text inside.
+    pub(super) fn angle_link(
+        &mut self,
+        input: &Input,
+        at: usize,
+        range: &Range<usize>,
+        frame: &mut Frame,
+    ) -> Option<Match> {
+        let text = &input.text[..range.end];
+        let bytes = text.as_bytes();
+        let start = at + 1;
+        let stop = frame.next_colon_space_or_gt(bytes, start, &mut self.steps);
+        if stop == start || !text[stop..].starts_with(":/") {
+            return None;
+        }
+        let rest = stop + 2;
+        let close = frame.next_space_or_gt(bytes, rest, &mut self.steps);
+        if close == rest || bytes.get(close) != Some(&b'>') {
+            return None;
+        }
+        let end = close + 1;
+        Some(match valid_url(&text[start..close]) {
+            Some(url) => self.link(
+                input,
+                at,
+                start..close,
+                end,
+                LinkData {
+                    url,
+                    kind: LinkKind::Plain,
+                    suppress_embed: true,
+                },
+            ),
+            None => Match {
+                node: text_node(input, start..close),
+                next: end,
+            },
+        })
+    }
+
+    /// `<user@example.com>`, optionally `mailto:` and `?headers`; one address only.
+    pub(super) fn email(
+        &mut self,
+        input: &Input,
+        at: usize,
+        range: &Range<usize>,
+    ) -> Option<Match> {
+        let text = &input.text[..range.end];
+        let start = at + 1;
+        let address = text[start..]
+            .strip_prefix("mailto:")
+            .map_or(start, |_| start + 7);
+        let bytes = text.as_bytes();
+        let local = bytes[address..]
+            .iter()
+            .take_while(|&&b| b.is_ascii_alphanumeric() || b"!#$%&'*+/=^_`{|}~.-".contains(&b))
+            .count();
+        let at_sign = address + local;
+        if local == 0 || bytes.get(at_sign) != Some(&b'@') {
+            return None;
+        }
+        let domain = at_sign + 1;
+        let domain_len = bytes[domain..]
+            .iter()
+            .take_while(|&&b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+            .count();
+        let labels = &text[domain..domain + domain_len];
+        if labels.split('.').count() < 2 || labels.split('.').any(str::is_empty) {
+            return None;
+        }
+        let mut close = domain + domain_len;
+        if bytes.get(close) == Some(&b'?') {
+            close += bytes[close..]
+                .iter()
+                .take_while(|&&b| b != b'>' && !b.is_ascii_whitespace())
+                .count();
+        }
+        self.steps += (close - at) as u64;
+        if bytes.get(close) != Some(&b'>') {
+            return None;
+        }
+        let url = url::Url::parse(&format!("mailto:{}", &text[address..close])).ok()?;
+        Some(self.link(
+            input,
+            at,
+            start..close,
+            close + 1,
+            LinkData {
+                url: url.as_str().to_owned(),
+                kind: LinkKind::Email,
+                suppress_embed: false,
+            },
+        ))
+    }
+
+    /// `<+1 (555) 123 4567>`, optionally `tel:` or `sms:`; the `+` is needed without a scheme.
+    pub(super) fn phone(
+        &mut self,
+        input: &Input,
+        at: usize,
+        range: &Range<usize>,
+    ) -> Option<Match> {
+        let text = &input.text[..range.end];
+        let start = at + 1;
+        let (scheme, number) = if text[start..].starts_with("tel:") {
+            ("tel:", start + 4)
+        } else if text[start..].starts_with("sms:") {
+            ("sms:", start + 4)
+        } else {
+            ("tel:", start)
+        };
+        let bytes = text.as_bytes();
+        let plus = bytes.get(number) == Some(&b'+');
+        if !plus && number == start {
+            return None;
+        }
+        let body = number + usize::from(plus);
+        let len = bytes[body..]
+            .iter()
+            .take_while(|&&b| b.is_ascii_digit() || b" ()-.".contains(&b))
+            .count();
+        let close = body + len;
+        self.steps += (close - at) as u64;
+        let digits: String = text[body..close]
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect();
+        if bytes.get(close) != Some(&b'>') || !(3..=15).contains(&digits.len()) {
+            return None;
+        }
+        let url = format!("{scheme}{}{digits}", if plus { "+" } else { "" });
+        Some(self.link(
+            input,
+            at,
+            start..close,
+            close + 1,
+            LinkData {
+                url,
+                kind: LinkKind::Phone,
+                suppress_embed: false,
+            },
+        ))
+    }
+
+    /// `[text](url "title")`, matched as parse-discord's regex does, then checked: the URL must
+    /// be valid and the text and title allowed, or the whole link is text.
+    pub(super) fn masked_link(
+        &mut self,
+        input: &Input,
+        at: usize,
+        range: &Range<usize>,
+        ctx: Ctx,
+        frame: &mut Frame,
+    ) -> Option<Match> {
+        let text = &input.text[..range.end];
+        let bytes = text.as_bytes();
+        let brackets = frame
+            .brackets
+            .get_or_insert_with(|| Brackets::new(bytes, range.clone(), &mut self.steps));
+        let text_end = brackets.text_end(at + 1, &mut self.steps);
+        let (close, part) = match frame.links_from.get(&text_end) {
+            Some(found) => found.clone()?,
+            None => {
+                let found = self.link_close(text, text_end, frame);
+                frame.links_from.insert(text_end, found.clone());
+                found?
+            }
+        };
+        let end = part.end;
+        let url = valid_url(&unescape(&text[part.url.clone()]));
+        let body = at + 1..close;
+        let check = Ctx {
+            testing_link: true,
+            trailing_newline: false,
+            depth: ctx.depth + 1,
+            ..self.inner(input, at, range, ctx, false)
+        };
+        let allowed = url.is_some()
+            && self.admissible(&text[body.clone()], check, false) == Some(true)
+            && part
+                .title
+                .clone()
+                .filter(|t| !t.is_empty())
+                .is_none_or(|t| self.admissible(&text[t], check, true).is_some());
+        let Some(url) = url.filter(|_| allowed) else {
+            return Some(Match {
+                node: text_node(input, at..end),
+                next: end,
+            });
+        };
+        let shown = clean_ranges(text, body);
+        let shown = input.derive(&shown);
+        let display = Ctx {
+            line_start: LineStart::Nothing,
+            trailing_newline: false,
+            quote: false,
+            list_depth: 0,
+            testing_link: false,
+            link_text: true,
+            depth: ctx.depth + 1,
+        };
+        self.steps += shown.text.len() as u64;
+        let children = self.region(&shown, 0..shown.text.len(), display);
+        let title = part.title.map(|t| {
+            text[t]
+                .chars()
+                .filter(|&c| !special_whitespace(c))
+                .collect::<String>()
+                .into_boxed_str()
+        });
+        Some(Match {
+            node: Node::Link {
+                data: LinkData {
+                    url,
+                    kind: LinkKind::Masked { title },
+                    suppress_embed: part.suppress,
+                },
+                shown: Vec::new(),
+                children,
+                source: input.span(at..end),
+            },
+            next: end,
+        })
+    }
+
+    /// The `](url)` that closes a link whose text part ends at `text_end`: the last `]` before
+    /// the next `[` that a valid URL part follows (the regex's backtracking order).
+    fn link_close(
+        &mut self,
+        text: &str,
+        text_end: usize,
+        frame: &mut Frame,
+    ) -> Option<(usize, UrlPart)> {
+        let bytes = text.as_bytes();
+        let brackets = frame.brackets.as_ref()?;
+        let limit = brackets.next_open(text_end).unwrap_or(bytes.len());
+        let candidates: Vec<usize> = brackets
+            .closes_in(text_end..limit)
+            .filter(|&c| bytes.get(c + 1) == Some(&b'('))
+            .collect();
+        for close in candidates.into_iter().rev() {
+            self.steps += 1;
+            if let Some(part) = self.url_part(text, close + 2, frame) {
+                return Some((close, part));
+            }
+        }
+        None
+    }
+
+    /// `\(\s*(<)?((?:\([^)]*\)|[^\s\\]|\\[^\n])*?)(>)?(?:\s+['"](.*?)['"])?\s*\)` from after `(`.
+    fn url_part(&mut self, text: &str, from: usize, frame: &mut Frame) -> Option<UrlPart> {
+        let start = whitespace_end(text, from);
+        self.steps += (start - from) as u64;
+        if text[start..].starts_with('<')
+            && let Some(part) = self.url_units(text, start + 1, true, frame)
+        {
+            return Some(part);
+        }
+        self.url_units(text, start, false, frame)
+    }
+
+    /// The lazy URL: the first end, in the regex's order, after which the rest matches. A
+    /// depth-first search over unit boundaries; a boundary from which nothing matched is
+    /// remembered for the region.
+    fn url_units(
+        &mut self,
+        text: &str,
+        start: usize,
+        angle: bool,
+        frame: &mut Frame,
+    ) -> Option<UrlPart> {
+        if frame.url_failed.contains(&start) {
+            return None;
+        }
+        let bytes = text.as_bytes();
+        // Each entry: a boundary and the next unit alternative to try there (0 = not finished yet).
+        let mut stack: Vec<(usize, u8)> = vec![(start, 0)];
+        while let Some(&mut (pos, ref mut next_alternative)) = stack.last_mut() {
+            self.steps += 1;
+            if *next_alternative == 0 {
+                *next_alternative = 1;
+                if let Some((suppress, title, end)) = self.url_finish(text, pos, frame) {
+                    return Some(UrlPart {
+                        url: start..pos,
+                        suppress: suppress || angle,
+                        title,
+                        end,
+                    });
+                }
+                continue;
+            }
+            let alternative = *next_alternative;
+            *next_alternative += 1;
+            let c = text[pos..].chars().next();
+            let next = match (alternative, c) {
+                // \([^)]*\)
+                (1, Some('(')) => frame
+                    .next_close_paren(bytes, pos + 1, &mut self.steps)
+                    .map(|close| close + 1),
+                // [^\s\\]
+                (2, Some(c)) if c != '\\' && !is_space(c) => Some(pos + c.len_utf8()),
+                // \\[^\n]
+                (3, Some('\\')) => text[pos + 1..]
+                    .chars()
+                    .next()
+                    .filter(|&c| c != '\n')
+                    .map(|c| pos + 1 + c.len_utf8()),
+                (1..=3, _) => None,
+                _ => {
+                    frame.url_failed.insert(pos);
+                    stack.pop();
+                    continue;
+                }
+            };
+            if let Some(next) = next
+                && !frame.url_failed.contains(&next)
+            {
+                stack.push((next, 0));
+            }
+        }
+        None
+    }
+
+    /// `(>)?(?:\s+['"](.*?)['"])?\s*\)` at `pos`: whether `>` was there, the title and the end.
+    fn url_finish(
+        &mut self,
+        text: &str,
+        pos: usize,
+        frame: &mut Frame,
+    ) -> Option<(bool, Option<Range<usize>>, usize)> {
+        let bytes = text.as_bytes();
+        let gt = bytes.get(pos) == Some(&b'>');
+        let after = pos + usize::from(gt);
+        let spaces = whitespace_end(text, after);
+        self.steps += (spaces - after) as u64 + 1;
+        if spaces > after
+            && matches!(bytes.get(spaces), Some(b'\'' | b'"'))
+            && let Some((close, end)) = frame.title_close(bytes, text, spaces + 1, &mut self.steps)
+        {
+            return Some((gt, Some(spaces + 1..close), end));
+        }
+        (bytes.get(spaces) == Some(&b')')).then_some((gt, None, spaces + 1))
+    }
+}
+
+/// `range` without special whitespace, as contiguous ranges.
+fn clean_ranges(text: &str, range: Range<usize>) -> Vec<Range<usize>> {
+    let mut out: Vec<Range<usize>> = Vec::new();
+    let mut from = range.start;
+    for (i, c) in text[range.clone()].char_indices() {
+        if special_whitespace(c) {
+            let at = range.start + i;
+            if at > from {
+                out.push(from..at);
+            }
+            from = at + c.len_utf8();
+        }
+    }
+    if from < range.end || out.is_empty() {
+        out.push(from..range.end);
+    }
+    out
+}

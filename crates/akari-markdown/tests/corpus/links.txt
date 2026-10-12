@@ -1,0 +1,307 @@
+# Masked links (R§7): [text](url "title"). The URL must be a WHATWG URL with scheme http, https
+# or discord; the text may not hold a URL, a mention, an emoji or a code block, checked after
+# special whitespace is removed and scheme look-alikes are replaced. A rejected link is text.
+
+== a masked link
+[a](https://b.co)
+--
+p: {l0}"a"
+link0: <https://b.co/> masked
+
+== an escape in the URL is unescaped
+[a](https://b\$)
+--
+p: {l0}"a"
+link0: <https://b$/> masked
+
+== ftp isn't allowed
+[a](ftp://b.co)
+--
+p: "[a](ftp://b.co)"
+
+== mailto isn't allowed in a masked link
+[a](mailto:a@b.co)
+--
+p: "[a](mailto:a@b.co)"
+
+== a URL needs a host
+[a](https://)
+--
+p: "[a](https://)"
+
+== discord URLs are allowed
+[a](discord://)
+--
+p: {l0}"a"
+link0: <discord://> masked
+
+== angle brackets suppress the embed
+[a](<https://b.co>)
+--
+p: {l0}"a"
+link0: <https://b.co/> masked suppress
+
+== an opening angle bracket alone suppresses the embed
+[a](<https://b.co)
+--
+p: {l0}"a"
+link0: <https://b.co/> masked suppress
+
+== a closing angle bracket alone suppresses the embed
+[a](https://b.co>)
+--
+p: {l0}"a"
+link0: <https://b.co/> masked suppress
+
+== a title in single quotes
+[a](http://b.co 'c')
+--
+p: {l0}"a"
+link0: <http://b.co/> masked title="c"
+
+== a title in double quotes
+[a](http://b.co "c")
+--
+p: {l0}"a"
+link0: <http://b.co/> masked title="c"
+
+== mixed title quotes
+[a](http://b.co "c')
+--
+p: {l0}"a"
+link0: <http://b.co/> masked title="c"
+
+== spaces around the URL
+[a](  https://b.co  )
+--
+p: {l0}"a"
+link0: <https://b.co/> masked
+
+== parentheses in the URL
+[a](https://b.co/x(y)z)
+--
+p: {l0}"a"
+link0: <https://b.co/x(y)z> masked
+
+== an unclosed parenthesis in the URL
+[x](https://a.co/(b)
+--
+p: {l0}"x"
+link0: <https://a.co/(b> masked
+
+== a URL without a scheme is text
+[x](a(b)
+--
+p: "[x](a(b)"
+
+== a second closing parenthesis is text
+[a](https://b.co))
+--
+p: {l0}"a" ")"
+link0: <https://b.co/> masked
+
+== a URL in the text is refused
+[https://a.co](https://b.co)
+--
+p: "[https://a.co](https://b.co)"
+
+== a look-alike scheme in the text is refused
+[ｈttps://a.co](https://b.co)
+--
+p: "[ｈttps://a.co](https://b.co)"
+
+== a URL in inline code in the text is refused
+[`https://a.co`](https://b.co)
+--
+p: "[`https://a.co`](https://b.co)"
+
+== a mention in the text is refused
+[<@123>](https://b.co)
+--
+p: "[<@123>](https://b.co)"
+
+== an emoji in the text is refused
+[😀](https://b.co)
+--
+p: "[😀](https://b.co)"
+
+== a shortcode in the text is refused
+[:smile:](https://b.co)
+--
+p: "[:smile:](https://b.co)"
+
+== a custom emoji in the text is refused
+[<:a:1>](https://b.co)
+--
+p: "[<:a:1>](https://b.co)"
+
+== empty text is refused
+[](https://b.co)
+--
+p: "[](https://b.co)"
+
+== a space is refused
+[ ](https://b.co)
+--
+p: "[ ](https://b.co)"
+
+== empty styles are refused
+[|| ||_ _** **` `](https://b.co)
+--
+p: "[|| ||_ _** **` `](https://b.co)"
+
+== a code block in the text is refused
+[```a```](https://b.co)
+--
+p: "[```a```](https://b.co)"
+
+== styles in the text
+[**a**](https://b.co)
+--
+p: {b l0}"a"
+link0: <https://b.co/> masked
+
+== italics in the text
+[*a*](https://b.co)
+--
+p: {i l0}"a"
+link0: <https://b.co/> masked
+
+== inline code in the text
+[`a`](https://b.co)
+--
+p: {l0}code"a"
+link0: <https://b.co/> masked
+
+== a timestamp in the text
+[<t:0>](https://b.co)
+--
+p: {l0}time:0:f
+link0: <https://b.co/> masked
+
+== a bare domain in the text
+[example.com](https://b.co)
+--
+p: {l0}"example.com"
+link0: <https://b.co/> masked
+
+== a scheme alone in the text
+[https://](https://b.co)
+--
+p: {l0}"https://"
+link0: <https://b.co/> masked
+
+== a URL in the title is refused
+[a](https://x.co 'http://evil.co')
+--
+p: "[a](https://x.co 'http://evil.co')"
+
+== an emoji in the title is allowed
+[a](https://x.co '😀')
+--
+p: {l0}"a"
+link0: <https://x.co/> masked title="😀"
+
+== observe: an invite in the text
+[discord.gg/abcd](https://a.co)
+--
+p: {l0}"discord.gg/abcd"
+link0: <https://a.co/> masked
+
+== heading syntax in the text is text
+[# a](https://b.co)
+--
+p: {l0}"# a"
+link0: <https://b.co/> masked
+
+== quote syntax in the text is text
+[> a](https://b.co)
+--
+p: {l0}"> a"
+link0: <https://b.co/> masked
+
+== a newline in the text
+input: "[a\nb](https://b.co)"
+--
+p: {l0}"a" br {l0}"b"
+link0: <https://b.co/> masked
+
+== spaces before a newline in the text aren't shown
+input: "[a  \nb](https://b.co)"
+--
+p: {l0}"a" br {l0}"b"
+link0: <https://b.co/> masked
+
+== observe: escapes in the text aren't processed
+[\*\**](http://a.co)
+--
+p: {l0}"\\" {i l0}"\\*"
+link0: <http://a.co/> masked
+
+== special whitespace is removed from the text
+input: "[a\u{200b}b](https://b.co)"
+--
+p: {l0}"ab"
+link0: <https://b.co/> masked
+
+== special whitespace is removed from the title
+input: "[a](https://b.co \"t\u{200b}x\")"
+--
+p: {l0}"a"
+link0: <https://b.co/> masked title="tx"
+
+== a bracket before a link
+[[a](http://b.co)
+--
+p: "[" {l0}"a"
+link0: <http://b.co/> masked
+
+== brackets inside the text
+[[]](http://b.co)
+--
+p: {l0}"[]"
+link0: <http://b.co/> masked
+
+== a closing bracket inside the text
+[a]](https://b.co)
+--
+p: {l0}"a]"
+link0: <https://b.co/> masked
+
+== a space between the parts isn't a link
+[foo] (http://b.co)
+--
+p: "[foo] (" {l0}"http://b.co" ")"
+link0: <http://b.co/>
+
+== adjacent links
+[a](http://b.co)[c](http://d.co)
+--
+p: {l0}"a" {l1}"c"
+link0: <http://b.co/> masked
+link1: <http://d.co/> masked
+
+== links are numbered in order
+[a](https://b.co) [c](https://d.co)
+--
+p: {l0}"a" " " {l1}"c"
+link0: <https://b.co/> masked
+link1: <https://d.co/> masked
+
+== an image is an exclamation mark and a link
+![alt](https://a.co/x.png)
+--
+p: "!" {l0}"alt"
+link0: <https://a.co/x.png> masked
+
+== a list in the text isn't checked
+[- 🥺](http://a.co)
+--
+p: {l0}"- 🥺"
+link0: <http://a.co/> masked
+
+== a link at the end of a line
+input: "[a](https://b.co)\n"
+--
+p: {l0}"a"
+link0: <https://b.co/> masked

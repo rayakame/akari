@@ -1,7 +1,7 @@
 //! The parse tree as a flat list of blocks, each with its runs.
 
 use crate::document::{
-    Block, BlockKind, Container, Document, Inline, InlineKind, Span, SpoilerId, Style,
+    Block, BlockKind, Container, Document, Inline, InlineKind, Link, LinkId, Span, SpoilerId, Style,
 };
 use crate::parse::{Node, Piece};
 
@@ -11,15 +11,17 @@ pub(crate) fn flatten(nodes: &[Node], jumbo: bool) -> Document {
         kind: BlockKind::Paragraph,
         style: Style::default(),
         spoiler: None,
+        link: None,
     };
     flat.nodes(nodes, ctx);
     flat.close();
-    Document::new(flat.blocks, Vec::new(), jumbo, flat.spoilers)
+    Document::new(flat.blocks, flat.links, jumbo, flat.spoilers)
 }
 
 #[derive(Default)]
 struct Flat {
     blocks: Vec<Block>,
+    links: Vec<Link>,
     /// With whether a list item's marker was shown yet.
     containers: Vec<(Container, bool)>,
     open: Option<Open>,
@@ -41,6 +43,7 @@ struct Context {
     kind: BlockKind,
     style: Style,
     spoiler: Option<SpoilerId>,
+    link: Option<LinkId>,
 }
 
 impl Flat {
@@ -96,6 +99,34 @@ impl Flat {
                 },
             ),
             Node::Token { kind, source } => self.inline(*kind, *source, ctx),
+            Node::Link {
+                data,
+                shown,
+                children,
+                source,
+            } => {
+                // Past 65,535 links, a link shows as its text.
+                let link = u16::try_from(self.links.len())
+                    .ok()
+                    .filter(|&id| id < u16::MAX);
+                if link.is_some() {
+                    self.links.push(Link {
+                        url: data.url.clone().into(),
+                        kind: data.kind.clone(),
+                        suppress_embed: data.suppress_embed,
+                    });
+                }
+                let ctx = Context {
+                    link: link.map(LinkId),
+                    ..ctx
+                };
+                for &span in shown {
+                    let whole = if shown.len() == 1 { *source } else { span };
+                    self.inline(InlineKind::Text(span), whole, ctx);
+                }
+                self.nodes(children, ctx);
+            }
+            Node::TestingCode { children } => self.nodes(children, ctx),
             Node::Emoji { source, .. } => self.piece(Piece::Plain(*source), ctx),
             Node::Quote { children, source } => {
                 self.containers.push((Container::Quote, false));
@@ -197,6 +228,7 @@ impl Flat {
                     && shown.end == span.start
                     && last.style == ctx.style
                     && last.spoiler == ctx.spoiler
+                    && last.link == ctx.link
                 {
                     shown.end = span.end;
                     last.source.end = span.end;
@@ -235,7 +267,7 @@ impl Flat {
             kind,
             style: ctx.style,
             spoiler: ctx.spoiler,
-            link: None,
+            link: ctx.link,
             source,
         });
     }

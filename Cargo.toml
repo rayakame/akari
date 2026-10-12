@@ -54,6 +54,8 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["a
 # akari-markdown: graphemes and the Unicode emoji list for jumbo messages and masked-link checks.
 unicode-segmentation = "1.13"
 emojis = { version = "0.9", default-features = false }
+# WHATWG URL parsing for links; already in the app through reqwest.
+url = "2.5"
 
 # akari-cli only
 clap = { version = "4.6", features = ["derive"] }

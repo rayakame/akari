@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use super::memo::{Frame, Runs};
-use super::{Input, Match, Node, Parser, char_len};
+use super::{Ctx, Input, Match, Node, Parser, char_len};
 
 const FENCE: &str = "```";
 
@@ -90,6 +90,7 @@ impl Parser {
         input: &Input,
         at: usize,
         range: &Range<usize>,
+        ctx: Ctx,
         frame: &mut Frame,
     ) -> Option<Match> {
         if at < frame.code_dead_until {
@@ -106,6 +107,14 @@ impl Parser {
             self.steps += 1;
             if let Some(close) = runs.find(len, at + opening) {
                 let content = strip_spaces(text, at + len..close);
+                if ctx.testing_link {
+                    let inner = self.inner(input, at, range, ctx, false);
+                    let children = self.region(input, content, inner);
+                    return Some(Match {
+                        node: Node::TestingCode { children },
+                        next: close + len,
+                    });
+                }
                 let mut pieces = Vec::new();
                 input.pieces(content, |span| pieces.push(span));
                 return Some(Match {

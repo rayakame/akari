@@ -6,8 +6,8 @@ mod flatten;
 mod parse;
 
 pub use document::{
-    Block, BlockKind, Container, Document, HeadingLevel, Inline, InlineKind, Link, LinkId,
-    LinkKind, Navigation, Span, SpoilerId, Style, TimestampStyle,
+    Block, BlockKind, Container, DiscordChannelLink, Document, HeadingLevel, Inline, InlineKind,
+    Link, LinkId, LinkKind, Navigation, Span, SpoilerId, Style, TimestampStyle,
 };
 
 use parse::{Ctx, Input, Parser};

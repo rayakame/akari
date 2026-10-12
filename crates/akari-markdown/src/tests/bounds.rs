@@ -2,8 +2,9 @@
 
 use crate::parse_with_steps;
 
-// 4,000 asterisks take 96 steps per byte: they nest 64 italics, each scanning its content again.
-const K: u64 = 128;
+// About 200 steps per byte at worst: a rejected masked link's text is parsed to check it, and
+// that text holds the next link to check, 64 levels deep (asterisk runs: 96, nesting italics).
+const K: u64 = 256;
 
 fn steps(source: &str) -> u64 {
     parse_with_steps(source).1
@@ -20,80 +21,106 @@ pub(crate) fn assert_bounded(source: &str) {
     );
 }
 
-pub(crate) fn pathological() -> Vec<String> {
-    let increasing_runs: String = (1..=88).map(|n| "`".repeat(n) + "a").collect();
+/// Inputs that make a careless parser quadratic, about 4,000 bytes each at `scale` 1; at 2 each
+/// is twice as long and made the same way.
+pub(crate) fn pathological_at(scale: usize) -> Vec<String> {
+    let r = |s: &str, n: usize| s.repeat(n * scale);
+    let increasing_runs: String = (1..=88)
+        .map(|n| "`".repeat(n) + "a")
+        .collect::<String>()
+        .repeat(scale);
     vec![
-        "`".repeat(4000),
-        "` ``".repeat(1000),
-        "``` ".to_owned() + &"a".repeat(4000),
-        "```".repeat(1333),
-        "`a".repeat(2000) + "``",
-        "``a".repeat(1333),
+        r("`", 4000),
+        r("` ``", 1000),
+        "``` ".to_owned() + &r("a", 4000),
+        r("```", 1333),
+        r("`a", 2000) + "``",
+        r("``a", 1333),
         increasing_runs,
-        "*".repeat(4000),
-        "_".repeat(4000),
-        "~".repeat(4000),
-        "|".repeat(4000),
-        "*_".repeat(2000),
-        "_*".repeat(2000),
-        "**a".repeat(1333),
-        "__a".repeat(1333),
-        "||a".repeat(1333),
-        "~~a".repeat(1333),
-        "*a".repeat(2000),
-        "_a".repeat(2000),
-        "\\*".repeat(1333),
-        "**\\".repeat(1000),
-        "~~a~~_".repeat(666),
-        "> a\n".repeat(1000),
-        "> ".repeat(2000),
-        "- a\n".repeat(1000),
-        "- ".repeat(2000),
-        "1. ".repeat(1333),
-        ("1. ".repeat(12) + "a\n").repeat(100),
-        "-# # ".repeat(800),
-        ">>> ".repeat(1000),
-        "# \n".repeat(1333),
-        "- a\n  ".repeat(571),
-        "<@1".repeat(1333),
-        "<t:".repeat(1333),
-        "<t:".to_owned() + &"1".repeat(4000),
-        "<:a:".repeat(1000),
-        "<:".to_owned() + &"a".repeat(4000),
-        "</a:".repeat(1000),
-        "</".to_owned() + &"a ".repeat(2000),
-        "<id:".repeat(1000),
-        "@".repeat(4000),
-        "😀".repeat(1000),
-        "😀\u{301}".repeat(666),
-        "🇦".repeat(1000),
-        "1\u{20e3}".repeat(1000),
-        "\u{301}".repeat(2000),
-        "👨\u{200d}".repeat(571),
-        ":a".repeat(2000),
-        ":".repeat(4000),
-        ":a:".repeat(1333),
-        "©".repeat(2000),
-        "日本語".repeat(444),
+        r("*", 4000),
+        r("_", 4000),
+        r("~", 4000),
+        r("|", 4000),
+        r("*_", 2000),
+        r("_*", 2000),
+        r("**a", 1333),
+        r("__a", 1333),
+        r("||a", 1333),
+        r("~~a", 1333),
+        r("*a", 2000),
+        r("_a", 2000),
+        r("\\*", 1333),
+        r("**\\", 1000),
+        r("~~a~~_", 666),
+        r("> a\n", 1000),
+        r("> ", 2000),
+        r("- a\n", 1000),
+        r("- ", 2000),
+        r("1. ", 1333),
+        r(&("1. ".repeat(12) + "a\n"), 100),
+        r("-# # ", 800),
+        r(">>> ", 1000),
+        r("# \n", 1333),
+        r("- a\n  ", 571),
+        r("<@1", 1333),
+        r("<t:", 1333),
+        "<t:".to_owned() + &r("1", 4000),
+        r("<:a:", 1000),
+        "<:".to_owned() + &r("a", 4000),
+        r("</a:", 1000),
+        "</".to_owned() + &r("a ", 2000),
+        r("<id:", 1000),
+        r("@", 4000),
+        r("😀", 1000),
+        r("😀\u{301}", 666),
+        r("🇦", 1000),
+        r("1\u{20e3}", 1000),
+        r("\u{301}", 2000),
+        r("👨\u{200d}", 571),
+        r(":a", 2000),
+        r(":", 4000),
+        r(":a:", 1333),
+        r("©", 2000),
+        r("日本語", 444),
+        r("[", 4000),
+        r("]", 4000),
+        r("[a](", 1000),
+        r("[a](x \"", 571),
+        r("[a](x '", 571),
+        r("](", 2000),
+        r("[a]", 1333),
+        r("[", 1000) + &r("](https://a.co)", 200),
+        r("[<@1>](https://a.co)", 200),
+        r("[[<@1>]](https://a.co)", 181),
+        "[a](https://a.co/".to_owned() + &r("(", 4000),
+        "[a](https://a.co/".to_owned() + &r("(b", 2000) + ")",
+        "[a](".to_owned() + &r("\\", 2000),
+        r("<", 4000),
+        r("<a", 2000),
+        r("<a:/", 1000),
+        "https://".to_owned() + &r("(", 2000) + &r(")", 2000),
+        "https://a.co/".to_owned() + &r("x", 4000),
+        r("http://", 571),
+        r("<a@b.co", 571),
+        r("<+1", 1333),
     ]
 }
 
 #[test]
 fn pathological_inputs_stay_linear() {
-    for input in pathological() {
+    for input in pathological_at(1) {
         assert_bounded(&input);
     }
 }
 
 #[test]
 fn steps_grow_linearly() {
-    for input in pathological() {
-        let half = &input[..input.floor_char_boundary(input.len() / 2)];
-        let (once, twice) = (steps(half), steps(&input));
+    for (once, twice) in pathological_at(1).into_iter().zip(pathological_at(2)) {
+        let (a, b) = (steps(&once), steps(&twice));
         assert!(
-            twice * 10 <= once * 22 + 100,
-            "{once} steps for half, {twice} for all: {:?}",
-            input.chars().take(40).collect::<String>()
+            b * 10 <= a * 22 + 100,
+            "{a} steps, then {b} for twice the input: {:?}",
+            once.chars().take(40).collect::<String>()
         );
     }
 }
@@ -101,7 +128,7 @@ fn steps_grow_linearly() {
 #[test]
 #[ignore = "prints the steps per byte of each pathological input, to set K"]
 fn step_ratios() {
-    for input in pathological() {
+    for input in pathological_at(1) {
         let ratio = steps(&input) as f64 / (input.len() + 1) as f64;
         println!(
             "{ratio:6.2} {:?}",
