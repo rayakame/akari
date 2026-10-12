@@ -305,3 +305,13 @@ input: "[a](https://b.co)\n"
 --
 p: {l0}"a"
 link0: <https://b.co/> masked
+
+== a newline in a refused link is a break
+input: "[a\nb](ftp://x)"
+--
+p: "[a" br "b](ftp://x)"
+
+== spaces before a newline in a refused link stay
+input: "x [a  \nb](ftp://x) y"
+--
+p: "x [a  " br "b](ftp://x) y"

@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use super::memo::{Brackets, Frame, UrlPart};
 use super::phishing::special_whitespace;
-use super::{Ctx, Input, LineStart, Match, Node, Parser, Piece};
+use super::{Ctx, Input, LineStart, Match, Node, Parser, literal};
 use crate::document::LinkKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,12 +48,6 @@ fn unescape(text: &str) -> String {
         out.push(c);
     }
     out
-}
-
-fn text_node(input: &Input, range: Range<usize>) -> Node {
-    let mut pieces = Vec::new();
-    input.pieces(range, |span| pieces.push(Piece::Plain(span)));
-    Node::Text(pieces)
 }
 
 impl Parser {
@@ -127,7 +121,7 @@ impl Parser {
                 },
             ),
             None => Match {
-                node: text_node(input, at..end),
+                node: literal(input, at..end),
                 next: end,
             },
         })
@@ -167,7 +161,7 @@ impl Parser {
                 },
             ),
             None => Match {
-                node: text_node(input, start..close),
+                node: literal(input, start..close),
                 next: end,
             },
         })
@@ -319,7 +313,7 @@ impl Parser {
                 .is_none_or(|t| self.admissible(&text[t], check, true).is_some());
         let Some(url) = url.filter(|_| allowed) else {
             return Some(Match {
-                node: text_node(input, at..end),
+                node: literal(input, at..end),
                 next: end,
             });
         };

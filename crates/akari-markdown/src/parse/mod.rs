@@ -241,6 +241,31 @@ pub(crate) enum Piece {
     Break(Span),
 }
 
+/// Text a rule hands back as it is written: no escapes, but each newline is a break.
+pub(crate) fn literal(input: &Input, range: Range<usize>) -> Node {
+    let bytes = input.text.as_bytes();
+    let mut pieces = Vec::new();
+    let mut from = range.start;
+    for at in range.clone() {
+        if bytes[at] == b'\n' {
+            let start = if at > from && bytes[at - 1] == b'\r' {
+                at - 1
+            } else {
+                at
+            };
+            if start > from {
+                input.pieces(from..start, |span| pieces.push(Piece::Plain(span)));
+            }
+            pieces.push(Piece::Break(input.span(start..at + 1)));
+            from = at + 1;
+        }
+    }
+    if from < range.end {
+        input.pieces(from..range.end, |span| pieces.push(Piece::Plain(span)));
+    }
+    Node::Text(pieces)
+}
+
 struct Match {
     node: Node,
     /// Where parsing continues; usually the match's end.

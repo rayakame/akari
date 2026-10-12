@@ -247,3 +247,8 @@ p: "<555 1234567>"
 --
 p: {l0}"+1-555-123-4567"
 link0: <tel:+15551234567> phone
+
+== a newline in an invalid angle-bracket link is a break
+input: "<a\nb:/c>"
+--
+p: "a" br "b:/c"
