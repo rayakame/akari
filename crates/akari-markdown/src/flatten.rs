@@ -21,7 +21,7 @@ pub(crate) fn flatten(nodes: &[Node], jumbo: bool) -> Document {
 #[derive(Default)]
 struct Flat {
     blocks: Vec<Block>,
-    links: Vec<Link>,
+    links: Vec<(Link, Span)>,
     /// With whether a list item's marker was shown yet.
     containers: Vec<(Container, bool)>,
     open: Option<Open>,
@@ -110,11 +110,14 @@ impl Flat {
                     .ok()
                     .filter(|&id| id < u16::MAX);
                 if link.is_some() {
-                    self.links.push(Link {
-                        url: data.url.clone().into(),
-                        kind: data.kind.clone(),
-                        suppress_embed: data.suppress_embed,
-                    });
+                    self.links.push((
+                        Link {
+                            url: data.url.clone().into(),
+                            kind: data.kind.clone(),
+                            suppress_embed: data.suppress_embed,
+                        },
+                        *source,
+                    ));
                 }
                 let ctx = Context {
                     link: link.map(LinkId),

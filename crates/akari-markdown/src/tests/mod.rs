@@ -1,9 +1,12 @@
 mod bounds;
+mod cache;
 mod corpus;
 mod emoji;
 mod links;
 mod outline;
+mod source_range;
 mod text;
+mod utf16;
 
 use crate::{Document, InlineKind, Span};
 

@@ -1,14 +1,20 @@
 //! Discord-flavored markdown: the rules Discord's clients apply to message content.
 
+mod cache;
 mod document;
 mod emoji;
 mod flatten;
 mod parse;
+mod source_range;
+pub mod utf16;
 
 pub use document::{
     Block, BlockKind, Container, DiscordChannelLink, Document, HeadingLevel, Inline, InlineKind,
     Link, LinkId, LinkKind, Navigation, Span, SpoilerId, Style, TimestampStyle,
 };
+
+pub use cache::Cache;
+pub use source_range::source_range;
 
 use parse::{Ctx, Input, Parser};
 

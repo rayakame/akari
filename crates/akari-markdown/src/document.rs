@@ -7,21 +7,29 @@ pub struct Document {
     links: Box<[Link]>,
     jumbo: bool,
     spoiler_count: u16,
+    /// Each link's whole construct, `[text](url)` or `<url>` included.
+    link_spans: Box<[Span]>,
 }
 
 impl Document {
     pub(crate) fn new(
         blocks: Vec<Block>,
-        links: Vec<Link>,
+        links: Vec<(Link, Span)>,
         jumbo: bool,
         spoiler_count: u16,
     ) -> Self {
+        let (links, link_spans): (Vec<Link>, Vec<Span>) = links.into_iter().unzip();
         Self {
             blocks: blocks.into(),
             links: links.into(),
             jumbo,
             spoiler_count,
+            link_spans: link_spans.into(),
         }
+    }
+
+    pub(crate) fn link_spans(&self) -> &[Span] {
+        &self.link_spans
     }
 
     pub fn blocks(&self) -> &[Block] {

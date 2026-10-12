@@ -407,18 +407,24 @@ fn the_outline_writes_every_kind() {
             ),
         ],
         vec![
-            Link {
-                url: "https://x.co/".into(),
-                kind: LinkKind::Plain,
-                suppress_embed: false,
-            },
-            Link {
-                url: "https://y.co/".into(),
-                kind: LinkKind::Masked {
-                    title: Some("t \"q\"".into()),
+            (
+                Link {
+                    url: "https://x.co/".into(),
+                    kind: LinkKind::Plain,
+                    suppress_embed: false,
                 },
-                suppress_embed: true,
-            },
+                s(12, 24),
+            ),
+            (
+                Link {
+                    url: "https://y.co/".into(),
+                    kind: LinkKind::Masked {
+                        title: Some("t \"q\"".into()),
+                    },
+                    suppress_embed: true,
+                },
+                s(0, 0),
+            ),
         ],
         true,
         2,
