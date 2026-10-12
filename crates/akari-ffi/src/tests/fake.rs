@@ -38,11 +38,18 @@ impl FakeGateway {
 
     pub fn client_with_api(&self, api: &str) -> Arc<DiscordClient> {
         let endpoints = akari_core::Endpoints {
-            gateway: format!("ws://{}/", self.address),
             api: api.to_owned(),
-            ..akari_core::Endpoints::default()
+            ..self.endpoints()
         };
         local_client(endpoints, Arc::new(MemoryStore::default()))
+    }
+
+    pub fn endpoints(&self) -> akari_core::Endpoints {
+        akari_core::Endpoints {
+            gateway: format!("ws://{}/", self.address),
+            api: "http://127.0.0.1:9/api/v9/".to_owned(),
+            ..akari_core::Endpoints::default()
+        }
     }
 
     pub async fn serve_ready(&self) -> WebSocketStream<TcpStream> {

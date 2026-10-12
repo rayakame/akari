@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use super::apply::wall_millis;
 use super::events::StoreEvent;
 use super::types::{Delivery, Message, User};
 use crate::gateway::MessageUpdate;
@@ -52,6 +53,13 @@ pub(crate) struct LoadTicket {
     holds: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CachedWindow {
+    // Milliseconds since the Unix epoch, so it orders against earlier sessions' windows.
+    pub(crate) viewed_at: i64,
+    pub(crate) messages: Vec<Arc<Message>>,
+}
+
 /// A snapshot of a viewed channel's loaded messages.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -86,6 +94,11 @@ struct Window {
     loading: u32,
     // Edits and deletes while a load runs; its page may predate them.
     missed: Vec<Missed>,
+    viewed_at: i64,
+    // A page landed; until then the window holds at most live messages and isn't cached.
+    filled: bool,
+    // Filled by the disk cache; the first page checks only its own range, so older rows go.
+    from_disk: bool,
 }
 
 #[cfg_attr(test, derive(PartialEq))]
@@ -239,6 +252,34 @@ impl Window {
         }
     }
 
+    fn drop_before(
+        &mut self,
+        first: Option<MessageId>,
+        channel_id: ChannelId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let Some(first) = first else {
+            return;
+        };
+        let older = self
+            .messages
+            .iter()
+            .take_while(|message| message.id < first)
+            .count();
+        if older == 0 {
+            return;
+        }
+        self.messages.drain(..older);
+        self.oldest = false;
+        if let Some((first, last)) = self.range() {
+            events.push(StoreEvent::MessagesTrimmed {
+                channel_id,
+                first,
+                last,
+            });
+        }
+    }
+
     fn reaches(&self, page: &[Arc<Message>]) -> bool {
         match (page.first(), self.messages.last()) {
             (Some(first), Some(last)) => first.id <= last.id,
@@ -338,8 +379,12 @@ impl Windows {
     }
 
     pub(crate) fn view(&mut self, channel: ChannelId, events: &mut Vec<StoreEvent>) {
+        let now = wall_millis();
         if let Some(index) = self.order.iter().position(|viewed| *viewed == channel) {
             self.order.remove(index);
+            if let Some(window) = self.windows.get_mut(&channel) {
+                window.viewed_at = now;
+            }
         } else {
             let generation = self.next_generation();
             self.windows.insert(
@@ -347,6 +392,7 @@ impl Windows {
                 Window {
                     latest: true,
                     generation,
+                    viewed_at: now,
                     ..Window::default()
                 },
             );
@@ -368,6 +414,27 @@ impl Windows {
                 });
             }
         }
+    }
+
+    // Only windows at the present that no new session made stale; others could be wrong.
+    pub(crate) fn cache_windows(&self, per_window: usize) -> Vec<(ChannelId, CachedWindow)> {
+        self.order
+            .iter()
+            .filter_map(|channel| {
+                let window = self.windows.get(channel)?;
+                if !window.filled || window.loading > 0 || !window.latest || window.stale {
+                    return None;
+                }
+                let skip = window.messages.len().saturating_sub(per_window);
+                Some((
+                    *channel,
+                    CachedWindow {
+                        viewed_at: window.viewed_at,
+                        messages: window.messages[skip..].to_vec(),
+                    },
+                ))
+            })
+            .collect()
     }
 
     pub(crate) fn snapshot(&self, channel: ChannelId) -> Option<MessageWindow> {
@@ -701,7 +768,11 @@ impl Windows {
             }
             LoadKind::Refresh if !window.stale => {}
             LoadKind::Latest | LoadKind::Refresh if window.stale && window.reaches(&page) => {
+                let first = page.first().map(|message| message.id);
                 window.reconcile(channel_id, page, reached_end, window_limit, events);
+                if window.from_disk {
+                    window.drop_before(first, channel_id, events);
+                }
             }
             LoadKind::Refresh => {
                 window.latest = false;
@@ -740,7 +811,38 @@ impl Windows {
                 window.trim(channel_id, window_limit, End::Older, events);
             }
         }
+        window.filled = true;
+        window.from_disk = false;
         window.release_or_drop_held(channel_id, window_limit, events);
+    }
+
+    // Cached messages show while the window's first page loads; they may be outdated, so the
+    // window is stale and the page reconciles or replaces them. Too late, they change nothing.
+    pub(crate) fn fill_from_cache(
+        &mut self,
+        ticket: LoadTicket,
+        messages: Vec<Arc<Message>>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let channel_id = ticket.channel;
+        let Some(window) = self.windows.get_mut(&channel_id).filter(|window| {
+            window.generation == ticket.generation
+                && window.loading > 0
+                && window.messages.is_empty()
+                && window.latest
+        }) else {
+            return;
+        };
+        let mut added = Added::default();
+        for message in &messages {
+            added.add(message.id);
+        }
+        window.messages = messages;
+        window.messages.sort_by_key(|message| message.id);
+        window.stale = true;
+        window.from_disk = true;
+        added.push(channel_id, events);
+        events.push(StoreEvent::MessagesStale { channel_id });
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {

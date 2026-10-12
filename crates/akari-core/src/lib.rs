@@ -4,6 +4,7 @@ mod account;
 pub mod auth;
 mod backlog;
 mod backoff;
+mod cache;
 mod client;
 mod error;
 pub mod gateway;

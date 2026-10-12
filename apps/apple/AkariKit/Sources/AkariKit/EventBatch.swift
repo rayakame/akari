@@ -1,6 +1,7 @@
 // What one batch touched, so each model reads only what changed.
 struct EventBatch {
     var ready = false
+    var restored = false
     var connection: ConnectionState?
     var currentUserChanged = false
     var usersChanged: Set<UserId> = []
@@ -15,6 +16,9 @@ struct EventBatch {
     // Confirmed message ID → the pending ID it replaced.
     var confirmed: [ChannelId: [MessageId: MessageId]] = [:]
 
+    // Read everything again: a new session, or the disk cache's state before the first one.
+    var everythingChanged: Bool { ready || restored }
+
     init(_ events: [StoreEvent]) {
         for event in events {
             switch event {
@@ -22,6 +26,8 @@ struct EventBatch {
                 connection = state
             case .ready:
                 ready = true
+            case .restored:
+                restored = true
             case .currentUserUpdated:
                 currentUserChanged = true
             case .userUpdated(let user):

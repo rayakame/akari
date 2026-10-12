@@ -241,7 +241,8 @@ for 24 hours.
 ## Logout
 
 `DiscordClient::logout(account)` loads the stored token, sends `POST /auth/logout {}` with
-it, and then deletes it from the token store. The body's fields (`provider`, `token`,
+it, and then deletes it from the token store and the account's disk cache
+([cache.md](cache.md#deleting)). The body's fields (`provider`, `token`,
 `voip_provider`, `voip_token`) are all optional push-notification tokens, so `{}` is valid,
 and Akari registers none ([Logout](https://docs.discord.food/authentication#logout)). What
 happens to a gateway connection that is still open isn't documented (**unverified**: likely a
@@ -256,9 +257,9 @@ that the session may still be active, and that it can be ended under User Settin
 Devices in an official client. akari-cli does this, and it also ends a replaced token's
 session after logging in again, so no live session is left behind a deleted token.
 
-The apps log out in the other order: `forget_token` first, so the Keychain item is gone before
-the login screen shows, then `end_session` with the open session's token, which the app keeps
-in memory, in the background. The UI never waits for Discord, and a new login with the same
+The apps log out in the other order: `forget_account` first, which deletes the token and then
+the account's disk cache, so both are gone before the login screen shows, then `end_session`
+with the open session's token, which the app keeps in memory, in the background. The UI never waits for Discord, and a new login with the same
 account can't have its token deleted by a late logout. If the token can't be deleted, the app
 stays logged in and says so; if Discord doesn't confirm, the login screen says the session may
 still be active.

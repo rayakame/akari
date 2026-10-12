@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use akari_core::gateway::GatewayError;
+use akari_core::model::UserId;
 use akari_core::state::{ConnectionState, StoreEvent, Subscription};
 use akari_core::{Account, DiscordClient, Token};
 use tokio::signal::unix::Signal;
@@ -20,11 +21,11 @@ pub struct Session {
     pub events: Subscription,
 }
 
-/// The current account's token, or the reason there is none, already printed.
+/// The current account and its token, or the reason there is none, already printed.
 pub async fn stored_token<S: Accounts>(
     client: &DiscordClient,
     store: &Arc<S>,
-) -> Result<Token, ExitCode> {
+) -> Result<(UserId, Token), ExitCode> {
     let id = match off_runtime(store, |store| store.current_account()).await {
         Ok(Some(id)) => id,
         Ok(None) => return Err(fail(&format!("Not logged in. {LOG_IN} first."))),
@@ -36,7 +37,7 @@ pub async fn stored_token<S: Accounts>(
         }
     };
     match client.load_token(id).await {
-        Ok(Some(token)) => Ok(token),
+        Ok(Some(token)) => Ok((id, token)),
         Ok(None) => Err(fail(&format!(
             "No token is stored for this account. {LOG_IN}."
         ))),
@@ -50,9 +51,9 @@ pub async fn open<S: Accounts>(
     store: &Arc<S>,
     flags_only: bool,
 ) -> Result<Session, ExitCode> {
-    let token = stored_token(client, store).await?;
+    let (id, token) = stored_token(client, store).await?;
     let account = client
-        .account(token)
+        .account(token, id)
         .map_err(|err| fail(&closed_message(Some(&err))))?;
     if flags_only {
         account.subscribe_flags_only();

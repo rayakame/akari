@@ -9,9 +9,7 @@ import Testing
 struct SessionLayoutTests {
     @Test(arguments: [false, true], [NSAppearance.Name.darkAqua, .aqua])
     func bothHeadersEndOnOneContinuousLine(atHome: Bool, appearance: NSAppearance.Name) throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         let session = SessionModel(
             userId: UserId(rawValue: 1), account: CrowdedAccount(),
             memory: AccountMemory(defaults: defaults)
@@ -70,9 +68,7 @@ struct SessionLayoutTests {
     // document is where rows can be seen.
     @Test(arguments: [false, true])
     func nothingScrollsUnderTheTitleStrip(atHome: Bool) async throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         let session = SessionModel(
             userId: UserId(rawValue: 1), account: CrowdedAccount(),
             memory: AccountMemory(defaults: defaults)

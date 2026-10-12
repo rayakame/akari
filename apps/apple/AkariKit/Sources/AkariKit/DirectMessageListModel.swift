@@ -33,7 +33,7 @@ public final class DirectMessageListModel {
     }
 
     func apply(_ batch: EventBatch) {
-        if batch.ready {
+        if batch.everythingChanged {
             return reload()
         }
         let renamed = batch.usersChanged.filter { users[$0] != nil }

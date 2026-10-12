@@ -6,16 +6,7 @@ import Testing
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class AppModelTests {
     let client = FakeClient()
-    let suite = "app.akari.tests.\(UUID().uuidString)"
-    let memory: AccountMemory
-
-    init() throws {
-        memory = AccountMemory(defaults: try #require(UserDefaults(suiteName: suite)))
-    }
-
-    deinit {
-        UserDefaults.standard.removePersistentDomain(forName: suite)
-    }
+    let memory = AccountMemory(defaults: MemoryDefaults())
 
     func makeApp() -> AppModel {
         AppModel(client: client, memory: memory)
@@ -38,7 +29,9 @@ final class AppModelTests {
 
         #expect(session.userId == id(42))
         #expect(
-            client.calls.current == [.warmUp, .loadToken(id(42)), .account(token: "stored.token")])
+            client.calls.current == [
+                .warmUp, .preload(id(42)), .loadToken(id(42)), .account(token: "stored.token"),
+            ])
         #expect(account.log.calls.contains(.connect))
         session.close()
     }
@@ -98,6 +91,7 @@ final class AppModelTests {
         client.passwordLogins.withLock { $0 = [password] }
         let app = makeApp()
         await app.start()
+        await client.cleared.wait()
         let login = try #require(app.screen.login)
 
         login.login = "me@example.com"
@@ -143,7 +137,7 @@ final class AppModelTests {
         )
         await client.forgotten.wait()
 
-        #expect(client.calls.current.filter { $0 == .forgetToken(id(42)) }.count == 1)
+        #expect(client.calls.current.filter { $0 == .forgetAccount(id(42)) }.count == 1)
         #expect(!client.calls.current.contains(.logout(id(42))))
         #expect(memory.lastAccount == nil)
         #expect(memory.lastSpot(of: id(42)) == nil)
@@ -161,7 +155,7 @@ final class AppModelTests {
 
         #expect(app.screen.session === session)
         #expect(memory.lastAccount == id(42))
-        #expect(!client.calls.current.contains(.forgetToken(id(42))))
+        #expect(!client.calls.current.contains(.forgetAccount(id(42))))
         session.close()
     }
 
@@ -179,7 +173,7 @@ final class AppModelTests {
         client.endSessions.send(())
         await app.endingSession?.value
         let calls = client.calls.current
-        let forgot = try #require(calls.firstIndex(of: .forgetToken(id(42))))
+        let forgot = try #require(calls.firstIndex(of: .forgetAccount(id(42))))
         let ended = try #require(calls.firstIndex(of: .endSession("stored.token")))
         #expect(forgot < ended)
         #expect(!calls.contains(.logout(id(42))))
@@ -215,7 +209,7 @@ final class AppModelTests {
         client.forgets.send(())
         await first
 
-        #expect(client.calls.current.filter { $0 == .forgetToken(id(42)) }.count == 1)
+        #expect(client.calls.current.filter { $0 == .forgetAccount(id(42)) }.count == 1)
         #expect(app.screen.login != nil)
     }
 
@@ -262,7 +256,7 @@ final class AppModelTests {
         let saved = try #require(calls.firstIndex(of: .saveToken(id(42), "token-2")))
         let storeCallsAfter = calls[(saved + 1)...].filter { call in
             switch call {
-            case .forgetToken, .logout, .saveToken: true
+            case .forgetAccount, .logout, .saveToken: true
             default: false
             }
         }
@@ -423,11 +417,59 @@ final class AppModelTests {
     }
 
     @Test
-    func aRestoredLaunchWarmsUpBeforeTheTokenLoads() async throws {
+    func aLaunchPreloadsAndWarmsUpBeforeTheTokenLoads() async throws {
         let (_, session, _) = try await restored()
 
-        #expect(Array(client.calls.current.prefix(2)) == [.warmUp, .loadToken(id(42))])
+        #expect(
+            Array(client.calls.current.prefix(3)) == [
+                .warmUp, .preload(id(42)), .loadToken(id(42)),
+            ]
+        )
+        #expect(!client.calls.current.contains(.clearCaches))
         session.close()
+    }
+
+    @Test
+    func aLaunchWithoutAnAccountClearsCaches() async {
+        let app = makeApp()
+
+        await app.start()
+        await client.cleared.wait()
+
+        #expect(client.calls.current.contains(.clearCaches))
+        #expect(app.screen.login != nil)
+    }
+
+    @Test
+    func quittingWaitsForTheFlushAtMostTheLimit() async throws {
+        let (app, session, account) = try await restored()
+        account.holdFlushes.withLock { $0 = true }
+
+        let started = ContinuousClock.now
+        await app.prepareToQuit(limit: .milliseconds(200))
+        let waited = started.duration(to: .now)
+
+        #expect(waited >= .milliseconds(200))
+        #expect(waited < .seconds(2))
+        #expect(account.log.actions.contains(.flushCache))
+        account.flushes.send(())
+
+        account.holdFlushes.withLock { $0 = false }
+        let quick = ContinuousClock.now
+        await app.prepareToQuit(limit: .seconds(10))
+        #expect(quick.duration(to: .now) < .seconds(2))
+        session.close()
+    }
+
+    @Test
+    func quittingWithoutASessionReturnsAtOnce() async {
+        let app = makeApp()
+        await app.start()
+
+        let started = ContinuousClock.now
+        await app.prepareToQuit(limit: .seconds(10))
+
+        #expect(started.duration(to: .now) < .seconds(1))
     }
 
     // After a sleep the pooled connection is usually gone.
@@ -435,6 +477,8 @@ final class AppModelTests {
     func aWakeWarmsUpAgain() async throws {
         let fresh = makeApp()
         await fresh.start()
+        // A launch without an account clears the caches in the background.
+        await client.cleared.wait()
         fresh.resume()
         #expect(!client.calls.current.contains(.warmUp))
 

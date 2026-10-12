@@ -172,16 +172,16 @@ public final class ComposerModel {
             guildId.map { batch.guildsChanged.contains($0) || batch.membersChanged.contains($0) }
             ?? false
         let channelChanged = batch.channelsChanged[guildId]?.contains(channelId) == true
-        if batch.ready || guildChanged || channelChanged {
+        if batch.everythingChanged || guildChanged || channelChanged {
             readCanSend()
         }
         // Only the user's own sends and messages start a cooldown, and they change the window.
-        if batch.ready || guildChanged || channelChanged
+        if batch.everythingChanged || guildChanged || channelChanged
             || batch.windowsChanged.contains(channelId) || batch.confirmed[channelId] != nil
         {
             slowmode = store.slowmode(channelId: channelId)
         }
-        if batch.ready || batch.currentUserChanged {
+        if batch.everythingChanged || batch.currentUserChanged {
             lengthLimit = Int(store.messageLengthLimit())
         }
     }

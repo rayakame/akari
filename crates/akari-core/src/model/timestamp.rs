@@ -16,8 +16,21 @@ impl Timestamp {
 
     // Outside the years 1–9999 it falls back to the Unix epoch.
     pub(crate) fn from_unix_millis(unix_millis: i64) -> Self {
+        Self::from_unix_nanos_wide(i128::from(unix_millis) * 1_000_000)
+    }
+
+    // Discord's timestamps carry microseconds, which milliseconds would lose.
+    pub(crate) fn unix_nanos(self) -> i64 {
+        i64::try_from(self.0.unix_timestamp_nanos()).unwrap_or(0)
+    }
+
+    pub(crate) fn from_unix_nanos(unix_nanos: i64) -> Self {
+        Self::from_unix_nanos_wide(i128::from(unix_nanos))
+    }
+
+    fn from_unix_nanos_wide(unix_nanos: i128) -> Self {
         Self(
-            OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix_millis) * 1_000_000)
+            OffsetDateTime::from_unix_timestamp_nanos(unix_nanos)
                 .unwrap_or(OffsetDateTime::UNIX_EPOCH),
         )
     }
@@ -54,5 +67,16 @@ mod tests {
         let timestamp = Timestamp::from_unix_millis(1_700_000_000_123);
 
         assert_eq!(timestamp.unix_millis(), 1_700_000_000_123);
+    }
+
+    #[test]
+    fn timestamps_round_trip_through_unix_nanos() {
+        let timestamp: Timestamp =
+            serde_json::from_str("\"2026-10-11T12:00:00.123456+00:00\"").unwrap();
+
+        assert_eq!(
+            Timestamp::from_unix_nanos(timestamp.unix_nanos()),
+            timestamp
+        );
     }
 }

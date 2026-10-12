@@ -210,8 +210,12 @@ struct ConstraintConflictTests {
         _ steps: [(MessageTableController) -> MessageTableState]
     ) -> Int {
         let key = "NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints"
-        UserDefaults.standard.set(true, forKey: key)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        UserDefaults.standard.setVolatileDomain(
+            arguments.merging([key: true]) { $1 }, forName: UserDefaults.argumentDomain)
+        defer {
+            UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        }
         let controller = MessageTableController(
             calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
         let window = RecordingWindow(
@@ -235,6 +239,23 @@ struct ConstraintConflictTests {
                 UInt64(raw), by: author(authorOf(raw)), at: noon + Double(raw) * 60,
                 content: String(repeating: "words that wrap ", count: raw % 9 * 4 + 1))
         }
+    }
+
+    @Test
+    func anUnsatisfiableConstraintIsCounted() {
+        #expect(
+            conflicts([
+                { controller in
+                    let box = NSView()
+                    box.translatesAutoresizingMaskIntoConstraints = false
+                    controller.scrollView.addSubview(box)
+                    NSLayoutConstraint.activate([
+                        box.widthAnchor.constraint(equalToConstant: 10),
+                        box.widthAnchor.constraint(equalToConstant: 20),
+                    ])
+                    return MessageTableState(rows: [])
+                }
+            ]) > 0)
     }
 
     @Test

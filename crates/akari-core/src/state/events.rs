@@ -9,6 +9,9 @@ use crate::model::{ChannelId, GuildId, MessageId};
 #[non_exhaustive]
 pub enum StoreEvent {
     Connection(ConnectionState),
+    /// The disk cache's state is in place, before the first READY: read everything, as
+    /// after READY. The first READY then reports only what changed since.
+    Restored,
     /// A new session's state is in place. After the first READY, read everything; after a
     /// later one, the events before this one described every difference.
     Ready,

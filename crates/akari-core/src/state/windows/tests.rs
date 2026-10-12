@@ -1156,3 +1156,153 @@ fn a_dropped_channel_keeps_its_unsent_messages() {
             .is_some()
     );
 }
+
+#[test]
+fn only_fresh_windows_at_the_present_are_written() {
+    let mut fresh = Harness::viewing(LOADS);
+    let ticket = fresh.begin(LoadKind::Latest).unwrap();
+    fresh.finish(ticket, &[10, 11, 12, 13, 14], 5);
+    fresh.queue(pending(500, "unsent"));
+
+    let taken = fresh.windows.cache_windows(3);
+
+    assert_eq!(taken.len(), 1);
+    let (channel_id, cached) = &taken[0];
+    assert_eq!(*channel_id, channel(CH));
+    let ids: Vec<u64> = cached
+        .messages
+        .iter()
+        .map(|message| message.id.get())
+        .collect();
+    assert_eq!(ids, [12, 13, 14]);
+    assert!(cached.viewed_at > 0);
+
+    let mut stale = Harness::viewing(LOADS);
+    stale.live(wire(10));
+    stale.windows.mark_stale(&mut Vec::new());
+    assert!(stale.windows.cache_windows(3).is_empty());
+
+    let detached = Harness::detached(LOADS, &[19, 20, 21]);
+    assert!(detached.windows.cache_windows(3).is_empty());
+}
+
+#[test]
+fn viewing_again_moves_the_viewed_time() {
+    let mut harness = Harness::viewing(LOADS);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(ticket, &[1, 2], 5);
+    let first = harness.windows.cache_windows(3)[0].1.viewed_at;
+    std::thread::sleep(std::time::Duration::from_millis(5));
+
+    harness.view(CH);
+
+    assert!(harness.windows.cache_windows(3)[0].1.viewed_at > first);
+}
+
+impl Harness {
+    fn fill(&mut self, ticket: LoadTicket, ids: &[u64]) -> Vec<String> {
+        let mut events = Vec::new();
+        let cached = ids.iter().map(|id| stored(*id)).collect();
+        self.windows.fill_from_cache(ticket, cached, &mut events);
+        describe(&events)
+    }
+}
+
+#[test]
+fn cached_messages_fill_an_empty_loading_window_as_stale() {
+    let mut harness = Harness::viewing(LOADS);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+
+    let filled = harness.fill(ticket, &[1, 2, 3]);
+
+    assert_eq!(filled, ["Loaded(1..3)", "Stale(1)"]);
+    let window = harness.window();
+    assert!(window.stale && window.latest);
+    let held = harness.live(wire(9));
+    assert!(held.is_empty(), "{held:?}");
+
+    let landed = harness.finish(ticket, &[2, 3, 4], 3);
+
+    assert_eq!(landed, ["Loaded(4..4)", "Loaded(9..9)", "Trimmed(2..9)"]);
+    assert_eq!(harness.ids(), [2, 3, 4, 9]);
+    let window = harness.window();
+    assert!(!window.stale && window.latest);
+}
+
+#[test]
+fn cached_messages_after_the_page_change_nothing() {
+    let mut harness = Harness::viewing(LOADS);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(ticket, &[2, 3, 4], 3);
+
+    assert!(harness.fill(ticket, &[1, 2, 3]).is_empty());
+
+    assert_eq!(harness.ids(), [2, 3, 4]);
+    assert!(!harness.window().stale);
+}
+
+#[test]
+fn cached_messages_never_replace_loaded_ones() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+
+    assert!(harness.fill(ticket, &[1, 2, 3]).is_empty());
+
+    assert_eq!(harness.ids(), [10]);
+}
+
+const DISK: WindowLimits = WindowLimits {
+    channels: 2,
+    messages: 20,
+};
+
+#[test]
+fn cached_rows_older_than_the_fresh_page_are_dropped() {
+    let mut harness = Harness::viewing(DISK);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.fill(ticket, &[1, 2, 3, 4, 5]);
+
+    let events = harness.finish(ticket, &[3, 4, 5, 6, 7], 5);
+
+    assert_eq!(harness.ids(), [3, 4, 5, 6, 7]);
+    assert!(events.contains(&"Trimmed(3..7)".to_owned()), "{events:?}");
+    let window = harness.window();
+    assert!(window.latest && !window.stale && !window.oldest);
+}
+
+#[test]
+fn a_refresh_after_a_new_session_keeps_the_older_rows() {
+    let mut harness = Harness::viewing(DISK);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(ticket, &[1, 2, 3, 4, 5], 5);
+    harness.windows.mark_stale(&mut Vec::new());
+
+    let refresh = harness.begin(LoadKind::Refresh).unwrap();
+    harness.finish(refresh, &[3, 4, 5, 6, 7], 5);
+
+    assert_eq!(harness.ids(), [1, 2, 3, 4, 5, 6, 7]);
+}
+
+#[test]
+fn windows_still_loading_or_never_filled_are_not_written() {
+    let mut harness = Harness::viewing(LOADS);
+    assert!(harness.windows.cache_windows(5).is_empty());
+
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    harness.live(wire(10));
+    assert!(harness.windows.cache_windows(5).is_empty());
+
+    harness.finish(ticket, &[8, 9], 5);
+    let taken = harness.windows.cache_windows(5);
+    let ids: Vec<u64> = taken[0]
+        .1
+        .messages
+        .iter()
+        .map(|message| message.id.get())
+        .collect();
+    assert_eq!(ids, [8, 9, 10]);
+
+    let _older = harness.begin(LoadKind::Older).unwrap();
+    assert!(harness.windows.cache_windows(5).is_empty());
+}

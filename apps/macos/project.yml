@@ -33,6 +33,9 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.social-networking
         CODE_SIGN_ENTITLEMENTS: Akari/Akari.entitlements
       configs:
+        # Debug runs and the test host get their own container: settings, cache and tokens.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: app.akari.Akari.dev
         # Debug leaves it off: library validation would refuse the ad-hoc signed test bundle.
         Release:
           ENABLE_HARDENED_RUNTIME: YES

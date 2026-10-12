@@ -11,7 +11,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::fake::{FakeGateway, GENERAL, events_until, fixture, online};
-use super::support::{block_on, refused_connection, token};
+use super::support::{USER, block_on, refused_connection, token};
 use crate::account::{Account, MessageLoad};
 use crate::errors::{NetworkErrorKind, RequestError};
 use crate::login::CaptchaChallenge;
@@ -30,7 +30,7 @@ async fn online_with(server: &MockServer) -> Online {
     let gateway = FakeGateway::start().await;
     let account = gateway
         .client_with_api(&format!("{}/api/v9/", server.uri()))
-        .account(token("t"))
+        .account(token("t"), USER)
         .unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
@@ -280,7 +280,7 @@ async fn request_errors_map_one_to_one() {
 #[tokio::test]
 async fn a_load_without_network_reports_the_kind() {
     let gateway = FakeGateway::start().await;
-    let account = gateway.client().account(token("t")).unwrap();
+    let account = gateway.client().account(token("t"), USER).unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let _ws = gateway.serve_ready().await;
@@ -335,7 +335,7 @@ async fn slowmode_online(server: &MockServer) -> Online {
     let gateway = FakeGateway::start().await;
     let account = gateway
         .client_with_api(&format!("{}/api/v9/", server.uri()))
-        .account(token("t"))
+        .account(token("t"), USER)
         .unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();

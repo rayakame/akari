@@ -372,7 +372,8 @@ of the repo.
   channels aren't in the store and can't be viewed or subscribed. The official client
   previews them through other requests; that's for a later milestone.
 - `GET /gateway` with a cached URL, and persisting a session across launches for a fast
-  resume after a cold start.
+  resume after a cold start. The disk cache restores the state but not the session: a resume
+  needs the exact state at the end of the session ([cache.md](cache.md#what-is-never-cached)).
 - Status across several sessions. When a user has several sessions with a presence,
   Discord broadcasts an overall one, shown as the session with `session_id` `all`
   ([Session Object](https://docs.discord.food/resources/presence#session-object)); how it

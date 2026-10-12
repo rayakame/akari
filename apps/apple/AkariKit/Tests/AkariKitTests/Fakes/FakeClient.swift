@@ -9,7 +9,9 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
         case saveToken(UserId, String)
         case loadToken(UserId)
         case logout(UserId)
-        case forgetToken(UserId)
+        case forgetAccount(UserId)
+        case preload(UserId)
+        case clearCaches
         case endSession(String)
         case warmUp
     }
@@ -52,6 +54,17 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
         record(.warmUp)
     }
 
+    override func preload(userId: UserId) {
+        record(.preload(userId))
+    }
+
+    let cleared = Signal()
+
+    override func clearCaches() async {
+        record(.clearCaches)
+        cleared.fire()
+    }
+
     override func passwordLogin() -> PasswordLogin {
         record(.passwordLogin)
         return passwordLogins.withLock { $0.isEmpty ? FakePasswordLogin() : $0.removeFirst() }
@@ -67,7 +80,7 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
 
     let accountError = Locked<GatewayError?>(nil)
 
-    override func account(token: Token) throws -> Account {
+    override func account(token: Token, userId: UserId) throws -> Account {
         record(.account(token: (token as? FakeToken)?.value ?? "?"))
         if let error = accountError.current {
             throw error
@@ -102,8 +115,8 @@ final class FakeClient: DiscordClient, @unchecked Sendable {
         tokens.withLock { $0[account] = nil }
     }
 
-    override func forgetToken(account: UserId) async throws {
-        record(.forgetToken(account))
+    override func forgetAccount(account: UserId) async throws {
+        record(.forgetAccount(account))
         if holdForgets.current {
             _ = await forgets.next()
         }

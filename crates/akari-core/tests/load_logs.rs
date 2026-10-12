@@ -44,7 +44,10 @@ async fn the_load_log_holds_numbers_and_the_channel_only() {
         DiscordClient::with_endpoints(support::properties(), Arc::new(support::NoStore), endpoints)
             .unwrap_or_else(|err| panic!("client setup failed: {err}"));
     let account = client
-        .account(Token::new("load-log-test-token.secret".to_owned()))
+        .account(
+            Token::new("load-log-test-token.secret".to_owned()),
+            Snowflake::new(1),
+        )
         .unwrap_or_else(|err| panic!("{err}"));
 
     account

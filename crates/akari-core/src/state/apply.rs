@@ -7,24 +7,24 @@ use super::events::StoreEvent;
 use super::permissions::compute;
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
-use super::windows::{LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
+use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct Entities {
-    current_user: Option<Arc<CurrentUser>>,
+    pub(crate) current_user: Option<Arc<CurrentUser>>,
     // DM and group DM recipients only.
-    users: HashMap<UserId, Arc<User>>,
-    guilds: HashMap<GuildId, Arc<Guild>>,
-    unavailable: HashSet<GuildId>,
+    pub(crate) users: HashMap<UserId, Arc<User>>,
+    pub(crate) guilds: HashMap<GuildId, Arc<Guild>>,
+    pub(crate) unavailable: HashSet<GuildId>,
     // Only the current user's member in each guild.
-    members: HashMap<GuildId, Arc<Member>>,
-    channels: HashMap<ChannelId, Arc<Channel>>,
+    pub(crate) members: HashMap<GuildId, Arc<Member>>,
+    pub(crate) channels: HashMap<ChannelId, Arc<Channel>>,
 }
 
 impl Entities {
@@ -190,6 +190,7 @@ pub(crate) struct ReadyDiff {
 pub(crate) struct State {
     entities: Entities,
     ready: bool,
+    restored: bool,
     windows: Windows,
     cooldowns: Cooldowns,
 }
@@ -204,6 +205,7 @@ impl State {
         Self {
             entities: Entities::default(),
             ready: false,
+            restored: false,
             windows: Windows::new(limits),
             cooldowns: Cooldowns::default(),
         }
@@ -214,9 +216,9 @@ impl State {
         self.swap(next, diff, events);
     }
 
-    // `None` before the first READY, which has nothing to diff against.
+    // `None` before the first READY or a restore, which leave nothing to diff against.
     pub(crate) fn ready_diff(&self, next: &Entities) -> Option<ReadyDiff> {
-        if !self.ready {
+        if !self.ready && !self.restored {
             return None;
         }
         let mut events = Vec::new();
@@ -246,6 +248,8 @@ impl State {
             for channel in diff.removed_channels {
                 self.windows.drop_channel(channel);
             }
+            // Pages loaded since a restore predate this session too: what happened in between
+            // never comes as a dispatch.
             self.windows.mark_stale(events);
         }
         self.ready = true;
@@ -255,6 +259,21 @@ impl State {
 
     pub(crate) fn me(&self) -> Option<UserId> {
         self.entities.me()
+    }
+
+    pub(crate) fn had_ready(&self) -> bool {
+        self.ready
+    }
+
+    // Only before the first READY: a READY that came first is fresher than any cache.
+    pub(crate) fn restore(&mut self, cached: Entities, events: &mut Vec<StoreEvent>) -> bool {
+        if self.ready || self.restored {
+            return false;
+        }
+        self.entities = cached;
+        self.restored = true;
+        events.push(StoreEvent::Restored);
+        true
     }
 
     fn diff(&self, next: &Entities, events: &mut Vec<StoreEvent>) {
@@ -714,8 +733,30 @@ impl State {
         self.windows.abort_load(ticket, events);
     }
 
+    pub(crate) fn fill_from_cache(
+        &mut self,
+        ticket: LoadTicket,
+        messages: Vec<Arc<Message>>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows.fill_from_cache(ticket, messages, events);
+    }
+
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {
         self.windows.stale_channels()
+    }
+
+    pub(crate) fn cache_parts(
+        &self,
+        per_window: usize,
+    ) -> (Entities, Vec<(ChannelId, CachedWindow)>) {
+        // Before a session nothing confirms a window is still current.
+        let windows = if self.ready {
+            self.windows.cache_windows(per_window)
+        } else {
+            Vec::new()
+        };
+        (self.entities.clone(), windows)
     }
 
     pub(crate) fn viewed_channels(&self) -> Vec<Arc<Channel>> {
@@ -901,7 +942,7 @@ impl State {
     }
 }
 
-fn wall_millis() -> i64 {
+pub(super) fn wall_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| {

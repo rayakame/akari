@@ -54,7 +54,7 @@ pub async fn run<S: Accounts>(
     options: Options,
 ) -> ExitCode {
     let token = match stored_token(client, store).await {
-        Ok(token) => token,
+        Ok((_, token)) => token,
         Err(code) => return code,
     };
     let gateway = match client.gateway(token) {

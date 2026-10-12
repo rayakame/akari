@@ -73,15 +73,20 @@ Without `Local.xcconfig` the app still builds and runs, signed ad hoc, with the 
 The app uses App Sandbox with outgoing network connections only, so it needs no
 provisioning profile.
 
+Debug builds and the test host are `app.akari.Akari.dev`, with their own container (settings
+and cache) and their own Keychain service, `app.akari.dev.tokens`; a Debug run logs in
+separately. Release builds are `app.akari.Akari` with `app.akari.tokens`.
+
 ## Tests
 
 ```sh
 xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari -destination 'platform=macOS'
 ```
 
-The tests run inside the app (a hosted test bundle), which starts nothing under tests: no
-client, no Keychain and no network. The logic the iOS app will share lives in AkariKit and
-is tested there with `swift test`.
+The tests run inside the Debug app (a hosted test bundle, `app.akari.Akari.dev`), which
+starts nothing under tests: no client, no Keychain and no network. Their settings live in
+`MemoryDefaults`, never in the app's defaults or a suite. The logic the iOS app will share
+lives in AkariKit and is tested there with `swift test`.
 
 ## Logs and launch time
 
@@ -112,6 +117,7 @@ channel 1234 latest page 1: queued 86 ms, limited 0.0 ms, headers 370 ms, connec
   body 1.3 ms, 69755 bytes, decode 0.7 ms, store 0.1 ms, read 0.1 ms, render 44 ms for 50 rows,
   shown after 524 ms; 50 messages; no limit headers
 channel 1234 opened: rows from the network after 544 ms
+channel 1234 opened: rows from disk after 24 ms, fresh after 380 ms
 ```
 
 - **queued:** behind an earlier request for the same channel, or a warm-up still connecting.
@@ -150,8 +156,9 @@ connections at `akari_core::rest` (debug, with their connect time).
 
 The app logs its launch milestones once each, in milliseconds since process start, to the
 unified log (subsystem `app.akari`, category `launch`): app started, client created, token
-loaded, session started, first message load started and finished, first channel rendered,
-READY in the app. Xcode's console shows them too. In zsh, `log` is a builtin, so call the
+loaded, cache restored, session started, first message load started and finished, first
+channel rendered, first fresh page rendered (the first page from the network on screen), READY
+in the app. Xcode's console shows them too. In zsh, `log` is a builtin, so call the
 tool by its path:
 
 ```sh
@@ -225,6 +232,20 @@ xcrun xctrace record --template 'Allocations' --attach Akari --time-limit 120s \
 The app marks its own work as Points of Interest (`page lands`, `row heights`,
 `message cell made`, `page requested`, live scroll start and settle), which Instruments shows
 beside its tracks. Delete recordings after use: they come from a real account.
+
+## Disk cache
+
+Each account's state and its recently viewed channels' newest messages are kept in
+`~/Library/Containers/app.akari.Akari/Data/Library/Application Support/Akari/Cache` (Debug
+builds: in `app.akari.Akari.dev`'s container), one
+`<user id>.sqlite` (with `-wal` and `-shm`) per account, excluded from backups. What it holds,
+when it's written and when it's deleted: [cache.md](../../docs/protocol/cache.md). Quitting
+waits for a last write, at most about a second.
+
+- **Its logs:** `-AkariLog akari_core::cache=info` (counts, sizes and durations only).
+- **Its size:** `du -ch ~/Library/Containers/app.akari.Akari/Data/Library/Application\ Support/Akari/Cache/*`.
+- **Deleting it by hand:** quit Akari, then delete the directory's files. The next launch
+  starts from the network, as without a cache.
 
 ## Theme
 

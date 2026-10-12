@@ -143,6 +143,12 @@ and applies each event.
 - **A new session** (READY after a failed resume) is compared with the old state, and only
   the differences become events, followed by `Ready`. A guild that is added, removed or
   goes down implies its channels. RESUMED changes nothing.
+- **The disk cache** can fill the store before the first READY (`StoreEvent::Restored`;
+  read everything, as after READY). The first READY after that is compared with the
+  restored state like a new session, so only real changes become events, but it doesn't
+  mark windows stale: windows loaded since the restore are as fresh as READY. A READY that
+  arrives before the cache was read wins, and the cached state isn't used. See
+  [cache.md](cache.md).
 - **Members:** only the current user's, for permissions. **Users:** the DM and group DM
   recipients; message authors are copies sent with each message, and equal copies share
   one allocation.
@@ -171,6 +177,11 @@ and applies each event.
   until the window is refreshed and reconciled, because appending them could leave a gap.
   `Account` refreshes stale windows right after READY; see
   [messages.md](messages.md#after-a-new-session).
+- A channel's first page can show the cache's copy of the channel while it loads: if the
+  copy is read before the page arrives (or the page fails), it fills the empty window as
+  stale (`MessagesLoaded`, then `MessagesStale`), and the page then reconciles it like a
+  refresh or, when it doesn't reach it, replaces it with the present. A page never waits
+  for the disk.
 - `MessagesLoaded { first, last }` announces messages added within that ID range: history
   at either end, or messages a refresh filled in between loaded ones. The UI reads the
   window for the range.

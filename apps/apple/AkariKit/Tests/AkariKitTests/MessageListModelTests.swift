@@ -70,7 +70,8 @@ struct MessageListModelTests {
             store.reads == [
                 .window(here), .messages(here, [id(3), id(4), id(5)]), .slowmode(here),
             ])
-        #expect(model.rows.map(\.message) == [message(3, content: "edited"), message(4), message(5)])
+        #expect(
+            model.rows.map(\.message) == [message(3, content: "edited"), message(4), message(5)])
     }
 
     @Test
@@ -311,7 +312,8 @@ struct MessageListModelTests {
         account.loadError.withLock { $0 = nil }
         await model.loadNewer()
         #expect(model.failedLoads.isEmpty)
-        #expect(store.log.actions == [.load(here, .newer(limit: 50)), .load(here, .newer(limit: 50))])
+        #expect(
+            store.log.actions == [.load(here, .newer(limit: 50)), .load(here, .newer(limit: 50))])
     }
 
     @Test
@@ -418,5 +420,57 @@ struct MessageListModelTests {
 
         #expect(empty.openedFrom == .network)
         #expect(held.openedFrom == .window)
+    }
+
+    @Test
+    func theFirstRowsSayTheyCameFromDisk() {
+        shown(window([]))
+        let model = loaded()
+        #expect(model.openedFrom == .network)
+
+        shown(window([1, 2], stale: true))
+        model.apply(
+            EventBatch([
+                .messagesLoaded(channelId: here, first: id(1), last: id(2)),
+                .messagesStale(channelId: here),
+            ]))
+
+        #expect(model.openedFrom == .disk)
+        #expect(model.rows.map(\.id) == [id(1), id(2)])
+    }
+
+    @Test
+    func rowsFromTheNetworkStayFromTheNetwork() {
+        shown(window([]))
+        let model = loaded()
+
+        shown(window([1, 2]))
+        model.apply(EventBatch([.messagesLoaded(channelId: here, first: id(1), last: id(2))]))
+
+        #expect(model.openedFrom == .network)
+    }
+
+    @Test
+    func aPageAfterRowsFromDiskCountsOnlyWhatTheNetworkAdded() async {
+        shown(window([]))
+        let model = loaded()
+        account.holdLoads.withLock { $0 = true }
+        account.windowAfterLoad.withLock { $0 = window([1, 2, 3]) }
+        let opening = Task { await model.open() }
+        while !store.log.actions.contains(where: { if case .load = $0 { true } else { false } }) {
+            await Task.yield()
+        }
+
+        shown(window([1, 2], stale: true))
+        model.apply(
+            EventBatch([
+                .messagesLoaded(channelId: here, first: id(1), last: id(2)),
+                .messagesStale(channelId: here),
+            ]))
+        account.loadReplies.send(nil)
+        await opening.value
+
+        #expect(model.openedFrom == .disk)
+        #expect(model.lastLoad?.page == [id(3)])
     }
 }

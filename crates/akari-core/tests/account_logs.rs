@@ -33,7 +33,10 @@ async fn a_broken_dispatch_is_skipped_without_logging_its_payload() {
         DiscordClient::with_endpoints(support::properties(), Arc::new(support::NoStore), endpoints)
             .unwrap_or_else(|err| panic!("client setup failed: {err}"));
     let account = client
-        .account(Token::new("account-log-test-token.secret".to_owned()))
+        .account(
+            Token::new("account-log-test-token.secret".to_owned()),
+            akari_core::model::Snowflake::new(1),
+        )
         .unwrap_or_else(|err| panic!("{err}"));
     let subscription = account.store().subscribe();
     account.connect().unwrap_or_else(|err| panic!("{err}"));

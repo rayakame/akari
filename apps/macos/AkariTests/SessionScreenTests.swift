@@ -25,9 +25,7 @@ struct SessionScreenTests {
     // A reconnect replaces the session with one for the same channel.
     @Test
     func aNewSessionForTheSameChannelLoadsIt() async throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         let first = GuildAccount()
         let second = GuildAccount()
         let host = NSHostingView(
@@ -55,9 +53,7 @@ struct SessionScreenTests {
 
     @Test
     func anUnloadedChannelShowsPlaceholdersAndNoSpinner() async throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         let account = GuildAccount(holdsLoads: true)
         let host = NSHostingView(
             rootView: SessionScreen(session: session(account, defaults: defaults)))
@@ -88,9 +84,7 @@ struct ComposerAlignmentTests {
 
     @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
     func theComposerLinesUpWithTheUserPanel(appearance: NSAppearance.Name) throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         let session = SessionModel(
             userId: UserId(rawValue: 1), account: GuildAccount(),
             memory: AccountMemory(defaults: defaults)

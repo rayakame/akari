@@ -15,6 +15,7 @@ final class CallLog: Sendable {
         case deliver(ChannelId, MessageId)
         case retry(ChannelId, MessageId)
         case discard(ChannelId, MessageId)
+        case flushCache
     }
 
     enum Read: Equatable {

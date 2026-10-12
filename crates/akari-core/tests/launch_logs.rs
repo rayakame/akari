@@ -31,7 +31,10 @@ async fn a_connect_logs_its_milestones_with_durations_only() {
         DiscordClient::with_endpoints(support::properties(), Arc::new(support::NoStore), endpoints)
             .unwrap_or_else(|err| panic!("client setup failed: {err}"));
     let account = client
-        .account(Token::new("launch-log-test-token.secret".to_owned()))
+        .account(
+            Token::new("launch-log-test-token.secret".to_owned()),
+            akari_core::model::Snowflake::new(1),
+        )
         .unwrap_or_else(|err| panic!("{err}"));
     let subscription = account.store().subscribe();
     account.connect().unwrap_or_else(|err| panic!("{err}"));

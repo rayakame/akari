@@ -47,6 +47,13 @@ impl Account {
         self.core.close();
     }
 
+    /// Writes what changed to the disk cache now, e.g. before the app quits. Resolves when
+    /// it's written, or at once without a cache.
+    pub async fn flush_cache(&self) {
+        let core = self.core.clone();
+        run(self.runtime, async move { core.flush_cache().await }).await;
+    }
+
     /// Keeps the channel's messages and adds new ones from the gateway.
     pub fn view_channel(&self, channel_id: ChannelId) {
         self.core.view_channel(channel_id);

@@ -25,8 +25,8 @@ fn plaintext_and_malformed_endpoints_are_rejected() {
         ..unreachable_endpoints()
     };
 
-    let plaintext = DiscordClient::with_endpoints(host(), store.clone(), plaintext);
-    let malformed = DiscordClient::with_endpoints(host(), store, malformed);
+    let plaintext = DiscordClient::with_endpoints(host(), store.clone(), plaintext, None);
+    let malformed = DiscordClient::with_endpoints(host(), store, malformed, None);
 
     assert!(
         matches!(&plaintext, Err(ClientError::InvalidEndpoint { name }) if name == "api"),
@@ -94,7 +94,7 @@ fn host_store_errors_keep_their_kind() {
 }
 
 #[tokio::test]
-async fn forget_token_deletes_without_a_request() {
+async fn forget_account_deletes_the_token_without_a_request() {
     let server = MockServer::start().await;
     Mock::given(wiremock::matchers::any())
         .respond_with(ResponseTemplate::new(200))
@@ -104,7 +104,7 @@ async fn forget_token_deletes_without_a_request() {
     let store = MemoryStore::with(USER, "rejected.token");
     let client = local_client(rest_endpoints(&server), store.clone());
 
-    client.forget_token(USER).await.unwrap();
+    client.forget_account(USER).await.unwrap();
 
     assert_eq!(store.token(USER), None);
     assert_eq!(store.calls(), [Call::Delete(USER.get())]);

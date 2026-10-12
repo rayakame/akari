@@ -4,12 +4,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::cache::{CacheThread, DiskCache, Flusher};
 use crate::gateway::session::Timing;
 use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
     MemberLists, PresenceStatus, SendError,
 };
-use crate::model::{ChannelId, GuildId, MessageId};
+use crate::model::{ChannelId, GuildId, MessageId, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
     ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
@@ -105,6 +106,9 @@ pub(crate) struct Shared {
     member_lists: AtomicBool,
     runtime: tokio::runtime::Handle,
     delivering: Mutex<BTreeSet<MessageId>>,
+    flusher: Option<Flusher>,
+    // The cache's thread and whose file it has open.
+    cache: Option<(CacheThread, UserId)>,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -232,14 +236,41 @@ impl Shared {
         } else {
             0
         };
-        let mut attempt = 0;
-        let loaded = loop {
-            match self.rest.list_messages(channel, query, limit).await {
-                Err(err) if attempt < retries && err.is_transient() => {
-                    tokio::time::sleep(SERVER_ERROR_RETRY * 2u32.pow(attempt)).await;
-                    attempt += 1;
+        let request = async {
+            let mut attempt = 0;
+            loop {
+                match self.rest.list_messages(channel, query, limit).await {
+                    Err(err) if attempt < retries && err.is_transient() => {
+                        tokio::time::sleep(SERVER_ERROR_RETRY * 2u32.pow(attempt)).await;
+                        attempt += 1;
+                    }
+                    loaded => break loaded,
                 }
-                loaded => break loaded,
+            }
+        };
+        let loaded = match self.cache_for(channel, ticket) {
+            None => request.await,
+            // A page never waits for the disk; cached messages show if they come first, or
+            // when the page failed, e.g. offline.
+            Some(cache) => {
+                let fill = async {
+                    if let Some(messages) = cache.read_window(channel).await
+                        && !messages.is_empty()
+                    {
+                        self.store.fill_from_cache(ticket, messages);
+                    }
+                };
+                let mut request = std::pin::pin!(request);
+                let mut fill = std::pin::pin!(fill);
+                tokio::select! {
+                    loaded = &mut request => {
+                        if loaded.is_err() {
+                            fill.await;
+                        }
+                        loaded
+                    }
+                    () = &mut fill => request.await,
+                }
             }
         };
         unfinished.ticket = None;
@@ -270,6 +301,27 @@ impl Shared {
                 Err(err)
             }
         }
+    }
+
+    // Only the first page of an empty window can use the cache's copy of the channel.
+    fn cache_for(&self, channel: ChannelId, ticket: LoadTicket) -> Option<&CacheThread> {
+        let (cache, owner) = self.cache.as_ref()?;
+        if ticket.kind != LoadKind::Latest {
+            return None;
+        }
+        // READY named another account than the host: that file isn't this session's.
+        if self
+            .store
+            .current_user()
+            .is_some_and(|current| current.user.id != *owner)
+        {
+            return None;
+        }
+        let empty = self
+            .store
+            .messages(channel)
+            .is_some_and(|window| window.messages.is_empty());
+        empty.then_some(cache)
     }
 
     // A 401 means the token is gone, like the gateway's 4004: the UI has to log in again.
@@ -529,21 +581,70 @@ impl Shared {
     fn close(&self) {
         self.gateway.close();
         self.rest.close();
+        if let Some(flusher) = &self.flusher {
+            if self.expired() {
+                flusher.delete();
+            } else {
+                flusher.close();
+            }
+        }
+    }
+
+    // Discord ended the session: the host logs in again, and the cache goes with the token.
+    fn expired(&self) -> bool {
+        matches!(
+            self.store.connection(),
+            ConnectionState::Closed { error: Some(error) }
+                if matches!(*error, GatewayError::AuthenticationFailed)
+        )
     }
 }
 
 impl Account {
+    #[cfg(test)]
     pub(crate) fn start(
         client: DiscordClient,
         token: Token,
         timing: Timing,
         limits: WindowLimits,
     ) -> Result<Self, GatewayError> {
+        Self::start_with_cache(client, token, timing, limits, None)
+    }
+
+    pub(crate) fn start_with_cache(
+        client: DiscordClient,
+        token: Token,
+        timing: Timing,
+        limits: WindowLimits,
+        cache: Option<DiskCache>,
+    ) -> Result<Self, GatewayError> {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
         let rest = AccountRest::new(client.clone(), token.clone(), SERVER_ERROR_RETRY);
+        let store = Store::new(limits);
+        let thread = cache
+            .as_ref()
+            .map(|cache| (cache.thread.clone(), cache.user));
+        if let Some((thread, owner)) = thread.clone() {
+            let store = store.clone();
+            runtime.spawn(async move {
+                let Some(cached) = thread.read_entities().await else {
+                    return;
+                };
+                match &cached.current_user {
+                    Some(current) if current.user.id == owner => {
+                        store.restore(cached);
+                    }
+                    Some(_) => {
+                        tracing::info!(target: "akari_core::cache", reason = "other_user", "cache not used");
+                    }
+                    None => {}
+                }
+            });
+        }
+        let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
         let shared = Arc::new(Shared {
             gateway: Gateway::start(client, token, timing)?,
-            store: Store::new(limits),
+            store,
             rest,
             nonces: Nonces::default(),
             status: Mutex::default(),
@@ -551,6 +652,8 @@ impl Account {
             member_lists: AtomicBool::new(true),
             delivering: Mutex::default(),
             runtime: runtime.clone(),
+            flusher,
+            cache: thread,
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
@@ -576,11 +679,22 @@ impl Account {
     pub fn disconnect(&self) {
         self.shared.gateway.disconnect();
         self.shared.store.set_connection(ConnectionState::Offline);
+        if let Some(flusher) = &self.shared.flusher {
+            flusher.flush_soon();
+        }
     }
 
     /// Ends the session. Subscriptions end once the connection is closed.
     pub fn close(&self) {
         self.shared.close();
+    }
+
+    /// Writes what changed to the disk cache now, e.g. before the app quits. Resolves when
+    /// it's written, or at once without a cache.
+    pub async fn flush_cache(&self) {
+        if let Some(flusher) = &self.shared.flusher {
+            flusher.flush().await;
+        }
     }
 
     /// Marks the channel as viewed: the store keeps its messages and adds new ones from
@@ -600,7 +714,19 @@ impl Account {
         load: MessageLoad,
     ) -> Result<Option<LoadReport>, RequestError> {
         let (kind, limit) = load.parts();
-        self.shared.load(channel, kind, limit).await
+        let loaded = self.shared.load(channel, kind, limit).await;
+        // Cached messages left stale hold live ones back; before READY its refresh takes them.
+        if loaded.is_err()
+            && kind == LoadKind::Latest
+            && self.shared.store.had_ready()
+            && self.shared.store.stale_channels().contains(&channel)
+        {
+            let shared = self.shared.clone();
+            self.shared.runtime.spawn(async move {
+                let _ = shared.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
+            });
+        }
+        loaded
     }
 
     /// Shows the message as pending at once and sends it. Resolves with Discord's ID; on an
@@ -738,8 +864,6 @@ impl Finish {
 
 impl Drop for Finish {
     fn drop(&mut self) {
-        // close() does nothing once the gateway has ended, so it runs on every path.
-        self.shared.close();
         let error = self
             .ended
             .take()
@@ -747,6 +871,9 @@ impl Drop for Finish {
         self.shared
             .store
             .set_connection(ConnectionState::Closed { error });
+        // close() does nothing once the gateway has ended, so it runs on every path. After the
+        // state, so it sees why the session ended.
+        self.shared.close();
         self.shared.store.finish();
     }
 }

@@ -239,6 +239,14 @@ pub(crate) fn client_for(gateway: String) -> DiscordClient {
 }
 
 pub(crate) fn client_with(gateway: String, api: String) -> DiscordClient {
+    client_with_store(gateway, api, Arc::new(NoStore))
+}
+
+pub(crate) fn client_with_store(
+    gateway: String,
+    api: String,
+    store: Arc<dyn TokenStore>,
+) -> DiscordClient {
     let host = HostInfo {
         os: DesktopOs::MacOs,
         os_version: "25.0.0".to_owned(),
@@ -252,7 +260,7 @@ pub(crate) fn client_with(gateway: String, api: String) -> DiscordClient {
         allow_plaintext: true,
         ..Endpoints::default()
     };
-    DiscordClient::with_endpoints(properties, Arc::new(NoStore), endpoints).unwrap()
+    DiscordClient::with_endpoints(properties, store, endpoints).unwrap()
 }
 
 pub(crate) fn client(fake: &FakeGateway) -> DiscordClient {

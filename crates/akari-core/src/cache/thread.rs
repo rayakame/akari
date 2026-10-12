@@ -1,0 +1,243 @@
+use std::path::PathBuf;
+use std::sync::{Arc, Weak, mpsc};
+use std::time::Instant;
+
+use tokio::sync::oneshot;
+
+use super::snapshot::{Flushed, Snapshot, Written, flush};
+use super::{Cache, CacheError, LOG, Opened, delete_files};
+use crate::model::{ChannelId, UserId};
+use crate::state::Message;
+use crate::state::apply::Entities;
+
+enum Command {
+    ReadEntities(oneshot::Sender<Entities>),
+    ReadWindow(ChannelId, oneshot::Sender<Vec<Arc<Message>>>),
+    Flush(Box<Snapshot>, oneshot::Sender<Option<Flushed>>),
+    Delete(oneshot::Sender<()>),
+    #[cfg(test)]
+    Hold(mpsc::Receiver<()>),
+    #[cfg(test)]
+    FailNextWrite,
+    #[cfg(test)]
+    FailNextCheckpoint,
+    #[cfg(test)]
+    Checkpoint(oneshot::Sender<()>),
+    #[cfg(test)]
+    ThreadName(oneshot::Sender<Option<String>>),
+}
+
+// Every SQLite call runs on this thread, never on a runtime worker. It stops once every clone
+// is dropped, after the queued commands.
+#[derive(Clone)]
+pub(crate) struct CacheThread {
+    handle: Arc<Handle>,
+}
+
+struct Handle {
+    commands: mpsc::Sender<Command>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct WeakCacheThread(Weak<Handle>);
+
+impl WeakCacheThread {
+    pub(crate) fn upgrade(&self) -> Option<CacheThread> {
+        self.0.upgrade().map(|handle| CacheThread { handle })
+    }
+}
+
+impl CacheThread {
+    pub(crate) fn start(path: PathBuf, user: UserId) -> Self {
+        let (commands, receiver) = mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("akari-cache".to_owned())
+            .spawn(move || run(&path, user, &receiver));
+        if spawned.is_err() {
+            tracing::warn!(target: LOG, "couldn't start the cache thread");
+        }
+        Self {
+            handle: Arc::new(Handle { commands }),
+        }
+    }
+
+    pub(crate) fn downgrade(&self) -> WeakCacheThread {
+        WeakCacheThread(Arc::downgrade(&self.handle))
+    }
+
+    fn send(&self, command: Command) -> Result<(), mpsc::SendError<Command>> {
+        self.handle.commands.send(command)
+    }
+
+    async fn ask<T>(&self, command: impl FnOnce(oneshot::Sender<T>) -> Command) -> Option<T> {
+        let (reply, answer) = oneshot::channel();
+        self.send(command(reply)).ok()?;
+        answer.await.ok()
+    }
+
+    // What the file held at open or the last flush wrote, without reading the disk again.
+    pub(crate) async fn read_entities(&self) -> Option<Entities> {
+        self.ask(Command::ReadEntities).await
+    }
+
+    pub(crate) async fn read_window(&self, channel: ChannelId) -> Option<Vec<Arc<Message>>> {
+        self.ask(|reply| Command::ReadWindow(channel, reply)).await
+    }
+
+    pub(crate) async fn flush(&self, snapshot: Snapshot) -> Option<Flushed> {
+        self.ask(|reply| Command::Flush(Box::new(snapshot), reply))
+            .await
+            .flatten()
+    }
+
+    pub(crate) async fn delete(&self) {
+        self.ask(Command::Delete).await;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hold(&self) -> mpsc::Sender<()> {
+        let (release, held) = mpsc::channel();
+        let _ = self.send(Command::Hold(held));
+        release
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_write(&self) {
+        let _ = self.send(Command::FailNextWrite);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_checkpoint(&self) {
+        let _ = self.send(Command::FailNextCheckpoint);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn checkpoint(&self) {
+        self.ask(Command::Checkpoint).await;
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn thread_name(&self) -> Option<String> {
+        self.ask(Command::ThreadName).await.flatten()
+    }
+}
+
+fn run(path: &std::path::Path, user: UserId, commands: &mpsc::Receiver<Command>) {
+    let started = Instant::now();
+    let Ok(Opened {
+        mut cache,
+        discarded,
+    }) = Cache::open_or_rebuild(path, user)
+    else {
+        return;
+    };
+    let mut written = match cache.read_entities() {
+        Ok(read) => {
+            log_opened(&cache, read.skipped, discarded.is_some(), started);
+            Written::read(read.value)
+        }
+        Err(err) => {
+            tracing::info!(target: LOG, reason = kind(&err), "cache not read");
+            Written::default()
+        }
+    };
+    for command in commands {
+        match command {
+            Command::ReadEntities(reply) => {
+                let _ = reply.send(written.entities.clone());
+            }
+            Command::ReadWindow(channel, reply) => {
+                let messages = match cache.read_window(channel) {
+                    Ok(read) => read.value,
+                    Err(err) => {
+                        tracing::info!(target: LOG, reason = kind(&err), "cache window not read");
+                        Vec::new()
+                    }
+                };
+                let _ = reply.send(messages);
+            }
+            Command::Flush(snapshot, reply) => {
+                let started = Instant::now();
+                let flushed = match flush(&mut cache, &mut written, *snapshot) {
+                    Ok(flushed) => {
+                        if flushed.rows() > 0 || flushed.deleted > 0 {
+                            tracing::info!(
+                                target: LOG,
+                                guilds = flushed.guilds,
+                                channels = flushed.channels,
+                                windows = flushed.windows,
+                                messages = flushed.messages,
+                                other = flushed.other,
+                                deleted = flushed.deleted,
+                                write_ms = crate::millis(started.elapsed()),
+                                file_kib = cache.file_kib(),
+                                "cache written"
+                            );
+                        }
+                        Some(flushed)
+                    }
+                    Err(err) => {
+                        tracing::warn!(target: LOG, reason = kind(&err), "cache write failed");
+                        None
+                    }
+                };
+                let _ = reply.send(flushed);
+            }
+            Command::Delete(reply) => {
+                drop(cache);
+                if delete_files(path).is_err() {
+                    tracing::warn!(target: LOG, "couldn't delete the cache");
+                }
+                let _ = reply.send(());
+                return;
+            }
+            #[cfg(test)]
+            Command::Hold(held) => {
+                let _ = held.recv();
+            }
+            #[cfg(test)]
+            Command::FailNextWrite => cache.fail_next_write = true,
+            #[cfg(test)]
+            Command::FailNextCheckpoint => cache.fail_next_checkpoint = true,
+            #[cfg(test)]
+            Command::Checkpoint(reply) => {
+                let _ = cache.checkpoint();
+                let _ = reply.send(());
+            }
+            #[cfg(test)]
+            Command::ThreadName(reply) => {
+                let _ = reply.send(std::thread::current().name().map(str::to_owned));
+            }
+        }
+    }
+    if cache.checkpoint().is_err() {
+        tracing::info!(target: LOG, "cache checkpoint failed");
+    }
+}
+
+fn log_opened(cache: &Cache, skipped: usize, rebuilt: bool, started: Instant) {
+    let [guilds, channels, windows, messages] = cache.counts().unwrap_or_default();
+    tracing::info!(
+        target: LOG,
+        guilds,
+        channels,
+        windows,
+        messages,
+        skipped,
+        rebuilt,
+        read_ms = crate::millis(started.elapsed()),
+        file_kib = cache.file_kib(),
+        "cache opened"
+    );
+}
+
+fn kind(err: &CacheError) -> &'static str {
+    match err {
+        CacheError::Corrupt => "corrupt",
+        CacheError::OtherSchema => "other_schema",
+        CacheError::OtherUser => "other_user",
+        CacheError::Busy => "busy",
+        CacheError::Io => "io",
+        CacheError::Sqlite(_) => "sqlite",
+    }
+}

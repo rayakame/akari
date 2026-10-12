@@ -4,10 +4,8 @@ import Testing
 
 struct AccountMemoryTests {
     @Test
-    func accountMemoryRemembersAndForgets() throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+    func accountMemoryRemembersAndForgets() {
+        let defaults = MemoryDefaults()
         let memory = AccountMemory(defaults: defaults)
         let user = UserId(rawValue: 18_446_744_073_709_551_615)
 
@@ -19,10 +17,8 @@ struct AccountMemoryTests {
     }
 
     @Test
-    func spotsArePerAccountAndForgotten() throws {
-        let suite = "app.akari.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+    func spotsArePerAccountAndForgotten() {
+        let defaults = MemoryDefaults()
         let memory = AccountMemory(defaults: defaults)
         let guild = AccountMemory.Spot(
             place: .guild(GuildId(rawValue: 7)), channel: ChannelId(rawValue: 70))

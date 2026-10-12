@@ -996,3 +996,147 @@ fn queueing_or_retrying_a_send_starts_its_cooldown_in_the_same_write() {
     store.retry_message(general, pending).unwrap();
     assert!(store.slowmode(general).unwrap().until.is_some());
 }
+
+fn ready_of(guilds: &[u64], edit: impl FnOnce(&mut Value)) -> DispatchEvent {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    let member = data["merged_members"][0][0].clone();
+    data["guilds"] = guilds
+        .iter()
+        .map(|guild| generated_guild(*guild, 3, 2, 0))
+        .collect();
+    data["merged_members"] = guilds.iter().map(|_| json!([member.clone()])).collect();
+    edit(&mut data);
+    dispatch("READY", &data)
+}
+
+fn cached(ready: DispatchEvent) -> Entities {
+    match ready {
+        DispatchEvent::Ready(ready) => Entities::from_ready(*ready),
+        other => panic!("not a READY: {other:?}"),
+    }
+}
+
+fn changes(subscription: &Subscription) -> Vec<String> {
+    let mut changes = Vec::new();
+    while subscription.buffered() > 0 {
+        let Some(event) = futures_util::FutureExt::now_or_never(subscription.next()).flatten()
+        else {
+            break;
+        };
+        changes.push(match event {
+            StoreEvent::GuildAdded(guild) => format!("GuildAdded({})", guild.id.get()),
+            StoreEvent::GuildUpdated(guild) => format!("GuildUpdated({})", guild.id.get()),
+            StoreEvent::GuildRemoved { guild_id } => format!("GuildRemoved({})", guild_id.get()),
+            other => describe(&other),
+        });
+    }
+    changes
+}
+
+#[tokio::test]
+async fn a_restore_before_ready_fills_the_store_once() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let subscription = store.subscribe();
+
+    assert!(store.restore(cached(ready_of(&[1, 2], |_| {}))));
+
+    assert_eq!(changes(&subscription), ["Restored"]);
+    assert_eq!(store.guild_list().len(), 2);
+    assert!(!store.channel_list(Snowflake::new(1)).is_empty());
+    assert_eq!(store.private_channel_list().len(), 2);
+    assert!(store.current_user().is_some());
+
+    assert!(!store.restore(cached(ready_of(&[3], |_| {}))));
+    assert_eq!(store.guild_list().len(), 2);
+    assert!(changes(&subscription).is_empty());
+}
+
+#[test]
+fn a_ready_that_comes_first_wins_over_the_cache() {
+    let store = ready_store();
+    let subscription = store.subscribe();
+
+    assert!(!store.restore(cached(ready_of(&[7], |_| {}))));
+
+    assert!(store.guild(Snowflake::new(7)).is_none());
+    assert!(store.guild(Snowflake::new(G1)).is_some());
+    assert!(changes(&subscription).is_empty());
+}
+
+#[test]
+fn the_first_ready_after_a_restore_reports_only_changes() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.restore(cached(ready_of(&[1, 2, 3], |_| {})));
+    let subscription = store.subscribe();
+
+    store.apply(ready_of(&[1, 2, 4], |data| {
+        data["guilds"][1]["name"] = "Renamed".into();
+        data["guilds"][1]["properties"]["name"] = "Renamed".into();
+    }));
+
+    assert_eq!(
+        changes(&subscription),
+        [
+            "GuildUpdated(2)",
+            "GuildRemoved(3)",
+            "GuildAdded(4)",
+            "Ready"
+        ]
+    );
+}
+
+fn load_page(store: &Store, channel: u64, first: u64) {
+    let ticket = store
+        .begin_load(Snowflake::new(channel), LoadKind::Latest)
+        .unwrap();
+    let mut template = message_template();
+    template.channel_id = Snowflake::new(channel);
+    store.finish_load(ticket, page(&template, first, 3), true);
+}
+
+#[test]
+fn windows_before_ready_are_never_written() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.restore(cached(ready_of(&[1], |_| {})));
+
+    load_page(&store, 1_000_002, 10);
+
+    assert!(store.messages(Snowflake::new(1_000_002)).is_some());
+    assert!(store.cache_parts(50).1.is_empty());
+}
+
+#[test]
+fn a_ready_after_a_restore_marks_earlier_windows_stale() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.restore(cached(ready_of(&[1], |_| {})));
+    load_page(&store, 1_000_002, 10);
+    let subscription = store.subscribe();
+
+    store.apply(ready_of(&[1], |_| {}));
+
+    assert!(store.messages(Snowflake::new(1_000_002)).unwrap().stale);
+    assert!(
+        changes(&subscription)
+            .iter()
+            .any(|event| event.contains("MessagesStale"))
+    );
+}
+
+#[test]
+fn a_restore_is_refused_while_a_ready_is_prepared() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let (parked, release) = store.park_next_conversion();
+    let applying = {
+        let store = store.clone();
+        thread::spawn(move || store.apply(ready_of(&[1, 2], |_| {})))
+    };
+    parked.recv_timeout(WAIT).unwrap();
+
+    let restored = store.restore(cached(ready_of(&[1, 3], |_| {})));
+    release.send(()).unwrap();
+    applying.join().unwrap();
+
+    assert!(!restored);
+    assert!(store.guild(Snowflake::new(3)).is_none());
+    assert!(store.guild(Snowflake::new(2)).is_some());
+}

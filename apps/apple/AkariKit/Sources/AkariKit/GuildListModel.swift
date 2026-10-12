@@ -18,7 +18,7 @@ public final class GuildListModel {
     }
 
     func apply(_ batch: EventBatch) {
-        if batch.ready {
+        if batch.everythingChanged {
             reload()
         } else if batch.guildListChanged {
             rebuild(rereading: batch.guildsChanged)

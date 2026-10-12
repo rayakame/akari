@@ -16,7 +16,7 @@ public final class ChannelListModel {
     }
 
     func apply(_ batch: EventBatch) {
-        if batch.ready {
+        if batch.everythingChanged {
             return reload(rereading: nil)
         }
         let changed = batch.channelsChanged[guildId]

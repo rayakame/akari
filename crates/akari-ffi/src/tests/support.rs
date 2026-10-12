@@ -116,7 +116,7 @@ pub fn rest_endpoints(server: &wiremock::MockServer) -> akari_core::Endpoints {
 }
 
 pub fn unreachable_client(store: Arc<dyn TokenStore>) -> Arc<DiscordClient> {
-    DiscordClient::with_endpoints(host(), store, unreachable_endpoints())
+    DiscordClient::with_endpoints(host(), store, unreachable_endpoints(), None)
         .unwrap_or_else(|err| panic!("client setup failed: {err}"))
 }
 

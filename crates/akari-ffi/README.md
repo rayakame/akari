@@ -89,6 +89,24 @@ decoding and storing, whether a new connection was opened, and Discord's rate-li
 Numbers only; the apps log them. `DiscordClient::warm_up()` opens a REST connection ahead of
 the first request (an unauthenticated `GET /gateway`) and returns at once.
 
+## The disk cache
+
+`DiscordClient`'s constructors take a `cache_directory`; without one nothing is written. In it
+akari-core keeps one SQLite file per account ([cache.md](../../docs/protocol/cache.md)).
+
+- `preload(user_id)` starts reading an account's file in the background, e.g. beside the token
+  read; it returns at once.
+- `account(token, user_id)` restores that account's cached state as soon as it's read, before
+  the gateway connects: `StoreEvent::Restored`, after which the host reads everything as after
+  `Ready`. It never waits for the disk.
+- `Account::flush_cache()` writes what changed now, e.g. before the app quits; the core also
+  writes every 10 s while the state changes, and on `disconnect()` and `close()`.
+- `forget_account(user_id)` deletes the stored token, then the account's cache, also while the
+  account is open; `logout` deletes it too. `clear_caches()` deletes the files of every account
+  that isn't open, e.g. at a login screen.
+
+All SQLite work runs on the cache's own thread, never on the runtime's workers or the caller's.
+
 ## Changing the API
 
 - A read: a `Store` method that returns a record built with `From<&state::X>`; never a core

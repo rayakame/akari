@@ -256,7 +256,7 @@ async fn ending_an_already_dead_session_succeeds() {
 }
 
 #[tokio::test]
-async fn forget_token_deletes_without_a_request() {
+async fn forget_account_deletes_the_token_without_a_request() {
     let server = MockServer::start().await;
     Mock::given(wiremock::matchers::any())
         .respond_with(ResponseTemplate::new(200))
@@ -270,7 +270,7 @@ async fn forget_token_deletes_without_a_request() {
         .await
         .unwrap();
 
-    client.forget_token(ACCOUNT).await.unwrap();
+    client.forget_account(ACCOUNT).await.unwrap();
 
     assert!(!store.holds(ACCOUNT));
 }
@@ -303,7 +303,7 @@ async fn the_warm_up_sends_no_token() {
     mount_gateway(&server, Duration::ZERO).await;
     let client = client(&server, Arc::new(MemoryStore::default()));
     let _account = client
-        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .account(Token::new("warm-up-test-token.secret".to_owned()), ACCOUNT)
         .unwrap_or_else(|err| panic!("{err}"));
 
     client.warm_up().await;
@@ -328,7 +328,7 @@ async fn a_load_after_the_warm_up_reuses_its_connection() {
     mount_messages(&server).await;
     let client = client(&server, Arc::new(MemoryStore::default()));
     let account = client
-        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .account(Token::new("warm-up-test-token.secret".to_owned()), ACCOUNT)
         .unwrap_or_else(|err| panic!("{err}"));
 
     client.warm_up().await;
@@ -351,7 +351,7 @@ async fn a_load_during_the_warm_up_uses_its_connection() {
     mount_messages(&server).await;
     let client = Arc::new(client(&server, Arc::new(MemoryStore::default())));
     let account = client
-        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .account(Token::new("warm-up-test-token.secret".to_owned()), ACCOUNT)
         .unwrap_or_else(|err| panic!("{err}"));
     let warming = tokio::spawn({
         let client = client.clone();
@@ -390,7 +390,7 @@ async fn a_dropped_warm_up_holds_no_load() {
     mount_messages(&server).await;
     let client = client(&server, Arc::new(MemoryStore::default()));
     let account = client
-        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .account(Token::new("warm-up-test-token.secret".to_owned()), ACCOUNT)
         .unwrap_or_else(|err| panic!("{err}"));
 
     let _ = tokio::time::timeout(Duration::from_millis(100), client.warm_up()).await;
@@ -413,7 +413,7 @@ async fn the_warm_up_never_fails_and_holds_a_load_briefly_at_most() {
     mount_messages(&server).await;
     let client = Arc::new(client(&server, Arc::new(MemoryStore::default())));
     let account = client
-        .account(Token::new("warm-up-test-token.secret".to_owned()))
+        .account(Token::new("warm-up-test-token.secret".to_owned()), ACCOUNT)
         .unwrap_or_else(|err| panic!("{err}"));
     let warming = tokio::spawn({
         let client = client.clone();

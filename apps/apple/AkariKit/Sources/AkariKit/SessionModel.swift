@@ -91,6 +91,10 @@ public final class SessionModel {
         currentUser = store.currentUser()
         guilds.reload()
         directMessages.reload()
+        // Restored before this subscription, so no event will say so.
+        if currentUser != nil {
+            restoreFromCache()
+        }
         do {
             try account.connect()
         } catch {
@@ -182,6 +186,10 @@ public final class SessionModel {
         }
     }
 
+    func flushCache() async {
+        await account.flushCache()
+    }
+
     // A new account starts with an empty outbox, so its text moves into the drafts.
     func keepUnsentAsDrafts() {
         for channel in openedChannels.sorted() {
@@ -217,7 +225,7 @@ public final class SessionModel {
                 }
             }
         }
-        if batch.ready || batch.currentUserChanged {
+        if batch.everythingChanged || batch.currentUserChanged {
             currentUser = store.currentUser()
         }
         if case .guild(let id) = place, batch.ready || batch.guildListChanged,
@@ -236,7 +244,11 @@ public final class SessionModel {
                 openListedChannel(in: list, guildId: guildId)
             } else {
                 messages = nil
+                rememberSpot()
             }
+        }
+        if batch.restored {
+            restoreFromCache()
         }
         if batch.ready {
             LaunchLog.mark("READY in the app")
@@ -246,6 +258,28 @@ public final class SessionModel {
             restore(spot)
         }
         messages?.apply(batch)
+    }
+
+    // Once per session: the cache's state shows the last place before READY.
+    private func restoreFromCache() {
+        LaunchLog.mark("cache restored")
+        // A place the cache doesn't have, e.g. a guild unavailable at the last write, is READY's.
+        guard let spot = spotToRestore, isCached(spot) else {
+            return
+        }
+        spotToRestore = nil
+        restore(spot)
+    }
+
+    private func isCached(_ spot: AccountMemory.Spot) -> Bool {
+        switch spot.place {
+        case .guild(let guildId):
+            return guilds.guilds.contains { $0.id == guildId }
+        case .home:
+            return spot.channel.map { channel in
+                directMessages.conversations.contains { $0.id == channel }
+            } ?? true
+        }
     }
 
     private func isListed(_ channel: ChannelId) -> Bool {

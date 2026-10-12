@@ -221,6 +221,59 @@ struct MessageTableTests {
         #expect(abs(table.rect(ofRow: first).minY - clip.bounds.minY - offset) <= 1)
     }
 
+    // The cache's copy shows first; the page that refreshes it edits, deletes and adds.
+    func refreshed(_ cached: [MessageListModel.Row]) -> [MessageListModel.Row] {
+        let deleted = MessageId(rawValue: 35)
+        let edited = MessageId(rawValue: 30)
+        let edit: MessageListModel.Row = row(
+            30, by: author(1), at: noon + 3600, content: "edited after the cache")
+        var fresh: [MessageListModel.Row] = cached.filter { $0.id != deleted }
+        if let index = fresh.firstIndex(where: { $0.id == edited }) {
+            fresh[index] = edit
+        }
+        return fresh + messages(1, from: 81)
+    }
+
+    @Test
+    func aFreshPageOverCachedRowsKeepsAScrolledReaderInPlace() {
+        let cached = messages(80, longText: true)
+        show(cached)
+        scroll(toRowOf: 40)
+        let offset = place(of: 40)
+        let reader = table.rowView(atRow: index(of: 40), makeIfNecessary: false)
+
+        show(refreshed(cached))
+
+        #expect(abs(place(of: 40) - offset) <= 1)
+        #expect(table.rowView(atRow: index(of: 40), makeIfNecessary: false) === reader)
+    }
+
+    @Test
+    func cachedRowsOlderThanTheFreshPageLeaveAScrolledReaderInPlace() {
+        let cached = messages(80, longText: true)
+        show(cached)
+        scroll(toRowOf: 40)
+        let offset = place(of: 40)
+        let reader = table.rowView(atRow: index(of: 40), makeIfNecessary: false)
+
+        show(Array(refreshed(cached).dropFirst(3)) + messages(2, from: 82))
+
+        #expect(abs(place(of: 40) - offset) <= 1)
+        #expect(table.rowView(atRow: index(of: 40), makeIfNecessary: false) === reader)
+    }
+
+    @Test
+    func aFreshPageOverCachedRowsKeepsTheBottomPinned() {
+        let cached = messages(80, longText: true)
+        show(cached)
+        #expect(controller.isPinnedToBottom)
+
+        show(refreshed(cached))
+
+        #expect(controller.isPinnedToBottom)
+        #expect(visibleRows.contains(index(of: 81)))
+    }
+
     // A mouse or "Show scroll bars: Always": the scroller appears when the rows outgrow the
     // view, which narrows the column in the middle of the update.
     @Test
@@ -472,7 +525,8 @@ struct MessageTableTests {
         var heights: Set<CGFloat> = []
         var moves: [String] = []
         var y: CGFloat = 0
-        while true {
+        // Bounded: a clip that stops moving short of the bottom fails below instead of spinning.
+        for _ in 0..<500 {
             clip.scroll(to: NSPoint(x: 0, y: y))
             controller.scrollView.reflectScrolledClipView(clip)
             postLiveScroll(NSScrollView.didLiveScrollNotification)
