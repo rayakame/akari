@@ -55,6 +55,15 @@ pub(crate) fn pathological() -> Vec<String> {
         ">>> ".repeat(1000),
         "# \n".repeat(1333),
         "- a\n  ".repeat(571),
+        "<@1".repeat(1333),
+        "<t:".repeat(1333),
+        "<t:".to_owned() + &"1".repeat(4000),
+        "<:a:".repeat(1000),
+        "<:".to_owned() + &"a".repeat(4000),
+        "</a:".repeat(1000),
+        "</".to_owned() + &"a ".repeat(2000),
+        "<id:".repeat(1000),
+        "@".repeat(4000),
     ]
 }
 

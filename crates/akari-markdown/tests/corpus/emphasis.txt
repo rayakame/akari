@@ -343,11 +343,6 @@ p: "*" {i}"*"
 --
 p: {b}"a `b" " c`"
 
-== styles around a mention
-*a <@1> b*
---
-p: {i}"a <@1> b"
-
 == emoji in italic
 *😀*
 --

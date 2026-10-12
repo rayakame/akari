@@ -1,0 +1,122 @@
+# Timestamps (R§11): <t:seconds:style>, f by default; the style is case-sensitive; seconds up to
+# ±8,640,000,000,000.
+
+== the default style
+<t:0>
+--
+p: time:0:f
+
+== short time
+<t:1:t>
+--
+p: time:1:t
+
+== medium time
+<t:1:T>
+--
+p: time:1:T
+
+== short date
+<t:1:d>
+--
+p: time:1:d
+
+== long date
+<t:1:D>
+--
+p: time:1:D
+
+== long date and short time
+<t:1:f>
+--
+p: time:1:f
+
+== full date and short time
+<t:1:F>
+--
+p: time:1:F
+
+== short date and short time
+<t:1:s>
+--
+p: time:1:s
+
+== short date and medium time
+<t:1:S>
+--
+p: time:1:S
+
+== relative
+<t:1:R>
+--
+p: time:1:R
+
+== negative seconds
+<t:-1:d>
+--
+p: time:-1:d
+
+== leading zeros
+<t:00012:t>
+--
+p: time:12:t
+
+== a lowercase r isn't a style
+<t:0:r>
+--
+p: "<t:0:r>"
+
+== an unknown style
+<t:1:x>
+--
+p: "<t:1:x>"
+
+== the latest time
+<t:8640000000000>
+--
+p: time:8640000000000:f
+
+== one second later is text
+<t:8640000000001>
+--
+p: "<t:8640000000001>"
+
+== the earliest time
+<t:-8640000000000:F>
+--
+p: time:-8640000000000:F
+
+== one second earlier is text
+<t:-8640000000001>
+--
+p: "<t:-8640000000001>"
+
+== far out of range
+<t:99999999999999999999999999>
+--
+p: "<t:99999999999999999999999999>"
+
+== seconds need digits
+<t:a>
+--
+p: "<t:a>"
+
+== no seconds
+<t:>
+--
+p: "<t:>"
+
+== a timestamp in a sentence
+input: "Starts <t:1700000000:R>, see you!"
+--
+p: "Starts " time:1700000000:R ", see you!"
+
+== an escaped timestamp is text
+\<t:0>
+--
+p: "<t:0>"
+
+== a timestamp in italics
+*<t:5:D>*
+--
+p: {i}time:5:D

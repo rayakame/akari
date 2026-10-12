@@ -95,6 +95,7 @@ impl Flat {
                     ..ctx
                 },
             ),
+            Node::Token { kind, source } => self.inline(*kind, *source, ctx),
             Node::Quote { children, source } => {
                 self.containers.push((Container::Quote, false));
                 self.container(children, *source, ctx);

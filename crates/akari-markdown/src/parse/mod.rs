@@ -6,11 +6,12 @@ mod emphasis;
 mod lines;
 mod memo;
 mod text;
+mod tokens;
 
 use std::borrow::Cow;
 use std::ops::Range;
 
-use crate::document::{HeadingLevel, Span, Style};
+use crate::document::{HeadingLevel, InlineKind, Span, Style};
 use memo::Frame;
 
 pub(crate) struct Parser {
@@ -197,6 +198,11 @@ pub(crate) enum Node {
         children: Vec<Node>,
         source: Span,
     },
+    /// A mention, command, custom emoji, timestamp or navigation token.
+    Token {
+        kind: InlineKind,
+        source: Span,
+    },
     /// `start`: the first number of an ordered list.
     List {
         start: Option<u32>,
@@ -289,6 +295,10 @@ impl Parser {
             b'_' if nest => self.underscore(input, at, range, ctx, frame),
             b'~' if nest => self.strike(input, at, range, ctx, frame),
             b'|' if nest => self.spoiler(input, at, range, ctx, frame),
+            b'<' => self
+                .angle_in_link(input, at, range)
+                .or_else(|| self.angle_mention(input, at, range)),
+            b'@' => self.everyone(input, at, range),
             _ => None,
         }
     }
