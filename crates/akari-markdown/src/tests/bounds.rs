@@ -2,9 +2,7 @@
 
 use crate::parse_with_steps;
 
-// About 200 steps per byte at worst: a rejected masked link's text is parsed to check it, and
-// that text holds the next link to check, 64 levels deep (asterisk runs: 96, nesting italics).
-const K: u64 = 256;
+use crate::STEPS_PER_BYTE as K;
 
 fn steps(source: &str) -> u64 {
     parse_with_steps(source).1

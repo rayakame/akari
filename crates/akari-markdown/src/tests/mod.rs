@@ -1,6 +1,7 @@
 mod bounds;
 mod cache;
 mod corpus;
+mod cost;
 mod emoji;
 mod links;
 mod outline;
