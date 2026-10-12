@@ -1,0 +1,112 @@
+# Backslash escapes (R§9): a backslash before a character that isn't an ASCII letter, digit or
+# whitespace shows that character.
+
+== escaped asterisks
+\*a\*
+--
+p: "*a*"
+
+== a letter after a backslash stays
+\a
+--
+p: "\\a"
+
+== a digit after a backslash stays
+\0
+--
+p: "\\0"
+
+== whitespace after a backslash stays
+input: "\\ a"
+--
+p: "\\ a"
+
+== a backslash before a newline stays
+input: "a\\\nb"
+--
+p: "a\\" br "b"
+
+== an escaped backslash
+\\
+--
+p: "\\"
+
+== an escaped backslash then an escaped asterisk
+\\\*
+--
+p: "\\*"
+
+== two escaped backslashes
+\\\\*
+--
+p: "\\\\*"
+
+== a trailing backslash
+a\
+--
+p: "a\\"
+
+== a backslash before trailing spaces
+input: "a \\\n"
+--
+p: "a \\"
+
+== non-ascii letters can be escaped
+\é
+--
+p: "é"
+
+== escaped header
+\# a
+--
+p: "# a"
+
+== escaped quote
+\> a
+--
+p: "> a"
+
+== escaped list bullet
+\- a
+--
+p: "- a"
+
+== escaped emoji
+\🥺
+--
+p: "🥺"
+
+== an escape takes one code point of a sequence
+input: "\\😀\u{200d}"
+--
+p: "😀‍"
+
+== escaped shortcode
+\:smile:
+--
+p: ":smile:"
+
+== escaped mention
+\<@123>
+--
+p: "<@123>"
+
+== escaped everyone
+\@everyone
+--
+p: "@everyone"
+
+== escaped underscore
+\_a_
+--
+p: "_a_"
+
+== shrug keeps its backslash
+¯\_(ツ)_/¯
+--
+p: "¯\\_(ツ)_/¯"
+
+== escaped shrug
+\¯\_(ツ)_/¯
+--
+p: "¯_(ツ)_/¯"
