@@ -43,9 +43,10 @@ inputs for the first version). The differences that remain are deliberate:
 - **IDNA**: rust-url refuses some hosts ada accepts (the bidi rule, code points its tables
   don't assign). Such URLs stay text, but in a masked link's text they still count as URLs, so
   the link is refused (stricter than parse-discord where neither parser takes the host).
-- **Styles in a masked link's text**: the text is checked again with `*`, `_`, `~~` and `||`
-  removed, read without nested rules, so `[ht**tps://example.com**](https://other.example)`
-  can't pass for another address. Discord and parse-discord accept it.
+- **Styles and code in a masked link's text**: the text is checked again with `*`, `_`, `~~`,
+  `||` and backticks removed, read without nested rules, so
+  `[ht**tps://example.com**](https://other.example)` can't pass for another address. Discord
+  and parse-discord accept it.
 - **Shortcodes** stay text (`:c:` isn't ©), commands, navigation, email and phone links and
   the `s`/`S` timestamp styles follow docs.discord.food, and IDs beyond `u64` stay text.
 

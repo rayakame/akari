@@ -77,18 +77,19 @@ impl Parser {
         walk(&nodes, &cleaned, allow_emoji)
     }
 
-    // Stricter than Discord: styles can split a URL into text that reads as one. Read flat (no
-    // nested rules), so it adds one pass and sees URLs that structure would hide.
+    // Stricter than Discord: styles and code can split a URL into text that reads as one.
+    // Read flat (no nested rules), so it adds one pass and sees URLs structure would hide.
     pub(super) fn admissible_without_styles(&mut self, text: &str, ctx: Ctx) -> bool {
         let unstyled = text
             .replace("~~", "")
             .replace("||", "")
-            .replace(['*', '_'], "");
+            .replace(['*', '_', '`'], "");
         let flat = Ctx {
             depth: MAX_DEPTH,
             ..ctx
         };
-        unstyled == text || self.admissible(&unstyled, flat, false).is_some()
+        // Emoji are the first check's business: code may hold one, and stripping it frees it.
+        unstyled == text || self.admissible(&unstyled, flat, true).is_some()
     }
 }
 

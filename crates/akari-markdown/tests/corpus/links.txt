@@ -335,7 +335,8 @@ input: "[https://\u{5d0}a.com](https://good.example)"
 p: "[https://אa.com](https://good.example)"
 
 # Stricter than Discord and parse-discord, which accept these: the text is checked again with
-# its style delimiters removed, so a style can't split a URL into text that reads as one.
+# its style delimiters and backticks removed, so a style or code can't split a URL into text
+# that reads as one.
 == bold inside the scheme is refused
 [ht**tps://example.com**](https://other.example)
 --
@@ -425,6 +426,33 @@ p: "[||https||://example.com](https://other.example)"
 [https:||//example.com||](https://other.example)
 --
 p: "[https:||//example.com||](https://other.example)"
+
+== inline code inside the scheme is refused
+[ht`tps://example.com`](https://other.example)
+--
+p: "[ht`tps://example.com`](https://other.example)"
+
+== inline code around the scheme is refused
+[`https`://example.com](https://other.example)
+--
+p: "[`https`://example.com](https://other.example)"
+
+== inline code after the scheme's colon is refused
+[https:`//example.com`](https://other.example)
+--
+p: "[https:`//example.com`](https://other.example)"
+
+== an emoji in code stays a link
+[`🥺`](https://example.com)
+--
+p: {l0}code"🥺"
+link0: <https://example.com/> masked
+
+== code without a URL stays a link
+[run `cargo test`](https://example.com)
+--
+p: {l0}"run " {l0}code"cargo test"
+link0: <https://example.com/> masked
 
 == a style inside the host is refused
 [https://ex**ample.com**](https://other.example)
