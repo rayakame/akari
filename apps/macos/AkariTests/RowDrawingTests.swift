@@ -241,6 +241,33 @@ struct ConstraintConflictTests {
         }
     }
 
+    // A reused cell's header goes from an app's tag to none.
+    @Test
+    func aHeaderLosingItsTagConflictsWithNothing() {
+        let key = "NSConstraintBasedLayoutVisualizeMutuallyExclusiveConstraints"
+        let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        UserDefaults.standard.setVolatileDomain(
+            arguments.merging([key: true]) { $1 }, forName: UserDefaults.argumentDomain)
+        defer {
+            UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        }
+        let window = RecordingWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 200), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        let cell = MessageCell()
+        window.contentView = cell
+
+        for (raw, user) in [(1, author(5, "Bot", bot: true)), (2, author(1))] {
+            let message = row(UInt64(raw), by: user, at: noon).message
+            cell.configure(
+                message, body: NSAttributedString(string: message.content), startsGroup: true,
+                groupTime: "Today at 12:00", shortTime: "12:00", fullDate: "")
+            window.layoutIfNeeded()
+        }
+
+        #expect(window.conflicts == 0)
+    }
+
     @Test
     func anUnsatisfiableConstraintIsCounted() {
         #expect(

@@ -308,8 +308,10 @@ private final class HeaderRow: NSView {
     func show(name: String, tagged: Bool, time: String, fullDate: String) {
         self.name.stringValue = name
         appTag.isHidden = !tagged
-        timeAfterName?.isActive = !tagged
-        timeAfterTag?.isActive = tagged
+        // Off before on: both at once can't be satisfied.
+        let (off, on) = tagged ? (timeAfterName, timeAfterTag) : (timeAfterTag, timeAfterName)
+        off?.isActive = false
+        on?.isActive = true
         self.time.stringValue = time
         self.time.toolTip = fullDate
     }
