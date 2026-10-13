@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
@@ -10,21 +10,51 @@ use crate::state::Store;
 
 enum Request {
     Flush(Option<oneshot::Sender<()>>),
-    Close,
+    Close(Option<Box<Snapshot>>),
     Delete,
 }
 
 // The gateway's pump never waits for it: the pump only bumps the store's change counter.
 pub(crate) struct Flusher {
     requests: mpsc::UnboundedSender<Request>,
+    source: Arc<Source>,
+}
+
+// Snapshots end with close's, so nothing that changes after close() returns is written.
+struct Source {
+    store: Store,
+    closed: Mutex<bool>,
+}
+
+impl Source {
+    // Under the lock, so none is taken after close's.
+    fn snapshot(&self) -> Option<Snapshot> {
+        let closed = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
+        if *closed {
+            return None;
+        }
+        Snapshot::take(&self.store)
+    }
+
+    fn last_snapshot(&self) -> Option<Snapshot> {
+        let mut closed = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
+        if std::mem::replace(&mut *closed, true) {
+            return None;
+        }
+        Snapshot::take(&self.store)
+    }
 }
 
 impl Flusher {
     pub(crate) fn start(runtime: &tokio::runtime::Handle, store: Store, cache: DiskCache) -> Self {
         let (requests, receiver) = mpsc::unbounded_channel();
         let every = cache.every;
-        runtime.spawn(run(
+        let source = Arc::new(Source {
             store,
+            closed: Mutex::new(false),
+        });
+        runtime.spawn(run(
+            source.clone(),
             Target {
                 thread: cache.thread,
                 user: cache.user,
@@ -33,7 +63,7 @@ impl Flusher {
             every,
             receiver,
         ));
-        Self { requests }
+        Self { requests, source }
     }
 
     pub(crate) async fn flush(&self) {
@@ -48,7 +78,8 @@ impl Flusher {
     }
 
     pub(crate) fn close(&self) {
-        let _ = self.requests.send(Request::Close);
+        let last = self.source.last_snapshot().map(Box::new);
+        let _ = self.requests.send(Request::Close(last));
     }
 
     pub(crate) fn delete(&self) {
@@ -63,7 +94,7 @@ struct Target {
 }
 
 async fn run(
-    store: Store,
+    source: Arc<Source>,
     mut target: Target,
     every: Duration,
     mut requests: mpsc::UnboundedReceiver<Request>,
@@ -74,19 +105,25 @@ async fn run(
     loop {
         tokio::select! {
             _ = ticks.tick() => {
-                if flushed != Some(store.changes()) {
-                    flush(&store, &mut target, &mut flushed).await;
+                if flushed != Some(source.store.changes()) {
+                    flush(&source, &mut target, &mut flushed).await;
                 }
             }
             request = requests.recv() => match request {
                 Some(Request::Flush(reply)) => {
-                    flush(&store, &mut target, &mut flushed).await;
+                    flush(&source, &mut target, &mut flushed).await;
                     if let Some(reply) = reply {
                         let _ = reply.send(());
                     }
                 }
-                Some(Request::Close) | None => {
-                    flush(&store, &mut target, &mut flushed).await;
+                Some(Request::Close(last)) => {
+                    if let Some(last) = last {
+                        write(&mut target, *last).await;
+                    }
+                    return;
+                }
+                None => {
+                    flush(&source, &mut target, &mut flushed).await;
                     return;
                 }
                 Some(Request::Delete) => {
@@ -102,11 +139,17 @@ async fn run(
 }
 
 // A failed write leaves `flushed` behind, so the next tick tries again.
-async fn flush(store: &Store, target: &mut Target, flushed: &mut Option<u64>) {
-    let changes = store.changes();
-    let Some(snapshot) = Snapshot::take(store) else {
+async fn flush(source: &Source, target: &mut Target, flushed: &mut Option<u64>) {
+    let changes = source.store.changes();
+    let Some(snapshot) = source.snapshot() else {
         return;
     };
+    if write(target, snapshot).await {
+        *flushed = Some(changes);
+    }
+}
+
+async fn write(target: &mut Target, snapshot: Snapshot) -> bool {
     // The host named another account than READY's: that file stays for its own account.
     if let Some(session) = snapshot
         .entities
@@ -117,13 +160,11 @@ async fn flush(store: &Store, target: &mut Target, flushed: &mut Option<u64>) {
         && let Some(caches) = &target.caches
     {
         let Some(thread) = caches.thread(session) else {
-            return;
+            return false;
         };
         tracing::info!(target: LOG, "cache moved to the session's account");
         target.thread = thread;
         target.user = session;
     }
-    if target.thread.flush(snapshot).await.is_some() {
-        *flushed = Some(changes);
-    }
+    target.thread.flush(snapshot).await.is_some()
 }

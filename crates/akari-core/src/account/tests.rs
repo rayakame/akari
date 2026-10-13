@@ -3494,12 +3494,14 @@ mod cache {
         let dir = TempDir::new();
         let mut fake = FakeGateway::start().await;
         let server = wiremock::MockServer::start().await;
-        let client = cached_client(&fake, &server, &dir, Arc::default());
-        let account = Arc::new(client.account(token(), UserId::new(OWNER)).unwrap());
+        let (account, thread) = start_cached_with(&fake, &server, &dir);
+        let account = Arc::new(account);
         let subscription = account.store().subscribe();
         let _connection = online(&mut fake, &account).await;
         events_until(&subscription, "Online").await;
-        mock_latest(&server, &[10, 11, 12], &[], Duration::from_millis(300)).await;
+        mock_latest(&server, &[10, 11, 12], &[], Duration::ZERO).await;
+        let (slow, release_page) = super::preparer::Slow::new();
+        account.set_message_preparer(slow.clone());
         let loading = tokio::spawn({
             let account = account.clone();
             async move {
@@ -3508,11 +3510,17 @@ mod cache {
                     .await
             }
         });
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        timeout(WAIT, slow.entered()).await.unwrap();
+        // A write still waiting on the disk when the account closes.
+        let release_disk = thread.hold();
+        account.disconnect();
 
         account.close();
+        release_page.send(()).unwrap();
         loading.await.unwrap().unwrap();
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        release_disk.send(()).unwrap();
+        // Resolves once the flusher has ended.
+        account.flush_cache().await;
 
         assert_eq!(ids(&account), [10, 11, 12]);
         let windows: i64 = rusqlite::Connection::open(dir.file(OWNER))
@@ -3749,9 +3757,26 @@ mod preparer {
     }
 
     // Blocks on GENERAL's messages until released; prepares any other channel's at once.
-    struct Slow {
+    pub(super) struct Slow {
         entered: AtomicBool,
         release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl Slow {
+        pub(super) fn new() -> (Arc<Self>, std::sync::mpsc::Sender<()>) {
+            let (release, released) = std::sync::mpsc::channel();
+            let slow = Arc::new(Self {
+                entered: AtomicBool::new(false),
+                release: Mutex::new(released),
+            });
+            (slow, release)
+        }
+
+        pub(super) async fn entered(&self) {
+            while !self.entered.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
     }
 
     impl MessagePreparer for Slow {
@@ -3918,20 +3943,14 @@ mod preparer {
         .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(dm_page))
         .mount(&server)
         .await;
-        let (release, released) = std::sync::mpsc::channel();
-        let slow = Arc::new(Slow {
-            entered: AtomicBool::new(false),
-            release: Mutex::new(released),
-        });
+        let (slow, release) = Slow::new();
         account.set_message_preparer(slow.clone());
 
         let (general_load, dm_loaded) = timeout(WAIT, async {
             tokio::join!(
                 account.load_messages(general(), MessageLoad::Latest { limit: 3 }),
                 async {
-                    while !slow.entered.load(Ordering::SeqCst) {
-                        tokio::time::sleep(Duration::from_millis(5)).await;
-                    }
+                    slow.entered().await;
                     let loaded = account
                         .load_messages(Snowflake::new(DM), MessageLoad::Latest { limit: 3 })
                         .await;
