@@ -152,7 +152,8 @@ bar says "Some messages may be missing" instead.
 ## Edits and deletes
 
 - An edited message ends with "(edited)" right after its text, smaller (12) and in
-  `chatTextMuted`, like the timestamps. A message without text puts it after its last line.
+  `chatTextMuted`, like the timestamps. A message without text puts it after its last line,
+  and one that ends with a code block puts it on a line of its own.
   The official client's mark has a tooltip with the edit time (**unverified**); Akari adds it
   later.
 - An edit that makes a message taller or shorter doesn't move the text the user is reading.
@@ -160,13 +161,23 @@ bar says "Some messages may be missing" instead.
   was above, below or at the top of what's visible. At the bottom, the list stays at the
   bottom.
 
+## Formatting and mentions
+
+- Message content is formatted as Discord formats it: styles, code, quotes, lists, headings,
+  spoilers, links, mentions and timestamps ([markdown.md](markdown.md)). The text can be
+  selected and copied.
+- A message that mentions the user (by name, through @everyone or @here, or through one of
+  their roles) is tinted with `mentionedBackground` (`#f8a300` at 8% dark, 10% light) and has
+  a 2 wide `mentionedBar` at its left edge; hovering darkens it like any row. Akari doesn't
+  read the user's notification settings yet, so it also highlights @everyone in servers where
+  the user suppressed it.
+- Relative timestamps ("in 5 minutes") count on their own while they're on screen, and a row
+  that grows or shrinks with them doesn't move the text being read.
+
 ## Later
 
 - A red (`#d22d39`) "new messages" line with a "NEW" tag at its right end, at the first unread
   message.
-- Messages that mention the user, tinted with `#f8a300` at 8% and a 2 wide bar on the left.
-- Markdown, mentions and timestamps ([markdown.md](markdown.md)); emoji images, embeds and
-  images. Until markdown rendering exists, Akari shows message content as plain text: a
-  mention looks like `<@123>` and markdown symbols show as typed.
+- Emoji images, embeds and images.
 - Components V2 layouts ([messages.md](../protocol/messages.md#components-v2)). Until Akari
   renders them, such a message shows one muted placeholder line where its content would be.
