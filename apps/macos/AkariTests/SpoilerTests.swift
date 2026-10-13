@@ -159,6 +159,161 @@ struct SpoilerTests {
         #expect(!attributed.string.contains("secret"))
     }
 
+    func shownWithALink() -> MessageTextView {
+        MessageTextDrawingTests().shown(
+            "a ||secret|| b [guide](https://example.com) c", appearance: .darkAqua)
+    }
+
+    func whole(_ view: MessageTextView) -> NSRange {
+        NSRange(location: 0, length: view.string.utf16.count)
+    }
+
+    // AppKit's entry points for an assistive app's requests, which in-process calls skip.
+    typealias Value = @convention(c) (AnyObject, NSString) -> Unmanaged<AnyObject>?
+    typealias ValueWith = @convention(c) (AnyObject, NSString, AnyObject) -> Unmanaged<AnyObject>?
+
+    func entryPoint<T>(_ name: String, as type: T.Type) throws -> T {
+        let symbol = try #require(dlsym(UnsafeMutableRawPointer(bitPattern: -2), name), "\(name)")
+        return unsafeBitCast(symbol, to: type)
+    }
+
+    func text(ofRTF data: Data?) -> String {
+        data.flatMap { NSAttributedString(rtf: $0, documentAttributes: nil)?.string } ?? ""
+    }
+
+    // The glyphs' bounds in the view.
+    func glyphs(of shown: String, in view: MessageTextView) throws -> NSRect {
+        let range = (view.string as NSString).range(of: shown)
+        try #require(range.location != NSNotFound)
+        let layout = try #require(view.layoutManager)
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        return layout.boundingRect(forGlyphRange: glyphs, in: try #require(view.textContainer))
+            .offsetBy(dx: view.textContainerOrigin.x, dy: view.textContainerOrigin.y)
+    }
+
+    func onScreen(_ shown: String, in view: MessageTextView) throws -> NSPoint {
+        let word = try glyphs(of: shown, in: view)
+        return try #require(view.window).convertPoint(
+            toScreen: view.convert(NSPoint(x: word.midX, y: word.midY), to: nil))
+    }
+
+    @Test
+    func voiceOverReadsNoHiddenTextInTheSelection() throws {
+        let view = shownWithALink()
+        view.selectAll(nil)
+
+        let selected = try #require(view.accessibilitySelectedText())
+
+        #expect(selected.contains("Spoiler") && !selected.contains("secret"), "\(selected)")
+    }
+
+    @Test
+    func voiceOverReadsNoHiddenTextInRichText() throws {
+        let view = shownWithALink()
+
+        let rtf = text(ofRTF: view.accessibilityRTF(for: whole(view)))
+
+        #expect(rtf.contains("Spoiler") && !rtf.contains("secret"), "\(rtf)")
+    }
+
+    @Test
+    func voiceOverReadsNoHiddenTextInPartOfASpoiler() throws {
+        let view = shownWithALink()
+        let part = (view.string as NSString).range(of: "cre")
+
+        #expect(view.accessibilityString(for: part) == "Spoiler")
+        #expect(view.accessibilityAttributedString(for: part)?.string == "Spoiler")
+    }
+
+    @Test
+    func aHiddenSpoilersLinkElementIsNamedSpoilerAndRevealsIt() throws {
+        let view = shownWithALink()
+        var clicked: [URL] = []
+        view.onLink = { clicked.append($0) }
+
+        let children = try #require(view.accessibilityChildren())
+        let elements = children.compactMap { $0 as? NSAccessibilityElement }
+        #expect(elements.count == children.count)
+        let names = elements.flatMap { element in
+            [element.accessibilityTitle(), element.accessibilityLabel(),
+             element.accessibilityValue() as? String].compactMap { $0 }
+        }
+        #expect(!names.contains { $0.contains("secret") }, "\(names)")
+        #expect(names.contains("guide"))
+
+        let spoiler = try #require(elements.first { $0.accessibilityLabel() == "Spoiler" })
+        #expect(spoiler.accessibilityRole() == .link)
+        #expect(spoiler.accessibilityFrame().contains(try onScreen("secret", in: view)))
+        #expect(spoiler.accessibilityPerformPress())
+        #expect(clicked == [URL(string: "akari://spoiler/0")])
+    }
+
+    @Test
+    func anAssistiveAppReadsNoHiddenText() throws {
+        let view = shownWithALink()
+        view.selectAll(nil)
+        let value = try entryPoint("NSAccessibilityEntryPointValueForAttribute", as: Value.self)
+        let valueWith = try entryPoint(
+            "NSAccessibilityEntryPointValueForAttributeWithParameter", as: ValueWith.self)
+        let range = NSValue(range: whole(view))
+
+        let texts = [
+            value(view, "AXValue")?.takeUnretainedValue() as? String,
+            value(view, "AXSelectedText")?.takeUnretainedValue() as? String,
+            valueWith(view, "AXStringForRange", range)?.takeUnretainedValue() as? String,
+            (valueWith(view, "AXAttributedStringForRange", range)?.takeUnretainedValue()
+                as? NSAttributedString)?.string,
+            text(ofRTF: valueWith(view, "AXRTFForRange", range)?.takeUnretainedValue() as? Data),
+        ]
+        var names: [String] = []
+        for attribute in ["AXChildren", "AXChildrenInNavigationOrder"] {
+            let children = value(view, attribute as NSString)?.takeUnretainedValue() as? [AnyObject]
+            for child in try #require(children) {
+                for name in ["AXTitle", "AXDescription", "AXValue", "AXHelp"] {
+                    names += [value(child, name as NSString)?.takeUnretainedValue() as? String]
+                        .compactMap { $0 }
+                }
+            }
+        }
+
+        #expect(texts.allSatisfy { $0?.contains("Spoiler") == true }, "\(texts)")
+        #expect(!texts.contains { $0?.contains("secret") == true }, "\(texts)")
+        #expect(names.filter { $0 == "Spoiler" }.count == 2, "\(names)")
+        #expect(!names.contains { $0.contains("secret") }, "\(names)")
+    }
+
+    @Test
+    func hoveringAHiddenSpoilerFindsItsLinkElement() throws {
+        let view = shownWithALink()
+
+        let hit = try #require(
+            view.accessibilityHitTest(try onScreen("secret", in: view)) as? NSAccessibilityElement)
+
+        #expect(hit.accessibilityLabel() == "Spoiler")
+        #expect(hit.accessibilityTitle() == nil)
+    }
+
+    @Test
+    func lookUpFindsNoHiddenWordAnywhereOnIt() throws {
+        let view = MessageTextDrawingTests().shown("a ||secret|| b", appearance: .darkAqua)
+        let word = try glyphs(of: "secret", in: view)
+
+        for x in stride(from: word.minX + 0.5, to: word.maxX, by: 1) {
+            #expect(view.looksUpHiddenText(at: NSPoint(x: x, y: word.midY)), "at \(x)")
+        }
+        let shown = try glyphs(of: "b", in: view)
+        #expect(!view.looksUpHiddenText(at: NSPoint(x: shown.midX, y: shown.midY)))
+    }
+
+    @Test
+    func lookUpOnASelectionWithAHiddenSpoilerFindsIt() throws {
+        let view = MessageTextDrawingTests().shown("a ||secret|| b", appearance: .darkAqua)
+        view.selectAll(nil)
+        let shown = try glyphs(of: "b", in: view)
+
+        #expect(view.looksUpHiddenText(at: NSPoint(x: shown.midX, y: shown.midY)))
+    }
+
     @Test
     func voiceOverSaysSpoiler() throws {
         let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
@@ -166,10 +321,10 @@ struct SpoilerTests {
         let view = MessageTextView()
         view.show(MessageText.build(message, revealed: [], now: .now, times: times).text)
 
-        let hidden = try #require(view.accessibilityValue() as? String)
+        let hidden = try #require(view.accessibilityValue())
         #expect(hidden.contains("Spoiler") && !hidden.contains("secret"), "\(hidden)")
 
         view.show(MessageText.build(message, revealed: [0], now: .now, times: times).text)
-        #expect((view.accessibilityValue() as? String)?.contains("secret") == true)
+        #expect(view.accessibilityValue()?.contains("secret") == true)
     }
 }

@@ -35,10 +35,13 @@ notifications and settings come later.
   there). Heights come from `TextMeasurer`, which measures with string drawing: it breaks lines
   as TextKit 1 does at half the cost.
 - **Spoilers** are covered until clicked; a revealed one stays revealed until the channel is
-  left. VoiceOver reads a hidden one as "Spoiler".
+  left. Assistive apps get a hidden one as "Spoiler", in the value, the selection, ranges and
+  RTF, and as a link element of that name that reveals it; the text view makes its own link
+  elements, since NSTextView's carry the hidden text. Look Up finds nothing on a hidden one.
 - **Links:** a plain URL opens in the browser; a masked link asks first, in Akari's words, with
   a box to trust its host for the account (`LinkConfirmation`). A link to a channel Akari
-  knows, and a channel mention, open that channel, in another server too.
+  knows, and a channel mention, open that channel, in another server too. Only the schemes the
+  parser links open (http, https, discord, steam, mailto, tel, sms).
 - **Copy:** Cmd+C copies what the selection shows, as plain text (`bold and @name`). A
   message's context menu has "Copy Text", which copies its markdown.
 - **Mentions of the user** tint the row; relative timestamps count down on one timer for

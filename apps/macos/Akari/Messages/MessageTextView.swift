@@ -4,6 +4,7 @@ import AppKit
 final class MessageTextView: NSTextView {
     private var measuredWidth: CGFloat = -1
     private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
+    private var linkElements: [LinkElement]?
     var onLink: (URL) -> Void = { _ in }
     // The message's own items, above the text's.
     var messageMenu: () -> [NSMenuItem] = { [] }
@@ -57,6 +58,7 @@ final class MessageTextView: NSTextView {
         decorations.frame = frame
         if newSize.width != measuredWidth {
             measuredWidth = newSize.width
+            linkElements = nil
             invalidateIntrinsicContentSize()
             updateDecorations()
         }
@@ -75,6 +77,7 @@ final class MessageTextView: NSTextView {
         }
         let kept = storage.string == text.string ? selectedRanges : nil
         storage.setAttributedString(text)
+        linkElements = nil
         selectedRanges = kept ?? [NSValue(range: NSRange(location: 0, length: 0))]
         invalidateIntrinsicContentSize()
         updateDecorations()
@@ -159,14 +162,43 @@ final class MessageTextView: NSTextView {
     }
 
     override func quickLook(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        let index = characterIndexForInsertion(at: point)
-        let spoiler = index < (textStorage?.length ?? 0)
-            ? textStorage?.attribute(.akariSpoiler, at: index, effectiveRange: nil) : nil
-        guard (spoiler as? MessageText.Spoiler)?.hidden != true else {
+        guard !looksUpHiddenText(at: convert(event.locationInWindow, from: nil)) else {
             return
         }
         super.quickLook(with: event)
+    }
+
+    // The glyph under the point, not the nearest insertion point, which can be past a spoiler.
+    func looksUpHiddenText(at point: NSPoint) -> Bool {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0
+        else {
+            return false
+        }
+        let inContainer = NSPoint(
+            x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        let glyph = layoutManager.glyphIndex(for: inContainer, in: textContainer)
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        var ranges = [
+            NSRange(location: index, length: 1),
+            selectionRange(
+                forProposedRange: NSRange(location: index, length: 0), granularity: .selectByWord),
+        ]
+        if NSLocationInRange(index, selectedRange()) {
+            ranges.append(selectedRange())
+        }
+        return ranges.contains { hidesText($0, storage) }
+    }
+
+    private func hidesText(_ range: NSRange, _ storage: NSTextStorage) -> Bool {
+        let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
+        var hides = false
+        storage.enumerateAttribute(.akariSpoiler, in: range) { value, _, stop in
+            if (value as? MessageText.Spoiler)?.hidden == true {
+                hides = true
+                stop.pointee = true
+            }
+        }
+        return hides
     }
 
     // A hidden code block reveals on a click anywhere on its cover, its padding included.
@@ -203,6 +235,66 @@ final class MessageTextView: NSTextView {
         accessibilityString(for: range).map { NSAttributedString(string: $0) }
     }
 
+    override func accessibilitySelectedText() -> String? {
+        accessibilityString(for: selectedRange())
+    }
+
+    override func accessibilityRTF(for range: NSRange) -> Data? {
+        accessibilityAttributedString(for: range).flatMap { text in
+            text.rtf(from: NSRange(location: 0, length: text.length))
+        }
+    }
+
+    // NSTextView's link elements carry their text, a hidden spoiler's too, and can't be filtered:
+    // asking one anything asks the view for its children.
+    override func accessibilityChildren() -> [Any]? {
+        links()
+    }
+
+    nonisolated override func accessibilityHitTest(_ point: NSPoint) -> Any? {
+        // AppKit asks on the main thread; the element isn't Sendable.
+        nonisolated(unsafe) var hit: Any?
+        MainActor.assumeIsolated {
+            hit = links().first { $0.accessibilityFrame().contains(point) } ?? self
+        }
+        return hit
+    }
+
+    private func links() -> [LinkElement] {
+        if let linkElements {
+            return linkElements
+        }
+        guard let storage = textStorage, let layoutManager, let textContainer else {
+            return []
+        }
+        var elements: [LinkElement] = []
+        var spoilers: Set<UInt16> = []
+        storage.enumerateAttribute(.link, in: NSRange(location: 0, length: storage.length)) {
+            value, range, _ in
+            guard let url = value as? URL ?? (value as? String).flatMap(URL.init(string:)) else {
+                return
+            }
+            let spoiler = storage.attribute(.akariSpoiler, at: range.location, effectiveRange: nil)
+            let hidden = (spoiler as? MessageText.Spoiler).flatMap { $0.hidden ? $0.index : nil }
+            if let hidden, !spoilers.insert(hidden).inserted {
+                return
+            }
+            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+                .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+            // An element's frame counts from its parent's bottom left, flipped or not.
+            let frame = NSRect(
+                x: rect.minX, y: bounds.height - rect.maxY, width: rect.width, height: rect.height)
+            elements.append(
+                LinkElement(
+                    label: hidden == nil ? MessageText.plain(storage, range) : "Spoiler",
+                    frame: frame, parent: self
+                ) { [weak self] in self?.onLink(url) })
+        }
+        linkElements = elements
+        return elements
+    }
+
     // Where the first line's glyphs sit, after the paragraph's baseline offset.
     override var firstBaselineOffsetFromTop: CGFloat {
         guard let layoutManager, let storage = textStorage, storage.length > 0 else {
@@ -216,6 +308,26 @@ final class MessageTextView: NSTextView {
     // A non-editable text view would swallow Escape; the list handles it.
     override func cancelOperation(_ sender: Any?) {
         nextResponder?.tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: sender)
+    }
+}
+
+// A link in a message as assistive apps see it; pressing it is a click.
+nonisolated final class LinkElement: NSAccessibilityElement {
+    private let press: @MainActor () -> Void
+
+    init(label: String, frame: NSRect, parent: NSView, press: @escaping @MainActor () -> Void) {
+        self.press = press
+        super.init()
+        setAccessibilityRole(.link)
+        setAccessibilityLabel(label)
+        setAccessibilityParent(parent)
+        setAccessibilityFrameInParentSpace(frame)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        let press = press
+        MainActor.assumeIsolated { press() }
+        return true
     }
 }
 
