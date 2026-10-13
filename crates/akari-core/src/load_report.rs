@@ -25,4 +25,9 @@ pub struct LoadReport {
     /// `X-RateLimit-Remaining` and `-Reset-After` of the last answer, when Discord sent them.
     pub remaining: Option<u32>,
     pub reset_after: Option<Duration>,
+    /// In the host's [`MessagePreparer`](crate::MessagePreparer): this page and, for a
+    /// channel's first page, the disk cache's messages shown before it.
+    pub prepare: Duration,
+    /// Messages the preparer reported as prepared.
+    pub prepared: u32,
 }

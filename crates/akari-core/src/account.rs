@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cache::{CacheThread, DiskCache, Flusher};
@@ -15,7 +15,7 @@ use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
     ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
 };
-use crate::{DiscordClient, LoadReport, Token};
+use crate::{DiscordClient, LoadReport, MessagePreparer, Token};
 
 const REFRESH_LIMIT: u8 = 100;
 const JUMP_LIMIT: u8 = 50;
@@ -79,6 +79,8 @@ fn log_page(channel: ChannelId, kind: LoadKind, report: &LoadReport) {
         retries = report.retries,
         remaining = report.remaining,
         reset_after_ms = report.reset_after.map(ms),
+        prepare_ms = ms(report.prepare),
+        prepared = report.prepared,
         "history page loaded"
     );
 }
@@ -109,6 +111,7 @@ pub(crate) struct Shared {
     flusher: Option<Flusher>,
     // The cache's thread and whose file it has open.
     cache: Option<(CacheThread, UserId)>,
+    preparer: RwLock<Option<Arc<dyn MessagePreparer>>>,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -248,6 +251,7 @@ impl Shared {
                 }
             }
         };
+        let mut prepared = (Duration::ZERO, 0);
         let loaded = match self.cache_for(channel, ticket) {
             None => request.await,
             // A page never waits for the disk; cached messages show if they come first, or
@@ -257,6 +261,7 @@ impl Shared {
                     if let Some(messages) = cache.read_window(channel).await
                         && !messages.is_empty()
                     {
+                        self.prepare(messages.clone(), &mut prepared).await;
                         self.store.fill_from_cache(ticket, messages);
                     }
                 };
@@ -273,21 +278,24 @@ impl Shared {
                 }
             }
         };
-        unfinished.ticket = None;
         match loaded {
             Ok(Page {
                 messages,
                 received,
                 mut report,
             }) => {
+                self.prepare_page(&messages, &mut prepared).await;
+                unfinished.ticket = None;
                 let reached_end = received < usize::from(limit);
                 let storing = Instant::now();
                 self.store.finish_load(ticket, messages, reached_end);
                 report.store = storing.elapsed();
+                (report.prepare, report.prepared) = prepared;
                 log_page(channel, ticket.kind, &report);
                 Ok(Some(report))
             }
             Err(err) => {
+                unfinished.ticket = None;
                 self.store.abort_load(ticket);
                 self.failed(&err);
                 tracing::debug!(
@@ -301,6 +309,46 @@ impl Shared {
                 Err(err)
             }
         }
+    }
+
+    // On a blocking thread, so a slow preparer holds up only this load.
+    async fn prepare(&self, messages: Vec<Arc<Message>>, totals: &mut (Duration, u32)) {
+        let Some(preparer) = self
+            .preparer
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let started = Instant::now();
+        let prepared = tokio::task::spawn_blocking(move || preparer.prepare(&messages)).await;
+        totals.0 += started.elapsed();
+        match prepared {
+            Ok(count) => totals.1 += count,
+            Err(_) => tracing::warn!("the message preparer failed; the page loads unprepared"),
+        }
+    }
+
+    // The store converts the page under its lock; the preparer gets its own copy outside it.
+    async fn prepare_page(&self, page: &[crate::model::Message], totals: &mut (Duration, u32)) {
+        if self
+            .preparer
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_none()
+        {
+            return;
+        }
+        let messages = page
+            .iter()
+            .map(|message| {
+                Arc::new(Message::from_wire(message.clone(), &mut |user| {
+                    Arc::new(crate::state::User::from_wire(user))
+                }))
+            })
+            .collect();
+        self.prepare(messages, totals).await;
     }
 
     // Only the first page of an empty window can use the cache's copy of the channel.
@@ -654,11 +702,22 @@ impl Account {
             runtime: runtime.clone(),
             flusher,
             cache: thread,
+            preparer: RwLock::new(None),
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
         runtime.spawn(pump(finish));
         Ok(Self { shared })
+    }
+
+    /// Runs `preparer` on every history page and disk cache fill before its messages enter
+    /// a window. Replaces an earlier one.
+    pub fn set_message_preparer(&self, preparer: Arc<dyn MessagePreparer>) {
+        *self
+            .shared
+            .preparer
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(preparer);
     }
 
     /// The account's state. It stays readable after the account is closed.

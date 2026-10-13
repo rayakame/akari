@@ -27,7 +27,7 @@ correctness. A message in a page that fails to decode is skipped and logged by I
 
 `Account::load_messages(channel, load)` takes an intent instead of raw IDs, so a window
 can't get a hole. The limit is clamped to 1–100. It returns a `LoadReport` with where the
-load's time went (rate-limit waits, headers, body, decoding, the store), or `None` when there
+load's time went (rate-limit waits, headers, body, decoding, the host's preparer, the store), or `None` when there
 was nothing to load.
 
 Requests ask for compressed bodies with the official client's
