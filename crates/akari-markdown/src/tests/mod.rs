@@ -7,6 +7,7 @@ mod links;
 mod outline;
 mod properties;
 mod source_range;
+mod stack;
 mod text;
 mod utf16;
 

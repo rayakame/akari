@@ -11,7 +11,47 @@ pub(crate) fn flatten(nodes: &[Node], jumbo: bool) -> Document {
         spoiler: None,
         link: None,
     };
-    flat.nodes(nodes, ctx);
+    // A work list, not recursion: content nests 64 deep and hosts parse on small stacks.
+    let mut tasks = vec![Task::Nodes(nodes.iter(), ctx)];
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Nodes(mut rest, ctx) => {
+                if let Some(node) = rest.next() {
+                    tasks.push(Task::Nodes(rest, ctx));
+                    flat.node(node, ctx, &mut tasks);
+                }
+            }
+            Task::Open {
+                container,
+                children,
+                source,
+                ctx,
+            } => {
+                if let Some(container) = container {
+                    flat.containers.push((container, false));
+                }
+                flat.close();
+                tasks.push(Task::Close {
+                    source,
+                    ctx,
+                    before: flat.blocks.len(),
+                    pop: container.is_some(),
+                });
+                tasks.push(Task::Nodes(children.iter(), ctx));
+            }
+            Task::Close {
+                source,
+                ctx,
+                before,
+                pop,
+            } => {
+                flat.close_container(source, ctx, before);
+                if pop {
+                    flat.containers.pop();
+                }
+            }
+        }
+    }
     flat.close();
     Document::new(flat.blocks, flat.links, jumbo, flat.spoilers)
 }
@@ -33,6 +73,22 @@ struct Open {
     source: Span,
 }
 
+enum Task<'n> {
+    Nodes(std::slice::Iter<'n, Node>, Context),
+    Open {
+        container: Option<Container>,
+        children: &'n [Node],
+        source: Span,
+        ctx: Context,
+    },
+    Close {
+        source: Span,
+        ctx: Context,
+        before: usize,
+        pop: bool,
+    },
+}
+
 #[derive(Clone, Copy)]
 struct Context {
     kind: BlockKind,
@@ -42,13 +98,7 @@ struct Context {
 }
 
 impl Flat {
-    fn nodes(&mut self, nodes: &[Node], ctx: Context) {
-        for node in nodes {
-            self.node(node, ctx);
-        }
-    }
-
-    fn node(&mut self, node: &Node, ctx: Context) {
+    fn node<'n>(&mut self, node: &'n Node, ctx: Context, tasks: &mut Vec<Task<'n>>) {
         match node {
             Node::Text(pieces) => {
                 for piece in pieces {
@@ -86,13 +136,13 @@ impl Flat {
             }
             Node::Style {
                 style, children, ..
-            } => self.nodes(
-                children,
+            } => tasks.push(Task::Nodes(
+                children.iter(),
                 Context {
                     style: ctx.style.with(*style),
                     ..ctx
                 },
-            ),
+            )),
             Node::Token { kind, source } => self.inline(*kind, *source, ctx),
             Node::Link {
                 data,
@@ -122,66 +172,68 @@ impl Flat {
                     let whole = if shown.len() == 1 { *source } else { span };
                     self.inline(InlineKind::Text(span), whole, ctx);
                 }
-                self.nodes(children, ctx);
+                tasks.push(Task::Nodes(children.iter(), ctx));
             }
-            Node::TestingCode { children } => self.nodes(children, ctx),
+            Node::TestingCode { children } => tasks.push(Task::Nodes(children.iter(), ctx)),
             Node::Emoji { source, .. } => self.piece(Piece::Plain(*source), ctx),
-            Node::Quote { children, source } => {
-                self.containers.push((Container::Quote, false));
-                self.container(children, *source, ctx);
-                self.containers.pop();
-            }
+            Node::Quote { children, source } => tasks.push(Task::Open {
+                container: Some(Container::Quote),
+                children,
+                source: *source,
+                ctx,
+            }),
             Node::Heading {
                 level,
                 children,
                 source,
-            } => self.container(
+            } => tasks.push(Task::Open {
+                container: None,
                 children,
-                *source,
-                Context {
+                source: *source,
+                ctx: Context {
                     kind: BlockKind::Heading(*level),
                     ..ctx
                 },
-            ),
-            Node::Subtext { children, source } => self.container(
+            }),
+            Node::Subtext { children, source } => tasks.push(Task::Open {
+                container: None,
                 children,
-                *source,
-                Context {
+                source: *source,
+                ctx: Context {
                     kind: BlockKind::Subtext,
                     ..ctx
                 },
-            ),
+            }),
             Node::List { start, items, .. } => {
-                for (i, (children, source)) in items.iter().enumerate() {
-                    let item = Container::ListItem {
-                        ordered: start.is_some(),
-                        number: start.unwrap_or(1).saturating_add(i as u32),
-                        marker: true,
-                    };
-                    self.containers.push((item, false));
-                    self.container(children, *source, ctx);
-                    self.containers.pop();
+                for (i, (children, source)) in items.iter().enumerate().rev() {
+                    tasks.push(Task::Open {
+                        container: Some(Container::ListItem {
+                            ordered: start.is_some(),
+                            number: start.unwrap_or(1).saturating_add(i as u32),
+                            marker: true,
+                        }),
+                        children,
+                        source: *source,
+                        ctx,
+                    });
                 }
             }
             Node::Spoiler { children, .. } => {
                 let id = SpoilerId(self.spoilers.min(u16::MAX - 1));
                 self.spoilers = self.spoilers.saturating_add(1);
-                self.nodes(
-                    children,
+                tasks.push(Task::Nodes(
+                    children.iter(),
                     Context {
                         spoiler: Some(id),
                         ..ctx
                     },
-                );
+                ));
             }
         }
     }
 
     // At least one block, empty if need be, so an empty item or quote still shows.
-    fn container(&mut self, children: &[Node], source: Span, ctx: Context) {
-        self.close();
-        let before = self.blocks.len();
-        self.nodes(children, ctx);
+    fn close_container(&mut self, source: Span, ctx: Context, before: usize) {
         self.close();
         if self.blocks.len() == before {
             let containers = self.block_containers();

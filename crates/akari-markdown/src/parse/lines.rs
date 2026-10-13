@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use super::{Ctx, Input, LineStart, Match, Node, Parser};
+use super::{Content, Ctx, Input, LineStart, Match, Node, Parser};
 use crate::document::HeadingLevel;
 use crate::emoji::py_space;
 
@@ -74,13 +74,13 @@ impl Parser {
         let next = end + usize::from(end < bytes.len());
         let content = trim_end(text, start..end, py_space);
         let inner = self.inner(input, at, range, ctx, next > end);
-        let children = self.region(input, content, inner);
         Some(Match {
             node: Node::Subtext {
-                children,
+                children: Vec::new(),
                 source: input.span(at..next),
             },
             next,
+            nested: vec![Content::new(content, inner)],
         })
     }
 
@@ -138,14 +138,14 @@ impl Parser {
         let title = trim_end(text, title, |c| c == '#');
         let title = trim_end(text, title, py_space);
         let inner = self.inner(input, at, range, ctx, text[..next].ends_with('\n'));
-        let children = self.region(input, title, inner);
         Some(Match {
             node: Node::Heading {
                 level,
-                children,
+                children: Vec::new(),
                 source: input.span(at..next),
             },
             next,
+            nested: vec![Content::new(title, inner)],
         })
     }
 
@@ -187,13 +187,14 @@ impl Parser {
             quote: true,
             ..self.inner(input, at, range, ctx, text[..next].ends_with('\n'))
         };
-        let children = self.parse_pieces(input, &lines, inner);
+        let content = self.content(input, &lines, inner);
         Some(Match {
             node: Node::Quote {
-                children,
+                children: Vec::new(),
                 source: input.span(at..next),
             },
             next,
+            nested: vec![content],
         })
     }
 
@@ -248,10 +249,11 @@ impl Parser {
             ..self.inner(input, at, range, ctx, text[..next].ends_with('\n'))
         };
         let mut parsed = Vec::with_capacity(items.len());
+        let mut nested = Vec::with_capacity(items.len());
         for (width, item) in items {
             let lines = dedent(bytes, item.clone(), width);
-            let source = input.span(item);
-            parsed.push((self.parse_pieces(input, &lines, inner), source));
+            parsed.push((Vec::new(), input.span(item)));
+            nested.push(self.content(input, &lines, inner));
         }
         Some(Match {
             node: Node::List {
@@ -262,17 +264,21 @@ impl Parser {
                 source: input.span(at..next),
             },
             next,
+            nested,
         })
     }
 
-    fn parse_pieces(&mut self, input: &Input, pieces: &[Range<usize>], ctx: Ctx) -> Vec<Node> {
+    fn content(&mut self, input: &Input, pieces: &[Range<usize>], ctx: Ctx) -> Content {
         match pieces {
-            [one] => self.region(input, one.clone(), ctx),
+            [one] => Content::new(one.clone(), ctx),
             _ => {
                 let joined = input.derive(pieces);
                 self.steps += joined.text.len() as u64;
-                let len = joined.text.len();
-                self.region(&joined, 0..len, ctx)
+                Content {
+                    range: 0..joined.text.len(),
+                    input: Some(joined),
+                    ctx,
+                }
             }
         }
     }

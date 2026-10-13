@@ -25,13 +25,13 @@ fn is_command_char(c: char) -> bool {
 impl Parser {
     fn token(&mut self, input: &Input, range: Range<usize>, kind: InlineKind) -> Match {
         self.steps += range.len() as u64;
-        Match {
-            node: Node::Token {
+        Match::new(
+            Node::Token {
                 kind,
                 source: input.span(range.clone()),
             },
-            next: range.end,
-        }
+            range.end,
+        )
     }
 
     // An ID beyond u64 can't be a snowflake; such a token stays text, consumed whole.
@@ -39,10 +39,7 @@ impl Parser {
         self.steps += range.len() as u64;
         let mut pieces = Vec::new();
         input.pieces(range.clone(), |span| pieces.push(Piece::Plain(span)));
-        Match {
-            node: Node::Text(pieces),
-            next: range.end,
-        }
+        Match::new(Node::Text(pieces), range.end)
     }
 
     pub(super) fn angle_in_link(

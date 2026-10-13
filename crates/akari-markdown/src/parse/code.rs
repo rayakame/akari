@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use super::memo::{Frame, Runs};
-use super::{Ctx, Input, Match, Node, Parser, char_len};
+use super::{Content, Ctx, Input, Match, Node, Parser, char_len};
 
 const FENCE: &str = "```";
 
@@ -49,14 +49,14 @@ impl Parser {
         let code = trim_newlines(text, code_start..close);
         let mut pieces = Vec::new();
         input.pieces(code, |span| pieces.push(span));
-        Some(Match {
-            node: Node::CodeBlock {
+        Some(Match::new(
+            Node::CodeBlock {
                 language: language.map(|l| input.span(l)),
                 code: pieces,
                 source: input.span(at..close + FENCE.len()),
             },
-            next: close + FENCE.len(),
-        })
+            close + FENCE.len(),
+        ))
     }
 
     fn fence_after(&mut self, text: &str, start: usize, frame: &mut Frame) -> Option<usize> {
@@ -106,21 +106,23 @@ impl Parser {
                 let content = strip_spaces(text, at + len..close);
                 if ctx.testing_link {
                     let inner = self.inner(input, at, range, ctx, false);
-                    let children = self.region(input, content, inner);
                     return Some(Match {
-                        node: Node::TestingCode { children },
+                        node: Node::TestingCode {
+                            children: Vec::new(),
+                        },
                         next: close + len,
+                        nested: vec![Content::new(content, inner)],
                     });
                 }
                 let mut pieces = Vec::new();
                 input.pieces(content, |span| pieces.push(span));
-                return Some(Match {
-                    node: Node::Code {
+                return Some(Match::new(
+                    Node::Code {
                         code: pieces,
                         source: input.span(at..close + len),
                     },
-                    next: close + len,
-                });
+                    close + len,
+                ));
             }
         }
         frame.code_dead_until = at + opening;

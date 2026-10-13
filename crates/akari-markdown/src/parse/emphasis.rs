@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use super::memo::{Doomed, Frame};
-use super::{Ctx, Input, Match, Node, Parser, char_len};
+use super::{Content, Ctx, Input, Match, Node, Parser, char_len};
 use crate::document::Style;
 
 fn is_space(c: char) -> bool {
@@ -91,13 +91,13 @@ impl Parser {
         let (content, end) =
             self.any_until(input, at, range, "||", None, &mut frame.no_spoiler_from)?;
         let inner = self.inner(input, at, range, ctx, false);
-        let children = self.region(input, content, inner);
         Some(Match {
             node: Node::Spoiler {
-                children,
+                children: Vec::new(),
                 source: input.span(at..end),
             },
             next: end,
+            nested: vec![Content::new(content, inner)],
         })
     }
 
@@ -110,14 +110,14 @@ impl Parser {
         (style, content, end): (Style, Range<usize>, usize),
     ) -> Match {
         let inner = self.inner(input, at, range, ctx, false);
-        let children = self.region(input, content, inner);
         Match {
             node: Node::Style {
                 style,
-                children,
+                children: Vec::new(),
                 source: input.span(at..end),
             },
             next: end,
+            nested: vec![Content::new(content, inner)],
         }
     }
 

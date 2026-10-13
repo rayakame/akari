@@ -26,6 +26,16 @@ pub(super) struct Frame {
     pub(super) code_dead_until: usize,
 }
 
+impl Frame {
+    // Built in its own call, so its temporaries never sit in region's frame.
+    pub(super) fn boxed(start: usize) -> Box<Self> {
+        Box::new(Self {
+            start,
+            ..Self::default()
+        })
+    }
+}
+
 pub(super) struct Runs {
     starts: Vec<usize>,
     by_len: HashMap<usize, Vec<usize>>,

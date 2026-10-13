@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use super::memo::{Brackets, Frame, UrlPart};
 use super::phishing::special_whitespace;
-use super::{Ctx, Input, LineStart, Match, Node, Parser, literal};
+use super::{Content, Ctx, Input, LineStart, Match, Node, Parser, literal};
 use crate::document::LinkKind;
 
 // A link's text is checked at this depth or deeper, so checks nest at most 8 deep and so do
@@ -62,15 +62,15 @@ impl Parser {
         self.steps += (end - at) as u64;
         let mut shown = Vec::new();
         input.pieces(display, |span| shown.push(span));
-        Match {
-            node: Node::Link {
+        Match::new(
+            Node::Link {
                 data,
                 shown,
                 children: Vec::new(),
                 source: input.span(at..end),
             },
-            next: end,
-        }
+            end,
+        )
     }
 
     // (?:https?|steam)://[^\s<]+[^<.,:;"'\]\s], minus one ")" when they outnumber "(".
@@ -126,10 +126,7 @@ impl Parser {
                         suppress_embed: false,
                     },
                 ),
-                None => Match {
-                    node: literal(input, at..end),
-                    next: end,
-                },
+                None => Match::new(literal(input, at..end), end),
             },
         )
     }
@@ -167,10 +164,7 @@ impl Parser {
                     suppress_embed: true,
                 },
             ),
-            None => Match {
-                node: literal(input, start..close),
-                next: end,
-            },
+            None => Match::new(literal(input, start..close), end),
         })
     }
 
@@ -285,22 +279,8 @@ impl Parser {
         frame: &mut Frame,
     ) -> Option<Match> {
         let text = &input.text[..range.end];
-        let bytes = text.as_bytes();
-        let brackets = frame
-            .brackets
-            .get_or_insert_with(|| Brackets::new(bytes, range.clone(), &mut self.steps));
-        let text_end = brackets.text_end(at + 1, &mut self.steps);
-        let (close, part) = match frame.links_from.get(&text_end) {
-            Some(found) => found.clone()?,
-            None => {
-                let found = self.link_close(text, text_end, frame);
-                frame.links_from.insert(text_end, found.clone());
-                found?
-            }
-        };
-        let end = part.end;
+        let (close, part) = self.link_parts(text, at, range, frame)?;
         let url = valid_url(&unescape(&text[part.url.clone()]));
-        let body = at + 1..close;
         let check = Ctx {
             testing_link: true,
             trailing_newline: false,
@@ -308,19 +288,51 @@ impl Parser {
             ..self.inner(input, at, range, ctx, false)
         };
         let allowed = url.is_some()
-            && self.admissible(&text[body.clone()], check, false) == Some(true)
+            && self.admissible(&text[at + 1..close], check, false) == Some(true)
             && part
                 .title
                 .clone()
                 .filter(|t| !t.is_empty())
                 .is_none_or(|t| self.admissible(&text[t], check, true).is_some());
-        let Some(url) = url.filter(|_| allowed) else {
-            return Some(Match {
-                node: literal(input, at..end),
-                next: end,
-            });
+        Some(self.masked_match(input, at..close, part, url.filter(|_| allowed), ctx))
+    }
+
+    fn link_parts(
+        &mut self,
+        text: &str,
+        at: usize,
+        range: &Range<usize>,
+        frame: &mut Frame,
+    ) -> Option<(usize, UrlPart)> {
+        let brackets = frame
+            .brackets
+            .get_or_insert_with(|| Brackets::new(text.as_bytes(), range.clone(), &mut self.steps));
+        let text_end = brackets.text_end(at + 1, &mut self.steps);
+        match frame.links_from.get(&text_end) {
+            Some(found) => found.clone(),
+            None => {
+                let found = self.link_close(text, text_end, frame);
+                frame.links_from.insert(text_end, found.clone());
+                found
+            }
+        }
+    }
+
+    // Apart from masked_link, whose frame is on the stack while its text is checked.
+    fn masked_match(
+        &mut self,
+        input: &Input,
+        open_close: Range<usize>,
+        part: UrlPart,
+        url: Option<String>,
+        ctx: Ctx,
+    ) -> Match {
+        let (at, end) = (open_close.start, part.end);
+        let Some(url) = url else {
+            return Match::new(literal(input, at..end), end);
         };
-        let shown = clean_ranges(text, body);
+        let text = &input.text;
+        let shown = clean_ranges(text, at + 1..open_close.end);
         let shown = input.derive(&shown);
         let display = Ctx {
             line_start: LineStart::Nothing,
@@ -332,7 +344,11 @@ impl Parser {
             depth: ctx.depth + 1,
         };
         self.steps += shown.text.len() as u64;
-        let children = self.region(&shown, 0..shown.text.len(), display);
+        let display = Content {
+            range: 0..shown.text.len(),
+            input: Some(shown),
+            ctx: display,
+        };
         let title = part.title.map(|t| {
             text[t]
                 .chars()
@@ -340,7 +356,7 @@ impl Parser {
                 .collect::<String>()
                 .into_boxed_str()
         });
-        Some(Match {
+        Match {
             node: Node::Link {
                 data: LinkData {
                     url,
@@ -348,11 +364,12 @@ impl Parser {
                     suppress_embed: part.suppress,
                 },
                 shown: Vec::new(),
-                children,
+                children: Vec::new(),
                 source: input.span(at..end),
             },
             next: end,
-        })
+            nested: vec![display],
+        }
     }
 
     // The regex's backtracking order: the last "](" before the next "[" whose URL part matches.

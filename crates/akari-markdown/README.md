@@ -55,16 +55,23 @@ linear: with the `fuzzing` feature, `parse_with_steps` counts it, and every corp
 fuzz input stays within `STEPS_PER_BYTE × (length + 1)` steps (128; the worst case, 64 nested
 italics, takes about 100), also when nested deep inside links, styles and quotes.
 
+Hosts parse on their own threads, so the stack is bounded too: a rule hands its content back to
+the parser instead of parsing it itself, so each level of nesting costs one frame, and building
+the document doesn't recurse. In a debug build every corpus, adversarial and fuzz-found input
+parses on a 256 KB thread; the deepest need about 85 KB there, and far less in a release build.
+
 ## Tests
 
 ```sh
 cargo test -p akari-markdown                       # corpus, properties, bounds, units
 cargo test --release -p akari-markdown -- --ignored parse_cost --nocapture
+cargo test -p akari-markdown -- --ignored stack_peak --nocapture   # with the local fuzz corpus
 ```
 
 - `tests/corpus/*.txt` holds the cases by area, in the format described in
   `src/tests/corpus.rs`: an input, `--`, and the expected outline, one line per block.
   `samples.txt` has realistic messages, `parse-discord.txt` parse-discord's own test inputs.
+- `tests/fuzz-found` holds the fuzzer's inputs that nest deepest, for the stack test.
 - Fuzzing needs cargo-fuzz; the fuzz crate has its own workspace and pins a nightly:
 
 ```sh
