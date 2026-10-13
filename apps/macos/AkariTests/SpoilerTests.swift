@@ -105,6 +105,60 @@ struct SpoilerTests {
         #expect(list.actions.calls.isEmpty)
     }
 
+    func click(
+        _ type: NSEvent.EventType, at point: NSPoint, in view: MessageTextView
+    ) throws -> NSEvent {
+        let window = try #require(view.window)
+        return try #require(
+            NSEvent.mouseEvent(
+                with: type, location: view.convert(point, to: nil), modifierFlags: [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                clickCount: 1, pressure: 1))
+    }
+
+    @Test
+    func aRightClickOnAHiddenSpoilerKeepsItHidden() throws {
+        let drawing = MessageTextDrawingTests()
+        let view = drawing.shown("a ||secret|| b", appearance: .darkAqua)
+        view.messageMenu = { MessageMenu.items(for: row(1, at: .now, content: "x").message) }
+        let point = try drawing.insidePill(of: "secret", in: view)
+        let before = view.selectedRange()
+
+        let menu = try #require(view.menu(for: try click(.rightMouseDown, at: point, in: view)))
+
+        #expect(!menu.items.contains { $0.title.contains("secret") }, "\(menu.items.map(\.title))")
+        #expect(menu.items.contains { $0.title == "Copy Text" })
+        #expect(view.selectedRange() == before)
+    }
+
+    @Test
+    func aClickAnywhereOnAHiddenCodeBlockRevealsIt() throws {
+        let drawing = MessageTextDrawingTests()
+        let view = drawing.shown("||```\nsecret\n```||", appearance: .darkAqua)
+        var clicked: [URL] = []
+        view.onLink = { clicked.append($0) }
+
+        // Ends the text view's tracking loop, should the click reach it.
+        NSApp.postEvent(try click(.leftMouseUp, at: NSPoint(x: 300, y: 3), in: view), atStart: false)
+        view.mouseDown(with: try click(.leftMouseDown, at: NSPoint(x: 300, y: 3), in: view))
+
+        #expect(clicked == [URL(string: "akari://spoiler/0")])
+    }
+
+    @Test
+    func voiceOverReadsNoHiddenTextByRange() throws {
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let message = row(1, at: .now, content: "a ||secret|| b").message
+        let view = MessageTextView()
+        view.show(MessageText.build(message, revealed: [], now: .now, times: times).text)
+        let whole = NSRange(location: 0, length: view.string.utf16.count)
+
+        let string = try #require(view.accessibilityString(for: whole))
+        #expect(string.contains("Spoiler") && !string.contains("secret"), "\(string)")
+        let attributed = try #require(view.accessibilityAttributedString(for: whole))
+        #expect(!attributed.string.contains("secret"))
+    }
+
     @Test
     func voiceOverSaysSpoiler() throws {
         let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)

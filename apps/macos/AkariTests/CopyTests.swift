@@ -108,6 +108,13 @@ struct CopyTests {
     }
 
     @Test
+    func copyTextIsntOfferedWithoutText() {
+        let message = row(1, at: now, content: "", attachments: ["a.png"]).message
+
+        #expect(MessageMenu.items(for: message, pasteboard: pasteboard).isEmpty)
+    }
+
+    @Test
     func theTextsMenuOffersCopyText() throws {
         let view = shown("hello")
         view.messageMenu = { MessageMenu.items(for: row(1, at: self.now).message) }

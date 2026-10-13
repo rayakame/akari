@@ -279,6 +279,25 @@ final class SessionModelTests {
         session.close()
     }
 
+    // As in the sidebar: forums, voice channels and categories have no message list yet.
+    @Test
+    func goingToAChannelWithoutAMessageListDoesNothing() {
+        store.update { state in
+            state.add(guild(1), guild(2))
+            state.list([channel(13)], in: 1)
+            state.list([channel(20, guild: 2, kind: .guildForum), channel(21, guild: 2)], in: 2)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+
+        session.go(to: id(20))
+
+        #expect(session.place == .guild(id(1)))
+        #expect(session.messages?.channelId == id(13))
+        session.close()
+    }
+
     @Test
     func goingToAChannelTheStoreDoesntHaveStaysInPlace() {
         store.update { state in

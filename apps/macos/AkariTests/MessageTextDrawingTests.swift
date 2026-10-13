@@ -176,6 +176,45 @@ struct MessageTextDrawingTests {
         #expect(same(spoiler.layer.backgroundColor, Palette.spoilerRevealed, .darkAqua))
     }
 
+    @Test
+    func adjacentPillsStayApart() throws {
+        let message = named(row(1, at: .now, content: "<@1><@2> <#5><@3>")).message
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let view = MessageTextView()
+        view.show(MessageText.build(message, revealed: [], now: .now, times: times).text)
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 40)
+        window.contentView?.addSubview(view)
+
+        #expect(view.decorations.subviews.count == 4)
+    }
+
+    // The number column grows with the list's widest number.
+    @Test(arguments: ["9. a\n10. b", "99. a\n100. b", "- x\n  10. a"])
+    func orderedNumbersKeepAGapBeforeTheirText(_ content: String) throws {
+        let view = shown(content, appearance: .darkAqua)
+        let layout = try #require(view.layoutManager)
+        let container = try #require(view.textContainer)
+        let storage = view.string as NSString
+        var searched = NSRange(location: 0, length: storage.length)
+        while true {
+            let number = storage.range(
+                of: "[0-9]+\\.", options: .regularExpression, range: searched)
+            guard number.location != NSNotFound else {
+                break
+            }
+            let item = NSRange(location: NSMaxRange(number) + 1, length: 1)
+            let glyphs = { (range: NSRange) in
+                layout.boundingRect(
+                    forGlyphRange: layout.glyphRange(
+                        forCharacterRange: range, actualCharacterRange: nil),
+                    in: container)
+            }
+            #expect(glyphs(number).maxX + 3 < glyphs(item).minX, "\(storage.substring(with: number))")
+            searched = NSRange(location: NSMaxRange(number), length: storage.length - NSMaxRange(number))
+        }
+    }
+
     // Boxes and bars are layers: a view that draws gets a bitmap of everything it draws, and
     // past about 40,000 pt² Core Animation renders it on its costly path.
     @Test

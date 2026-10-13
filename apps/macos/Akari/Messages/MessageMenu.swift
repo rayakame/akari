@@ -4,7 +4,10 @@ import AppKit
 /// What a message's context menu offers.
 enum MessageMenu {
     static func items(for message: Message, pasteboard: NSPasteboard = .general) -> [NSMenuItem] {
-        [
+        guard !message.content.isEmpty else {
+            return []
+        }
+        return [
             item("Copy Text") {
                 pasteboard.clearContents()
                 pasteboard.setString(message.content, forType: .string)

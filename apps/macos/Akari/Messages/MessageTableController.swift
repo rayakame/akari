@@ -17,7 +17,6 @@ struct MessageTableState: Equatable {
 
 // Row updates only: a full reloadData() would lose the scroll position.
 final class MessageTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-    // Runs `fire` once at a date; the result cancels it.
     typealias Schedule = @MainActor (Date, @escaping @MainActor () -> Void) -> () -> Void
     typealias Build =
         @MainActor (Message, Set<UInt16>, Date, TimestampText) -> MessageText.Built
@@ -46,12 +45,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var atPresent = true
     private var state = MessageTableState(rows: [])
     private var revealed: [MessageId: Set<UInt16>] = [:]
-    // When each row's relative timestamps next read differently.
     private var relativeTimes: [MessageId: Date] = [:]
     private let schedule: Schedule
     private let build: Build
-    // Each row's text, built once for its message, revealed spoilers and relative text, and
-    // shared by the height pass and the cell (D71).
+    // Shared by the height pass and the cell, so a row's text is built once per change (D71).
     private var texts: [MessageId: (message: Message, revealed: Set<UInt16>, built: MessageText.Built)] =
         [:]
     private var relativeTimer: (date: Date, cancel: () -> Void)?
@@ -325,7 +322,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         updateRelativeTimer()
     }
 
-    // The messages whose revealed spoilers changed.
     private func revealed(_ old: Set<SpoilerKey>, _ new: Set<SpoilerKey>) -> Set<MessageId> {
         guard old != new else {
             return []
@@ -334,7 +330,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return Set(old.symmetricDifference(new).map(\.messageId))
     }
 
-    // A reveal changes no height: the text was laid out under its cover.
+    // A revealed spoiler keeps the height, but a relative time in the same row may not.
     private func reload(_ messages: Set<MessageId>) {
         guard !messages.isEmpty else {
             return
@@ -348,9 +344,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard !rows.isEmpty else {
             return
         }
+        for index in rows {
+            rowHeights[timeline.items[index].id] = nil
+        }
         ownChanges += 1
         defer { ownChanges -= 1 }
         tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
+        tableView.noteHeightOfRows(withIndexesChanged: rows)
     }
 
     private func follow(_ url: URL, in row: MessageListModel.Row) {
@@ -757,9 +757,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private func body(_ row: MessageListModel.Row) -> NSAttributedString {
         let revealed = revealed[row.id] ?? []
         let now = now()
-        if let cached = texts[row.id], cached.revealed == revealed, cached.message == row.message,
-            cached.built.nextChange.map({ $0 > now }) ?? true
-        {
+        // A relative time that changed waits for the timer, which re-measures its row too.
+        if let cached = texts[row.id], cached.revealed == revealed, cached.message == row.message {
             return cached.built.text
         }
         let built = build(row.message, revealed, now, times)
@@ -813,6 +812,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             if case .message(let row, _) = item, let next = relativeTimes[row.id], next <= now {
                 due.insert(index)
                 rowHeights[item.id] = nil
+                texts[row.id] = nil
             }
         }
         if !due.isEmpty {

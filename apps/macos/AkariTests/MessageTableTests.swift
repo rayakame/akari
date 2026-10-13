@@ -651,12 +651,17 @@ struct MessageTableTests {
                     edited: later + 110),
             ]
             + FormattedSamples.contents.enumerated().map { index, content in
-                row(
-                    UInt64(60 + index), by: author(UInt64(3 + index % 2)),
-                    at: later + 200 + Double(index) * 400, content: content,
-                    edited: index % 3 == 0 ? later + 210 + Double(index) * 400 : nil)
+                named(
+                    row(
+                        UInt64(60 + index), by: author(UInt64(3 + index % 2)),
+                        at: later + 200 + Double(index) * 400, content: content,
+                        edited: index % 3 == 0 ? later + 210 + Double(index) * 400 : nil))
             }
-        show(rows)
+        // Names known, so pills and channel symbols are measured; one spoiler revealed.
+        show(
+            MessageTableState(
+                rows: rows,
+                revealedSpoilers: [SpoilerKey(messageId: MessageId(rawValue: 66), index: 0)]))
 
         for width: CGFloat in [600, 380, 900] {
             window.setContentSize(NSSize(width: width, height: 400))

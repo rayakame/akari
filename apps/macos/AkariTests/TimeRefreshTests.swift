@@ -172,6 +172,56 @@ final class TimeRefreshTests {
         #expect(table.rect(ofRow: index(of: 21)).minY - clip.bounds.minY == place)
     }
 
+    // A row's relative text can change while it's off screen, with the timer stopped.
+    @Test
+    func aRowWhoseTimeChangedOffScreenComesBackAtItsNewHeight() throws {
+        let due = seconds(clock.now) + 61
+        let times = TimestampText(
+            locale: clock.locale, timeZone: clock.calendar.timeZone, calendar: clock.calendar)
+        let width = table.tableColumns[0].width
+        let height = { (message: Message, now: Date) in
+            MessageCell.height(
+                message,
+                body: MessageText.build(message, revealed: [], now: now, times: times).text,
+                startsGroup: true, width: width)
+        }
+        let later = clock.now + 120
+        let wrapping = try #require(
+            (1...160).lazy.map { "x" + String(repeating: "a", count: $0) + " <t:\(due):R>" }
+                .first { content in
+                    let message = row(1, at: self.clock.now, content: content).message
+                    return height(message, self.clock.now) != height(message, later)
+                })
+        var rows = (1...80).map { raw in
+            row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: clock.now + Double(raw) * 30)
+        }
+        rows[1] = row(2, by: author(2), at: clock.now + 60, content: wrapping)
+        show(rows)
+        table.scrollRowToVisible(table.numberOfRows - 1)
+        window.layoutIfNeeded()
+        #expect(timers.active.isEmpty)
+
+        clock.now = later
+        table.scrollRowToVisible(0)
+        window.layoutIfNeeded()
+        timers.fire()
+        window.layoutIfNeeded()
+
+        let shown = table.rect(ofRow: index(of: 2)).height
+        guard case .message(let edited, let startsGroup) = controller.timeline.items[index(of: 2)]
+        else {
+            Issue.record("not a message")
+            return
+        }
+        #expect(
+            shown
+                == MessageCell.height(
+                    edited.message,
+                    body: MessageText.build(edited.message, revealed: [], now: later, times: times)
+                        .text,
+                    startsGroup: startsGroup, width: width))
+    }
+
     @Test
     func theTimerStopsWithoutRelativeTimesOnScreen() {
         var rows = relativeRows(6)

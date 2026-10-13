@@ -29,6 +29,9 @@ final class MessageTextView: NSTextView {
         textContainerInset = .zero
         // Links keep their own colors: pills are links too.
         linkTextAttributes = [.cursor: NSCursor.pointingHand]
+        if #available(macOS 15.0, *) {
+            writingToolsBehavior = .none
+        }
         isVerticallyResizable = false
         isHorizontallyResizable = false
         setContentHuggingPriority(.required, for: .vertical)
@@ -48,7 +51,6 @@ final class MessageTextView: NSTextView {
             height: TextMeasurer.usedHeight(layoutManager, textContainer) + padding.top
                 + padding.bottom)
     }
-
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -102,6 +104,7 @@ final class MessageTextView: NSTextView {
     private func updateDecorations() {
         let shapes = (layoutManager as? MessageLayoutManager)?.blocks() ?? []
         decorations.show(shapes, at: textContainerOrigin)
+        window?.invalidateCursorRects(for: self)
     }
 
     // The table routes Akari's own links and asks before masked ones; super would open them.
@@ -137,20 +140,67 @@ final class MessageTextView: NSTextView {
         return pboard.setString(text, forType: .string)
     }
 
+    // NSTextView's own menu selects the word under the pointer and offers to look it up, which
+    // would read a hidden spoiler.
     override func menu(for event: NSEvent) -> NSMenu? {
-        let menu = super.menu(for: event) ?? NSMenu()
-        let items = messageMenu()
-        if !items.isEmpty {
-            menu.insertItem(.separator(), at: 0)
-            for item in items.reversed() {
-                menu.insertItem(item, at: 0)
-            }
+        let menu = NSMenu()
+        for item in messageMenu() {
+            menu.addItem(item)
         }
-        return menu
+        if selectedRange().length > 0 {
+            if !menu.items.isEmpty {
+                menu.addItem(.separator())
+            }
+            let copy = NSMenuItem(title: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+            copy.target = self
+            menu.addItem(copy)
+        }
+        return menu.items.isEmpty ? nil : menu
+    }
+
+    override func quickLook(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let index = characterIndexForInsertion(at: point)
+        let spoiler = index < (textStorage?.length ?? 0)
+            ? textStorage?.attribute(.akariSpoiler, at: index, effectiveRange: nil) : nil
+        guard (spoiler as? MessageText.Spoiler)?.hidden != true else {
+            return
+        }
+        super.quickLook(with: event)
+    }
+
+    // A hidden code block reveals on a click anywhere on its cover, its padding included.
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let spoiler = decorations.cover(at: point),
+            let url = URL(string: "akari://spoiler/\(spoiler)")
+        {
+            onLink(url)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        for rect in decorations.covers {
+            addCursorRect(rect, cursor: .pointingHand)
+        }
     }
 
     override func accessibilityValue() -> String? {
         textStorage.map(MessageText.accessible)
+    }
+
+    override func accessibilityString(for range: NSRange) -> String? {
+        guard let storage = textStorage, NSMaxRange(range) <= storage.length else {
+            return nil
+        }
+        return MessageText.accessible(storage.attributedSubstring(from: range))
+    }
+
+    override func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? {
+        accessibilityString(for: range).map { NSAttributedString(string: $0) }
     }
 
     // Where the first line's glyphs sit, after the paragraph's baseline offset.
@@ -169,10 +219,8 @@ final class MessageTextView: NSTextView {
     }
 }
 
-/// Code boxes, quote bars, pills and spoilers' backgrounds, as colored layers behind a
-/// message's text. Drawn into the text view, a full-width box made its bitmap large enough for
-/// Core Animation's costly path (about 40,000 pt²), and any fill made AppKit keep the text in
-/// full color instead of a one-color mask.
+/// Code boxes, quote bars, pills and spoilers' backgrounds as layers behind a message's text,
+/// kept out of the text's bitmap (apps/macos/README.md, Performance).
 final class MessageDecorations: NSView {
     private var shapes: [MessageBlockShape] = []
     private var origin = NSPoint.zero
@@ -181,6 +229,26 @@ final class MessageDecorations: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
+    }
+
+    var covers: [NSRect] {
+        shapes.compactMap { shape in
+            guard case .cover(let rect, _) = shape else {
+                return nil
+            }
+            return rect.offsetBy(dx: origin.x, dy: origin.y)
+        }
+    }
+
+    func cover(at point: NSPoint) -> UInt16? {
+        for shape in shapes {
+            if case .cover(let rect, let spoiler) = shape,
+                rect.offsetBy(dx: origin.x, dy: origin.y).contains(point)
+            {
+                return spoiler
+            }
+        }
+        return nil
     }
 
     func show(_ shapes: [MessageBlockShape], at origin: NSPoint) {

@@ -174,6 +174,33 @@ struct MessageTextTests {
         #expect(text.string == "\u{FFFC}No Access")
     }
 
+    // The sidebar doesn't open them either: no message list for forums, voice or categories.
+    @Test
+    func aChannelWithoutAMessageListIsntALink() throws {
+        let text = built("<#5> https://discord.com/channels/1/6") { kind in
+            if case .channel(let id, _, _) = kind {
+                kind = .channel(id: id, name: .known(name: "help"), kind: .guildForum)
+            }
+        }.text
+        var message = message("https://discord.com/channels/1/6")
+        message.formatted.links[0].channel?.name = .known(name: "help")
+        message.formatted.links[0].channel?.kind = .guildForum
+        let link = MessageText.build(message, revealed: [], now: now, times: times).text
+
+        let mention = try attributes(text, of: "help")
+        #expect(mention[.akariPill] as? MessageText.Pill == .mention)
+        #expect(mention[.link] == nil)
+        #expect(mention[.toolTip] as? String == ChannelSymbols.unsupported(.guildForum))
+        #expect(try attributes(link, of: "help")[.link] == nil)
+    }
+
+    @Test
+    func carriageReturnsBreakLinesWithoutNewParagraphs() {
+        let text = built("```\na\r\nb\rc\n```").text
+
+        #expect(text.string == "a\u{2028}b\u{2028}c")
+    }
+
     @Test
     func discordLinksToKnownChannelsArePills() throws {
         let content =

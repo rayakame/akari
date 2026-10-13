@@ -40,24 +40,20 @@ struct RowTextTests {
         list.show(rows(51...100))
         #expect(builds.counts.count == 50 && builtOnce, "\(builds.counts)")
 
-        // A page lands above.
         list.show(rows(1...100))
         #expect(builds.counts.count == 100 && builtOnce, "\(builds.counts)")
 
-        // A fling through every row.
         for row in stride(from: list.table.numberOfRows - 1, through: 0, by: -4) {
             list.table.scrollRowToVisible(row)
             list.window.layoutIfNeeded()
         }
         #expect(builtOnce, "\(builds.counts)")
 
-        // Unchanged rows reloaded.
         list.table.reloadData(
             forRowIndexes: IndexSet(integersIn: 0..<list.table.numberOfRows), columnIndexes: [0])
         list.window.layoutIfNeeded()
         #expect(builtOnce, "\(builds.counts)")
 
-        // An edit rebuilds its row only.
         var edited = rows(1...100)
         edited[59] = row(60, by: author(1), at: list.noon + 3_600, content: "now **edited**")
         list.show(edited)

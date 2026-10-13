@@ -251,8 +251,9 @@ the footprint. `TEST_RUNNER_AKARI_PROBE_TEXT=formatted` shows only formatted mes
 (`FormattedSamples`), `=realistic` plain ones with every fourth one of the markdown corpus's
 realistic messages (`CorpusSamples`). Swift Testing runs the probe's tests in no fixed order, so
 for footprints run one at a time, e.g.
-`-only-testing:'AkariTests/PerformanceProbe/flingThroughPagesThatLand()'`. `TEST_RUNNER_AKARI_PROBE_PAUSE=4` pauses at each phase so `footprint` or
-`heap` can look at the test host, e.g.
+`-only-testing:'AkariTests/PerformanceProbe/flingThroughPagesThatLand()'`.
+`TEST_RUNNER_AKARI_PROBE_PAUSE=4` pauses at each phase so `footprint` or `heap` can look at the
+test host, e.g.
 `footprint --pid "$(pgrep -x Akari)" --sample 1 --sample-duration 40`, which splits the
 footprint by kind (malloc, CoreAnimation, graphics).
 

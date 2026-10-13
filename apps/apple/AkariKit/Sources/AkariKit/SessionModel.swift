@@ -172,9 +172,12 @@ public final class SessionModel {
     }
 
     /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
-    /// the store doesn't have opens where the user is.
+    /// the store doesn't have opens where the user is; one without a message list doesn't open.
     public func go(to channel: ChannelId) {
         if let found = store.channel(id: channel) {
+            guard found.opensMessageList else {
+                return
+            }
             let place: Place = found.guildId.map { .guild($0) } ?? .home
             if place != self.place {
                 open(place)

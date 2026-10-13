@@ -30,9 +30,8 @@ struct PerformanceProbe {
         )
     }
 
-    // TEST_RUNNER_AKARI_PROBE_TEXT=formatted: every row is one of the formatted samples;
-    // =realistic: every fourth row is one of the corpus's realistic messages, the others plain.
-    // Names are known, so mentions and channel links show as pills.
+    // TEST_RUNNER_AKARI_PROBE_TEXT=formatted: only formatted samples; =realistic: every fourth
+    // row a corpus message. Names are known, so mentions and channel links show as pills.
     static let text = ProcessInfo.processInfo.environment["AKARI_PROBE_TEXT"]
 
     // Lengths like a busy channel's: mostly one line, some paragraphs, a few attachments.

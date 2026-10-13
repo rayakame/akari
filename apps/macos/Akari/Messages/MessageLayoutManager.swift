@@ -43,8 +43,8 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
             if block.contains(.code), let box = codeBox(range, storage, container) {
                 shapes.append(.codeBox(box))
                 let spoiler = storage.attribute(.akariSpoiler, at: range.location, effectiveRange: nil)
-                if (spoiler as? MessageText.Spoiler)?.hidden == true {
-                    shapes.append(.cover(box))
+                if let spoiler = spoiler as? MessageText.Spoiler, spoiler.hidden {
+                    shapes.append(.cover(box, spoiler.index))
                 }
             }
             if block.contains(.quote) {
@@ -75,8 +75,11 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
             guard let pill = value as? MessageText.Pill else {
                 return
             }
-            for rect in rects(range, storage, container, padded: true) {
-                shapes.append(.pill(rect, pill))
+            // Equal neighbours form one run; each pill has a source of its own.
+            storage.enumerateAttribute(.akariSource, in: range) { _, part, _ in
+                for rect in rects(part, storage, container, padded: true) {
+                    shapes.append(.pill(rect, pill))
+                }
             }
         }
         return shapes.filter { !$0.rect.isEmpty }
@@ -155,13 +158,13 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
 nonisolated enum MessageBlockShape: Equatable {
     case codeBox(NSRect)
     case quoteBar(NSRect)
-    case cover(NSRect)
+    case cover(NSRect, UInt16)
     case revealed(NSRect)
     case pill(NSRect, MessageText.Pill)
 
     var rect: NSRect {
         switch self {
-        case .codeBox(let rect), .quoteBar(let rect), .cover(let rect), .revealed(let rect),
+        case .codeBox(let rect), .quoteBar(let rect), .cover(let rect, _), .revealed(let rect),
             .pill(let rect, _):
             rect
         }

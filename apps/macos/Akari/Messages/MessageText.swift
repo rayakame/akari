@@ -160,6 +160,7 @@ private struct ParagraphKey: Hashable {
     var head: CGFloat = 0
     var tail: CGFloat = 0
     var marker = Marker.none
+    var column: CGFloat = 20
 
     static var made: [ParagraphKey: NSParagraphStyle] = [:]
 
@@ -173,14 +174,14 @@ private struct ParagraphKey: Hashable {
         style.paragraphSpacingBefore = before
         style.paragraphSpacing = after
         style.headIndent = head
-        style.firstLineHeadIndent = marker == .none ? head : head - 20
+        style.firstLineHeadIndent = marker == .none ? head : head - column
         style.tailIndent = tail
         switch marker {
         case .none:
             break
         case .bullet:
             style.tabStops = [
-                NSTextTab(textAlignment: .center, location: head - 10),
+                NSTextTab(textAlignment: .center, location: head - column / 2),
                 NSTextTab(textAlignment: .left, location: head),
             ]
         case .number:
@@ -232,6 +233,8 @@ private struct Builder {
     private var hasRelativeTime = false
     // A Discord link shown as a pill: its other spans are left out.
     private var pillLink: UInt16?
+    // A list's numbers from 10 up need more than the usual 20 of marker column.
+    private let columns: [CGFloat]
 
     init(_ message: Message, revealed: Set<UInt16>, now: Date, times: TimestampText) {
         self.message = message
@@ -245,12 +248,40 @@ private struct Builder {
             case .failed: Palette.danger
             default: Palette.textDefault
             }
+        columns = Self.columns(message.formatted.blocks)
         // Custom emoji are text until the emoji milestone, so they can't be large yet.
         jumbo =
             message.formatted.jumbo
             && !message.formatted.blocks.contains { block in
                 block.spans.contains { if case .emoji = $0.kind { true } else { false } }
             }
+    }
+
+    private static func columns(_ blocks: [TextBlock]) -> [CGFloat] {
+        var widest: [UInt32] = []
+        for block in blocks {
+            var depth = 0
+            for container in block.containers {
+                guard case .listItem(let ordered, let number, _) = container else {
+                    continue
+                }
+                if widest.count <= depth {
+                    widest.append(0)
+                }
+                if ordered {
+                    widest[depth] = max(widest[depth], number)
+                }
+                depth += 1
+            }
+        }
+        let font = Typeface.body.font(bold: false, italic: false)
+        return widest.map { number in
+            guard number >= 10 else {
+                return 20
+            }
+            let width = ("\(number)." as NSString).size(withAttributes: [.font: font]).width
+            return max(20, ceil(width) + 8)
+        }
     }
 
     mutating func build() -> MessageText.Built {
@@ -289,6 +320,7 @@ private struct Builder {
         var head: CGFloat = 0
         var bar: CGFloat?
         var level = 0
+        var column: CGFloat = 20
         var marker: (ordered: Bool, number: UInt32)?
         for container in block.containers {
             switch container {
@@ -297,8 +329,9 @@ private struct Builder {
                 bar = head
                 head += 16
             case .listItem(let ordered, let number, let shows):
+                column = level < columns.count ? columns[level] : 20
                 level += 1
-                head += 20
+                head += column
                 marker = shows ? (ordered, number) : nil
             }
         }
@@ -330,6 +363,7 @@ private struct Builder {
         var shown: String?
         if let marker {
             key.marker = marker.ordered ? .number : .bullet
+            key.column = column
             shown = marker.ordered ? "\t\(marker.number).\t" : level > 1 ? "\t◦\t" : "\t•\t"
         }
         var attributes: [NSAttributedString.Key: Any] = [
@@ -497,7 +531,9 @@ private struct Builder {
     }
 
     private func target(_ link: TextLink, index: UInt16) -> URL? {
-        if let channel = link.channel, case .known = channel.name {
+        if let channel = link.channel, case .known = channel.name,
+            channel.kind?.opensMessageList ?? true
+        {
             return URL(string: "akari://channel/\(channel.channelId.rawValue)")
         }
         return link.masked ? URL(string: "akari://link/\(index)") : URL(string: link.url)
@@ -507,8 +543,13 @@ private struct Builder {
         let text = source.substring(
             with: NSRange(location: Int(start), length: Int(end) - Int(start)))
         // One paragraph per block, so a block's lines share its indents and spacing.
-        return text.utf8.contains(UInt8(ascii: "\n"))
-            ? text.replacingOccurrences(of: "\n", with: "\u{2028}") : text
+        guard text.utf8.contains(where: { $0 == 0x0A || $0 == 0x0D || $0 == 0xE2 }) else {
+            return text
+        }
+        return text.replacingOccurrences(of: "\r\n", with: "\u{2028}")
+            .replacingOccurrences(of: "\r", with: "\u{2028}")
+            .replacingOccurrences(of: "\n", with: "\u{2028}")
+            .replacingOccurrences(of: "\u{2029}", with: "\u{2028}")
     }
 
     private func append(_ string: String, _ attributes: [NSAttributedString.Key: Any]) {
@@ -541,8 +582,13 @@ private struct Builder {
         var attributes = attributes
         attributes[.font] = style.face.font(bold: span.bold, italic: span.italic, medium: true)
         attributes[.foregroundColor] = Palette.mentionText
-        attributes[.link] = URL(string: "akari://channel/\(id.rawValue)")
-        attributes[.toolTip] = nil
+        if kind?.opensMessageList ?? true {
+            attributes[.link] = URL(string: "akari://channel/\(id.rawValue)")
+            attributes[.toolTip] = nil
+        } else {
+            attributes[.link] = nil
+            attributes[.toolTip] = kind.map(ChannelSymbols.unsupported)
+        }
         let start = out.length
         let symbolName = kind.map(ChannelSymbols.name(for:)) ?? "number"
         append(symbol(symbolName, style.face, Palette.mentionText, attributes))
