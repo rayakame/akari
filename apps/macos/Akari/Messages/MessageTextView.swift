@@ -4,6 +4,9 @@ import AppKit
 final class MessageTextView: NSTextView {
     private var measuredWidth: CGFloat = -1
     private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
+    var onLink: (URL) -> Void = { _ in }
+    // The message's own items, above the text's.
+    var messageMenu: () -> [NSMenuItem] = { [] }
 
     init() {
         let storage = NSTextStorage()
@@ -54,20 +57,80 @@ final class MessageTextView: NSTextView {
         }
     }
 
+    // A selection survives a reconfigure that shows the same text, not an edit.
     func show(_ text: NSAttributedString) {
+        guard let storage = textStorage else {
+            return
+        }
         let padding = MessageText.padding(text)
         if padding != self.padding {
             self.padding = padding
             // Only its top counts: the height is the view's own, from the padding.
             textContainerInset = NSSize(width: 0, height: padding.top)
         }
-        textStorage?.setAttributedString(text)
+        let kept = storage.string == text.string ? selectedRanges : nil
+        storage.setAttributedString(text)
+        selectedRanges = kept ?? [NSValue(range: NSRange(location: 0, length: 0))]
         invalidateIntrinsicContentSize()
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        (layoutManager as? MessageLayoutManager)?.drawBlocks(at: textContainerOrigin)
+        let layout = layoutManager as? MessageLayoutManager
+        layout?.drawBlocks(at: textContainerOrigin)
+        // NSTextView leaves its clip to the text container behind.
+        NSGraphicsContext.saveGraphicsState()
         super.draw(dirtyRect)
+        NSGraphicsContext.restoreGraphicsState()
+        layout?.drawBlockCovers(at: textContainerOrigin)
+    }
+
+    // The table routes Akari's own links and asks before masked ones; super would open them.
+    override func clicked(onLink link: Any, at charIndex: Int) {
+        if let url = link as? URL ?? (link as? String).flatMap(URL.init(string:)) {
+            onLink(url)
+        }
+    }
+
+    // Copying and dragging write what the selection shows, as plain text only (D63).
+    override var writablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        [.string]
+    }
+
+    override func writeSelection(
+        to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]
+    ) -> Bool {
+        guard types.contains(.string) else {
+            return false
+        }
+        pboard.declareTypes([.string], owner: nil)
+        return writeSelection(to: pboard, type: .string)
+    }
+
+    override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType)
+        -> Bool
+    {
+        guard type == .string, let storage = textStorage else {
+            return false
+        }
+        let text = selectedRanges.map { MessageText.plain(storage, $0.rangeValue) }
+            .joined(separator: "\n")
+        return pboard.setString(text, forType: .string)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        let items = messageMenu()
+        if !items.isEmpty {
+            menu.insertItem(.separator(), at: 0)
+            for item in items.reversed() {
+                menu.insertItem(item, at: 0)
+            }
+        }
+        return menu
+    }
+
+    override func accessibilityValue() -> String? {
+        textStorage.map(MessageText.accessible)
     }
 
     // Where the first line's glyphs sit, after the paragraph's baseline offset.

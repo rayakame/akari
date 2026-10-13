@@ -252,6 +252,50 @@ final class SessionModelTests {
         session.close()
     }
 
+    // A channel link or mention can name a channel of another guild, or a conversation.
+    @Test
+    func goingToAChannelOpensItWhereItLives() {
+        store.update { state in
+            state.add(guild(1), guild(2))
+            state.list([channel(13)], in: 1)
+            state.list([channel(20, guild: 2), channel(21, guild: 2)], in: 2)
+            state.channels[id(50)] = dm(50, with: 7)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+
+        session.go(to: id(21))
+        #expect(session.place == .guild(id(2)))
+        #expect(session.channels?.guildId == id(2))
+        #expect(session.messages?.channelId == id(21))
+
+        session.go(to: id(50))
+        #expect(session.place == .home)
+        #expect(session.messages?.channelId == id(50))
+
+        session.open(.guild(id(2)))
+        #expect(session.messages?.channelId == id(21))
+        session.close()
+    }
+
+    @Test
+    func goingToAChannelTheStoreDoesntHaveStaysInPlace() {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(13)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+
+        session.go(to: id(99))
+
+        #expect(session.place == .guild(id(1)))
+        #expect(session.messages?.channelId == id(99))
+        session.close()
+    }
+
     @Test
     func aChannelOutsideTheListStaysOpenUntilRemoved() async {
         store.update { state in

@@ -1,4 +1,5 @@
 import AkariKit
+import Foundation
 
 // What the table asks of the message list; the app wires it to the channel's models.
 @MainActor
@@ -10,4 +11,9 @@ protocol MessageListActions: AnyObject {
     func jumpToLatest()
     // One action for Escape from the list and the composer; read state adds marking as read.
     func escape()
+    func reveal(_ spoiler: SpoilerKey)
+    // Wherever the channel is: another server's, or a conversation.
+    func openChannel(_ id: ChannelId)
+    // A masked link may ask first (D65).
+    func openLink(_ url: URL, masked: Bool)
 }

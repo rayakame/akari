@@ -12,6 +12,7 @@ struct MessageTableState: Equatable {
     var lastLoad: LoadTrace?
     var openedAt: ContinuousClock.Instant?
     var openedFrom = MessageListModel.Origin.network
+    var revealedSpoilers: Set<SpoilerKey> = []
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -39,6 +40,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var sticksToBottom = true
     private var atPresent = true
     private var state = MessageTableState(rows: [])
+    private var revealed: [MessageId: Set<UInt16>] = [:]
     // A page that lands while the list is bounced past its top waits for the bounce to end:
     // moving the clip under AppKit's rubber band would fight it.
     private var heldState: MessageTableState?
@@ -137,12 +139,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         // The jump bar covers the bottom while older messages are shown.
         scrollView.contentInsets.bottom =
             Self.bottomInset + (atPresent ? 0 : JumpBar.height + JumpBar.margin)
+        let revealedNow = revealed(previous.revealedSpoilers, state.revealedSpoilers)
         let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
             Signposts.interval("page lands") { apply(next, changes) }
             noteApply(started, inserting: changes.inserted, of: next, held: held)
         }
+        reload(revealedNow)
         if previous.loading != state.loading || previous.failedLoads != state.failedLoads
             || previous.reachedOldest != state.reachedOldest
             || previous.beginning != state.beginning
@@ -296,6 +300,57 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             scrollToBottom()
         } else {
             restoreAnchor()
+        }
+    }
+
+    // The messages whose revealed spoilers changed.
+    private func revealed(_ old: Set<SpoilerKey>, _ new: Set<SpoilerKey>) -> Set<MessageId> {
+        guard old != new else {
+            return []
+        }
+        revealed = Dictionary(grouping: new, by: \.messageId).mapValues { Set($0.map(\.index)) }
+        return Set(old.symmetricDifference(new).map(\.messageId))
+    }
+
+    // A reveal changes no height: the text was laid out under its cover.
+    private func reload(_ messages: Set<MessageId>) {
+        guard !messages.isEmpty else {
+            return
+        }
+        var rows = IndexSet()
+        for (index, item) in timeline.items.enumerated() {
+            if case .message(let row, _) = item, messages.contains(row.id) {
+                rows.insert(index)
+            }
+        }
+        guard !rows.isEmpty else {
+            return
+        }
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
+    }
+
+    private func follow(_ url: URL, in row: MessageListModel.Row) {
+        guard url.scheme == "akari" else {
+            actions?.openLink(url, masked: false)
+            return
+        }
+        guard let value = url.pathComponents.last.flatMap({ UInt64($0) }) else {
+            return
+        }
+        switch url.host() {
+        case "spoiler":
+            actions?.reveal(SpoilerKey(messageId: row.id, index: UInt16(clamping: value)))
+        case "channel":
+            actions?.openChannel(ChannelId(rawValue: value))
+        case "link":
+            let links = row.message.formatted.links
+            if value < links.count, let target = URL(string: links[Int(value)].url) {
+                actions?.openLink(target, masked: true)
+            }
+        default:
+            break
         }
     }
 
@@ -619,7 +674,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 return NoticeCell.height(message, notice: notice, time: time, width: width)
             }
             return MessageCell.height(
-                message, body: body(message), startsGroup: startsGroup, width: width)
+                message, body: body(row), startsGroup: startsGroup, width: width)
         }
     }
 
@@ -663,8 +718,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.isHovered = item.id == hovered
             cell.onRetry = { [weak self] in self?.actions?.retry(message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
+            cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
-                message, body: body(message), startsGroup: startsGroup, groupTime: groupTime,
+                message, body: body(row), startsGroup: startsGroup, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)
@@ -672,8 +728,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
     }
 
-    private func body(_ message: Message) -> NSAttributedString {
-        MessageText.build(message, revealed: [], now: now(), times: times).text
+    private func body(_ row: MessageListModel.Row) -> NSAttributedString {
+        MessageText.build(row.message, revealed: revealed[row.id] ?? [], now: now(), times: times)
+            .text
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {

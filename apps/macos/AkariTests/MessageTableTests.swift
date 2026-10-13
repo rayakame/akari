@@ -452,6 +452,31 @@ struct MessageTableTests {
     }
 
     @Test
+    func anEditDuringASelectionKeepsTheRowStable() throws {
+        let rows = variedMessages(60)
+        show(rows)
+        scroll(toRowOf: 20)
+        let top = place(of: 20)
+        let text = try #require(messageText(in: try cell(of: 21)))
+        window.makeFirstResponder(text)
+        text.setSelectedRange(NSRange(location: 0, length: 5))
+
+        var edited = rows
+        let old = rows[20].message
+        edited[20] = row(
+            21, by: old.author, at: old.timestamp,
+            content: old.content + " and **more** words that wrap onto another line or two",
+            edited: noon + 9_999)
+        show(edited)
+
+        #expect(place(of: 20) == top)
+        let after = try #require(messageText(in: try cell(of: 21)))
+        #expect(after.string.contains("more"))
+        #expect(after.selectedRange().length == 0)
+        #expect((window.firstResponder as? NSTextView)?.selectedRange().length ?? 0 == 0)
+    }
+
+    @Test
     func clickingMessageTextKeepsItsAttributes() throws {
         show([row(1, at: noon, content: "hello there")])
         let text = try #require(messageText(in: try cell(of: 1)))
@@ -749,6 +774,18 @@ struct MessageTableTests {
 
         func escape() {
             calls.append("escape")
+        }
+
+        func reveal(_ spoiler: SpoilerKey) {
+            calls.append("reveal \(spoiler.messageId.rawValue) \(spoiler.index)")
+        }
+
+        func openChannel(_ id: ChannelId) {
+            calls.append("channel \(id.rawValue)")
+        }
+
+        func openLink(_ url: URL, masked: Bool) {
+            calls.append("link \(url.absoluteString)\(masked ? " masked" : "")")
         }
     }
 

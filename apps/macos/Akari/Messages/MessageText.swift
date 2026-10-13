@@ -48,6 +48,33 @@ enum MessageText {
         return builder.build()
     }
 
+    /// The text a selection shows, as plain text: line breaks as newlines, symbols left out.
+    nonisolated static func plain(_ text: NSAttributedString, _ range: NSRange) -> String {
+        text.attributedSubstring(from: range).string
+            .replacingOccurrences(of: "\u{2028}", with: "\n")
+            .replacingOccurrences(of: "\u{FFFC}", with: "")
+    }
+
+    /// What VoiceOver reads: a hidden spoiler is "Spoiler", not its text.
+    nonisolated static func accessible(_ text: NSAttributedString) -> String {
+        var parts: [String] = []
+        var lastHidden: UInt16?
+        text.enumerateAttribute(
+            .akariSpoiler, in: NSRange(location: 0, length: text.length)
+        ) { value, range, _ in
+            if let spoiler = value as? Spoiler, spoiler.hidden {
+                if lastHidden != spoiler.index {
+                    parts.append("Spoiler")
+                }
+                lastHidden = spoiler.index
+            } else {
+                parts.append(plain(text, range))
+                lastHidden = nil
+            }
+        }
+        return parts.joined()
+    }
+
     /// The code box's padding above a first line and below a last one, which TextKit 1's
     /// paragraph spacing leaves out there.
     nonisolated static func padding(_ text: NSAttributedString) -> (top: CGFloat, bottom: CGFloat) {
@@ -360,6 +387,12 @@ private struct Builder {
             attributes[.akariSpoiler] = MessageText.Spoiler(
                 index: spoiler, hidden: !revealed.contains(spoiler))
         }
+        let start = out.length
+        defer {
+            if let spoiler = span.spoiler ?? block.spoiler, !revealed.contains(spoiler) {
+                hide(NSRange(location: start, length: out.length - start), spoiler)
+            }
+        }
         if let index = span.link {
             if index == pillLink {
                 return
@@ -446,6 +479,21 @@ private struct Builder {
         case .navigation(let target):
             mention(MentionText.navigation(target), placeholder: false, span, style, attributes)
         }
+    }
+
+    // Laid out as shown, so revealing moves nothing; the cover is drawn over it, and a click
+    // anywhere on it reveals it.
+    private func hide(_ range: NSRange, _ spoiler: UInt16) {
+        guard range.length > 0 else {
+            return
+        }
+        var attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.clear, .underlineColor: NSColor.clear,
+            .strikethroughColor: NSColor.clear,
+        ]
+        attributes[.link] = URL(string: "akari://spoiler/\(spoiler)")
+        out.addAttributes(attributes, range: range)
+        out.removeAttribute(.toolTip, range: range)
     }
 
     private func target(_ link: TextLink, index: UInt16) -> URL? {

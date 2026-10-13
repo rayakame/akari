@@ -87,13 +87,28 @@ struct SessionScreen: View {
     var warning: AppModel.Warning?
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
+    // Trusted hosts are the account's (D65).
+    @State private var links: LinkFollower
+
+    init(
+        session: SessionModel, warning: AppModel.Warning? = nil,
+        dismissWarning: @escaping () -> Void = {}, reconnect: @escaping () -> Void = {}
+    ) {
+        self.session = session
+        self.warning = warning
+        self.dismissWarning = dismissWarning
+        self.reconnect = reconnect
+        _links = State(initialValue: LinkFollower(trusted: TrustedLinks(account: session.userId)))
+    }
 
     var body: some View {
         SessionView(
             session: session, warning: warning, dismissWarning: dismissWarning,
             reconnect: reconnect
         ) { messages, name in
-            MessageArea(messages: messages, name: name)
+            MessageArea(
+                messages: messages, name: name, links: links,
+                go: { [session] in session.go(to: $0) })
         }
         // A reconnect brings a new session for the same channel; without a new identity its
         // views would keep the old one's state and never open the channel.

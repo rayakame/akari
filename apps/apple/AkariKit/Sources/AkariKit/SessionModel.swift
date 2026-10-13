@@ -171,6 +171,18 @@ public final class SessionModel {
         messages = MessageListModel(channelId: id, account: account, store: store, drafts: drafts)
     }
 
+    /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
+    /// the store doesn't have opens where the user is.
+    public func go(to channel: ChannelId) {
+        if let found = store.channel(id: channel) {
+            let place: Place = found.guildId.map { .guild($0) } ?? .home
+            if place != self.place {
+                open(place)
+            }
+        }
+        open(channel: channel)
+    }
+
     /// Disconnects but keeps the session, e.g. before the Mac sleeps.
     public func suspend() {
         suspended = true

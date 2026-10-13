@@ -25,6 +25,8 @@ final class MessageCell: NSTableCellView {
     private var failed: FailedLine?
     var onRetry: () -> Void = {}
     var onDelete: () -> Void = {}
+    var onLink: (URL) -> Void = { _ in }
+    private var message: Message?
     private let stack = NSStackView()
     private var top: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
@@ -56,7 +58,19 @@ final class MessageCell: NSTableCellView {
         configureAllButTheBody(
             message, startsGroup: startsGroup, groupTime: groupTime, shortTime: shortTime,
             fullDate: fullDate)
+        self.message = message
         content.show(body)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let message else {
+            return nil
+        }
+        let menu = NSMenu()
+        for item in MessageMenu.items(for: message) {
+            menu.addItem(item)
+        }
+        return menu
     }
 
     // The sizing cell measures the body instead of laying it out in its text view.
@@ -142,6 +156,10 @@ final class MessageCell: NSTableCellView {
     }
 
     private func build() {
+        content.onLink = { [weak self] url in self?.onLink(url) }
+        content.messageMenu = { [weak self] in
+            self?.message.map { MessageMenu.items(for: $0) } ?? []
+        }
         avatar.translatesAutoresizingMaskIntoConstraints = false
         reply.attributedStringValue = CellText.symbolLine(
             "arrowshape.turn.up.left", "Replying to an earlier message")

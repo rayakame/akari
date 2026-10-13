@@ -12,6 +12,57 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
     }
 
+    // Covers go over the glyphs, the pills and the selection.
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+        guard let storage = textStorage, let container = textContainers.first else {
+            return
+        }
+        let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        storage.enumerateAttribute(.akariSpoiler, in: characters) { value, range, _ in
+            guard let spoiler = value as? MessageText.Spoiler, spoiler.hidden,
+                !isCode(storage, range.location)
+            else {
+                return
+            }
+            Palette.spoilerHidden.setFill()
+            for rect in rects(range, storage, container, padded: true) {
+                NSBezierPath(
+                    roundedRect: rect.offsetBy(dx: origin.x, dy: origin.y), xRadius: 3,
+                    yRadius: 3
+                ).fill()
+            }
+        }
+    }
+
+    /// Covers over hidden code blocks, whole boxes, which reach past the text container too.
+    func drawBlockCovers(at origin: NSPoint) {
+        guard let storage = textStorage, let container = textContainers.first else {
+            return
+        }
+        storage.enumerateAttribute(
+            .akariBlock, in: NSRange(location: 0, length: storage.length)
+        ) { value, range, _ in
+            guard (value as? MessageText.Block)?.contains(.code) == true,
+                let spoiler = storage.attribute(
+                    .akariSpoiler, at: range.location, effectiveRange: nil)
+                    as? MessageText.Spoiler,
+                spoiler.hidden, let box = codeBox(range, storage, container)
+            else {
+                return
+            }
+            Palette.spoilerHidden.setFill()
+            NSBezierPath(
+                roundedRect: box.offsetBy(dx: origin.x, dy: origin.y), xRadius: 4, yRadius: 4
+            ).fill()
+        }
+    }
+
+    private func isCode(_ storage: NSTextStorage, _ index: Int) -> Bool {
+        (storage.attribute(.akariBlock, at: index, effectiveRange: nil) as? MessageText.Block)?
+            .contains(.code) == true
+    }
+
     /// Code boxes and quote bars, from the whole text: they reach past the lines being redrawn,
     /// and a box's padding past the text container, where the text view clips this manager's
     /// own drawing.
@@ -110,8 +161,7 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
                 return
             }
             // A code block's spoiler shows its box; no tint over it.
-            let block = storage.attribute(.akariBlock, at: range.location, effectiveRange: nil)
-            if (block as? MessageText.Block)?.contains(.code) == true {
+            if isCode(storage, range.location) {
                 return
             }
             for rect in rects(range, storage, container, padded: false) {
