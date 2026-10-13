@@ -130,8 +130,10 @@ struct MessageTextDrawingTests {
     func pillsBoxesAndBarsAreDrawnInBothAppearances(_ appearance: NSAppearance.Name) throws {
         let view = shown("x `code` y\n> quoted\n```\nblock\n```", appearance: appearance)
 
-        let pill = try pixel(view, at: try insidePill(of: "code", in: view))
-        #expect(try matches(pill, Palette.codeBackground), "\(pill)")
+        let pill = try #require(decoration(at: try insidePill(of: "code", in: view), in: view))
+        #expect(same(pill.layer.backgroundColor, Palette.codeBackground, appearance))
+        #expect(same(pill.layer.borderColor, Palette.codeBorder, appearance))
+        #expect(pill.layer.cornerRadius == 4)
         let quote = try line(of: "quoted", in: view)
         let bar = try #require(decoration(at: NSPoint(x: 2, y: quote.midY), in: view))
         #expect(same(bar.layer.backgroundColor, Palette.quoteBar, appearance))
@@ -142,6 +144,36 @@ struct MessageTextDrawingTests {
         #expect(same(box.layer.borderColor, Palette.codeBorder, appearance))
         #expect(box.layer.borderWidth == 1 && box.layer.cornerRadius == 4)
         #expect(box.frame.maxX == view.bounds.width)
+    }
+
+    @Test
+    func mentionsRolesAndRevealedSpoilersArePillsToo() throws {
+        let message = named(row(1, at: .now, content: "<@1> <@&4> ||shown||")).message
+        var colored = message
+        for block in colored.formatted.blocks.indices {
+            for span in colored.formatted.blocks[block].spans.indices {
+                if case .role(let id, _, _) = colored.formatted.blocks[block].spans[span].kind {
+                    colored.formatted.blocks[block].spans[span].kind = .role(
+                        id: id, name: .known(name: "Red"), color: 0xff0000)
+                }
+            }
+        }
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let view = MessageTextView()
+        view.show(MessageText.build(colored, revealed: [0], now: .now, times: times).text)
+        view.translatesAutoresizingMaskIntoConstraints = true
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 60)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView?.addSubview(view)
+
+        let mention = try #require(decoration(at: try insidePill(of: "@mira", in: view), in: view))
+        #expect(same(mention.layer.backgroundColor, Palette.mentionBackground, .darkAqua))
+        let role = try #require(decoration(at: try insidePill(of: "@Red", in: view), in: view))
+        let red = try #require(role.layer.backgroundColor.flatMap { NSColor(cgColor: $0) }?
+            .usingColorSpace(.sRGB))
+        #expect(red.redComponent == 1 && abs(red.alphaComponent - 0.1) < 0.01)
+        let spoiler = try #require(decoration(at: try insidePill(of: "shown", in: view), in: view))
+        #expect(same(spoiler.layer.backgroundColor, Palette.spoilerRevealed, .darkAqua))
     }
 
     // Boxes and bars are layers: a view that draws gets a bitmap of everything it draws, and
@@ -181,12 +213,22 @@ struct MessageTextDrawingTests {
 
     @Test
     func anAppearanceChangeRecolorsFormattedText() throws {
-        let view = shown("x `code` y", appearance: .darkAqua)
-        let point = try insidePill(of: "code", in: view)
-        #expect(try matches(try pixel(view, at: point), Palette.codeBackground))
+        let view = shown("x `code` y <t:1800000000:f>", appearance: .darkAqua)
+        let code = try insidePill(of: "code", in: view)
+        let range = (view.string as NSString).range(of: " y ")
+        let layout = try #require(view.layoutManager)
+        let after = layout.boundingRect(
+            forGlyphRange: layout.glyphRange(
+                forCharacterRange: NSRange(location: NSMaxRange(range) + 2, length: 1),
+                actualCharacterRange: nil),
+            in: try #require(view.textContainer))
+        let stamp = NSPoint(x: after.midX, y: code.y)
 
         window.appearance = NSAppearance(named: .aqua)
 
-        #expect(try matches(try pixel(view, at: point), Palette.codeBackground))
+        let pill = try #require(decoration(at: code, in: view))
+        #expect(same(pill.layer.backgroundColor, Palette.codeBackground, .aqua))
+        let timestamp = try #require(decoration(at: stamp, in: view))
+        #expect(same(timestamp.layer.backgroundColor, Palette.timestampBackground, .aqua))
     }
 }

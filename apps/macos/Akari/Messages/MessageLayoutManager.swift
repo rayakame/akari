@@ -2,16 +2,6 @@ import AppKit
 
 // TextKit 1, so the pills, boxes and covers can be drawn around glyph ranges.
 nonisolated final class MessageLayoutManager: NSLayoutManager {
-    // The selection is drawn by super, over the pills.
-    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
-        if let storage = textStorage, let container = textContainers.first {
-            let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
-            drawRevealedSpoilers(storage, container, characters, at: origin)
-            drawPills(storage, container, characters, at: origin)
-        }
-        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
-    }
-
     // Covers go over the glyphs, the pills and the selection.
     override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
@@ -38,8 +28,8 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
             .contains(.code) == true
     }
 
-    /// What goes behind the text: code boxes, quote bars and the covers of hidden code blocks,
-    /// in the text container's coordinates.
+    /// What goes behind the text: code boxes, quote bars, the covers of hidden code blocks,
+    /// revealed spoilers' tint and pills, in the text container's coordinates.
     func blocks() -> [MessageBlockShape] {
         guard let storage = textStorage, let container = textContainers.first else {
             return []
@@ -68,6 +58,26 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
         }
         if let quote {
             shapes.append(quoteBar(quote.range, x: quote.bar, storage, container))
+        }
+        let whole = NSRange(location: 0, length: storage.length)
+        storage.enumerateAttribute(.akariSpoiler, in: whole) { value, range, _ in
+            // A code block's spoiler shows its box; no tint over it.
+            guard let spoiler = value as? MessageText.Spoiler, !spoiler.hidden,
+                !isCode(storage, range.location)
+            else {
+                return
+            }
+            for rect in rects(range, storage, container, padded: false) {
+                shapes.append(.revealed(rect))
+            }
+        }
+        storage.enumerateAttribute(.akariPill, in: whole) { value, range, _ in
+            guard let pill = value as? MessageText.Pill else {
+                return
+            }
+            for rect in rects(range, storage, container, padded: true) {
+                shapes.append(.pill(rect, pill))
+            }
         }
         return shapes.filter { !$0.rect.isEmpty }
     }
@@ -113,61 +123,6 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
         return .quoteBar(NSRect(x: x, y: top, width: 4, height: bottom - top))
     }
 
-    private func drawRevealedSpoilers(
-        _ storage: NSTextStorage, _ container: NSTextContainer, _ characters: NSRange,
-        at origin: NSPoint
-    ) {
-        storage.enumerateAttribute(.akariSpoiler, in: characters) { value, range, _ in
-            guard let spoiler = value as? MessageText.Spoiler, !spoiler.hidden else {
-                return
-            }
-            // A code block's spoiler shows its box; no tint over it.
-            if isCode(storage, range.location) {
-                return
-            }
-            for rect in rects(range, storage, container, padded: false) {
-                Palette.spoilerRevealed.setFill()
-                NSBezierPath(
-                    roundedRect: rect.offsetBy(dx: origin.x, dy: origin.y), xRadius: 3,
-                    yRadius: 3
-                ).fill()
-            }
-        }
-    }
-
-    private func drawPills(
-        _ storage: NSTextStorage, _ container: NSTextContainer, _ characters: NSRange,
-        at origin: NSPoint
-    ) {
-        storage.enumerateAttribute(.akariPill, in: characters) { value, range, _ in
-            guard let pill = value as? MessageText.Pill else {
-                return
-            }
-            for rect in rects(range, storage, container, padded: true) {
-                let shape = rect.offsetBy(dx: origin.x, dy: origin.y)
-                switch pill {
-                case .mention:
-                    Palette.mentionBackground.setFill()
-                    NSBezierPath(roundedRect: shape, xRadius: 3, yRadius: 3).fill()
-                case .role(let color):
-                    NSColor(rgb: color, alpha: 0.1).setFill()
-                    NSBezierPath(roundedRect: shape, xRadius: 3, yRadius: 3).fill()
-                case .timestamp:
-                    Palette.timestampBackground.setFill()
-                    NSBezierPath(roundedRect: shape, xRadius: 3, yRadius: 3).fill()
-                case .code:
-                    let path = NSBezierPath(
-                        roundedRect: shape.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
-                    Palette.codeBackground.setFill()
-                    path.fill()
-                    Palette.codeBorder.setStroke()
-                    path.lineWidth = 1
-                    path.stroke()
-                }
-            }
-        }
-    }
-
     // One rect per line the range is on, around its glyphs' ascent and descent. Padded rects
     // take the 2 of kerning before the range; the kerning after it is in the glyphs' advance.
     private func rects(
@@ -201,10 +156,14 @@ nonisolated enum MessageBlockShape: Equatable {
     case codeBox(NSRect)
     case quoteBar(NSRect)
     case cover(NSRect)
+    case revealed(NSRect)
+    case pill(NSRect, MessageText.Pill)
 
     var rect: NSRect {
         switch self {
-        case .codeBox(let rect), .quoteBar(let rect), .cover(let rect): rect
+        case .codeBox(let rect), .quoteBar(let rect), .cover(let rect), .revealed(let rect),
+            .pill(let rect, _):
+            rect
         }
     }
 }

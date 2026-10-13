@@ -169,9 +169,10 @@ final class MessageTextView: NSTextView {
     }
 }
 
-/// Code boxes, quote bars and hidden code blocks' covers, as colored layers behind a
-/// message's text: drawn into the text view, a full-width box made its bitmap large enough
-/// for Core Animation's costly path (about 40,000 pt²).
+/// Code boxes, quote bars, pills and spoilers' backgrounds, as colored layers behind a
+/// message's text. Drawn into the text view, a full-width box made its bitmap large enough for
+/// Core Animation's costly path (about 40,000 pt²), and any fill made AppKit keep the text in
+/// full color instead of a one-color mask.
 final class MessageDecorations: NSView {
     private var shapes: [MessageBlockShape] = []
     private var origin = NSPoint.zero
@@ -250,6 +251,26 @@ private final class BlockView: NSView {
                 layer.backgroundColor = Palette.spoilerHidden.cgColor
                 layer.borderWidth = 0
                 layer.cornerRadius = 4
+            case .revealed:
+                layer.backgroundColor = Palette.spoilerRevealed.cgColor
+                layer.borderWidth = 0
+                layer.cornerRadius = 3
+            case .pill(_, let pill):
+                layer.borderWidth = 0
+                layer.cornerRadius = 3
+                switch pill {
+                case .mention:
+                    layer.backgroundColor = Palette.mentionBackground.cgColor
+                case .role(let color):
+                    layer.backgroundColor = NSColor(rgb: color, alpha: 0.1).cgColor
+                case .timestamp:
+                    layer.backgroundColor = Palette.timestampBackground.cgColor
+                case .code:
+                    layer.backgroundColor = Palette.codeBackground.cgColor
+                    layer.borderColor = Palette.codeBorder.cgColor
+                    layer.borderWidth = 1
+                    layer.cornerRadius = 4
+                }
             }
         }
     }
