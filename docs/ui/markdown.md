@@ -75,7 +75,8 @@ only). A masked link asks first:
 | Checkbox | Trust links from example.com from now on | Trust links to example.com from now on |
 | Buttons | Back, Visit Site | Back, Open Link |
 
-The full URL shows under the text. A trusted host's masked links open without asking. Akari
+The full URL shows under the text; a link without a host (mailto:, tel:, sms:) has no checkbox,
+since trust is by host. A trusted host's masked links open without asking. Akari
 keeps the trusted hosts per account and matches the exact host (a subdomain isn't trusted with
 its parent), on any port, in its punycode spelling and without a trailing dot; logging out or
 an expired session forgets them and closes a confirmation still open as Back would, and

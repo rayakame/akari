@@ -83,6 +83,16 @@ struct LinkTests {
         #expect(recorder.opened == [url])
     }
 
+    // Trust is by host; these would ask again however the box was set.
+    @Test(arguments: ["mailto:someone@example.com", "tel:+15551234567", "sms:+15551234567"])
+    func aLinkWithoutAHostOffersNoTrust(_ string: String) throws {
+        let alert = LinkConfirmation.alert(for: try #require(URL(string: string)))
+
+        #expect(!alert.showsSuppressionButton)
+        #expect(LinkConfirmation.alert(for: try #require(URL(string: "https://example.com/")))
+            .showsSuppressionButton)
+    }
+
     @Test
     func theDialogNamesTheHostAsItIsTrusted() throws {
         let url = try #require(URL(string: "https://bücher.example/a"))

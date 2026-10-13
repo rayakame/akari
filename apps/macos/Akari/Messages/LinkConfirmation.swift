@@ -65,9 +65,11 @@ enum LinkConfirmation {
         alert.addButton(withTitle: "Open Link")
         let back = alert.addButton(withTitle: "Back")
         back.keyEquivalent = "\u{1b}"
-        alert.showsSuppressionButton = true
-        alert.suppressionButton?.title =
-            "Trust links to \(TrustedLinks.host(url) ?? url.absoluteString) from now on"
+        // Trust is by host; mailto:, tel: and sms: have none.
+        if let host = TrustedLinks.host(url) {
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = "Trust links to \(host) from now on"
+        }
         return alert
     }
 
@@ -81,7 +83,7 @@ enum LinkConfirmation {
             answer(
                 LinkFollower.Answer(
                     open: response == .alertFirstButtonReturn,
-                    trust: alert.suppressionButton?.state == .on))
+                    trust: alert.showsSuppressionButton && alert.suppressionButton?.state == .on))
         }
         guard let window else {
             done(alert.runModal())
