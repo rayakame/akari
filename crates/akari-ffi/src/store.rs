@@ -3,6 +3,8 @@ use std::sync::Arc;
 use akari_core::model::{ChannelId, GuildId, MessageId, Permissions, UserId};
 use akari_core::state;
 
+use crate::formatted::FormattedText;
+use crate::names::Names;
 use crate::records::{Channel, ConnectionState, Guild, Message, MessageWindow, Slowmode, User};
 use crate::subscription::StoreSubscription;
 
@@ -16,6 +18,17 @@ pub struct Store {
 impl Store {
     pub(crate) fn new(core: state::Store) -> Arc<Self> {
         Arc::new(Self { core })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn core(&self) -> &state::Store {
+        &self.core
+    }
+
+    fn message(&self, message: &state::Message, names: &Names<'_>) -> Message {
+        let document = akari_markdown::parse(&message.content);
+        let formatted = FormattedText::new(&document, &message.content, names, Some(message));
+        Message::new(message, formatted, self.core.mentions_me(message))
     }
 }
 
@@ -118,6 +131,7 @@ impl Store {
         let Some(window) = self.core.messages(channel_id) else {
             return Vec::new();
         };
+        let names = Names::new(&self.core, channel_id);
         ids.into_iter()
             .filter_map(|id| {
                 window
@@ -126,7 +140,7 @@ impl Store {
                     .ok()
                     .and_then(|index| window.messages.get(index))
                     .or_else(|| window.pending.iter().find(|message| message.id == id))
-                    .map(|message| Message::from(&**message))
+                    .map(|message| self.message(message, &names))
             })
             .collect()
     }

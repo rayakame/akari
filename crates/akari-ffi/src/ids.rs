@@ -1,4 +1,4 @@
-use akari_core::model::{AttachmentId, ChannelId, GuildId, MessageId, Permissions, UserId};
+use akari_core::model::{AttachmentId, ChannelId, GuildId, MessageId, Permissions, RoleId, UserId};
 
 uniffi::custom_type!(UserId, u64, {
     remote,
@@ -22,6 +22,12 @@ uniffi::custom_type!(MessageId, u64, {
     remote,
     lower: |id| id.get(),
     try_lift: |raw| Ok(MessageId::new(raw)),
+});
+
+uniffi::custom_type!(RoleId, u64, {
+    remote,
+    lower: |id| id.get(),
+    try_lift: |raw| Ok(RoleId::new(raw)),
 });
 
 uniffi::custom_type!(AttachmentId, u64, {

@@ -19,6 +19,10 @@ lower = "{}.rawValue"
 lift = "MessageId(rawValue: {})"
 lower = "{}.rawValue"
 
+[bindings.swift.custom_types.RoleId]
+lift = "RoleId(rawValue: {})"
+lower = "{}.rawValue"
+
 [bindings.swift.custom_types.AttachmentId]
 lift = "AttachmentId(rawValue: {})"
 lower = "{}.rawValue"

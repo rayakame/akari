@@ -3,9 +3,11 @@
 mod account;
 mod client;
 mod errors;
+mod formatted;
 mod ids;
 mod logging;
 mod login;
+mod names;
 mod records;
 mod runtime;
 mod store;
@@ -20,6 +22,10 @@ pub use client::{DiscordClient, Endpoints, HostInfo, Token, discord_endpoints};
 pub use errors::{
     ClientError, GatewayError, LoginError, LogoutError, NetworkErrorKind, RequestError,
     TokenStoreError,
+};
+pub use formatted::{
+    ChannelLink, FormattedText, GuildNavigation, MentionName, SpanKind, TextBlock, TextBlockKind,
+    TextContainer, TextLink, TextSpan, TimestampStyle, formatted_text,
 };
 pub use logging::enable_logging;
 pub use login::{

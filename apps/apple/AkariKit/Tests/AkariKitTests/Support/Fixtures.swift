@@ -45,12 +45,14 @@ func message(
     _ raw: UInt64, in channelRaw: UInt64 = 10, content: String? = nil,
     delivery: Delivery = .sent
 ) -> Message {
-    Message(
+    let content = content ?? "message \(raw)"
+    return Message(
         id: id(raw), channelId: id(channelRaw), kind: .default, author: user(1),
-        fromWebhook: false, content: content ?? "message \(raw)",
+        fromWebhook: false, content: content,
         timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(raw)),
         editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-        embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery
+        embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery,
+        formatted: formattedText(content: content), mentionsMe: false
     )
 }
 

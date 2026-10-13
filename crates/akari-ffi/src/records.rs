@@ -7,6 +7,7 @@ use akari_core::model::{
 use akari_core::state;
 
 use crate::errors::GatewayError;
+use crate::formatted::FormattedText;
 
 /// A user, as the current user, a DM recipient or a message author.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -105,10 +106,17 @@ pub struct Message {
     /// Laid out with Components V2, which Akari can't show yet; such a message has no content.
     pub components_v2: bool,
     pub delivery: Delivery,
+    pub formatted: FormattedText,
+    /// Mentions the current user, by ID, @everyone or @here, or a role of theirs.
+    pub mentions_me: bool,
 }
 
-impl From<&state::Message> for Message {
-    fn from(message: &state::Message) -> Self {
+impl Message {
+    pub(crate) fn new(
+        message: &state::Message,
+        formatted: FormattedText,
+        mentions_me: bool,
+    ) -> Self {
         Self {
             id: message.id,
             channel_id: message.channel_id,
@@ -129,6 +137,8 @@ impl From<&state::Message> for Message {
                 .collect(),
             components_v2: message.uses_components_v2(),
             delivery: message.delivery.into(),
+            formatted,
+            mentions_me,
         }
     }
 }

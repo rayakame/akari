@@ -32,12 +32,13 @@ func row(
             id: AttachmentId(rawValue: raw * 100 + UInt64(index)), filename: name,
             contentType: nil, size: 2_000_000)
     }
+    let content = content ?? "message \(raw)"
     let message = Message(
         id: MessageId(rawValue: raw), channelId: ChannelId(rawValue: 10), kind: kind,
-        author: user, fromWebhook: false, content: content ?? "message \(raw)", timestamp: time,
+        author: user, fromWebhook: false, content: content, timestamp: time,
         editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
         embedCount: embedCount, stickerNames: stickers, componentsV2: componentsV2,
-        delivery: delivery)
+        delivery: delivery, formatted: formattedText(content: content), mentionsMe: false)
     return MessageListModel.Row(id: MessageId(rawValue: key ?? raw), message: message)
 }
 
