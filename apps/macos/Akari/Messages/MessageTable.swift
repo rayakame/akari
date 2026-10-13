@@ -51,16 +51,18 @@ struct MessageArea: View {
                         }
                     }
                     .overlay(alignment: .bottom) {
-                        if let text = JumpBar.text(
-                            atPresent: messages.atPresent, isStale: messages.isStale,
-                            hasRows: !messages.rows.isEmpty)
-                        {
-                            JumpBar(text: text) { bridge.escape() }
+                        VStack(spacing: 0) {
+                            if let text = JumpBar.text(
+                                atPresent: messages.atPresent, isStale: messages.isStale,
+                                hasRows: !messages.rows.isEmpty)
+                            {
+                                JumpBar(text: text) { bridge.escape() }
+                            }
+                            // Above the composer, as in the official client: send errors on
+                            // the left, slowmode on the right, over the list's last pixels.
+                            ComposerStatus(composer: messages.composer)
                         }
                     }
-                // Above the composer, as in the official client: send errors on the left,
-                // slowmode on the right.
-                ComposerStatus(composer: messages.composer)
                 ComposerView(
                     composer: messages.composer, placeholder: name.placeholder,
                     areaHeight: geometry.size.height,

@@ -45,6 +45,8 @@ struct MessageTableTests {
     }
 
     let noon = berlinTime(2026, 10, 10, 12, 0)
+    // Below the newest row when pinned: 8, and the status strip over the list's bottom.
+    let restingInset = 8 + ComposerStatus.height
     let table = CountingTableView()
     let pointer = Pointer()
     let controller: MessageTableController
@@ -404,12 +406,12 @@ struct MessageTableTests {
         let clip = controller.scrollView.contentView
 
         let below = { clip.bounds.maxY - self.table.rect(ofRow: self.table.numberOfRows - 1).maxY }
-        #expect(abs(below() - 8) <= 1)
+        #expect(abs(below() - restingInset) <= 1)
         #expect(table.rect(ofRow: 0).minY - clip.bounds.minY > 100)
 
         rows += messages(1, from: 4)
         show(MessageTableState(rows: rows, reachedOldest: true))
-        #expect(abs(below() - 8) <= 1)
+        #expect(abs(below() - restingInset) <= 1)
 
         // A short list is at its bottom, so a resize doesn't unpin it and later messages follow.
         window.setContentSize(NSSize(width: 600, height: 300))
@@ -1390,10 +1392,12 @@ struct MessageTableTests {
         window.layoutIfNeeded()
 
         let edge = table.rect(ofRow: table.numberOfRows - 1)
-        #expect(edge.maxY <= clip.bounds.maxY - JumpBar.height - JumpBar.margin)
+        #expect(
+            edge.maxY
+                <= clip.bounds.maxY - ComposerStatus.height - JumpBar.height - JumpBar.margin)
 
         show(page)
-        #expect(controller.scrollView.contentInsets.bottom == 8)
+        #expect(controller.scrollView.contentInsets.bottom == restingInset)
     }
 
     @Test
@@ -1596,7 +1600,7 @@ struct MessageTableTests {
         show(MessageTableState(rows: messages(3), reachedOldest: true))
 
         let bottom = clip.bounds.maxY - table.rect(ofRow: table.numberOfRows - 1).maxY
-        #expect(abs(bottom - 8) <= 1)
+        #expect(abs(bottom - restingInset) <= 1)
     }
 
     @Test

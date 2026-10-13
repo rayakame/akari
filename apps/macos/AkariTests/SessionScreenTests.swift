@@ -102,6 +102,56 @@ struct SessionScreenTests {
         #expect(try newestRowHidden(in: host) <= 0.5)
     }
 
+    // The composer's box is its field's scroll view, in window coordinates.
+    func composerBox(in host: NSView) throws -> NSRect {
+        let field = try #require(views(ComposerTextView.self, in: host).first?.enclosingScrollView)
+        return field.convert(field.bounds, to: nil)
+    }
+
+    // As in the official client: messages scroll on under the strip above the composer, and its
+    // texts stay readable on a backdrop.
+    @Test
+    func theListRunsBehindTheStatusStripDownToTheComposer() async throws {
+        let account = FormattedAccount(
+            contents: ["test"], formattedEvery: 1000,
+            slowmode: Slowmode(interval: 30, exempt: false, until: nil), mentioned: true)
+        let host = NSHostingView(rootView: SessionScreen(session: formattedSession(account)))
+        let window = shownWindow(host)
+        defer { window.orderOut(nil) }
+        await settle(host)
+        let table = try #require(views(MessageTableView.self, in: host).first)
+        let scroll = try #require(table.enclosingScrollView)
+        let box = try composerBox(in: host)
+        let list = scroll.convert(scroll.bounds, to: nil)
+        let stripTop = box.maxY + ComposerStatus.height
+
+        #expect(abs(list.minY - box.maxY) <= 0.5, "list \(list), composer \(box)")
+        let newest = table.convert(table.rect(ofRow: table.numberOfRows - 1), to: nil)
+        #expect(newest.minY >= stripTop - 0.5, "newest \(newest), strip top \(stripTop)")
+
+        // The newest row, tinted for its mention, moves down behind the strip.
+        let clip = scroll.contentView
+        clip.scroll(to: NSPoint(x: 0, y: clip.bounds.minY - 32))
+        scroll.reflectScrolledClipView(clip)
+        host.layoutSubtreeIfNeeded()
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / host.bounds.width
+        let color = { (x: CGFloat, y: CGFloat) in
+            rep.colorAt(x: Int(x * scale), y: Int((host.bounds.height - y) * scale))?
+                .usingColorSpace(.sRGB)
+        }
+        let stripMiddle = box.maxY + ComposerStatus.height / 2
+        let inStrip = color(list.midX, stripMiddle)
+        let inRow = color(list.midX, stripTop + 4)
+        let chat = color(list.minX + 3, box.midY)
+
+        #expect(same(inStrip, inRow), "\(String(describing: inStrip)) \(String(describing: inRow))")
+        #expect(!same(inStrip, chat))
+        // Inside the slowmode text's backdrop, right of its last glyph.
+        #expect(same(color(list.maxX - 14, stripMiddle), chat))
+    }
+
     func views<View: NSView>(_ type: View.Type, in view: NSView) -> [View] {
         view.subviews.flatMap { subview in
             [subview as? View].compactMap { $0 } + views(type, in: subview)

@@ -7,9 +7,13 @@ import os
 nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     let formattedStore: FormattedStore
 
-    init(contents: [String], formattedEvery: Int = 3, slowmode: Slowmode? = nil) {
+    init(
+        contents: [String], formattedEvery: Int = 3, slowmode: Slowmode? = nil,
+        mentioned: Bool = false
+    ) {
         formattedStore = FormattedStore(
-            contents: contents, formattedEvery: formattedEvery, slowmode: slowmode)
+            contents: contents, formattedEvery: formattedEvery, slowmode: slowmode,
+            mentioned: mentioned)
         super.init(noHandle: NoHandle())
     }
 
@@ -36,12 +40,14 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     private let contents: [String]
     private let formattedEvery: Int
     private let slowmode: Slowmode?
+    private let mentioned: Bool
     private let counts = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
 
-    init(contents: [String], formattedEvery: Int, slowmode: Slowmode?) {
+    init(contents: [String], formattedEvery: Int, slowmode: Slowmode?, mentioned: Bool) {
         self.contents = contents
         self.formattedEvery = formattedEvery
         self.slowmode = slowmode
+        self.mentioned = mentioned
         super.init(noHandle: NoHandle())
     }
 
@@ -137,7 +143,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(number) * 600),
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
                 embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
-                formatted: formattedText(content: content), mentionsMe: false)
+                formatted: formattedText(content: content), mentionsMe: mentioned)
         }
     }
 
