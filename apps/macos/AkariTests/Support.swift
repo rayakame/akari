@@ -111,5 +111,5 @@ func loadReport(newConnection: Bool = false) -> LoadReport {
     LoadReport(
         queued: 0, limited: 0, headers: 0.182, newConnection: newConnection, body: 0.012,
         bytes: 48_213, decode: 0.0021, store: 0.0004, received: 50, retries: 0, remaining: 4,
-        resetAfter: 1.2)
+        resetAfter: 1.2, parse: 0.0004, parsed: 50)
 }

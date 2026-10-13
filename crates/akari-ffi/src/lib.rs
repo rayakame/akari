@@ -2,6 +2,7 @@
 
 mod account;
 mod client;
+mod contents;
 mod errors;
 mod formatted;
 mod ids;
@@ -33,7 +34,8 @@ pub use login::{
     QrEvent, QrLogin, ScannedUser,
 };
 pub use records::{
-    Attachment, Channel, ConnectionState, Delivery, Guild, Message, MessageWindow, Slowmode, User,
+    Attachment, Channel, ConnectionState, ContentStats, Delivery, Guild, Message, MessageWindow,
+    Slowmode, User,
 };
 pub use store::{Store, message_length};
 pub use subscription::{StoreEvent, StoreSubscription};

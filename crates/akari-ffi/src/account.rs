@@ -3,6 +3,7 @@ use std::sync::Arc;
 use akari_core::model::{ChannelId, MessageId};
 use tokio::runtime::Runtime;
 
+use crate::contents::Contents;
 use crate::errors::{GatewayError, RequestError};
 use crate::records::LoadReport;
 use crate::runtime::run;
@@ -13,14 +14,23 @@ use crate::store::Store;
 pub struct Account {
     core: Arc<akari_core::Account>,
     runtime: &'static Runtime,
+    contents: Arc<Contents>,
 }
 
 impl Account {
     pub(crate) fn new(core: akari_core::Account, runtime: &'static Runtime) -> Arc<Self> {
+        let contents = Contents::new();
+        core.set_message_preparer(contents.clone());
         Arc::new(Self {
             core: Arc::new(core),
             runtime,
+            contents,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn contents(&self) -> &Arc<Contents> {
+        &self.contents
     }
 }
 
@@ -28,7 +38,7 @@ impl Account {
 impl Account {
     /// The account's state; it stays readable after the account is closed.
     pub fn store(&self) -> Arc<Store> {
-        Store::new(self.core.store().clone())
+        Store::new(self.core.store().clone(), self.contents.clone())
     }
 
     /// Connects, or resumes after `disconnect()`. Fails with `Closed` after `close()`.

@@ -11,10 +11,10 @@ use super::support::{MemoryStore, USER, core_client, host, token};
 use crate::client::DiscordClient;
 use crate::subscription::{StoreEvent, StoreSubscription};
 
-struct TempDir(PathBuf);
+pub(super) struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
             "akari-ffi-cache-{}-{}",
@@ -23,6 +23,10 @@ impl TempDir {
         ));
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
+    }
+
+    pub(super) fn path(&self) -> PathBuf {
+        self.0.clone()
     }
 
     fn file(&self) -> PathBuf {

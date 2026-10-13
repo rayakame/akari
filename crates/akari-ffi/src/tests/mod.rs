@@ -1,6 +1,7 @@
 mod account;
 mod cache;
 mod client;
+mod contents;
 mod fake;
 mod formatted;
 mod login;

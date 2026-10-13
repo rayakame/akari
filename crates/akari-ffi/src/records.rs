@@ -382,6 +382,11 @@ pub struct LoadReport {
     /// `X-RateLimit-Remaining` and `-Reset-After` of the last answer, when Discord sent them.
     pub remaining: Option<u32>,
     pub reset_after: Option<Duration>,
+    /// Parsing the page's new messages on the runtime, and on a first page the disk cache's
+    /// messages shown before it.
+    pub parse: Duration,
+    /// Messages parsed for this load; ones parsed before aren't parsed again.
+    pub parsed: u32,
 }
 
 impl From<akari_core::LoadReport> for LoadReport {
@@ -399,6 +404,20 @@ impl From<akari_core::LoadReport> for LoadReport {
             retries: report.retries,
             remaining: report.remaining,
             reset_after: report.reset_after,
+            parse: report.prepare,
+            parsed: report.prepared,
         }
     }
+}
+
+/// How an account's message contents were parsed. Counts only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct ContentStats {
+    pub parsed: u64,
+    /// Parsed when read, though a load or the cache's fill should have parsed them.
+    pub misses: u64,
+    /// Live changes parsed when read, on the reader's thread.
+    pub event_parses: u64,
+    /// Documents held now.
+    pub cached: u32,
 }

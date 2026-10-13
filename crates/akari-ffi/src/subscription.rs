@@ -4,6 +4,7 @@ use akari_core::model::{ChannelId, GuildId, MessageId, UserId};
 use akari_core::state;
 use tokio_util::sync::CancellationToken;
 
+use crate::contents::Contents;
 use crate::records::ConnectionState;
 
 const BATCH: usize = 256;
@@ -13,13 +14,15 @@ const BATCH: usize = 256;
 pub struct StoreSubscription {
     inner: Mutex<Option<Arc<state::Subscription>>>,
     closed: CancellationToken,
+    contents: Arc<Contents>,
 }
 
 impl StoreSubscription {
-    pub(crate) fn new(subscription: state::Subscription) -> Arc<Self> {
+    pub(crate) fn new(subscription: state::Subscription, contents: Arc<Contents>) -> Arc<Self> {
         Arc::new(Self {
             inner: Mutex::new(Some(Arc::new(subscription))),
             closed: CancellationToken::new(),
+            contents,
         })
     }
 
@@ -54,6 +57,15 @@ impl StoreSubscription {
             };
             if batch.is_empty() {
                 return None;
+            }
+            // Live changes are parsed when read; announcing them counts those parses apart.
+            for event in &batch {
+                if let state::StoreEvent::MessageInserted(message)
+                | state::StoreEvent::MessageUpdated(message)
+                | state::StoreEvent::MessageReplaced { message, .. } = event
+                {
+                    self.contents.announce(message);
+                }
             }
             let events: Vec<StoreEvent> = batch.into_iter().filter_map(StoreEvent::new).collect();
             if !events.is_empty() {

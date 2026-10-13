@@ -3,9 +3,12 @@ use std::sync::Arc;
 use akari_core::model::{ChannelId, GuildId, MessageId, Permissions, UserId};
 use akari_core::state;
 
+use crate::contents::{Contents, Found};
 use crate::formatted::FormattedText;
 use crate::names::Names;
-use crate::records::{Channel, ConnectionState, Guild, Message, MessageWindow, Slowmode, User};
+use crate::records::{
+    Channel, ConnectionState, ContentStats, Guild, Message, MessageWindow, Slowmode, User,
+};
 use crate::subscription::StoreSubscription;
 
 /// An account's state. Reads are synchronous and cheap (one read lock each) and return
@@ -13,11 +16,12 @@ use crate::subscription::StoreSubscription;
 #[derive(uniffi::Object)]
 pub struct Store {
     core: state::Store,
+    contents: Arc<Contents>,
 }
 
 impl Store {
-    pub(crate) fn new(core: state::Store) -> Arc<Self> {
-        Arc::new(Self { core })
+    pub(crate) fn new(core: state::Store, contents: Arc<Contents>) -> Arc<Self> {
+        Arc::new(Self { core, contents })
     }
 
     #[cfg(test)]
@@ -25,8 +29,11 @@ impl Store {
         &self.core
     }
 
-    fn message(&self, message: &state::Message, names: &Names<'_>) -> Message {
-        let document = akari_markdown::parse(&message.content);
+    fn message(&self, message: &state::Message, names: &Names<'_>, misses: &mut u32) -> Message {
+        let (document, found) = self.contents.document(message);
+        if found == Found::Miss {
+            *misses += 1;
+        }
         let formatted = FormattedText::new(&document, &message.content, names, Some(message));
         Message::new(message, formatted, self.core.mentions_me(message))
     }
@@ -36,7 +43,7 @@ impl Store {
 impl Store {
     /// Changes from now on. Subscribe first, then read, then apply the events.
     pub fn subscribe(&self) -> Arc<StoreSubscription> {
-        StoreSubscription::new(self.core.subscribe())
+        StoreSubscription::new(self.core.subscribe(), self.contents.clone())
     }
 
     pub fn connection(&self) -> ConnectionState {
@@ -132,7 +139,9 @@ impl Store {
             return Vec::new();
         };
         let names = Names::new(&self.core, channel_id);
-        ids.into_iter()
+        let mut misses = 0;
+        let messages = ids
+            .into_iter()
             .filter_map(|id| {
                 window
                     .messages
@@ -140,9 +149,23 @@ impl Store {
                     .ok()
                     .and_then(|index| window.messages.get(index))
                     .or_else(|| window.pending.iter().find(|message| message.id == id))
-                    .map(|message| self.message(message, &names))
+                    .map(|message| self.message(message, &names, &mut misses))
             })
-            .collect()
+            .collect();
+        if misses > 0 {
+            tracing::debug!(
+                target: "akari_ffi::content",
+                channel_id = channel_id.get(),
+                misses,
+                "parsed on read"
+            );
+        }
+        messages
+    }
+
+    /// How this account's message contents were parsed so far.
+    pub fn content_stats(&self) -> ContentStats {
+        self.contents.stats()
     }
 }
 
