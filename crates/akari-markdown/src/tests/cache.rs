@@ -117,3 +117,16 @@ fn document_sizes() {
         println!("largest: {size} bytes ({name})");
     }
 }
+
+#[test]
+fn an_insert_says_which_key_it_dropped() {
+    let mut cache = Cache::new(2);
+    assert_eq!(cache.insert(1u64, 1, doc("a")), None);
+    assert_eq!(cache.insert(2, 1, doc("a")), None);
+    assert_eq!(
+        cache.insert(2, 1, doc("b")),
+        None,
+        "replacing drops nothing"
+    );
+    assert_eq!(cache.insert(3, 1, doc("a")), Some(1));
+}

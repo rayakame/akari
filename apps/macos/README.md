@@ -142,8 +142,8 @@ channel 1234 opened: rows from disk after 24 ms, fresh after 380 ms
 akari-core logs the same stages itself at `akari_core::load` (debug, stderr; the parse as
 `prepare_ms` and `prepared`), and new REST connections at `akari_core::rest` (debug, with their
 connect time). `akari_ffi::content` (debug) logs a line whenever a read had to parse a message a
-load should have parsed (a miss: the channel ID and the count); live messages parsed when read
-aren't logged.
+load had parsed and the cache dropped since (a miss: the channel ID and the count); live
+messages parsed when read aren't logged.
 
 ### Comparing a page load with the official client
 

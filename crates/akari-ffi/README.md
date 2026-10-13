@@ -39,9 +39,10 @@ a guild not in the store). `formatted_text(content)` parses without a store, for
 previews.
 
 Each account keeps up to 4,096 parsed documents, keyed by message ID and edit time, with the
-content's length as a guard. `Store.content_stats()` counts them: parsed, `misses` (parsed when
-read though a load should have parsed them) and `event_parses` (live changes parsed when
-read).
+content's length as a guard. `Store.content_stats()` counts them: parsed, `misses` (parsed
+when read though a load had parsed them, because the cache dropped them since) and
+`event_parses` (parsed when read because no load did: live messages and edits, also those the
+store held back while a page loaded).
 
 ## Events
 
@@ -73,10 +74,10 @@ read.
 - Markdown is parsed on the runtime where it can be: each account registers its documents as
   akari-core's message preparer, so history pages and the disk cache's fill are parsed on a
   blocking thread before they enter a window, and `messages` only looks them up. Live
-  changes (new, edited, confirmed messages) are parsed when read, on the reader's thread: one
-  message takes microseconds. `next()` announces them, so those parses count as event parses;
-  any other parse on read is a miss and logs one debug line at `akari_ffi::content` (the
-  channel ID and the count).
+  changes (new, edited, confirmed messages) are parsed when read, on the reader's thread: a
+  typical message takes microseconds. Those count as event parses; a parse on read of something
+  a load had parsed is a miss and logs one debug line at `akari_ffi::content` (the channel ID
+  and the count).
 - **Swift task cancellation doesn't reach Rust** (UniFFI 0.32 doesn't support it). A request
   runs to completion; a send that the host stopped waiting for still resolves through the
   store. Waits end through explicit calls: `PasswordLogin.cancel()`, `QrLogin.cancel()`,

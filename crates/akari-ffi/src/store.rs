@@ -43,7 +43,7 @@ impl Store {
 impl Store {
     /// Changes from now on. Subscribe first, then read, then apply the events.
     pub fn subscribe(&self) -> Arc<StoreSubscription> {
-        StoreSubscription::new(self.core.subscribe(), self.contents.clone())
+        StoreSubscription::new(self.core.subscribe())
     }
 
     pub fn connection(&self) -> ConnectionState {

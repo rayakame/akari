@@ -27,23 +27,50 @@ impl ContentKey {
     }
 }
 
-/// How a read found a message's document.
+// How a read found a message's document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Found {
     Cached,
-    // A live change `next()` handed out, parsed when read.
+    // Never parsed by a load: a live message, an edit, or one the store held during a load.
     EventParse,
+    // A load parsed it, and the cache dropped it since.
     Miss,
 }
 
-/// An account's parsed message contents. Pages and the disk cache's fill are parsed on the
-/// runtime before they enter a window (D56, amendment 84); live changes when they're read.
-pub(crate) struct Contents {
-    cache: Mutex<Cache<ContentKey>>,
-    // Live changes `next()` handed out and nobody read yet; past the capacity it starts over,
-    // so a forgotten one counts as a miss, never the other way round.
-    announced: Mutex<HashSet<ContentKey>>,
+struct Documents {
+    cache: Cache<ContentKey>,
+    // The cached documents a load parsed.
+    prepared: HashSet<ContentKey>,
+    // Those the cache dropped; starts over past the capacity, so an old one counts as an
+    // event parse.
+    dropped: HashSet<ContentKey>,
     capacity: usize,
+}
+
+impl Documents {
+    fn insert(&mut self, key: ContentKey, len: usize, document: Arc<Document>, prepared: bool) {
+        self.dropped.remove(&key);
+        if prepared {
+            self.prepared.insert(key);
+        } else {
+            self.prepared.remove(&key);
+        }
+        let Some(old) = self.cache.insert(key, len, document) else {
+            return;
+        };
+        if self.prepared.remove(&old) {
+            if self.dropped.len() >= self.capacity {
+                self.dropped.clear();
+            }
+            self.dropped.insert(old);
+        }
+    }
+}
+
+// An account's parsed message contents. Pages and the disk cache's fill are parsed on the
+// runtime before they enter a window (D56); everything else when it's read.
+pub(crate) struct Contents {
+    documents: Mutex<Documents>,
     parsed: AtomicU64,
     misses: AtomicU64,
     event_parses: AtomicU64,
@@ -62,9 +89,12 @@ impl Contents {
 
     pub(crate) fn with_capacity(capacity: usize) -> Arc<Self> {
         Arc::new(Self {
-            cache: Mutex::new(Cache::new(capacity)),
-            announced: Mutex::default(),
-            capacity,
+            documents: Mutex::new(Documents {
+                cache: Cache::new(capacity),
+                prepared: HashSet::new(),
+                dropped: HashSet::new(),
+                capacity,
+            }),
             parsed: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             event_parses: AtomicU64::new(0),
@@ -75,28 +105,28 @@ impl Contents {
 
     pub(crate) fn document(&self, message: &state::Message) -> (Arc<Document>, Found) {
         let key = ContentKey::of(message);
-        if let Some(document) = lock(&self.cache).get(&key, message.content.len()) {
+        let len = message.content.len();
+        if let Some(document) = lock(&self.documents).cache.get(&key, len) {
             return (document, Found::Cached);
         }
         let document = Arc::new(akari_markdown::parse(&message.content));
-        lock(&self.cache).insert(key, message.content.len(), document.clone());
-        self.parsed.fetch_add(1, Ordering::Relaxed);
-        let found = if lock(&self.announced).remove(&key) {
-            self.event_parses.fetch_add(1, Ordering::Relaxed);
-            Found::EventParse
-        } else {
-            self.misses.fetch_add(1, Ordering::Relaxed);
-            Found::Miss
+        let found = {
+            let mut documents = lock(&self.documents);
+            let found = if documents.dropped.contains(&key) {
+                Found::Miss
+            } else {
+                Found::EventParse
+            };
+            documents.insert(key, len, document.clone(), false);
+            found
         };
+        self.parsed.fetch_add(1, Ordering::Relaxed);
+        let counter = match found {
+            Found::Miss => &self.misses,
+            _ => &self.event_parses,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
         (document, found)
-    }
-
-    pub(crate) fn announce(&self, message: &state::Message) {
-        let mut announced = lock(&self.announced);
-        if announced.len() >= self.capacity {
-            announced.clear();
-        }
-        announced.insert(ContentKey::of(message));
     }
 
     pub(crate) fn stats(&self) -> ContentStats {
@@ -104,7 +134,7 @@ impl Contents {
             parsed: self.parsed.load(Ordering::Relaxed),
             misses: self.misses.load(Ordering::Relaxed),
             event_parses: self.event_parses.load(Ordering::Relaxed),
-            cached: u32::try_from(lock(&self.cache).len()).unwrap_or(u32::MAX),
+            cached: u32::try_from(lock(&self.documents).cache.len()).unwrap_or(u32::MAX),
         }
     }
 
@@ -119,11 +149,12 @@ impl MessagePreparer for Contents {
         #[cfg(test)]
         lock(&self.prepared_on).push(std::thread::current().name().map(str::to_owned));
         let missing: Vec<&state::Message> = {
-            let mut cache = lock(&self.cache);
+            let mut documents = lock(&self.documents);
             messages
                 .iter()
                 .filter(|message| {
-                    cache
+                    documents
+                        .cache
                         .get(&ContentKey::of(message), message.content.len())
                         .is_none()
                 })
@@ -135,9 +166,14 @@ impl MessagePreparer for Contents {
             .iter()
             .map(|message| Arc::new(akari_markdown::parse(&message.content)))
             .collect();
-        let mut cache = lock(&self.cache);
+        let mut documents = lock(&self.documents);
         for (message, document) in missing.iter().zip(parsed) {
-            cache.insert(ContentKey::of(message), message.content.len(), document);
+            documents.insert(
+                ContentKey::of(message),
+                message.content.len(),
+                document,
+                true,
+            );
         }
         let count = missing.len() as u64;
         self.parsed.fetch_add(count, Ordering::Relaxed);

@@ -13,7 +13,7 @@ use super::gateway::send;
 use super::support::{MemoryStore, USER, core_client, token};
 use crate::account::{Account, MessageLoad};
 use crate::client::DiscordClient;
-use crate::contents::Contents;
+use crate::contents::{Contents, Found};
 use crate::formatted::SpanKind;
 use crate::records::{ContentStats, Message};
 use crate::subscription::{StoreEvent, StoreSubscription};
@@ -294,6 +294,7 @@ async fn an_update_without_an_edit_reuses_the_document() {
 struct Restoring {
     account: Arc<Account>,
     subscription: Arc<StoreSubscription>,
+    gateway: FakeGateway,
     _client: Arc<DiscordClient>,
     _server: MockServer,
     _dir: super::cache::TempDir,
@@ -332,6 +333,7 @@ async fn restoring(body: Value, delay: Duration) -> Restoring {
     Restoring {
         account,
         subscription,
+        gateway,
         _client: client,
         _server: server,
         _dir: dir,
@@ -434,4 +436,59 @@ async fn contents_keep_at_most_their_capacity() {
     assert_eq!(prepared, 20);
     assert!(small.stats().cached <= 8);
     online.account.close();
+}
+
+#[tokio::test]
+async fn only_documents_a_load_parsed_count_as_misses() {
+    let contents: Vec<String> = (0..4).map(|i| format!("message {i}")).collect();
+    let online = online_with(page(400_000_000_000_000_200, &contents)).await;
+    load(&online.account).await;
+    let window = online.account.store().core().messages(GENERAL).unwrap();
+    let messages = &window.messages;
+
+    let small = Contents::with_capacity(2);
+    small.prepare(&messages[..3]);
+
+    assert_eq!(
+        small.document(&messages[0]).1,
+        Found::Miss,
+        "prepared, then dropped"
+    );
+    assert_eq!(
+        small.document(&messages[3]).1,
+        Found::EventParse,
+        "never prepared"
+    );
+    assert_eq!(small.document(&messages[3]).1, Found::Cached);
+    online.account.close();
+}
+
+#[tokio::test]
+async fn a_message_held_during_a_restore_is_an_event_parse() {
+    let restoring = restoring(three(), Duration::from_millis(500)).await;
+    let account = restoring.account.clone();
+    account.connect().unwrap();
+    let mut ws = restoring.gateway.serve_ready().await;
+    events_until(&restoring.subscription, online).await;
+
+    let loading = tokio::spawn(async move { load(&account).await });
+    events_until(&restoring.subscription, |event| {
+        matches!(event, StoreEvent::MessagesLoaded { .. })
+    })
+    .await;
+    let mut created = page_message(400_000_000_000_000_013, "*live*");
+    created["channel_id"] = GENERAL.get().to_string().into();
+    send(
+        &mut ws,
+        json!({"op": 0, "s": 2, "t": "MESSAGE_CREATE", "d": created}),
+    )
+    .await;
+    loading.await.unwrap();
+    let read = read_all(&restoring.account);
+
+    assert_eq!(read.len(), 4);
+    assert_eq!(texts(&read[3]), "live");
+    let stats = stats(&restoring.account);
+    assert_eq!((stats.misses, stats.event_parses, stats.parsed), (0, 1, 4));
+    restoring.account.close();
 }

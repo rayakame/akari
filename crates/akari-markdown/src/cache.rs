@@ -45,9 +45,10 @@ impl<K: Hash + Eq + Clone> Cache<K> {
         Some(self.entries[i].document.clone())
     }
 
-    pub fn insert(&mut self, key: K, source_len: usize, document: Arc<Document>) {
+    /// Returns the key it dropped to make room, if any.
+    pub fn insert(&mut self, key: K, source_len: usize, document: Arc<Document>) -> Option<K> {
         if self.capacity == 0 {
-            return;
+            return None;
         }
         if let Some(&i) = self.index.get(&key) {
             let entry = &mut self.entries[i];
@@ -55,8 +56,9 @@ impl<K: Hash + Eq + Clone> Cache<K> {
             entry.document = document;
             self.unlink(i);
             self.push_front(i);
-            return;
+            return None;
         }
+        let mut dropped = None;
         let i = if self.entries.len() < self.capacity {
             self.entries.push(Entry {
                 key: key.clone(),
@@ -67,19 +69,18 @@ impl<K: Hash + Eq + Clone> Cache<K> {
             });
             self.entries.len() - 1
         } else {
-            let Some(oldest) = self.tail else {
-                return;
-            };
+            let oldest = self.tail?;
             self.unlink(oldest);
             let entry = &mut self.entries[oldest];
             self.index.remove(&entry.key);
-            entry.key = key.clone();
+            dropped = Some(std::mem::replace(&mut entry.key, key.clone()));
             entry.source_len = source_len;
             entry.document = document;
             oldest
         };
         self.index.insert(key, i);
         self.push_front(i);
+        dropped
     }
 
     pub fn len(&self) -> usize {
