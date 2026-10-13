@@ -27,6 +27,13 @@ final class MessageCell: NSTableCellView {
     var onDelete: () -> Void = {}
     var onLink: (URL) -> Void = { _ in }
     private var message: Message?
+    private var mentioned = false {
+        didSet {
+            if mentioned != oldValue {
+                needsDisplay = true
+            }
+        }
+    }
     private let stack = NSStackView()
     private var top: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
@@ -59,6 +66,7 @@ final class MessageCell: NSTableCellView {
             message, startsGroup: startsGroup, groupTime: groupTime, shortTime: shortTime,
             fullDate: fullDate)
         self.message = message
+        mentioned = message.mentionsMe
         content.show(body)
     }
 
@@ -149,6 +157,12 @@ final class MessageCell: NSTableCellView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if mentioned {
+            Palette.mentionedBackground.setFill()
+            bounds.fill(using: .sourceOver)
+            Palette.mentionedBar.setFill()
+            NSRect(x: 0, y: 0, width: 2, height: bounds.height).fill()
+        }
         if isHovered {
             Palette.hoverBackground.setFill()
             bounds.fill(using: .sourceOver)

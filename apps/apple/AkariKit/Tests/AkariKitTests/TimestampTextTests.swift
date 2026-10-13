@@ -74,6 +74,21 @@ struct TimestampTextTests {
         #expect(next > now && next <= now + unit)
     }
 
+    // The formatter truncates, so counting down the text changes just after a whole unit.
+    @Test(arguments: [
+        230.0, 180, 179.5, 61, 60, 59.5, 30, 3_600, 3_600.5, 7_200, 86_400, 90_000, -0.5, -59.5,
+        -60, -61, -3_599.5, -86_399.5,
+    ])
+    func theNextChangeIsWhenTheTextChanges(_ ahead: TimeInterval) throws {
+        let times = times("en_US")
+        let now = Date(timeIntervalSince1970: TimeInterval(Self.instant)) - ahead
+        let text = { (at: Date) in times.text(Self.instant, style: .relative, now: at) }
+        let next = try #require(times.nextChange(Self.instant, style: .relative, now: now))
+
+        #expect(text(next) != text(now), "\(text(now)) at \(ahead)")
+        #expect(text(next - 0.01) == text(now), "\(text(now)) at \(ahead)")
+    }
+
     @Test(arguments: [
         TimestampStyle.shortTime, .mediumTime, .shortDate, .longDate, .longDateShortTime,
         .fullDateShortTime, .shortDateShortTime, .shortDateMediumTime,

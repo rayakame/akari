@@ -38,13 +38,11 @@ public struct TimestampText: Sendable {
             case ..<86400: 3600
             default: 86400
             }
-        // Ahead, the distance shrinks to its next lower multiple of the unit; behind, it grows to
-        // the next higher one.
-        let step =
-            ahead > 0
-            ? distance.truncatingRemainder(dividingBy: unit)
-            : unit - distance.truncatingRemainder(dividingBy: unit)
-        return now + (step > 0 ? step : unit)
+        // The formatter truncates: ahead, the text changes once the distance drops below its
+        // whole units; behind, once it reaches the next one. A millisecond past either.
+        let rest = distance.truncatingRemainder(dividingBy: unit)
+        let step = ahead > 0 ? rest : unit - rest
+        return now + step + 0.001
     }
 
     // JavaScript's range, which Discord's clients format; beyond it Foundation's dates still do.
