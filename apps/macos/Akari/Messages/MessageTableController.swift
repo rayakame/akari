@@ -29,6 +29,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private let localeSource: () -> Locale
     private var calendar: Calendar
     private var locale: Locale
+    private var times: TimestampText
     private let now: () -> Date
     private let notifications: NotificationCenter
     nonisolated(unsafe) private var timeObservers: [NSObjectProtocol] = []
@@ -97,6 +98,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         localeSource = locale
         self.calendar = calendar()
         self.locale = locale()
+        times = TimestampText(
+            locale: self.locale, timeZone: self.calendar.timeZone, calendar: self.calendar)
         self.now = now
         self.notifications = notifications
         self.pointer =
@@ -268,6 +271,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     func refreshTimes() {
         calendar = calendarSource()
         locale = localeSource()
+        times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)
         let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
         if let place {
             anchor = place
@@ -614,7 +618,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(message, notice: notice, time: time, width: width)
             }
-            return MessageCell.height(message, startsGroup: startsGroup, width: width)
+            return MessageCell.height(
+                message, body: body(message), startsGroup: startsGroup, width: width)
         }
     }
 
@@ -659,12 +664,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onRetry = { [weak self] in self?.actions?.retry(message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
             cell.configure(
-                message, startsGroup: startsGroup, groupTime: groupTime,
+                message, body: body(message), startsGroup: startsGroup, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)
             return cell
         }
+    }
+
+    private func body(_ message: Message) -> NSAttributedString {
+        MessageText.build(message, revealed: [], now: now(), times: times).text
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {

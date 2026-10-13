@@ -50,23 +50,13 @@ final class MessageCell: NSTableCellView {
     }
 
     func configure(
-        _ message: Message, startsGroup: Bool, groupTime: String, shortTime: String,
-        fullDate: String
+        _ message: Message, body: NSAttributedString, startsGroup: Bool, groupTime: String,
+        shortTime: String, fullDate: String
     ) {
         configureAllButTheBody(
             message, startsGroup: startsGroup, groupTime: groupTime, shortTime: shortTime,
             fullDate: fullDate)
-        content.show(Self.body(message))
-    }
-
-    private static func body(_ message: Message) -> NSAttributedString {
-        let body = CellText.body(message.content, color: color(message.delivery))
-        guard message.editedTimestamp != nil, !message.content.isEmpty else {
-            return body
-        }
-        let marked = NSMutableAttributedString(attributedString: body)
-        marked.append(CellText.editedMark())
-        return marked
+        content.show(body)
     }
 
     // The sizing cell measures the body instead of laying it out in its text view.
@@ -108,21 +98,15 @@ final class MessageCell: NSTableCellView {
         failed?.isHidden = !isFailed
     }
 
-    private static func color(_ delivery: Delivery) -> NSColor {
-        switch delivery {
-        case .pending: Palette.textMuted
-        case .failed: Palette.danger
-        default: Palette.textDefault
-        }
-    }
-
-    /// The row height for `message` at `width`, as Auto Layout would size the cell.
-    static func height(_ message: Message, startsGroup: Bool, width: CGFloat) -> CGFloat {
+    /// The row height for `message` showing `body` at `width`, as Auto Layout would size the
+    /// cell.
+    static func height(
+        _ message: Message, body: NSAttributedString, startsGroup: Bool, width: CGFloat
+    ) -> CGFloat {
         sizing.configureAllButTheBody(
             message, startsGroup: startsGroup, groupTime: "", shortTime: "", fullDate: "")
         let textWidth = width - textLeading - textTrailing
-        let body = message.content.isEmpty
-            ? 0 : TextMeasurer.shared.height(Self.body(message), width: textWidth)
+        let body = message.content.isEmpty ? 0 : TextMeasurer.shared.height(body, width: textWidth)
         return sizing.height(width: width, body: body)
     }
 

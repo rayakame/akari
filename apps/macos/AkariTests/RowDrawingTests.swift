@@ -316,7 +316,8 @@ struct CellBuildingTests {
     func configure(_ cell: MessageCell, _ delivery: Delivery) {
         let message = row(1, at: berlinTime(2026, 10, 10, 12, 0), delivery: delivery).message
         cell.configure(
-            message, startsGroup: true, groupTime: "Today at 12:00", shortTime: "12:00",
+            message, body: NSAttributedString(string: message.content), startsGroup: true,
+            groupTime: "Today at 12:00", shortTime: "12:00",
             fullDate: "Saturday, 10 October 2026 at 12:00")
     }
 

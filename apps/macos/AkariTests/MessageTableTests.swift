@@ -625,6 +625,12 @@ struct MessageTableTests {
                     49, by: author(3), at: later + 100, content: "", attachments: ["d.zip"],
                     edited: later + 110),
             ]
+            + FormattedSamples.contents.enumerated().map { index, content in
+                row(
+                    UInt64(60 + index), by: author(UInt64(3 + index % 2)),
+                    at: later + 200 + Double(index) * 400, content: content,
+                    edited: index % 3 == 0 ? later + 210 + Double(index) * 400 : nil)
+            }
         show(rows)
 
         for width: CGFloat in [600, 380, 900] {

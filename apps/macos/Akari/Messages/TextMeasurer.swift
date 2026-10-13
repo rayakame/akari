@@ -11,7 +11,8 @@ final class TextMeasurer {
         let bounds = text.boundingRect(
             with: NSSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin])
-        return ceil(bounds.height)
+        let padding = MessageText.padding(text)
+        return ceil(bounds.height) + padding.top + padding.bottom
     }
 
     static func usedHeight(_ layoutManager: NSLayoutManager, _ container: NSTextContainer)

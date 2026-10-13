@@ -3,6 +3,7 @@ import AppKit
 /// A message's body: selectable, not editable, laid out by TextKit 1.
 final class MessageTextView: NSTextView {
     private var measuredWidth: CGFloat = -1
+    private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
 
     init() {
         let storage = NSTextStorage()
@@ -22,6 +23,8 @@ final class MessageTextView: NSTextView {
         importsGraphics = false
         allowsUndo = false
         textContainerInset = .zero
+        // Links keep their own colors: pills are links too.
+        linkTextAttributes = [.cursor: NSCursor.pointingHand]
         isVerticallyResizable = false
         isHorizontallyResizable = false
         setContentHuggingPriority(.required, for: .vertical)
@@ -38,8 +41,10 @@ final class MessageTextView: NSTextView {
         }
         return NSSize(
             width: NSView.noIntrinsicMetric,
-            height: TextMeasurer.usedHeight(layoutManager, textContainer))
+            height: TextMeasurer.usedHeight(layoutManager, textContainer) + padding.top
+                + padding.bottom)
     }
+
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -50,8 +55,19 @@ final class MessageTextView: NSTextView {
     }
 
     func show(_ text: NSAttributedString) {
+        let padding = MessageText.padding(text)
+        if padding != self.padding {
+            self.padding = padding
+            // Only its top counts: the height is the view's own, from the padding.
+            textContainerInset = NSSize(width: 0, height: padding.top)
+        }
         textStorage?.setAttributedString(text)
         invalidateIntrinsicContentSize()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        (layoutManager as? MessageLayoutManager)?.drawBlocks(at: textContainerOrigin)
+        super.draw(dirtyRect)
     }
 
     // Where the first line's glyphs sit, after the paragraph's baseline offset.
@@ -61,7 +77,7 @@ final class MessageTextView: NSTextView {
         }
         layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: 1))
         let line = layoutManager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
-        return line.minY + layoutManager.location(forGlyphAt: 0).y
+        return padding.top + line.minY + layoutManager.location(forGlyphAt: 0).y
     }
 
     // A non-editable text view would swallow Escape; the list handles it.
