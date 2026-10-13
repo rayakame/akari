@@ -3846,6 +3846,64 @@ mod preparer {
         assert_eq!(report.prepared, 0);
     }
 
+    // Holds every batch while closed.
+    struct Gate(AtomicBool);
+
+    impl MessagePreparer for Gate {
+        fn prepare(&self, messages: &[Arc<Message>]) -> u32 {
+            while self.0.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            messages.len() as u32
+        }
+    }
+
+    #[tokio::test]
+    async fn a_load_dropped_while_preparing_stops_holding_live_messages() {
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        let account = start_with(&fake, &server);
+        let subscription = account.store().subscribe();
+        let mut connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+        mock_page(&server, ("around", "20"), page(&[19, 20, 21])).await;
+        mock_page(&server, ("after", "21"), page(&[22])).await;
+        let gate = Arc::new(Gate(AtomicBool::new(false)));
+        account.set_message_preparer(gate.clone());
+        account
+            .load_messages(
+                general(),
+                MessageLoad::Around {
+                    id: Snowflake::new(20),
+                    limit: 3,
+                },
+            )
+            .await
+            .unwrap();
+
+        gate.0.store(true, Ordering::SeqCst);
+        let dropped = timeout(
+            Duration::from_millis(100),
+            account.load_messages(general(), MessageLoad::Newer { limit: 3 }),
+        )
+        .await;
+        assert!(dropped.is_err());
+        gate.0.store(false, Ordering::SeqCst);
+        account
+            .load_messages(general(), MessageLoad::Newer { limit: 3 })
+            .await
+            .unwrap();
+        connection.send(message(2, 30)).await;
+
+        assert_eq!(
+            events_until(&subscription, "MessageInserted(30)")
+                .await
+                .last()
+                .map(String::as_str),
+            Some("MessageInserted(30)")
+        );
+    }
+
     #[tokio::test]
     async fn a_slow_preparer_doesnt_hold_up_another_channel() {
         let mut fake = FakeGateway::start().await;
