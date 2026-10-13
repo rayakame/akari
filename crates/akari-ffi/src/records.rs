@@ -414,9 +414,9 @@ impl From<akari_core::LoadReport> for LoadReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct ContentStats {
     pub parsed: u64,
-    /// Parsed when read, though a load or the cache's fill should have parsed them.
+    /// Parsed when read though a load had parsed them: the cache dropped them since.
     pub misses: u64,
-    /// Live changes parsed when read, on the reader's thread.
+    /// Parsed when read because no load did: live messages and edits, on the reader's thread.
     pub event_parses: u64,
     /// Documents held now.
     pub cached: u32,

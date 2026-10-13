@@ -38,6 +38,11 @@ store has the list but not the item) or `NotLoaded` (before READY, a pending mes
 a guild not in the store). `formatted_text(content)` parses without a store, for tests and
 previews.
 
+Names and `mentions_me` can change without a message event, so a host rereads the messages it
+shows after `GuildUpdated` (role names and colors), `ChannelUpdated` (channel names, access),
+`UserUpdated`, `CurrentUserUpdated` and `CurrentMemberUpdated` (the user's roles: their
+mentions and channel access).
+
 Each account keeps up to 4,096 parsed documents, keyed by message ID and edit time, with the
 content's length as a guard. `Store.content_stats()` counts them: parsed, `misses` (parsed
 when read though a load had parsed them, because the cache dropped them since) and

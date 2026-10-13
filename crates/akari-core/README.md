@@ -19,9 +19,11 @@ message's markdown there, so pages are never parsed on the main thread.
 - **What it gets:** the messages read-only (`&[Arc<Message>]`); it can't change them or the
   store. A page's messages are a copy converted for it; the window's own are converted under
   the store's lock, with edits that arrived during the load applied.
-- **Where it runs:** outside the store's lock, on a blocking thread that its own load awaits.
-  Loads of one channel run one at a time anyway, so a slow preparer holds up only that
-  channel; other channels, the gateway and reads go on. A preparer that panics prepares
+- **Where it runs:** outside the store's lock, on a blocking thread that its own load awaits:
+  for a page after its request (and rate-limit permit) is done, for the cache's fill while the
+  request runs. A slow preparer holds up only that load: other loads, the gateway and reads go
+  on. The store drops a page whose window moved
+  meanwhile, so loads that finish out of order stay safe. A preparer that panics prepares
   nothing, and the load goes on.
 - **What it reports:** how many messages it prepared. `LoadReport.prepare` and `prepared`
   carry its time and count, including the cache's fill on a first page, and the "history

@@ -62,7 +62,6 @@ impl<'a> Names<'a> {
         }
     }
 
-    /// The color is 0 for a role without one.
     pub(crate) fn role(&self, id: RoleId) -> (MentionName, u32) {
         if self.current.is_none() {
             return (MentionName::NotLoaded, 0);
