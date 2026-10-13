@@ -103,4 +103,42 @@ struct TrustedLinksTests {
         again.trust(url("https://example.net/"))
         #expect(TrustedLinks(account: id(1), defaults: defaults).isTrusted(url("https://example.net/")))
     }
+
+    @Test
+    func twoListsOfOneAccountKeepEachOthersTrust() {
+        let first = TrustedLinks(account: id(1), defaults: defaults)
+        let second = TrustedLinks(account: id(1), defaults: defaults)
+
+        first.trust(url("https://example.com/"))
+        second.trust(url("https://example.org/"))
+
+        #expect(second.isTrusted(url("https://example.com/")))
+        let again = TrustedLinks(account: id(1), defaults: defaults)
+        #expect(again.isTrusted(url("https://example.com/")))
+        #expect(again.isTrusted(url("https://example.org/")))
+    }
+
+    @Test
+    func forgettingAnAccountLeavesAnothersListsAsTheyWere() {
+        _ = TrustedLinks(account: id(1), defaults: defaults)
+        let other = TrustedLinks(account: id(2), defaults: defaults)
+        other.trust(url("https://example.com/"))
+
+        AccountMemory(defaults: defaults).forget(id(1))
+        other.trust(url("https://example.org/"))
+
+        #expect(other.isTrusted(url("https://example.com/")))
+        #expect(TrustedLinks(account: id(2), defaults: defaults).isTrusted(url("https://example.org/")))
+    }
+
+    @Test
+    func forgettingAnAccountLeavesNothingThatNamesIt() {
+        let links = TrustedLinks(account: id(123_456), defaults: defaults)
+        links.trust(url("https://example.com/"))
+
+        AccountMemory(defaults: defaults).forget(id(123_456))
+        links.trust(url("https://example.org/"))
+
+        #expect(!defaults.keys.contains { $0.contains("123456") }, "\(defaults.keys)")
+    }
 }

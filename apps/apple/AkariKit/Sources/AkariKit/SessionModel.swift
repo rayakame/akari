@@ -125,6 +125,11 @@ public final class SessionModel {
         }
     }
 
+    /// The hosts the account trusts for masked links, kept with the rest of its memory.
+    public func trustedLinks() -> TrustedLinks {
+        memory.trustedLinks(of: userId)
+    }
+
     /// A guild opens the channel last opened there, else its first text channel; home opens
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {

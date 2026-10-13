@@ -24,6 +24,19 @@ final class SessionModelTests {
         }
     }
 
+    // Where the memory that forgets the account keeps them, not the shared defaults.
+    @Test
+    func theSessionsTrustedLinksLiveWithItsMemory() throws {
+        let session = makeSession()
+        let url = try #require(URL(string: "https://example.com/"))
+
+        session.trustedLinks().trust(url)
+
+        #expect(TrustedLinks(account: session.userId, defaults: defaults).isTrusted(url))
+        memory.forget(session.userId)
+        #expect(!session.trustedLinks().isTrusted(url))
+    }
+
     @Test
     func startSubscribesBeforeReadingThenConnects() {
         store.update { state in

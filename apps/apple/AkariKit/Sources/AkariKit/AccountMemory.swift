@@ -58,6 +58,11 @@ public struct AccountMemory: Sendable {
         defaults.set(stored, forKey: Self.spotKey(account))
     }
 
+    @MainActor
+    public func trustedLinks(of account: UserId) -> TrustedLinks {
+        TrustedLinks(account: account, defaults: defaults)
+    }
+
     /// Forgets what's kept for the account: its spot and the hosts its links are trusted for.
     public func forget(_ account: UserId) {
         remember(nil, of: account)

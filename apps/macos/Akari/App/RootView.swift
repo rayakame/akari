@@ -100,7 +100,7 @@ struct SessionScreen: View {
         self.dismissWarning = dismissWarning
         self.reconnect = reconnect
         _links = State(
-            initialValue: links ?? LinkFollower(trusted: TrustedLinks(account: session.userId)))
+            initialValue: links ?? LinkFollower(trusted: session.trustedLinks()))
     }
 
     var body: some View {
