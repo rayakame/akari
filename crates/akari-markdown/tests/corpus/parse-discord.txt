@@ -1,0 +1,1609 @@
+# Inputs from parse-discord's own tests (https://github.com/LyricLy/parse-discord at
+# eca0540c54f2), with Akari's outlines; each matches parse-discord's result unless noted.
+#
+# Copyright (c) 2023-2025 LyricLy
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+== asterisks bold
+input: "**foo**"
+--
+p: {b}"foo"
+
+== asterisks bold in italic
+input: "a ***foo** bar* baz"
+--
+p: "a " {b i}"foo" {i}" bar" " baz"
+
+== asterisks cross bold first
+input: "**foo *bar** baz*"
+--
+p: {b}"foo *bar" " baz*"
+
+== asterisks cross italic first
+input: "*foo **bar* baz**"
+--
+p: {i}"foo **bar" " baz**"
+
+== asterisks escape end
+input: "*foo\\*"
+--
+p: "*foo*"
+
+== asterisks escape middle
+input: "*a\\*\\\\\\*\\\\*"
+--
+p: {i}"a*\\*\\"
+
+== asterisks escape scourge
+input: "**\\**"
+--
+p: "*" {i}"*"
+
+== asterisks escape start
+input: "\\*foo*"
+--
+p: "*foo*"
+
+== asterisks invalid escape middle
+input: "*\\a*"
+--
+p: {i}"\\a"
+
+== asterisks italic in bold
+input: "a ***foo* bar** baz"
+--
+p: "a " {b i}"foo" {b}" bar" " baz"
+
+== asterisks italics
+input: "*foo*"
+--
+p: {i}"foo"
+
+== asterisks multiple
+input: "*a* *b*"
+--
+p: {i}"a" " " {i}"b"
+
+== asterisks n
+input: "*"
+--
+p: "*"
+
+== asterisks n 2
+input: "**"
+--
+p: "**"
+
+== asterisks n 3
+input: "***"
+--
+p: "***"
+
+== asterisks n 4
+input: "****"
+--
+p: {i}"**"
+
+== asterisks n 5
+input: "*****"
+--
+p: {b}"*"
+
+== asterisks n 6
+input: "******"
+--
+p: {i}"**"
+
+== asterisks n 7
+input: "*******"
+--
+p: {b}"***"
+
+== asterisks n 8
+input: "********"
+--
+p: {i}"**"
+
+== asterisks n 9
+input: "*********"
+--
+p: {b}"*"
+
+== asterisks n 10
+input: "**********"
+--
+p: {i}"**"
+
+== asterisks n 11
+input: "***********"
+--
+p: {b}"***"
+
+== asterisks n 12
+input: "************"
+--
+p: {i}"**"
+
+== asterisks n 13
+input: "*************"
+--
+p: {b}"*"
+
+== asterisks n 14
+input: "**************"
+--
+p: {i}"**"
+
+== asterisks n 15
+input: "***************"
+--
+p: {b}"***"
+
+== asterisks n 16
+input: "****************"
+--
+p: {i}"**"
+
+== asterisks n 17
+input: "*****************"
+--
+p: {b}"*"
+
+== asterisks n 18
+input: "******************"
+--
+p: {i}"**"
+
+== asterisks n 19
+input: "*******************"
+--
+p: {b}"***"
+
+== asterisks n 20
+input: "********************"
+--
+p: {i}"**"
+
+== asterisks n on right
+input: "*foo****"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 2
+input: "*foo*****"
+--
+p: {i}"foo**"
+
+== asterisks n on right 3
+input: "*foo******"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 4
+input: "*foo*******"
+--
+p: {i}"foo**"
+
+== asterisks n on right 5
+input: "*foo********"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 6
+input: "*foo*********"
+--
+p: {i}"foo**"
+
+== asterisks n on right 7
+input: "*foo**********"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 8
+input: "*foo***********"
+--
+p: {i}"foo**"
+
+== asterisks n on right 9
+input: "*foo************"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 10
+input: "*foo*************"
+--
+p: {i}"foo**"
+
+== asterisks n on right 11
+input: "*foo**************"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 12
+input: "*foo***************"
+--
+p: {i}"foo**"
+
+== asterisks n on right 13
+input: "*foo****************"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 14
+input: "*foo*****************"
+--
+p: {i}"foo**"
+
+== asterisks n on right 15
+input: "*foo******************"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 16
+input: "*foo*******************"
+--
+p: {i}"foo**"
+
+== asterisks n on right 17
+input: "*foo********************"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 18
+input: "*foo*********************"
+--
+p: {i}"foo**"
+
+== asterisks n on right 19
+input: "*foo**********************"
+--
+p: "*foo" {i}"**"
+
+== asterisks n on right 20
+input: "*foo***********************"
+--
+p: {i}"foo**"
+
+== asterisks newline breaker
+input: "*foo\n*"
+--
+p: "*foo" br "*"
+
+== asterisks no nest
+input: "*a   *b*   c*"
+--
+p: "*a   " {i}"b" "   c*"
+
+== asterisks right assoc
+input: "**foo*"
+--
+p: "*" {i}"foo"
+
+== asterisks two together bold
+input: "**a** b **c**"
+--
+p: {b}"a" " b " {b}"c"
+
+== asterisks two together italic
+input: "*a* b *c*"
+--
+p: {i}"a" " b " {i}"c"
+
+== asterisks ws
+input: "a * *"
+--
+p: "a * *"
+
+== asterisks ws 2
+input: "a * b*"
+--
+p: "a * b*"
+
+== asterisks ws 3
+input: "a *b  *"
+--
+p: "a " {i}"b"
+
+== asterisks ws 4
+input: "a **b   **"
+--
+p: "a " {b}"b   "
+
+== asterisks ws 5
+input: "a  *b   *"
+--
+p: "a  *b   *"
+
+== asterisks ws 6
+input: "** **"
+--
+p: {b}" "
+
+== backticks block
+input: "```foo```"
+--
+code[]: "foo"
+
+== backticks block lang
+input: "```py\nfoo```"
+--
+code[py]: "foo"
+
+== backticks block strip
+input: "```\nfoo \n```"
+--
+code[]: "foo "
+
+== backticks block that could be different
+input: "```\n```\n```"
+--
+code[]: "```"
+
+== backticks block that could be inline
+input: "```\n``\n```"
+--
+code[]: "``"
+
+== backticks double inline
+input: "``foo``"
+--
+p: code"foo"
+
+== backticks empty inline
+input: "``"
+--
+p: "``"
+
+== backticks false block
+input: "```\n```"
+--
+p: code"\n"
+
+== backticks false lang
+input: "```py\n\n```"
+--
+code[]: "py"
+
+== backticks inline
+input: "`foo`"
+--
+p: code"foo"
+
+== backticks inline is not escaped
+input: "`\\`"
+--
+p: code"\\"
+
+== backticks inline stability
+input: "```` `"
+--
+p: code"```"
+
+== backticks just space
+input: "` `"
+--
+p: code" "
+
+== backticks one tick block
+input: "```````"
+--
+code[]: "`"
+
+== backticks strips
+input: "``  `a  ``"
+--
+p: code" `a  "
+
+== backticks two together block
+input: "```a``` b ```c```"
+--
+code[]: "a"
+p: " b "
+code[]: "c"
+
+== backticks two together inline
+input: "`a` b `c`"
+--
+p: code"a" " b " code"c"
+
+== text digit not escaped
+input: "\\0"
+--
+p: "\\0"
+
+== text escape shrug
+input: "\\¯\\_(ツ)_/¯"
+--
+p: "¯_(ツ)_/¯"
+
+== text invalid escape
+input: "\\foo"
+--
+p: "\\foo"
+
+== text preserve shrug
+input: "¯\\_(ツ)_/¯"
+--
+p: "¯\\_(ツ)_/¯"
+
+== text self escape
+input: "\\\\\\*"
+--
+p: "\\*"
+
+== text strip trailing ws
+input: "foo   \nbar"
+--
+p: "foo" br "bar"
+
+== text text
+input: "foo"
+--
+p: "foo"
+
+== text useless escape
+input: "\\&"
+--
+p: "&"
+
+== emoji custom
+input: "<:name:0>"
+--
+p: emoji"name":0
+jumbo
+
+== emoji custom animated
+input: "<a:name:0>"
+--
+p: aemoji"name":0
+jumbo
+
+== emoji no copyright
+input: "©"
+--
+p: "©"
+
+# parse-discord shows the emoji; Akari keeps shortcodes as text (D66).
+== emoji no copyright 2
+input: ":copyright:"
+--
+p: ":copyright:"
+
+== emoji reject bad name
+input: "<:-:0>"
+--
+p: "<:-:0>"
+
+== emoji unicode
+input: "🥺"
+--
+p: "🥺"
+jumbo
+
+== emoji unicode escape
+input: "\\🥺"
+--
+p: "🥺"
+
+== emoji unicode name
+input: ":pleading_face:"
+--
+p: ":pleading_face:"
+
+== headers codeblocks
+input: "# ```a```"
+--
+code[]: "a"
+
+== headers codeblocks 2
+input: "# ```\na\n```"
+--
+h1: "```"
+p: "a" br "```"
+
+== headers ender trick
+input: "*# foo*ing"
+--
+h1: {i}"foo"
+p: "ing"
+
+== headers even through asterisks
+input: " *# foo*"
+--
+p: " " {i}"# foo"
+
+== headers h1
+input: "# foo"
+--
+h1: "foo"
+
+== headers h2
+input: "## foo"
+--
+h2: "foo"
+
+== headers h3
+input: "### foo"
+--
+h3: "foo"
+
+== headers indentation breaks
+input: " # foo"
+--
+p: " # foo"
+
+== headers leading hash
+input: "# # a"
+--
+p: "# # a"
+
+== headers newline ends
+input: "# foo\ning"
+--
+h1: "foo"
+p: "ing"
+
+== headers newline start
+input: "#\na"
+--
+h1: "a"
+
+== headers no h4
+input: "#### foo"
+--
+p: "#### foo"
+
+== headers only at start
+input: "a # foo"
+--
+p: "a # foo"
+
+== headers strips
+input: "#    a #   ####   "
+--
+h1: "a #"
+
+== headers strips 2
+input: "# a \u{3000}"
+--
+h1: "a"
+
+== links antiphish
+input: "[http://ab](http://c)"
+--
+p: "[http://ab](http://c)"
+
+== links antiphish 2
+input: "[ｈttp://ab](http://c)"
+--
+p: "[ｈttp://ab](http://c)"
+
+== links antiphish 3
+input: "[`http://ab`](http://c)"
+--
+p: "[`http://ab`](http://c)"
+
+== links antiphish 4
+input: "[```a```](http://b)"
+--
+p: "[```a```](http://b)"
+
+== links antiphish 5
+input: "[<t:0>](http://a)"
+--
+p: {l0}time:0:f
+link0: <http://a/> masked
+
+== links antiphish 6
+input: "[a](http://b 'http://ab')"
+--
+p: "[a](http://b 'http://ab')"
+
+== links antiphish 7
+input: "[a](http://b 'ｈttp://ab')"
+--
+p: "[a](http://b 'ｈttp://ab')"
+
+== links antiphish 8
+input: "[a](http://b '`http://ab`')"
+--
+p: "[a](http://b '`http://ab`')"
+
+== links antiphish 9
+input: "[a](http://b '```a```')"
+--
+p: "[a](http://b '```a```')"
+
+== links antiphish 10
+input: "[a](http://b '<t:0>')"
+--
+p: {l0}"a"
+link0: <http://b/> masked title="<t:0>"
+
+== links bare
+input: "https://example.com"
+--
+p: {l0}"https://example.com"
+link0: <https://example.com/>
+
+== links bogus
+input: "blah://*a*"
+--
+p: "blah://" {i}"a"
+
+== links bracket parsing
+input: "[[]](http://b)"
+--
+p: {l0}"[]"
+link0: <http://b/> masked
+
+== links bracket parsing 2
+input: "[[a](http://b)"
+--
+p: "[" {l0}"a"
+link0: <http://b/> masked
+
+== links bracket parsing 3
+input: "[[[]](http://b)"
+--
+p: {l0}"[[]"
+link0: <http://b/> masked
+
+== links bracket parsing 4
+input: "[[][]]](http://b)"
+--
+p: {l0}"[][]]"
+link0: <http://b/> masked
+
+== links bracket parsing 5
+input: "[[]][]](http://b)"
+--
+p: "[[]]" {l0}"]"
+link0: <http://b/> masked
+
+== links emoji ban
+input: "[🥺](https://a)"
+--
+p: "[🥺](https://a)"
+
+== links emoji ban 2
+input: "[a](https://b '🥺')"
+--
+p: {l0}"a"
+link0: <https://b/> masked title="🥺"
+
+== links emoji ban 3
+input: "[`🥺`](https://a)"
+--
+p: {l0}code"🥺"
+link0: <https://a/> masked
+
+== links link scourge
+input: "[\\*[*a\n1. b](https://c)](https://d)"
+--
+p: {l0}"\\" {i l0}"[" {l0}"a" br {l0}"1. b](https://c)"
+link0: <https://d/> masked
+
+== links no empty
+input: "[|| ||_ _** **` `](http://a)"
+--
+p: "[|| ||_ _** **` `](http://a)"
+
+== links no ending special
+input: "http://ab."
+--
+p: {l0}"http://ab" "."
+link0: <http://ab/>
+
+== links no ending unmatched close paren
+input: "https://ab)"
+--
+p: {l0}"https://ab" ")"
+link0: <https://ab/>
+
+== links no ending unmatched close paren 2
+input: "https://a))"
+--
+p: {l0}"https://a)" ")"
+link0: <https://a)/>
+
+== links no ending unmatched close paren 3
+input: "https://(a)"
+--
+p: {l0}"https://(a)"
+link0: <https://(a)/>
+
+== links no ending unmatched close paren 4
+input: "https://(a))"
+--
+p: {l0}"https://(a)" ")"
+link0: <https://(a)/>
+
+== links no ending unmatched close paren 5
+input: "https://(a)b)"
+--
+p: {l0}"https://(a)b)"
+link0: <https://(a)b)/>
+
+== links no ending unmatched close paren 6
+input: "https://a)."
+--
+p: {l0}"https://a" ")."
+link0: <https://a/>
+
+== links no ending unmatched close paren 7
+input: "https://a.)"
+--
+p: {l0}"https://a." ")"
+link0: <https://a./>
+
+== links not single char
+input: "http://a"
+--
+p: "http://a"
+
+== links not single char 2
+input: "http://a."
+--
+p: "http://a."
+
+== links not single char 3
+input: "http://a)"
+--
+p: {l0}"http://a" ")"
+link0: <http://a/>
+
+== links prevents blocks
+input: "[# a](http://b)"
+--
+p: {l0}"# a"
+link0: <http://b/> masked
+
+== links prevents blocks 2
+input: "[-# a](http://b)"
+--
+p: {l0}"-# a"
+link0: <http://b/> masked
+
+== links prevents blocks 3
+input: "[> a](http://b)"
+--
+p: {l0}"> a"
+link0: <http://b/> masked
+
+== links prevents blocks 4
+input: "[* a](http://b)"
+--
+p: {l0}"* a"
+link0: <http://b/> masked
+
+== links prevents escapes
+input: "[\\*\\**](http://a)"
+--
+p: {l0}"\\" {i l0}"\\*"
+link0: <http://a/> masked
+
+== links qualified
+input: "[a](https://example.com)"
+--
+p: {l0}"a"
+link0: <https://example.com/> masked
+
+== links qualified bogus
+input: "[a](blah://b)"
+--
+p: "[a](blah://b)"
+
+== links qualified short
+input: "[a](https://)"
+--
+p: "[a](https://)"
+
+== links qualified short 2
+input: "[a](discord://)"
+--
+p: {l0}"a"
+link0: <discord://> masked
+
+== links qualified suppressed
+input: "[a](<https://b>)"
+--
+p: {l0}"a"
+link0: <https://b/> masked suppress
+
+== links qualified suppressed 2
+input: "[a](<https://b)"
+--
+p: {l0}"a"
+link0: <https://b/> masked suppress
+
+== links qualified suppressed 3
+input: "[a](https://b>)"
+--
+p: {l0}"a"
+link0: <https://b/> masked suppress
+
+== links sanitization
+input: "[a\u{3000}b](http://c 'd\u{3000}e')"
+--
+p: {l0}"ab"
+link0: <http://c/> masked title="de"
+
+== links steam
+input: "steam://*a*"
+--
+p: "steam://*a*"
+
+== links suppressed
+input: "<https://a>"
+--
+p: {l0}"https://a"
+link0: <https://a/> suppress
+
+== links suppressed bogus
+input: "<blah:/*a*>"
+--
+p: "blah:/*a*"
+
+== links suppressed bogus 2
+input: "<blah:*a*>"
+--
+p: "<blah:" {i}"a" ">"
+
+== links title
+input: "[a](http://b 'c')"
+--
+p: {l0}"a"
+link0: <http://b/> masked title="c"
+
+== links title 2
+input: "[a](http://b ''')"
+--
+p: {l0}"a"
+link0: <http://b/> masked title="'"
+
+== links title 3
+input: "[a](http://b> \"c')"
+--
+p: {l0}"a"
+link0: <http://b/> masked title="c" suppress
+
+== links url escaping
+input: "https://a\\$"
+--
+p: {l0}"https://a\\$"
+link0: <https://a/$>
+
+== links url escaping 2
+input: "[a](https://b\\$)"
+--
+p: {l0}"a"
+link0: <https://b$/> masked
+
+== links whitespace allowance
+input: "[ a ]( https://b  ' c ' )"
+--
+p: {l0}" a "
+link0: <https://b/> masked title=" c "
+
+== links with newlines
+input: "[a\n> b](http://c)"
+--
+p: {l0}"a" br {l0}"> b"
+link0: <http://c/> masked
+
+== links wonderland
+input: "[- ```a```](http://b)"
+--
+p: {l0}"- " {l0}code"a"
+link0: <http://b/> masked
+
+== links wonderland 2
+input: "[- ````` ` `` ``` ```` `````](http://b)"
+--
+p: {l0}"- " {l0}code"` `` ``` ````"
+link0: <http://b/> masked
+
+== links wonderland 3
+input: "[- ```````](http://b)"
+--
+p: {l0}"- ```````"
+link0: <http://b/> masked
+
+== links wonderland 4
+input: "[- https://**a**](http://a)"
+--
+p: {l0}"- https://" {b l0}"a"
+link0: <http://a/> masked
+
+== links wonderland 5
+input: "[- 🥺](http://a)"
+--
+p: {l0}"- 🥺"
+link0: <http://a/> masked
+
+== lists anti grab
+input: "* \n* b"
+--
+- p:
+- p: "b"
+
+== lists asterisk ul
+input: "* foo"
+--
+- p: "foo"
+
+== lists headers do not
+input: "- # a"
+--
+- p: "# a"
+
+== lists hyphen ul
+input: "- foo"
+--
+- p: "foo"
+
+== lists indent
+input: "- a\n b"
+--
+- p: "a"
+p: "b"
+
+== lists indent 2
+input: "- a\n   b"
+--
+- p: "a" br " b"
+
+== lists indent 3
+input: "1. a\n   b"
+--
+1. p: "a" br "b"
+
+== lists indent 4
+input: "1. a\n    b"
+--
+1. p: "a" br " b"
+
+== lists indent 5
+input: "1.  a\n    b"
+--
+1. p: "a" br "b"
+
+== lists list in quote
+input: "> - a"
+--
+> - p: "a"
+
+== lists multi
+input: "0. a\n0. b"
+--
+1. p: "a"
+2. p: "b"
+
+== lists nesting
+input: "1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. a"
+--
+1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. p: "1. a"
+
+== lists null grab
+input: "* \na"
+--
+- p: br "a"
+
+== lists ol
+input: "1. foo"
+--
+1. p: "foo"
+
+== lists ol bounds
+input: "0. foo"
+--
+1. p: "foo"
+
+== lists ol bounds 2
+input: "1000000001. foo"
+--
+1000000000. p: "foo"
+
+== lists quotes work
+input: "- > a"
+--
+- > p: "a"
+
+== lists quotes work nested
+input: "1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. > a"
+--
+1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. > p: "a"
+
+== lists random example
+input: "* a\n    b\n    1. c\n    2. d\n    c"
+--
+- p: "a" br "  b" br "  "
+. 1. p: "c"
+. . 2. p: "d"
+. . p: "c"
+
+== lists reverse indent
+input: "   1. a\n  2. b\n 3. c\n4. d"
+--
+p: "   "
+1. p: "a"
+. 2. p: "b"
+2. p: "c"
+3. p: "d"
+
+== lists strip passthrough
+input: "- a\u{3000} \n"
+--
+- p: "a\u{3000}"
+
+== mentions channel
+input: "<#0>"
+--
+p: #chan:0
+
+== mentions everyone
+input: "@everyone"
+--
+p: @everyone
+
+== mentions everyone escape
+input: "\\@everyone"
+--
+p: "@everyone"
+
+== mentions here
+input: "@here"
+--
+p: @here
+
+== mentions role
+input: "<@&0>"
+--
+p: @role:0
+
+== mentions user
+input: "<@0>"
+--
+p: @user:0
+
+== mentions user escape
+input: "\\<@123456789012345678>"
+--
+p: "<@123456789012345678>"
+
+== mentions user exclam
+input: "<@!0>"
+--
+p: @user:0
+
+== quotes block quote
+input: ">>> foo\nbar"
+--
+> p: "foo" br "bar"
+
+== quotes codeblock scourge
+input: "*> ```\nfoo```*"
+--
+> p: {i}"```"
+p: {i}"foo```"
+
+== quotes codeblocks
+input: "> ```a```"
+--
+> code[]: "a"
+
+== quotes codeblocks 2
+input: "> ```\n> a\n> ```"
+--
+> code[]: "a"
+
+== quotes codeblocks 3
+input: "> ```\na\n```"
+--
+> p: "```"
+p: "a" br "```"
+
+== quotes does not strip
+input: ">  foo"
+--
+> p: " foo"
+
+== quotes early close
+input: "__>>> a\nb__c"
+--
+> p: {u}"a" br {u}"b"
+p: "c"
+
+== quotes empty
+input: "> "
+--
+> p:
+
+== quotes goes through
+input: "a *> foo*"
+--
+p: "a " {i}"> foo"
+
+== quotes leading space ok
+input: " > foo"
+--
+p: " "
+> p: "foo"
+
+== quotes line quote
+input: "> foo"
+--
+> p: "foo"
+
+== quotes line quotes
+input: "> foo\n> bar"
+--
+> p: "foo" br "bar"
+
+== quotes no nesting
+input: "> > foo\n> > bar"
+--
+> p: "> foo" br "> bar"
+
+== quotes not in middle
+input: "a > foo"
+--
+p: "a > foo"
+
+== quotes strip passthrough
+input: "> a\u{3000} \n"
+--
+> p: "a\u{3000}"
+
+== quotes strip trailing
+input: "_> foo  _\nbar"
+--
+> p: {i}"foo  "
+p: br "bar"
+
+== spoilers no escape
+input: "||\\||"
+--
+p{sp0}: {sp0}"\\"
+
+== spoilers spoilers
+input: "||foo||"
+--
+p{sp0}: {sp0}"foo"
+
+== spoilers stack
+input: "|||||"
+--
+p{sp0}: {sp0}"|"
+
+== spoilers two together
+input: "||a|| b ||c||"
+--
+p: {sp0}"a" " b " {sp1}"c"
+
+== tilde no escape
+input: "~~\\~~"
+--
+p: {s}"\\"
+
+== tilde stack
+input: "~~~~~"
+--
+p: {s}"~"
+
+== tilde strikethrough
+input: "~~foo~~"
+--
+p: {s}"foo"
+
+== tilde two together
+input: "~~a~~ b ~~c~~"
+--
+p: {s}"a" " b " {s}"c"
+
+== time bad format
+input: "<t:0:r>"
+--
+p: "<t:0:r>"
+
+== time default
+input: "<t:0>"
+--
+p: time:0:f
+
+== time large time
+input: "<t:8640000000000>"
+--
+p: time:8640000000000:f
+
+== time negative time
+input: "<t:-1>"
+--
+p: time:-1:f
+
+== time out of range
+input: "<t:8640000000001>"
+--
+p: "<t:8640000000001>"
+
+== time time
+input: "<t:0:R>"
+--
+p: time:0:R
+
+== underscores cross italic first
+input: "_foo __bar_ baz__"
+--
+p: {i}"foo __bar" " baz__"
+
+== underscores cross underline first
+input: "__foo _bar__ baz_"
+--
+p: {u}"foo _bar" " baz_"
+
+== underscores escape end
+input: "_foo\\_"
+--
+p: "_foo_"
+
+== underscores escape middle
+input: "_a\\_\\\\\\_\\\\_"
+--
+p: {i}"a_\\_\\"
+
+== underscores escape scourge
+input: "__\\__"
+--
+p: "_" {i}"_"
+
+== underscores escape start
+input: "\\_foo_"
+--
+p: "_foo_"
+
+== underscores following breaks
+input: "_a_b"
+--
+p: "_a_b"
+
+== underscores following symbol fine
+input: "_a_$"
+--
+p: {i}"a" "$"
+
+== underscores invalid escape middle
+input: "_\\a_"
+--
+p: {i}"\\a"
+
+== underscores italic in underline
+input: "a ___foo_ bar__ baz"
+--
+p: "a " {i u}"foo" {u}" bar" " baz"
+
+== underscores italics
+input: "_foo_"
+--
+p: {i}"foo"
+
+== underscores n
+input: "_"
+--
+p: "_"
+
+== underscores n 2
+input: "__"
+--
+p: "__"
+
+== underscores n 3
+input: "___"
+--
+p: "___"
+
+== underscores n 4
+input: "____"
+--
+p: {i}"__"
+
+== underscores n 5
+input: "_____"
+--
+p: {u}"_"
+
+== underscores n 6
+input: "______"
+--
+p: {i}"__"
+
+== underscores n 7
+input: "_______"
+--
+p: {u}"___"
+
+== underscores n 8
+input: "________"
+--
+p: {i}"__"
+
+== underscores n 9
+input: "_________"
+--
+p: {u}"_"
+
+== underscores n 10
+input: "__________"
+--
+p: {i}"__"
+
+== underscores n 11
+input: "___________"
+--
+p: {u}"___"
+
+== underscores n 12
+input: "____________"
+--
+p: {i}"__"
+
+== underscores n 13
+input: "_____________"
+--
+p: {u}"_"
+
+== underscores n 14
+input: "______________"
+--
+p: {i}"__"
+
+== underscores n 15
+input: "_______________"
+--
+p: {u}"___"
+
+== underscores n 16
+input: "________________"
+--
+p: {i}"__"
+
+== underscores n 17
+input: "_________________"
+--
+p: {u}"_"
+
+== underscores n 18
+input: "__________________"
+--
+p: {i}"__"
+
+== underscores n 19
+input: "___________________"
+--
+p: {u}"___"
+
+== underscores n 20
+input: "____________________"
+--
+p: {i}"__"
+
+== underscores n on right
+input: "_foo____"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 2
+input: "_foo_____"
+--
+p: {i}"foo__"
+
+== underscores n on right 3
+input: "_foo______"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 4
+input: "_foo_______"
+--
+p: {i}"foo__"
+
+== underscores n on right 5
+input: "_foo________"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 6
+input: "_foo_________"
+--
+p: {i}"foo__"
+
+== underscores n on right 7
+input: "_foo__________"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 8
+input: "_foo___________"
+--
+p: {i}"foo__"
+
+== underscores n on right 9
+input: "_foo____________"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 10
+input: "_foo_____________"
+--
+p: {i}"foo__"
+
+== underscores n on right 11
+input: "_foo______________"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 12
+input: "_foo_______________"
+--
+p: {i}"foo__"
+
+== underscores n on right 13
+input: "_foo________________"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 14
+input: "_foo_________________"
+--
+p: {i}"foo__"
+
+== underscores n on right 15
+input: "_foo__________________"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 16
+input: "_foo___________________"
+--
+p: {i}"foo__"
+
+== underscores n on right 17
+input: "_foo____________________"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 18
+input: "_foo_____________________"
+--
+p: {i}"foo__"
+
+== underscores n on right 19
+input: "_foo______________________"
+--
+p: "_foo" {i}"__"
+
+== underscores n on right 20
+input: "_foo_______________________"
+--
+p: {i}"foo__"
+
+== underscores no nest
+input: "_a   _b_   c_"
+--
+p: "_a   " {i}"b" "   c_"
+
+== underscores right assoc
+input: "__foo_"
+--
+p: "_" {i}"foo"
+
+== underscores two together italic
+input: "_a_ b _c_"
+--
+p: {i}"a" " b " {i}"c"
+
+== underscores two together underline
+input: "__a__ b __c__"
+--
+p: {u}"a" " b " {u}"c"
+
+== underscores underline in italic
+input: "a ___foo__ bar_ baz"
+--
+p: "a " {i u}"foo" {i}" bar" " baz"
+
+== underscores underlined
+input: "__foo__"
+--
+p: {u}"foo"
+
+== underscores ws
+input: "_ _"
+--
+p: {i}" "
+
+== underscores ws 2
+input: "__ __"
+--
+p: {u}" "
+
+== underscores ws 3
+input: "a _b  _"
+--
+p: "a " {i}"b  "
+
+== subtext 1
+input: "-# foo"
+--
+sub: "foo"
+
+== subtext 2
+input: "-# foo\ning"
+--
+sub: "foo"
+p: "ing"
+
+== subtext 3
+input: "*-# foo*ing"
+--
+sub: {i}"foo"
+p: "ing"
+
+== subtext 4
+input: "a -# foo"
+--
+p: "a -# foo"
+
+== subtext 5
+input: " -# foo"
+--
+p: " -# foo"
+
+== subtext 6
+input: " *-# foo*"
+--
+p: " " {i}"-# foo"
+
+== subtext 7
+input: "-# -# a"
+--
+p: "-# -# a"
+
+== subtext 8
+input: "-#\na"
+--
+p: "-#" br "a"
+
+== subtext 9
+input: "-# ```a```"
+--
+code[]: "a"
+
+== subtext 10
+input: "-# ```\na\n```"
+--
+sub: "```"
+p: "a" br "```"
+
+== subtext 11
+input: "-#    a   \u{3000}"
+--
+sub: "a"

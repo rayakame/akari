@@ -1,0 +1,144 @@
+# Block quotes (R§4): "> " at a line's start, leading spaces allowed; ">>> " takes the rest.
+
+== a quote
+> a
+--
+> p: "a"
+
+== the space after > is needed
+>a
+--
+p: ">a"
+
+== quote lines are joined
+input: "> a\n> b"
+--
+> p: "a" br "b"
+
+== a second space is content
+>  foo
+--
+> p: " foo"
+
+== an empty quote
+input: "> "
+--
+> p:
+
+== observe: a space before a quote
+input: " > a"
+--
+p: " "
+> p: "a"
+
+== a quote ends at a line without the prefix
+input: "> a\nb"
+--
+> p: "a"
+p: "b"
+
+== a quote after a line of text
+input: "a\n> b"
+--
+p: "a"
+> p: "b"
+
+== a bare > ends the quote
+input: "> a\n>\n> b"
+--
+> p: "a"
+p: ">"
+> p: "b"
+
+== spaces before a newline in a quote
+input: "> a  \n> b"
+--
+> p: "a" br "b"
+
+== a block quote takes the rest
+input: ">>> a\nb"
+--
+> p: "a" br "b"
+
+== a block quote after text
+input: "x\n>>> a\nb"
+--
+p: "x"
+> p: "a" br "b"
+
+== a block quote takes the rest of its style
+input: "**>>> a\nb**c"
+--
+> p: {b}"a" br {b}"b"
+p: "c"
+
+== quotes don't nest
+> > foo
+--
+> p: "> foo"
+
+== a list in a quote
+> - a
+--
+> - p: "a"
+
+== a list of two items in a quote
+input: "> - a\n> - b"
+--
+> - p: "a"
+> - p: "b"
+
+== a list item continued in a quote
+input: "> - a\n>   b"
+--
+> - p: "a" br "b"
+
+== a heading in a quote
+> # a
+--
+> h1: "a"
+
+== a code block in a quote
+input: "> ```\n> a\n> ```"
+--
+> code[]: "a"
+
+== a code block in a quote needs every line quoted
+input: "> ```\na\n```"
+--
+> p: "```"
+p: "a" br "```"
+
+== a code block of several lines in a quote
+input: "> ```py\n> a\n> b\n> ```"
+--
+> code[py]: "a\nb"
+
+== a quote in a list
+- > a
+--
+- > p: "a"
+
+== a quote in italics
+*> a*
+--
+> p: {i}"a"
+
+== a quote inside bold
+input: "**test\n> foo**bar"
+--
+p: {b}"test"
+> p: {b}"foo"
+p: "bar"
+
+== a quote inside bold with text after
+input: "**a\n> b** c"
+--
+p: {b}"a"
+> p: {b}"b"
+p: " c"
+
+== a spoiler across quote lines
+input: "> ||a\n> b||"
+--
+> p{sp0}: {sp0}"a" br {sp0}"b"

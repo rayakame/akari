@@ -1,0 +1,238 @@
+# Realistic messages written for this corpus (D74): synthetic text, IDs and addresses only.
+# Each outline matches parse-discord's, except where Akari follows docs.discord.food (commands,
+# navigation, email and phone links).
+
+== release announcement
+input: "# Release 2.4.0\n## What's new\n- Faster startup on older machines\n- **Dark mode** for the settings window\n- Search now finds `#channels` by topic\n## Fixes\n1. Crash when pasting an empty image\n2. The unread marker sometimes stayed after reading\n-# Thanks to everyone who reported bugs!"
+--
+h1: "Release 2.4.0"
+h2: "What's new"
+- p: "Faster startup on older machines"
+- p: {b}"Dark mode" " for the settings window"
+- p: "Search now finds " code"#channels" " by topic"
+h2: "Fixes"
+1. p: "Crash when pasting an empty image"
+2. p: "The unread marker sometimes stayed after reading"
+sub: "Thanks to everyone who reported bugs!"
+
+== code help question
+input: "Hey, why does this panic? I thought `unwrap_or` was safe.\n```rust\nfn main() {\n    let v: Vec<u32> = Vec::new();\n    println!(\"{}\", v[0]);\n}\n```\nIt says *index out of bounds*."
+--
+p: "Hey, why does this panic? I thought " code"unwrap_or" " was safe."
+code[rust]: "fn main() {\n    let v: Vec<u32> = Vec::new();\n    println!(\"{}\", v[0]);\n}"
+p: br "It says " {i}"index out of bounds" "."
+
+== code help answer
+input: "> why does this panic?\n`v[0]` indexes an empty vector. Use `v.first()` instead:\n```rs\nif let Some(x) = v.first() { println!(\"{x}\"); }\n```"
+--
+> p: "why does this panic?"
+p: code"v[0]" " indexes an empty vector. Use " code"v.first()" " instead:"
+code[rs]: "if let Some(x) = v.first() { println!(\"{x}\"); }"
+
+== game chat with spoilers
+input: "did you finish chapter 3?? ||the captain was the traitor all along|| I did NOT see that coming"
+--
+p: "did you finish chapter 3?? " {sp0}"the captain was the traitor all along" " I did NOT see that coming"
+
+== spoiler over two lines
+input: "ok last one:\n||the ending\nis a dream||\nfight me"
+--
+p: "ok last one:" br {sp0}"the ending" br {sp0}"is a dream" br "fight me"
+
+== quote reply
+input: "> I think we should move the meetup to Saturday\nworks for me, <@123456789012345678> what about you?"
+--
+> p: "I think we should move the meetup to Saturday"
+p: "works for me, " @user:123456789012345678 " what about you?"
+
+== block quote
+input: ">>> Rules for the tournament:\n1. Be on time\n2. No smurf accounts\n3. Have fun"
+--
+> p: "Rules for the tournament:"
+> 1. p: "Be on time"
+> 2. p: "No smurf accounts"
+> 3. p: "Have fun"
+
+== bot status
+input: "**Server status** <t:1760000000:R>\nUptime: `14d 3h`\nPlayers online: 42\nMaintenance: <t:1760086400:F> (<t:1760086400:R>)\nPing <@&234567890123456789> if anything breaks."
+--
+p: {b}"Server status" " " time:1760000000:R br "Uptime: " code"14d 3h" br "Players online: 42" br "Maintenance: " time:1760086400:F " (" time:1760086400:R ")" br "Ping " @role:234567890123456789 " if anything breaks."
+
+== mentions everywhere
+input: "@everyone the stream starts in 10 minutes in <#345678901234567890>! <@123456789012345678> is hosting."
+--
+p: @everyone " the stream starts in 10 minutes in " #chan:345678901234567890 "! " @user:123456789012345678 " is hosting."
+
+== here ping
+input: "@here quick vote: pizza or tacos?"
+--
+p: @here " quick vote: pizza or tacos?"
+
+== german
+input: "Grüße aus Köln! Das Treffen ist am **Dienstag** um 19 Uhr, bitte pünktlich sein. Wer kommt mit? 🍺"
+--
+p: "Grüße aus Köln! Das Treffen ist am " {b}"Dienstag" " um 19 Uhr, bitte pünktlich sein. Wer kommt mit? 🍺"
+
+== japanese
+input: "おはようございます！今日の**会議**は午後３時からです。資料は`docs/meeting.md`にあります。"
+--
+p: "おはようございます！今日の" {b}"会議" "は午後３時からです。資料は" code"docs/meeting.md" "にあります。"
+
+== arabic
+input: "مرحبا بالجميع! الاجتماع **غدا** في الساعة الخامسة. شكرا لكم 🌙"
+--
+p: "مرحبا بالجميع! الاجتماع " {b}"غدا" " في الساعة الخامسة. شكرا لكم 🌙"
+
+== hebrew and latin
+input: "שלום world, *mixed* direction text"
+--
+p: "שלום world, " {i}"mixed" " direction text"
+
+== emoji with skin tones
+input: "great job 👍🏽👏🏿 everyone"
+--
+p: "great job 👍🏽👏🏿 everyone"
+
+== family emoji jumbo
+input: "👨\u{200d}👩\u{200d}👧\u{200d}👦 🏳️\u{200d}🌈 🇯🇵"
+--
+p: "👨‍👩‍👧‍👦 🏳️‍🌈 🇯🇵"
+jumbo
+
+== single emoji
+input: "😂"
+--
+p: "😂"
+jumbo
+
+== custom emoji reaction
+input: "<:pepeLaugh:456789012345678901> <a:partyparrot:567890123456789012>"
+--
+p: emoji"pepeLaugh":456789012345678901 " " aemoji"partyparrot":567890123456789012
+jumbo
+
+== custom emoji in text
+input: "that's so good <:pog:456789012345678901> honestly"
+--
+p: "that's so good " emoji"pog":456789012345678901 " honestly"
+
+== long URL
+input: "check this out https://example.com/a/very/long/path/with/segments?query=value&another=thing&third=3#section-about-the-thing"
+--
+p: "check this out " {l0}"https://example.com/a/very/long/path/with/segments?query=value&another=thing&third=3#section-about-the-thing"
+link0: <https://example.com/a/very/long/path/with/segments?query=value&another=thing&third=3#section-about-the-thing>
+
+== URL in parentheses
+input: "(see https://en.wikipedia.org/wiki/Rust_(programming_language) for details)"
+--
+p: "(see " {l0}"https://en.wikipedia.org/wiki/Rust_(programming_language)" " for details)"
+link0: <https://en.wikipedia.org/wiki/Rust_(programming_language)>
+
+== masked link
+input: "Read the [contributing guide](https://example.com/contributing \"How to contribute\") before opening a PR."
+--
+p: "Read the " {l0}"contributing guide" " before opening a PR."
+link0: <https://example.com/contributing> masked title="How to contribute"
+
+== suppressed link
+input: "No embed please: <https://example.com/article>"
+--
+p: "No embed please: " {l0}"https://example.com/article"
+link0: <https://example.com/article> suppress
+
+== rejected masked link
+input: "[https://example.com](https://example.org) looks fishy"
+--
+p: "[https://example.com](https://example.org) looks fishy"
+
+== slash command help
+input: "Use </remind:678901234567890123> to set a reminder, or </settings timezone set:678901234567890124>."
+--
+p: "Use " /cmd"remind":678901234567890123 " to set a reminder, or " /cmd"settings timezone set":678901234567890124 "."
+
+== navigation tokens
+input: "New here? Check <id:guide> and pick roles in <id:customize>."
+--
+p: "New here? Check " nav:guide " and pick roles in " nav:customize "."
+
+== nested list
+input: "Shopping:\n- fruit\n  - apples\n  - pears\n- bread\n- cheese"
+--
+p: "Shopping:"
+- p: "fruit"
+. - p: "apples"
+. - p: "pears"
+- p: "bread"
+- p: "cheese"
+
+== numbered steps
+input: "3. open settings\n4. click *Privacy*\n5. turn off ~~tracking~~ telemetry"
+--
+3. p: "open settings"
+4. p: "click " {i}"Privacy"
+5. p: "turn off " {s}"tracking" " telemetry"
+
+== mixed styles
+input: "this is ***really*** __important__, ~~not~~ optional, and ||secret||"
+--
+p: "this is " {b i}"really" " " {u}"important" ", " {s}"not" " optional, and " {sp0}"secret"
+
+== snake case identifiers
+input: "set max_retry_count and RETRY_BACKOFF_MS in config_file.toml"
+--
+p: "set max_retry_count and RETRY_BACKOFF_MS in config_file.toml"
+
+== escaped markdown
+input: "use \\*asterisks\\* and \\_underscores\\_ literally, like \\`this\\`"
+--
+p: "use *asterisks* and _underscores_ literally, like `this`"
+
+== shrug
+input: "idk ¯\\_(ツ)_/¯"
+--
+p: "idk ¯\\_(ツ)_/¯"
+
+== headings in quote
+input: "> # Weekly digest\n> - 3 new members\n> - 1 event"
+--
+> h1: "Weekly digest"
+> - p: "3 new members"
+> - p: "1 event"
+
+== subtext footnote
+input: "The price is 20€.\n-# prices may change without notice"
+--
+p: "The price is 20€."
+sub: "prices may change without notice"
+
+== inline code with backticks
+input: "the syntax is ``a `b` c`` for nested code"
+--
+p: "the syntax is " code"a `b` c" " for nested code"
+
+== timestamp styles
+input: "<t:1700000000:t> <t:1700000000:T> <t:1700000000:d> <t:1700000000:D> <t:1700000000:f> <t:1700000000:F> <t:1700000000:R>"
+--
+p: time:1700000000:t " " time:1700000000:T " " time:1700000000:d " " time:1700000000:D " " time:1700000000:f " " time:1700000000:F " " time:1700000000:R
+
+== email and phone
+input: "Contact <support@example.com> or call <+1 (555) 010 0199>."
+--
+p: "Contact " {l0}"support@example.com" " or call " {l1}"+1 (555) 010 0199" "."
+link0: <mailto:support@example.com> email
+link1: <tel:+15550100199> phone
+
+== windows line endings
+input: "line one\r\nline two\r\n"
+--
+p: "line one" br "line two"
+
+== trailing spaces
+input: "first line   \nsecond line"
+--
+p: "first line" br "second line"
+
+== long message
+input: "**Patch notes, part 2**\nlorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, conse *end*"
+--
+p: {b}"Patch notes, part 2" br "lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, consectetur adipiscing elit. lorem ipsum dolor sit amet, conse " {i}"end"

@@ -1,0 +1,231 @@
+# Unicode emoji, :shortcodes: and jumbo messages (R§10, R§12, D66). Emoji show as text; a
+# message of 1 to 27 emoji (Unicode or custom) and whitespace is jumbo.
+
+== one emoji is jumbo
+😀
+--
+p: "😀"
+jumbo
+
+== emoji with spaces are jumbo
+😀 😀
+--
+p: "😀 😀"
+jumbo
+
+== emoji next to each other are jumbo
+😀😀
+--
+p: "😀😀"
+jumbo
+
+== emoji on two lines are jumbo
+input: "😀\n😀"
+--
+p: "😀" br "😀"
+jumbo
+
+== spaces around emoji
+input: " 😀 "
+--
+p: " 😀 "
+jumbo
+
+== 27 emoji are jumbo
+😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+--
+p: "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+jumbo
+
+== 28 emoji aren't
+😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+--
+p: "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+
+== text after an emoji cancels jumbo
+😀 a
+--
+p: "😀 a"
+
+== text before an emoji cancels jumbo
+a 😀
+--
+p: "a 😀"
+
+== a custom emoji is jumbo
+<:a:1>
+--
+p: emoji"a":1
+jumbo
+
+== an animated custom emoji is jumbo
+<a:b:2>
+--
+p: aemoji"b":2
+jumbo
+
+== custom emoji count towards 27
+<:a:1>😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+--
+p: emoji"a":1 "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+jumbo
+
+== custom emoji count towards 28
+<:a:1>😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+--
+p: emoji"a":1 "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+
+== a family is one emoji
+👨‍👩‍👧
+--
+p: "👨‍👩‍👧"
+jumbo
+
+== a skin tone is part of its emoji
+👍🏽
+--
+p: "👍🏽"
+jumbo
+
+== two emoji with skin tones
+👍🏽👍🏽
+--
+p: "👍🏽👍🏽"
+jumbo
+
+== a flag is one emoji
+🇩🇪
+--
+p: "🇩🇪"
+jumbo
+
+== a lone regional indicator is an emoji
+🇦
+--
+p: "🇦"
+jumbo
+
+== a rainbow flag
+🏳️‍🌈
+--
+p: "🏳️‍🌈"
+jumbo
+
+== a keycap
+1️⃣
+--
+p: "1️⃣"
+jumbo
+
+== a hash keycap
+#️⃣
+--
+p: "#️⃣"
+jumbo
+
+== an asterisk keycap
+*️⃣
+--
+p: "*️⃣"
+jumbo
+
+== a keycap without its variation selector isn't an emoji
+input: "1\u{20e3}"
+--
+p: "1⃣"
+
+== a heart with its variation selector
+❤️
+--
+p: "❤️"
+jumbo
+
+== a heart without its variation selector isn't an emoji
+❤
+--
+p: "❤"
+
+== copyright isn't an emoji
+©
+--
+p: "©"
+
+== registered isn't an emoji
+®
+--
+p: "®"
+
+== trade mark isn't an emoji
+™
+--
+p: "™"
+
+== copyright with a variation selector isn't an emoji
+©️
+--
+p: "©️"
+
+== an escaped emoji isn't one
+\😀
+--
+p: "😀"
+
+== a combining mark after an emoji is text
+input: "😀\u{301}"
+--
+p: "😀́"
+
+== a zero-width space after an emoji is text
+input: "😀\u{200b}"
+--
+p: "😀\u{200b}"
+
+== italics win over an asterisk keycap
+*️⃣ a*
+--
+p: {i}"️⃣ a"
+
+== a keycap before a period isn't a list
+1️⃣. a
+--
+p: "1️⃣. a"
+
+== a hash keycap isn't a heading
+#️⃣ a
+--
+p: "#️⃣ a"
+
+== observe: a styled emoji isn't jumbo
+**😀**
+--
+p: {b}"😀"
+
+== observe: a mention cancels jumbo
+😀 <@1>
+--
+p: "😀 " @user:1
+
+== observe: a timestamp cancels jumbo
+😀 <t:0>
+--
+p: "😀 " time:0:f
+
+== observe: a spoiler cancels jumbo
+||😀||
+--
+p{sp0}: {sp0}"😀"
+
+== shortcodes stay text
+:smile:
+--
+p: ":smile:"
+
+== a shortcode's underscores don't start italics
+_:a_b:_
+--
+p: "_:a_b:_"
+
+== a shortcode is read as a whole
+x :a_b: y_
+--
+p: "x :a_b: y_"

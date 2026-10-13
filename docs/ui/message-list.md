@@ -165,8 +165,8 @@ bar says "Some messages may be missing" instead.
 - A red (`#d22d39`) "new messages" line with a "NEW" tag at its right end, at the first unread
   message.
 - Messages that mention the user, tinted with `#f8a300` at 8% and a 2 wide bar on the left.
-- Markdown, mentions, emoji, embeds and images. Until markdown rendering exists, Akari shows
-  message content as plain text: a mention looks like `<@123>` and markdown symbols show as
-  typed.
+- Markdown, mentions and timestamps ([markdown.md](markdown.md)); emoji images, embeds and
+  images. Until markdown rendering exists, Akari shows message content as plain text: a
+  mention looks like `<@123>` and markdown symbols show as typed.
 - Components V2 layouts ([messages.md](../protocol/messages.md#components-v2)). Until Akari
   renders them, such a message shows one muted placeholder line where its content would be.

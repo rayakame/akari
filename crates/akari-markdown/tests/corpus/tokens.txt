@@ -1,0 +1,246 @@
+# Mentions, commands, custom emoji and server navigation (R§10). Malformed tokens stay text.
+
+== a user mention
+<@123>
+--
+p: @user:123
+
+== a user mention with an exclamation mark
+<@!123>
+--
+p: @user:123
+
+== a role mention
+<@&123>
+--
+p: @role:123
+
+== a channel mention
+<#123>
+--
+p: #chan:123
+
+== everyone
+@everyone
+--
+p: @everyone
+
+== here
+@here
+--
+p: @here
+
+== everyone is case-sensitive
+@Everyone
+--
+p: "@Everyone"
+
+== observe: everyone needs no word boundary
+@everyonee
+--
+p: @everyone "e"
+
+== observe: here inside an email address
+email@here.com
+--
+p: "email" @here ".com"
+
+== here then everyone
+@here@everyone
+--
+p: @here @everyone
+
+== a space after the at sign
+<@ 123>
+--
+p: "<@ 123>"
+
+== a space before the bracket
+<@123 >
+--
+p: "<@123 >"
+
+== a channel needs digits
+<#abc>
+--
+p: "<#abc>"
+
+== an ID over the largest snowflake is text
+<@99999999999999999999999>
+--
+p: "<@99999999999999999999999>"
+
+== a snowflake-sized ID
+<@123456789012345678>
+--
+p: @user:123456789012345678
+
+== game profiles aren't parsed yet
+<@$123>
+--
+p: "<@$123>"
+
+== mentions inside text
+a<@1>b
+--
+p: "a" @user:1 "b"
+
+== mentions next to each other
+<@1><@2>
+--
+p: @user:1 @user:2
+
+== an escaped mention is text
+\<@1>
+--
+p: "<@1>"
+
+== a mention in inline code is text
+`<@1>`
+--
+p: code"<@1>"
+
+== a custom emoji
+a <:smile:123>
+--
+p: "a " emoji"smile":123
+
+== an animated custom emoji
+a <a:dance:456>
+--
+p: "a " aemoji"dance":456
+
+== custom emoji names are letters, digits and underscores
+<:x-y:1>
+--
+p: "<:x-y:1>"
+
+== a custom emoji needs a name
+<::1>
+--
+p: "<::1>"
+
+== a custom emoji needs an ID
+<:a:>
+--
+p: "<:a:>"
+
+== a custom emoji ID over the largest snowflake is text
+<:a:99999999999999999999999>
+--
+p: "<:a:99999999999999999999999>"
+
+== a slash command
+</ping:123456789012345678>
+--
+p: /cmd"ping":123456789012345678
+
+== a slash command with a subcommand
+</role add:123456789012345678>
+--
+p: /cmd"role add":123456789012345678
+
+== a slash command with a group and a subcommand
+</settings user set:123456789012345678>
+--
+p: /cmd"settings user set":123456789012345678
+
+== four words aren't a command
+</a b c d:123456789012345678>
+--
+p: "</a b c d:123456789012345678>"
+
+== command names take dashes, underscores and apostrophes
+</it's-a_test:123456789012345678>
+--
+p: /cmd"it's-a_test":123456789012345678
+
+== command names take any letters and digits
+</über2:123456789012345678>
+--
+p: /cmd"über2":123456789012345678
+
+== command names take Devanagari and Thai
+</नमस्ते:123456789012345678>
+--
+p: /cmd"नमस्ते":123456789012345678
+
+== a command name of 32 characters
+</abcdefghijklmnopqrstuvwxyzabcdef:123456789012345678>
+--
+p: /cmd"abcdefghijklmnopqrstuvwxyzabcdef":123456789012345678
+
+== a command name of 33 characters is text
+</abcdefghijklmnopqrstuvwxyzabcdefg:123456789012345678>
+--
+p: "</abcdefghijklmnopqrstuvwxyzabcdefg:123456789012345678>"
+
+== a command ID needs 17 digits
+</ping:1234567890123456>
+--
+p: "</ping:1234567890123456>"
+
+== a command ID of 21 digits
+</ping:123456789012345678901>
+--
+p: "</ping:123456789012345678901>"
+
+== a command needs a name
+</:123456789012345678>
+--
+p: "</:123456789012345678>"
+
+== two spaces in a command
+</a  b:123456789012345678>
+--
+p: "</a  b:123456789012345678>"
+
+== customize
+<id:customize>
+--
+p: nav:customize
+
+== browse
+<id:browse>
+--
+p: nav:browse
+
+== guide
+<id:guide>
+--
+p: nav:guide
+
+== home is the guide
+<id:home>
+--
+p: nav:guide
+
+== linked roles
+<id:linked-roles>
+--
+p: nav:linked-roles
+
+== a linked role
+<id:linked-roles:123>
+--
+p: nav:linked-roles:123
+
+== an unknown navigation target is text
+<id:other>
+--
+p: "<id:other>"
+
+== navigation is case-sensitive
+<id:Guide>
+--
+p: "<id:Guide>"
+
+== styles around a mention
+*a <@1> b*
+--
+p: {i}"a " {i}@user:1 {i}" b"
+
+== a mention in bold
+**<@&5>**
+--
+p: {b}@role:5

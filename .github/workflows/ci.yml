@@ -134,6 +134,57 @@ jobs:
         run: |
           for pid in $(pgrep -x Akari); do sudo sample "$pid" 3; done
 
+  fuzz:
+    name: fuzz akari-markdown
+    # Pull requests that change the parser; the targets and their nightly live in its fuzz crate.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Did akari-markdown change?
+        id: changed
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          if git diff --name-only "origin/$BASE...HEAD" | grep -q '^crates/akari-markdown/'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      # The prebuilt cargo-fuzz targets musl by default, which the address sanitizer can't use;
+      # libFuzzer needs its corpus directories to exist.
+      - if: steps.changed.outputs.run == 'true'
+        working-directory: crates/akari-markdown/fuzz
+        run: |
+          rustup toolchain install --no-self-update
+          echo "FUZZ_TARGET=$(rustc -vV | sed -n 's/^host: //p')" >> "$GITHUB_ENV"
+          mkdir -p corpus/parse corpus/source_range
+      - if: steps.changed.outputs.run == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz@0.13.2
+      # Two minutes per target, seeded with the corpus files, with debug assertions and overflow checks.
+      - name: Fuzz parse
+        if: steps.changed.outputs.run == 'true'
+        working-directory: crates/akari-markdown/fuzz
+        run: >-
+          cargo fuzz run parse -O -a --target "$FUZZ_TARGET" corpus/parse ../tests/corpus
+          -- -max_total_time=120 -max_len=8192
+      - name: Fuzz source_range
+        if: ${{ !cancelled() && steps.changed.outputs.run == 'true' }}
+        working-directory: crates/akari-markdown/fuzz
+        run: >-
+          cargo fuzz run source_range -O -a --target "$FUZZ_TARGET" corpus/source_range ../tests/corpus
+          -- -max_total_time=120 -max_len=8192
+      - if: ${{ failure() && steps.changed.outputs.run == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: crates/akari-markdown/fuzz/artifacts/
+          if-no-files-found: ignore
+
   deny:
     name: cargo-deny bans
     runs-on: ubuntu-latest

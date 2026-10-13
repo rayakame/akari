@@ -1,0 +1,72 @@
+# Text, line breaks and whitespace (R§13). The format is in src/tests/corpus.rs.
+
+== plain words
+hello world
+--
+p: "hello world"
+
+== a newline is a break
+a
+b
+--
+p: "a" br "b"
+
+== blank lines are kept
+input: "a\n\n\nb"
+--
+p: "a" br br br "b"
+
+== trailing spaces before a newline aren't shown
+input: "a   \nb"
+--
+p: "a" br "b"
+
+== leading spaces of a line are kept
+input: "a  \n  b"
+--
+p: "a" br "  b"
+
+== spaces at the end of the message are kept
+input: "a  "
+--
+p: "a  "
+
+== only spaces are dropped before a newline
+input: "a\t\nb\u{a0}\nc"
+--
+p: "a\t" br "b\u{a0}" br "c"
+
+== empty input has no blocks
+input: ""
+--
+
+== whitespace-only input is one paragraph
+input: "   "
+--
+p: "   "
+
+== a final newline adds no line
+input: "a\n"
+--
+p: "a"
+
+== a leading newline is an empty line
+input: "\na\n"
+--
+p: br "a"
+
+== a single newline is an empty paragraph
+input: "\n"
+--
+p:
+
+# CR LF is one break; a lone CR, NUL, U+2028 and tabs are text (Review Focus 3).
+== line_endings_and_controls
+input: "a\r\nb\rc\u{0}\u{2028}\td"
+--
+p: "a" br "b\rc\u{0}\u{2028}\td"
+
+== non-latin text
+input: "Grüße, 日本語のテキスト، مرحبا"
+--
+p: "Grüße, 日本語のテキスト، مرحبا"

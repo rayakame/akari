@@ -1,0 +1,365 @@
+# Bold, italic, underline, strikethrough and spoilers (R§1). Each style matches lazily up to its
+# first valid closing delimiter; its inner text is parsed again.
+
+== bold
+**a**
+--
+p: {b}"a"
+
+== italic with asterisks
+*a*
+--
+p: {i}"a"
+
+== italic with underscores
+_a_
+--
+p: {i}"a"
+
+== underline
+__a__
+--
+p: {u}"a"
+
+== strikethrough
+~~a~~
+--
+p: {s}"a"
+
+== spoiler
+||a||
+--
+p{sp0}: {sp0}"a"
+
+# Bold has no whitespace rule.
+== bold may start with a space
+** a**
+--
+p: {b}" a"
+
+== bold around spaced words
+foo ** bar ** baz
+--
+p: "foo " {b}" bar " " baz"
+
+== underline then text
+__a__b
+--
+p: {u}"a" "b"
+
+# Asterisk italic: no whitespace after the opener; up to two spaces before the closer, dropped.
+== one space before the closing asterisk
+*a *
+--
+p: {i}"a"
+
+== two spaces before the closing asterisk
+*a  *
+--
+p: {i}"a"
+
+== three spaces before the closing asterisk
+*a   *
+--
+p: "*a   *"
+
+== an opening asterisk before a space
+a * b*
+--
+p: "a * b*"
+
+== an opening asterisk before a tab
+input: "*\ta*"
+--
+p: "*\ta*"
+
+== a tab before the closing asterisk
+input: "*a\t*"
+--
+p: "*a\t*"
+
+== asterisk italic inside a word
+a*b*c
+--
+p: "a" {i}"b" "c"
+
+== double asterisks inside asterisk italic
+*a**b*
+--
+p: {i}"a**b"
+
+== a closing asterisk before another
+*a**
+--
+p: "*a**"
+
+# Underscore italic: only the right edge is checked.
+== snake case
+snake_case_words
+--
+p: "snake_case_words"
+
+== an underscore italic before a letter
+_a_b
+--
+p: "_a_b"
+
+== an underscore italic after a letter
+a_b_
+--
+p: "a" {i}"b"
+
+== an underscore italic inside a word
+foo_bar_ baz
+--
+p: "foo" {i}"bar" " baz"
+
+== an underscore closer before a letter isn't one
+_a b_c
+--
+p: "_a b_c"
+
+== an underscore closer before punctuation
+_a_$
+--
+p: {i}"a" "$"
+
+== an underscore italic may start with a space
+_ a_
+--
+p: {i}" a"
+
+== double underscores inside underscore italic
+_a__b_
+--
+p: {i}"a__b"
+
+== an underscore closer before a non-ascii letter
+_a_é
+--
+p: {i}"a" "é"
+
+== non-ascii letters in underscore italic
+_é_é
+--
+p: {i}"é" "é"
+
+# Combinations: bold and underline win over a shorter italic at the same place.
+== bold italic
+***foo***
+--
+p: {b i}"foo"
+
+== underline italic
+___foo___
+--
+p: {i u}"foo"
+
+== italic closes first inside bold
+a ***foo* bar** baz
+--
+p: "a " {b i}"foo" {b}" bar" " baz"
+
+== bold closes first inside italic
+a ***foo** bar* baz
+--
+p: "a " {b i}"foo" {i}" bar" " baz"
+
+== underline closes first inside italic
+a ___foo__ bar_ baz
+--
+p: "a " {i u}"foo" {i}" bar" " baz"
+
+== all four styles
+***__~~a~~__***
+--
+p: {b i u s}"a"
+
+# Strikethrough: any characters, escapes don't protect the closer, and no underscore after it.
+== a strikethrough closer before an underscore
+~~a~~_
+--
+p: "~~a~~_"
+
+== four tildes
+~~~~
+--
+p: "~~~~"
+
+== five tildes
+~~~~~
+--
+p: {s}"~"
+
+== a backslash doesn't protect the strikethrough closer
+~~\~~
+--
+p: {s}"\\"
+
+== a third tilde after strikethrough
+~~a~~~
+--
+p: {s}"a" "~"
+
+== four tildes after strikethrough
+~~a~~~~
+--
+p: {s}"a" "~~"
+
+# Spoilers: any characters, across lines, numbered in source order.
+== four bars
+||||
+--
+p: "||||"
+
+== five bars
+|||||
+--
+p{sp0}: {sp0}"|"
+
+== six bars
+||||||
+--
+p: {sp0}"|" "|"
+
+== a third bar after a spoiler
+||a|||
+--
+p: {sp0}"a" "|"
+
+== a spoiler across lines
+input: "||a\nb||"
+--
+p{sp0}: {sp0}"a" br {sp0}"b"
+
+== a spoiler before a quote keeps its block
+input: "||a||\n> b"
+--
+p{sp0}: {sp0}"a"
+> p: "b"
+
+== a spoiler before a final line break keeps its block
+input: "||a||\n"
+--
+p{sp0}: {sp0}"a"
+
+== spoilers are numbered in order
+||a|| ||b||
+--
+p: {sp0}"a" " " {sp1}"b"
+
+== styles inside a spoiler share its number
+||**a** b||
+--
+p{sp0}: {b sp0}"a" {sp0}" b"
+
+== a code block in a spoiler
+||```x```||
+--
+code[]{sp0}: "x"
+
+== a code block in the middle of a spoiler
+a||b```c```d||e
+--
+p: "a" {sp0}"b"
+code[]{sp0}: "c"
+p: {sp0}"d" "e"
+
+# Unbalanced delimiters stay text, matched from the right.
+== bold missing an asterisk
+**foo*
+--
+p: "*" {i}"foo"
+
+== bold with an extra asterisk
+**foo***
+--
+p: {b}"foo*"
+
+== three asterisks
+***
+--
+p: "***"
+
+== four asterisks
+****
+--
+p: {i}"**"
+
+== five asterisks
+*****
+--
+p: {b}"*"
+
+== italic with a double closer
+*foo**
+--
+p: "*foo**"
+
+== unclosed bold
+**foo
+--
+p: "**foo"
+
+# Crossed delimiters: the first opener wins.
+== crossed italic and bold
+*foo **bar* baz**
+--
+p: {i}"foo **bar" " baz**"
+
+== crossed bold and underline
+**foo__bar**baz__
+--
+p: {b}"foo__bar" "baz__"
+
+# Across lines.
+== italic across a line
+input: "*foo\nbar*"
+--
+p: {i}"foo" br {i}"bar"
+
+== bold across a blank line
+input: "**foo\n\nbar**"
+--
+p: {b}"foo" br br {b}"bar"
+
+== an italic closer after a newline isn't one
+input: "*foo\n*"
+--
+p: "*foo" br "*"
+
+== spaces before a newline inside bold
+input: "**a  \nb**"
+--
+p: {b}"a" br {b}"b"
+
+== italics on two lines
+input: "*a*\n*b*"
+--
+p: {i}"a" br {i}"b"
+
+# Escapes are respected by bold, underline and asterisk italic.
+== escapes inside italic
+*a\*\\\*\\*
+--
+p: {i}"a*\\*\\"
+
+== an escaped bold closer
+**\**
+--
+p: "*" {i}"*"
+
+== bold isn't stopped by inline code that starts inside it
+**a `b** c`
+--
+p: {b}"a `b" " c`"
+
+== emoji in italic
+*😀*
+--
+p: {i}"😀"
+
+== accented letters in bold
+**é**
+--
+p: {b}"é"
