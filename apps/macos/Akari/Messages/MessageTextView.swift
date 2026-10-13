@@ -64,8 +64,8 @@ final class MessageTextView: NSTextView {
         }
     }
 
-    // A selection survives a reconfigure that shows the same text, not an edit.
-    func show(_ text: NSAttributedString) {
+    // A selection survives a reread of the same message, not an edit or another message.
+    func show(_ text: NSAttributedString, keepingSelection: Bool = false) {
         guard let storage = textStorage else {
             return
         }
@@ -75,7 +75,7 @@ final class MessageTextView: NSTextView {
             // Only its top counts: the height is the view's own, from the padding.
             textContainerInset = NSSize(width: 0, height: padding.top)
         }
-        let kept = storage.string == text.string ? selectedRanges : nil
+        let kept = keepingSelection && storage.string == text.string ? selectedRanges : nil
         storage.setAttributedString(text)
         linkElements = nil
         selectedRanges = kept ?? [NSValue(range: NSRange(location: 0, length: 0))]

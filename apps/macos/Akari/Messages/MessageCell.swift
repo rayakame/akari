@@ -65,9 +65,10 @@ final class MessageCell: NSTableCellView {
         configureAllButTheBody(
             message, startsGroup: startsGroup, groupTime: groupTime, shortTime: shortTime,
             fullDate: fullDate)
+        let same = self.message?.id == message.id
         self.message = message
         mentioned = message.mentionsMe
-        content.show(body)
+        content.show(body, keepingSelection: same)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

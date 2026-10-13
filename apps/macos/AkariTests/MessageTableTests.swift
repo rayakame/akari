@@ -477,6 +477,26 @@ struct MessageTableTests {
     }
 
     @Test
+    func aReusedCellDropsTheSelectionOfItsLastMessage() throws {
+        let cell = MessageCell()
+        let show = { (message: Message) in
+            cell.configure(
+                message, body: NSAttributedString(string: message.content), startsGroup: true,
+                groupTime: "", shortTime: "", fullDate: "")
+        }
+        let first = row(1, at: noon, content: "same words").message
+        show(first)
+        let text = try #require(messageText(in: cell))
+        text.setSelectedRange(NSRange(location: 0, length: 4))
+
+        show(first)
+        #expect(text.selectedRange().length == 4)
+
+        show(row(2, at: noon, content: "same words").message)
+        #expect(text.selectedRange().length == 0)
+    }
+
+    @Test
     func clickingMessageTextKeepsItsAttributes() throws {
         show([row(1, at: noon, content: "hello there")])
         let text = try #require(messageText(in: try cell(of: 1)))
