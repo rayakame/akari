@@ -172,7 +172,8 @@ bar says "Some messages may be missing" instead.
   read the user's notification settings yet, so it also highlights @everyone in servers where
   the user suppressed it.
 - Relative timestamps ("in 5 minutes") count on their own while they're on screen, and a row
-  that grows or shrinks with them doesn't move the text being read.
+  that grows or shrinks with them doesn't move the text being read. Akari stops counting while
+  the window is hidden or minimized and catches up when it shows again.
 
 ## Later
 

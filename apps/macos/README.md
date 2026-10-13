@@ -45,7 +45,7 @@ notifications and settings come later.
 - **Copy:** Cmd+C copies what the selection shows, as plain text (`bold and @name`). A
   message's context menu has "Copy Text", which copies its markdown.
 - **Mentions of the user** tint the row; relative timestamps count down on one timer for
-  the list.
+  the list, which waits while the window is hidden or minimized and goes with the list.
 
 ## Connection
 

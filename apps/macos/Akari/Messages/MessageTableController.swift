@@ -47,11 +47,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var revealed: [MessageId: Set<UInt16>] = [:]
     private var relativeTimes: [MessageId: Date] = [:]
     private let schedule: Schedule
+    private let onScreen: @MainActor (NSWindow) -> Bool
     private let build: Build
     // Shared by the height pass and the cell, so a row's text is built once per change (D71).
     private var texts: [MessageId: (message: Message, revealed: Set<UInt16>, built: MessageText.Built)] =
         [:]
-    private var relativeTimer: (date: Date, cancel: () -> Void)?
+    nonisolated(unsafe) private var relativeTimer: (date: Date, cancel: () -> Void)?
     private var lastRelativeFire = Date.distantPast
     // A page that lands while the list is bounced past its top waits for the bounce to end:
     // moving the clip under AppKit's rubber band would fight it.
@@ -107,9 +108,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         now: @escaping () -> Date = Date.init, pointer: (() -> NSPoint?)? = nil,
         notifications: NotificationCenter = .default,
         schedule: @escaping Schedule = MessageTableController.timer,
+        onScreen: @escaping @MainActor (NSWindow) -> Bool = MessageTableController.isOnScreen,
         build: @escaping Build = MessageText.build
     ) {
         self.schedule = schedule
+        self.onScreen = onScreen
         self.build = build
         self.tableView = tableView
         calendarSource = calendar
@@ -286,6 +289,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         for observer in timeObservers {
             notifications.removeObserver(observer)
         }
+        relativeTimer?.cancel()
     }
 
     // Every height is measured again: system rows carry the time in their wrapped text.
@@ -767,6 +771,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return built.text
     }
 
+    static func isOnScreen(_ window: NSWindow) -> Bool {
+        window.occlusionState.contains(.visible) && !window.isMiniaturized
+    }
+
     static func timer(_ date: Date, _ fire: @escaping @MainActor () -> Void) -> () -> Void {
         let timer = Timer(fire: date, interval: 0, repeats: false) { _ in
             MainActor.assumeIsolated { fire() }
@@ -775,9 +783,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return { timer.invalidate() }
     }
 
-    // One timer for the list, at the earliest change on screen, at least a second apart (D68).
+    // One timer for the list, at the earliest change on screen, at least a second apart (D68),
+    // and none while the window is hidden.
     private func updateRelativeTimer() {
-        let visible = tableView.rows(in: tableView.visibleRect)
+        let shown = tableView.window.map(onScreen) ?? false
+        let visible = shown ? tableView.rows(in: tableView.visibleRect) : NSRange()
         var earliest: Date?
         for index in visible.location..<min(NSMaxRange(visible), timeline.items.count) {
             if case .message(let row, _) = timeline.items[index], let next = relativeTimes[row.id] {
@@ -800,6 +810,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 self?.relativeTimeChanged()
             }
         )
+    }
+
+    @objc private func windowShownOrHidden(_ notification: Notification) {
+        if notification.object as? NSWindow === tableView.window {
+            updateRelativeTimer()
+        }
     }
 
     // Rows whose relative text changed, shown or not: an unshown one's height is kept too.
@@ -905,6 +921,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                         self?.refreshTimes()
                     }
                 })
+        }
+        for name in [
+            NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
+            NSWindow.didDeminiaturizeNotification,
+        ] {
+            notifications.addObserver(
+                self, selector: #selector(windowShownOrHidden(_:)), name: name, object: nil)
+        }
+        tableView.windowChanged = { [weak self] in
+            self?.updateRelativeTimer()
         }
         // Wheel, keyboard and accessibility scrolls post no live-scroll notifications; every
         // scroll moves the clip view.
@@ -1124,6 +1150,7 @@ class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
     var onEscape: (() -> Void)?
     var pointerMoved: (() -> Void)?
+    var windowChanged: (() -> Void)?
     private(set) var isLayingOut = false
 
     // The rows' extent; the frame itself stretches to fill a taller clip view.
@@ -1133,6 +1160,11 @@ class MessageTableView: NSTableView {
 
     override func cancelOperation(_ sender: Any?) {
         onEscape?()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        windowChanged?()
     }
 
     override func layout() {

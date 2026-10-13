@@ -40,9 +40,14 @@ final class TimeRefreshTests {
         }
     }
 
+    final class Screen {
+        var shows = true
+    }
+
     let clock = Clock()
     let center = NotificationCenter()
     let timers = Timers()
+    let screen = Screen()
     let table = MessageTableTests.CountingTableView()
     let controller: MessageTableController
     let window: NSWindow
@@ -52,7 +57,8 @@ final class TimeRefreshTests {
             tableView: table, calendar: { [clock] in clock.calendar },
             locale: { [clock] in clock.locale }, now: { [clock] in clock.now },
             pointer: { nil }, notifications: center,
-            schedule: { [timers] date, fire in timers.schedule(date, fire) })
+            schedule: { [timers] date, fire in timers.schedule(date, fire) },
+            onScreen: { [screen] _ in screen.shows })
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -237,6 +243,53 @@ final class TimeRefreshTests {
 
         table.scrollRowToVisible(table.numberOfRows - 1)
         window.layoutIfNeeded()
+        #expect(timers.active.isEmpty)
+    }
+
+    @Test
+    func theTimerWaitsWhileTheWindowIsHidden() {
+        let rows = relativeRows(40)
+        show(rows)
+        let date = timers.active.first?.date
+        #expect(timers.active.count == 1)
+
+        for (hidden, shown) in [
+            (NSWindow.didChangeOcclusionStateNotification, NSWindow.didChangeOcclusionStateNotification),
+            (NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification),
+        ] {
+            screen.shows = false
+            center.post(name: hidden, object: window)
+            #expect(timers.active.isEmpty, "\(hidden)")
+            show(rows)
+            #expect(timers.active.isEmpty, "\(hidden)")
+
+            screen.shows = true
+            center.post(name: shown, object: window)
+            #expect(timers.active.map(\.date) == [date], "\(shown)")
+        }
+    }
+
+    @Test
+    func theTimerGoesWithTheList() {
+        let timers = Timers()
+        weak var gone: MessageTableController?
+        autoreleasepool {
+            let controller = MessageTableController(
+                calendar: { [clock] in clock.calendar }, locale: { [clock] in clock.locale },
+                now: { [clock] in clock.now }, pointer: { nil }, notifications: center,
+                schedule: { date, fire in timers.schedule(date, fire) }, onScreen: { _ in true })
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            window.contentView = controller.scrollView
+            controller.show(MessageTableState(rows: relativeRows(10), reachedOldest: true))
+            window.layoutIfNeeded()
+            #expect(timers.active.count == 1)
+            window.contentView = nil
+            gone = controller
+        }
+
+        #expect(gone == nil)
         #expect(timers.active.isEmpty)
     }
 
