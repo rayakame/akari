@@ -97,12 +97,16 @@ struct SpoilerTests {
 
     @Test
     func aSecondClickKeepsItRevealed() throws {
-        list.show([row(1, at: list.noon, content: "||one||")], revealed: [key(1, 0)])
-        let text = try list.text(of: 1)
+        list.show([row(1, at: list.noon, content: "||one||")])
 
-        #expect(text.textStorage?.attribute(.link, at: 0, effectiveRange: nil) == nil)
+        try press("one", in: try list.text(of: 1))
+        #expect(list.actions.calls == ["reveal 1 0"])
+        list.reveal([key(1, 0)])
+        let text = try list.text(of: 1)
+        try press("one", in: text)
+
+        #expect(list.actions.calls == ["reveal 1 0"])
         #expect(try spoiler("one", in: text)?.hidden == false)
-        #expect(list.actions.calls.isEmpty)
     }
 
     func click(
@@ -114,6 +118,14 @@ struct SpoilerTests {
                 with: type, location: view.convert(point, to: nil), modifierFlags: [],
                 timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
                 clickCount: 1, pressure: 1))
+    }
+
+    // Down and up on the word, through the text view's own handling.
+    func press(_ shown: String, in view: MessageTextView) throws {
+        let word = try glyphs(of: shown, in: view)
+        let point = NSPoint(x: word.midX, y: word.midY)
+        NSApp.postEvent(try click(.leftMouseUp, at: point, in: view), atStart: false)
+        view.mouseDown(with: try click(.leftMouseDown, at: point, in: view))
     }
 
     @Test
