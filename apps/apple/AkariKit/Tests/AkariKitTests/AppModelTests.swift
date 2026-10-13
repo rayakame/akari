@@ -6,7 +6,17 @@ import Testing
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class AppModelTests {
     let client = FakeClient()
-    let memory = AccountMemory(defaults: MemoryDefaults())
+    let defaults = MemoryDefaults()
+    let memory: AccountMemory
+    let trustedHost = URL(string: "https://example.com/")!
+
+    init() {
+        memory = AccountMemory(defaults: defaults)
+    }
+
+    func trusts(_ account: UInt64) -> Bool {
+        TrustedLinks(account: id(account), defaults: defaults).isTrusted(trustedHost)
+    }
 
     func makeApp() -> AppModel {
         AppModel(client: client, memory: memory)
@@ -15,6 +25,8 @@ final class AppModelTests {
     func restored() async throws -> (AppModel, SessionModel, FakeAccount) {
         memory.lastAccount = id(42)
         memory.remember(.init(place: .home, channel: id(5)), of: id(42))
+        TrustedLinks(account: id(42), defaults: defaults).trust(trustedHost)
+        TrustedLinks(account: id(7), defaults: defaults).trust(trustedHost)
         client.tokens.withLock { $0[id(42)] = "stored.token" }
         let app = makeApp()
         await app.start()
@@ -146,6 +158,31 @@ final class AppModelTests {
     }
 
     @Test
+    func anExpiredSessionForgetsTheTrustedLinkHosts() async throws {
+        let (app, _, account) = try await restored()
+
+        account.fakeStore.subscription.send(
+            .connection(state: .closed(error: .AuthenticationFailed))
+        )
+        await client.forgotten.wait()
+
+        #expect(app.screen.login != nil)
+        #expect(!trusts(42))
+        #expect(trusts(7))
+    }
+
+    @Test
+    func logOutForgetsTheTrustedLinkHosts() async throws {
+        let (app, _, _) = try await restored()
+
+        await app.logOut()
+        await app.endingSession?.value
+
+        #expect(!trusts(42))
+        #expect(trusts(7))
+    }
+
+    @Test
     func otherClosesStayOnTheSession() async throws {
         let (app, session, account) = try await restored()
 
@@ -191,6 +228,7 @@ final class AppModelTests {
         #expect(!account.log.calls.contains(.close))
         #expect(memory.lastAccount == id(42))
         #expect(memory.lastSpot(of: id(42)) != nil)
+        #expect(trusts(42))
         #expect(app.logoutError == .Unavailable)
         #expect(!client.calls.current.contains(.endSession("stored.token")))
         app.dismissLogoutError()

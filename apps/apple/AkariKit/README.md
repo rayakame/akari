@@ -138,7 +138,8 @@ Rules every Apple app shows the same way, so they live here rather than in the a
   resolved and the neutral placeholders shown before a server's lists load. `TimestampText`
   formats `<t:…>` timestamps in the system locale and time zone, gives the full date for
   their tooltip, and says when a relative one next reads differently. `TrustedLinks` keeps the
-  hosts whose masked links open without asking, per account.
+  hosts whose masked links open without asking, per account; logging out and an expired
+  session forget them with the account's spot (`AccountMemory.forget`).
 - `Message.notice` is Akari's sentence for a system message; `Initials` gives the letters a
   server or avatar without an image shows; `Channel.opensMessageList` says which channels
   have a message list.

@@ -9,7 +9,7 @@ public final class TrustedLinks {
 
     public init(account: UserId, defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        key = "trustedLinkHosts.\(account.rawValue)"
+        key = Self.key(account)
         hosts = Set(defaults.stringArray(forKey: key) ?? [])
     }
 
@@ -23,6 +23,10 @@ public final class TrustedLinks {
             return
         }
         defaults.set(hosts.sorted(), forKey: key)
+    }
+
+    nonisolated static func key(_ account: UserId) -> String {
+        "trustedLinkHosts.\(account.rawValue)"
     }
 
     private static func host(_ url: URL) -> String? {
