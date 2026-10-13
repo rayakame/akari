@@ -484,6 +484,14 @@ async fn a_message_held_during_a_restore_is_an_event_parse() {
     )
     .await;
     loading.await.unwrap();
+    // The page can land before the store has taken the live message in.
+    for _ in 0..500 {
+        let window = restoring.account.store().core().messages(GENERAL).unwrap();
+        if window.messages.len() == 4 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let read = read_all(&restoring.account);
 
     assert_eq!(read.len(), 4);

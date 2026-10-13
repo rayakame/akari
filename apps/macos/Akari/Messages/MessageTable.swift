@@ -32,10 +32,12 @@ final class MessageTableLink {
 struct MessageArea: View {
     let messages: MessageListModel
     let name: ChannelName
+    let links: LinkFollower
+    let go: (ChannelId) -> Void
     @State private var link = MessageTableLink()
 
     var body: some View {
-        let bridge = MessageListBridge(messages: messages, link: link)
+        let bridge = MessageListBridge(messages: messages, link: link, links: links, go: go)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
@@ -49,16 +51,18 @@ struct MessageArea: View {
                         }
                     }
                     .overlay(alignment: .bottom) {
-                        if let text = JumpBar.text(
-                            atPresent: messages.atPresent, isStale: messages.isStale,
-                            hasRows: !messages.rows.isEmpty)
-                        {
-                            JumpBar(text: text) { bridge.escape() }
+                        VStack(spacing: 0) {
+                            if let text = JumpBar.text(
+                                atPresent: messages.atPresent, isStale: messages.isStale,
+                                hasRows: !messages.rows.isEmpty)
+                            {
+                                JumpBar(text: text) { bridge.escape() }
+                            }
+                            // Above the composer, as in the official client: send errors on
+                            // the left, slowmode on the right, over the list's last pixels.
+                            ComposerStatus(composer: messages.composer)
                         }
                     }
-                // Above the composer, as in the official client: send errors on the left,
-                // slowmode on the right.
-                ComposerStatus(composer: messages.composer)
                 ComposerView(
                     composer: messages.composer, placeholder: name.placeholder,
                     areaHeight: geometry.size.height,
@@ -78,17 +82,25 @@ struct MessageArea: View {
             reachedOldest: messages.reachedOldest, loading: messages.loading,
             failedLoads: messages.failedLoads, beginning: name.beginning,
             channelId: messages.channelId, lastLoad: messages.lastLoad,
-            openedAt: messages.openedAt, openedFrom: messages.openedFrom)
+            openedAt: messages.openedAt, openedFrom: messages.openedFrom,
+            revealedSpoilers: messages.revealedSpoilers)
     }
 }
 
 final class MessageListBridge: MessageListActions {
     let messages: MessageListModel
     let link: MessageTableLink
+    let links: LinkFollower
+    let go: (ChannelId) -> Void
 
-    init(messages: MessageListModel, link: MessageTableLink) {
+    init(
+        messages: MessageListModel, link: MessageTableLink, links: LinkFollower,
+        go: @escaping (ChannelId) -> Void
+    ) {
         self.messages = messages
         self.link = link
+        self.links = links
+        self.go = go
     }
 
     func retry(_ message: MessageId) {
@@ -116,5 +128,17 @@ final class MessageListBridge: MessageListActions {
     func escape() {
         link.controller?.jumpToPresent(load: true)
         link.composer?.takeFocus()
+    }
+
+    func reveal(_ spoiler: SpoilerKey) {
+        messages.reveal(spoiler)
+    }
+
+    func openChannel(_ id: ChannelId) {
+        go(id)
+    }
+
+    func openLink(_ url: URL, masked: Bool) {
+        links.follow(url, masked: masked)
     }
 }

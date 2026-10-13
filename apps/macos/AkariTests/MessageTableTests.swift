@@ -45,6 +45,8 @@ struct MessageTableTests {
     }
 
     let noon = berlinTime(2026, 10, 10, 12, 0)
+    // Below the newest row when pinned: 8, and the status strip over the list's bottom.
+    let restingInset = 8 + ComposerStatus.height
     let table = CountingTableView()
     let pointer = Pointer()
     let controller: MessageTableController
@@ -329,6 +331,46 @@ struct MessageTableTests {
         #expect(visibleRows.contains(table.numberOfRows - 1))
     }
 
+    // Every third message formatted, as in a channel with a few code blocks and lists.
+    func formattedMix(_ count: Int) -> [MessageListModel.Row] {
+        let contents = FormattedSamples.contents
+        return (1...count).map { number in
+            row(
+                UInt64(number), by: author(UInt64(2 + number % 2)), at: noon + Double(number) * 600,
+                content: number % 3 == 0
+                    ? contents[number / 3 % contents.count] : "test \(number)")
+        }
+    }
+
+    // As SwiftUI makes a list for a channel the user returns to: filled, placed, then sized.
+    // The counts put different rows at the top edge.
+    @Test
+    func aListFilledBeforeItHasASizeLandsOnItsNewestMessage() throws {
+        var missed: [Int: CGFloat] = [:]
+        for count in 30...70 {
+            let controller = MessageTableController(
+                calendar: { berlin }, now: { berlinTime(2026, 10, 12, 15, 0) }, pointer: { nil })
+            controller.show(MessageTableState(rows: formattedMix(count), reachedOldest: true))
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 725, height: 431), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            let container = try #require(window.contentView)
+            container.addSubview(controller.scrollView)
+            controller.scrollView.frame = container.bounds
+            window.layoutIfNeeded()
+
+            let table = controller.tableView
+            let scroll = controller.scrollView
+            let newest = table.rect(ofRow: table.numberOfRows - 1).maxY
+            let shown = scroll.contentView.bounds.maxY - scroll.contentInsets.bottom
+            if newest > shown + 0.5 {
+                missed[count] = newest - shown
+            }
+        }
+
+        #expect(missed.isEmpty, "\(missed.sorted { $0.key < $1.key })")
+    }
+
     @Test
     func aListScrolledUpStaysPutWhenRowsChangeAboveIt() throws {
         var rows = messages(200)
@@ -364,12 +406,12 @@ struct MessageTableTests {
         let clip = controller.scrollView.contentView
 
         let below = { clip.bounds.maxY - self.table.rect(ofRow: self.table.numberOfRows - 1).maxY }
-        #expect(abs(below() - 8) <= 1)
+        #expect(abs(below() - restingInset) <= 1)
         #expect(table.rect(ofRow: 0).minY - clip.bounds.minY > 100)
 
         rows += messages(1, from: 4)
         show(MessageTableState(rows: rows, reachedOldest: true))
-        #expect(abs(below() - 8) <= 1)
+        #expect(abs(below() - restingInset) <= 1)
 
         // A short list is at its bottom, so a resize doesn't unpin it and later messages follow.
         window.setContentSize(NSSize(width: 600, height: 300))
@@ -446,21 +488,121 @@ struct MessageTableTests {
         #expect(hoveredRows.isEmpty)
     }
 
+    func messageText(in view: NSView) -> MessageTextView? {
+        view.subviews.lazy.compactMap { ($0 as? MessageTextView) ?? self.messageText(in: $0) }
+            .first
+    }
+
     @Test
-    func clickingMessageTextKeepsItsFont() throws {
-        show([row(1, at: noon, content: "hello there")])
-        let field = try #require(
-            textFields(in: try cell(of: 1)).first { $0.stringValue == "hello there" })
+    func anEditDuringASelectionKeepsTheRowStable() throws {
+        let rows = variedMessages(60)
+        show(rows)
+        scroll(toRowOf: 20)
+        let top = place(of: 20)
+        let text = try #require(messageText(in: try cell(of: 21)))
+        window.makeFirstResponder(text)
+        text.setSelectedRange(NSRange(location: 0, length: 5))
 
-        // What a click on selectable text does: the field editor takes over the text.
-        field.selectText(nil)
+        var edited = rows
+        let old = rows[20].message
+        edited[20] = row(
+            21, by: old.author, at: old.timestamp,
+            content: old.content + " and **more** words that wrap onto another line or two",
+            edited: noon + 9_999)
+        show(edited)
 
-        let editor = try #require(field.currentEditor() as? NSTextView)
-        let attribute = { (key: NSAttributedString.Key) in
-            editor.textStorage?.attribute(key, at: 0, effectiveRange: nil)
+        #expect(place(of: 20) == top)
+        let after = try #require(messageText(in: try cell(of: 21)))
+        #expect(after.string.contains("more"))
+        #expect(after.selectedRange().length == 0)
+        #expect((window.firstResponder as? NSTextView)?.selectedRange().length ?? 0 == 0)
+    }
+
+    @Test
+    func aReusedCellDropsTheSelectionOfItsLastMessage() throws {
+        let cell = MessageCell()
+        let show = { (message: Message) in
+            cell.configure(
+                message, body: NSAttributedString(string: message.content), startsGroup: true,
+                groupTime: "", shortTime: "", fullDate: "")
         }
+        let first = row(1, at: noon, content: "same words").message
+        show(first)
+        let text = try #require(messageText(in: cell))
+        text.setSelectedRange(NSRange(location: 0, length: 4))
+
+        show(first)
+        #expect(text.selectedRange().length == 4)
+
+        show(row(2, at: noon, content: "same words").message)
+        #expect(text.selectedRange().length == 0)
+    }
+
+    @Test
+    func clickingMessageTextKeepsItsAttributes() throws {
+        show([row(1, at: noon, content: "hello there")])
+        let text = try #require(messageText(in: try cell(of: 1)))
+
+        window.makeFirstResponder(text)
+        text.selectAll(nil)
+
+        let attribute = { (key: NSAttributedString.Key) in
+            text.textStorage?.attribute(key, at: 0, effectiveRange: nil)
+        }
+        #expect(text.string == "hello there")
         #expect((attribute(.font) as? NSFont)?.pointSize == 16)
         #expect((attribute(.paragraphStyle) as? NSParagraphStyle)?.minimumLineHeight == 22)
+    }
+
+    @Test
+    func escapeStillReachesTheListWithTextSelected() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        let text = try #require(messageText(in: try cell(of: 200)))
+        window.makeFirstResponder(text)
+        text.setSelectedRange(NSRange(location: 0, length: 3))
+
+        let escape = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
+                charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        text.keyDown(with: escape)
+
+        #expect(actions.calls.filter { !$0.hasPrefix("more") } == ["escape"])
+    }
+
+    // The lowest row of ink a view draws, in window points.
+    func inkBottom(of view: NSView) throws -> CGFloat {
+        let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let last = try #require(
+            (0..<rep.pixelsHigh).last { y in
+                (0..<rep.pixelsWide).contains { x in
+                    (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5
+                }
+            })
+        let scale = CGFloat(rep.pixelsHigh) / view.bounds.height
+        let fromTop = CGFloat(last + 1) / scale
+        let y = view.isFlipped ? fromTop : view.bounds.height - fromTop
+        return view.convert(NSPoint(x: 0, y: y), to: nil).y
+    }
+
+    @Test
+    func theHoverTimeSitsOnTheFirstLinesBaseline() throws {
+        show([row(1, at: noon), row(2, at: noon + 30, content: "xxxx xxxx")])
+        let cell = try #require(try cell(of: 2) as? MessageCell)
+        cell.isHovered = true
+        cell.layoutSubtreeIfNeeded()
+        let text = try #require(messageText(in: cell))
+        let time = try #require(
+            textFields(in: cell).first { !$0.isHiddenOrHasHiddenAncestor && $0.stringValue != "" })
+
+        // Neither "x" nor the time's digits reach below the baseline.
+        let textBottom = try inkBottom(of: text)
+        let timeBottom = try inkBottom(of: time)
+        #expect(abs(textBottom - timeBottom) <= 0.5, "time at \(timeBottom), text at \(textBottom)")
     }
 
     @Test
@@ -570,7 +712,18 @@ struct MessageTableTests {
                     49, by: author(3), at: later + 100, content: "", attachments: ["d.zip"],
                     edited: later + 110),
             ]
-        show(rows)
+            + FormattedSamples.contents.enumerated().map { index, content in
+                named(
+                    row(
+                        UInt64(60 + index), by: author(UInt64(3 + index % 2)),
+                        at: later + 200 + Double(index) * 400, content: content,
+                        edited: index % 3 == 0 ? later + 210 + Double(index) * 400 : nil))
+            }
+        // Names known, so pills and channel symbols are measured; one spoiler revealed.
+        show(
+            MessageTableState(
+                rows: rows,
+                revealedSpoilers: [SpoilerKey(messageId: MessageId(rawValue: 66), index: 0)]))
 
         for width: CGFloat in [600, 380, 900] {
             window.setContentSize(NSSize(width: width, height: 400))
@@ -689,12 +842,24 @@ struct MessageTableTests {
         func escape() {
             calls.append("escape")
         }
+
+        func reveal(_ spoiler: SpoilerKey) {
+            calls.append("reveal \(spoiler.messageId.rawValue) \(spoiler.index)")
+        }
+
+        func openChannel(_ id: ChannelId) {
+            calls.append("channel \(id.rawValue)")
+        }
+
+        func openLink(_ url: URL, masked: Bool) {
+            calls.append("link \(url.absoluteString)\(masked ? " masked" : "")")
+        }
     }
 
     func contentColor(of raw: UInt64, text: String) throws -> NSColor? {
-        let field = try #require(
-            textFields(in: try cell(of: raw)).first { $0.stringValue.hasPrefix(text) })
-        return field.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil)
+        let body = try #require(messageText(in: try cell(of: raw)))
+        #expect(body.string.hasPrefix(text))
+        return body.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil)
             as? NSColor
     }
 
@@ -737,18 +902,14 @@ struct MessageTableTests {
             row(3, at: noon + 20),
         ])
 
-        let fields = textFields(in: try cell(of: 1)).filter {
-            $0.stringValue.hasPrefix("message 1")
-        }
-        let text = try #require(fields.first).attributedStringValue
+        let text = try #require(messageText(in: try cell(of: 1))).attributedString()
         #expect(text.string == "message 1 (edited)")
         let marker = text.attributes(at: text.length - 1, effectiveRange: nil)
         #expect((marker[.font] as? NSFont)?.pointSize == 12)
         #expect(marker[.foregroundColor] as? NSColor == Palette.chatTextMuted)
         let extras = textFields(in: try cell(of: 2)).filter { $0.stringValue.contains("a.zip") }
         #expect(try #require(extras.first).stringValue.hasSuffix(" (edited)"))
-        let plain = textFields(in: try cell(of: 3)).filter { $0.stringValue.hasPrefix("message 3") }
-        #expect(try #require(plain.first).stringValue == "message 3")
+        #expect(try #require(messageText(in: try cell(of: 3))).string == "message 3")
     }
 
     // 100 one-line messages, 101...200, two minutes apart on one day.
@@ -1231,10 +1392,12 @@ struct MessageTableTests {
         window.layoutIfNeeded()
 
         let edge = table.rect(ofRow: table.numberOfRows - 1)
-        #expect(edge.maxY <= clip.bounds.maxY - JumpBar.height - JumpBar.margin)
+        #expect(
+            edge.maxY
+                <= clip.bounds.maxY - ComposerStatus.height - JumpBar.height - JumpBar.margin)
 
         show(page)
-        #expect(controller.scrollView.contentInsets.bottom == 8)
+        #expect(controller.scrollView.contentInsets.bottom == restingInset)
     }
 
     @Test
@@ -1437,7 +1600,7 @@ struct MessageTableTests {
         show(MessageTableState(rows: messages(3), reachedOldest: true))
 
         let bottom = clip.bounds.maxY - table.rect(ofRow: table.numberOfRows - 1).maxY
-        #expect(abs(bottom - 8) <= 1)
+        #expect(abs(bottom - restingInset) <= 1)
     }
 
     @Test

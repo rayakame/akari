@@ -1,5 +1,16 @@
 import Observation
 
+/// One spoiler of one message, revealed by a click.
+public struct SpoilerKey: Hashable, Sendable {
+    public let messageId: MessageId
+    public let index: UInt16
+
+    public init(messageId: MessageId, index: UInt16) {
+        self.messageId = messageId
+        self.index = index
+    }
+}
+
 /// A channel's messages, as the store's window holds them.
 @MainActor @Observable
 public final class MessageListModel {
@@ -44,11 +55,15 @@ public final class MessageListModel {
     /// When the session opened the channel, and where its first rows came from.
     public let openedAt = ContinuousClock.now
     public private(set) var openedFrom = Origin.network
+    /// Revealed for as long as the model lives: through rereads and loads, not a channel switch.
+    public private(set) var revealedSpoilers: Set<SpoilerKey> = []
 
     private static let pageSize: UInt8 = 50
 
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
+    // Mentions in this channel are named from its guild.
+    @ObservationIgnored private let guildId: GuildId?
     @ObservationIgnored private var hasMessages = false
     // Rows the cache showed while the first page loaded; that page didn't bring them.
     @ObservationIgnored private var fromDisk: Set<MessageId> = []
@@ -61,6 +76,7 @@ public final class MessageListModel {
         self.channelId = channelId
         self.account = account
         self.store = store
+        guildId = store.channel(id: channelId)?.guildId
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
         reload(rereading: [])
@@ -96,12 +112,18 @@ public final class MessageListModel {
         await load(.latest)
     }
 
+    public func reveal(_ key: SpoilerKey) {
+        revealedSpoilers.insert(key)
+    }
+
     func apply(_ batch: EventBatch) {
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages
         if batch.windowsChanged.contains(channelId) {
-            reload(rereading: updated)
+            reload(rereading: namesChanged(batch) ? Set(rows.map(\.message.id)) : updated)
+        } else if namesChanged(batch) {
+            reread(Set(rows.map(\.message.id)))
         } else if !updated.isEmpty {
             reread(updated)
         }
@@ -111,6 +133,18 @@ public final class MessageListModel {
             fromDisk = Set(rows.map(\.message.id))
         }
         composer.apply(batch)
+    }
+
+    // Mention names and the mentioned highlight come from these, not from the message.
+    private func namesChanged(_ batch: EventBatch) -> Bool {
+        if batch.currentUserChanged || !batch.usersChanged.isEmpty {
+            return true
+        }
+        guard let guildId else {
+            return false
+        }
+        return batch.guildsChanged.contains(guildId) || batch.membersChanged.contains(guildId)
+            || batch.channelsChanged[guildId] != nil
     }
 
     private func load(_ kind: Load) async {

@@ -14,15 +14,29 @@ struct ComposerStatus: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(problem.text)
+                    .modifier(Backdrop())
             }
             Spacer(minLength: 0)
             if let slowmode = composer.slowmode {
                 slowmodeView(slowmode)
+                    .modifier(Backdrop())
             }
         }
         .font(.system(size: 12))
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 16 - Backdrop.padding)
         .frame(height: Self.height)
+    }
+
+    // Messages scroll on under the strip; its texts keep the chat's background behind them.
+    private struct Backdrop: ViewModifier {
+        static let padding: CGFloat = 4
+
+        func body(content: Content) -> some View {
+            content
+                .padding(.horizontal, Self.padding)
+                .padding(.vertical, 2)
+                .background(Color(nsColor: Palette.chat), in: RoundedRectangle(cornerRadius: 4))
+        }
     }
 
     @ViewBuilder private func slowmodeView(_ slowmode: Slowmode) -> some View {

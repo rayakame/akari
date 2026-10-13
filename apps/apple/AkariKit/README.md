@@ -68,7 +68,12 @@ screen, so views render from them without calling into Rust.
   `MessageListModel` (the open channel's messages and loads; `failedLoads` keeps each kind of
   load's last failure; `lastLoad` is the last load's `LoadTrace` with akari-core's
   `LoadReport` and the model's read time, and `openedAt`/`openedFrom` say when the channel
-  opened and where its first rows came from, for the `load` log). `AccountMemory` keeps the last place and channel per account, and the session's
+  opened and where its first rows came from, for the `load` log; `revealedSpoilers` holds the
+  spoilers revealed with `reveal(_:)` for as long as the model lives, so switching channels
+  hides them again, as Discord does; rows are read again after the events that rename the
+  users, roles or channels its mentions show). `go(to:)` opens a channel where it lives, in
+  its guild or at home, for links and mentions that name another server's channel.
+  `AccountMemory` keeps the last place and channel per account, and the session's
   first READY reopens them, as Discord does after a restart. `notice` is what a connection bar
   says (`ConnectionNotice`: connecting, reconnecting, offline after `suspend()`, or closed with
   its error), with the delay before a bar shows it.
@@ -128,8 +133,15 @@ Rules every Apple app shows the same way, so they live here rather than in the a
   indexes a table or collection view applies, so a list never reloads as a whole. A
   confirmation keeps its row key (above) and reloads one row.
 - `Message.formatted` (the parsed content, UTF-16 offsets into `content`) and
-  `Message.mentionsMe` come from akari-ffi; the app renders them from the message formatting
-  milestone's third part on, and shows plain text until then.
+  `Message.mentionsMe` come from akari-ffi; the app renders them (`docs/ui/markdown.md`).
+  `MentionText` says what a mention shows, including Akari's words for names that can't be
+  resolved and the neutral placeholders shown before a server's lists load. `TimestampText`
+  formats `<t:…>` timestamps in the system locale and time zone, gives the full date for
+  their tooltip, and says when a relative one next reads differently. `TrustedLinks` keeps the
+  hosts whose masked links open without asking, per account, in the session's memory
+  (`SessionModel.trustedLinks()`); lists of one account share their hosts. Logging out and an
+  expired session forget them with the account's spot (`AccountMemory.forget`), and a list
+  made before that stores nothing more.
 - `Message.notice` is Akari's sentence for a system message; `Initials` gives the letters a
   server or avatar without an image shows; `Channel.opensMessageList` says which channels
   have a message list.

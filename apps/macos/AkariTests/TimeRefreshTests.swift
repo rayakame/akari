@@ -12,8 +12,42 @@ final class TimeRefreshTests {
         var locale = Locale(identifier: "en_US")
     }
 
+    // Timers that fire when the test says so.
+    final class Timers {
+        struct Entry {
+            let date: Date
+            let fire: @MainActor () -> Void
+            var cancelled = false
+        }
+
+        var entries: [Entry] = []
+        var active: [Entry] { entries.filter { !$0.cancelled } }
+
+        func schedule(_ date: Date, _ fire: @escaping @MainActor () -> Void) -> () -> Void {
+            let index = entries.count
+            entries.append(Entry(date: date, fire: fire))
+            return { [weak self] in self?.entries[index].cancelled = true }
+        }
+
+        func fire() {
+            let due = active
+            for index in entries.indices {
+                entries[index].cancelled = true
+            }
+            for entry in due {
+                entry.fire()
+            }
+        }
+    }
+
+    final class Screen {
+        var shows = true
+    }
+
     let clock = Clock()
     let center = NotificationCenter()
+    let timers = Timers()
+    let screen = Screen()
     let table = MessageTableTests.CountingTableView()
     let controller: MessageTableController
     let window: NSWindow
@@ -22,7 +56,9 @@ final class TimeRefreshTests {
         controller = MessageTableController(
             tableView: table, calendar: { [clock] in clock.calendar },
             locale: { [clock] in clock.locale }, now: { [clock] in clock.now },
-            pointer: { nil }, notifications: center)
+            pointer: { nil }, notifications: center,
+            schedule: { [timers] date, fire in timers.schedule(date, fire) },
+            onScreen: { [screen] _ in screen.shows })
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -31,8 +67,230 @@ final class TimeRefreshTests {
     }
 
     func show(_ rows: [MessageListModel.Row]) {
-        controller.show(MessageTableState(rows: rows))
+        controller.show(MessageTableState(rows: rows, reachedOldest: true))
         window.layoutIfNeeded()
+    }
+
+    func body(ofRow row: Int) -> String {
+        guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) else {
+            return ""
+        }
+        return MessageListFixture.messageText(in: cell)?.string ?? ""
+    }
+
+    var visibleRows: Range<Int> {
+        let rows = table.rows(in: table.visibleRect)
+        return rows.location..<NSMaxRange(rows)
+    }
+
+    func seconds(_ date: Date) -> Int64 {
+        Int64(date.timeIntervalSince1970)
+    }
+
+    // Every other row counts down to its own time, a few minutes apart.
+    func relativeRows(_ count: Int) -> [MessageListModel.Row] {
+        (1...count).map { raw in
+            let at = berlinTime(2026, 10, 10, 23, 0) + Double(raw) * 30
+            let content =
+                raw % 2 == 0
+                ? "due <t:\(seconds(clock.now) + Int64(raw) * 200 + 30):R>" : "plain \(raw)"
+            return row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: at, content: content)
+        }
+    }
+
+    @Test
+    func oneTimerServesAllRelativeTimes() {
+        let rows = relativeRows(40)
+        show(rows)
+        let visible = visibleRows
+        let times = TimestampText(
+            locale: clock.locale, timeZone: clock.calendar.timeZone, calendar: clock.calendar)
+        let earliest = visible.compactMap { index -> Date? in
+            guard case .message(let row, _) = controller.timeline.items[index],
+                row.message.content.hasPrefix("due")
+            else {
+                return nil
+            }
+            return MessageText.build(row.message, revealed: [], now: clock.now, times: times)
+                .nextChange
+        }.min()
+
+        #expect(timers.active.count == 1)
+        #expect(timers.active.first?.date == earliest)
+
+        table.forget()
+        let before = visible.map(body(ofRow:))
+        clock.now = earliest ?? clock.now
+        timers.fire()
+        window.layoutIfNeeded()
+
+        let reloaded = table.reloaded.reduce(IndexSet()) { $0.union($1) }
+        #expect(!reloaded.isEmpty)
+        #expect(
+            reloaded.allSatisfy { index in
+                guard case .message(let row, _) = controller.timeline.items[index] else {
+                    return false
+                }
+                return row.message.content.hasPrefix("due")
+            })
+        #expect(table.fullReloads == 0)
+        #expect(visible.map(body(ofRow:)) != before)
+        #expect(timers.active.count == 1)
+    }
+
+    @Test
+    func aRelativeTimeThatWrapsKeepsTheAnchor() throws {
+        // A row whose text wraps once its relative time turns from minutes to seconds.
+        let due = seconds(clock.now) + 61
+        let fire = clock.now + 2
+        let times = TimestampText(
+            locale: clock.locale, timeZone: clock.calendar.timeZone, calendar: clock.calendar)
+        let width = table.tableColumns[0].width - 88
+        let wrapping = try #require(
+            (1...160).lazy.map { "x" + String(repeating: "a", count: $0) + " <t:\(due):R>" }
+                .first { content in
+                    let message = row(1, at: self.clock.now, content: content).message
+                    let height = { (now: Date) in
+                        TextMeasurer.shared.height(
+                            MessageText.build(message, revealed: [], now: now, times: times)
+                                .text, width: width)
+                    }
+                    return height(self.clock.now) != height(fire)
+                })
+        var rows = (1...60).map { raw in
+            row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: clock.now + Double(raw) * 30)
+        }
+        rows[19] = row(20, by: author(1), at: clock.now + 600, content: wrapping)
+        rows[24] = row(25, by: author(2), at: clock.now + 750, content: "soon <t:\(due):R>")
+        show(rows)
+        let clip = controller.scrollView.contentView
+        clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: index(of: 21)).minY))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        let place = table.rect(ofRow: index(of: 21)).minY - clip.bounds.minY
+        let height = table.rect(ofRow: index(of: 20)).height
+
+        clock.now = fire
+        timers.fire()
+        window.layoutIfNeeded()
+
+        #expect(table.rect(ofRow: index(of: 20)).height != height)
+        #expect(table.rect(ofRow: index(of: 21)).minY - clip.bounds.minY == place)
+    }
+
+    // A row's relative text can change while it's off screen, with the timer stopped.
+    @Test
+    func aRowWhoseTimeChangedOffScreenComesBackAtItsNewHeight() throws {
+        let due = seconds(clock.now) + 61
+        let times = TimestampText(
+            locale: clock.locale, timeZone: clock.calendar.timeZone, calendar: clock.calendar)
+        let width = table.tableColumns[0].width
+        let height = { (message: Message, now: Date) in
+            MessageCell.height(
+                message,
+                body: MessageText.build(message, revealed: [], now: now, times: times).text,
+                startsGroup: true, width: width)
+        }
+        let later = clock.now + 120
+        let wrapping = try #require(
+            (1...160).lazy.map { "x" + String(repeating: "a", count: $0) + " <t:\(due):R>" }
+                .first { content in
+                    let message = row(1, at: self.clock.now, content: content).message
+                    return height(message, self.clock.now) != height(message, later)
+                })
+        var rows = (1...80).map { raw in
+            row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: clock.now + Double(raw) * 30)
+        }
+        rows[1] = row(2, by: author(2), at: clock.now + 60, content: wrapping)
+        show(rows)
+        table.scrollRowToVisible(table.numberOfRows - 1)
+        window.layoutIfNeeded()
+        #expect(timers.active.isEmpty)
+
+        clock.now = later
+        table.scrollRowToVisible(0)
+        window.layoutIfNeeded()
+        timers.fire()
+        window.layoutIfNeeded()
+
+        let shown = table.rect(ofRow: index(of: 2)).height
+        guard case .message(let edited, let startsGroup) = controller.timeline.items[index(of: 2)]
+        else {
+            Issue.record("not a message")
+            return
+        }
+        #expect(
+            shown
+                == MessageCell.height(
+                    edited.message,
+                    body: MessageText.build(edited.message, revealed: [], now: later, times: times)
+                        .text,
+                    startsGroup: startsGroup, width: width))
+    }
+
+    @Test
+    func theTimerStopsWithoutRelativeTimesOnScreen() {
+        var rows = relativeRows(6)
+        rows += (7...80).map { raw in
+            row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: berlinTime(2026, 10, 10, 23, 30) + Double(raw) * 10)
+        }
+        show(rows)
+        #expect(timers.active.isEmpty)
+
+        table.scrollRowToVisible(0)
+        window.layoutIfNeeded()
+        #expect(timers.active.count == 1)
+
+        table.scrollRowToVisible(table.numberOfRows - 1)
+        window.layoutIfNeeded()
+        #expect(timers.active.isEmpty)
+    }
+
+    @Test
+    func theTimerWaitsWhileTheWindowIsHidden() {
+        let rows = relativeRows(40)
+        show(rows)
+        let date = timers.active.first?.date
+        #expect(timers.active.count == 1)
+
+        for (hidden, shown) in [
+            (NSWindow.didChangeOcclusionStateNotification, NSWindow.didChangeOcclusionStateNotification),
+            (NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification),
+        ] {
+            screen.shows = false
+            center.post(name: hidden, object: window)
+            #expect(timers.active.isEmpty, "\(hidden)")
+            show(rows)
+            #expect(timers.active.isEmpty, "\(hidden)")
+
+            screen.shows = true
+            center.post(name: shown, object: window)
+            #expect(timers.active.map(\.date) == [date], "\(shown)")
+        }
+    }
+
+    @Test
+    func theTimerGoesWithTheList() {
+        let timers = Timers()
+        weak var gone: MessageTableController?
+        autoreleasepool {
+            let controller = MessageTableController(
+                calendar: { [clock] in clock.calendar }, locale: { [clock] in clock.locale },
+                now: { [clock] in clock.now }, pointer: { nil }, notifications: center,
+                schedule: { date, fire in timers.schedule(date, fire) }, onScreen: { _ in true })
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            window.contentView = controller.scrollView
+            controller.show(MessageTableState(rows: relativeRows(10), reachedOldest: true))
+            window.layoutIfNeeded()
+            #expect(timers.active.count == 1)
+            window.contentView = nil
+            gone = controller
+        }
+
+        #expect(gone == nil)
+        #expect(timers.active.isEmpty)
     }
 
     // The observers run on the main queue.

@@ -12,10 +12,15 @@ struct MessageTableState: Equatable {
     var lastLoad: LoadTrace?
     var openedAt: ContinuousClock.Instant?
     var openedFrom = MessageListModel.Origin.network
+    var revealedSpoilers: Set<SpoilerKey> = []
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
 final class MessageTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    typealias Schedule = @MainActor (Date, @escaping @MainActor () -> Void) -> () -> Void
+    typealias Build =
+        @MainActor (Message, Set<UInt16>, Date, TimestampText) -> MessageText.Built
+
     let tableView: MessageTableView
     let scrollView = NSScrollView()
     // Strong: the bridge that implements it holds nothing that leads back here.
@@ -29,6 +34,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private let localeSource: () -> Locale
     private var calendar: Calendar
     private var locale: Locale
+    private var times: TimestampText
     private let now: () -> Date
     private let notifications: NotificationCenter
     nonisolated(unsafe) private var timeObservers: [NSObjectProtocol] = []
@@ -38,6 +44,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var sticksToBottom = true
     private var atPresent = true
     private var state = MessageTableState(rows: [])
+    private var revealed: [MessageId: Set<UInt16>] = [:]
+    private var relativeTimes: [MessageId: Date] = [:]
+    private let schedule: Schedule
+    private let onScreen: @MainActor (NSWindow) -> Bool
+    private let build: Build
+    // Shared by the height pass and the cell, so a row's text is built once per change (D71).
+    private var texts: [MessageId: (message: Message, revealed: Set<UInt16>, built: MessageText.Built)] =
+        [:]
+    nonisolated(unsafe) private var relativeTimer: (date: Date, cancel: () -> Void)?
+    private var lastRelativeFire = Date.distantPast
     // A page that lands while the list is bounced past its top waits for the bounce to end:
     // moving the clip under AppKit's rubber band would fight it.
     private var heldState: MessageTableState?
@@ -55,6 +71,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var liveScrollGeneration = 0
     private static let liveScrollQuiet: TimeInterval = 0.5
     private static let bottomInset: CGFloat = 8
+    // The status strip above the composer lies over the list's bottom.
+    private static let restingInset = bottomInset + ComposerStatus.height
     // Exact heights before a row shows: automatic heights start as estimates and change when a
     // fling first reaches a row, which moves the bottom under it.
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
@@ -90,13 +108,21 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         calendar: @escaping () -> Calendar = { .autoupdatingCurrent },
         locale: @escaping () -> Locale = { .autoupdatingCurrent },
         now: @escaping () -> Date = Date.init, pointer: (() -> NSPoint?)? = nil,
-        notifications: NotificationCenter = .default
+        notifications: NotificationCenter = .default,
+        schedule: @escaping Schedule = MessageTableController.timer,
+        onScreen: @escaping @MainActor (NSWindow) -> Bool = MessageTableController.isOnScreen,
+        build: @escaping Build = MessageText.build
     ) {
+        self.schedule = schedule
+        self.onScreen = onScreen
+        self.build = build
         self.tableView = tableView
         calendarSource = calendar
         localeSource = locale
         self.calendar = calendar()
         self.locale = locale()
+        times = TimestampText(
+            locale: self.locale, timeZone: self.calendar.timeZone, calendar: self.calendar)
         self.now = now
         self.notifications = notifications
         self.pointer =
@@ -117,6 +143,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     func show(_ state: MessageTableState) {
+        // Before SwiftUI sizes the list its column has AppKit's default width, where formatted
+        // rows cost several times as much to build and measure; settling after the size shows it.
+        guard scrollView.frame.width > 0 else {
+            heldState = state
+            return
+        }
         if isLiveScrolling && isPastTheTop {
             heldState = state
             heldSince = heldSince ?? .now
@@ -133,13 +165,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         atPresent = state.atPresent
         // The jump bar covers the bottom while older messages are shown.
         scrollView.contentInsets.bottom =
-            Self.bottomInset + (atPresent ? 0 : JumpBar.height + JumpBar.margin)
+            Self.restingInset + (atPresent ? 0 : JumpBar.height + JumpBar.margin)
+        let revealedNow = revealed(previous.revealedSpoilers, state.revealedSpoilers)
         let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
             Signposts.interval("page lands") { apply(next, changes) }
             noteApply(started, inserting: changes.inserted, of: next, held: held)
         }
+        reload(revealedNow)
+        updateRelativeTimer()
         if previous.loading != state.loading || previous.failedLoads != state.failedLoads
             || previous.reachedOldest != state.reachedOldest
             || previous.beginning != state.beginning
@@ -262,12 +297,15 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         for observer in timeObservers {
             notifications.removeObserver(observer)
         }
+        relativeTimer?.cancel()
     }
 
     // Every height is measured again: system rows carry the time in their wrapped text.
     func refreshTimes() {
         calendar = calendarSource()
         locale = localeSource()
+        times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)
+        texts.removeAll()
         let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
         if let place {
             anchor = place
@@ -292,6 +330,61 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             scrollToBottom()
         } else {
             restoreAnchor()
+        }
+        updateRelativeTimer()
+    }
+
+    private func revealed(_ old: Set<SpoilerKey>, _ new: Set<SpoilerKey>) -> Set<MessageId> {
+        guard old != new else {
+            return []
+        }
+        revealed = Dictionary(grouping: new, by: \.messageId).mapValues { Set($0.map(\.index)) }
+        return Set(old.symmetricDifference(new).map(\.messageId))
+    }
+
+    // A revealed spoiler keeps the height, but a relative time in the same row may not.
+    private func reload(_ messages: Set<MessageId>) {
+        guard !messages.isEmpty else {
+            return
+        }
+        var rows = IndexSet()
+        for (index, item) in timeline.items.enumerated() {
+            if case .message(let row, _) = item, messages.contains(row.id) {
+                rows.insert(index)
+            }
+        }
+        guard !rows.isEmpty else {
+            return
+        }
+        for index in rows {
+            rowHeights[timeline.items[index].id] = nil
+        }
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
+        tableView.noteHeightOfRows(withIndexesChanged: rows)
+    }
+
+    private func follow(_ url: URL, in row: MessageListModel.Row) {
+        guard url.scheme == "akari" else {
+            actions?.openLink(url, masked: false)
+            return
+        }
+        guard let value = url.pathComponents.last.flatMap({ UInt64($0) }) else {
+            return
+        }
+        switch url.host() {
+        case "spoiler":
+            actions?.reveal(SpoilerKey(messageId: row.id, index: UInt16(clamping: value)))
+        case "channel":
+            actions?.openChannel(ChannelId(rawValue: value))
+        case "link":
+            let links = row.message.formatted.links
+            if value < links.count, let target = URL(string: links[Int(value)].url) {
+                actions?.openLink(target, masked: true)
+            }
+        default:
+            break
         }
     }
 
@@ -341,6 +434,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         defer { CATransaction.commit() }
         for index in changes.removed {
             rowHeights[timeline.items[index].id] = nil
+            if case .message(let row, _) = timeline.items[index] {
+                relativeTimes[row.id] = nil
+                texts[row.id] = nil
+            }
         }
         for index in changes.reloaded {
             rowHeights[next.items[index].id] = nil
@@ -614,7 +711,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(message, notice: notice, time: time, width: width)
             }
-            return MessageCell.height(message, startsGroup: startsGroup, width: width)
+            return MessageCell.height(
+                message, body: body(row), startsGroup: startsGroup, width: width)
         }
     }
 
@@ -658,13 +756,110 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.isHovered = item.id == hovered
             cell.onRetry = { [weak self] in self?.actions?.retry(message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
+            cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
-                message, startsGroup: startsGroup, groupTime: groupTime,
+                message, body: body(row), startsGroup: startsGroup, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)
             return cell
         }
+    }
+
+    private func body(_ row: MessageListModel.Row) -> NSAttributedString {
+        let revealed = revealed[row.id] ?? []
+        let now = now()
+        // A relative time that changed waits for the timer, which re-measures its row too.
+        if let cached = texts[row.id], cached.revealed == revealed, cached.message == row.message {
+            return cached.built.text
+        }
+        let built = build(row.message, revealed, now, times)
+        texts[row.id] = (row.message, revealed, built)
+        relativeTimes[row.id] = built.nextChange
+        return built.text
+    }
+
+    static func isOnScreen(_ window: NSWindow) -> Bool {
+        window.occlusionState.contains(.visible) && !window.isMiniaturized
+    }
+
+    static func timer(_ date: Date, _ fire: @escaping @MainActor () -> Void) -> () -> Void {
+        let timer = Timer(fire: date, interval: 0, repeats: false) { _ in
+            MainActor.assumeIsolated { fire() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        return { timer.invalidate() }
+    }
+
+    // One timer for the list, at the earliest change on screen, at least a second apart (D68),
+    // and none while the window is hidden.
+    private func updateRelativeTimer() {
+        let shown = tableView.window.map(onScreen) ?? false
+        let visible = shown ? tableView.rows(in: tableView.visibleRect) : NSRange()
+        var earliest: Date?
+        for index in visible.location..<min(NSMaxRange(visible), timeline.items.count) {
+            if case .message(let row, _) = timeline.items[index], let next = relativeTimes[row.id] {
+                earliest = min(earliest ?? next, next)
+            }
+        }
+        guard let earliest else {
+            relativeTimer?.cancel()
+            relativeTimer = nil
+            return
+        }
+        let date = max(earliest, lastRelativeFire + 1)
+        guard relativeTimer?.date != date else {
+            return
+        }
+        relativeTimer?.cancel()
+        relativeTimer = (
+            date,
+            schedule(date) { [weak self] in
+                self?.relativeTimeChanged()
+            }
+        )
+    }
+
+    @objc private func windowShownOrHidden(_ notification: Notification) {
+        if notification.object as? NSWindow === tableView.window {
+            updateRelativeTimer()
+        }
+    }
+
+    // Rows whose relative text changed, shown or not: an unshown one's height is kept too.
+    private func relativeTimeChanged() {
+        relativeTimer = nil
+        let now = now()
+        lastRelativeFire = now
+        var due = IndexSet()
+        for (index, item) in timeline.items.enumerated() {
+            if case .message(let row, _) = item, let next = relativeTimes[row.id], next <= now {
+                due.insert(index)
+                rowHeights[item.id] = nil
+                texts[row.id] = nil
+            }
+        }
+        if !due.isEmpty {
+            let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
+            if let place {
+                anchor = place
+            }
+            ownChanges += 1
+            defer { ownChanges -= 1 }
+            let visible = tableView.rows(in: tableView.visibleRect)
+            let shown = due.filteredIndexSet { NSLocationInRange($0, visible) }
+            if !shown.isEmpty {
+                tableView.reloadData(forRowIndexes: shown, columnIndexes: [0])
+            }
+            tableView.noteHeightOfRows(withIndexesChanged: due)
+            measureRows()
+            if pinsToBottom {
+                scrollToBottom()
+            } else {
+                restoreAnchor()
+            }
+        }
+        updateRelativeTimer()
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
@@ -694,7 +889,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         // The native bounce at both ends; the list never scrolls sideways.
         scrollView.verticalScrollElasticity = .automatic
         scrollView.horizontalScrollElasticity = .none
-        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: Self.bottomInset, right: 0)
+        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: Self.restingInset, right: 0)
         tableView.didLayout = { [weak self] in
             self?.settle()
         }
@@ -734,6 +929,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                         self?.refreshTimes()
                     }
                 })
+        }
+        for name in [
+            NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
+            NSWindow.didDeminiaturizeNotification,
+        ] {
+            notifications.addObserver(
+                self, selector: #selector(windowShownOrHidden(_:)), name: name, object: nil)
+        }
+        tableView.windowChanged = { [weak self] in
+            self?.updateRelativeTimer()
         }
         // Wheel, keyboard and accessibility scrolls post no live-scroll notifications; every
         // scroll moves the clip view.
@@ -853,6 +1058,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 + "own \(ownChanges > 0) layout \(tableView.isLayingOut)")
         // Content moves under a still pointer on every scroll, the controller's own included.
         updateHover()
+        updateRelativeTimer()
         // The table re-anchors inside its own layout; that isn't the user scrolling either.
         guard ownChanges == 0, !tableView.isLayingOut, origin != lastClipOrigin else {
             return
@@ -952,6 +1158,7 @@ class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
     var onEscape: (() -> Void)?
     var pointerMoved: (() -> Void)?
+    var windowChanged: (() -> Void)?
     private(set) var isLayingOut = false
 
     // The rows' extent; the frame itself stretches to fill a taller clip view.
@@ -961,6 +1168,11 @@ class MessageTableView: NSTableView {
 
     override func cancelOperation(_ sender: Any?) {
         onEscape?()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        windowChanged?()
     }
 
     override func layout() {

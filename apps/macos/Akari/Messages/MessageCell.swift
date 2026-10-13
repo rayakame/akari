@@ -19,12 +19,21 @@ final class MessageCell: NSTableCellView {
     private let reply = CellText.label()
     private let header = HeaderRow()
     private let hoverTime = CellText.label()
-    private let content = CellText.label(wrapping: true)
+    private let content = MessageTextView()
     private let extras = CellText.label(wrapping: true)
     // Built for the first failed message: its buttons cost a layout pass each.
     private var failed: FailedLine?
     var onRetry: () -> Void = {}
     var onDelete: () -> Void = {}
+    var onLink: (URL) -> Void = { _ in }
+    private var message: Message?
+    private var mentioned = false {
+        didSet {
+            if mentioned != oldValue {
+                needsDisplay = true
+            }
+        }
+    }
     private let stack = NSStackView()
     private var top: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
@@ -50,6 +59,31 @@ final class MessageCell: NSTableCellView {
     }
 
     func configure(
+        _ message: Message, body: NSAttributedString, startsGroup: Bool, groupTime: String,
+        shortTime: String, fullDate: String
+    ) {
+        configureAllButTheBody(
+            message, startsGroup: startsGroup, groupTime: groupTime, shortTime: shortTime,
+            fullDate: fullDate)
+        let same = self.message?.id == message.id
+        self.message = message
+        mentioned = message.mentionsMe
+        content.show(body, keepingSelection: same)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let message else {
+            return nil
+        }
+        let menu = NSMenu()
+        for item in MessageMenu.items(for: message) {
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    // The sizing cell measures the body instead of laying it out in its text view.
+    private func configureAllButTheBody(
         _ message: Message, startsGroup: Bool, groupTime: String, shortTime: String,
         fullDate: String
     ) {
@@ -67,13 +101,10 @@ final class MessageCell: NSTableCellView {
         hoverTime.toolTip = fullDate
         hoverTime.isHidden = !isHovered || startsGroup
         reply.isHidden = !(startsGroup && message.kind == .reply)
-        let body = NSMutableAttributedString(
-            attributedString: CellText.body(message.content, color: Self.color(message.delivery)))
         let lines = NSMutableAttributedString(attributedString: Self.extras(message))
-        if message.editedTimestamp != nil {
-            (message.content.isEmpty ? lines : body).append(CellText.editedMark())
+        if message.editedTimestamp != nil, message.content.isEmpty {
+            lines.append(CellText.editedMark())
         }
-        content.attributedStringValue = body
         content.isHidden = message.content.isEmpty
         extras.attributedStringValue = lines
         extras.isHidden = lines.length == 0
@@ -90,25 +121,21 @@ final class MessageCell: NSTableCellView {
         failed?.isHidden = !isFailed
     }
 
-    private static func color(_ delivery: Delivery) -> NSColor {
-        switch delivery {
-        case .pending: Palette.textMuted
-        case .failed: Palette.danger
-        default: Palette.textDefault
-        }
-    }
-
-    /// The row height for `message` at `width`, as Auto Layout would size the cell.
-    static func height(_ message: Message, startsGroup: Bool, width: CGFloat) -> CGFloat {
-        sizing.configure(
+    /// The row height for `message` showing `body` at `width`, as Auto Layout would size the
+    /// cell.
+    static func height(
+        _ message: Message, body: NSAttributedString, startsGroup: Bool, width: CGFloat
+    ) -> CGFloat {
+        sizing.configureAllButTheBody(
             message, startsGroup: startsGroup, groupTime: "", shortTime: "", fullDate: "")
-        return sizing.height(width: width)
+        let textWidth = width - textLeading - textTrailing
+        let body = message.content.isEmpty ? 0 : TextMeasurer.shared.height(body, width: textWidth)
+        return sizing.height(width: width, body: body)
     }
 
     // The constraints of build() in arithmetic; the stack leaves hidden views out.
-    private func height(width: CGFloat) -> CGFloat {
+    private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
-        content.preferredMaxLayoutWidth = textWidth
         extras.preferredMaxLayoutWidth = textWidth
         let shown = ([reply, header, content, extras] + [failed].compactMap { $0 }).filter {
             !$0.isHidden
@@ -117,7 +144,8 @@ final class MessageCell: NSTableCellView {
             shown.map { view in
                 view === header
                     ? self.header.height
-                    : view === failed ? FailedLine.height : view.intrinsicContentSize.height
+                    : view === content
+                        ? body : view === failed ? FailedLine.height : view.intrinsicContentSize.height
             }
             .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
         let top = showsHeader ? Self.groupTop : Self.continuationTop
@@ -130,6 +158,12 @@ final class MessageCell: NSTableCellView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if mentioned {
+            Palette.mentionedBackground.setFill()
+            bounds.fill(using: .sourceOver)
+            Palette.mentionedBar.setFill()
+            NSRect(x: 0, y: 0, width: 2, height: bounds.height).fill()
+        }
         if isHovered {
             Palette.hoverBackground.setFill()
             bounds.fill(using: .sourceOver)
@@ -137,18 +171,20 @@ final class MessageCell: NSTableCellView {
     }
 
     private func build() {
+        content.onLink = { [weak self] url in self?.onLink(url) }
+        content.messageMenu = { [weak self] in
+            self?.message.map { MessageMenu.items(for: $0) } ?? []
+        }
         avatar.translatesAutoresizingMaskIntoConstraints = false
         reply.attributedStringValue = CellText.symbolLine(
             "arrowshape.turn.up.left", "Replying to an earlier message")
         hoverTime.font = .systemFont(ofSize: 11)
         hoverTime.textColor = Palette.chatTextMuted
         hoverTime.alignment = .right
-        for field in [content, extras] {
-            field.isSelectable = true
-            // Without it, the field editor drops the attributed string's font on a click.
-            field.allowsEditingTextAttributes = true
-            field.font = .systemFont(ofSize: 16)
-        }
+        extras.isSelectable = true
+        // Without it, the field editor drops the attributed string's font on a click.
+        extras.allowsEditingTextAttributes = true
+        extras.font = .systemFont(ofSize: 16)
 
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -273,8 +309,10 @@ private final class HeaderRow: NSView {
     func show(name: String, tagged: Bool, time: String, fullDate: String) {
         self.name.stringValue = name
         appTag.isHidden = !tagged
-        timeAfterName?.isActive = !tagged
-        timeAfterTag?.isActive = tagged
+        // Off before on: both at once can't be satisfied.
+        let (off, on) = tagged ? (timeAfterName, timeAfterTag) : (timeAfterTag, timeAfterName)
+        off?.isActive = false
+        on?.isActive = true
         self.time.stringValue = time
         self.time.toolTip = fullDate
     }

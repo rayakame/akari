@@ -355,13 +355,17 @@ struct LoadLineTests {
             await settle()
 
             let fresh = trace(1, started: opened, page: nil, kind: .latest)
+            // Other tests share the main actor, so the disk rows' commit may come late too.
+            let freshShown = opened.duration(to: .now)
             show(state(rows(50...99), load: fresh, from: .disk))
             await settle { lines.all.contains { $0.contains("opened") } }
 
             let open = lines.all.first { $0.contains("opened") } ?? ""
             let numbers = open.split(separator: " ").compactMap { Double($0) }.dropFirst()
             #expect(numbers.count == 2, "\(open)")
-            #expect((numbers.last ?? 0) - (numbers.first ?? 0) >= 150, "\(open)")
+            let (disk, freshAfter) = (numbers.first ?? 0, numbers.last ?? 0)
+            #expect(freshAfter >= (freshShown / .milliseconds(1)).rounded(.down), "\(open)")
+            #expect(disk <= freshAfter, "\(open)")
         }
     }
 }

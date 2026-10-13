@@ -19,4 +19,8 @@ final class MemoryDefaults: UserDefaults, @unchecked Sendable {
     override func removeObject(forKey defaultName: String) {
         values.withLock { $0[defaultName] = nil }
     }
+
+    var keys: [String] {
+        values.withLock { Array($0.keys) }
+    }
 }

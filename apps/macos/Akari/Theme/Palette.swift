@@ -30,6 +30,25 @@ enum Palette {
     static let danger = token("danger", dark: "#f23f43", light: "#da373c")
     static let brand = NSColor(hex: "#5865f2")
     static let composer = token("composer", dark: "#222327", light: "#ffffff")
+    static let mentionText = token("mentionText", dark: "#c9cdfb", light: "#4752c4")
+    static let mentionBackground = token(
+        "mentionBackground", dark: "#5865f2", light: "#5865f2", alpha: (0.30, 0.15))
+    static let mentionedBackground = token(
+        "mentionedBackground", dark: "#f8a300", light: "#f8a300", alpha: (0.08, 0.10))
+    static let mentionedBar = token("mentionedBar", dark: "#f8a300", light: "#f8a300")
+    static let codeBackground = token(
+        "codeBackground", dark: "#97979f", light: "#97979f", alpha: (0.08, 0.10))
+    static let codeBorder = token(
+        "codeBorder", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.24))
+    static let quoteBar = token(
+        "quoteBar", dark: "#97979f", light: "#97979f", alpha: (0.40, 0.40))
+    // The message layout manager draws it; it isn't isolated to the main actor.
+    nonisolated static let spoilerHidden = token(
+        "spoilerHidden", dark: "#121214", light: "#d6d7dc")
+    static let spoilerRevealed = token(
+        "spoilerRevealed", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.16))
+    static let timestampBackground = token(
+        "timestampBackground", dark: "#97979f", light: "#97979f", alpha: (0.12, 0.12))
     static let avatars = ["#5865f2", "#3e8e7e", "#c06c2b", "#a352b5", "#c2445a", "#4f7fba"]
         .map { NSColor(hex: $0) }
 

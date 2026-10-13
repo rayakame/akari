@@ -1,0 +1,161 @@
+import AkariKit
+import Foundation
+import os
+
+// One server with two text channels (1001, 1002) of formatted messages; a channel's window can
+// grow while it isn't shown, as when messages arrive.
+nonisolated final class FormattedAccount: Account, @unchecked Sendable {
+    let formattedStore: FormattedStore
+
+    init(
+        contents: [String], formattedEvery: Int = 3, slowmode: Slowmode? = nil,
+        mentioned: Bool = false
+    ) {
+        formattedStore = FormattedStore(
+            contents: contents, formattedEvery: formattedEvery, slowmode: slowmode,
+            mentioned: mentioned)
+        super.init(noHandle: NoHandle())
+    }
+
+    required init(unsafeFromHandle handle: UInt64) {
+        fatalError("a fake has no Rust object")
+    }
+
+    override func store() -> Store {
+        formattedStore
+    }
+
+    override func connect() throws {}
+
+    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
+        -> LoadReport?
+    { nil }
+
+    override func viewChannel(channelId: ChannelId) {}
+}
+
+nonisolated final class FormattedStore: Store, @unchecked Sendable {
+    static let channelIds = [ChannelId(rawValue: 1001), ChannelId(rawValue: 1002)]
+
+    private let contents: [String]
+    private let formattedEvery: Int
+    private let slowmode: Slowmode?
+    private let mentioned: Bool
+    private let counts = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
+
+    init(contents: [String], formattedEvery: Int, slowmode: Slowmode?, mentioned: Bool) {
+        self.contents = contents
+        self.formattedEvery = formattedEvery
+        self.slowmode = slowmode
+        self.mentioned = mentioned
+        super.init(noHandle: NoHandle())
+    }
+
+    required init(unsafeFromHandle handle: UInt64) {
+        fatalError("a fake has no Rust object")
+    }
+
+    func add(_ count: UInt64, to channel: ChannelId) {
+        counts.withLock { $0[channel.rawValue, default: 40] += count }
+    }
+
+    func newest(of channel: ChannelId) -> MessageId {
+        MessageId(rawValue: channel.rawValue * 1000 + counts.withLock { $0[channel.rawValue, default: 40] })
+    }
+
+    private func person(_ raw: UInt64) -> User {
+        User(
+            id: UserId(rawValue: raw), username: "user\(raw)", globalName: nil,
+            displayName: "User \(raw)", bot: false, system: false)
+    }
+
+    override func subscribe() -> StoreSubscription {
+        IdleSubscription()
+    }
+
+    override func connection() -> ConnectionState {
+        .online
+    }
+
+    override func currentUser() -> User? {
+        person(1)
+    }
+
+    override func user(id: UserId) -> User? {
+        person(id.rawValue)
+    }
+
+    override func guildIds() -> [GuildId] {
+        [GuildId(rawValue: 1)]
+    }
+
+    override func guild(id: GuildId) -> Guild? {
+        id.rawValue == 1 ? Guild(id: id, name: "Server") : nil
+    }
+
+    override func unavailableGuildIds() -> [GuildId] {
+        []
+    }
+
+    override func channelList(guildId: GuildId) -> [ChannelId] {
+        guildId.rawValue == 1 ? Self.channelIds : []
+    }
+
+    override func privateChannelList() -> [ChannelId] {
+        []
+    }
+
+    override func channel(id: ChannelId) -> Channel? {
+        guard Self.channelIds.contains(id) else {
+            return nil
+        }
+        return Channel(
+            id: id, kind: .guildText, guildId: GuildId(rawValue: 1), parentId: nil,
+            name: "channel-\(id.rawValue)", position: Int32(id.rawValue), topic: nil,
+            nsfw: false, rateLimitPerUser: 0, recipientIds: [])
+    }
+
+    override func channels(ids: [ChannelId]) -> [Channel] {
+        ids.compactMap { channel(id: $0) }
+    }
+
+    override func permissions(channelId: ChannelId) -> Permissions? {
+        nil
+    }
+
+    override func window(channelId: ChannelId) -> MessageWindow? {
+        guard Self.channelIds.contains(channelId) else {
+            return nil
+        }
+        let count = counts.withLock { $0[channelId.rawValue, default: 40] }
+        let base = channelId.rawValue * 1000
+        return MessageWindow(
+            messageIds: (1...count).map { MessageId(rawValue: base + $0) }, pendingIds: [],
+            latest: true, oldest: true, stale: false)
+    }
+
+    // Every so many messages formatted, the rest one plain line.
+    override func messages(channelId: ChannelId, ids: [MessageId]) -> [Message] {
+        ids.map { id in
+            let number = Int(id.rawValue % 1000)
+            let content =
+                number % formattedEvery == 0
+                ? contents[number / formattedEvery % contents.count] : "test \(number)"
+            return Message(
+                id: id, channelId: channelId, kind: .default, author: person(UInt64(2 + number % 2)),
+                fromWebhook: false, content: content,
+                timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(number) * 600),
+                editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
+                embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
+                formatted: formattedText(content: content), mentionsMe: mentioned)
+        }
+    }
+
+    override func messageLengthLimit() -> UInt32 {
+        2000
+    }
+
+    override func slowmode(channelId: ChannelId) -> Slowmode? {
+        slowmode
+    }
+}

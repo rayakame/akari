@@ -36,6 +36,16 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `danger` | error messages, e.g. above the login button | `#f23f43` | `#da373c` |
 | `brand` | Home when selected, a hovered or selected server, primary buttons | `#5865f2` | `#5865f2` |
 | `composer` | the composer card | `#222327` | `#ffffff` |
+| `mentionText` | a mention's name | `#c9cdfb` | `#4752c4` |
+| `mentionBackground` | a mention's pill | `#5865f2` at 30% | `#5865f2` at 15% |
+| `mentionedBackground` | a message that mentions you | `#f8a300` at 8% | `#f8a300` at 10% |
+| `mentionedBar` | the bar beside a message that mentions you | `#f8a300` | `#f8a300` |
+| `codeBackground` | inline code and code blocks | `#97979f` at 8% | `#97979f` at 10% |
+| `codeBorder` | the outline of inline code and code blocks | `#97979f` at 16% | `#97979f` at 24% |
+| `quoteBar` | the bar beside a quote | `#97979f` at 40% | `#97979f` at 40% |
+| `spoilerHidden` | a spoiler's cover | `#121214` | `#d6d7dc` |
+| `spoilerRevealed` | a revealed spoiler's background | `#97979f` at 16% | `#97979f` at 16% |
+| `timestampBackground` | a timestamp's pill | `#97979f` at 12% | `#97979f` at 12% |
 
 On the dark message list (`#1a1a1e`), `hoverBackground` comes out at about `#29292d` and
 `selectedBackground` at about `#333338`.

@@ -30,16 +30,39 @@ struct PerformanceProbe {
         )
     }
 
+    // TEST_RUNNER_AKARI_PROBE_TEXT=formatted: only formatted samples; =realistic: every fourth
+    // row a corpus message. Names are known, so mentions and channel links show as pills.
+    static let text = ProcessInfo.processInfo.environment["AKARI_PROBE_TEXT"]
+
     // Lengths like a busy channel's: mostly one line, some paragraphs, a few attachments.
     func rows(_ range: ClosedRange<UInt64>) -> [MessageListModel.Row] {
-        range.map { raw in
-            let words = [1, 1, 2, 1, 6, 1, 3, 1, 14, 2][Int(raw % 10)] * 6
-            return row(
-                raw, by: author(raw % 4 == 0 ? 2 : raw % 7 == 0 ? 3 : 1),
-                at: noon + Double(raw) * 40,
-                content: String(repeating: "some words that wrap ", count: words),
-                attachments: raw % 13 == 0 ? ["photo.png"] : [])
+        let samples: [String]? =
+            switch Self.text {
+            case "formatted": FormattedSamples.contents
+            case "realistic": CorpusSamples.contents
+            default: nil
+            }
+        let every: UInt64 = Self.text == "realistic" ? 4 : 1
+        return range.map { raw in
+            guard let samples, raw % every == 0 else {
+                return plainRow(raw)
+            }
+            return named(
+                row(
+                    raw, by: author(raw % 4 == 0 ? 2 : raw % 7 == 0 ? 3 : 1),
+                    at: noon + Double(raw) * 40,
+                    content: samples[Int(raw / every) % samples.count],
+                    attachments: raw % 13 == 0 ? ["photo.png"] : []))
         }
+    }
+
+    func plainRow(_ raw: UInt64) -> MessageListModel.Row {
+        let words = [1, 1, 2, 1, 6, 1, 3, 1, 14, 2][Int(raw % 10)] * 6
+        return row(
+            raw, by: author(raw % 4 == 0 ? 2 : raw % 7 == 0 ? 3 : 1),
+            at: noon + Double(raw) * 40,
+            content: String(repeating: "some words that wrap ", count: words),
+            attachments: raw % 13 == 0 ? ["photo.png"] : [])
     }
 
     // Before the next layout pass: how far the visible row views sit from their rows, which is

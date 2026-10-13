@@ -263,6 +263,24 @@ final class ComposerTextViewTests {
         view.takeFocus()
         #expect(window.firstResponder === view)
     }
+
+    @Test
+    func aSelectionInAMessageKeepsTheComposerFromTakingFocus() {
+        let (_, view) = field()
+        let message = MessageTextView()
+        message.textStorage?.setAttributedString(NSAttributedString(string: "a message"))
+        message.frame = NSRect(x: 0, y: 0, width: 200, height: 22)
+        window.contentView?.addSubview(message)
+        window.makeFirstResponder(message)
+        message.setSelectedRange(NSRange(location: 0, length: 3))
+
+        view.takeFocus()
+        #expect(window.firstResponder === message)
+
+        message.removeFromSuperview()
+        view.takeFocus()
+        #expect(window.firstResponder === view)
+    }
 }
 
 // Counts the block observers still registered with it.

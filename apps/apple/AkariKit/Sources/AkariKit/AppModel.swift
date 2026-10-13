@@ -241,6 +241,6 @@ public final class AppModel {
     private func forget(_ userId: UserId) {
         token = nil
         memory.lastAccount = nil
-        memory.remember(nil, of: userId)
+        memory.forget(userId)
     }
 }

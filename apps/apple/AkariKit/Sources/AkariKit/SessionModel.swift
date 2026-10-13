@@ -125,6 +125,11 @@ public final class SessionModel {
         }
     }
 
+    /// The hosts the account trusts for masked links, kept with the rest of its memory.
+    public func trustedLinks() -> TrustedLinks {
+        memory.trustedLinks(of: userId)
+    }
+
     /// A guild opens the channel last opened there, else its first text channel; home opens
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
@@ -169,6 +174,21 @@ public final class SessionModel {
         }
         openedChannels.insert(id)
         messages = MessageListModel(channelId: id, account: account, store: store, drafts: drafts)
+    }
+
+    /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
+    /// the store doesn't have opens where the user is; one without a message list doesn't open.
+    public func go(to channel: ChannelId) {
+        if let found = store.channel(id: channel) {
+            guard found.opensMessageList else {
+                return
+            }
+            let place: Place = found.guildId.map { .guild($0) } ?? .home
+            if place != self.place {
+                open(place)
+            }
+        }
+        open(channel: channel)
     }
 
     /// Disconnects but keeps the session, e.g. before the Mac sleeps.

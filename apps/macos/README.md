@@ -6,9 +6,9 @@ macOS 14 or later.
 
 So far it has the login screen (QR code, email or phone and password, two-factor codes,
 new-location confirmation) and the main window: the server rail, a server's channel list,
-the DM list at home, the channel header, the user panel, the message list and the composer.
-Markdown, images, attachments, reactions, replies, threads, voice, notifications and settings
-come later.
+the DM list at home, the channel header, the user panel, the message list with formatted
+messages, and the composer. Images, attachments, reactions, replies, threads, voice,
+notifications and settings come later.
 
 ## Messages and the composer
 
@@ -25,6 +25,27 @@ come later.
 - **Up arrow** in an empty composer is reserved for editing the last message, which isn't
   built yet.
 - **Times** ("Today at", day dividers) follow midnight, time zone and locale changes.
+- **Formatting** (`docs/ui/markdown.md`): `MessageText` builds a message's attributed string
+  from `Message.formatted`, once per message, revealed spoilers and relative text, shared by
+  the height pass and the cell. `MessageTextView` shows it with TextKit 1, and
+  `MessageLayoutManager` says where code boxes, quote bars, pills and spoilers' backgrounds go;
+  `MessageDecorations`, kept behind the text view, shows them as layers (see Performance), and
+  the layout manager draws only hidden spoilers' covers over the glyphs. A code block's padding
+  at the text's top or bottom is the text view's own (TextKit 1 leaves paragraph spacing out
+  there). Heights come from `TextMeasurer`, which measures with string drawing: it breaks lines
+  as TextKit 1 does at half the cost.
+- **Spoilers** are covered until clicked; a revealed one stays revealed until the channel is
+  left. Assistive apps get a hidden one as "Spoiler", in the value, the selection, ranges and
+  RTF, and as a link element of that name that reveals it; the text view makes its own link
+  elements, since NSTextView's carry the hidden text. Look Up finds nothing on a hidden one.
+- **Links:** a plain URL opens in the browser; a masked link asks first, in Akari's words, with
+  a box to trust its host for the account (`LinkConfirmation`). A link to a channel Akari
+  knows, and a channel mention, open that channel, in another server too. Only the schemes the
+  parser links open (http, https, discord, steam, mailto, tel, sms).
+- **Copy:** Cmd+C copies what the selection shows, as plain text (`bold and @name`). A
+  message's context menu has "Copy Text", which copies its markdown.
+- **Mentions of the user** tint the row; relative timestamps count down on one timer for
+  the list, which waits while the window is hidden or minimized and goes with the list.
 
 ## Connection
 
@@ -208,6 +229,23 @@ What the Performance and cache milestone found, so later changes don't bring it 
   serve the tests' Auto Layout oracle.
 - **What's left in the first page's frame** is mostly Auto Layout of the new rows; only manual
   layout in the cells would cut it.
+- **Message formatting draws as little as it can.** A view's bitmap covers what it draws, so a
+  code box drawn full width by the text view pushed a code message past the 40,000 pt² above;
+  and AppKit keeps text drawn in one color as a one-byte mask, but in full color as soon as a
+  second color or a fill is drawn (20 copies of a paragraph: about 1 MB, 12.5 MB with one
+  pill). Code boxes, quote bars, pills and spoilers' backgrounds are therefore layers behind
+  the text (`MessageDecorations`), and the text view draws only glyphs and hidden spoilers'
+  covers. Colored mentions and links still need full color.
+- **Formatted rows are built and measured on the main thread**, once per message (shared by
+  the height pass and the cell): on fully formatted pages the first page costs about 1.6× a
+  plain one. Building a page's text off the main thread is the next step if pages landing in
+  a fling ever hitch.
+- **A new list waits for its size.** SwiftUI updates a list before it sizes it, while its
+  column has AppKit's default width of 100 pt, where formatted rows cost several times as
+  much to build and measure; a channel the user returned to paid for every row twice. The
+  controller holds that update until the list has a width. A message's text view never
+  scrolls the list either: NSTextView scrolls its insertion point into view when layout
+  resizes it, which moved a pinned list off its bottom.
 
 `AkariTests/PerformanceProbe.swift` measures the table offline (no account, synthetic
 messages, a window on screen) and only runs when asked:
@@ -218,8 +256,13 @@ TEST_RUNNER_AKARI_PROBE=1 xcodebuild test -project apps/macos/Akari.xcodeproj -s
 ```
 
 It prints `PROBE` lines: frame times of a fling with pages landing, the first page's time, and
-the footprint. `TEST_RUNNER_AKARI_PROBE_PAUSE=4` pauses at each phase so `footprint` or
-`heap` can look at the test host, e.g.
+the footprint. `TEST_RUNNER_AKARI_PROBE_TEXT=formatted` shows only formatted messages
+(`FormattedSamples`), `=realistic` plain ones with every fourth one of the markdown corpus's
+realistic messages (`CorpusSamples`). Swift Testing runs the probe's tests in no fixed order, so
+for footprints run one at a time, e.g.
+`-only-testing:'AkariTests/PerformanceProbe/flingThroughPagesThatLand()'`.
+`TEST_RUNNER_AKARI_PROBE_PAUSE=4` pauses at each phase so `footprint` or `heap` can look at the
+test host, e.g.
 `footprint --pid "$(pgrep -x Akari)" --sample 1 --sample-duration 40`, which splits the
 footprint by kind (malloc, CoreAnimation, graphics).
 
