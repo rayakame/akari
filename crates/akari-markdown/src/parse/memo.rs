@@ -160,13 +160,12 @@ impl Brackets {
             let open = Self::next(&self.opens, pos);
             let close = Self::next(&self.closes, pos);
             match (open, close) {
-                (None, None) => break self.end,
                 (_, Some(close)) if open.is_none_or(|open| close < open) => break close,
                 (Some(open), _) => match Self::next(&self.closes, open + 1) {
                     Some(group_end) => pos = group_end + 1,
                     None => break open,
                 },
-                (None, Some(_)) => unreachable!("handled above"),
+                (None, _) => break self.end,
             }
         };
         for pos in visited {

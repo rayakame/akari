@@ -1,5 +1,17 @@
 //! Discord-flavored markdown: the rules Discord's clients apply to message content.
 
+// Message content comes from strangers, so no input may panic a client (unwrap and expect are
+// denied workspace-wide).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented
+    )
+)]
+
 mod cache;
 mod document;
 mod emoji;
