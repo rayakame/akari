@@ -21,7 +21,7 @@ public struct TimestampText: Sendable {
 
     /// The tooltip: weekday, date and time.
     public func fullDate(_ seconds: Int64) -> String {
-        formatters.fixed(.fullDateShortTime).string(from: Self.date(seconds))
+        formatters.fullDate(Self.date(seconds), seconds)
     }
 
     /// When a relative text next changes; nil for the other styles.
@@ -92,5 +92,18 @@ private final class Formatters: @unchecked Sendable {
 
     func fixed(_ style: TimestampStyle) -> DateFormatter {
         styles[style] ?? fallback
+    }
+
+    // Every build of a message asks again for its tooltips; the full style is the slowest.
+    private let fullDates = NSCache<NSNumber, NSString>()
+
+    func fullDate(_ date: Date, _ seconds: Int64) -> String {
+        let key = NSNumber(value: seconds)
+        if let cached = fullDates.object(forKey: key) {
+            return cached as String
+        }
+        let text = fixed(.fullDateShortTime).string(from: date)
+        fullDates.setObject(text as NSString, forKey: key)
+        return text
     }
 }

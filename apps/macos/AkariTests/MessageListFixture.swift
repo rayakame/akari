@@ -13,9 +13,13 @@ final class MessageListFixture {
     let noon = berlinTime(2026, 10, 10, 12, 0)
     private(set) var state = MessageTableState(rows: [])
 
-    init(width: CGFloat = 600, height: CGFloat = 400) {
+    init(
+        width: CGFloat = 600, height: CGFloat = 400,
+        build: @escaping MessageTableController.Build = MessageText.build
+    ) {
         controller = MessageTableController(
-            calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
+            calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil },
+            build: build)
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)

@@ -19,6 +19,8 @@ struct MessageTableState: Equatable {
 final class MessageTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     // Runs `fire` once at a date; the result cancels it.
     typealias Schedule = @MainActor (Date, @escaping @MainActor () -> Void) -> () -> Void
+    typealias Build =
+        @MainActor (Message, Set<UInt16>, Date, TimestampText) -> MessageText.Built
 
     let tableView: MessageTableView
     let scrollView = NSScrollView()
@@ -47,6 +49,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // When each row's relative timestamps next read differently.
     private var relativeTimes: [MessageId: Date] = [:]
     private let schedule: Schedule
+    private let build: Build
+    // Each row's text, built once for its message, revealed spoilers and relative text, and
+    // shared by the height pass and the cell (D71).
+    private var texts: [MessageId: (message: Message, revealed: Set<UInt16>, built: MessageText.Built)] =
+        [:]
     private var relativeTimer: (date: Date, cancel: () -> Void)?
     private var lastRelativeFire = Date.distantPast
     // A page that lands while the list is bounced past its top waits for the bounce to end:
@@ -102,9 +109,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         locale: @escaping () -> Locale = { .autoupdatingCurrent },
         now: @escaping () -> Date = Date.init, pointer: (() -> NSPoint?)? = nil,
         notifications: NotificationCenter = .default,
-        schedule: @escaping Schedule = MessageTableController.timer
+        schedule: @escaping Schedule = MessageTableController.timer,
+        build: @escaping Build = MessageText.build
     ) {
         self.schedule = schedule
+        self.build = build
         self.tableView = tableView
         calendarSource = calendar
         localeSource = locale
@@ -287,6 +296,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         calendar = calendarSource()
         locale = localeSource()
         times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)
+        texts.removeAll()
         let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
         if let place {
             anchor = place
@@ -414,6 +424,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             rowHeights[timeline.items[index].id] = nil
             if case .message(let row, _) = timeline.items[index] {
                 relativeTimes[row.id] = nil
+                texts[row.id] = nil
             }
         }
         for index in changes.reloaded {
@@ -744,8 +755,15 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func body(_ row: MessageListModel.Row) -> NSAttributedString {
-        let built = MessageText.build(
-            row.message, revealed: revealed[row.id] ?? [], now: now(), times: times)
+        let revealed = revealed[row.id] ?? []
+        let now = now()
+        if let cached = texts[row.id], cached.revealed == revealed, cached.message == row.message,
+            cached.built.nextChange.map({ $0 > now }) ?? true
+        {
+            return cached.built.text
+        }
+        let built = build(row.message, revealed, now, times)
+        texts[row.id] = (row.message, revealed, built)
         relativeTimes[row.id] = built.nextChange
         return built.text
     }

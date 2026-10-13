@@ -507,7 +507,8 @@ private struct Builder {
         let text = source.substring(
             with: NSRange(location: Int(start), length: Int(end) - Int(start)))
         // One paragraph per block, so a block's lines share its indents and spacing.
-        return text.contains("\n") ? text.replacingOccurrences(of: "\n", with: "\u{2028}") : text
+        return text.utf8.contains(UInt8(ascii: "\n"))
+            ? text.replacingOccurrences(of: "\n", with: "\u{2028}") : text
     }
 
     private func append(_ string: String, _ attributes: [NSAttributedString.Key: Any]) {
