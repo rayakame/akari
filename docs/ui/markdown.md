@@ -77,8 +77,12 @@ only). A masked link asks first:
 
 The full URL shows under the text. A trusted host's masked links open without asking. Akari
 keeps the trusted hosts per account and matches the exact host (a subdomain isn't trusted with
-its parent); there's no way to untrust one yet. A masked link to a channel Akari knows opens
-the channel without asking.
+its parent), on any port, in its punycode spelling and without a trailing dot; logging out or
+an expired session forgets them, and there's no way to untrust one yet. A masked link to a
+channel Akari knows opens the channel without asking.
+
+Akari opens only the schemes the parser makes links of: http, https, discord, steam, mailto,
+tel and sms. Any other URL that reaches the link handler opens nothing.
 
 ## Where Discord differs from CommonMark
 

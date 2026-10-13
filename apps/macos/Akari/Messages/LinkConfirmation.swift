@@ -2,7 +2,7 @@ import AkariKit
 import AppKit
 
 /// Opens links from messages: plain ones directly, masked ones after asking (D65), unless their
-/// host is trusted.
+/// host is trusted. Only the schemes the parser links open.
 final class LinkFollower {
     struct Answer {
         let open: Bool
@@ -23,7 +23,13 @@ final class LinkFollower {
         self.ask = ask
     }
 
+    // What akari-markdown makes links of; any other scheme would hand the URL to another app.
+    private static let schemes: Set = ["http", "https", "discord", "steam", "mailto", "tel", "sms"]
+
     func follow(_ url: URL, masked: Bool) {
+        guard let scheme = url.scheme?.lowercased(), Self.schemes.contains(scheme) else {
+            return
+        }
         guard masked, !trusted.isTrusted(url) else {
             open(url)
             return

@@ -92,6 +92,37 @@ struct LinkTests {
         #expect(recorder.opened.map(\.path) == ["/one", "/two"])
     }
 
+    @Test(arguments: [
+        "http://example.com/", "https://example.com/", "HTTPS://example.com/",
+        "discord://-/channels/1/2", "steam://run/440", "mailto:someone@example.com",
+        "tel:+15551234567", "sms:+15551234567",
+    ])
+    func theParsersSchemesOpen(_ string: String) throws {
+        let recorder = Recorder()
+        let url = try #require(URL(string: string))
+
+        recorder.follower(trusted()).follow(url, masked: false)
+
+        #expect(recorder.opened == [url])
+    }
+
+    // The custom scheme's host is trusted, so only the scheme stops it.
+    @Test(arguments: ["file:///etc/hosts", "javascript:alert(1)", "akari-test-app://example.com/open"])
+    func aLinkWithAnotherSchemeOpensNothing(_ string: String) throws {
+        let recorder = Recorder()
+        let trusted = trusted()
+        trusted.trust(try #require(URL(string: "https://example.com/")))
+        recorder.answers = [.init(open: true, trust: false)]
+        let follower = recorder.follower(trusted)
+        let url = try #require(URL(string: string))
+
+        follower.follow(url, masked: false)
+        follower.follow(url, masked: true)
+
+        #expect(recorder.asked.isEmpty)
+        #expect(recorder.opened.isEmpty)
+    }
+
     @Test
     func aChannelLinkPillOpensTheChannel() throws {
         list.show([named(row(1, at: list.noon, content: "https://discord.com/channels/1/2"))])
