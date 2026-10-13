@@ -76,8 +76,9 @@ cargo test -p akari-markdown -- --ignored stack_peak --nocapture   # with the lo
 
 ```sh
 cd crates/akari-markdown/fuzz
-cargo fuzz run parse -O corpus/parse ../tests/corpus -- -max_total_time=600
-cargo fuzz run source_range -O corpus/source_range ../tests/corpus -- -max_total_time=600
+cargo fuzz run parse -O -a corpus/parse ../tests/corpus -- -max_total_time=600
+cargo fuzz run source_range -O -a corpus/source_range ../tests/corpus -- -max_total_time=600
 ```
 
-CI fuzzes each target for two minutes on pull requests that change this crate.
+CI fuzzes each target for two minutes, with debug assertions, on pull requests that change this
+crate, and keeps what a failure leaves in `fuzz/artifacts` as the run's `fuzz-artifacts`.
