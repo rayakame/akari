@@ -105,7 +105,7 @@ struct MessageListModelTests {
                 .messagesLoaded(channelId: other, first: id(1), last: id(2)),
                 .messagesStale(channelId: other),
                 .messagesCleared(channelId: other),
-                .channelUpdated(channelId: other, guildId: id(1)),
+                .channelUpdated(channelId: id(21), guildId: id(2)),
                 .currentMemberUpdated(guildId: id(2)),
                 .guildUpdated(guildId: id(2)),
             ])
@@ -472,5 +472,71 @@ struct MessageListModelTests {
 
         #expect(model.openedFrom == .disk)
         #expect(model.lastLoad?.page == [id(3)])
+    }
+
+    var messageReads: [CallLog.Read] {
+        store.reads.filter { read in
+            switch read {
+            case .window, .messages: true
+            default: false
+            }
+        }
+    }
+
+    @Test
+    func aRevealSurvivesARereadAndALoad() {
+        shown(window([1, 2]))
+        let model = loaded()
+        let key = SpoilerKey(messageId: id(2), index: 0)
+        model.reveal(key)
+
+        store.update { $0.show(message(2, content: "edited")) }
+        model.apply(EventBatch([.messageUpdated(channelId: here, messageId: id(2))]))
+        shown(window([1, 2, 3]))
+        model.apply(EventBatch([.messageInserted(channelId: here, messageId: id(3))]))
+
+        #expect(model.revealedSpoilers == [key])
+    }
+
+    @Test
+    func revealsEndWithTheModel() {
+        shown(window([1, 2]))
+        loaded().reveal(SpoilerKey(messageId: id(2), index: 0))
+
+        #expect(loaded().revealedSpoilers.isEmpty)
+    }
+
+    @Test(arguments: [
+        StoreEvent.guildUpdated(guildId: id(1)),
+        .channelUpdated(channelId: id(11), guildId: id(1)),
+        .currentMemberUpdated(guildId: id(1)),
+        .userUpdated(userId: id(7)),
+        .currentUserUpdated,
+    ])
+    func aRenameReloadsOnlyRowsThatShowIt(_ event: StoreEvent) {
+        shown(window([1, 2, 3]))
+        let model = loaded()
+        let before = model.rows
+        store.update { $0.show(message(2, content: "renamed")) }
+
+        model.apply(EventBatch([event]))
+
+        #expect(messageReads == [.messages(here, [id(1), id(2), id(3)])])
+        #expect(model.rows[0] == before[0] && model.rows[2] == before[2])
+        #expect(model.rows[1].message.content == "renamed")
+    }
+
+    @Test(arguments: [
+        StoreEvent.guildUpdated(guildId: id(2)),
+        .channelUpdated(channelId: id(20), guildId: id(2)),
+        .currentMemberUpdated(guildId: id(2)),
+    ])
+    func aRenameElsewhereReadsNothing(_ event: StoreEvent) {
+        shown(window([1, 2, 3]))
+        let model = loaded()
+
+        model.apply(EventBatch([event]))
+
+        #expect(messageReads.isEmpty)
     }
 }
