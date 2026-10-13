@@ -522,6 +522,32 @@ impl Store {
         self.read(|inner| inner.state.current_member(guild))
     }
 
+    /// Whether `message` mentions the current user: by ID, through @everyone or @here, or
+    /// through one of the current member's roles. Ignores notification settings.
+    pub fn mentions_me(&self, message: &Message) -> bool {
+        self.read(|inner| {
+            let state = &inner.state;
+            let Some(me) = state.current_user() else {
+                return false;
+            };
+            if message.mention_everyone || message.mentions.iter().any(|user| user.id == me.user.id)
+            {
+                return true;
+            }
+            !message.mention_roles.is_empty()
+                && state
+                    .channel(message.channel_id)
+                    .and_then(|channel| channel.guild_id)
+                    .and_then(|guild| state.current_member(guild))
+                    .is_some_and(|member| {
+                        member
+                            .roles
+                            .iter()
+                            .any(|role| message.mention_roles.contains(role))
+                    })
+        })
+    }
+
     /// A guild channel, category, thread, DM or group DM.
     pub fn channel(&self, id: ChannelId) -> Option<Arc<Channel>> {
         self.read(|inner| inner.state.channel(id))

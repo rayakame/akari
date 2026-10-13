@@ -3648,4 +3648,303 @@ mod cache {
 
         assert!(account.store().current_user().is_none());
     }
+
+    #[tokio::test]
+    async fn the_cache_fill_is_prepared_before_it_enters_the_window() {
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let _subscription = restored(&account).await;
+        let batches = super::preparer::Batches::register(&account);
+        mock_latest(
+            &server,
+            &(2..=51).collect::<Vec<_>>(),
+            &[],
+            Duration::from_millis(300),
+        )
+        .await;
+
+        let report = account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap()
+            .unwrap();
+
+        let seen = batches.seen();
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert_eq!(seen[0].ids, (1..=50).collect::<Vec<_>>());
+        assert_eq!(seen[1].ids, (2..=51).collect::<Vec<_>>());
+        assert!(seen[0].window_before.is_empty());
+        // The page reconciles the cached messages; only 51 is new.
+        assert!(!seen[1].window_before.contains(&51));
+        assert_eq!(report.prepared, 100);
+    }
+}
+
+mod preparer {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+    use crate::MessagePreparer;
+
+    const DM: u64 = 300_000_000_000_000_010;
+
+    #[derive(Debug, Clone)]
+    pub(super) struct Batch {
+        pub(super) ids: Vec<u64>,
+        // The window's messages while the preparer ran: none of the batch may be in it yet.
+        pub(super) window_before: Vec<u64>,
+    }
+
+    pub(super) struct Batches {
+        store: crate::state::Store,
+        seen: Mutex<Vec<Batch>>,
+    }
+
+    impl Batches {
+        pub(super) fn register(account: &Account) -> Arc<Self> {
+            let batches = Arc::new(Self {
+                store: account.store().clone(),
+                seen: Mutex::new(Vec::new()),
+            });
+            account.set_message_preparer(batches.clone());
+            batches
+        }
+
+        pub(super) fn seen(&self) -> Vec<Batch> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl MessagePreparer for Batches {
+        fn prepare(&self, messages: &[Arc<Message>]) -> u32 {
+            let ids: Vec<u64> = messages.iter().map(|message| message.id.get()).collect();
+            // Reads the store: it would wait forever if the load held its lock.
+            let window_before = self
+                .store
+                .messages(messages[0].channel_id)
+                .map(|window| {
+                    window
+                        .messages
+                        .iter()
+                        .map(|message| message.id.get())
+                        .filter(|id| ids.contains(id))
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.seen.lock().unwrap().push(Batch { ids, window_before });
+            messages.len() as u32
+        }
+    }
+
+    struct Panics;
+
+    impl MessagePreparer for Panics {
+        fn prepare(&self, _: &[Arc<Message>]) -> u32 {
+            panic!("a preparer bug");
+        }
+    }
+
+    // Blocks on GENERAL's messages until released; prepares any other channel's at once.
+    struct Slow {
+        entered: AtomicBool,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl MessagePreparer for Slow {
+        fn prepare(&self, messages: &[Arc<Message>]) -> u32 {
+            if messages[0].channel_id == general() {
+                self.entered.store(true, Ordering::SeqCst);
+                let _ = self.release.lock().unwrap().recv();
+            }
+            messages.len() as u32
+        }
+    }
+
+    async fn online_with_page(
+        fake: &mut FakeGateway,
+    ) -> (Account, Subscription, FakeConnection, wiremock::MockServer) {
+        let server = wiremock::MockServer::start().await;
+        let account = start_with(fake, &server);
+        let subscription = account.store().subscribe();
+        let connection = online(fake, &account).await;
+        events_until(&subscription, "Online").await;
+        mock_page(&server, ("limit", "3"), page(&[10, 11, 12])).await;
+        (account, subscription, connection, server)
+    }
+
+    #[tokio::test]
+    async fn a_page_is_prepared_before_it_enters_the_window() {
+        let mut fake = FakeGateway::start().await;
+        let (account, _subscription, _connection, _server) = online_with_page(&mut fake).await;
+        let batches = Batches::register(&account);
+
+        let report = timeout(
+            WAIT,
+            account.load_messages(general(), MessageLoad::Latest { limit: 3 }),
+        )
+        .await
+        .expect("the preparer ran under the store's lock")
+        .unwrap()
+        .unwrap();
+
+        let seen = batches.seen();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].ids, [10, 11, 12]);
+        assert!(seen[0].window_before.is_empty());
+        assert_eq!(ids(&account), [10, 11, 12]);
+        assert_eq!(report.prepared, 3);
+        assert!(report.prepare > Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn no_preparer_reports_nothing() {
+        let mut fake = FakeGateway::start().await;
+        let (account, _subscription, _connection, _server) = online_with_page(&mut fake).await;
+
+        let report = account
+            .load_messages(general(), MessageLoad::Latest { limit: 3 })
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!((report.prepare, report.prepared), (Duration::ZERO, 0));
+    }
+
+    #[tokio::test]
+    async fn gateway_messages_are_never_prepared() {
+        let mut fake = FakeGateway::start().await;
+        let (account, subscription, mut connection, _server) = online_with_page(&mut fake).await;
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 3 })
+            .await
+            .unwrap();
+        let batches = Batches::register(&account);
+
+        connection.send(message(2, 13)).await;
+        events_until(&subscription, "MessageInserted(13)").await;
+
+        assert!(batches.seen().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_panicking_preparer_leaves_the_load_intact() {
+        let mut fake = FakeGateway::start().await;
+        let (account, _subscription, _connection, _server) = online_with_page(&mut fake).await;
+        account.set_message_preparer(Arc::new(Panics));
+
+        let report = account
+            .load_messages(general(), MessageLoad::Latest { limit: 3 })
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(ids(&account), [10, 11, 12]);
+        assert_eq!(report.prepared, 0);
+    }
+
+    // Holds every batch while closed.
+    struct Gate(AtomicBool);
+
+    impl MessagePreparer for Gate {
+        fn prepare(&self, messages: &[Arc<Message>]) -> u32 {
+            while self.0.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            messages.len() as u32
+        }
+    }
+
+    #[tokio::test]
+    async fn a_load_dropped_while_preparing_stops_holding_live_messages() {
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        let account = start_with(&fake, &server);
+        let subscription = account.store().subscribe();
+        let mut connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+        mock_page(&server, ("around", "20"), page(&[19, 20, 21])).await;
+        mock_page(&server, ("after", "21"), page(&[22])).await;
+        let gate = Arc::new(Gate(AtomicBool::new(false)));
+        account.set_message_preparer(gate.clone());
+        account
+            .load_messages(
+                general(),
+                MessageLoad::Around {
+                    id: Snowflake::new(20),
+                    limit: 3,
+                },
+            )
+            .await
+            .unwrap();
+
+        gate.0.store(true, Ordering::SeqCst);
+        let dropped = timeout(
+            Duration::from_millis(100),
+            account.load_messages(general(), MessageLoad::Newer { limit: 3 }),
+        )
+        .await;
+        assert!(dropped.is_err());
+        gate.0.store(false, Ordering::SeqCst);
+        account
+            .load_messages(general(), MessageLoad::Newer { limit: 3 })
+            .await
+            .unwrap();
+        connection.send(message(2, 30)).await;
+
+        assert_eq!(
+            events_until(&subscription, "MessageInserted(30)")
+                .await
+                .last()
+                .map(String::as_str),
+            Some("MessageInserted(30)")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_slow_preparer_doesnt_hold_up_another_channel() {
+        let mut fake = FakeGateway::start().await;
+        let (account, _subscription, _connection, server) = online_with_page(&mut fake).await;
+        let mut dm_page = page(&[20, 21]);
+        for message in dm_page.as_array_mut().unwrap() {
+            message["channel_id"] = DM.to_string().into();
+        }
+        wiremock::Mock::given(wiremock::matchers::path(format!(
+            "/api/v9/channels/{DM}/messages"
+        )))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(dm_page))
+        .mount(&server)
+        .await;
+        let (release, released) = std::sync::mpsc::channel();
+        let slow = Arc::new(Slow {
+            entered: AtomicBool::new(false),
+            release: Mutex::new(released),
+        });
+        account.set_message_preparer(slow.clone());
+
+        let (general_load, dm_loaded) = timeout(WAIT, async {
+            tokio::join!(
+                account.load_messages(general(), MessageLoad::Latest { limit: 3 }),
+                async {
+                    while !slow.entered.load(Ordering::SeqCst) {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    let loaded = account
+                        .load_messages(Snowflake::new(DM), MessageLoad::Latest { limit: 3 })
+                        .await;
+                    release.send(()).unwrap();
+                    loaded
+                }
+            )
+        })
+        .await
+        .expect("the slow preparer held up another channel's load");
+
+        assert!(dm_loaded.unwrap().is_some());
+        assert!(general_load.unwrap().is_some());
+        assert_eq!(ids(&account), [10, 11, 12]);
+    }
 }

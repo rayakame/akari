@@ -696,11 +696,11 @@ input: "[`🥺`](https://a)"
 p: {l0}code"🥺"
 link0: <https://a/> masked
 
+# Stricter than parse-discord: without its styles the text holds a link of its own.
 == links link scourge
 input: "[\\*[*a\n1. b](https://c)](https://d)"
 --
-p: {l0}"\\" {i l0}"[" {l0}"a" br {l0}"1. b](https://c)"
-link0: <https://d/> masked
+p: "[\\*[*a" br "1. b](https://c)](https://d)"
 
 == links no empty
 input: "[|| ||_ _** **` `](http://a)"

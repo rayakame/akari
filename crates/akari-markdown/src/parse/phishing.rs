@@ -1,6 +1,6 @@
 // parse-discord's is_link_admissable; like Discord's, it doesn't look into lists.
 
-use super::{Ctx, Input, Node, Parser, Piece};
+use super::{Ctx, Input, MAX_DEPTH, Node, Parser, Piece};
 use crate::document::InlineKind;
 use crate::emoji::py_space;
 
@@ -75,6 +75,21 @@ impl Parser {
         let input = Input::source(&cleaned);
         let nodes = self.region(&input, 0..cleaned.len(), ctx);
         walk(&nodes, &cleaned, allow_emoji)
+    }
+
+    // Stricter than Discord: styles and code can split a URL into text that reads as one.
+    // Read flat (no nested rules), so it adds one pass and sees URLs structure would hide.
+    pub(super) fn admissible_without_styles(&mut self, text: &str, ctx: Ctx) -> bool {
+        let unstyled = text
+            .replace("~~", "")
+            .replace("||", "")
+            .replace(['*', '_', '`'], "");
+        let flat = Ctx {
+            depth: MAX_DEPTH,
+            ..ctx
+        };
+        // Emoji are the first check's business: code may hold one, and stripping it frees it.
+        unstyled == text || self.admissible(&unstyled, flat, true).is_some()
     }
 }
 

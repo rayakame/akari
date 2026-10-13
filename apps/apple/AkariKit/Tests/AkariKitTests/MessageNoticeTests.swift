@@ -11,7 +11,8 @@ struct MessageNoticeTests {
             id: message.id, channelId: message.channelId, kind: kind, author: message.author,
             fromWebhook: false, content: content, timestamp: message.timestamp,
             editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-            embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent
+            embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
+            formatted: formattedText(content: content), mentionsMe: false
         ).notice
     }
 

@@ -114,8 +114,8 @@ with channel IDs, counts and durations only:
 
 ```text
 channel 1234 latest page 1: queued 86 ms, limited 0.0 ms, headers 370 ms, connection reused,
-  body 1.3 ms, 69755 bytes, decode 0.7 ms, store 0.1 ms, read 0.1 ms, render 44 ms for 50 rows,
-  shown after 524 ms; 50 messages; no limit headers
+  body 1.3 ms, 69755 bytes, decode 0.7 ms, parse 0.2 ms (50 parsed), store 0.1 ms, read 0.1 ms,
+  render 44 ms for 50 rows, shown after 524 ms; 50 messages; no limit headers
 channel 1234 opened: rows from the network after 544 ms
 channel 1234 opened: rows from disk after 24 ms, fresh after 380 ms
 ```
@@ -127,6 +127,9 @@ channel 1234 opened: rows from disk after 24 ms, fresh after 380 ms
   "new connection", DNS, TCP and TLS are part of it.
 - **body:** reading the body; **bytes** is its size after decompression.
 - **decode:** JSON into messages; **store:** into the channel's window, under the store's lock.
+- **parse:** the messages' markdown, parsed on Akari's runtime before they enter the window
+  (the page's new messages and, on a first page, the disk cache's copy shown before it), with
+  how many were parsed; ones parsed before aren't parsed again.
 - **read:** AkariKit reading the window and the new messages; **render:** the table update
   that inserted the page's rows (row heights included), with how many; a message arriving
   meanwhile isn't counted. **held … for live scroll:** how long a scroll past the top held the
@@ -136,8 +139,11 @@ channel 1234 opened: rows from disk after 24 ms, fresh after 380 ms
   headers".
 - A failed page says `failed after N ms:` and the error's kind; Discord's message isn't logged.
 
-akari-core logs the same stages itself at `akari_core::load` (debug, stderr), and new REST
-connections at `akari_core::rest` (debug, with their connect time).
+akari-core logs the same stages itself at `akari_core::load` (debug, stderr; the parse as
+`prepare_ms` and `prepared`), and new REST connections at `akari_core::rest` (debug, with their
+connect time). `akari_ffi::content` (debug) logs a line whenever a read had to parse a message a
+load had parsed and the cache dropped since (a miss: the channel ID and the count); live
+messages parsed when read aren't logged.
 
 ### Comparing a page load with the official client
 

@@ -21,10 +21,12 @@ public enum UserMarker {}
 public enum GuildMarker {}
 public enum ChannelMarker {}
 public enum MessageMarker {}
+public enum RoleMarker {}
 public enum AttachmentMarker {}
 
 public typealias UserId = Snowflake<UserMarker>
 public typealias GuildId = Snowflake<GuildMarker>
 public typealias ChannelId = Snowflake<ChannelMarker>
 public typealias MessageId = Snowflake<MessageMarker>
+public typealias RoleId = Snowflake<RoleMarker>
 public typealias AttachmentId = Snowflake<AttachmentMarker>

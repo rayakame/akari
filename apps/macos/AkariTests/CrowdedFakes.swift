@@ -116,12 +116,14 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
 
     override func messages(channelId: ChannelId, ids: [MessageId]) -> [Message] {
         ids.map { id in
-            Message(
+            let content = "message \(id.rawValue)"
+            return Message(
                 id: id, channelId: channelId, kind: .default, author: person(2),
-                fromWebhook: false, content: "message \(id.rawValue)",
+                fromWebhook: false, content: content,
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(id.rawValue)),
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-                embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent)
+                embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
+                formatted: formattedText(content: content), mentionsMe: false)
         }
     }
 

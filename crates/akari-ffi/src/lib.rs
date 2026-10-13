@@ -2,10 +2,13 @@
 
 mod account;
 mod client;
+mod contents;
 mod errors;
+mod formatted;
 mod ids;
 mod logging;
 mod login;
+mod names;
 mod records;
 mod runtime;
 mod store;
@@ -21,13 +24,18 @@ pub use errors::{
     ClientError, GatewayError, LoginError, LogoutError, NetworkErrorKind, RequestError,
     TokenStoreError,
 };
+pub use formatted::{
+    ChannelLink, FormattedText, GuildNavigation, MentionName, SpanKind, TextBlock, TextBlockKind,
+    TextContainer, TextLink, TextSpan, TimestampStyle, formatted_text,
+};
 pub use logging::enable_logging;
 pub use login::{
     CaptchaChallenge, LoginStep, LoginSuccess, MfaChallenge, MfaMethod, NewLocation, PasswordLogin,
     QrEvent, QrLogin, ScannedUser,
 };
 pub use records::{
-    Attachment, Channel, ConnectionState, Delivery, Guild, Message, MessageWindow, Slowmode, User,
+    Attachment, Channel, ConnectionState, ContentStats, Delivery, Guild, Message, MessageWindow,
+    Slowmode, User,
 };
 pub use store::{Store, message_length};
 pub use subscription::{StoreEvent, StoreSubscription};

@@ -32,12 +32,13 @@ func row(
             id: AttachmentId(rawValue: raw * 100 + UInt64(index)), filename: name,
             contentType: nil, size: 2_000_000)
     }
+    let content = content ?? "message \(raw)"
     let message = Message(
         id: MessageId(rawValue: raw), channelId: ChannelId(rawValue: 10), kind: kind,
-        author: user, fromWebhook: false, content: content ?? "message \(raw)", timestamp: time,
+        author: user, fromWebhook: false, content: content, timestamp: time,
         editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
         embedCount: embedCount, stickerNames: stickers, componentsV2: componentsV2,
-        delivery: delivery)
+        delivery: delivery, formatted: formattedText(content: content), mentionsMe: false)
     return MessageListModel.Row(id: MessageId(rawValue: key ?? raw), message: message)
 }
 
@@ -110,5 +111,5 @@ func loadReport(newConnection: Bool = false) -> LoadReport {
     LoadReport(
         queued: 0, limited: 0, headers: 0.182, newConnection: newConnection, body: 0.012,
         bytes: 48_213, decode: 0.0021, store: 0.0004, received: 50, retries: 0, remaining: 4,
-        resetAfter: 1.2)
+        resetAfter: 1.2, parse: 0.0004, parsed: 50)
 }

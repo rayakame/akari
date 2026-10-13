@@ -289,6 +289,7 @@ impl Parser {
         };
         let allowed = url.is_some()
             && self.admissible(&text[at + 1..close], check, false) == Some(true)
+            && (ctx.testing_link || self.admissible_without_styles(&text[at + 1..close], check))
             && part
                 .title
                 .clone()

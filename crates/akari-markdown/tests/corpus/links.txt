@@ -333,3 +333,140 @@ p: "[a](https://good.example \"https://evil.example𐵊\")"
 input: "[https://\u{5d0}a.com](https://good.example)"
 --
 p: "[https://אa.com](https://good.example)"
+
+# Stricter than Discord and parse-discord, which accept these: the text is checked again with
+# its style delimiters and backticks removed, so a style or code can't split a URL into text
+# that reads as one.
+== bold inside the scheme is refused
+[ht**tps://example.com**](https://other.example)
+--
+p: "[ht**tps://example.com**](https://other.example)"
+
+== bold around the scheme is refused
+[**https**://example.com](https://other.example)
+--
+p: "[**https**://example.com](https://other.example)"
+
+== bold after the scheme's colon is refused
+[https:**//example.com**](https://other.example)
+--
+p: "[https:**//example.com**](https://other.example)"
+
+== italics inside the scheme is refused
+[ht*tps://example.com*](https://other.example)
+--
+p: "[ht*tps://example.com*](https://other.example)"
+
+== italics around the scheme is refused
+[*https*://example.com](https://other.example)
+--
+p: "[*https*://example.com](https://other.example)"
+
+== italics after the scheme's colon is refused
+[https:*//example.com*](https://other.example)
+--
+p: "[https:*//example.com*](https://other.example)"
+
+== underscore italics inside the scheme is refused
+[ht_tps://example.com_](https://other.example)
+--
+p: "[ht_tps://example.com_](https://other.example)"
+
+== underscore italics around the scheme is refused
+[_https_://example.com](https://other.example)
+--
+p: "[_https_://example.com](https://other.example)"
+
+== underscore italics after the scheme's colon is refused
+[https:_//example.com_](https://other.example)
+--
+p: "[https:_//example.com_](https://other.example)"
+
+== underline inside the scheme is refused
+[ht__tps://example.com__](https://other.example)
+--
+p: "[ht__tps://example.com__](https://other.example)"
+
+== underline around the scheme is refused
+[__https__://example.com](https://other.example)
+--
+p: "[__https__://example.com](https://other.example)"
+
+== underline after the scheme's colon is refused
+[https:__//example.com__](https://other.example)
+--
+p: "[https:__//example.com__](https://other.example)"
+
+== strikethrough inside the scheme is refused
+[ht~~tps://example.com~~](https://other.example)
+--
+p: "[ht~~tps://example.com~~](https://other.example)"
+
+== strikethrough around the scheme is refused
+[~~https~~://example.com](https://other.example)
+--
+p: "[~~https~~://example.com](https://other.example)"
+
+== strikethrough after the scheme's colon is refused
+[https:~~//example.com~~](https://other.example)
+--
+p: "[https:~~//example.com~~](https://other.example)"
+
+== a spoiler inside the scheme is refused
+[ht||tps://example.com||](https://other.example)
+--
+p: "[ht||tps://example.com||](https://other.example)"
+
+== a spoiler around the scheme is refused
+[||https||://example.com](https://other.example)
+--
+p: "[||https||://example.com](https://other.example)"
+
+== a spoiler after the scheme's colon is refused
+[https:||//example.com||](https://other.example)
+--
+p: "[https:||//example.com||](https://other.example)"
+
+== inline code inside the scheme is refused
+[ht`tps://example.com`](https://other.example)
+--
+p: "[ht`tps://example.com`](https://other.example)"
+
+== inline code around the scheme is refused
+[`https`://example.com](https://other.example)
+--
+p: "[`https`://example.com](https://other.example)"
+
+== inline code after the scheme's colon is refused
+[https:`//example.com`](https://other.example)
+--
+p: "[https:`//example.com`](https://other.example)"
+
+== an emoji in code stays a link
+[`🥺`](https://example.com)
+--
+p: {l0}code"🥺"
+link0: <https://example.com/> masked
+
+== code without a URL stays a link
+[run `cargo test`](https://example.com)
+--
+p: {l0}"run " {l0}code"cargo test"
+link0: <https://example.com/> masked
+
+== a style inside the host is refused
+[https://ex**ample.com**](https://other.example)
+--
+p: "[https://ex**ample.com**](https://other.example)"
+
+== underscores without a URL stay a link
+[snake_case_name](https://example.com)
+--
+p: {l0}"snake_case_name"
+link0: <https://example.com/> masked
+
+== a styled word stays a link
+[**a** page](https://example.com)
+--
+p: {b l0}"a" {l0}" page"
+link0: <https://example.com/> masked

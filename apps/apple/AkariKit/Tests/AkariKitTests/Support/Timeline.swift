@@ -18,11 +18,13 @@ func row(
     _ raw: UInt64, by author: User = user(1), at time: Date, kind: MessageType = .default,
     webhook: Bool = false, key: UInt64? = nil, delivery: Delivery = .sent
 ) -> MessageListModel.Row {
+    let content = "message \(raw)"
     let message = Message(
         id: id(raw), channelId: id(10), kind: kind, author: author, fromWebhook: webhook,
-        content: "message \(raw)", timestamp: time, editedTimestamp: nil, pinned: false,
+        content: content, timestamp: time, editedTimestamp: nil, pinned: false,
         mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
-        componentsV2: false, delivery: delivery
+        componentsV2: false, delivery: delivery, formatted: formattedText(content: content),
+        mentionsMe: false
     )
     return MessageListModel.Row(id: id(key ?? raw), message: message)
 }

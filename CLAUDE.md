@@ -46,7 +46,9 @@ composer; it shows the connection state and reconnects. akari-core also has the 
 cache (`akari_core::cache`): one file per account with the last session's state and recent
 messages, which the macOS app restores before the gateway connects. `akari-markdown` parses
 Discord's message markdown (the rules, a flat document with source spans, a source map, UTF-16
-offsets and a document cache); nothing uses it yet. The other app folders contain only a README.
+offsets and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
+on Akari's runtime through akari-core's message preparer hook; the apps don't render it yet. The
+other app folders contain only a README.
 
 | Path | Contents |
 |---|---|

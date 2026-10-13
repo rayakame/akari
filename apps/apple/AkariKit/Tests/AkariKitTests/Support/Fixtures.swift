@@ -45,12 +45,14 @@ func message(
     _ raw: UInt64, in channelRaw: UInt64 = 10, content: String? = nil,
     delivery: Delivery = .sent
 ) -> Message {
-    Message(
+    let content = content ?? "message \(raw)"
+    return Message(
         id: id(raw), channelId: id(channelRaw), kind: .default, author: user(1),
-        fromWebhook: false, content: content ?? "message \(raw)",
+        fromWebhook: false, content: content,
         timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(raw)),
         editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-        embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery
+        embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery,
+        formatted: formattedText(content: content), mentionsMe: false
     )
 }
 
@@ -79,11 +81,12 @@ let captcha = CaptchaChallenge(
 
 func loadReport(
     headers: TimeInterval = 0.182, newConnection: Bool = false, received: UInt16 = 50,
-    remaining: UInt32? = 4, resetAfter: TimeInterval? = 1.2
+    remaining: UInt32? = 4, resetAfter: TimeInterval? = 1.2, parse: TimeInterval = 0.0004,
+    parsed: UInt32 = 50
 ) -> LoadReport {
     LoadReport(
         queued: 0, limited: 0.0004, headers: headers, newConnection: newConnection, body: 0.012,
         bytes: 48_213, decode: 0.0021, store: 0.0004, received: received, retries: 0,
-        remaining: remaining, resetAfter: resetAfter
+        remaining: remaining, resetAfter: resetAfter, parse: parse, parsed: parsed
     )
 }
