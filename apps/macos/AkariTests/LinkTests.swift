@@ -67,6 +67,15 @@ struct LinkTests {
     }
 
     @Test
+    func theDialogNamesTheHostAsItIsTrusted() throws {
+        let url = try #require(URL(string: "https://bücher.example/a"))
+
+        let alert = LinkConfirmation.alert(for: url)
+
+        #expect(alert.suppressionButton?.title == "Trust links to xn--bcher-kva.example from now on")
+    }
+
+    @Test
     func trustingTheHostOpensItsLinksDirectly() throws {
         let recorder = Recorder()
         let trusted = trusted()

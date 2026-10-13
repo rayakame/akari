@@ -17,7 +17,7 @@ public final class TrustedLinks {
         Self.host(url).map(hosts.contains) ?? false
     }
 
-    /// Trusts the URL's host, lowercased.
+    /// Trusts the URL's host, spelled as `host(_:)` gives it.
     public func trust(_ url: URL) {
         guard let host = Self.host(url), hosts.insert(host).inserted else {
             return
@@ -29,7 +29,14 @@ public final class TrustedLinks {
         "trustedLinkHosts.\(account.rawValue)"
     }
 
-    private static func host(_ url: URL) -> String? {
-        url.host(percentEncoded: true)?.lowercased()
+    /// The host a trust covers: lowercased, in its ASCII spelling (punycode), without a
+    /// trailing dot.
+    public nonisolated static func host(_ url: URL) -> String? {
+        // Unencoded, Foundation gives an international host in punycode.
+        var host = url.host(percentEncoded: false)?.lowercased() ?? ""
+        while host.hasSuffix(".") {
+            host.removeLast()
+        }
+        return host.isEmpty ? nil : host
     }
 }

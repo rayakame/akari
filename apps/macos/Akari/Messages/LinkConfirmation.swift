@@ -50,7 +50,7 @@ enum LinkConfirmation {
         back.keyEquivalent = "\u{1b}"
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title =
-            "Trust links to \(url.host(percentEncoded: true) ?? url.absoluteString) from now on"
+            "Trust links to \(TrustedLinks.host(url) ?? url.absoluteString) from now on"
         return alert
     }
 

@@ -44,4 +44,46 @@ struct TrustedLinksTests {
 
         #expect(links.isTrusted(url("https://example.com/")))
     }
+
+    @Test
+    func userinfoIsntTheHost() {
+        let links = TrustedLinks(account: id(1), defaults: defaults)
+        links.trust(url("https://example.com/"))
+
+        #expect(!links.isTrusted(url("https://example.com@evil.example/")))
+
+        links.trust(url("https://example.com@evil.example/"))
+        #expect(links.isTrusted(url("https://evil.example/")))
+        #expect(!links.isTrusted(url("https://other.example/")))
+    }
+
+    @Test
+    func trustCoversEveryPortOfTheHost() {
+        let links = TrustedLinks(account: id(1), defaults: defaults)
+        links.trust(url("https://example.com:8443/a"))
+
+        #expect(links.isTrusted(url("https://example.com/")))
+        #expect(links.isTrusted(url("https://example.com:9000/")))
+    }
+
+    @Test
+    func aTrailingDotNamesTheSameHost() {
+        let links = TrustedLinks(account: id(1), defaults: defaults)
+        links.trust(url("https://example.com./"))
+
+        #expect(links.isTrusted(url("https://example.com/")))
+        #expect(!links.isTrusted(url("https://example.com.evil.example/")))
+    }
+
+    @Test
+    func anInternationalHostIsTrustedInBothSpellings() {
+        let links = TrustedLinks(account: id(1), defaults: defaults)
+        links.trust(url("https://bücher.example/"))
+
+        #expect(links.isTrusted(url("https://xn--bcher-kva.example/")))
+        #expect(links.isTrusted(url("https://BÜCHER.example/")))
+        // A Cyrillic "а" in place of the Latin one.
+        links.trust(url("https://example.com/"))
+        #expect(!links.isTrusted(url("https://ex\u{0430}mple.com/")))
+    }
 }
