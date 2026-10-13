@@ -1,6 +1,7 @@
 use std::collections::HashSet;
+use std::hash::{BuildHasher, RandomState};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use akari_core::MessagePreparer;
 use akari_core::model::{MessageId, Timestamp};
@@ -48,14 +49,14 @@ struct Documents {
 }
 
 impl Documents {
-    fn insert(&mut self, key: ContentKey, len: usize, document: Arc<Document>, prepared: bool) {
+    fn insert(&mut self, key: ContentKey, source: u64, document: Arc<Document>, prepared: bool) {
         self.dropped.remove(&key);
         if prepared {
             self.prepared.insert(key);
         } else {
             self.prepared.remove(&key);
         }
-        let Some(old) = self.cache.insert(key, len, document) else {
+        let Some(old) = self.cache.insert(key, source, document) else {
             return;
         };
         if self.prepared.remove(&old) {
@@ -76,6 +77,14 @@ pub(crate) struct Contents {
     event_parses: AtomicU64,
     #[cfg(test)]
     prepared_on: Mutex<Vec<Option<String>>>,
+}
+
+// An update can change the content without an edit time. SipHash under a random key, so no
+// one can craft two contents that collide.
+fn fingerprint(message: &state::Message) -> u64 {
+    static KEY: OnceLock<RandomState> = OnceLock::new();
+    KEY.get_or_init(RandomState::new)
+        .hash_one(&*message.content)
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -105,8 +114,8 @@ impl Contents {
 
     pub(crate) fn document(&self, message: &state::Message) -> (Arc<Document>, Found) {
         let key = ContentKey::of(message);
-        let len = message.content.len();
-        if let Some(document) = lock(&self.documents).cache.get(&key, len) {
+        let source = fingerprint(message);
+        if let Some(document) = lock(&self.documents).cache.get(&key, source) {
             return (document, Found::Cached);
         }
         let document = Arc::new(akari_markdown::parse(&message.content));
@@ -117,7 +126,7 @@ impl Contents {
             } else {
                 Found::EventParse
             };
-            documents.insert(key, len, document.clone(), false);
+            documents.insert(key, source, document.clone(), false);
             found
         };
         self.parsed.fetch_add(1, Ordering::Relaxed);
@@ -155,7 +164,7 @@ impl MessagePreparer for Contents {
                 .filter(|message| {
                     documents
                         .cache
-                        .get(&ContentKey::of(message), message.content.len())
+                        .get(&ContentKey::of(message), fingerprint(message))
                         .is_none()
                 })
                 .map(|message| &**message)
@@ -170,7 +179,7 @@ impl MessagePreparer for Contents {
         for (message, document) in missing.iter().zip(parsed) {
             documents.insert(
                 ContentKey::of(message),
-                message.content.len(),
+                fingerprint(message),
                 document,
                 true,
             );

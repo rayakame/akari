@@ -43,8 +43,9 @@ shows after `GuildUpdated` (role names and colors), `ChannelUpdated` (channel na
 `UserUpdated`, `CurrentUserUpdated` and `CurrentMemberUpdated` (the user's roles: their
 mentions and channel access).
 
-Each account keeps up to 4,096 parsed documents, keyed by message ID and edit time, with the
-content's length as a guard. `Store.content_stats()` counts them: parsed, `misses` (parsed
+Each account keeps up to 4,096 parsed documents, keyed by message ID and edit time, with a
+hash of the content as a guard (SipHash under a random key per process), since an update can
+change the content without an edit time. `Store.content_stats()` counts them: parsed, `misses` (parsed
 when read though a load had parsed them, because the cache dropped them since) and
 `event_parses` (parsed when read because no load did: live messages and edits, also those the
 store held back while a page loaded).

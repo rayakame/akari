@@ -492,3 +492,25 @@ async fn a_message_held_during_a_restore_is_an_event_parse() {
     assert_eq!((stats.misses, stats.event_parses, stats.parsed), (0, 1, 4));
     restoring.account.close();
 }
+
+#[tokio::test]
+async fn a_same_length_update_without_an_edit_time_is_parsed_again() {
+    let mut online = online_with(three()).await;
+    load(&online.account).await;
+    read_all(&online.account);
+
+    update(
+        &mut online,
+        2,
+        json!({"id": "400000000000000010", "channel_id": GENERAL.get().to_string(),
+               "content": "__a__"}),
+    )
+    .await;
+    let read = read_all(&online.account);
+
+    assert_eq!(read[0].content, "__a__");
+    assert_eq!(read[0].edited_timestamp, None);
+    let span = &read[0].formatted.blocks[0].spans[0];
+    assert!(span.underline && !span.bold, "{span:?}");
+    online.account.close();
+}

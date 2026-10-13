@@ -16,7 +16,7 @@ fn a_document_is_found_after_it_was_inserted() {
 }
 
 #[test]
-fn another_length_is_a_miss() {
+fn another_fingerprint_is_a_miss() {
     let mut cache = Cache::new(4);
     cache.insert(1u64, 3, doc("abc"));
     assert_eq!(cache.get(&1, 4), None);

@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::document::Document;
 
-/// Parsed documents by key, the least recently used dropped beyond `capacity`.
+/// Parsed documents by key, the least recently used dropped beyond `capacity`. Each is stored
+/// with a fingerprint of its source, such as a hash, which a lookup must match.
 #[derive(Debug)]
 pub struct Cache<K> {
     capacity: usize,
@@ -17,7 +18,7 @@ pub struct Cache<K> {
 #[derive(Debug)]
 struct Entry<K> {
     key: K,
-    source_len: usize,
+    fingerprint: u64,
     document: Arc<Document>,
     newer: Option<usize>,
     older: Option<usize>,
@@ -34,10 +35,10 @@ impl<K: Hash + Eq + Clone> Cache<K> {
         }
     }
 
-    /// `None` also when the stored document was parsed from a source of another length.
-    pub fn get(&mut self, key: &K, source_len: usize) -> Option<Arc<Document>> {
+    /// `None` also when the stored document was parsed from a source with another fingerprint.
+    pub fn get(&mut self, key: &K, fingerprint: u64) -> Option<Arc<Document>> {
         let i = *self.index.get(key)?;
-        if self.entries[i].source_len != source_len {
+        if self.entries[i].fingerprint != fingerprint {
             return None;
         }
         self.unlink(i);
@@ -46,13 +47,13 @@ impl<K: Hash + Eq + Clone> Cache<K> {
     }
 
     /// Returns the key it dropped to make room, if any.
-    pub fn insert(&mut self, key: K, source_len: usize, document: Arc<Document>) -> Option<K> {
+    pub fn insert(&mut self, key: K, fingerprint: u64, document: Arc<Document>) -> Option<K> {
         if self.capacity == 0 {
             return None;
         }
         if let Some(&i) = self.index.get(&key) {
             let entry = &mut self.entries[i];
-            entry.source_len = source_len;
+            entry.fingerprint = fingerprint;
             entry.document = document;
             self.unlink(i);
             self.push_front(i);
@@ -62,7 +63,7 @@ impl<K: Hash + Eq + Clone> Cache<K> {
         let i = if self.entries.len() < self.capacity {
             self.entries.push(Entry {
                 key: key.clone(),
-                source_len,
+                fingerprint,
                 document,
                 newer: None,
                 older: None,
@@ -74,7 +75,7 @@ impl<K: Hash + Eq + Clone> Cache<K> {
             let entry = &mut self.entries[oldest];
             self.index.remove(&entry.key);
             dropped = Some(std::mem::replace(&mut entry.key, key.clone()));
-            entry.source_len = source_len;
+            entry.fingerprint = fingerprint;
             entry.document = document;
             oldest
         };
