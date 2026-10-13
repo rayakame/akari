@@ -19,7 +19,7 @@ final class MessageCell: NSTableCellView {
     private let reply = CellText.label()
     private let header = HeaderRow()
     private let hoverTime = CellText.label()
-    private let content = CellText.label(wrapping: true)
+    private let content = MessageTextView()
     private let extras = CellText.label(wrapping: true)
     // Built for the first failed message: its buttons cost a layout pass each.
     private var failed: FailedLine?
@@ -53,6 +53,27 @@ final class MessageCell: NSTableCellView {
         _ message: Message, startsGroup: Bool, groupTime: String, shortTime: String,
         fullDate: String
     ) {
+        configureAllButTheBody(
+            message, startsGroup: startsGroup, groupTime: groupTime, shortTime: shortTime,
+            fullDate: fullDate)
+        content.show(Self.body(message))
+    }
+
+    private static func body(_ message: Message) -> NSAttributedString {
+        let body = CellText.body(message.content, color: color(message.delivery))
+        guard message.editedTimestamp != nil, !message.content.isEmpty else {
+            return body
+        }
+        let marked = NSMutableAttributedString(attributedString: body)
+        marked.append(CellText.editedMark())
+        return marked
+    }
+
+    // The sizing cell measures the body instead of laying it out in its text view.
+    private func configureAllButTheBody(
+        _ message: Message, startsGroup: Bool, groupTime: String, shortTime: String,
+        fullDate: String
+    ) {
         showsHeader = startsGroup
         header.isHidden = !startsGroup
         avatar.isHidden = !startsGroup
@@ -67,13 +88,10 @@ final class MessageCell: NSTableCellView {
         hoverTime.toolTip = fullDate
         hoverTime.isHidden = !isHovered || startsGroup
         reply.isHidden = !(startsGroup && message.kind == .reply)
-        let body = NSMutableAttributedString(
-            attributedString: CellText.body(message.content, color: Self.color(message.delivery)))
         let lines = NSMutableAttributedString(attributedString: Self.extras(message))
-        if message.editedTimestamp != nil {
-            (message.content.isEmpty ? lines : body).append(CellText.editedMark())
+        if message.editedTimestamp != nil, message.content.isEmpty {
+            lines.append(CellText.editedMark())
         }
-        content.attributedStringValue = body
         content.isHidden = message.content.isEmpty
         extras.attributedStringValue = lines
         extras.isHidden = lines.length == 0
@@ -100,15 +118,17 @@ final class MessageCell: NSTableCellView {
 
     /// The row height for `message` at `width`, as Auto Layout would size the cell.
     static func height(_ message: Message, startsGroup: Bool, width: CGFloat) -> CGFloat {
-        sizing.configure(
+        sizing.configureAllButTheBody(
             message, startsGroup: startsGroup, groupTime: "", shortTime: "", fullDate: "")
-        return sizing.height(width: width)
+        let textWidth = width - textLeading - textTrailing
+        let body = message.content.isEmpty
+            ? 0 : TextMeasurer.shared.height(Self.body(message), width: textWidth)
+        return sizing.height(width: width, body: body)
     }
 
     // The constraints of build() in arithmetic; the stack leaves hidden views out.
-    private func height(width: CGFloat) -> CGFloat {
+    private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
-        content.preferredMaxLayoutWidth = textWidth
         extras.preferredMaxLayoutWidth = textWidth
         let shown = ([reply, header, content, extras] + [failed].compactMap { $0 }).filter {
             !$0.isHidden
@@ -117,7 +137,8 @@ final class MessageCell: NSTableCellView {
             shown.map { view in
                 view === header
                     ? self.header.height
-                    : view === failed ? FailedLine.height : view.intrinsicContentSize.height
+                    : view === content
+                        ? body : view === failed ? FailedLine.height : view.intrinsicContentSize.height
             }
             .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
         let top = showsHeader ? Self.groupTop : Self.continuationTop
@@ -143,12 +164,10 @@ final class MessageCell: NSTableCellView {
         hoverTime.font = .systemFont(ofSize: 11)
         hoverTime.textColor = Palette.chatTextMuted
         hoverTime.alignment = .right
-        for field in [content, extras] {
-            field.isSelectable = true
-            // Without it, the field editor drops the attributed string's font on a click.
-            field.allowsEditingTextAttributes = true
-            field.font = .systemFont(ofSize: 16)
-        }
+        extras.isSelectable = true
+        // Without it, the field editor drops the attributed string's font on a click.
+        extras.allowsEditingTextAttributes = true
+        extras.font = .systemFont(ofSize: 16)
 
         stack.orientation = .vertical
         stack.alignment = .leading

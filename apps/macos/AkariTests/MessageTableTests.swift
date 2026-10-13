@@ -446,21 +446,76 @@ struct MessageTableTests {
         #expect(hoveredRows.isEmpty)
     }
 
+    func messageText(in view: NSView) -> MessageTextView? {
+        view.subviews.lazy.compactMap { ($0 as? MessageTextView) ?? self.messageText(in: $0) }
+            .first
+    }
+
     @Test
-    func clickingMessageTextKeepsItsFont() throws {
+    func clickingMessageTextKeepsItsAttributes() throws {
         show([row(1, at: noon, content: "hello there")])
-        let field = try #require(
-            textFields(in: try cell(of: 1)).first { $0.stringValue == "hello there" })
+        let text = try #require(messageText(in: try cell(of: 1)))
 
-        // What a click on selectable text does: the field editor takes over the text.
-        field.selectText(nil)
+        window.makeFirstResponder(text)
+        text.selectAll(nil)
 
-        let editor = try #require(field.currentEditor() as? NSTextView)
         let attribute = { (key: NSAttributedString.Key) in
-            editor.textStorage?.attribute(key, at: 0, effectiveRange: nil)
+            text.textStorage?.attribute(key, at: 0, effectiveRange: nil)
         }
+        #expect(text.string == "hello there")
         #expect((attribute(.font) as? NSFont)?.pointSize == 16)
         #expect((attribute(.paragraphStyle) as? NSParagraphStyle)?.minimumLineHeight == 22)
+    }
+
+    @Test
+    func escapeStillReachesTheListWithTextSelected() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        let text = try #require(messageText(in: try cell(of: 200)))
+        window.makeFirstResponder(text)
+        text.setSelectedRange(NSRange(location: 0, length: 3))
+
+        let escape = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
+                charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        text.keyDown(with: escape)
+
+        #expect(actions.calls.filter { !$0.hasPrefix("more") } == ["escape"])
+    }
+
+    // The lowest row of ink a view draws, in window points.
+    func inkBottom(of view: NSView) throws -> CGFloat {
+        let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let last = try #require(
+            (0..<rep.pixelsHigh).last { y in
+                (0..<rep.pixelsWide).contains { x in
+                    (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5
+                }
+            })
+        let scale = CGFloat(rep.pixelsHigh) / view.bounds.height
+        let fromTop = CGFloat(last + 1) / scale
+        let y = view.isFlipped ? fromTop : view.bounds.height - fromTop
+        return view.convert(NSPoint(x: 0, y: y), to: nil).y
+    }
+
+    @Test
+    func theHoverTimeSitsOnTheFirstLinesBaseline() throws {
+        show([row(1, at: noon), row(2, at: noon + 30, content: "xxxx xxxx")])
+        let cell = try #require(try cell(of: 2) as? MessageCell)
+        cell.isHovered = true
+        cell.layoutSubtreeIfNeeded()
+        let text = try #require(messageText(in: cell))
+        let time = try #require(
+            textFields(in: cell).first { !$0.isHiddenOrHasHiddenAncestor && $0.stringValue != "" })
+
+        // Neither "x" nor the time's digits reach below the baseline.
+        let textBottom = try inkBottom(of: text)
+        let timeBottom = try inkBottom(of: time)
+        #expect(abs(textBottom - timeBottom) <= 0.5, "time at \(timeBottom), text at \(textBottom)")
     }
 
     @Test
@@ -692,9 +747,9 @@ struct MessageTableTests {
     }
 
     func contentColor(of raw: UInt64, text: String) throws -> NSColor? {
-        let field = try #require(
-            textFields(in: try cell(of: raw)).first { $0.stringValue.hasPrefix(text) })
-        return field.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil)
+        let body = try #require(messageText(in: try cell(of: raw)))
+        #expect(body.string.hasPrefix(text))
+        return body.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil)
             as? NSColor
     }
 
@@ -737,18 +792,14 @@ struct MessageTableTests {
             row(3, at: noon + 20),
         ])
 
-        let fields = textFields(in: try cell(of: 1)).filter {
-            $0.stringValue.hasPrefix("message 1")
-        }
-        let text = try #require(fields.first).attributedStringValue
+        let text = try #require(messageText(in: try cell(of: 1))).attributedString()
         #expect(text.string == "message 1 (edited)")
         let marker = text.attributes(at: text.length - 1, effectiveRange: nil)
         #expect((marker[.font] as? NSFont)?.pointSize == 12)
         #expect(marker[.foregroundColor] as? NSColor == Palette.chatTextMuted)
         let extras = textFields(in: try cell(of: 2)).filter { $0.stringValue.contains("a.zip") }
         #expect(try #require(extras.first).stringValue.hasSuffix(" (edited)"))
-        let plain = textFields(in: try cell(of: 3)).filter { $0.stringValue.hasPrefix("message 3") }
-        #expect(try #require(plain.first).stringValue == "message 3")
+        #expect(try #require(messageText(in: try cell(of: 3))).string == "message 3")
     }
 
     // 100 one-line messages, 101...200, two minutes apart on one day.

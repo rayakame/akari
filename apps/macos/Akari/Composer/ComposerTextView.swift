@@ -88,6 +88,11 @@ final class ComposerTextView: NSTextView {
         {
             return
         }
+        if let message = window.firstResponder as? MessageTextView, message.window === window,
+            message.selectedRange().length > 0
+        {
+            return
+        }
         window.makeFirstResponder(self)
     }
 
