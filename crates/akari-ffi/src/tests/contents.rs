@@ -291,8 +291,17 @@ async fn an_update_without_an_edit_reuses_the_document() {
     online.account.close();
 }
 
-#[tokio::test]
-async fn a_restore_leaves_nothing_to_parse_on_read() {
+struct Restoring {
+    account: Arc<Account>,
+    subscription: Arc<StoreSubscription>,
+    _client: Arc<DiscordClient>,
+    _server: MockServer,
+    _dir: super::cache::TempDir,
+}
+
+// A previous session cached `body`'s messages; a new account restores them, and its first page
+// (the same messages) answers after `delay`.
+async fn restoring(body: Value, delay: Duration) -> Restoring {
     let dir = super::cache::TempDir::new();
     let server = MockServer::start().await;
     let gateway = FakeGateway::start().await;
@@ -302,7 +311,7 @@ async fn a_restore_leaves_nothing_to_parse_on_read() {
     };
     let core = core_client(endpoints, Arc::new(MemoryStore::default())).with_cache(dir.path());
     let client = DiscordClient::from_core(core).unwrap();
-    mock_page(&server, three(), Duration::ZERO).await;
+    mock_page(&server, body.clone(), Duration::ZERO).await;
     let first = client.account(token("t"), USER).unwrap();
     let subscription = first.store().subscribe();
     first.connect().unwrap();
@@ -313,29 +322,103 @@ async fn a_restore_leaves_nothing_to_parse_on_read() {
     first.close();
     drop(first);
     server.reset().await;
-    mock_page(&server, three(), Duration::from_millis(500)).await;
+    mock_page(&server, body, delay).await;
 
-    let again = client.account(token("t"), USER).unwrap();
-    let restored = again.store().subscribe();
-    if again.store().current_user().is_none() {
-        events_until(&restored, |event| *event == StoreEvent::Restored).await;
+    let account = client.account(token("t"), USER).unwrap();
+    let subscription = account.store().subscribe();
+    if account.store().current_user().is_none() {
+        events_until(&subscription, |event| *event == StoreEvent::Restored).await;
     }
-    let loading = {
-        let again = again.clone();
-        tokio::spawn(async move { load(&again).await })
-    };
-    events_until(&restored, |event| {
+    Restoring {
+        account,
+        subscription,
+        _client: client,
+        _server: server,
+        _dir: dir,
+    }
+}
+
+#[tokio::test]
+async fn a_restore_leaves_nothing_to_parse_on_read() {
+    let restoring = restoring(three(), Duration::from_millis(500)).await;
+    let again = restoring.account.clone();
+
+    let loading = tokio::spawn(async move { load(&again).await });
+    events_until(&restoring.subscription, |event| {
         matches!(event, StoreEvent::MessagesLoaded { .. })
     })
     .await;
     assert!(!loading.is_finished(), "the page came before the cache");
-    let shown = read_all(&again);
+    let shown = read_all(&restoring.account);
 
     assert_eq!(shown.len(), 3);
-    let stats = stats(&again);
+    let stats = stats(&restoring.account);
     assert_eq!((stats.misses, stats.event_parses, stats.parsed), (0, 0, 3));
     loading.await.unwrap();
-    again.close();
+    restoring.account.close();
+}
+
+// akari-markdown's realistic samples, the same ones its parse_cost measures.
+fn samples() -> Vec<String> {
+    fn unescape(quoted: &str) -> String {
+        let mut out = String::new();
+        let mut chars = quoted.chars();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                out.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('u') => {
+                    let hex: String = chars.by_ref().skip(1).take_while(|&c| c != '}').collect();
+                    out.extend(u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32));
+                }
+                Some(other) => out.push(other),
+                None => {}
+            }
+        }
+        out
+    }
+    include_str!("../../../akari-markdown/tests/corpus/samples.txt")
+        .lines()
+        .filter_map(|line| line.strip_prefix("input: \"")?.strip_suffix('"'))
+        .map(unescape)
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "prints a restored launch's parse (observe-only); run with --release"]
+async fn restored_parse_cost() {
+    let samples = samples();
+    let typical: Vec<String> = samples.iter().cycle().take(50).cloned().collect();
+    let worst: Vec<String> = (0..50).map(adversarial).collect();
+    for (name, contents) in [("typical", typical), ("adversarial", worst)] {
+        let bytes: usize = contents.iter().map(String::len).sum();
+        let restoring = restoring(
+            page(400_000_000_000_000_300, &contents),
+            Duration::from_millis(200),
+        )
+        .await;
+
+        let report = load(&restoring.account).await;
+        let reading = Instant::now();
+        let shown = read_all(&restoring.account);
+        let read = reading.elapsed();
+
+        println!(
+            "{name}: 50 messages, {bytes} bytes: parse {:.2} ms ({} parsed), read {:.2} ms \
+             for {} rows, {:?}",
+            report.parse.as_secs_f64() * 1000.0,
+            report.parsed,
+            read.as_secs_f64() * 1000.0,
+            shown.len(),
+            stats(&restoring.account)
+        );
+        restoring.account.close();
+    }
 }
 
 #[tokio::test]
