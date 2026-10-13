@@ -83,6 +83,12 @@ final class MessageTextView: NSTextView {
         updateDecorations()
     }
 
+    // NSTextView scrolls its insertion point into view when layout resizes it, which here would
+    // move the list as if the user had.
+    override func scrollToVisible(_ rect: NSRect) -> Bool {
+        false
+    }
+
     // Behind the text in the superview, in step with this view's frame.
     override func viewWillMove(toSuperview newSuperview: NSView?) {
         super.viewWillMove(toSuperview: newSuperview)

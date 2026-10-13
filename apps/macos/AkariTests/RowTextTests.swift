@@ -35,6 +35,32 @@ struct RowTextTests {
         builds.counts.values.allSatisfy { $0 == 1 }
     }
 
+    // As SwiftUI makes a list for a channel the user returns to: filled, placed, then sized;
+    // until then its column has AppKit's default width.
+    @Test
+    func aListFilledBeforeItHasASizeBuildsNothingUntilItHasOne() throws {
+        let builds = Builds()
+        let controller = MessageTableController(
+            calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil },
+            build: { message, revealed, now, times in
+                builds.counts[message.id.rawValue, default: 0] += 1
+                return MessageText.build(message, revealed: revealed, now: now, times: times)
+            })
+
+        controller.show(MessageTableState(rows: rows(1...50), reachedOldest: true))
+        #expect(builds.counts.isEmpty, "\(builds.counts)")
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 725, height: 431), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        let container = try #require(window.contentView)
+        container.addSubview(controller.scrollView)
+        #expect(builds.counts.isEmpty, "\(builds.counts)")
+        controller.scrollView.frame = container.bounds
+        window.layoutIfNeeded()
+        #expect(builds.counts.count == 50 && builds.counts.values.allSatisfy { $0 == 1 })
+    }
+
     @Test
     func theHeightPassAndTheCellShareOneBuild() {
         list.show(rows(51...100))

@@ -141,6 +141,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     func show(_ state: MessageTableState) {
+        // Before SwiftUI sizes the list its column has AppKit's default width, where formatted
+        // rows cost several times as much to build and measure; settling after the size shows it.
+        guard scrollView.frame.width > 0 else {
+            heldState = state
+            return
+        }
         if isLiveScrolling && isPastTheTop {
             heldState = state
             heldSince = heldSince ?? .now

@@ -329,6 +329,46 @@ struct MessageTableTests {
         #expect(visibleRows.contains(table.numberOfRows - 1))
     }
 
+    // Every third message formatted, as in a channel with a few code blocks and lists.
+    func formattedMix(_ count: Int) -> [MessageListModel.Row] {
+        let contents = FormattedSamples.contents
+        return (1...count).map { number in
+            row(
+                UInt64(number), by: author(UInt64(2 + number % 2)), at: noon + Double(number) * 600,
+                content: number % 3 == 0
+                    ? contents[number / 3 % contents.count] : "test \(number)")
+        }
+    }
+
+    // As SwiftUI makes a list for a channel the user returns to: filled, placed, then sized.
+    // The counts put different rows at the top edge.
+    @Test
+    func aListFilledBeforeItHasASizeLandsOnItsNewestMessage() throws {
+        var missed: [Int: CGFloat] = [:]
+        for count in 30...70 {
+            let controller = MessageTableController(
+                calendar: { berlin }, now: { berlinTime(2026, 10, 12, 15, 0) }, pointer: { nil })
+            controller.show(MessageTableState(rows: formattedMix(count), reachedOldest: true))
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 725, height: 431), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            let container = try #require(window.contentView)
+            container.addSubview(controller.scrollView)
+            controller.scrollView.frame = container.bounds
+            window.layoutIfNeeded()
+
+            let table = controller.tableView
+            let scroll = controller.scrollView
+            let newest = table.rect(ofRow: table.numberOfRows - 1).maxY
+            let shown = scroll.contentView.bounds.maxY - scroll.contentInsets.bottom
+            if newest > shown + 0.5 {
+                missed[count] = newest - shown
+            }
+        }
+
+        #expect(missed.isEmpty, "\(missed.sorted { $0.key < $1.key })")
+    }
+
     @Test
     func aListScrolledUpStaysPutWhenRowsChangeAboveIt() throws {
         var rows = messages(200)

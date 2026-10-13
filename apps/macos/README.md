@@ -240,6 +240,12 @@ What the Performance and cache milestone found, so later changes don't bring it 
   the height pass and the cell): on fully formatted pages the first page costs about 1.6× a
   plain one. Building a page's text off the main thread is the next step if pages landing in
   a fling ever hitch.
+- **A new list waits for its size.** SwiftUI updates a list before it sizes it, while its
+  column has AppKit's default width of 100 pt, where formatted rows cost several times as
+  much to build and measure; a channel the user returned to paid for every row twice. The
+  controller holds that update until the list has a width. A message's text view never
+  scrolls the list either: NSTextView scrolls its insertion point into view when layout
+  resizes it, which moved a pinned list off its bottom.
 
 `AkariTests/PerformanceProbe.swift` measures the table offline (no account, synthetic
 messages, a window on screen) and only runs when asked:

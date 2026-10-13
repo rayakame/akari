@@ -45,6 +45,63 @@ struct SessionScreenTests {
         #expect(second.loads.withLock { $0 } == 1)
     }
 
+    // SwiftUI applies a channel switch over a few run loop turns.
+    func settle(_ host: NSView) async {
+        for _ in 0..<6 {
+            try? await Task.sleep(for: .milliseconds(100))
+            host.layoutSubtreeIfNeeded()
+        }
+    }
+
+    func formattedSession(_ account: FormattedAccount) -> SessionModel {
+        let session = SessionModel(
+            userId: UserId(rawValue: 1), account: account,
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(.guild(GuildId(rawValue: 1)))
+        session.open(channel: FormattedStore.channelIds[0])
+        return session
+    }
+
+    func shownWindow(_ host: NSView) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 600), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFrontRegardless()
+        return window
+    }
+
+    // How far the newest row reaches below what the list shows above its bottom inset.
+    func newestRowHidden(in host: NSView) throws -> CGFloat {
+        let table = try #require(views(MessageTableView.self, in: host).first)
+        let scroll = try #require(table.enclosingScrollView)
+        let newest = table.rect(ofRow: table.numberOfRows - 1)
+        return newest.maxY - (scroll.contentView.bounds.maxY - scroll.contentInsets.bottom)
+    }
+
+    @Test(arguments: [false, true])
+    func returningToAChannelLeftAtTheBottomShowsItsNewestMessage(arrivals: Bool) async throws {
+        let account = FormattedAccount(contents: FormattedSamples.contents)
+        let session = formattedSession(account)
+        let host = NSHostingView(rootView: SessionScreen(session: session))
+        let window = shownWindow(host)
+        defer { window.orderOut(nil) }
+        await settle(host)
+        #expect(try newestRowHidden(in: host) <= 0.5)
+
+        session.open(channel: FormattedStore.channelIds[1])
+        await settle(host)
+        if arrivals {
+            account.formattedStore.add(3, to: FormattedStore.channelIds[0])
+        }
+        session.open(channel: FormattedStore.channelIds[0])
+        await settle(host)
+
+        #expect(try newestRowHidden(in: host) <= 0.5)
+    }
+
     func views<View: NSView>(_ type: View.Type, in view: NSView) -> [View] {
         view.subviews.flatMap { subview in
             [subview as? View].compactMap { $0 } + views(type, in: subview)
