@@ -153,12 +153,14 @@ jobs:
           if git diff --name-only "origin/$BASE...HEAD" | grep -q '^crates/akari-markdown/'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
-      # The prebuilt cargo-fuzz targets musl by default, which the address sanitizer can't use.
+      # The prebuilt cargo-fuzz targets musl by default, which the address sanitizer can't use;
+      # libFuzzer needs its corpus directories to exist.
       - if: steps.changed.outputs.run == 'true'
         working-directory: crates/akari-markdown/fuzz
         run: |
           rustup toolchain install --no-self-update
           echo "FUZZ_TARGET=$(rustc -vV | sed -n 's/^host: //p')" >> "$GITHUB_ENV"
+          mkdir -p corpus/parse corpus/source_range
       - if: steps.changed.outputs.run == 'true'
         uses: taiki-e/install-action@v2
         with:
