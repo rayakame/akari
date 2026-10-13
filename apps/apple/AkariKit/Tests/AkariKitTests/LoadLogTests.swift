@@ -32,9 +32,19 @@ struct LoadLogTests {
         #expect(
             line
                 == "channel 1234 older page 7: queued 0.0 ms, limited 0.4 ms, headers 182 ms, "
-                + "connection reused, body 12 ms, 48213 bytes, decode 2.1 ms, store 0.4 ms, "
+                + "connection reused, body 12 ms, 48213 bytes, decode 2.1 ms, "
+                + "parse 0.4 ms (50 parsed), store 0.4 ms, "
                 + "read 0.9 ms, render 8.7 ms for 50 rows, shown after 214 ms; 50 messages; "
                 + "remaining 4, reset 1.2 s")
+    }
+
+    @Test
+    func theLoadLineShowsTheParse() {
+        let line = LoadLog.page(
+            trace(.latest, report: loadReport(parse: 0.0123, parsed: 3)), render: nil, rows: 0,
+            held: nil, shown: .milliseconds(300))
+
+        #expect(line.contains("decode 2.1 ms, parse 12 ms (3 parsed), store 0.4 ms"))
     }
 
     @Test

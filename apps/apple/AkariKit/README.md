@@ -127,12 +127,16 @@ Rules every Apple app shows the same way, so they live here rather than in the a
 - `TimelineChanges` diffs two timelines by item keys into the removed, inserted and reloaded
   indexes a table or collection view applies, so a list never reloads as a whole. A
   confirmation keeps its row key (above) and reloads one row.
+- `Message.formatted` (the parsed content, UTF-16 offsets into `content`) and
+  `Message.mentionsMe` come from akari-ffi; the app renders them from the message formatting
+  milestone's third part on, and shows plain text until then.
 - `Message.notice` is Akari's sentence for a system message; `Initials` gives the letters a
   server or avatar without an image shows; `Channel.opensMessageList` says which channels
   have a message list.
 
 `LoadLog` writes the `load` category's lines (`-AkariLog load` on macOS): one per page with
-where its time went, and one per channel open. The formats are here, so every Apple app logs
+where its time went (including `parse`, the runtime's markdown parse for the page), and one
+per channel open. The formats are here, so every Apple app logs
 the same lines; the app adds the render time it measures.
 
 ## Tests

@@ -1,8 +1,8 @@
 # akari-ffi
 
-UniFFI bindings over `akari-core` for Swift (macOS now, iOS later) and Kotlin (Android,
-later). This crate holds bindings only: logic belongs in `akari-core`, and Apple-specific
-view-model behavior in AkariKit (`apps/apple/AkariKit`).
+UniFFI bindings over `akari-core` and `akari-markdown` for Swift (macOS now, iOS later) and
+Kotlin (Android, later). This crate holds bindings only: logic belongs in `akari-core` and
+`akari-markdown`, and Apple-specific view-model behavior in AkariKit (`apps/apple/AkariKit`).
 
 ## How state crosses the boundary
 
@@ -21,6 +21,27 @@ view-model behavior in AkariKit (`apps/apple/AkariKit`).
 - **Reads by ID** come in single and batch form (`channel(id)`, `channels(ids)`,
   `messages(channel_id, ids)`); lists cross as ID lists (`guild_ids`, `channel_list`,
   `window`).
+
+## Formatted messages
+
+`Message.formatted` is the content as Discord formats it (`FormattedText`), flat so it maps
+onto an attributed string: blocks (paragraph, heading, subtext, code block) inside their
+quotes and list items, each with spans that carry their styles, spoiler and link, and the
+links (masked or not, the title, the embed flag, and for Discord channel and message URLs
+the typed IDs and the channel's name). Offsets are UTF-16 code units into `content`, so Swift
+cuts it with `NSString` ranges. `Message.mentions_me` says whether the message mentions the
+current user (akari-core's rule; notification settings aren't read yet).
+
+Mention names come from the message's own users, else the store, at read time, so a rename
+needs no invalidation: `Known`, `NoAccess` (a channel the user can't view), `Missing` (the
+store has the list but not the item) or `NotLoaded` (before READY, a pending message's users,
+a guild not in the store). `formatted_text(content)` parses without a store, for tests and
+previews.
+
+Each account keeps up to 4,096 parsed documents, keyed by message ID and edit time, with the
+content's length as a guard. `Store.content_stats()` counts them: parsed, `misses` (parsed when
+read though a load should have parsed them) and `event_parses` (live changes parsed when
+read).
 
 ## Events
 
@@ -49,6 +70,13 @@ read.
   `view_channel` only signal.
 - The host's `TokenStore` runs on a blocking thread, never on the main thread or a runtime
   worker, so it may block or show a dialog.
+- Markdown is parsed on the runtime where it can be: each account registers its documents as
+  akari-core's message preparer, so history pages and the disk cache's fill are parsed on a
+  blocking thread before they enter a window, and `messages` only looks them up. Live
+  changes (new, edited, confirmed messages) are parsed when read, on the reader's thread: one
+  message takes microseconds. `next()` announces them, so those parses count as event parses;
+  any other parse on read is a miss and logs one debug line at `akari_ffi::content` (the
+  channel ID and the count).
 - **Swift task cancellation doesn't reach Rust** (UniFFI 0.32 doesn't support it). A request
   runs to completion; a send that the host stopped waiting for still resolves through the
   store. Waits end through explicit calls: `PasswordLogin.cancel()`, `QrLogin.cancel()`,
@@ -85,7 +113,8 @@ the open channel's window events and after a send.
 
 `load_messages` returns a `LoadReport` (or `None` when there was nothing to load): the time
 behind earlier requests and waiting for rate limits, until the headers, for the body,
-decoding and storing, whether a new connection was opened, and Discord's rate-limit headers.
+decoding, parsing (`parse`, `parsed`: the page's new messages and, on a first page, the disk
+cache's) and storing, whether a new connection was opened, and Discord's rate-limit headers.
 Numbers only; the apps log them. `DiscordClient::warm_up()` opens a REST connection ahead of
 the first request (an unauthenticated `GET /gateway`) and returns at once.
 

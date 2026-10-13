@@ -43,6 +43,7 @@ public enum LoadLog {
             + "headers \(ms(report.headers)), "
             + (report.newConnection ? "new connection" : "connection reused")
             + ", body \(ms(report.body)), \(report.bytes) bytes, decode \(ms(report.decode)), "
+            + "parse \(ms(report.parse)) (\(report.parsed) parsed), "
             + "store \(ms(report.store)), read \(ms(trace.read)), "
             + "render \(render.map { "\(ms($0)) for \(rows) rows" } ?? "none (no rows changed)")"
             + (held.map { ", held \(ms($0)) for live scroll" } ?? "")
