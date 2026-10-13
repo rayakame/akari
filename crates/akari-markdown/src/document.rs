@@ -257,20 +257,22 @@ impl Link {
         if !matches!(base, "discord.com" | "discordapp.com") {
             return None;
         }
-        let mut segments = url.path_segments()?.filter(|s| !s.is_empty());
-        if segments.next()? != "channels" {
-            return None;
+        let mut segments: Vec<&str> = url.path_segments()?.collect();
+        // A trailing slash is the same page; any other empty segment makes it another URL.
+        if segments.len() > 1 && segments.last() == Some(&"") {
+            segments.pop();
         }
-        let guild = segments.next()?;
+        let (guild, channel, message) = match segments[..] {
+            ["channels", guild, channel] => (guild, channel, None),
+            ["channels", guild, channel, message] => (guild, channel, Some(message)),
+            _ => return None,
+        };
         let guild_id = match guild {
             "@me" => None,
             id => Some(id.parse().ok()?),
         };
-        let channel_id = segments.next()?.parse().ok()?;
-        let message_id = segments.next().map(str::parse).transpose().ok()?;
-        if segments.next().is_some() {
-            return None;
-        }
+        let channel_id = channel.parse().ok()?;
+        let message_id = message.map(str::parse).transpose().ok()?;
         Some(DiscordChannelLink {
             guild_id,
             channel_id,

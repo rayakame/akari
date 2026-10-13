@@ -56,6 +56,11 @@ fn discord_channel_links_are_recognized() {
         "https://evil.discord.com.example/channels/1/2",
         "ftp://discord.com/channels/1/2",
         "https://discord.gg/abc",
+        "https://discord.com//channels/1/2",
+        "https://discord.com/channels//1/2",
+        "https://discord.com/channels/1//2",
+        "https://discord.com/channels/1/2//3",
+        "https://discord.com/channels/1/2//",
     ] {
         assert_eq!(channel(other), None, "{other}");
     }
