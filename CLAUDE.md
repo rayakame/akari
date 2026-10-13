@@ -44,8 +44,9 @@ timeline. `apps/macos` is the first app: the login screen and the main window wi
 rail, the channel and DM lists, a message list that loads history in both directions, and the
 composer; it shows the connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
-messages, which the macOS app restores before the gateway connects. `akari-markdown` is
-still an empty skeleton, and the other app folders contain only a README.
+messages, which the macOS app restores before the gateway connects. `akari-markdown` parses
+Discord's message markdown (the rules, a flat document with source spans, a source map, UTF-16
+offsets and a document cache); nothing uses it yet. The other app folders contain only a README.
 
 | Path | Contents |
 |---|---|
