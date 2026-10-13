@@ -1140,3 +1140,89 @@ fn a_restore_is_refused_while_a_ready_is_prepared() {
     assert!(store.guild(Snowflake::new(3)).is_none());
     assert!(store.guild(Snowflake::new(2)).is_some());
 }
+
+const MODERATORS: u64 = 500_000_000_000_000_002;
+
+// The fixture's message mentions the current user, who holds the Moderators role in guild 1.
+fn mentioning(edit: impl FnOnce(&mut model::Message)) -> Message {
+    let mut wire = message_template();
+    edit(&mut wire);
+    Message::from_wire(wire, &mut |user| Arc::new(User::from_wire(user)))
+}
+
+fn mentioning_nobody(edit: impl FnOnce(&mut model::Message)) -> Message {
+    mentioning(|wire| {
+        wire.mentions.clear();
+        edit(wire);
+    })
+}
+
+#[test]
+fn a_user_mention_mentions_me() {
+    assert!(ready_store().mentions_me(&mentioning(|_| {})));
+    assert!(!ready_store().mentions_me(&mentioning_nobody(|_| {})));
+}
+
+#[test]
+fn everyone_mentions_me() {
+    let message = mentioning_nobody(|wire| wire.mention_everyone = true);
+    assert!(ready_store().mentions_me(&message));
+}
+
+#[test]
+fn a_role_i_have_mentions_me() {
+    let message = mentioning_nobody(|wire| wire.mention_roles = vec![Snowflake::new(MODERATORS)]);
+    assert!(ready_store().mentions_me(&message));
+}
+
+#[test]
+fn a_role_i_lack_does_not() {
+    let message = mentioning_nobody(|wire| wire.mention_roles = vec![Snowflake::new(1)]);
+    assert!(!ready_store().mentions_me(&message));
+}
+
+#[test]
+fn role_mentions_in_a_dm_do_not() {
+    let message = mentioning_nobody(|wire| {
+        wire.channel_id = Snowflake::new(DM);
+        wire.mention_roles = vec![Snowflake::new(MODERATORS)];
+    });
+    assert!(!ready_store().mentions_me(&message));
+}
+
+#[test]
+fn nothing_mentions_me_before_ready() {
+    let everyone = mentioning(|wire| wire.mention_everyone = true);
+    assert!(!Store::new(DEFAULT_LIMITS).mentions_me(&everyone));
+}
+
+#[test]
+fn an_unknown_channel_counts_users_and_everyone_only() {
+    let unknown = |edit: fn(&mut model::Message)| {
+        mentioning_nobody(|wire| {
+            wire.channel_id = Snowflake::new(1);
+            edit(wire);
+        })
+    };
+    let store = ready_store();
+    assert!(!store.mentions_me(&unknown(|wire| {
+        wire.mention_roles = vec![Snowflake::new(MODERATORS)];
+    })));
+    assert!(store.mentions_me(&unknown(|wire| wire.mention_everyone = true)));
+    let user = mentioning(|wire| wire.channel_id = Snowflake::new(1));
+    assert!(store.mentions_me(&user));
+}
+
+#[test]
+fn a_pending_message_mentions_nobody() {
+    let store = ready_store();
+    let me = Arc::new(store.current_user().unwrap().user.clone());
+    let pending = Message::pending(
+        Snowflake::new(9),
+        Snowflake::new(GENERAL),
+        me,
+        format!("<@{ME}> @everyone <@&{MODERATORS}>"),
+        0,
+    );
+    assert!(!store.mentions_me(&pending));
+}
