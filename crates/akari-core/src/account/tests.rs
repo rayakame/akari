@@ -3531,6 +3531,31 @@ mod cache {
     }
 
     #[tokio::test]
+    async fn a_close_overtaken_by_another_still_writes_its_snapshot() {
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let (account, thread) = start_cached(&fake, &dir, Duration::from_secs(3600));
+        let account = Arc::new(account);
+        let subscription = account.store().subscribe();
+        let _connection = online(&mut fake, &account).await;
+        events_until(&subscription, "Online").await;
+        let (reached, release) = account.shared.flusher.as_ref().unwrap().pause_next_close();
+        let first = std::thread::spawn({
+            let account = account.clone();
+            move || account.close()
+        });
+        reached.recv().unwrap();
+
+        account.close();
+        // Resolves once the flusher has ended.
+        account.flush_cache().await;
+
+        assert_eq!(cached_guilds(&thread).await, 1);
+        release.send(()).unwrap();
+        first.join().unwrap();
+    }
+
+    #[tokio::test]
     async fn a_failed_open_of_a_cached_channel_is_refreshed_after_ready() {
         use wiremock::matchers::{path, query_param};
 

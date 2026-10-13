@@ -10,7 +10,7 @@ use crate::state::Store;
 
 enum Request {
     Flush(Option<oneshot::Sender<()>>),
-    Close(Option<Box<Snapshot>>),
+    Close,
     Delete,
 }
 
@@ -18,30 +18,47 @@ enum Request {
 pub(crate) struct Flusher {
     requests: mpsc::UnboundedSender<Request>,
     source: Arc<Source>,
+    #[cfg(test)]
+    paused: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
 }
 
 // Snapshots end with close's, so nothing that changes after close() returns is written.
 struct Source {
     store: Store,
-    closed: Mutex<bool>,
+    closing: Mutex<Closing>,
+}
+
+#[derive(Default)]
+struct Closing {
+    closed: bool,
+    // Kept here, not in the request: another close's request can reach the task first.
+    last: Option<Snapshot>,
 }
 
 impl Source {
+    fn closing(&self) -> std::sync::MutexGuard<'_, Closing> {
+        self.closing.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     // Under the lock, so none is taken after close's.
     fn snapshot(&self) -> Option<Snapshot> {
-        let closed = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
-        if *closed {
+        let closing = self.closing();
+        if closing.closed {
             return None;
         }
         Snapshot::take(&self.store)
     }
 
-    fn last_snapshot(&self) -> Option<Snapshot> {
-        let mut closed = self.closed.lock().unwrap_or_else(PoisonError::into_inner);
-        if std::mem::replace(&mut *closed, true) {
-            return None;
+    fn close(&self) {
+        let mut closing = self.closing();
+        if !closing.closed {
+            closing.closed = true;
+            closing.last = Snapshot::take(&self.store);
         }
-        Snapshot::take(&self.store)
+    }
+
+    fn take_last(&self) -> Option<Snapshot> {
+        self.closing().last.take()
     }
 }
 
@@ -51,7 +68,7 @@ impl Flusher {
         let every = cache.every;
         let source = Arc::new(Source {
             store,
-            closed: Mutex::new(false),
+            closing: Mutex::default(),
         });
         runtime.spawn(run(
             source.clone(),
@@ -63,7 +80,12 @@ impl Flusher {
             every,
             receiver,
         ));
-        Self { requests, source }
+        Self {
+            requests,
+            source,
+            #[cfg(test)]
+            paused: Mutex::default(),
+        }
     }
 
     pub(crate) async fn flush(&self) {
@@ -78,8 +100,34 @@ impl Flusher {
     }
 
     pub(crate) fn close(&self) {
-        let last = self.source.last_snapshot().map(Box::new);
-        let _ = self.requests.send(Request::Close(last));
+        self.source.close();
+        #[cfg(test)]
+        self.pause();
+        let _ = self.requests.send(Request::Close);
+    }
+
+    // The next close() stops between its snapshot and its request until released.
+    #[cfg(test)]
+    pub(crate) fn pause_next_close(
+        &self,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (reached, reaching) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        *self.paused.lock().unwrap_or_else(PoisonError::into_inner) = Some((reached, released));
+        (reaching, release)
+    }
+
+    #[cfg(test)]
+    fn pause(&self) {
+        let paused = self
+            .paused
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some((reached, release)) = paused {
+            let _ = reached.send(());
+            let _ = release.recv();
+        }
     }
 
     pub(crate) fn delete(&self) {
@@ -116,9 +164,9 @@ async fn run(
                         let _ = reply.send(());
                     }
                 }
-                Some(Request::Close(last)) => {
-                    if let Some(last) = last {
-                        write(&mut target, *last).await;
+                Some(Request::Close) => {
+                    if let Some(last) = source.take_last() {
+                        write(&mut target, last).await;
                     }
                     return;
                 }
