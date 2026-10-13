@@ -48,12 +48,12 @@ struct SpoilerTests {
         let view = drawing.shown("||```\nsecret\n```||", appearance: .darkAqua)
         let height = view.intrinsicContentSize.height
 
-        for y in [2, height / 2, height - 2] {
-            #expect(
-                try drawing.matches(
-                    try drawing.pixel(view, at: NSPoint(x: 200, y: y)), Palette.spoilerHidden),
-                "at \(y)")
-        }
+        let cover = try #require(drawing.decoration(at: NSPoint(x: 200, y: 2), in: view))
+        #expect(drawing.same(cover.layer.backgroundColor, Palette.spoilerHidden, .darkAqua))
+        #expect(cover.frame == NSRect(x: 0, y: 0, width: view.bounds.width, height: height))
+        // Over the text too, so a selection's highlight stays hidden.
+        let middle = NSPoint(x: 30, y: height / 2)
+        #expect(try drawing.matches(try drawing.pixel(view, at: middle), Palette.spoilerHidden))
     }
 
     @Test

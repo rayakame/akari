@@ -20,9 +20,7 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
         }
         let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         storage.enumerateAttribute(.akariSpoiler, in: characters) { value, range, _ in
-            guard let spoiler = value as? MessageText.Spoiler, spoiler.hidden,
-                !isCode(storage, range.location)
-            else {
+            guard let spoiler = value as? MessageText.Spoiler, spoiler.hidden else {
                 return
             }
             Palette.spoilerHidden.setFill()
@@ -35,61 +33,43 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
         }
     }
 
-    /// Covers over hidden code blocks, whole boxes, which reach past the text container too.
-    func drawBlockCovers(at origin: NSPoint) {
-        guard let storage = textStorage, let container = textContainers.first else {
-            return
-        }
-        storage.enumerateAttribute(
-            .akariBlock, in: NSRange(location: 0, length: storage.length)
-        ) { value, range, _ in
-            guard (value as? MessageText.Block)?.contains(.code) == true,
-                let spoiler = storage.attribute(
-                    .akariSpoiler, at: range.location, effectiveRange: nil)
-                    as? MessageText.Spoiler,
-                spoiler.hidden, let box = codeBox(range, storage, container)
-            else {
-                return
-            }
-            Palette.spoilerHidden.setFill()
-            NSBezierPath(
-                roundedRect: box.offsetBy(dx: origin.x, dy: origin.y), xRadius: 4, yRadius: 4
-            ).fill()
-        }
-    }
-
     private func isCode(_ storage: NSTextStorage, _ index: Int) -> Bool {
         (storage.attribute(.akariBlock, at: index, effectiveRange: nil) as? MessageText.Block)?
             .contains(.code) == true
     }
 
-    /// Code boxes and quote bars, from the whole text: they reach past the lines being redrawn,
-    /// and a box's padding past the text container, where the text view clips this manager's
-    /// own drawing.
-    func drawBlocks(at origin: NSPoint) {
+    /// What goes behind the text: code boxes, quote bars and the covers of hidden code blocks,
+    /// in the text container's coordinates.
+    func blocks() -> [MessageBlockShape] {
         guard let storage = textStorage, let container = textContainers.first else {
-            return
+            return []
         }
+        var shapes: [MessageBlockShape] = []
         var quote: (range: NSRange, bar: CGFloat)?
         storage.enumerateAttribute(
             .akariBlock, in: NSRange(location: 0, length: storage.length)
         ) { value, range, _ in
             let block = value as? MessageText.Block ?? []
-            if block.contains(.code) {
-                drawCodeBox(range, storage, container, at: origin)
+            if block.contains(.code), let box = codeBox(range, storage, container) {
+                shapes.append(.codeBox(box))
+                let spoiler = storage.attribute(.akariSpoiler, at: range.location, effectiveRange: nil)
+                if (spoiler as? MessageText.Spoiler)?.hidden == true {
+                    shapes.append(.cover(box))
+                }
             }
             if block.contains(.quote) {
                 let bar = storage.attribute(.akariQuoteBar, at: range.location, effectiveRange: nil)
                 quote = quote.map { (NSUnionRange($0.range, range), $0.bar) }
                     ?? (range, bar as? CGFloat ?? 0)
             } else if let ended = quote {
-                drawQuoteBar(ended.range, x: ended.bar, storage, at: origin)
+                shapes.append(quoteBar(ended.range, x: ended.bar, storage, container))
                 quote = nil
             }
         }
         if let quote {
-            drawQuoteBar(quote.range, x: quote.bar, storage, at: origin)
+            shapes.append(quoteBar(quote.range, x: quote.bar, storage, container))
         }
+        return shapes.filter { !$0.rect.isEmpty }
     }
 
     private func codeBox(_ range: NSRange, _ storage: NSTextStorage, _ container: NSTextContainer)
@@ -109,29 +89,12 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
             height: last.maxY - first.minY + 2 * padding)
     }
 
-    private func drawCodeBox(
-        _ range: NSRange, _ storage: NSTextStorage, _ container: NSTextContainer,
-        at origin: NSPoint
-    ) {
-        guard let box = codeBox(range, storage, container) else {
-            return
-        }
-        let path = NSBezierPath(
-            roundedRect: box.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: 0.5, dy: 0.5),
-            xRadius: 4, yRadius: 4)
-        Palette.codeBackground.setFill()
-        path.fill()
-        Palette.codeBorder.setStroke()
-        path.lineWidth = 1
-        path.stroke()
-    }
-
-    private func drawQuoteBar(
-        _ range: NSRange, x: CGFloat, _ storage: NSTextStorage, at origin: NSPoint
-    ) {
+    private func quoteBar(
+        _ range: NSRange, x: CGFloat, _ storage: NSTextStorage, _ container: NSTextContainer
+    ) -> MessageBlockShape {
         let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        guard glyphs.length > 0, let container = textContainers.first else {
-            return
+        guard glyphs.length > 0 else {
+            return .quoteBar(.zero)
         }
         var top = lineFragmentUsedRect(forGlyphAt: glyphs.location, effectiveRange: nil).minY
         var bottom = lineFragmentUsedRect(forGlyphAt: NSMaxRange(glyphs) - 1, effectiveRange: nil)
@@ -147,9 +110,7 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
                 bottom = max(bottom, box.maxY)
             }
         }
-        let bar = NSRect(x: origin.x + x, y: origin.y + top, width: 4, height: bottom - top)
-        Palette.quoteBar.setFill()
-        NSBezierPath(roundedRect: bar, xRadius: 2, yRadius: 2).fill()
+        return .quoteBar(NSRect(x: x, y: top, width: 4, height: bottom - top))
     }
 
     private func drawRevealedSpoilers(
@@ -233,5 +194,17 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
             rects.append(NSRect(x: left, y: top, width: right - left, height: bottom - top))
         }
         return rects
+    }
+}
+
+nonisolated enum MessageBlockShape: Equatable {
+    case codeBox(NSRect)
+    case quoteBar(NSRect)
+    case cover(NSRect)
+
+    var rect: NSRect {
+        switch self {
+        case .codeBox(let rect), .quoteBar(let rect), .cover(let rect): rect
+        }
     }
 }

@@ -7,6 +7,7 @@ final class MessageTextView: NSTextView {
     var onLink: (URL) -> Void = { _ in }
     // The message's own items, above the text's.
     var messageMenu: () -> [NSMenuItem] = { [] }
+    let decorations = MessageDecorations()
 
     init() {
         let storage = NSTextStorage()
@@ -51,9 +52,11 @@ final class MessageTextView: NSTextView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        decorations.frame = frame
         if newSize.width != measuredWidth {
             measuredWidth = newSize.width
             invalidateIntrinsicContentSize()
+            updateDecorations()
         }
     }
 
@@ -72,16 +75,33 @@ final class MessageTextView: NSTextView {
         storage.setAttributedString(text)
         selectedRanges = kept ?? [NSValue(range: NSRange(location: 0, length: 0))]
         invalidateIntrinsicContentSize()
+        updateDecorations()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let layout = layoutManager as? MessageLayoutManager
-        layout?.drawBlocks(at: textContainerOrigin)
-        // NSTextView leaves its clip to the text container behind.
-        NSGraphicsContext.saveGraphicsState()
-        super.draw(dirtyRect)
-        NSGraphicsContext.restoreGraphicsState()
-        layout?.drawBlockCovers(at: textContainerOrigin)
+    // Behind the text in the superview, in step with this view's frame.
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        super.viewWillMove(toSuperview: newSuperview)
+        decorations.removeFromSuperview()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        superview?.addSubview(decorations, positioned: .below, relativeTo: self)
+        decorations.frame = frame
+    }
+
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+        decorations.frame = frame
+    }
+
+    override var isHidden: Bool {
+        didSet { decorations.isHidden = isHidden }
+    }
+
+    private func updateDecorations() {
+        let shapes = (layoutManager as? MessageLayoutManager)?.blocks() ?? []
+        decorations.show(shapes, at: textContainerOrigin)
     }
 
     // The table routes Akari's own links and asks before masked ones; super would open them.
@@ -146,5 +166,91 @@ final class MessageTextView: NSTextView {
     // A non-editable text view would swallow Escape; the list handles it.
     override func cancelOperation(_ sender: Any?) {
         nextResponder?.tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: sender)
+    }
+}
+
+/// Code boxes, quote bars and hidden code blocks' covers, as colored layers behind a
+/// message's text: drawn into the text view, a full-width box made its bitmap large enough
+/// for Core Animation's costly path (about 40,000 pt²).
+final class MessageDecorations: NSView {
+    private var shapes: [MessageBlockShape] = []
+    private var origin = NSPoint.zero
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    func show(_ shapes: [MessageBlockShape], at origin: NSPoint) {
+        guard shapes != self.shapes || origin != self.origin else {
+            return
+        }
+        self.shapes = shapes
+        self.origin = origin
+        for (index, shape) in shapes.enumerated() {
+            let view: BlockView
+            if index < subviews.count, let reused = subviews[index] as? BlockView {
+                view = reused
+            } else {
+                view = BlockView()
+                addSubview(view)
+            }
+            view.shape = shape
+            view.frame = shape.rect.offsetBy(dx: origin.x, dy: origin.y)
+        }
+        for view in subviews.dropFirst(shapes.count) {
+            view.removeFromSuperview()
+        }
+    }
+}
+
+// A shape's colors come from the theme, applied again when the appearance changes.
+private final class BlockView: NSView {
+    var shape = MessageBlockShape.codeBox(.zero) {
+        didSet { applyColors() }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        applyColors()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    private func applyColors() {
+        guard let layer else {
+            return
+        }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            switch shape {
+            case .codeBox:
+                layer.backgroundColor = Palette.codeBackground.cgColor
+                layer.borderColor = Palette.codeBorder.cgColor
+                layer.borderWidth = 1
+                layer.cornerRadius = 4
+            case .quoteBar:
+                layer.backgroundColor = Palette.quoteBar.cgColor
+                layer.borderWidth = 0
+                layer.cornerRadius = 2
+            case .cover:
+                layer.backgroundColor = Palette.spoilerHidden.cgColor
+                layer.borderWidth = 0
+                layer.cornerRadius = 4
+            }
+        }
     }
 }

@@ -99,6 +99,33 @@ struct MessageTextDrawingTests {
             && abs(drawn.blueComponent - expected.blueComponent) < 0.02
     }
 
+    // The topmost shape behind the text at a point, in the text view's coordinates.
+    func decoration(at point: NSPoint, in view: MessageTextView) -> (frame: NSRect, layer: CALayer)? {
+        view.decorations.layoutSubtreeIfNeeded()
+        view.decorations.displayIfNeeded()
+        let shape = view.decorations.subviews.last { $0.frame.contains(point) }
+        return shape.flatMap { shape in shape.layer.map { (shape.frame, $0) } }
+    }
+
+    func resolved(_ color: NSColor, _ appearance: NSAppearance.Name) -> NSColor {
+        var result = color
+        NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
+            result = color.usingColorSpace(.sRGB) ?? color
+        }
+        return result
+    }
+
+    func same(_ color: CGColor?, _ token: NSColor, _ appearance: NSAppearance.Name) -> Bool {
+        guard let color, let drawn = NSColor(cgColor: color)?.usingColorSpace(.sRGB) else {
+            return false
+        }
+        let expected = resolved(token, appearance)
+        return abs(drawn.redComponent - expected.redComponent) < 0.01
+            && abs(drawn.greenComponent - expected.greenComponent) < 0.01
+            && abs(drawn.blueComponent - expected.blueComponent) < 0.01
+            && abs(drawn.alphaComponent - expected.alphaComponent) < 0.01
+    }
+
     @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
     func pillsBoxesAndBarsAreDrawnInBothAppearances(_ appearance: NSAppearance.Name) throws {
         let view = shown("x `code` y\n> quoted\n```\nblock\n```", appearance: appearance)
@@ -106,11 +133,22 @@ struct MessageTextDrawingTests {
         let pill = try pixel(view, at: try insidePill(of: "code", in: view))
         #expect(try matches(pill, Palette.codeBackground), "\(pill)")
         let quote = try line(of: "quoted", in: view)
-        let bar = try pixel(view, at: NSPoint(x: 2, y: quote.midY))
-        #expect(try matches(bar, Palette.quoteBar), "\(bar)")
+        let bar = try #require(decoration(at: NSPoint(x: 2, y: quote.midY), in: view))
+        #expect(same(bar.layer.backgroundColor, Palette.quoteBar, appearance))
+        #expect(bar.frame.width == 4 && bar.layer.cornerRadius == 2)
         let block = try line(of: "block", in: view)
-        let box = try pixel(view, at: NSPoint(x: 4, y: block.midY))
-        #expect(try matches(box, Palette.codeBackground), "\(box)")
+        let box = try #require(decoration(at: NSPoint(x: 4, y: block.midY), in: view))
+        #expect(same(box.layer.backgroundColor, Palette.codeBackground, appearance))
+        #expect(same(box.layer.borderColor, Palette.codeBorder, appearance))
+        #expect(box.layer.borderWidth == 1 && box.layer.cornerRadius == 4)
+        #expect(box.frame.maxX == view.bounds.width)
+    }
+
+    // Boxes and bars are layers: a view that draws gets a bitmap of everything it draws, and
+    // past about 40,000 pt² Core Animation renders it on its costly path.
+    @Test
+    func theTextDrawsNoBitmapOfItsOwn() {
+        #expect(!RowDrawingTests.drawsItsOwnBitmap(MessageTextView.self, over: NSTextView.self))
     }
 
     // TextKit 1 leaves out paragraph spacing above a first line, so the view pads it.
@@ -121,7 +159,24 @@ struct MessageTextDrawingTests {
         let first = layout.lineFragmentUsedRect(forGlyphAt: 0, effectiveRange: nil)
 
         #expect(first.minY + view.textContainerOrigin.y == MessageText.codePadding)
-        #expect(try matches(try pixel(view, at: NSPoint(x: 100, y: 4)), Palette.codeBackground))
+        let box = try #require(decoration(at: NSPoint(x: 100, y: 4), in: view))
+        #expect(box.frame.minY == 0)
+        #expect(box.frame.maxY == view.intrinsicContentSize.height)
+    }
+
+    @Test
+    func anAppearanceChangeRecolorsBoxesAndBars() throws {
+        let view = shown("> quoted\n```\nblock\n```", appearance: .darkAqua)
+        let block = try line(of: "block", in: view)
+        let quote = try line(of: "quoted", in: view)
+
+        window.appearance = NSAppearance(named: .aqua)
+        view.decorations.layoutSubtreeIfNeeded()
+
+        let box = try #require(decoration(at: NSPoint(x: 20, y: block.midY), in: view))
+        #expect(same(box.layer.backgroundColor, Palette.codeBackground, .aqua))
+        let bar = try #require(decoration(at: NSPoint(x: 2, y: quote.midY), in: view))
+        #expect(same(bar.layer.backgroundColor, Palette.quoteBar, .aqua))
     }
 
     @Test
