@@ -86,4 +86,21 @@ struct TrustedLinksTests {
         links.trust(url("https://example.com/"))
         #expect(!links.isTrusted(url("https://ex\u{0430}mple.com/")))
     }
+
+    // As a confirmation still on screen when the session ends, answered after the forget.
+    @Test
+    func aListMadeBeforeItsAccountWasForgottenTrustsNothing() {
+        let links = TrustedLinks(account: id(1), defaults: defaults)
+        links.trust(url("https://example.com/"))
+
+        AccountMemory(defaults: defaults).forget(id(1))
+        links.trust(url("https://example.org/"))
+
+        let again = TrustedLinks(account: id(1), defaults: defaults)
+        #expect(!again.isTrusted(url("https://example.com/")))
+        #expect(!again.isTrusted(url("https://example.org/")))
+        #expect(!links.isTrusted(url("https://example.com/")))
+        again.trust(url("https://example.net/"))
+        #expect(TrustedLinks(account: id(1), defaults: defaults).isTrusted(url("https://example.net/")))
+    }
 }

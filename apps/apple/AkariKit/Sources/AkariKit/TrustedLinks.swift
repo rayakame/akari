@@ -6,26 +6,42 @@ public final class TrustedLinks {
     private let defaults: UserDefaults
     private let key: String
     private var hosts: Set<String>
+    private let generation: Int
 
     public init(account: UserId, defaults: UserDefaults = .standard) {
         self.defaults = defaults
         key = Self.key(account)
         hosts = Set(defaults.stringArray(forKey: key) ?? [])
+        generation = defaults.integer(forKey: Self.generationKey)
     }
 
     public func isTrusted(_ url: URL) -> Bool {
-        Self.host(url).map(hosts.contains) ?? false
+        isCurrent && (Self.host(url).map(hosts.contains) ?? false)
     }
 
-    /// Trusts the URL's host, spelled as `host(_:)` gives it.
+    /// Trusts the URL's host, spelled as `host(_:)` gives it; nothing once the account was
+    /// forgotten after this list was made.
     public func trust(_ url: URL) {
-        guard let host = Self.host(url), hosts.insert(host).inserted else {
+        guard isCurrent, let host = Self.host(url), hosts.insert(host).inserted else {
             return
         }
         defaults.set(hosts.sorted(), forKey: key)
     }
 
-    nonisolated static func key(_ account: UserId) -> String {
+    // A confirmation still open when the session ended answers through a list made before.
+    private var isCurrent: Bool {
+        defaults.integer(forKey: Self.generationKey) == generation
+    }
+
+    nonisolated static func forget(_ account: UserId, in defaults: UserDefaults) {
+        defaults.removeObject(forKey: key(account))
+        defaults.set(defaults.integer(forKey: generationKey) + 1, forKey: generationKey)
+    }
+
+    // A count of forgets, so it names no account.
+    private nonisolated static let generationKey = "trustedLinkHosts.generation"
+
+    private nonisolated static func key(_ account: UserId) -> String {
         "trustedLinkHosts.\(account.rawValue)"
     }
 

@@ -8,19 +8,36 @@ import Testing
 struct LinkTests {
     let list = MessageListFixture()
 
-    // The dialog's answers, given in turn, and what was opened.
+    // The dialog's answers, given in turn, and what was opened; without an answer in turn the
+    // dialog stays open until answered or dismissed.
     final class Recorder {
         var answers: [LinkFollower.Answer] = []
         var asked: [URL] = []
         var opened: [URL] = []
+        var open: ((LinkFollower.Answer) -> Void)?
+        var dismissed = 0
 
         func follower(_ trusted: TrustedLinks) -> LinkFollower {
             LinkFollower(
                 trusted: trusted, open: { self.opened.append($0) },
                 ask: { url, answer in
                     self.asked.append(url)
-                    answer(self.answers.removeFirst())
+                    guard self.answers.isEmpty else {
+                        answer(self.answers.removeFirst())
+                        return {}
+                    }
+                    self.open = answer
+                    return {
+                        self.dismissed += 1
+                        self.answer(.init(open: false, trust: false))
+                    }
                 })
+        }
+
+        func answer(_ answer: LinkFollower.Answer) {
+            let open = self.open
+            self.open = nil
+            open?(answer)
         }
     }
 
@@ -73,6 +90,59 @@ struct LinkTests {
         let alert = LinkConfirmation.alert(for: url)
 
         #expect(alert.suppressionButton?.title == "Trust links to xn--bcher-kva.example from now on")
+    }
+
+    @Test
+    func aConfirmationAnsweredAfterTheAccountWasForgottenTrustsNothing() throws {
+        let defaults = MemoryDefaults()
+        let account = UserId(rawValue: 1)
+        let recorder = Recorder()
+        let url = try #require(URL(string: "https://example.com/a"))
+        recorder.follower(TrustedLinks(account: account, defaults: defaults))
+            .follow(url, masked: true)
+
+        AccountMemory(defaults: defaults).forget(account)
+        recorder.answer(.init(open: true, trust: true))
+
+        #expect(!TrustedLinks(account: account, defaults: defaults).isTrusted(url))
+    }
+
+    @Test
+    func closingTheFollowerEndsItsConfirmationAsBackWould() throws {
+        let recorder = Recorder()
+        let follower = recorder.follower(trusted())
+        follower.follow(try #require(URL(string: "https://example.com/a")), masked: true)
+
+        follower.close()
+
+        #expect(recorder.dismissed == 1)
+        #expect(recorder.opened.isEmpty)
+        follower.close()
+        #expect(recorder.dismissed == 1)
+    }
+
+    @Test
+    func theDialogEndsWhenDismissed() async throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        var answers: [LinkFollower.Answer] = []
+        let dismiss = LinkConfirmation.ask(
+            try #require(URL(string: "https://example.com/a")), in: window
+        ) { answers.append($0) }
+        #expect(window.attachedSheet != nil)
+
+        dismiss()
+        for _ in 0..<50 where answers.isEmpty || window.attachedSheet != nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(answers.map(\.open) == [false])
+        #expect(window.attachedSheet == nil)
+        dismiss()
+        #expect(answers.count == 1)
     }
 
     @Test

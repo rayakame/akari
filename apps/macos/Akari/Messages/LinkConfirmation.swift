@@ -11,12 +11,16 @@ final class LinkFollower {
 
     private let trusted: TrustedLinks
     private let open: @MainActor (URL) -> Void
-    private let ask: @MainActor (URL, @escaping (Answer) -> Void) -> Void
+    private let ask: @MainActor (URL, @escaping (Answer) -> Void) -> () -> Void
+    private var dismiss: () -> Void = {}
 
+    /// `ask` shows the confirmation and returns what ends it as Back would.
     init(
         trusted: TrustedLinks,
         open: @escaping @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) },
-        ask: @escaping @MainActor (URL, @escaping (Answer) -> Void) -> Void = LinkConfirmation.ask
+        ask: @escaping @MainActor (URL, @escaping (Answer) -> Void) -> () -> Void = {
+            LinkConfirmation.ask($0, in: NSApp.keyWindow, $1)
+        }
     ) {
         self.trusted = trusted
         self.open = open
@@ -34,7 +38,7 @@ final class LinkFollower {
             open(url)
             return
         }
-        ask(url) { [trusted, open] answer in
+        dismiss = ask(url) { [trusted, open] answer in
             guard answer.open else {
                 return
             }
@@ -43,6 +47,13 @@ final class LinkFollower {
             }
             open(url)
         }
+    }
+
+    /// Ends a confirmation still on screen as Back would, as when the session ends.
+    func close() {
+        let dismiss = self.dismiss
+        self.dismiss = {}
+        dismiss()
     }
 }
 
@@ -60,8 +71,11 @@ enum LinkConfirmation {
         return alert
     }
 
-    // A sheet on the window the link was clicked in.
-    static func ask(_ url: URL, _ answer: @escaping (LinkFollower.Answer) -> Void) {
+    // A sheet on the window the link was clicked in; what it returns ends the sheet as Back
+    // would.
+    static func ask(
+        _ url: URL, in window: NSWindow?, _ answer: @escaping (LinkFollower.Answer) -> Void
+    ) -> () -> Void {
         let alert = alert(for: url)
         let done = { (response: NSApplication.ModalResponse) in
             answer(
@@ -69,10 +83,16 @@ enum LinkConfirmation {
                     open: response == .alertFirstButtonReturn,
                     trust: alert.suppressionButton?.state == .on))
         }
-        if let window = NSApp.keyWindow {
-            alert.beginSheetModal(for: window, completionHandler: done)
-        } else {
+        guard let window else {
             done(alert.runModal())
+            return {}
+        }
+        alert.beginSheetModal(for: window, completionHandler: done)
+        return { [weak window, weak alert] in
+            guard let window, let sheet = alert?.window, window.attachedSheet === sheet else {
+                return
+            }
+            window.endSheet(sheet, returnCode: .cancel)
         }
     }
 }

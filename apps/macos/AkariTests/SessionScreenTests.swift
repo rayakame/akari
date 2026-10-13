@@ -45,6 +45,19 @@ struct SessionScreenTests {
         #expect(second.loads.withLock { $0 } == 1)
     }
 
+    // SwiftUI applies a change over a few run loop turns; at most 5 s.
+    func waitUntil(_ host: NSView, _ condition: () throws -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
+            host.layoutSubtreeIfNeeded()
+            if try condition() {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        Issue.record("not within 5 s")
+    }
+
     // SwiftUI applies a channel switch over a few run loop turns.
     func settle(_ host: NSView) async {
         for _ in 0..<6 {
@@ -150,6 +163,25 @@ struct SessionScreenTests {
         #expect(!same(inStrip, chat))
         // Inside the slowmode text's backdrop, right of its last glyph.
         #expect(same(color(list.maxX - 14, stripMiddle), chat))
+    }
+
+    @Test
+    func anEndedSessionEndsItsLinkConfirmation() async throws {
+        let recorder = LinkTests.Recorder()
+        let follower = recorder.follower(
+            TrustedLinks(account: UserId(rawValue: 1), defaults: MemoryDefaults()))
+        let account = FormattedAccount(contents: ["test"])
+        let host = NSHostingView(
+            rootView: AnyView(SessionScreen(session: formattedSession(account), links: follower)))
+        let window = shownWindow(host)
+        defer { window.orderOut(nil) }
+        try await waitUntil(host) { !views(MessageTableView.self, in: host).isEmpty }
+        follower.follow(try #require(URL(string: "https://example.com/a")), masked: true)
+
+        host.rootView = AnyView(Color.clear)
+        try await waitUntil(host) { recorder.dismissed > 0 }
+
+        #expect(recorder.dismissed == 1)
     }
 
     func views<View: NSView>(_ type: View.Type, in view: NSView) -> [View] {

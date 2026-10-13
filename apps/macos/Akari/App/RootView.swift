@@ -92,13 +92,15 @@ struct SessionScreen: View {
 
     init(
         session: SessionModel, warning: AppModel.Warning? = nil,
-        dismissWarning: @escaping () -> Void = {}, reconnect: @escaping () -> Void = {}
+        dismissWarning: @escaping () -> Void = {}, reconnect: @escaping () -> Void = {},
+        links: LinkFollower? = nil
     ) {
         self.session = session
         self.warning = warning
         self.dismissWarning = dismissWarning
         self.reconnect = reconnect
-        _links = State(initialValue: LinkFollower(trusted: TrustedLinks(account: session.userId)))
+        _links = State(
+            initialValue: links ?? LinkFollower(trusted: TrustedLinks(account: session.userId)))
     }
 
     var body: some View {
@@ -113,5 +115,7 @@ struct SessionScreen: View {
         // A reconnect brings a new session for the same channel; without a new identity its
         // views would keep the old one's state and never open the channel.
         .id(ObjectIdentifier(session))
+        // A confirmation answered later would act for a session that's gone.
+        .onDisappear { links.close() }
     }
 }

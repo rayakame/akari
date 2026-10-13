@@ -61,7 +61,7 @@ public struct AccountMemory: Sendable {
     /// Forgets what's kept for the account: its spot and the hosts its links are trusted for.
     public func forget(_ account: UserId) {
         remember(nil, of: account)
-        defaults.removeObject(forKey: TrustedLinks.key(account))
+        TrustedLinks.forget(account, in: defaults)
     }
 
     private static func spotKey(_ account: UserId) -> String {
