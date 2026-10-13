@@ -59,6 +59,10 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         counts.withLock { $0[channel.rawValue, default: 40] += count }
     }
 
+    func newest(of channel: ChannelId) -> MessageId {
+        MessageId(rawValue: channel.rawValue * 1000 + counts.withLock { $0[channel.rawValue, default: 40] })
+    }
+
     private func person(_ raw: UInt64) -> User {
         User(
             id: UserId(rawValue: raw), username: "user\(raw)", globalName: nil,

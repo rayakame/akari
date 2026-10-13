@@ -58,12 +58,24 @@ struct SessionScreenTests {
         Issue.record("not within 5 s")
     }
 
-    // SwiftUI applies a channel switch over a few run loop turns.
-    func settle(_ host: NSView) async {
-        for _ in 0..<6 {
-            try? await Task.sleep(for: .milliseconds(100))
-            host.layoutSubtreeIfNeeded()
+    // Once the list's newest row is that message and the list has stopped moving.
+    func shown(_ newest: MessageId, in host: NSView) async throws -> MessageTableView {
+        var table: MessageTableView?
+        var last: NSPoint?
+        try await waitUntil(host) {
+            guard let shown = views(MessageTableView.self, in: host).first,
+                let items = (shown.delegate as? MessageTableController)?.timeline.items,
+                items.last(where: { if case .message = $0 { true } else { false } })?.id
+                    == .message(newest)
+            else {
+                return false
+            }
+            let origin = shown.enclosingScrollView?.contentView.bounds.origin
+            defer { last = origin }
+            table = shown
+            return origin == last
         }
+        return try #require(table)
     }
 
     func formattedSession(_ account: FormattedAccount) -> SessionModel {
@@ -97,20 +109,22 @@ struct SessionScreenTests {
     @Test(arguments: [false, true])
     func returningToAChannelLeftAtTheBottomShowsItsNewestMessage(arrivals: Bool) async throws {
         let account = FormattedAccount(contents: FormattedSamples.contents)
+        let store = account.formattedStore
+        let (first, second) = (FormattedStore.channelIds[0], FormattedStore.channelIds[1])
         let session = formattedSession(account)
         let host = NSHostingView(rootView: SessionScreen(session: session))
         let window = shownWindow(host)
         defer { window.orderOut(nil) }
-        await settle(host)
+        _ = try await shown(store.newest(of: first), in: host)
         #expect(try newestRowHidden(in: host) <= 0.5)
 
-        session.open(channel: FormattedStore.channelIds[1])
-        await settle(host)
+        session.open(channel: second)
+        _ = try await shown(store.newest(of: second), in: host)
         if arrivals {
-            account.formattedStore.add(3, to: FormattedStore.channelIds[0])
+            store.add(3, to: first)
         }
-        session.open(channel: FormattedStore.channelIds[0])
-        await settle(host)
+        session.open(channel: first)
+        _ = try await shown(store.newest(of: first), in: host)
 
         #expect(try newestRowHidden(in: host) <= 0.5)
     }
@@ -131,8 +145,8 @@ struct SessionScreenTests {
         let host = NSHostingView(rootView: SessionScreen(session: formattedSession(account)))
         let window = shownWindow(host)
         defer { window.orderOut(nil) }
-        await settle(host)
-        let table = try #require(views(MessageTableView.self, in: host).first)
+        let table = try await shown(
+            account.formattedStore.newest(of: FormattedStore.channelIds[0]), in: host)
         let scroll = try #require(table.enclosingScrollView)
         let box = try composerBox(in: host)
         let list = scroll.convert(scroll.bounds, to: nil)
