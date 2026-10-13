@@ -68,7 +68,6 @@ struct Flat {
 struct Open {
     kind: BlockKind,
     containers: Box<[Container]>,
-    spoiler: Option<SpoilerId>,
     inlines: Vec<Inline>,
     source: Span,
 }
@@ -299,7 +298,6 @@ impl Flat {
             self.open = Some(Open {
                 kind: ctx.kind,
                 containers,
-                spoiler: ctx.spoiler,
                 inlines: Vec::new(),
                 source,
             });
@@ -307,9 +305,6 @@ impl Flat {
         let Some(open) = &mut self.open else {
             return;
         };
-        if open.spoiler != ctx.spoiler {
-            open.spoiler = None;
-        }
         open.source.start = open.source.start.min(source.start);
         open.source.end = open.source.end.max(source.end);
         open.inlines.push(Inline {
@@ -325,17 +320,25 @@ impl Flat {
         let Some(mut open) = self.open.take() else {
             return;
         };
-        if open
+        let dropped = if open
             .inlines
             .last()
             .is_some_and(|i| i.kind == InlineKind::Break)
         {
-            open.inlines.pop();
-        }
+            open.inlines.pop()
+        } else {
+            None
+        };
+        let spoiler = match open.inlines.split_first() {
+            Some((first, rest)) => first
+                .spoiler
+                .filter(|&id| rest.iter().all(|i| i.spoiler == Some(id))),
+            None => dropped.and_then(|b| b.spoiler),
+        };
         self.blocks.push(Block {
             kind: open.kind,
             containers: open.containers,
-            spoiler: open.spoiler,
+            spoiler,
             inlines: open.inlines.into(),
             source: open.source,
         });

@@ -232,6 +232,17 @@ input: "||a\nb||"
 --
 p{sp0}: {sp0}"a" br {sp0}"b"
 
+== a spoiler before a quote keeps its block
+input: "||a||\n> b"
+--
+p{sp0}: {sp0}"a"
+> p: "b"
+
+== a spoiler before a final line break keeps its block
+input: "||a||\n"
+--
+p{sp0}: {sp0}"a"
+
 == spoilers are numbered in order
 ||a|| ||b||
 --
