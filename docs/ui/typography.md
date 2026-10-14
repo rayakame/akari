@@ -51,6 +51,7 @@ official ones.
 | Day divider | "14. Oktober 2026" | 11 (on the 15 line of the old 12) | semibold | 12 semibold |
 | Start header title | "Willkommen bei #new!" | 30 | heavy | – |
 | Start header subtitle | "Das ist der Beginn des Kanals #new." | 15.5 | regular | – |
+| Title bar | "testserver" | 12.5 | medium | the native title |
 
 - **Message text stays at the base.** By the same measure SF Pro at 16 is 3 to 8% wider than
   the official message text (the best match is 15 to 15.5), but next to each other they read

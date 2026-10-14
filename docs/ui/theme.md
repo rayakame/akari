@@ -18,7 +18,7 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `chat` | message list, channel header | `#1a1a1e` | `#fbfbfb` |
 | `panel` | user panel | `#202024` | `#fbfbfb` |
 | `card` | login card, sheets | `#28282d` | `#ffffff` |
-| `frameBorder` | lines between the columns and under the title bar | `#97979f` at 12% | `#97979f` at 28% |
+| `frameBorder` | the line along the top and left edges of the area under the title bar and right of the rail (measured dark: `#222225` over `frame`; light **unverified**) | `#97979f` at 12% | `#97979f` at 28% |
 | `borderSubtle` | the line under the channel header, day dividers | `#97979f` at 12% | `#97979f` at 28% |
 | `borderMuted` | the user panel's outline | `#97979f` at 4% | `#97979f` at 20% |
 | `textDefault` | message text | `#efeff1` | `#2e2e34` |

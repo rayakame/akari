@@ -32,13 +32,23 @@ The member list on the right (264 wide) is not part of Akari yet.
 - 32 tall, in the `frame` color (see [theme.md](theme.md)).
 - On macOS it holds the traffic lights, and its own content starts after the rail plus 16.
 - A centered title says where the user is: the server's name, or "Direct Messages" at home.
+  Measured on 2026-10-14 (dark theme): icon and name together are centered on the whole
+  window, not on the area right of the sidebar; the icon is the server's, a 16 rounded square
+  with corners of about 4, then 8 of space and the name in `textDefault`, medium weight (size
+  in [typography.md](typography.md)), both centered on the bar's height. *Akari: servers
+  without a loaded icon (all of them so far) show their initials tile, as in the rail.*
+  **Unverified**: the light theme's colors, and what the official client shows while a DM is
+  open; Akari then shows the conversation's avatar and name, and "Direct Messages" with the
+  rail's home symbol at home without one.
 - Nothing scrolls under it or the traffic lights: the rail, the channel or DM list and the
   message list all stop at its lower edge or below.
 - Discord also puts back/forward buttons and an Inbox button there. Akari leaves those out
   until it has navigation history and an inbox.
 
 Akari keeps the native macOS title bar and makes it transparent over a 32 pt strip, so
-dragging, double-click to zoom and the traffic lights behave like every other Mac app.
+dragging, double-click to zoom, full screen and the traffic lights behave like every other Mac
+app. The native title is hidden and Akari draws its own centered one; the window's title is
+still set to the same text, so the Window menu, Mission Control and VoiceOver read it.
 
 ## Server rail
 
@@ -53,8 +63,15 @@ The rail and the channel list together form the sidebar.
 - It is resizable: 264 to 432 wide, 375 by default. Discord also moves it by 10 with the
   arrow keys while its handle has focus.
 - The channel list is the sidebar minus the rail and a 1 pt line: 302 by default.
-- The channel list has the rail's color. A 1 pt `frameBorder` line runs along its left
-  and top edges.
+- The rail and the title bar form one L-shaped frame in the `frame` color, and the area inside
+  it (channel list and message area) has a rounded top-left corner. A 1 pt `frameBorder` line
+  runs along that area's top edge across the whole window and down its left edge, beside the
+  rail; its corner's outer radius is about 11.5 (measured 2026-10-14, 11.4). The other edges
+  run to the window's edges.
+- The line is one color all along: over the message area it's the same `#222225` as over the
+  channel list (dark), so Akari lays it over the frame's color there.
+- The channel list has the rail's color, so the corner shows only in the line.
+  **Unverified** in the light theme.
 - At home the channel list's place holds the DM list
   ([channel-list.md](channel-list.md#home)).
 

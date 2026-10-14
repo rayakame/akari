@@ -11,7 +11,7 @@ struct SessionView<MessageArea: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Color(nsColor: Palette.frame).frame(height: 32)
+            TitleBar(title: windowTitle)
             ConnectionBar(notice: session.notice, reconnect: reconnect)
             // The login screen shows the logout warning; only this one belongs to a session.
             if warning == .tokenNotSaved, let warning {
@@ -24,19 +24,19 @@ struct SessionView<MessageArea: View>: View {
             .overlay(alignment: .topLeading) { headerLine }
         }
         .ignoresSafeArea(edges: .top)
-        .navigationTitle(title)
+        .navigationTitle(windowTitle.text)
     }
 
     private var sidebar: some View {
         ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
                 ServerRail(session: session).frame(width: SidebarWidth.rail)
-                Rectangle().fill(Color(nsColor: Palette.frameBorder)).frame(width: 1)
                 // Over the list, not above it, so its header starts level with the channel header.
                 list
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .top) {
-                        Rectangle().fill(Color(nsColor: Palette.frameBorder)).frame(height: 1)
+                    .padding(.leading, 1)
+                    .overlay {
+                        ContentCorner().stroke(Color(nsColor: Palette.frameBorder), lineWidth: 1)
                     }
             }
             UserPanel(user: session.currentUser).padding(8)
@@ -90,13 +90,31 @@ struct SessionView<MessageArea: View>: View {
         }
         // A background reaches into the title bar by default, over the strip.
         .background(Color(nsColor: Palette.chat), ignoresSafeAreaEdges: [])
+        // The top edge of the list's frame runs on over the page, in the same color: the
+        // official line is one color across the window, so it's laid over the frame's.
+        .overlay(alignment: .top) {
+            // Not a background: that would reach up into the title bar, over the title.
+            ZStack {
+                Color(nsColor: Palette.frame)
+                Color(nsColor: Palette.frameBorder)
+            }
+            .frame(height: 1)
+        }
     }
 
-    private var title: String {
-        switch session.place {
-        case .home: "Direct Messages"
-        case .guild(let guildId): session.servers.guilds.first { $0.id == guildId }?.name ?? "Akari"
+    private var windowTitle: WindowTitle {
+        let server: String? =
+            switch session.place {
+            case .home: nil
+            case .guild(let guildId): session.servers.guilds.first { $0.id == guildId }?.name
+            }
+        // The avatar the DM list shows for it.
+        let open = conversation.map { conversation in
+            let person = conversation.channel.kind == .dm ? conversation.recipients.first : nil
+            let avatarId = person?.id.rawValue ?? conversation.id.rawValue
+            return (name: conversation.name, avatarId: avatarId)
         }
+        return WindowTitle.at(session.place, server: server, conversation: open)
     }
 
     private var conversation: DirectMessageListModel.Conversation? {

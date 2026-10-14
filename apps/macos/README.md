@@ -5,8 +5,9 @@ shared `AkariKit` package (`apps/apple/AkariKit`) and akari-ffi's XCFramework. I
 macOS 14 or later.
 
 So far it has the login screen (QR code, email or phone and password, two-factor codes,
-new-location confirmation) and the main window: the server rail (the user's order, with
-folders), a server's channel list (muted channels dimmed, "hide muted channels" followed),
+new-location confirmation) and the main window: a centered title naming the server or DM
+(drawn by `TitleBar` over the native title bar, whose own title stays set but hidden), the
+server rail (the user's order, with folders), a server's channel list (muted channels dimmed, "hide muted channels" followed),
 the DM list at home, the channel header, the user panel, the message list with formatted
 messages, and the composer. Images, attachments, reactions, replies, threads, voice,
 notifications and settings come later.

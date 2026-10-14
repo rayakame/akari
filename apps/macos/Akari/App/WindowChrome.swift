@@ -17,6 +17,8 @@ struct WindowChrome: NSViewRepresentable {
             }
             window.styleMask.insert(.fullSizeContentView)
             window.backgroundColor = Palette.frame
+            // The session centers its own over the whole window (TitleBar).
+            window.titleVisibility = .hidden
         }
     }
 }

@@ -7,12 +7,15 @@ import Testing
 
 @MainActor
 struct WindowChromeTests {
+    // The session draws the title itself, centered on the window; the window keeps its title
+    // for the Window menu, Mission Control and VoiceOver.
     @Test
-    func theTitleBarShowsTheSidebarColorUnderTheTitle() async throws {
+    func theTitleBarShowsTheSidebarColorAndNoNativeTitle() async throws {
         let window = try await mainWindow()
 
         #expect(window.titlebarAppearsTransparent)
-        #expect(window.titleVisibility == .visible)
+        #expect(window.titleVisibility == .hidden)
+        #expect(window.title == "Akari")
         #expect(window.styleMask.contains(.fullSizeContentView))
         #expect(window.backgroundColor == Palette.frame)
     }
