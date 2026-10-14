@@ -18,12 +18,24 @@ struct ServerRail: View {
                 Rectangle()
                     .fill(Color(nsColor: Palette.frameBorder))
                     .frame(width: 32, height: 1)
-                ForEach(session.servers.guilds, id: \.id) { guild in
-                    RailItem(selected: session.place == .guild(guild.id), help: guild.name) {
-                        highlighted in
-                        GuildIcon(name: guild.name, highlighted: highlighted)
-                    } action: {
-                        session.open(.guild(guild.id))
+                ForEach(session.servers.items) { item in
+                    switch item {
+                    case .guild(let guild):
+                        guildItem(guild)
+                    case .folder(let folder):
+                        let expanded = session.servers.isExpanded(folder: folder.id)
+                        FolderColumn(color: folder.folder.color, expanded: expanded) {
+                            RailItem(selected: false, help: FolderTile.help(folder)) { _ in
+                                FolderTile(item: folder, expanded: expanded)
+                            } action: {
+                                session.servers.toggle(folder: folder.id)
+                            }
+                            if expanded {
+                                ForEach(folder.guilds, id: \.id) { guild in
+                                    guildItem(guild)
+                                }
+                            }
+                        }
                     }
                 }
                 let unavailable = session.servers.unavailableIds.count
@@ -42,6 +54,14 @@ struct ServerRail: View {
         }
         // Outside the scroll view: one that touches the title bar's safe area stretches under it.
         .padding(.top, 4)
+    }
+
+    private func guildItem(_ guild: Guild) -> some View {
+        RailItem(selected: session.place == .guild(guild.id), help: guild.name) { highlighted in
+            GuildIcon(name: guild.name, highlighted: highlighted)
+        } action: {
+            session.open(.guild(guild.id))
+        }
     }
 }
 

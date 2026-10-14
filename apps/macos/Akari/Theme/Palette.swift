@@ -49,6 +49,7 @@ enum Palette {
         "spoilerRevealed", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.16))
     static let timestampBackground = token(
         "timestampBackground", dark: "#97979f", light: "#97979f", alpha: (0.12, 0.12))
+    static let folder = token("folder", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.20))
     static let avatars = ["#5865f2", "#3e8e7e", "#c06c2b", "#a352b5", "#c2445a", "#4f7fba"]
         .map { NSColor(hex: $0) }
 

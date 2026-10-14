@@ -21,6 +21,11 @@ public final class ServerListModel {
         public let guilds: [Guild]
 
         public var id: Int64 { folder.id }
+
+        public init(folder: Folder, guilds: [Guild]) {
+            self.folder = folder
+            self.guilds = guilds
+        }
     }
 
     public private(set) var items: [Item] = []

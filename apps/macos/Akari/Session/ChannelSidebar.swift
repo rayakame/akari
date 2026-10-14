@@ -14,18 +14,22 @@ struct ChannelSidebar: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     let open = session.messages?.channelId
                     ForEach(
-                        collapsed.visible(list.channels, in: list.guildId, open: open), id: \.id
+                        collapsed.visible(list.shown(open: open), in: list.guildId, open: open),
+                        id: \.id
                     ) {
                         channel in
+                        let muted = list.muted.contains(channel.id)
                         if channel.kind == .guildCategory {
                             CategoryRow(
                                 name: channel.name ?? "",
-                                collapsed: collapsed.isCollapsed(channel.id, in: list.guildId)
+                                collapsed: collapsed.isCollapsed(channel.id, in: list.guildId),
+                                muted: muted
                             ) {
                                 collapsed.toggle(channel.id, in: list.guildId)
                             }
                         } else {
-                            ChannelRow(channel: channel, selected: channel.id == open) {
+                            ChannelRow(channel: channel, selected: channel.id == open, muted: muted)
+                            {
                                 session.open(channel: channel.id)
                             }
                         }
@@ -40,6 +44,7 @@ struct ChannelSidebar: View {
 struct CategoryRow: View {
     let name: String
     let collapsed: Bool
+    let muted: Bool
     let toggle: () -> Void
     @State private var hovered = false
 
@@ -57,6 +62,7 @@ struct CategoryRow: View {
             .foregroundStyle(
                 Color(nsColor: hovered ? Palette.interactiveTextActive : Palette.channelDefault)
             )
+            .opacity(muted ? 0.5 : 1)
             .padding(.leading, 16)
             .padding(.trailing, 8)
             .frame(height: 24)
@@ -71,6 +77,7 @@ struct CategoryRow: View {
 struct ChannelRow: View {
     let channel: Channel
     let selected: Bool
+    let muted: Bool
     let open: () -> Void
     @State private var hovered = false
     @Environment(\.colorScheme) private var colorScheme
@@ -93,6 +100,7 @@ struct ChannelRow: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
+            .opacity(muted && !selected ? 0.5 : 1)
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .frame(height: 32)

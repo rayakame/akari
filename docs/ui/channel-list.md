@@ -33,7 +33,11 @@ title bar.
   - voice channels with people in them.
 
   Akari shows only the selected channel until it tracks unread state.
-- A muted category's name shows at half opacity.
+- A muted category's name shows at half opacity. Muting a category collapses it at once, its
+  channels still look normal (muting the category doesn't mute them), and while it is muted
+  and collapsed only a channel with a mention stays under it (observed 2026-10-14). *Akari:
+  collapse is local, as in Discord's clients, which don't sync it; a category that becomes
+  muted while Akari runs collapses once, and the user can expand it again.*
 
 ## Channels
 
@@ -62,7 +66,11 @@ title bar.
   channels need the server's rules channel ID, which it doesn't receive either.
 - Voice, stage, forum, media and directory channels are listed but don't open anything; their
   tooltip says the kind isn't supported yet.
-- Unread and muted styles come with unread state.
+- Muted rows and categories are drawn at half opacity; the unread style comes with unread
+  state. A muted channel that is selected keeps full opacity.
+- "Hide muted channels" (a server setting) leaves channels muted by their own settings out of
+  the list, except the open one. **Unverified:** what the official client does with a muted
+  category there; Akari keeps categories.
 
 ## Home
 

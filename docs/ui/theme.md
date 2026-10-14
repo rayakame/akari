@@ -46,6 +46,7 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `spoilerHidden` | a spoiler's cover | `#121214` | `#d6d7dc` |
 | `spoilerRevealed` | a revealed spoiler's background | `#97979f` at 16% | `#97979f` at 16% |
 | `timestampBackground` | a timestamp's pill | `#97979f` at 12% | `#97979f` at 12% |
+| `folder` | a server folder without a color: its tile and, expanded, its column (Akari's value for the neutral gray observed on 2026-10-14) | `#97979f` at 16% | `#97979f` at 20% |
 
 On the dark message list (`#1a1a1e`), `hoverBackground` comes out at about `#29292d` and
 `selectedBackground` at about `#333338`.
