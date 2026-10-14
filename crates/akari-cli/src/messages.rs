@@ -298,6 +298,9 @@ async fn tail(
                     println!("(new session, catching up)");
                 }
             }
+            StoreEvent::MessagesRefreshed { channel_id } if channel_id == channel => {
+                println!("(caught up)");
+            }
             StoreEvent::Connection(ConnectionState::Connecting) => println!("(reconnecting)"),
             StoreEvent::Connection(ConnectionState::Online) => println!("(connected)"),
             StoreEvent::Connection(ConnectionState::Closed { error }) => {

@@ -26,6 +26,7 @@ struct EventBatchTests {
             .messagesTrimmed(channelId: id(25), first: id(107), last: id(108)),
             .messagesStale(channelId: id(26)),
             .messagesCleared(channelId: id(27)),
+            .messagesRefreshed(channelId: id(28)),
         ])
 
         #expect(batch.ready)
@@ -39,7 +40,8 @@ struct EventBatchTests {
         ]
         #expect(batch.channelsChanged == channels)
         #expect(batch.removedChannels == [id(12)])
-        #expect(batch.windowsChanged == [id(20), id(22), id(23), id(24), id(25), id(26), id(27)])
+        #expect(
+            batch.windowsChanged == [id(20), id(22), id(23), id(24), id(25), id(26), id(27), id(28)])
         #expect(batch.updatedMessages == [id(21): [id(101)]])
         #expect(batch.confirmed == [id(23): [id(104): id(103)]])
     }

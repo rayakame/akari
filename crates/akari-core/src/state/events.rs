@@ -90,6 +90,12 @@ pub enum StoreEvent {
     MessagesStale {
         channel_id: ChannelId,
     },
+    /// A stale window is current again: a refresh reconciled it, or a load replaced it. Sent
+    /// also when that changed none of its messages, so read its state (`stale`, `latest`)
+    /// again; new messages show from now on.
+    MessagesRefreshed {
+        channel_id: ChannelId,
+    },
     /// The window's messages were dropped: the channel was viewed least recently, or a jump
     /// to the present or to a message replaced them.
     MessagesCleared {

@@ -332,6 +332,21 @@ struct MessageListModelTests {
         #expect(!model.isStale)
     }
 
+    // A catch-up after a new session that finds nothing new changes no message; the model
+    // still learns the window is current, or it would show "Catching up…" until reopened.
+    @Test
+    func aRefreshThatChangedNothingEndsTheCatchUp() {
+        shown(window([1, 2], stale: true))
+        let model = loaded()
+        #expect(model.isStale)
+
+        shown(window([1, 2], stale: false))
+        model.apply(EventBatch([.messagesRefreshed(channelId: here)]))
+
+        #expect(!model.isStale)
+        #expect(model.rows.map(\.id) == [id(1), id(2)])
+    }
+
     @Test
     func aSuccessAtOneEdgeKeepsTheOtherEdgesFailure() async {
         shown(window([1, 2], latest: false))
