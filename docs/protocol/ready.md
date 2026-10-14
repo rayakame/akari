@@ -163,6 +163,18 @@ resolve through `Store::user`, if a guild has no member for the current user, or
 guild and channel IDs. With `--nocapture` it prints counts and nothing else: guilds,
 channels, visible channels (with `VIEW_CHANNEL`), threads and DMs.
 
+A third one decodes the capture's `user_settings_proto` with Akari's proto reader and fails
+if it doesn't decode (the error names only a byte offset):
+
+```sh
+AKARI_READY_FIXTURE="$PWD/captures/ready-<unix time>.json" \
+  cargo test -p akari-core --lib -- --ignored captured_settings_proto_decodes --nocapture
+```
+
+With `--nocapture` it prints counts and nothing else: whether `versions` is there, the
+`guild_folders` entries, folders with an ID (named, colored, the largest), entries without
+one, and how many guilds they place.
+
 A captured READY contains secrets (`analytics_token`, `auth_session_id_hash`) and personal
 data. `captures/` is git-ignored; still never commit or share a capture, and delete it when
 you're done.

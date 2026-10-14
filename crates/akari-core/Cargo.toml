@@ -50,6 +50,7 @@ insecure-test-endpoints = []
 akari-core = { workspace = true, features = ["insecure-test-endpoints"] }
 brotli.workspace = true
 flate2.workspace = true
+proptest.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 tracing-subscriber.workspace = true
 wiremock.workspace = true

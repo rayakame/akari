@@ -12,6 +12,8 @@ mod payload;
 mod ready;
 pub(crate) mod session;
 mod settings;
+#[cfg_attr(not(test), expect(dead_code, reason = "the store doesn't read it yet"))]
+pub(crate) mod settings_proto;
 
 #[cfg(test)]
 pub(crate) use connection::fake;
