@@ -11,9 +11,10 @@ use crate::model::{
     Permissions, PremiumType, Snowflake, StickerFormatType, Timestamp, UserId,
 };
 use crate::state::{
-    Attachment, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
-    EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
-    NotificationLevel, PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, User,
+    Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
+    EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
+    Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
+    Sticker, ThreadInfo, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -787,6 +788,142 @@ impl MessageRow {
             }),
             referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Sent,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct GuildSettingsRow {
+    #[serde(default, skip_serializing_if = "is_false")]
+    muted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mute_ends: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    level: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unreads: Option<u8>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    suppress_everyone: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    suppress_roles: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    hide_muted_channels: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    channels: Vec<ChannelSettingsRow>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChannelSettingsRow {
+    id: u64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    muted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mute_ends: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    level: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unreads: Option<u8>,
+}
+
+// 0 all messages, 1 only mentions.
+fn unreads_code(unreads: Unreads) -> u8 {
+    match unreads {
+        Unreads::OnlyMentions => 1,
+        Unreads::AllMessages => 0,
+    }
+}
+
+fn unreads(code: u8) -> Unreads {
+    match code {
+        1 => Unreads::OnlyMentions,
+        _ => Unreads::AllMessages,
+    }
+}
+
+impl From<&GuildSettings> for GuildSettingsRow {
+    fn from(settings: &GuildSettings) -> Self {
+        let mut channels: Vec<ChannelSettingsRow> = settings
+            .channels
+            .iter()
+            .map(|(id, channel)| ChannelSettingsRow {
+                id: id.get(),
+                muted: channel.muted,
+                mute_ends: channel.mute_ends.map(nanos),
+                level: channel.level.map(level_code),
+                unreads: channel.unreads.map(unreads_code),
+            })
+            .collect();
+        channels.sort_unstable_by_key(|channel| channel.id);
+        Self {
+            muted: settings.muted,
+            mute_ends: settings.mute_ends.map(nanos),
+            level: settings.level.map(level_code),
+            unreads: settings.unreads.map(unreads_code),
+            suppress_everyone: settings.suppress_everyone,
+            suppress_roles: settings.suppress_roles,
+            hide_muted_channels: settings.hide_muted_channels,
+            channels,
+        }
+    }
+}
+
+impl GuildSettingsRow {
+    pub(super) fn into_settings(self) -> GuildSettings {
+        GuildSettings {
+            muted: self.muted,
+            mute_ends: self.mute_ends.map(timestamp),
+            level: self.level.map(level),
+            unreads: self.unreads.map(unreads),
+            suppress_everyone: self.suppress_everyone,
+            suppress_roles: self.suppress_roles,
+            hide_muted_channels: self.hide_muted_channels,
+            channels: Arc::new(
+                self.channels
+                    .into_iter()
+                    .map(|channel| {
+                        let settings = ChannelSettings {
+                            muted: channel.muted,
+                            mute_ends: channel.mute_ends.map(timestamp),
+                            level: channel.level.map(level),
+                            unreads: channel.unreads.map(unreads),
+                        };
+                        (Snowflake::new(channel.id), settings)
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct FolderRow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<u32>,
+    guilds: Vec<u64>,
+}
+
+impl From<&FolderEntry> for FolderRow {
+    fn from(folder: &FolderEntry) -> Self {
+        Self {
+            id: folder.id,
+            name: folder.name.clone(),
+            color: folder.color,
+            guilds: folder.guilds.iter().map(|guild| guild.get()).collect(),
+        }
+    }
+}
+
+impl From<FolderRow> for FolderEntry {
+    fn from(row: FolderRow) -> Self {
+        Self {
+            id: row.id,
+            name: row.name,
+            color: row.color,
+            guilds: row.guilds.into_iter().map(Snowflake::new).collect(),
         }
     }
 }

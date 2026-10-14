@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use super::{Cache, CacheError, Writer};
 use crate::model::ChannelId;
 use crate::state::apply::Entities;
-use crate::state::{CachedWindow, Message, Store};
+use crate::state::{CachedWindow, Message, Store, UserSettings};
 
 pub(crate) const MESSAGES_PER_CHANNEL: usize = 50;
 pub(crate) const CHANNELS_WITH_MESSAGES: usize = 50;
@@ -44,7 +44,7 @@ pub(crate) struct Flushed {
     pub(crate) channels: usize,
     pub(crate) windows: usize,
     pub(crate) messages: usize,
-    // The current user, DM recipients, memberships and unavailable guilds.
+    // The current user, DM recipients, memberships, unavailable guilds and settings.
     pub(crate) other: usize,
     pub(crate) deleted: usize,
 }
@@ -101,6 +101,49 @@ fn diff<'w, K: Copy + Eq + Hash, T: PartialEq>(
     for key in old.keys().filter(|key| !new.contains_key(key)) {
         delete(writer, *key)?;
         counts.1 += 1;
+    }
+    Ok(counts)
+}
+
+fn settings_changes(
+    old: &UserSettings,
+    new: &UserSettings,
+    writer: &mut Writer<'_>,
+) -> rusqlite::Result<(usize, usize)> {
+    let mut counts = (0, 0);
+    for (guild, settings) in &new.guilds {
+        if !old
+            .guilds
+            .get(guild)
+            .is_some_and(|known| same(known, settings))
+        {
+            writer.put_guild_settings(*guild, settings)?;
+            counts.0 += 1;
+        }
+    }
+    for guild in old
+        .guilds
+        .keys()
+        .filter(|guild| !new.guilds.contains_key(guild))
+    {
+        writer.delete_guild_settings(*guild)?;
+        counts.1 += 1;
+    }
+    let same_folders = match (&old.folders, &new.folders) {
+        (Some(old), Some(new)) => Arc::ptr_eq(old, new) || old == new,
+        (old, new) => old.is_none() && new.is_none(),
+    };
+    if !same_folders {
+        writer.put_folders(new.folders.as_deref())?;
+        if new.folders.is_some() {
+            counts.0 += 1;
+        } else {
+            counts.1 += 1;
+        }
+    }
+    if old.notification_flags != new.notification_flags {
+        writer.put_notification_flags(new.notification_flags)?;
+        counts.0 += 1;
     }
     Ok(counts)
 }
@@ -168,6 +211,9 @@ pub(crate) fn flush(
             writer.delete_unavailable(*id)?;
             flushed.deleted += 1;
         }
+        let (put, deleted) = settings_changes(&old.settings, &new.settings, writer)?;
+        flushed.other += put;
+        flushed.deleted += deleted;
         for (channel, window) in &next.windows {
             if written
                 .windows

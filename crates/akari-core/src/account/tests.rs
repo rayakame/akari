@@ -2866,6 +2866,44 @@ mod cache {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn a_restored_store_orders_the_rail_before_ready() {
+        use base64::Engine as _;
+
+        use crate::gateway::settings_proto::encode::{Wire, field};
+        use crate::state::ServerListItem;
+
+        let fake = FakeGateway::start().await;
+        let dir = TempDir::new();
+        let lab: u64 = 200_000_000_000_000_001;
+        let folder = [
+            field(1, Wire::Bytes(lab.to_le_bytes().to_vec())),
+            field(2, Wire::Bytes(field(1, Wire::Varint(7)))),
+        ]
+        .concat();
+        let proto = base64::engine::general_purpose::STANDARD
+            .encode(field(14, Wire::Bytes(field(1, Wire::Bytes(folder)))));
+        let thread = CacheThread::start(dir.file(OWNER), UserId::new(OWNER));
+        thread
+            .flush(crate::cache::Snapshot {
+                entities: ready_entities(&fake, |data| data["user_settings_proto"] = proto.into()),
+                ..crate::cache::Snapshot::default()
+            })
+            .await
+            .unwrap();
+        drop(thread);
+
+        let (account, _thread) = start_cached(&fake, &dir, Duration::from_secs(3600));
+        let _subscription = restored(&account).await;
+
+        let rail = account.store().server_list();
+        let [ServerListItem::Folder(folder)] = &rail[..] else {
+            panic!("expected the cached folder, got {rail:?}");
+        };
+        assert_eq!(folder.id, 7);
+        assert_eq!(&*folder.guilds, [Snowflake::new(lab)]);
+    }
+
     // Subscribed before the restore, and past its event.
     async fn restored(account: &Account) -> Subscription {
         let subscription = account.store().subscribe();

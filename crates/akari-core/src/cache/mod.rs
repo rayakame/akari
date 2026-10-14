@@ -18,12 +18,17 @@ use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 
 pub(crate) use self::caches::Caches;
 pub(crate) use self::flusher::Flusher;
-use self::rows::{ChannelRow, CurrentUserRow, GuildRow, MemberRow, MessageRow, UserRow};
+use self::rows::{
+    ChannelRow, CurrentUserRow, FolderRow, GuildRow, GuildSettingsRow, MemberRow, MessageRow,
+    UserRow,
+};
 pub(crate) use self::snapshot::Snapshot;
 pub(crate) use self::thread::CacheThread;
 use crate::model::{ChannelId, GuildId, Snowflake, UserId};
 use crate::state::apply::Entities;
-use crate::state::{Channel, CurrentUser, Delivery, Guild, Member, Message, User};
+use crate::state::{
+    Channel, CurrentUser, Delivery, FolderEntry, Guild, GuildSettings, Member, Message, User,
+};
 
 const LOG: &str = "akari_core::cache";
 
@@ -35,6 +40,11 @@ pub(crate) struct DiskCache {
     // Without it the cache stays on `user`'s file whatever READY says.
     pub(crate) caches: Option<Arc<Caches>>,
 }
+
+// The DM settings' row: snowflakes are never 0.
+const DM_SETTINGS: u64 = 0;
+const FOLDERS: &str = "folders";
+const NOTIFICATION_FLAGS: &str = "notification_flags";
 
 pub(crate) fn file(directory: &Path, user: UserId) -> PathBuf {
     directory.join(format!("{}.sqlite", user.get()))
@@ -255,6 +265,37 @@ impl Cache {
         for id in statement.query_map([], |row| row.get::<_, i64>(0))? {
             entities.unavailable.insert(Snowflake::new(row_id(id?)));
         }
+        skipped += self.each("SELECT guild_id, data FROM guild_settings", |id, data| {
+            let row: GuildSettingsRow = serde_json::from_str(data).ok()?;
+            let guild = (id != DM_SETTINGS).then(|| GuildId::new(id));
+            entities
+                .settings
+                .guilds
+                .insert(guild, Arc::new(row.into_settings()));
+            Some(())
+        })?;
+        let mut statement = self.conn.prepare("SELECT key, data FROM user_settings")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (key, data) = row?;
+            let settings = &mut entities.settings;
+            let read = match key.as_str() {
+                FOLDERS => serde_json::from_str::<Vec<FolderRow>>(&data)
+                    .ok()
+                    .map(|rows| {
+                        settings.folders = Some(rows.into_iter().map(FolderEntry::from).collect())
+                    }),
+                NOTIFICATION_FLAGS => serde_json::from_str::<u64>(&data)
+                    .ok()
+                    .map(|flags| settings.notification_flags = flags),
+                _ => Some(()),
+            };
+            if read.is_none() {
+                skipped += 1;
+            }
+        }
         Ok(Read {
             value: entities,
             skipped,
@@ -435,6 +476,54 @@ impl Writer<'_> {
 
     pub(crate) fn delete_user(&mut self, id: UserId) -> rusqlite::Result<()> {
         self.delete("DELETE FROM users WHERE id = ?1", id.get())?;
+        Ok(())
+    }
+
+    pub(crate) fn put_guild_settings(
+        &mut self,
+        guild: Option<GuildId>,
+        settings: &GuildSettings,
+    ) -> rusqlite::Result<()> {
+        let data = json(&GuildSettingsRow::from(settings))?;
+        self.put(
+            "INSERT OR REPLACE INTO guild_settings (guild_id, data) VALUES (?1, ?2)",
+            guild.map_or(DM_SETTINGS, GuildId::get),
+            data,
+        )
+    }
+
+    pub(crate) fn delete_guild_settings(&mut self, guild: Option<GuildId>) -> rusqlite::Result<()> {
+        self.delete(
+            "DELETE FROM guild_settings WHERE guild_id = ?1",
+            guild.map_or(DM_SETTINGS, GuildId::get),
+        )?;
+        Ok(())
+    }
+
+    // No row: the settings proto had no folders field, which differs from an empty list.
+    pub(crate) fn put_folders(&mut self, folders: Option<&[FolderEntry]>) -> rusqlite::Result<()> {
+        match folders {
+            Some(folders) => {
+                let rows: Vec<FolderRow> = folders.iter().map(FolderRow::from).collect();
+                self.put_user_setting(FOLDERS, json(&rows)?)
+            }
+            None => {
+                self.conn
+                    .execute("DELETE FROM user_settings WHERE key = ?1", [FOLDERS])?;
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn put_notification_flags(&mut self, flags: u64) -> rusqlite::Result<()> {
+        self.put_user_setting(NOTIFICATION_FLAGS, flags.to_string())
+    }
+
+    fn put_user_setting(&mut self, key: &str, data: String) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO user_settings (key, data) VALUES (?1, ?2)",
+            params![key, data],
+        )?;
         Ok(())
     }
 

@@ -2,7 +2,8 @@
 
 `akari_core::cache` keeps what a cold start draws before the gateway connects: the guilds,
 channels, roles and the current member (for permissions), the DM recipients, the current
-user, and the newest messages of recently opened channels. A launch shows the last session
+user, the user's settings (server folders and order, mutes, notification levels), and the
+newest messages of recently opened channels. A launch shows the last session
 from it at once; READY then brings only what changed. Linux and Android get it with the core.
 
 ## What is never cached
@@ -37,14 +38,18 @@ every other target builds rusqlite's bundled copy.
   INCREMENTAL` (set before the first table), 2 MiB of page cache, a 500 ms busy timeout.
 - **Tables:** `meta` (the owner's user ID), `current_user`, `users` (DM recipients), `guilds`
   (with their roles), `unavailable_guilds`, `members` (the current user's, per guild),
-  `channels`, `windows` (a cached channel and when it was last viewed) and `messages` (per
-  channel and ID). Each row is its key columns plus a `data` column of JSON in the cache's own
+  `channels`, `windows` (a cached channel and when it was last viewed), `messages` (per
+  channel and ID), `guild_settings` (per guild; `guild_id` 0 holds the DM settings),
+  `user_settings` (per key: `folders`, absent when the settings proto had none, and
+  `notification_flags`) and `read_states` (empty until read states are kept). Each row is its key columns plus a `data` column of JSON in the cache's own
   row types, never the wire structs or the state types, so either can change without breaking
   files already written. A field added later reads old rows through its default.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
-- **Version:** `PRAGMA user_version`. A file with any other version is deleted and started
-  empty, never migrated. The cache refills from Discord, so a migration would only add risk.
+- **Version:** `PRAGMA user_version`, 2 since the settings tables (version 1 files are deleted
+  once, so the first launch after that update starts empty). A file with any other version is
+  deleted and started empty, never migrated. The cache refills from Discord, so a migration
+  would only add risk.
 
 ### Opening, and when a file is thrown away
 
@@ -77,6 +82,9 @@ never touches it: it only bumps a change counter in the store.
   confirmed the session; before it, a restore's entities are all the file gets. The cache thread compares it with what it last wrote (`Arc::ptr_eq`, then `==`) and
   writes only the difference in one transaction. A READY that rebuilds every value with the
   same content writes nothing. The first comparison is against what the file held at open.
+- **Settings** are diffed the same way: one row per guild whose settings changed, the folders
+  and the notification flags only when they did. Category collapse isn't cached (the official
+  clients don't sync it; Akari keeps it in the app).
 - **Caps:** the newest 50 messages of the 50 most recently viewed channels. A window that
   drops out of memory keeps its rows in the file; past the 50th channel the least recently
   viewed lose theirs, and so do channels that are gone. Free pages past 256 go back to the
@@ -94,7 +102,8 @@ never touches it: it only bumps a change counter in the store.
 2. `account(token, user)` takes the preloaded thread (or starts one) and returns at once. As
    soon as the entities are read, the store takes them before the first READY
    (`StoreEvent::Restored`: read everything, as after READY).
-3. The host shows the rail, the channel list and the last channel from them.
+3. The host shows the rail (in the user's order, with folders), the channel list and the last
+   channel from them.
 4. The first READY is compared with the restored state like a new session, so only real
    changes become events. Windows loaded between the restore and that READY are marked stale
    and refreshed after it. A READY that arrives before the cache was read, or is being
@@ -141,7 +150,8 @@ Target `akari_core::cache`, `info`, numbers only, never content, names or IDs:
   (`ready_first`, `other_user`), `cache not in WAL mode reason=journal_mode`,
   `cache write failed reason=…`
 
-`skipped` counts rows that didn't decode; they're left out of the restore. `snapshot_ms` (to a
+`skipped` counts rows that didn't decode; they're left out of the restore. `other` counts the
+current user, DM recipients, memberships, unavailable guilds and settings rows. `snapshot_ms` (to a
 tenth) is how long taking the state from the store took. For close's snapshot that time is
 spent on the thread that called `close()`, the main thread on logout and quit, so close's
 write is logged even when it has nothing to write.

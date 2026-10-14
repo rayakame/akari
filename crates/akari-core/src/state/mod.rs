@@ -19,6 +19,7 @@ pub use send::{Slowmode, message_length};
 pub use settings::{
     ChannelSettings, Folder, GuildSettings, NotificationLevel, ServerListItem, Unreads,
 };
+pub(crate) use settings::{FolderEntry, UserSettings};
 pub use store::{Store, Subscription};
 pub use types::*;
 pub use windows::MessageWindow;
