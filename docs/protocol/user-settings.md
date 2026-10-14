@@ -70,7 +70,9 @@ changed those ([User Guild Settings](https://docs.discord.food/resources/user-se
 (`Store::guild_settings`), and a change sends `GuildSettingsChanged`:
 
 - **Mutes:** a guild or a channel is muted while `muted` and its `mute_config.end_time` is
-  unset or later than now (`muted_now`). `Store::channel_muted` is a channel's own override
+  unset or later than now (`muted_now`). Discord sends nothing when a timed mute runs out,
+  so the account keeps one timer for the earliest end and sends `GuildSettingsChanged` for
+  the guild then. It checks again after a reconnect, in case the computer slept past an end. `Store::channel_muted` is a channel's own override
   only: in the official client a muted category's channels look normal, and a muted server's
   icon isn't dimmed (observed 2026-10-14).
 - **Levels:** `message_notifications` 0 all messages, 1 only mentions, 2 nothing, 3 inherit.

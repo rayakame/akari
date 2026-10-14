@@ -353,6 +353,24 @@ impl Store {
         });
     }
 
+    pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
+        self.read(|inner| inner.state.next_mute_end(after))
+    }
+
+    // Reports the guilds whose mute, or a channel's, ended within `after..=until`.
+    pub(crate) fn end_mutes(&self, after: Timestamp, until: Timestamp) {
+        let ended = self.read(|inner| inner.state.mutes_ending(after, until));
+        if !ended.is_empty() {
+            self.write("mutes", |_, events| {
+                events.extend(
+                    ended
+                        .into_iter()
+                        .map(|guild_id| StoreEvent::GuildSettingsChanged { guild_id }),
+                );
+            });
+        }
+    }
+
     pub(crate) fn changes(&self) -> u64 {
         self.shared.changes.load(Ordering::Relaxed)
     }

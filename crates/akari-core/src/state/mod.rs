@@ -11,6 +11,7 @@ mod store;
 mod types;
 mod windows;
 
+pub(crate) use apply::wall_millis;
 pub use events::{ConnectionState, StoreEvent};
 pub use order::display_order;
 pub(crate) use send::limit_in;

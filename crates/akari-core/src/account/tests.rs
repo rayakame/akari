@@ -2607,6 +2607,58 @@ async fn paging_with_a_bucket_left_never_waits() {
     }
 }
 
+// An ISO 8601 time as Discord sends it, `millis` from the Unix epoch.
+fn iso(millis: i64) -> String {
+    let time =
+        ::time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(millis) * 1_000_000).unwrap();
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}000+00:00",
+        time.year(),
+        u8::from(time.month()),
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second(),
+        time.millisecond()
+    )
+}
+
+#[tokio::test]
+async fn a_timed_mute_ends_on_its_own() {
+    let mut fake = FakeGateway::start().await;
+    let account = start(&fake);
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let mut connection = fake.accept().await;
+    connection.handshake(60_000).await;
+    let end = crate::state::wall_millis() + 300;
+    connection
+        .send(ready_payload(1, &fake, |data| {
+            let guild = &mut data["user_guild_settings"]["entries"][0];
+            guild["muted"] = true.into();
+            guild["mute_config"] = json!({"end_time": iso(end), "selected_time_window": 900});
+        }))
+        .await;
+    events_until(&subscription, "Ready").await;
+    let lab = Some(Snowflake::new(200_000_000_000_000_001));
+    assert!(account.store().guild_settings(lab).muted);
+
+    let ended = timeout(WAIT, async {
+        loop {
+            match subscription.next().await {
+                Some(StoreEvent::GuildSettingsChanged { guild_id }) => return guild_id,
+                Some(_) => {}
+                None => panic!("the subscription ended"),
+            }
+        }
+    })
+    .await
+    .expect("the mute's end wasn't reported");
+
+    assert_eq!(ended, lab);
+    assert!(crate::state::wall_millis() >= end);
+}
+
 mod cache {
     use super::*;
     use crate::cache::tests::TempDir;

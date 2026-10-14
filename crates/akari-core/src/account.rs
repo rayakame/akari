@@ -702,6 +702,10 @@ impl Account {
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
         runtime.spawn(pump(finish));
+        runtime.spawn(mutes::end_mutes(
+            shared.store.clone(),
+            shared.store.subscribe(),
+        ));
         Ok(Self { shared })
     }
 
@@ -1015,6 +1019,8 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
         ConnectionEvent::CapturedReady(_) => {}
     }
 }
+
+mod mutes;
 
 #[cfg(test)]
 mod tests;

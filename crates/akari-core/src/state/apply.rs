@@ -1006,6 +1006,26 @@ impl State {
             .unwrap_or(NotificationLevel::AllMessages)
     }
 
+    pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
+        self.entities
+            .settings
+            .mute_ends()
+            .map(|(_, end)| end)
+            .filter(|end| *end > after)
+            .min()
+    }
+
+    pub(crate) fn mutes_ending(&self, after: Timestamp, until: Timestamp) -> Vec<Option<GuildId>> {
+        let ended: BTreeSet<Option<GuildId>> = self
+            .entities
+            .settings
+            .mute_ends()
+            .filter(|(_, end)| *end > after && *end <= until)
+            .map(|(guild, _)| guild)
+            .collect();
+        ended.into_iter().collect()
+    }
+
     #[cfg(test)]
     pub(crate) fn settings(&self) -> &UserSettings {
         &self.entities.settings
@@ -1094,7 +1114,7 @@ impl State {
     }
 }
 
-pub(super) fn wall_millis() -> i64 {
+pub(crate) fn wall_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| {

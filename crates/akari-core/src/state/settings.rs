@@ -198,6 +198,21 @@ impl UserSettings {
         self.guilds.get(&guild)
     }
 
+    // Each mute that is on and ends at a set time: a guild's own, and its channels'.
+    pub(crate) fn mute_ends(&self) -> impl Iterator<Item = (Option<GuildId>, Timestamp)> + '_ {
+        self.guilds.iter().flat_map(|(guild, settings)| {
+            let own = settings.mute_ends.filter(|_| settings.muted);
+            let channels = settings
+                .channels
+                .values()
+                .filter(|channel| channel.muted)
+                .filter_map(|channel| channel.mute_ends);
+            own.into_iter()
+                .chain(channels)
+                .map(move |end| (*guild, end))
+        })
+    }
+
     // Returns whether the guild's settings changed.
     pub(crate) fn put_guild(&mut self, settings: UserGuildSettings) -> bool {
         let guild = settings.guild_id;
