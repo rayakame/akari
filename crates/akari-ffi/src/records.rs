@@ -107,7 +107,8 @@ pub struct Message {
     pub components_v2: bool,
     pub delivery: Delivery,
     pub formatted: FormattedText,
-    /// Mentions the current user, by ID, @everyone or @here, or a role of theirs.
+    /// Mentions the current user, by ID, @everyone or @here, or a role of theirs. The last
+    /// three don't count where the server suppresses them.
     pub mentions_me: bool,
 }
 

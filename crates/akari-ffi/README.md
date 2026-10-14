@@ -30,7 +30,8 @@ quotes and list items, each with spans that carry their styles, spoiler and link
 links (masked or not, the title, the embed flag, and for Discord channel and message URLs
 the typed IDs and the channel's name). Offsets are UTF-16 code units into `content`, so Swift
 cuts it with `NSString` ranges. `Message.mentions_me` says whether the message mentions the
-current user (akari-core's rule; notification settings aren't read yet).
+current user (akari-core's rule, which leaves out @everyone, @here and role mentions where the
+server's notification settings suppress them).
 
 Mention names come from the message's own users, else the store, at read time, so a rename
 needs no invalidation: `Known`, `NoAccess` (a channel the user can't view), `Missing` (the

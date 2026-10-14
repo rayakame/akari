@@ -567,21 +567,29 @@ impl Store {
     }
 
     /// Whether `message` mentions the current user: by ID, through @everyone or @here, or
-    /// through one of the current member's roles. Ignores notification settings.
+    /// through one of the current member's roles. @everyone, @here and role mentions don't
+    /// count where the guild's settings suppress them; a mention by ID always does.
     pub fn mentions_me(&self, message: &Message) -> bool {
         self.read(|inner| {
             let state = &inner.state;
             let Some(me) = state.current_user() else {
                 return false;
             };
-            if message.mention_everyone || message.mentions.iter().any(|user| user.id == me.user.id)
-            {
+            if message.mentions.iter().any(|user| user.id == me.user.id) {
+                return true;
+            }
+            let guild = state
+                .channel(message.channel_id)
+                .and_then(|channel| channel.guild_id);
+            let settings = guild.map(|guild| state.guild_settings(Some(guild)));
+            let suppressed =
+                |suppress: fn(&GuildSettings) -> bool| settings.as_deref().is_some_and(suppress);
+            if message.mention_everyone && !suppressed(|settings| settings.suppress_everyone) {
                 return true;
             }
             !message.mention_roles.is_empty()
-                && state
-                    .channel(message.channel_id)
-                    .and_then(|channel| channel.guild_id)
+                && !suppressed(|settings| settings.suppress_roles)
+                && guild
                     .and_then(|guild| state.current_member(guild))
                     .is_some_and(|member| {
                         member
