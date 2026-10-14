@@ -43,8 +43,8 @@ quotes and list items, each with spans that carry their styles, spoiler and link
 links (masked or not, the title, the embed flag, and for Discord channel and message URLs
 the typed IDs and the channel's name). Offsets are UTF-16 code units into `content`, so Swift
 cuts it with `NSString` ranges. `Message.mentions_me` says whether the message mentions the
-current user (akari-core's rule, which leaves out @everyone, @here and role mentions where the
-server's notification settings suppress them).
+current user (akari-core's rule; suppress settings don't change it, as in the official client,
+which drops only the badge).
 
 Mention names come from the message's own users, else the store, at read time, so a rename
 needs no invalidation: `Known`, `NoAccess` (a channel the user can't view), `Missing` (the
@@ -54,8 +54,8 @@ previews.
 
 Names and `mentions_me` can change without a message event, so a host rereads the messages it
 shows after `GuildUpdated` (role names and colors), `ChannelUpdated` (channel names, access),
-`UserUpdated`, `CurrentUserUpdated`, `CurrentMemberUpdated` (the user's roles: their
-mentions and channel access) and `GuildSettingsChanged` (which mentions are suppressed).
+`UserUpdated`, `CurrentUserUpdated` and `CurrentMemberUpdated` (the user's roles: their
+mentions and channel access).
 
 Each account keeps up to 4,096 parsed documents, keyed by message ID and edit time, with a
 hash of the content as a guard (SipHash under a random key per process), since an update can

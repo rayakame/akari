@@ -1164,13 +1164,12 @@ fn a_user_mention_mentions_me() {
     assert!(!ready_store().mentions_me(&mentioning_nobody(|_| {})));
 }
 
-// Guild 1's settings with only the suppress settings changed (the fixture suppresses
-// @everyone).
-fn suppressing(store: &Store, guild: Option<u64>, everyone: bool, roles: bool) {
+// Guild 1's settings with only the suppress settings changed.
+fn suppressing(store: &Store, everyone: bool, roles: bool) {
     store.apply(dispatch(
         "USER_GUILD_SETTINGS_UPDATE",
         &json!({
-            "guild_id": guild.map(|id| id.to_string()),
+            "guild_id": G1.to_string(),
             "muted": false,
             "message_notifications": 3,
             "suppress_everyone": everyone,
@@ -1182,11 +1181,8 @@ fn suppressing(store: &Store, guild: Option<u64>, everyone: bool, roles: bool) {
 
 #[test]
 fn everyone_mentions_me() {
-    let store = ready_store();
-    suppressing(&store, Some(G1), false, false);
-
     let message = mentioning_nobody(|wire| wire.mention_everyone = true);
-    assert!(store.mentions_me(&message));
+    assert!(ready_store().mentions_me(&message));
 }
 
 #[test]
@@ -1195,50 +1191,16 @@ fn a_role_i_have_mentions_me() {
     assert!(ready_store().mentions_me(&message));
 }
 
+// The official client still tints such rows; suppressing only drops the badge.
 #[test]
-fn suppressed_everyone_doesnt_mention_me() {
+fn the_highlight_ignores_suppress_settings() {
     let store = ready_store();
-    suppressing(&store, Some(G1), true, false);
+    suppressing(&store, true, true);
 
     let everyone = mentioning_nobody(|wire| wire.mention_everyone = true);
-    assert!(!store.mentions_me(&everyone));
     let role = mentioning_nobody(|wire| wire.mention_roles = vec![Snowflake::new(MODERATORS)]);
-    assert!(store.mentions_me(&role), "roles aren't suppressed");
-}
-
-#[test]
-fn suppressed_roles_dont_mention_me() {
-    let store = ready_store();
-    suppressing(&store, Some(G1), false, true);
-
-    let role = mentioning_nobody(|wire| wire.mention_roles = vec![Snowflake::new(MODERATORS)]);
-    assert!(!store.mentions_me(&role));
-    let everyone = mentioning_nobody(|wire| wire.mention_everyone = true);
-    assert!(store.mentions_me(&everyone), "@everyone isn't suppressed");
-}
-
-#[test]
-fn a_direct_mention_always_counts() {
-    let store = ready_store();
-    suppressing(&store, Some(G1), true, true);
-
-    let message = mentioning(|wire| {
-        wire.mention_everyone = true;
-        wire.mention_roles = vec![Snowflake::new(MODERATORS)];
-    });
-    assert!(store.mentions_me(&message));
-}
-
-#[test]
-fn suppress_settings_dont_touch_dms() {
-    let store = ready_store();
-    suppressing(&store, None, true, true);
-
-    let everyone = mentioning_nobody(|wire| {
-        wire.channel_id = Snowflake::new(DM);
-        wire.mention_everyone = true;
-    });
     assert!(store.mentions_me(&everyone));
+    assert!(store.mentions_me(&role));
 }
 
 #[test]

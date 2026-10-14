@@ -120,7 +120,5 @@ agreed in every case checked so far (October 2026); the corpus still marks those
 - Timestamps: the hover text, and how often `R` changes.
 - What Cmd+C copies from a hidden spoiler.
 - Spaces at a message's start and end.
-- The highlight when @everyone is suppressed: Akari leaves it off, as the official client
-  shows such a message like a plain one; the tint is still to compare side by side.
 - A masked link without a title, and a channel link with a trailing slash.
 - That a plain link opens without the warning (Akari opens it directly).

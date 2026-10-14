@@ -144,7 +144,7 @@ public final class MessageListModel {
             return false
         }
         return batch.guildsChanged.contains(guildId) || batch.membersChanged.contains(guildId)
-            || batch.channelsChanged[guildId] != nil || batch.guildSettingsChanged.contains(guildId)
+            || batch.channelsChanged[guildId] != nil
     }
 
     private func load(_ kind: Load) async {

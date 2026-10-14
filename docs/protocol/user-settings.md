@@ -81,7 +81,9 @@ changed those ([User Guild Settings](https://docs.discord.food/resources/user-se
   `default_message_notifications`. A guild without an entry has Discord's defaults.
 - **Unreads:** the `UNREADS_ALL_MESSAGES` and `UNREADS_ONLY_MENTIONS` flags (guild 1 << 11 and
   1 << 12, channel 1 << 10 and 1 << 9) become `unreads`.
-- `suppress_everyone`, `suppress_roles` and `hide_muted_channels` are kept as sent.
+- `suppress_everyone`, `suppress_roles` and `hide_muted_channels` are kept as sent. The
+  suppress settings decide what counts toward a mention badge, not the highlighted row: the
+  official client still tints a suppressed @everyone or role mention (observed 2026-10-14).
 - **Category collapse isn't synced.** `channel_overrides[].collapsed` exists, but the
   official clients don't write it: collapsing or expanding a category in the web or the
   desktop client sends no request, and categories collapsed on the phone were expanded on
