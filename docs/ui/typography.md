@@ -9,9 +9,15 @@ at which SF Pro looks as big as the official text, not the official CSS size.
 
 Every text style in an app is one entry of its type scale, kept in one place (on macOS
 `TypeScale` in `apps/macos/Akari/Theme/TypeScale.swift`). Each style is given in points at a
-**16 pt base** and scales with it, so a font size setting like the official one (which scales
-the whole client) changes only the base. Glyphs inside icons (avatar and server initials, SF
+**16 pt base** and computed from it, so a font size setting like the official one (which scales
+the whole client) starts from the base. Glyphs inside icons (avatar and server initials, SF
 Symbols) size with their icon, not with the scale.
+
+The base is fixed for now, and a new base alone wouldn't reach everything: several places make
+their fonts once and keep them (on macOS the message formatting's typefaces, the composer's font
+and line, every cell's labels, set when the cell is made, and the sizing cells that measure
+rows). The setting will also have to rebuild those fonts, drop the message texts built with the
+old ones, and remeasure every row while keeping the reader's place.
 
 Message text is the base: 16 regular on a 22 line.
 

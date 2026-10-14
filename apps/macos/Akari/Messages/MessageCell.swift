@@ -164,8 +164,11 @@ final class MessageCell: NSTableCellView {
     /// The message's own area, which hover and the mention highlight cover.
     var box: NSRect {
         let spacing = showsHeader ? Self.groupSpacing : 0
-        // A legacy scroller sits in a gutter of its own beside the list.
-        let gutter = enclosingScrollView?.scrollerStyle == .legacy ? 0 : Self.scrollbarGutter
+        // A legacy scroller sits in a gutter of its own beside the list, while it shows.
+        let legacy = enclosingScrollView.map {
+            $0.scrollerStyle == .legacy && $0.verticalScroller?.isHidden == false
+        }
+        let gutter = legacy == true ? 0 : Self.scrollbarGutter
         return NSRect(
             x: 0, y: isFlipped ? spacing : 0, width: max(0, bounds.width - gutter),
             height: max(0, bounds.height - spacing))

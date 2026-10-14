@@ -60,9 +60,8 @@ nonisolated struct TextStyle: Equatable, Sendable {
     }
 }
 
-/// Every text style of the app. Sizes are relative to `base`, so a font size setting like the
-/// official client's changes only the base. The values and how they were measured are in
-/// docs/ui/typography.md.
+/// Every text style of the app, relative to `base` (values and method: docs/ui/typography.md).
+/// A new base also needs the fonts made once rebuilt and every row remeasured.
 nonisolated enum TypeScale {
     static let base: CGFloat = 16
 

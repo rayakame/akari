@@ -54,10 +54,10 @@ title bar.
 | Hovered | `hoverBackground` | `interactiveTextActive` |
 | Selected | `selectedBackground` | `interactiveTextActive` (semibold in light) |
 | Unread | none | `interactiveTextActive`, plus a 4 × 8 pill on the column's left edge |
+| Muted | none | icon and name at half opacity |
 
 Names are medium weight in every state; the official client changes only their color (observed
 2026-10-14 in the dark theme).
-| Muted | none | icon and name at half opacity |
 
 - Icons by kind: text, voice, announcement, stage, forum, media, rules and thread. Each has a
   private variant (with a lock) and an NSFW variant (with a warning mark).

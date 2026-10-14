@@ -173,6 +173,21 @@ struct MentionHighlightTests {
         #expect(cell.box.width == 600)
     }
 
+    // A short channel autohides it, which leaves the gutter empty.
+    @Test
+    func aHiddenLegacyScrollerKeepsTheGutter() throws {
+        let cell = cell(mentioned: false)
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 640, height: 200))
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .legacy
+        scrollView.documentView = cell.superview
+        scrollView.tile()
+        try #require(scrollView.verticalScroller?.isHidden == true)
+
+        #expect(cell.box.width == 584)
+    }
+
     @Test
     func anAppearanceChangeRecolorsTheMentionHighlight() throws {
         let cell = cell(mentioned: true)

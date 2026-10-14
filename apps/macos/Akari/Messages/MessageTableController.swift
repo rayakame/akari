@@ -320,11 +320,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         ownChanges += 1
         defer { ownChanges -= 1 }
-        let visible = tableView.rows(in: tableView.visibleRect)
-        if visible.length > 0 {
-            tableView.reloadData(
-                forRowIndexes: IndexSet(integersIn: visible.location..<NSMaxRange(visible)),
-                columnIndexes: [0])
+        // Not only the visible rows: AppKit prepares row views beyond them, and a slight scroll
+        // shows those as they are.
+        var held = IndexSet()
+        tableView.enumerateAvailableRowViews { _, row in
+            if row >= 0 {
+                held.insert(row)
+            }
+        }
+        if !held.isEmpty {
+            tableView.reloadData(forRowIndexes: held, columnIndexes: [0])
         }
         tableView.noteHeightOfRows(
             withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows))
@@ -638,12 +643,22 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         rowHeights[timeline.items[index].id] = nil
         ownChanges += 1
         defer { ownChanges -= 1 }
+        // Inside an update the table moves its row views, as for apply's inserts; at zero
+        // duration it does so at once.
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        tableView.beginUpdates()
         tableView.noteHeightOfRows(withIndexesChanged: [index])
+        tableView.endUpdates()
+        NSAnimationContext.endGrouping()
         if pinsToBottom {
             scrollToBottom()
         } else {
             restoreAnchor()
         }
+        // As in apply: inside a SwiftUI update the table's own layout can come a frame later.
+        tableView.layoutSubtreeIfNeeded()
+        updateHover()
     }
 
     // Without rows the placeholders stand in for the latest page.
@@ -846,6 +861,17 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         )
     }
 
+    // A message's box keeps a gutter unless a legacy scroller shows.
+    @objc private func scrollerStyleChanged() {
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            (rowView.view(atColumn: 0) as? MessageCell)?.needsDisplay = true
+        }
+        // The scroll view takes the new style on the same notification; hover waits for it.
+        Task { @MainActor [weak self] in
+            self?.updateHover()
+        }
+    }
+
     @objc private func windowShownOrHidden(_ notification: Notification) {
         if notification.object as? NSWindow === tableView.window {
             updateRelativeTimer()
@@ -963,6 +989,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             notifications.addObserver(
                 self, selector: #selector(windowShownOrHidden(_:)), name: name, object: nil)
         }
+        notifications.addObserver(
+            self, selector: #selector(scrollerStyleChanged),
+            name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
         tableView.windowChanged = { [weak self] in
             self?.updateRelativeTimer()
         }

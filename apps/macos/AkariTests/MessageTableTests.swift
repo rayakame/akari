@@ -11,6 +11,7 @@ struct MessageTableTests {
         var removes = 0
         var inserts = 0
         var reloaded: [IndexSet] = []
+        var afterReload: (IndexSet) -> Void = { _ in }
 
         override func reloadData() {
             fullReloads += 1
@@ -20,6 +21,7 @@ struct MessageTableTests {
         override func reloadData(forRowIndexes rows: IndexSet, columnIndexes columns: IndexSet) {
             reloaded.append(rows)
             super.reloadData(forRowIndexes: rows, columnIndexes: columns)
+            afterReload(rows)
         }
 
         override func removeRows(at indexes: IndexSet, withAnimation options: AnimationOptions = [])
@@ -500,6 +502,7 @@ struct MessageTableTests {
 
     @Test
     func theSpaceBeforeAGroupHoversNothing() {
+        controller.scrollView.scrollerStyle = .overlay
         show([row(1, at: noon), row(2, by: author(2), at: noon + 30)])
         let second = index(of: 2)
         let rect = table.rect(ofRow: second)
@@ -515,8 +518,64 @@ struct MessageTableTests {
 
         pointer.location = at(table.bounds.maxX - 8, rect.minY + 30)
         controller.pointerMoved()
-        let legacy = controller.scrollView.scrollerStyle == .legacy
-        #expect(hoveredRows == (legacy ? [second] : []))
+        #expect(hoveredRows.isEmpty)
+    }
+
+    // A legacy scroller that shows up takes the gutter itself; messages then reach it.
+    @Test
+    func aScrollerStyleChangeRedrawsAndHoversAgain() async throws {
+        let center = NotificationCenter()
+        let pointer = Pointer()
+        let table = MessageTableView()
+        let controller = MessageTableController(
+            tableView: table, calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) },
+            pointer: { pointer.location }, notifications: center)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.contentView = controller.scrollView
+        controller.scrollView.scrollerStyle = .overlay
+        // Highlighted, so a box that changes shows.
+        let rows = messages(30).map { row in
+            var message = row.message
+            message.mentionsMe = true
+            return MessageListModel.Row(id: row.id, message: message)
+        }
+        controller.show(MessageTableState(rows: rows))
+        window.layoutIfNeeded()
+        let visible = table.rows(in: table.visibleRect)
+        let cells = (visible.location..<NSMaxRange(visible)).filter {
+            table.view(atColumn: 0, row: $0, makeIfNecessary: false) is MessageCell
+        }
+        let row = try #require(cells.last)
+        let cell = try #require(table.view(atColumn: 0, row: row, makeIfNecessary: false))
+        let first = try #require(cells.first)
+        let other = try #require(table.view(atColumn: 0, row: first, makeIfNecessary: false))
+        let hovered = { (cell as? MessageCell)?.isHovered == true }
+        let atTheEdge = {
+            table.convert(
+                NSPoint(x: table.bounds.maxX - 4, y: table.rect(ofRow: row).maxY - 4), to: nil)
+        }
+        pointer.location = atTheEdge()
+        controller.pointerMoved()
+        #expect(!hovered())
+
+        controller.scrollView.scrollerStyle = .legacy
+        window.layoutIfNeeded()
+        try #require(controller.scrollView.verticalScroller?.isHidden == false)
+        pointer.location = atTheEdge()
+        // Its backing layer says whether it will draw again; NSView's flag reads false there.
+        let redraws = { other.layer?.needsDisplay() == true }
+        window.displayIfNeeded()
+        CATransaction.flush()
+        try #require(!redraws())
+        #expect(!hovered())
+
+        center.post(name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
+
+        #expect(redraws())
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(hovered())
     }
 
     func messageText(in view: NSView) -> MessageTextView? {
@@ -1318,6 +1377,24 @@ struct MessageTableTests {
             .map(\.stringValue)
         #expect(shown == ["Welcome to #general!", "This is the start of the #general channel."])
         #expect(table.rect(ofRow: 0).height == fittingHeight(ofRow: 0))
+    }
+
+    // Its rows reach their places in this update, as a page's do; a SwiftUI update can lay
+    // the table out a frame later.
+    @Test
+    func aRenameThatGrowsTheStartKeepsTheVisibleRowsInPlace() {
+        let short = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        let long = ChannelName(
+            kind: .guildChannel(.guildText),
+            name: String(repeating: "a-very-long-channel-name-", count: 4))
+        show(MessageTableState(rows: page, reachedOldest: true, start: short.start))
+        scroll(toRowOf: 102)
+        let before = visibleViews()
+        #expect(!before.isEmpty)
+
+        controller.show(MessageTableState(rows: page, reachedOldest: true, start: long.start))
+
+        expectTheSameViewsInPlace(before)
     }
 
     // The official client's welcome sits left, above the first message.

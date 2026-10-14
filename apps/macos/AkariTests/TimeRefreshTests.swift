@@ -308,6 +308,10 @@ final class TimeRefreshTests {
         guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) else {
             return []
         }
+        return texts(in: cell)
+    }
+
+    func texts(in cell: NSView) -> [String] {
         cell.layoutSubtreeIfNeeded()
         return fields(in: cell).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
     }
@@ -335,6 +339,36 @@ final class TimeRefreshTests {
         rows.append(row(2, at: berlinTime(2026, 10, 11, 0, 2)))
         show(rows)
         #expect(dividers == 2)
+    }
+
+    // AppKit keeps row views ready beyond the visible rows; a slight scroll shows them as they are.
+    @Test
+    func midnightReachesRowViewsPreparedOutOfSight() async throws {
+        let start = berlinTime(2026, 10, 10, 23, 58)
+        // Every author change starts a group, so every row shows its time.
+        show((1...60).map { row(UInt64($0), by: author(UInt64($0 % 2 + 1)), at: start + 1) })
+        let first = index(of: 1)
+        try #require(!table.visibleRect.intersects(table.rect(ofRow: first)))
+        // As AppKit's overdraw does ahead of a scroll.
+        let prepared = try #require(table.view(atColumn: 0, row: first, makeIfNecessary: true))
+        window.layoutIfNeeded()
+        try #require(table.view(atColumn: 0, row: first, makeIfNecessary: false) === prepared)
+        #expect(texts(in: prepared).contains("11:58\u{202F}PM"))
+        // An offscreen table drops it at its next tile, which the refresh brings; on screen it
+        // stays. So it's read as the refresh reloads it.
+        var shown: [String] = []
+        table.afterReload = { [table] rows in
+            if rows.contains(first),
+                let cell = table.view(atColumn: 0, row: first, makeIfNecessary: false)
+            {
+                shown = self.texts(in: cell)
+            }
+        }
+
+        clock.now = berlinTime(2026, 10, 11, 0, 1)
+        await post(.NSCalendarDayChanged)
+
+        #expect(shown.contains("Yesterday at 11:58\u{202F}PM"))
     }
 
     @Test
