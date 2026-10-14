@@ -134,7 +134,7 @@ struct ChannelListModelTests {
     }
 
     @Test
-    func aMuteInTheSameBatchAsANewChannelIsReported() {
+    func aMuteInTheSameBatchAsANewChannelIsRead() {
         let model = loaded()
         store.update { state in
             state.list(
@@ -142,28 +142,12 @@ struct ChannelListModelTests {
             state.mutedChannels = [id(10)]
         }
 
-        let muted = model.apply(
+        model.apply(
             EventBatch([
                 .channelAdded(channelId: id(13), guildId: id(1)),
                 .guildSettingsChanged(guildId: id(1)),
             ]))
 
-        #expect(muted == [id(10)])
-    }
-
-    @Test
-    func aCategoryMutedByAChangeIsReportedOnce() {
-        let model = loaded()
-        store.update { $0.mutedChannels = [id(10), id(11)] }
-
-        let muted = model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
-        let again = model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
-
-        #expect(muted == [id(10)], "categories only")
-        #expect(again.isEmpty)
-        store.update { $0.mutedChannels = [] }
-        model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
-        store.update { $0.mutedChannels = [id(10)] }
-        #expect(model.apply(EventBatch([.ready])).isEmpty, "a new session isn't a change")
+        #expect(model.muted == [id(10)])
     }
 }

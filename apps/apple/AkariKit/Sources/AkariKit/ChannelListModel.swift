@@ -32,15 +32,12 @@ public final class ChannelListModel {
         }
     }
 
-    /// Returns the categories a settings change muted, which the official client collapses.
-    @discardableResult
-    func apply(_ batch: EventBatch) -> Set<ChannelId> {
+    func apply(_ batch: EventBatch) {
         if batch.everythingChanged {
             reload(rereading: nil)
             readSettings()
-            return []
+            return
         }
-        let before = muted
         let changed = batch.channelsChanged[guildId]
         // Member and role changes can show or hide channels.
         if changed != nil || batch.membersChanged.contains(guildId)
@@ -48,12 +45,9 @@ public final class ChannelListModel {
         {
             reload(rereading: changed ?? [])
         }
-        guard batch.guildSettingsChanged.contains(guildId) else {
-            return []
+        if batch.guildSettingsChanged.contains(guildId) {
+            readSettings()
         }
-        readSettings()
-        let categories = Set(channels.filter { $0.kind == .guildCategory }.map(\.id))
-        return muted.subtracting(before).intersection(categories)
     }
 
     // `nil` re-reads every channel, e.g. after a new session.

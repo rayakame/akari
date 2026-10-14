@@ -37,8 +37,9 @@ final class SessionModelTests {
         #expect(!session.trustedLinks().isTrusted(url))
     }
 
+    // Discord's clients collapse a category only when it's muted in that same client.
     @Test
-    func aCategoryMutedWhileRunningCollapsesOnce() {
+    func aCategoryMutedElsewhereStaysAsTheUserLeftIt() {
         store.update { state in
             state.connection = .online
             state.currentUser = user(1)
@@ -52,34 +53,8 @@ final class SessionModelTests {
 
         session.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
 
-        #expect(session.collapsed.isCollapsed(id(10), in: id(1)))
-        session.collapsed.toggle(id(10), in: id(1))
-        session.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
-        #expect(!session.collapsed.isCollapsed(id(10), in: id(1)), "the user's choice stays")
-        #expect(
-            CollapsedCategories(defaults: defaults).isCollapsed(id(10), in: id(1)) == false,
-            "kept with the session's memory")
-        session.close()
-    }
-
-    // A new session's events can span batches before READY's own; none of them is a live mute.
-    @Test
-    func aCategoryMutedBeforeTheSessionIsOnlineDoesntCollapse() {
-        store.update { state in
-            state.connection = .connecting
-            state.currentUser = user(1)
-            state.add(guild(1))
-            state.list([channel(10, kind: .guildCategory), channel(11, parent: 10)], in: 1)
-        }
-        let session = makeSession()
-        session.start()
-        session.open(.guild(id(1)))
-        store.update { $0.mutedChannels = [id(10)] }
-
-        session.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
-        session.apply(EventBatch([.ready, .connection(state: .online)]))
-
         #expect(!session.collapsed.isCollapsed(id(10), in: id(1)))
+        #expect(session.channels?.muted == [id(10)])
         session.close()
     }
 
