@@ -1,6 +1,14 @@
 import AkariKit
 import Foundation
 
+// The window's title while hosted tests run, so a test can name the window the way a session
+// does, through navigationTitle.
+@MainActor @Observable
+final class TestingWindowTitle {
+    static let shared = TestingWindowTitle()
+    var text = "Akari"
+}
+
 enum Launch {
     enum State {
         // Hosted tests run inside the app; they must not reach the Keychain or Discord.
