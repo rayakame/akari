@@ -6,6 +6,11 @@ public final class ChannelListModel {
     public let guildId: GuildId
     /// Display order; categories are channels of kind `.guildCategory`.
     public private(set) var channels: [Channel] = []
+    /// Channels and categories muted now by their own settings; a muted category doesn't
+    /// mute its channels.
+    public private(set) var muted: Set<ChannelId> = []
+    /// The user hides muted channels in this guild.
+    public private(set) var hidesMuted = false
 
     @ObservationIgnored private let store: Store
 
@@ -13,11 +18,27 @@ public final class ChannelListModel {
         self.guildId = guildId
         self.store = store
         reload(rereading: nil)
+        readSettings()
     }
 
-    func apply(_ batch: EventBatch) {
+    /// The list as shown: without muted channels when the user hides them, except `open`.
+    /// Categories stay.
+    public func shown(open: ChannelId?) -> [Channel] {
+        guard hidesMuted else {
+            return channels
+        }
+        return channels.filter { channel in
+            channel.kind == .guildCategory || channel.id == open || !muted.contains(channel.id)
+        }
+    }
+
+    /// Returns the categories a settings change muted, which the official client collapses.
+    @discardableResult
+    func apply(_ batch: EventBatch) -> Set<ChannelId> {
         if batch.everythingChanged {
-            return reload(rereading: nil)
+            reload(rereading: nil)
+            readSettings()
+            return []
         }
         let changed = batch.channelsChanged[guildId]
         // Member and role changes can show or hide channels.
@@ -26,6 +47,13 @@ public final class ChannelListModel {
         {
             reload(rereading: changed ?? [])
         }
+        guard batch.guildSettingsChanged.contains(guildId) else {
+            return []
+        }
+        let before = muted
+        readSettings()
+        let categories = Set(channels.filter { $0.kind == .guildCategory }.map(\.id))
+        return muted.subtracting(before).intersection(categories)
     }
 
     // `nil` re-reads every channel, e.g. after a new session.
@@ -40,6 +68,15 @@ public final class ChannelListModel {
                 held[channel.id] = channel
             }
         }
+        let listed = channels.map(\.id)
         channels = ids.compactMap { held[$0] }
+        if changed != nil, channels.map(\.id) != listed {
+            muted = Set(store.mutedChannels(ids: channels.map(\.id)))
+        }
+    }
+
+    private func readSettings() {
+        muted = Set(store.mutedChannels(ids: channels.map(\.id)))
+        hidesMuted = store.guildSettings(guildId: guildId).hideMutedChannels
     }
 }

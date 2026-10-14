@@ -20,6 +20,17 @@ public final class CollapsedCategories {
         if categories.remove(category) == nil {
             categories.insert(category)
         }
+        store(categories, in: guild)
+    }
+
+    func collapse(_ category: ChannelId, in guild: GuildId) {
+        var categories = categories(in: guild)
+        if categories.insert(category).inserted {
+            store(categories, in: guild)
+        }
+    }
+
+    private func store(_ categories: Set<ChannelId>, in guild: GuildId) {
         collapsed[guild] = categories
         defaults.set(categories.map(\.description), forKey: Self.key(guild))
     }

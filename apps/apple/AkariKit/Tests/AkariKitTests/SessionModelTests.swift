@@ -38,6 +38,30 @@ final class SessionModelTests {
     }
 
     @Test
+    func aCategoryMutedWhileRunningCollapsesOnce() {
+        store.update { state in
+            state.currentUser = user(1)
+            state.add(guild(1))
+            state.list([channel(10, kind: .guildCategory), channel(11, parent: 10)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        store.update { $0.mutedChannels = [id(10)] }
+
+        session.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
+
+        #expect(session.collapsed.isCollapsed(id(10), in: id(1)))
+        session.collapsed.toggle(id(10), in: id(1))
+        session.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
+        #expect(!session.collapsed.isCollapsed(id(10), in: id(1)), "the user's choice stays")
+        #expect(
+            CollapsedCategories(defaults: defaults).isCollapsed(id(10), in: id(1)) == false,
+            "kept with the session's memory")
+        session.close()
+    }
+
+    @Test
     func startSubscribesBeforeReadingThenConnects() {
         store.update { state in
             state.connection = .connecting
@@ -53,10 +77,10 @@ final class SessionModelTests {
         #expect(calls.last == .connect)
         #expect(calls.contains(.read(.connection)))
         #expect(calls.contains(.read(.currentUser)))
-        #expect(calls.contains(.read(.guildIds)))
+        #expect(calls.contains(.read(.serverList)))
         #expect(session.connection == .connecting)
         #expect(session.currentUser == user(1, name: "me"))
-        #expect(session.guilds.guilds == [guild(5)])
+        #expect(session.servers.guilds == [guild(5)])
         session.close()
     }
 
@@ -381,7 +405,7 @@ final class SessionModelTests {
         #expect(session.place == .home)
         #expect(session.channels == nil)
         #expect(session.messages == nil)
-        #expect(session.guilds.guilds.isEmpty)
+        #expect(session.servers.guilds.isEmpty)
         session.close()
     }
 
@@ -652,7 +676,7 @@ final class SessionModelTests {
         await subscription.batches.pulled(2)
 
         #expect(session.currentUser == user(1, name: "me"))
-        #expect(session.guilds.guilds == [guild(1), guild(2)])
+        #expect(session.servers.guilds == [guild(1), guild(2)])
         #expect(session.directMessages.conversations.map(\.id) == [id(5)])
         #expect(session.place == .guild(id(1)))
         #expect(session.messages?.channelId == id(12))

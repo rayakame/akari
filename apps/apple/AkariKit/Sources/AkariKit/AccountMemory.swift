@@ -63,13 +63,38 @@ public struct AccountMemory: Sendable {
         TrustedLinks(account: account, defaults: defaults)
     }
 
-    /// Forgets what's kept for the account: its spot and the hosts its links are trusted for.
+    @MainActor
+    public func collapsedCategories() -> CollapsedCategories {
+        CollapsedCategories(defaults: defaults)
+    }
+
+    /// The server folders the user expanded in Akari. Discord doesn't sync this.
+    public func expandedFolders(of account: UserId) -> Set<Int64> {
+        let stored = defaults.stringArray(forKey: Self.foldersKey(account)) ?? []
+        return Set(stored.compactMap(Int64.init))
+    }
+
+    public func remember(expandedFolders folders: Set<Int64>, of account: UserId) {
+        if folders.isEmpty {
+            defaults.removeObject(forKey: Self.foldersKey(account))
+        } else {
+            defaults.set(folders.sorted().map(String.init), forKey: Self.foldersKey(account))
+        }
+    }
+
+    /// Forgets what's kept for the account: its spot, its expanded folders and the hosts its
+    /// links are trusted for.
     public func forget(_ account: UserId) {
         remember(nil, of: account)
+        remember(expandedFolders: [], of: account)
         TrustedLinks.forget(account, in: defaults)
     }
 
     private static func spotKey(_ account: UserId) -> String {
         "lastSpot.\(account.rawValue)"
+    }
+
+    private static func foldersKey(_ account: UserId) -> String {
+        "expandedFolders.\(account.rawValue)"
     }
 }

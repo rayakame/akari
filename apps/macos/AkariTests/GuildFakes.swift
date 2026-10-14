@@ -61,6 +61,16 @@ nonisolated final class GuildStore: Store, @unchecked Sendable {
         id == channel.id ? channel : nil
     }
 
+    override func guildSettings(guildId: GuildId?) -> GuildSettings {
+        GuildSettings(
+            muted: false, muteEndsAt: nil, suppressEveryone: false, suppressRoles: false,
+            hideMutedChannels: false)
+    }
+
+    override func mutedChannels(ids: [ChannelId]) -> [ChannelId] {
+        []
+    }
+
     override func permissions(channelId: ChannelId) -> Permissions? {
         nil
     }

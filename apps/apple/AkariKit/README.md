@@ -62,16 +62,21 @@ screen, so views render from them without calling into Rust.
   store already restored when the session starts) shows before READY: everything is read as
   after READY and the last place and channel reopen once. The first READY then checks that
   place and falls back as it would at a READY restore (a gone guild to home, a hidden channel
-  to the guild's first one, a gone conversation to nothing). It owns `GuildListModel` (the server
-  list), `DirectMessageListModel` (the DM list, the latest conversation first, with each
-  one's recipients and name), `ChannelListModel` (the open guild's channels) and
+  to the guild's first one, a gone conversation to nothing). It owns `ServerListModel` (the
+  server list in the user's order: `items` are servers and folders, `guilds` the same servers
+  with folders opened; a folder's expansion is Akari's own, kept per account in
+  `AccountMemory`, and starts collapsed), `DirectMessageListModel` (the DM list, the latest conversation first, with each
+  one's recipients and name), `ChannelListModel` (the open guild's channels, which of them
+  their own settings mute, and `shown(open:)`, which leaves muted channels out when the user
+  hides them, except the open one) and
   `MessageListModel` (the open channel's messages and loads; `failedLoads` keeps each kind of
   load's last failure; `lastLoad` is the last load's `LoadTrace` with akari-core's
   `LoadReport` and the model's read time, and `openedAt`/`openedFrom` say when the channel
   opened and where its first rows came from, for the `load` log; `revealedSpoilers` holds the
   spoilers revealed with `reveal(_:)` for as long as the model lives, so switching channels
   hides them again, as Discord does; rows are read again after the events that rename the
-  users, roles or channels its mentions show). `go(to:)` opens a channel where it lives, in
+  users, roles or channels its mentions show, and after a settings change in its guild, which
+  can suppress mentions). `go(to:)` opens a channel where it lives, in
   its guild or at home, for links and mentions that name another server's channel.
   `AccountMemory` keeps the last place and channel per account, and the session's
   first READY reopens them, as Discord does after a restart. `notice` is what a connection bar
@@ -83,8 +88,10 @@ screen, so views render from them without calling into Rust.
   `submit()` sends the trimmed draft unless it is blank, too long or held back by slowmode,
   and clears it only once the core has queued the message;
   `retry(_:)` and `discard(_:)` act on failed messages.
-- `CollapsedCategories` keeps the collapsed categories per guild across launches; a collapsed
-  category still shows the open channel.
+- `CollapsedCategories` (`session.collapsed`) keeps the collapsed categories per guild across
+  launches; a collapsed category still shows the open channel. Discord's clients don't sync
+  collapse, so it stays Akari's own; like the official client, the session collapses a
+  category once when it becomes muted while Akari runs, and the user can expand it again.
 
 The session replaces `messages` on its own when the open channel is deleted or the user can
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.

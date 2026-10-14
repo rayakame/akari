@@ -512,6 +512,8 @@ struct MessageListModelTests {
         .currentMemberUpdated(guildId: id(1)),
         .userUpdated(userId: id(7)),
         .currentUserUpdated,
+        // Suppressed mentions aren't highlighted.
+        .guildSettingsChanged(guildId: id(1)),
     ])
     func aRenameReloadsOnlyRowsThatShowIt(_ event: StoreEvent) {
         shown(window([1, 2, 3]))
@@ -530,6 +532,8 @@ struct MessageListModelTests {
         StoreEvent.guildUpdated(guildId: id(2)),
         .channelUpdated(channelId: id(20), guildId: id(2)),
         .currentMemberUpdated(guildId: id(2)),
+        .guildSettingsChanged(guildId: id(2)),
+        .guildSettingsChanged(guildId: nil),
     ])
     func aRenameElsewhereReadsNothing(_ event: StoreEvent) {
         shown(window([1, 2, 3]))

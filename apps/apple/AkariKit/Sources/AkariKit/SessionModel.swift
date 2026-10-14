@@ -13,8 +13,10 @@ public final class SessionModel {
     public let userId: UserId
     public private(set) var connection: ConnectionState = .offline
     public private(set) var currentUser: User?
-    public let guilds: GuildListModel
+    public let servers: ServerListModel
     public let directMessages: DirectMessageListModel
+    /// Collapsed categories, Akari's own: Discord's clients don't sync them.
+    public let collapsed: CollapsedCategories
     public private(set) var place: Place = .home
     /// The open guild's channels; `nil` at home.
     public private(set) var channels: ChannelListModel?
@@ -72,8 +74,9 @@ public final class SessionModel {
         self.onClosed = onClosed
         spotToRestore = memory.lastSpot(of: userId)
         store = account.store()
-        guilds = GuildListModel(store: store)
+        servers = ServerListModel(store: store, account: userId, memory: memory)
         directMessages = DirectMessageListModel(store: store)
+        collapsed = memory.collapsedCategories()
     }
 
     deinit {
@@ -89,7 +92,7 @@ public final class SessionModel {
         self.subscription = subscription
         connection = store.connection()
         currentUser = store.currentUser()
-        guilds.reload()
+        servers.reload()
         directMessages.reload()
         // Restored before this subscription, so no event will say so.
         if currentUser != nil {
@@ -255,9 +258,15 @@ public final class SessionModel {
         }
         let open = messages?.channelId
         let wasListed = open.map(isListed) ?? false
-        guilds.apply(batch)
+        servers.apply(batch)
         directMessages.apply(batch)
-        channels?.apply(batch)
+        let muted = channels?.apply(batch) ?? []
+        // Like the official client, which collapses a category as it's muted there.
+        if case .guild(let guildId) = place {
+            for category in muted {
+                collapsed.collapse(category, in: guildId)
+            }
+        }
         // Threads and DMs aren't in the channel list; they leave only when removed.
         if let open, batch.removedChannels.contains(open) || (wasListed && !isListed(open)) {
             if case .guild(let guildId) = place, let list = channels {
@@ -294,7 +303,7 @@ public final class SessionModel {
     private func isCached(_ spot: AccountMemory.Spot) -> Bool {
         switch spot.place {
         case .guild(let guildId):
-            return guilds.guilds.contains { $0.id == guildId }
+            return servers.guilds.contains { $0.id == guildId }
         case .home:
             return spot.channel.map { channel in
                 directMessages.conversations.contains { $0.id == channel }
@@ -309,7 +318,7 @@ public final class SessionModel {
     private func restore(_ spot: AccountMemory.Spot) {
         switch spot.place {
         case .guild(let guildId):
-            guard guilds.guilds.contains(where: { $0.id == guildId }) else {
+            guard servers.guilds.contains(where: { $0.id == guildId }) else {
                 messages = nil
                 rememberSpot()
                 return

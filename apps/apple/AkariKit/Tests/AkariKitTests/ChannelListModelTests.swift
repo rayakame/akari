@@ -25,7 +25,11 @@ struct ChannelListModelTests {
         let model = ChannelListModel(guildId: id(1), store: store)
 
         #expect(model.channels.map(\.id) == [id(10), id(11), id(12)])
-        #expect(store.reads == [.channelList(id(1)), .channels([id(10), id(11), id(12)])])
+        #expect(
+            store.reads == [
+                .channelList(id(1)), .channels([id(10), id(11), id(12)]),
+                .mutedChannels([id(10), id(11), id(12)]), .guildSettings(id(1)),
+            ])
     }
 
     @Test
@@ -74,13 +78,74 @@ struct ChannelListModelTests {
         model.apply(EventBatch([.currentMemberUpdated(guildId: id(1))]))
 
         #expect(model.channels.map(\.id) == [id(10), id(11), id(13), id(12)])
-        #expect(store.reads == [.channelList(id(1)), .channels([id(13)])])
+        #expect(
+            store.reads == [
+                .channelList(id(1)), .channels([id(13)]),
+                .mutedChannels([id(10), id(11), id(13), id(12)]),
+            ])
 
         store.log.forget()
         store.update { $0.channelLists[id(1)] = [id(10), id(11), id(12)] }
         model.apply(EventBatch([.guildUpdated(guildId: id(1))]))
 
         #expect(model.channels.map(\.id) == [id(10), id(11), id(12)])
-        #expect(store.reads == [.channelList(id(1))])
+        #expect(store.reads == [.channelList(id(1)), .mutedChannels([id(10), id(11), id(12)])])
+    }
+
+    @Test
+    func channelRowsKnowTheirMute() {
+        store.update { $0.mutedChannels = [id(10), id(12)] }
+        let model = loaded()
+        #expect(model.muted == [id(10), id(12)])
+        store.update { $0.mutedChannels = [id(11)] }
+
+        model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
+
+        #expect(model.muted == [id(11)])
+        #expect(store.reads == [.mutedChannels([id(10), id(11), id(12)]), .guildSettings(id(1))])
+    }
+
+    @Test
+    func settingsOfOtherGuildsReadNothing() {
+        let model = loaded()
+
+        model.apply(
+            EventBatch([
+                .guildSettingsChanged(guildId: id(2)), .guildSettingsChanged(guildId: nil),
+            ]))
+
+        #expect(store.reads.isEmpty)
+    }
+
+    @Test
+    func hideMutedChannelsLeavesThemOut() {
+        store.update { state in
+            state.mutedChannels = [id(10), id(11), id(12)]
+            state.guildSettings[id(1)] = settings(hideMutedChannels: true)
+        }
+        let model = loaded()
+
+        #expect(model.hidesMuted)
+        #expect(model.shown(open: nil).map(\.id) == [id(10)], "categories stay")
+        #expect(model.shown(open: id(12)).map(\.id) == [id(10), id(12)], "the open one stays")
+        store.update { $0.guildSettings[id(1)] = settings() }
+        model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
+        #expect(model.shown(open: nil).map(\.id) == [id(10), id(11), id(12)])
+    }
+
+    @Test
+    func aCategoryMutedByAChangeIsReportedOnce() {
+        let model = loaded()
+        store.update { $0.mutedChannels = [id(10), id(11)] }
+
+        let muted = model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
+        let again = model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
+
+        #expect(muted == [id(10)], "categories only")
+        #expect(again.isEmpty)
+        store.update { $0.mutedChannels = [] }
+        model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
+        store.update { $0.mutedChannels = [id(10)] }
+        #expect(model.apply(EventBatch([.ready])).isEmpty, "a new session isn't a change")
     }
 }

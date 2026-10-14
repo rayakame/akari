@@ -18,7 +18,7 @@ struct ServerRail: View {
                 Rectangle()
                     .fill(Color(nsColor: Palette.frameBorder))
                     .frame(width: 32, height: 1)
-                ForEach(session.guilds.guilds, id: \.id) { guild in
+                ForEach(session.servers.guilds, id: \.id) { guild in
                     RailItem(selected: session.place == .guild(guild.id), help: guild.name) {
                         highlighted in
                         GuildIcon(name: guild.name, highlighted: highlighted)
@@ -26,7 +26,7 @@ struct ServerRail: View {
                         session.open(.guild(guild.id))
                     }
                 }
-                let unavailable = session.guilds.unavailableIds.count
+                let unavailable = session.servers.unavailableIds.count
                 if unavailable > 0 {
                     RailIcon(highlighted: false) {
                         Image(systemName: "exclamationmark.triangle")
