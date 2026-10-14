@@ -11,6 +11,7 @@ mod partial;
 mod payload;
 mod ready;
 pub(crate) mod session;
+mod settings;
 
 #[cfg(test)]
 pub(crate) use connection::fake;
@@ -25,3 +26,7 @@ pub use outgoing::{GatewayCommand, GuildSubscription, MemberLists, PresenceStatu
 pub use partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
 pub use payload::{DecodeError, DispatchEvent, GatewayEvent, decode};
 pub use ready::Ready;
+pub use settings::{
+    ChannelOverride, MuteConfig, NotificationSettings, SettingsProto, SettingsProtoUpdate,
+    UserGuildSettings, Versioned,
+};

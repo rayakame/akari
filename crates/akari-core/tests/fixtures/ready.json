@@ -132,7 +132,70 @@
     ],
     "relationships": [],
     "read_state": { "entries": [], "partial": false, "version": 0 },
-    "user_guild_settings": { "entries": [], "partial": false, "version": 0 },
+    "user_guild_settings": {
+      "entries": [
+        {
+          "guild_id": "200000000000000001",
+          "muted": false,
+          "mute_config": null,
+          "message_notifications": 1,
+          "suppress_everyone": true,
+          "suppress_roles": false,
+          "notify_highlights": 0,
+          "mobile_push": true,
+          "hide_muted_channels": true,
+          "mute_scheduled_events": false,
+          "flags": 4096,
+          "version": 7,
+          "channel_overrides": [
+            {
+              "channel_id": "300000000000000001",
+              "collapsed": true,
+              "message_notifications": 3,
+              "muted": false,
+              "mute_config": null,
+              "flags": 0
+            },
+            {
+              "channel_id": "300000000000000002",
+              "collapsed": false,
+              "message_notifications": 2,
+              "muted": true,
+              "mute_config": {
+                "end_time": "2026-10-01T12:00:00.000000+00:00",
+                "selected_time_window": 3600
+              },
+              "flags": 1024
+            }
+          ]
+        },
+        {
+          "guild_id": null,
+          "muted": false,
+          "mute_config": null,
+          "message_notifications": 0,
+          "suppress_everyone": false,
+          "suppress_roles": false,
+          "notify_highlights": 0,
+          "mobile_push": true,
+          "hide_muted_channels": false,
+          "mute_scheduled_events": false,
+          "flags": 0,
+          "version": 2,
+          "channel_overrides": [
+            {
+              "channel_id": "300000000000000010",
+              "collapsed": false,
+              "message_notifications": 3,
+              "muted": true,
+              "mute_config": { "end_time": null, "selected_time_window": -1 }
+            }
+          ]
+        }
+      ],
+      "partial": false,
+      "version": 1234
+    },
     "user_settings_proto": "",
     "notification_settings": { "flags": 16 },
     "sessions": [],

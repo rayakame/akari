@@ -1,7 +1,8 @@
 use serde::Deserialize;
 
 use super::guild::GatewayGuild;
-use crate::lenient::{skip_invalid, skip_invalid_in_each};
+use super::settings::{NotificationSettings, UserGuildSettings, Versioned};
+use crate::lenient::{default_on_error, skip_invalid, skip_invalid_in_each};
 use crate::model::{Channel, CurrentUser, GuildMember, User};
 
 /// The READY dispatch, in the shape described in `docs/protocol/ready.md`.
@@ -21,6 +22,14 @@ pub struct Ready {
     /// DMs and group DMs, with `recipient_ids` instead of `recipients`.
     #[serde(default, deserialize_with = "skip_invalid")]
     pub private_channels: Vec<Channel>,
+    /// The user's notification settings per guild, and for DMs.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub user_guild_settings: Versioned<UserGuildSettings>,
+    /// The preloaded settings proto (type 1) in base64. `None` means the defaults.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub user_settings_proto: Option<String>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub notification_settings: Option<NotificationSettings>,
     pub session_id: String,
     pub resume_gateway_url: String,
 }

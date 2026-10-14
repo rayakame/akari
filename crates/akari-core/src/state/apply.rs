@@ -380,7 +380,11 @@ impl State {
                     self.windows.delete(delete.channel_id, id, events);
                 }
             }
-            E::Resumed | E::Other(_) => {}
+            E::Resumed
+            | E::Other(_)
+            | E::UserGuildSettingsUpdate(_)
+            | E::UserSettingsProtoUpdate(_)
+            | E::NotificationSettingsUpdate(_) => {}
         }
     }
 

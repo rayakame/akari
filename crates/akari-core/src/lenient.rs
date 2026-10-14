@@ -39,6 +39,25 @@ where
         .collect())
 }
 
+// A part of a payload that doesn't parse becomes its default instead of failing the payload.
+pub(crate) fn default_on_error<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned + Default,
+{
+    let Some(raw) = Option::<&'de RawValue>::deserialize(deserializer)? else {
+        return Ok(T::default());
+    };
+    Ok(serde_json::from_str(raw.get()).unwrap_or_else(|err| {
+        tracing::warn!(
+            error = %JsonError::from(&err),
+            "using the default for a {} that failed to parse",
+            type_name::<T>()
+        );
+        T::default()
+    }))
+}
+
 pub(crate) fn parse_list<T: DeserializeOwned>(
     json: &[u8],
 ) -> Result<(Vec<T>, usize), serde_json::Error> {
@@ -65,16 +84,23 @@ fn parse_valid<T: DeserializeOwned>(entries: Vec<&RawValue>) -> Vec<T> {
         .collect()
 }
 
-// Members carry `user_id` instead of `id`.
+// Members carry `user_id` instead of `id`, guild settings `guild_id` and their overrides
+// `channel_id`.
 fn entry_id(entry: &RawValue) -> Option<u64> {
     #[derive(serde::Deserialize)]
     struct Ids {
         id: Option<Snowflake<GenericMarker>>,
         user_id: Option<Snowflake<GenericMarker>>,
+        channel_id: Option<Snowflake<GenericMarker>>,
+        guild_id: Option<Snowflake<GenericMarker>>,
     }
 
     let ids: Ids = serde_json::from_str(entry.get()).ok()?;
-    ids.id.or(ids.user_id).map(Snowflake::get)
+    ids.id
+        .or(ids.user_id)
+        .or(ids.channel_id)
+        .or(ids.guild_id)
+        .map(Snowflake::get)
 }
 
 #[cfg(test)]

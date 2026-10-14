@@ -70,6 +70,9 @@ Two details:
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
+| USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | Not applied yet. A full settings object for one guild (`guild_id: null` for DMs) |
+| USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Not applied yet. `settings.type` (1 preloaded, 2 frecency), the base64 `proto`, and `partial` when it carries only the changed fields |
+| NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Not applied yet |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
 `debug` level with its IDs.
