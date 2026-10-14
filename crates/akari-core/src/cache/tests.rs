@@ -597,7 +597,11 @@ fn snapshot(windows: impl IntoIterator<Item = (u64, CachedWindow)>) -> Snapshot 
             .entry(*id)
             .or_insert_with(|| Arc::new(channel(id.get(), Some(100), "cached")));
     }
-    Snapshot { entities, windows }
+    Snapshot {
+        entities,
+        windows,
+        ..Snapshot::default()
+    }
 }
 
 // Every Arc rebuilt with equal values, as a later READY makes them.
@@ -712,6 +716,7 @@ async fn an_equal_state_writes_nothing() {
     let again = Snapshot {
         entities: state.entities.clone(),
         windows: state.windows.clone(),
+        ..Snapshot::default()
     };
 
     let first = thread.flush(state).await.unwrap();
@@ -729,6 +734,7 @@ async fn a_ready_with_equal_values_rewrites_nothing() {
     let after_ready = Snapshot {
         entities: rebuilt(&state.entities),
         windows: std::collections::HashMap::new(),
+        ..Snapshot::default()
     };
 
     thread.flush(state).await.unwrap();
@@ -749,6 +755,7 @@ async fn a_restart_with_the_same_state_writes_nothing() {
         .flush(Snapshot {
             entities: rebuilt(&entities()),
             windows: std::collections::HashMap::new(),
+            ..Snapshot::default()
         })
         .await
         .unwrap();
@@ -770,6 +777,7 @@ async fn entities_gone_since_the_last_write_are_deleted() {
         .flush(Snapshot {
             entities: fewer,
             windows: std::collections::HashMap::new(),
+            ..Snapshot::default()
         })
         .await
         .unwrap();
@@ -839,6 +847,7 @@ async fn a_removed_channel_loses_its_messages() {
         .flush(Snapshot {
             entities: without,
             windows: std::collections::HashMap::new(),
+            ..Snapshot::default()
         })
         .await
         .unwrap();
@@ -923,6 +932,7 @@ async fn a_failed_write_keeps_the_account_running() {
             ..entities()
         },
         windows: std::collections::HashMap::new(),
+        ..Snapshot::default()
     };
 
     thread.fail_next_write();

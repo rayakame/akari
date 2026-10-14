@@ -15,7 +15,7 @@ use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
     ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
 };
-use crate::{DiscordClient, LoadReport, MessagePreparer, Token};
+use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 
 const REFRESH_LIMIT: u8 = 100;
 const JUMP_LIMIT: u8 = 50;
@@ -55,11 +55,6 @@ fn kind_name(kind: LoadKind) -> &'static str {
         LoadKind::Newer => "newer",
         LoadKind::Around(_) => "around",
     }
-}
-
-// Tenths of a millisecond: decoding and storing a page often take less than one.
-fn ms(duration: Duration) -> f64 {
-    (duration.as_secs_f64() * 10_000.0).round() / 10.0
 }
 
 fn log_page(channel: ChannelId, kind: LoadKind, report: &LoadReport) {

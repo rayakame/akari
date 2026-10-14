@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use super::{Cache, CacheError, Writer};
 use crate::model::ChannelId;
@@ -12,19 +13,27 @@ pub(crate) const CHANNELS_WITH_MESSAGES: usize = 50;
 // Free pages past this are given back to the file system after a flush.
 const FREE_PAGES: i64 = 256;
 
+#[derive(Default)]
 pub(crate) struct Snapshot {
     pub(crate) entities: Entities,
     pub(crate) windows: HashMap<ChannelId, CachedWindow>,
+    // How long take() held its caller, which is the main thread for close's.
+    pub(crate) took: Duration,
+    // Close's is logged even when it writes nothing, for `took`.
+    pub(crate) last: bool,
 }
 
 impl Snapshot {
     // None before a session or a restore: writing that would delete the file's state.
     pub(crate) fn take(store: &Store) -> Option<Self> {
+        let started = Instant::now();
         let (entities, windows) = store.cache_parts(MESSAGES_PER_CHANNEL);
         entities.current_user.as_ref()?;
         Some(Self {
             entities,
             windows: windows.into_iter().collect(),
+            took: started.elapsed(),
+            last: false,
         })
     }
 }
@@ -177,7 +186,9 @@ pub(crate) fn flush(
         flushed.deleted += deleted;
         Ok((flushed, evicted))
     })?;
-    let Snapshot { entities, windows } = next;
+    let Snapshot {
+        entities, windows, ..
+    } = next;
     written.entities = entities;
     written.windows.extend(windows);
     written

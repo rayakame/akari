@@ -2713,6 +2713,7 @@ mod cache {
             .flush(crate::cache::Snapshot {
                 entities: crate::cache::tests::entities(),
                 windows: std::collections::HashMap::new(),
+                ..crate::cache::Snapshot::default()
             })
             .await
             .unwrap();
@@ -2807,6 +2808,7 @@ mod cache {
                     },
                 )]
                 .into(),
+                ..crate::cache::Snapshot::default()
             })
             .await
             .unwrap();
@@ -3279,6 +3281,7 @@ mod cache {
             .flush(crate::cache::Snapshot {
                 entities: theirs,
                 windows: std::collections::HashMap::new(),
+                ..crate::cache::Snapshot::default()
             })
             .await
             .unwrap();
@@ -3634,6 +3637,7 @@ mod cache {
                     },
                 )]
                 .into(),
+                ..crate::cache::Snapshot::default()
             })
             .await
             .unwrap();

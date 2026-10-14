@@ -27,6 +27,11 @@ pub(crate) fn millis(duration: std::time::Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
+// Tenths of a millisecond, for steps that often take less than one.
+pub(crate) fn ms(duration: std::time::Duration) -> f64 {
+    (duration.as_secs_f64() * 10_000.0).round() / 10.0
+}
+
 pub use account::{Account, MessageLoad};
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{JsonError, JsonErrorKind, TransportError, TransportErrorKind};

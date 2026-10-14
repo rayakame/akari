@@ -136,12 +136,15 @@ entities (`cache not used reason=other_user`) nor its windows.
 Target `akari_core::cache`, `info`, numbers only, never content, names or IDs:
 
 - `cache opened guilds=… channels=… windows=… messages=… skipped=… rebuilt=… read_ms=… file_kib=…`
-- `cache written guilds=… channels=… windows=… messages=… other=… deleted=… write_ms=… file_kib=…`
+- `cache written guilds=… channels=… windows=… messages=… other=… deleted=… snapshot_ms=… write_ms=… file_kib=…`
 - `cache discarded reason=…`, `cache unavailable reason=…`, `cache not used reason=…`
   (`ready_first`, `other_user`), `cache not in WAL mode reason=journal_mode`,
   `cache write failed reason=…`
 
-`skipped` counts rows that didn't decode; they're left out of the restore.
+`skipped` counts rows that didn't decode; they're left out of the restore. `snapshot_ms` (to a
+tenth) is how long taking the state from the store took. For close's snapshot that time is
+spent on the thread that called `close()`, the main thread on logout and quit, so close's
+write is logged even when it has nothing to write.
 
 ## Later
 
