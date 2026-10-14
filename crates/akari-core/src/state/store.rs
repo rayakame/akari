@@ -546,6 +546,23 @@ impl Store {
         self.read(|inner| inner.state.channel_muted_at(channel, now))
     }
 
+    /// Of `ids`, the channels muted now by their own settings, in the order given.
+    pub fn muted_channels(&self, ids: &[ChannelId]) -> Vec<ChannelId> {
+        let now = Timestamp::from_unix_millis(wall_millis());
+        self.read(|inner| {
+            ids.iter()
+                .copied()
+                .filter(|id| inner.state.channel_muted_at(*id, now))
+                .collect()
+        })
+    }
+
+    /// Whether the guild (`None`: DMs) is muted now. Its channels aren't muted by it.
+    pub fn guild_muted(&self, guild: Option<GuildId>) -> bool {
+        let now = Timestamp::from_unix_millis(wall_millis());
+        self.read(|inner| inner.state.guild_settings(guild).muted_now(now))
+    }
+
     /// The level that decides which messages notify in a channel: its own, else its
     /// category's, else the guild's, else the guild's default.
     pub fn notification_level(&self, channel: ChannelId) -> NotificationLevel {

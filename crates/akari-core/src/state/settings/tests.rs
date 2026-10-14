@@ -770,3 +770,20 @@ fn the_store_reads_settings() {
         NotificationLevel::Nothing
     );
 }
+
+#[test]
+fn the_store_reads_mutes_for_guilds_and_batches_of_channels() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(dispatch("READY", &ready_value()));
+
+    let ids = [GENERAL, DM, UNKNOWN, GROUP].map(Snowflake::new);
+    assert_eq!(store.muted_channels(&ids), [Snowflake::new(DM)]);
+    assert!(!store.guild_muted(Some(Snowflake::new(G1))));
+
+    let mut update = guild_settings_update(G1, json!([]));
+    update["muted"] = true.into();
+    store.apply(dispatch("USER_GUILD_SETTINGS_UPDATE", &update));
+
+    assert!(store.guild_muted(Some(Snowflake::new(G1))));
+    assert!(!store.guild_muted(None));
+}

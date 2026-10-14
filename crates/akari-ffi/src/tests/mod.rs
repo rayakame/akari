@@ -6,6 +6,7 @@ mod fake;
 mod formatted;
 mod login;
 mod messages;
+mod settings;
 mod support;
 
 // akari-core's fake gateway helpers, shared instead of copied.

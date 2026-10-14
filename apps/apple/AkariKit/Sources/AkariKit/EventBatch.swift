@@ -8,6 +8,8 @@ struct EventBatch {
     var guildsChanged: Set<GuildId> = []
     var guildListChanged = false
     var membersChanged: Set<GuildId> = []
+    // The `nil` guild holds the DM settings.
+    var guildSettingsChanged: Set<GuildId?> = []
     // The `nil` guild holds DMs and group DMs.
     var channelsChanged: [GuildId?: Set<ChannelId>] = [:]
     var removedChannels: Set<ChannelId> = []
@@ -39,6 +41,10 @@ struct EventBatch {
                 guildsChanged.insert(guild)
             case .currentMemberUpdated(let guild):
                 membersChanged.insert(guild)
+            case .serverListChanged:
+                guildListChanged = true
+            case .guildSettingsChanged(let guild):
+                guildSettingsChanged.insert(guild)
             case .channelAdded(let channel, let guild), .channelUpdated(let channel, let guild):
                 channelsChanged[guild, default: []].insert(channel)
             case .channelRemoved(let channel, let guild):

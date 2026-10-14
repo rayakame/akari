@@ -19,8 +19,21 @@ Kotlin (Android, later). This crate holds bindings only: logic belongs in `akari
   item in a batch collapse into one read, and a view model always converges to the store's
   state at batch time.
 - **Reads by ID** come in single and batch form (`channel(id)`, `channels(ids)`,
-  `messages(channel_id, ids)`); lists cross as ID lists (`guild_ids`, `channel_list`,
-  `window`).
+  `messages(channel_id, ids)`, `muted_channels(ids)`); lists cross as ID lists (`guild_ids`,
+  `channel_list`, `window`), or as `server_list`'s entries (a guild ID, or a folder with its
+  guild IDs).
+
+## Settings
+
+`server_list()` is the rail in the user's order, with their folders (`ServerListItem`:
+`Guild` or `Folder`, whose `name` is `None` when the user gave none). `guild_ids()` is the same
+list with every folder's guilds in its place. `guild_settings(guild_id)` (`None`: the DM
+settings) says whether the guild is muted now, when that ends, and its suppress and "hide
+muted channels" settings. `muted_channels(ids)` returns the channels among `ids` that their
+own settings mute now, in one read; a muted category or guild doesn't mute its channels.
+`ServerListChanged` says to read `server_list` again, `GuildSettingsChanged` to reread a
+guild's settings and mutes; it also comes when a timed mute ends. Category collapse isn't
+here: Discord's clients don't sync it, so each app keeps its own.
 
 ## Formatted messages
 
@@ -41,8 +54,8 @@ previews.
 
 Names and `mentions_me` can change without a message event, so a host rereads the messages it
 shows after `GuildUpdated` (role names and colors), `ChannelUpdated` (channel names, access),
-`UserUpdated`, `CurrentUserUpdated` and `CurrentMemberUpdated` (the user's roles: their
-mentions and channel access).
+`UserUpdated`, `CurrentUserUpdated`, `CurrentMemberUpdated` (the user's roles: their
+mentions and channel access) and `GuildSettingsChanged` (which mentions are suppressed).
 
 Each account keeps up to 4,096 parsed documents, keyed by message ID and edit time, with a
 hash of the content as a guard (SipHash under a random key per process), since an update can

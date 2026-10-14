@@ -49,6 +49,69 @@ impl From<&state::Guild> for Guild {
     }
 }
 
+/// One entry of the server list, top to bottom.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum ServerListItem {
+    Guild { guild_id: GuildId },
+    Folder { folder: Folder },
+}
+
+impl ServerListItem {
+    // `None` for a kind of entry the bindings don't know yet.
+    pub(crate) fn new(item: &state::ServerListItem) -> Option<Self> {
+        Some(match item {
+            state::ServerListItem::Guild(guild_id) => Self::Guild {
+                guild_id: *guild_id,
+            },
+            state::ServerListItem::Folder(folder) => Self::Folder {
+                folder: Folder {
+                    id: folder.id,
+                    name: folder.name.as_deref().map(str::to_owned),
+                    color: folder.color,
+                    guild_ids: folder.guilds.to_vec(),
+                },
+            },
+            _ => return None,
+        })
+    }
+}
+
+/// A server folder from the user's settings.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Folder {
+    pub id: i64,
+    /// `None` when the user named it nothing: show its servers' names.
+    pub name: Option<String>,
+    /// 0xRRGGBB; `None` for the default color.
+    pub color: Option<u32>,
+    pub guild_ids: Vec<GuildId>,
+}
+
+/// The user's notification settings for a guild, or for DMs.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct GuildSettings {
+    /// Muted when it was read. `GuildSettingsChanged` follows when a timed mute ends.
+    pub muted: bool,
+    /// When the mute ends; `None` when it lasts until unmuted, or nothing is muted.
+    pub mute_ends_at: Option<SystemTime>,
+    /// @everyone and @here.
+    pub suppress_everyone: bool,
+    pub suppress_roles: bool,
+    pub hide_muted_channels: bool,
+}
+
+impl GuildSettings {
+    pub(crate) fn new(settings: &state::GuildSettings, muted: bool) -> Self {
+        Self {
+            muted,
+            mute_ends_at: settings.mute_ends.filter(|_| muted).map(system_time),
+            suppress_everyone: settings.suppress_everyone,
+            suppress_roles: settings.suppress_roles,
+            hide_muted_channels: settings.hide_muted_channels,
+        }
+    }
+}
+
 /// A guild channel, category, thread, DM or group DM.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Channel {
