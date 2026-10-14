@@ -46,9 +46,11 @@ Observed in the official desktop client on 2026-10-14:
 - **Collapsed:** a rounded 40 × 40 tile with its servers as small icons in a 2 × 2 grid (two
   servers fill the top row). A folder without a color is a neutral dark gray tile, not the
   brand color.
-- **Expanded:** the tile shows a folder symbol, and the folder's servers follow it on a
-  rounded column in the folder's color. The state survives a restart; Discord doesn't sync it
-  (each client keeps its own).
+- **Expanded:** one rounded column (a capsule) in the folder's color at low opacity, neutral
+  without a color, encloses the header and all its servers, with equal padding at top and
+  bottom. The header is only the folder symbol, with no tile behind it, in the folder's color
+  (Discord's blue-violet, `brand`, without one). Items keep the rail's gap. The state survives
+  a restart; Discord doesn't sync it (each client keeps its own).
 - **Unread:** a collapsed folder shows the white pill when a server in it is unread, and a red
   badge with the count at the tile's bottom right for mentions, plus the pill. *Akari: later,
   with unread state.*
@@ -57,9 +59,10 @@ Observed in the official desktop client on 2026-10-14:
 
 *Akari:* the collapsed tile shows up to four servers' initials, each on a 16 × 16 rounded
 square in `hoverBackground`. A colored folder's tile and column use its color at 30%; one
-without a color uses `folder`. The expanded tile's symbol is `folder.fill` in the folder's
-color (`interactiveText` without one), and the column is 48 wide behind the tile and its
-servers. Expansion is kept per account. A collapsed folder holding the open server carries
+without a color uses `folder`. Expanded, the header is `folder.fill` (18) in the folder's
+color, or `brand`, in the 40 × 40 slot of a rail item; the capsule is 48 wide, with 4 of
+padding above the header and below the last server, and items 8 apart. Expansion is kept per
+account. A collapsed folder holding the open server carries
 the selected pill. **Unverified:** that the official client does the same.
 
 ## Mention badge

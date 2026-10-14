@@ -35,6 +35,78 @@ struct RailFolderTests {
                 NSColor(hex: "#5865f2").usingColorSpace(.sRGB)))
     }
 
+    // Colors down the middle of a rendered view, as runs: (kind, length in pixels).
+    func runs(
+        _ rendered: Rendered, at x: CGFloat, kind: (NSColor) -> Character
+    ) -> [(Character, Int)] {
+        var runs: [(Character, Int)] = []
+        let column = Int(x * rendered.scale)
+        for y in 0..<rendered.rep.pixelsHigh {
+            guard let color = rendered.pixel(column, y) else {
+                continue
+            }
+            let next = kind(color)
+            if let last = runs.last, last.0 == next {
+                runs[runs.count - 1].1 += 1
+            } else {
+                runs.append((next, 1))
+            }
+        }
+        return runs
+    }
+
+    @Test
+    func anExpandedFoldersColumnPadsTopAndBottomAlike() throws {
+        let column = FolderColumn(color: 0xff0000, expanded: true) {
+            Color.blue.frame(width: 40, height: 40)
+            Color.blue.frame(width: 40, height: 40)
+        }
+        .frame(width: SidebarWidth.rail, height: 160)
+        .background(Color.black)
+        let rendered = try Rendered(column, size: NSSize(width: SidebarWidth.rail, height: 160))
+
+        let colors = runs(rendered, at: SidebarWidth.rail / 2) { color in
+            if color.blueComponent > 0.5 { return "b" }
+            if color.redComponent > 0.15 { return "r" }
+            return "k"
+        }
+
+        #expect(colors.map(\.0) == ["k", "r", "b", "r", "b", "r", "k"], "\(colors)")
+        guard colors.count == 7 else {
+            return
+        }
+        #expect(colors[1].1 == colors[5].1, "top \(colors[1].1) px, bottom \(colors[5].1) px")
+        #expect(abs(CGFloat(colors[3].1) - 8 * rendered.scale) <= 1, "the gap is \(colors[3].1) px")
+    }
+
+    @Test
+    func anExpandedFoldersHeaderIsItsSymbolAlone() throws {
+        func render(_ color: UInt32?) throws -> Rendered {
+            let folder = item(["Alpha", "Beta"], color: color)
+            return try Rendered(
+                FolderTile(item: folder, expanded: true)
+                    .frame(width: 60, height: 60)
+                    .background(Color(nsColor: Palette.frame)),
+                size: NSSize(width: 60, height: 60))
+        }
+        let plain = try render(nil)
+        let red = try render(0xff0000)
+        let pixels = { (rendered: Rendered) in
+            (0..<rendered.rep.pixelsHigh).flatMap { y in
+                (0..<rendered.rep.pixelsWide).compactMap { rendered.pixel($0, y) }
+            }
+        }
+
+        // Inside a tile's left edge, beside the symbol, the background shows.
+        #expect(same(plain.color(14, 30), plain.color(2, 30)), "no tile behind the symbol")
+        #expect(
+            pixels(plain).contains { $0.blueComponent > 0.8 && $0.redComponent < 0.5 },
+            "the symbol is brand without a color")
+        #expect(
+            pixels(red).contains { $0.redComponent > 0.8 && $0.greenComponent < 0.3 },
+            "the symbol takes the folder's color")
+    }
+
     @Test
     func aCollapsedFolderShowsTheOpenServerInside() {
         let folder = item(["Alpha", "Beta"])

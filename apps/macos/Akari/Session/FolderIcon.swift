@@ -1,28 +1,26 @@
 import AkariKit
 import SwiftUI
 
-/// A server folder's tile on the rail: up to four of its servers in a 2 × 2 grid while
-/// collapsed, a folder symbol while expanded.
+/// A server folder's header on the rail: a tile with up to four of its servers in a 2 × 2
+/// grid while collapsed, only a folder symbol while expanded.
 struct FolderTile: View {
     let item: ServerListModel.FolderItem
     let expanded: Bool
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color(nsColor: Self.background(item.folder.color)))
-            .frame(width: 40, height: 40)
-            .overlay {
-                if expanded {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(
-                            Color(
-                                nsColor: item.folder.color == nil
-                                    ? Palette.interactiveText : Self.tint(item.folder.color)))
-                } else {
+        if expanded {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(Color(nsColor: item.folder.color.map(Self.tint) ?? Palette.brand))
+                .frame(width: 40, height: 40)
+        } else {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: Self.background(item.folder.color)))
+                .frame(width: 40, height: 40)
+                .overlay {
                     MiniGrid(initials: Self.minis(item))
                 }
-            }
+        }
     }
 
     /// The first four servers' initials, as the tile shows them.
@@ -85,7 +83,7 @@ private struct MiniGrid: View {
     }
 }
 
-/// An expanded folder's servers, on a column in the folder's color under its tile.
+/// An expanded folder: one capsule in the folder's color around its header and servers.
 struct FolderColumn<Content: View>: View {
     let color: UInt32?
     let expanded: Bool
@@ -95,9 +93,10 @@ struct FolderColumn<Content: View>: View {
         VStack(spacing: 8) {
             content
         }
+        .padding(.vertical, expanded ? 4 : 0)
         .background {
             if expanded {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(Color(nsColor: FolderTile.background(color)))
                     .frame(width: 48)
             }
