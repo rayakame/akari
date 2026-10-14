@@ -530,6 +530,10 @@ struct MessageListModelTests {
         StoreEvent.guildUpdated(guildId: id(2)),
         .channelUpdated(channelId: id(20), guildId: id(2)),
         .currentMemberUpdated(guildId: id(2)),
+        // Suppress settings drop only the badge, not the highlight.
+        .guildSettingsChanged(guildId: id(1)),
+        .guildSettingsChanged(guildId: id(2)),
+        .guildSettingsChanged(guildId: nil),
     ])
     func aRenameElsewhereReadsNothing(_ event: StoreEvent) {
         shown(window([1, 2, 3]))

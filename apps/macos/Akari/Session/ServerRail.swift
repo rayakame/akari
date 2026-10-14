@@ -18,15 +18,31 @@ struct ServerRail: View {
                 Rectangle()
                     .fill(Color(nsColor: Palette.frameBorder))
                     .frame(width: 32, height: 1)
-                ForEach(session.guilds.guilds, id: \.id) { guild in
-                    RailItem(selected: session.place == .guild(guild.id), help: guild.name) {
-                        highlighted in
-                        GuildIcon(name: guild.name, highlighted: highlighted)
-                    } action: {
-                        session.open(.guild(guild.id))
+                ForEach(session.servers.items) { item in
+                    switch item {
+                    case .guild(let guild):
+                        guildItem(guild)
+                    case .folder(let folder):
+                        let expanded = session.servers.isExpanded(folder: folder.id)
+                        FolderColumn(color: folder.folder.color, expanded: expanded) {
+                            RailItem(
+                                selected: FolderTile.selected(
+                                    folder, expanded: expanded, place: session.place),
+                                help: FolderTile.help(folder)
+                            ) { _ in
+                                FolderTile(item: folder, expanded: expanded)
+                            } action: {
+                                session.servers.toggle(folder: folder.id)
+                            }
+                            if expanded {
+                                ForEach(folder.guilds, id: \.id) { guild in
+                                    guildItem(guild)
+                                }
+                            }
+                        }
                     }
                 }
-                let unavailable = session.guilds.unavailableIds.count
+                let unavailable = session.servers.unavailableIds.count
                 if unavailable > 0 {
                     RailIcon(highlighted: false) {
                         Image(systemName: "exclamationmark.triangle")
@@ -42,6 +58,14 @@ struct ServerRail: View {
         }
         // Outside the scroll view: one that touches the title bar's safe area stretches under it.
         .padding(.top, 4)
+    }
+
+    private func guildItem(_ guild: Guild) -> some View {
+        RailItem(selected: session.place == .guild(guild.id), help: guild.name) { highlighted in
+            GuildIcon(name: guild.name, highlighted: highlighted)
+        } action: {
+            session.open(.guild(guild.id))
+        }
     }
 }
 
@@ -78,12 +102,17 @@ private struct RailPill: View {
     }
 }
 
+enum RailShape {
+    /// A rail icon's corners, also a collapsed folder's.
+    static let cornerRadius: CGFloat = 12
+}
+
 struct RailIcon<Content: View>: View {
     let highlighted: Bool
     @ViewBuilder let content: Content
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
+        RoundedRectangle(cornerRadius: RailShape.cornerRadius, style: .continuous)
             .fill(Color(nsColor: highlighted ? Palette.brand : Palette.hoverBackground))
             .frame(width: 40, height: 40)
             .overlay {

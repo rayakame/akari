@@ -1080,6 +1080,7 @@ fn the_first_ready_after_a_restore_reports_only_changes() {
             "GuildUpdated(2)",
             "GuildRemoved(3)",
             "GuildAdded(4)",
+            "ServerListChanged",
             "Ready"
         ]
     );
@@ -1163,6 +1164,21 @@ fn a_user_mention_mentions_me() {
     assert!(!ready_store().mentions_me(&mentioning_nobody(|_| {})));
 }
 
+// Guild 1's settings with only the suppress settings changed.
+fn suppressing(store: &Store, everyone: bool, roles: bool) {
+    store.apply(dispatch(
+        "USER_GUILD_SETTINGS_UPDATE",
+        &json!({
+            "guild_id": G1.to_string(),
+            "muted": false,
+            "message_notifications": 3,
+            "suppress_everyone": everyone,
+            "suppress_roles": roles,
+            "channel_overrides": [],
+        }),
+    ));
+}
+
 #[test]
 fn everyone_mentions_me() {
     let message = mentioning_nobody(|wire| wire.mention_everyone = true);
@@ -1173,6 +1189,18 @@ fn everyone_mentions_me() {
 fn a_role_i_have_mentions_me() {
     let message = mentioning_nobody(|wire| wire.mention_roles = vec![Snowflake::new(MODERATORS)]);
     assert!(ready_store().mentions_me(&message));
+}
+
+// The official client still tints such rows; suppressing only drops the badge.
+#[test]
+fn the_highlight_ignores_suppress_settings() {
+    let store = ready_store();
+    suppressing(&store, true, true);
+
+    let everyone = mentioning_nobody(|wire| wire.mention_everyone = true);
+    let role = mentioning_nobody(|wire| wire.mention_roles = vec![Snowflake::new(MODERATORS)]);
+    assert!(store.mentions_me(&everyone));
+    assert!(store.mentions_me(&role));
 }
 
 #[test]

@@ -2,9 +2,9 @@ use serde::de::{self, Deserialize, Deserializer};
 
 use crate::lenient::skip_invalid_option;
 use crate::model::{
-    Attachment, ChannelId, ChannelType, Embed, GenericMarker, GuildId, MessageId, MessageType,
-    PermissionOverwrite, PremiumType, Role, RoleId, Snowflake, StickerItem, ThreadMetadata,
-    Timestamp, User, UserId, WebhookId, double_option,
+    Attachment, ChannelId, ChannelType, Embed, GenericMarker, GuildId, MessageId,
+    MessageNotificationLevel, MessageType, PermissionOverwrite, PremiumType, Role, RoleId,
+    Snowflake, StickerItem, ThreadMetadata, Timestamp, User, UserId, WebhookId, double_option,
 };
 
 /// GUILD_UPDATE. A missing field is unchanged, `Some(None)` is `null`, a list replaces.
@@ -16,6 +16,7 @@ pub struct GuildUpdate {
     pub banner: Option<Option<String>>,
     pub owner_id: Option<UserId>,
     pub roles: Option<Vec<Role>>,
+    pub default_message_notifications: Option<MessageNotificationLevel>,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -28,6 +29,7 @@ struct GuildFields {
     banner: Option<Option<String>>,
     owner_id: Option<UserId>,
     roles: Option<Vec<Role>>,
+    default_message_notifications: Option<MessageNotificationLevel>,
     properties: Option<Box<GuildFields>>,
 }
 
@@ -51,6 +53,9 @@ impl<'de> Deserialize<'de> for GuildUpdate {
             banner: nested.banner.or(top.banner),
             owner_id: nested.owner_id.or(top.owner_id),
             roles: top.roles.or(nested.roles),
+            default_message_notifications: nested
+                .default_message_notifications
+                .or(top.default_message_notifications),
         })
     }
 }

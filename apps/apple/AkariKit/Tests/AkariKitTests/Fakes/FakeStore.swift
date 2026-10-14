@@ -6,6 +6,10 @@ final class FakeStore: Store, @unchecked Sendable {
         var connection: ConnectionState = .offline
         var currentUser: User?
         var guildIds: [GuildId] = []
+        // `nil`: `guildIds`, none in a folder.
+        var serverList: [ServerListItem]?
+        var guildSettings: [GuildId?: GuildSettings] = [:]
+        var mutedChannels: Set<ChannelId> = []
         var guilds: [GuildId: Guild] = [:]
         var unavailableGuildIds: [GuildId] = []
         var channelLists: [GuildId: [ChannelId]] = [:]
@@ -94,6 +98,20 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func guildIds() -> [GuildId] {
         read(.guildIds) { $0.guildIds }
+    }
+
+    override func serverList() -> [ServerListItem] {
+        read(.serverList) { state in
+            state.serverList ?? state.guildIds.map { .guild(guildId: $0) }
+        }
+    }
+
+    override func guildSettings(guildId: GuildId?) -> GuildSettings {
+        read(.guildSettings(guildId)) { $0.guildSettings[guildId] ?? settings() }
+    }
+
+    override func mutedChannels(ids: [ChannelId]) -> [ChannelId] {
+        read(.mutedChannels(ids)) { state in ids.filter(state.mutedChannels.contains) }
     }
 
     override func guild(id: GuildId) -> Guild? {

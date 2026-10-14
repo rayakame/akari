@@ -10,6 +10,7 @@ use super::guild::GatewayGuild;
 use super::hello::Hello;
 use super::partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
 use super::ready::Ready;
+use super::settings::{NotificationSettings, SettingsProtoUpdate, UserGuildSettings};
 use crate::JsonError;
 use crate::model::{Channel, GenericMarker, Message, Snowflake};
 
@@ -59,6 +60,9 @@ pub enum DispatchEvent {
     MessageDelete(MessageDelete),
     MessageDeleteBulk(MessageDeleteBulk),
     UserUpdate(Box<UserUpdate>),
+    UserGuildSettingsUpdate(Box<UserGuildSettings>),
+    UserSettingsProtoUpdate(Box<SettingsProtoUpdate>),
+    NotificationSettingsUpdate(NotificationSettings),
     /// An event Akari doesn't parse yet, by name.
     Other(String),
 }
@@ -87,6 +91,9 @@ impl DispatchEvent {
             Self::MessageDelete(_) => "MESSAGE_DELETE",
             Self::MessageDeleteBulk(_) => "MESSAGE_DELETE_BULK",
             Self::UserUpdate(_) => "USER_UPDATE",
+            Self::UserGuildSettingsUpdate(_) => "USER_GUILD_SETTINGS_UPDATE",
+            Self::UserSettingsProtoUpdate(_) => "USER_SETTINGS_PROTO_UPDATE",
+            Self::NotificationSettingsUpdate(_) => "NOTIFICATION_SETTINGS_UPDATE",
             Self::Other(_) => "other",
         }
     }
@@ -196,6 +203,13 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
         "MESSAGE_DELETE" => parse(json).map(E::MessageDelete),
         "MESSAGE_DELETE_BULK" => parse(json).map(E::MessageDeleteBulk),
         "USER_UPDATE" => parse(json).map(|update| E::UserUpdate(Box::new(update))),
+        "USER_GUILD_SETTINGS_UPDATE" => {
+            parse(json).map(|settings| E::UserGuildSettingsUpdate(Box::new(settings)))
+        }
+        "USER_SETTINGS_PROTO_UPDATE" => {
+            parse(json).map(|update| E::UserSettingsProtoUpdate(Box::new(update)))
+        }
+        "NOTIFICATION_SETTINGS_UPDATE" => parse(json).map(E::NotificationSettingsUpdate),
         _ => return Ok(E::Other(name)),
     };
     event.map_err(|source| DecodeError::Dispatch {

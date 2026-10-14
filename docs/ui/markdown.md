@@ -120,6 +120,5 @@ agreed in every case checked so far (October 2026); the corpus still marks those
 - Timestamps: the hover text, and how often `R` changes.
 - What Cmd+C copies from a hidden spoiler.
 - Spaces at a message's start and end.
-- The highlight when @everyone is suppressed.
 - A masked link without a title, and a channel link with a trailing slash.
 - That a plain link opens without the warning (Akari opens it directly).

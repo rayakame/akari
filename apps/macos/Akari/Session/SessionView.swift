@@ -7,7 +7,6 @@ struct SessionView<MessageArea: View>: View {
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
     @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
-    @State private var collapsed = CollapsedCategories()
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
 
     var body: some View {
@@ -70,8 +69,8 @@ struct SessionView<MessageArea: View>: View {
         case .guild(let guildId):
             if let channels = session.channels {
                 ChannelSidebar(
-                    session: session, list: channels, collapsed: collapsed,
-                    guildName: session.guilds.guilds.first { $0.id == guildId }?.name ?? "")
+                    session: session, list: channels, collapsed: session.collapsed,
+                    guildName: session.servers.guilds.first { $0.id == guildId }?.name ?? "")
             }
         }
     }
@@ -96,7 +95,7 @@ struct SessionView<MessageArea: View>: View {
     private var title: String {
         switch session.place {
         case .home: "Direct Messages"
-        case .guild(let guildId): session.guilds.guilds.first { $0.id == guildId }?.name ?? "Akari"
+        case .guild(let guildId): session.servers.guilds.first { $0.id == guildId }?.name ?? "Akari"
         }
     }
 

@@ -126,6 +126,7 @@ mod tests {
             roles: Arc::from(all),
             member_count: None,
             large: false,
+            default_message_notifications: crate::state::NotificationLevel::AllMessages,
         }
     }
 

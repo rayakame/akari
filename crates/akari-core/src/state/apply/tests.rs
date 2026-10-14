@@ -186,7 +186,10 @@ fn guild_create_adds_a_guild_with_its_channels_and_member() {
 
     let events = apply(&mut state, "GUILD_CREATE", guild_create(G3));
 
-    assert_eq!(events, [format!("GuildAdded({G3})")]);
+    assert_eq!(
+        events,
+        [format!("GuildAdded({G3})"), "ServerListChanged".to_owned()]
+    );
     assert_eq!(
         channel_ids(state.guild_channels(Snowflake::new(G3))),
         [300_000_000_000_000_031]
@@ -200,7 +203,10 @@ fn an_unavailable_guild_comes_back_with_guild_create() {
 
     let events = apply(&mut state, "GUILD_CREATE", guild_create(G2));
 
-    assert_eq!(events, [format!("GuildAdded({G2})")]);
+    assert_eq!(
+        events,
+        [format!("GuildAdded({G2})"), "ServerListChanged".to_owned()]
+    );
     assert!(state.unavailable_guilds().is_empty());
     assert!(state.guild(Snowflake::new(G2)).is_some());
 }
@@ -237,7 +243,13 @@ fn guild_delete_tells_leaving_from_an_outage() {
         json!({"id": G1.to_string(), "unavailable": true}),
     );
 
-    assert_eq!(down, [format!("GuildUnavailable({G1})")]);
+    assert_eq!(
+        down,
+        [
+            format!("GuildUnavailable({G1})"),
+            "ServerListChanged".to_owned()
+        ]
+    );
     assert!(state.guild(Snowflake::new(G1)).is_none());
     assert!(state.channel(Snowflake::new(GENERAL)).is_none());
     assert!(state.channel(Snowflake::new(THREAD)).is_none());
@@ -256,7 +268,13 @@ fn leaving_an_available_guild_removes_everything_in_it() {
 
     let events = apply(&mut state, "GUILD_DELETE", json!({"id": G1.to_string()}));
 
-    assert_eq!(events, [format!("GuildRemoved({G1})")]);
+    assert_eq!(
+        events,
+        [
+            format!("GuildRemoved({G1})"),
+            "ServerListChanged".to_owned()
+        ]
+    );
     assert!(state.guild_channels(Snowflake::new(G1)).is_empty());
     assert!(state.threads(Snowflake::new(G1)).is_empty());
     assert!(!state.unavailable_guilds().contains(&Snowflake::new(G1)));
@@ -619,10 +637,21 @@ fn a_later_ready_implies_the_channels_of_guilds_that_go_away() {
     let gone = apply(&mut gone, "READY", without);
     let down = apply(&mut down, "READY", unavailable);
 
-    assert_eq!(gone, [format!("GuildRemoved({G1})"), "Ready".to_owned()]);
+    assert_eq!(
+        gone,
+        [
+            format!("GuildRemoved({G1})"),
+            "ServerListChanged".to_owned(),
+            "Ready".to_owned()
+        ]
+    );
     assert_eq!(
         down,
-        [format!("GuildUnavailable({G1})"), "Ready".to_owned()]
+        [
+            format!("GuildUnavailable({G1})"),
+            "ServerListChanged".to_owned(),
+            "Ready".to_owned()
+        ]
     );
 }
 
@@ -713,7 +742,13 @@ fn removing_a_channel_or_guild_drops_its_window() {
             format!("ChannelRemoved({THREAD})")
         ]
     );
-    assert_eq!(left, [format!("GuildRemoved({G1})")]);
+    assert_eq!(
+        left,
+        [
+            format!("GuildRemoved({G1})"),
+            "ServerListChanged".to_owned()
+        ]
+    );
     assert_eq!(message_ids(&channel_gone, GENERAL), None);
     assert_eq!(message_ids(&guild_gone, GENERAL), None);
 }

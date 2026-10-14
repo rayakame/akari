@@ -45,6 +45,20 @@ struct EventBatchTests {
     }
 
     @Test
+    func settingsEventsAreCollected() {
+        let batch = EventBatch([
+            .serverListChanged,
+            .guildSettingsChanged(guildId: id(1)),
+            .guildSettingsChanged(guildId: nil),
+        ])
+
+        #expect(batch.guildListChanged)
+        let settings: Set<GuildId?> = [id(1), nil]
+        #expect(batch.guildSettingsChanged == settings)
+        #expect(batch.guildsChanged.isEmpty)
+    }
+
+    @Test
     func anUpdatedGuildKeepsTheListAndAnEmptyBatchTouchesNothing() {
         let updated = EventBatch([.guildUpdated(guildId: id(1))])
         let empty = EventBatch([])

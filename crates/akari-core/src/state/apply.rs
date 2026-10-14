@@ -4,15 +4,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::events::StoreEvent;
+use super::order::guild_order;
 use super::permissions::compute;
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
+use super::settings::{
+    GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
+};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
 use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
-use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
+use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -25,6 +29,7 @@ pub(crate) struct Entities {
     // Only the current user's member in each guild.
     pub(crate) members: HashMap<GuildId, Arc<Member>>,
     pub(crate) channels: HashMap<ChannelId, Arc<Channel>>,
+    pub(crate) settings: UserSettings,
 }
 
 impl Entities {
@@ -33,6 +38,11 @@ impl Entities {
         let me = current.user.id;
         let mut entities = Self {
             current_user: Some(Arc::new(current)),
+            settings: UserSettings::from_ready(
+                ready.user_guild_settings,
+                ready.user_settings_proto,
+                ready.notification_settings,
+            ),
             ..Self::default()
         };
         let mut recipients = HashSet::new();
@@ -69,6 +79,25 @@ impl Entities {
 
     fn me(&self) -> Option<UserId> {
         self.current_user.as_ref().map(|current| current.user.id)
+    }
+
+    fn server_list(&self) -> Vec<ServerListItem> {
+        let by_join = guild_order(
+            self.guilds
+                .values()
+                .map(|guild| {
+                    let joined = self
+                        .members
+                        .get(&guild.id)
+                        .and_then(|member| member.joined_at);
+                    (guild.clone(), joined)
+                })
+                .collect(),
+        );
+        server_list(
+            self.settings.folders.as_deref(),
+            by_join.iter().map(|guild| guild.id).collect(),
+        )
     }
 
     fn insert_users(&mut self, users: impl IntoIterator<Item = model::User>) {
@@ -211,9 +240,17 @@ impl State {
         }
     }
 
-    pub(crate) fn replace(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
+    pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
+        self.keep_folders(&mut next);
         let diff = self.ready_diff(&next);
         self.swap(next, diff, events);
+    }
+
+    // A READY whose settings proto didn't decode keeps the folders the store had.
+    pub(crate) fn keep_folders(&self, next: &mut Entities) {
+        if std::mem::take(&mut next.settings.unreadable_folders) {
+            next.settings.folders = self.entities.settings.folders.clone();
+        }
     }
 
     // `None` before the first READY or a restore, which leave nothing to diff against.
@@ -329,6 +366,20 @@ impl State {
         // Channels of added, removed or unavailable guilds come with their guild's event.
         let implied = |channel: &Channel| channel.guild_id.is_some_and(|id| !kept.contains(&id));
         push_channel_changes(&old.channels, &next.channels, implied, events);
+
+        if old.server_list() != next.server_list() {
+            events.push(StoreEvent::ServerListChanged);
+        }
+        let settings: BTreeSet<Option<GuildId>> = [&old.settings.guilds, &next.settings.guilds]
+            .into_iter()
+            .flat_map(HashMap::keys)
+            .copied()
+            .collect();
+        for guild_id in settings {
+            if old.settings.guild(guild_id) != next.settings.guild(guild_id) {
+                events.push(StoreEvent::GuildSettingsChanged { guild_id });
+            }
+        }
     }
 
     pub(crate) fn apply(&mut self, event: DispatchEvent, events: &mut Vec<StoreEvent>) {
@@ -343,10 +394,18 @@ impl State {
             }
             E::GuildCreate(guild) => match *guild {
                 GatewayGuild::Available(guild) => self.guild_create(*guild, events),
-                GatewayGuild::Unavailable(guild) => self.guild_down(guild.id, events),
+                GatewayGuild::Unavailable(guild) => {
+                    self.tracking_server_list(events, |state, events| {
+                        state.guild_down(guild.id, events);
+                    });
+                }
             },
             E::GuildUpdate(update) => self.guild_update(*update, events),
-            E::GuildDelete(delete) => self.guild_delete(delete, events),
+            E::GuildDelete(delete) => {
+                self.tracking_server_list(events, |state, events| {
+                    state.guild_delete(delete, events);
+                });
+            }
             E::GuildRoleCreate(event) | E::GuildRoleUpdate(event) => self.put_role(*event, events),
             E::GuildRoleDelete(delete) => self.delete_role(delete, events),
             E::GuildMemberUpdate(update) => self.member_update(*update, events),
@@ -380,7 +439,33 @@ impl State {
                     self.windows.delete(delete.channel_id, id, events);
                 }
             }
+            E::UserGuildSettingsUpdate(settings) => {
+                let guild_id = settings.guild_id;
+                if self.entities.settings.put_guild(*settings) {
+                    events.push(StoreEvent::GuildSettingsChanged { guild_id });
+                }
+            }
+            E::UserSettingsProtoUpdate(update) => {
+                self.tracking_server_list(events, |state, _| {
+                    state.entities.settings.apply_proto(*update);
+                });
+            }
+            E::NotificationSettingsUpdate(settings) => {
+                self.entities.settings.notification_flags = settings.flags;
+            }
             E::Resumed | E::Other(_) => {}
+        }
+    }
+
+    fn tracking_server_list(
+        &mut self,
+        events: &mut Vec<StoreEvent>,
+        change: impl FnOnce(&mut Self, &mut Vec<StoreEvent>),
+    ) {
+        let before = self.entities.server_list();
+        change(self, events);
+        if self.entities.server_list() != before {
+            events.push(StoreEvent::ServerListChanged);
         }
     }
 
@@ -530,6 +615,10 @@ impl State {
     }
 
     pub(crate) fn add_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
+        self.tracking_server_list(events, |state, events| state.merge_guild(next, events));
+    }
+
+    fn merge_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         let Some((&id, after)) = next.guilds.iter().next() else {
             return;
         };
@@ -859,6 +948,89 @@ impl State {
         self.entities.members.get(&guild).cloned()
     }
 
+    pub(crate) fn server_list(&self) -> Vec<ServerListItem> {
+        self.entities.server_list()
+    }
+
+    pub(crate) fn guild_settings(&self, guild: Option<GuildId>) -> Arc<GuildSettings> {
+        self.entities
+            .settings
+            .guild(guild)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn channel_muted_at(&self, channel: ChannelId, now: Timestamp) -> bool {
+        let Some(stored) = self.entities.channels.get(&channel) else {
+            return false;
+        };
+        self.entities
+            .settings
+            .guild(stored.guild_id)
+            .and_then(|settings| settings.channels.get(&channel))
+            .is_some_and(|own| own.muted_now(now))
+    }
+
+    // A thread inherits from its channel, which inherits from its category.
+    pub(crate) fn notification_level(&self, channel: ChannelId) -> NotificationLevel {
+        let guild = self
+            .entities
+            .channels
+            .get(&channel)
+            .and_then(|stored| stored.guild_id);
+        let settings = self.entities.settings.guild(guild);
+        let mut next = Some(channel);
+        for _ in 0..3 {
+            let Some(id) = next else {
+                break;
+            };
+            if let Some(level) = settings
+                .and_then(|settings| settings.channels.get(&id))
+                .and_then(|own| own.level)
+            {
+                return level;
+            }
+            next = self
+                .entities
+                .channels
+                .get(&id)
+                .and_then(|stored| stored.parent_id);
+        }
+        settings
+            .and_then(|settings| settings.level)
+            .or_else(|| {
+                guild
+                    .and_then(|id| self.entities.guilds.get(&id))
+                    .map(|guild| guild.default_message_notifications)
+            })
+            .unwrap_or(NotificationLevel::AllMessages)
+    }
+
+    pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
+        self.entities
+            .settings
+            .mute_ends()
+            .map(|(_, end)| end)
+            .filter(|end| *end > after)
+            .min()
+    }
+
+    pub(crate) fn mutes_ending(&self, after: Timestamp, until: Timestamp) -> Vec<Option<GuildId>> {
+        let ended: BTreeSet<Option<GuildId>> = self
+            .entities
+            .settings
+            .mute_ends()
+            .filter(|(_, end)| *end > after && *end <= until)
+            .map(|(guild, _)| guild)
+            .collect();
+        ended.into_iter().collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn settings(&self) -> &UserSettings {
+        &self.entities.settings
+    }
+
     pub(crate) fn channel(&self, id: ChannelId) -> Option<Arc<Channel>> {
         self.entities.channels.get(&id).cloned()
     }
@@ -942,7 +1114,7 @@ impl State {
     }
 }
 
-pub(super) fn wall_millis() -> i64 {
+pub(crate) fn wall_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| {

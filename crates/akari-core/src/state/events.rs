@@ -35,6 +35,15 @@ pub enum StoreEvent {
     },
     /// The current user's membership changed, which can change channel permissions.
     CurrentMemberUpdated(Arc<Member>),
+    /// The server list's order or folders changed: read
+    /// [`Store::server_list`](super::Store::server_list) again.
+    ServerListChanged,
+    /// The user's notification settings for a guild changed (`None`: for DMs), or a timed
+    /// mute in it ended. Mutes, what counts as a mention and which channels are hidden may
+    /// have changed.
+    GuildSettingsChanged {
+        guild_id: Option<GuildId>,
+    },
     /// A channel, category, thread, DM or group DM appeared.
     ChannelAdded(Arc<Channel>),
     ChannelUpdated(Arc<Channel>),

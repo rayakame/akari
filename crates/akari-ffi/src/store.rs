@@ -7,7 +7,8 @@ use crate::contents::{Contents, Found};
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
-    Channel, ConnectionState, ContentStats, Guild, Message, MessageWindow, Slowmode, User,
+    Channel, ConnectionState, ContentStats, Guild, GuildSettings, Message, MessageWindow,
+    ServerListItem, Slowmode, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -62,7 +63,30 @@ impl Store {
         self.core.user(id).map(|user| User::from(&*user))
     }
 
-    /// Available guilds in server list order.
+    /// The server list in the user's order, with their folders. Unavailable guilds are left
+    /// out; see `unavailable_guild_ids`.
+    pub fn server_list(&self) -> Vec<ServerListItem> {
+        self.core
+            .server_list()
+            .iter()
+            .filter_map(ServerListItem::new)
+            .collect()
+    }
+
+    /// The user's notification settings for a guild, or for DMs with `None`.
+    pub fn guild_settings(&self, guild_id: Option<GuildId>) -> GuildSettings {
+        let settings = self.core.guild_settings(guild_id);
+        GuildSettings::new(&settings, self.core.guild_muted(guild_id))
+    }
+
+    /// Of `ids`, the channels muted now by their own settings, in the order given. A muted
+    /// category or guild doesn't mute its channels.
+    pub fn muted_channels(&self, ids: Vec<ChannelId>) -> Vec<ChannelId> {
+        self.core.muted_channels(&ids)
+    }
+
+    /// Available guilds in server list order: `server_list` with each folder's guilds in its
+    /// place.
     pub fn guild_ids(&self) -> Vec<GuildId> {
         self.core
             .guild_list()

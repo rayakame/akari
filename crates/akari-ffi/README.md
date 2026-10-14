@@ -19,8 +19,21 @@ Kotlin (Android, later). This crate holds bindings only: logic belongs in `akari
   item in a batch collapse into one read, and a view model always converges to the store's
   state at batch time.
 - **Reads by ID** come in single and batch form (`channel(id)`, `channels(ids)`,
-  `messages(channel_id, ids)`); lists cross as ID lists (`guild_ids`, `channel_list`,
-  `window`).
+  `messages(channel_id, ids)`, `muted_channels(ids)`); lists cross as ID lists (`guild_ids`,
+  `channel_list`, `window`), or as `server_list`'s entries (a guild ID, or a folder with its
+  guild IDs).
+
+## Settings
+
+`server_list()` is the rail in the user's order, with their folders (`ServerListItem`:
+`Guild` or `Folder`, whose `name` is `None` when the user gave none). `guild_ids()` is the same
+list with every folder's guilds in its place. `guild_settings(guild_id)` (`None`: the DM
+settings) says whether the guild is muted now, when that ends, and its suppress and "hide
+muted channels" settings. `muted_channels(ids)` returns the channels among `ids` that their
+own settings mute now, in one read; a muted category or guild doesn't mute its channels.
+`ServerListChanged` says to read `server_list` again, `GuildSettingsChanged` to reread a
+guild's settings and mutes; it also comes when a timed mute ends. Category collapse isn't
+here: Discord's clients don't sync it, so each app keeps its own.
 
 ## Formatted messages
 
@@ -30,7 +43,8 @@ quotes and list items, each with spans that carry their styles, spoiler and link
 links (masked or not, the title, the embed flag, and for Discord channel and message URLs
 the typed IDs and the channel's name). Offsets are UTF-16 code units into `content`, so Swift
 cuts it with `NSString` ranges. `Message.mentions_me` says whether the message mentions the
-current user (akari-core's rule; notification settings aren't read yet).
+current user (akari-core's rule; suppress settings don't change it, as in the official client,
+which drops only the badge).
 
 Mention names come from the message's own users, else the store, at read time, so a rename
 needs no invalidation: `Known`, `NoAccess` (a channel the user can't view), `Missing` (the

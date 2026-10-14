@@ -1,6 +1,7 @@
 use akari_core::gateway::{
     ChannelDelete, DecodeError, DispatchEvent, GatewayEvent, GatewayGuild, GuildDelete,
-    GuildRoleDelete, Hello, MessageDelete, MessageDeleteBulk, Ready, UnavailableGuild, decode,
+    GuildRoleDelete, Hello, MessageDelete, MessageDeleteBulk, MuteConfig, NotificationSettings,
+    Ready, SettingsProto, SettingsProtoUpdate, UnavailableGuild, Versioned, decode,
 };
 use akari_core::model::{
     ChannelType, MessageNotificationLevel, NsfwLevel, Permissions, PremiumTier, PremiumType,
@@ -348,6 +349,175 @@ fn null_lists_count_as_empty() {
 }
 
 #[test]
+fn ready_reads_the_user_guild_settings() {
+    let (_, ready) = ready_from(include_str!("fixtures/ready.json"));
+
+    let settings = &ready.user_guild_settings;
+    assert!(!settings.partial);
+    assert_eq!(settings.version, 1234);
+    let [guild, dms] = &settings.entries[..] else {
+        panic!("expected two entries, got {:?}", settings.entries);
+    };
+
+    assert_eq!(
+        guild.guild_id,
+        Some(Snowflake::new(200_000_000_000_000_001))
+    );
+    assert!(!guild.muted);
+    assert_eq!(guild.mute_config, None);
+    assert_eq!(
+        guild.message_notifications,
+        MessageNotificationLevel::OnlyMentions
+    );
+    assert!(guild.suppress_everyone);
+    assert!(!guild.suppress_roles);
+    assert!(guild.hide_muted_channels);
+    assert_eq!(guild.flags, 1 << 12);
+    let [category, channel] = &guild.channel_overrides[..] else {
+        panic!("expected two overrides, got {:?}", guild.channel_overrides);
+    };
+    assert_eq!(category.channel_id, Snowflake::new(300_000_000_000_000_001));
+    assert!(category.collapsed);
+    assert_eq!(
+        category.message_notifications,
+        MessageNotificationLevel::Inherit
+    );
+    assert!(!category.muted);
+    assert_eq!(category.mute_config, None);
+    assert_eq!(category.flags, 0);
+    assert_eq!(channel.channel_id, Snowflake::new(300_000_000_000_000_002));
+    assert!(!channel.collapsed);
+    assert_eq!(
+        channel.message_notifications,
+        MessageNotificationLevel::NoMessages
+    );
+    assert!(channel.muted);
+    let mute = channel.mute_config.expect("a timed mute");
+    assert_eq!(
+        mute.end_time.map(Timestamp::unix_millis),
+        Some(1_790_856_000_000)
+    );
+    assert_eq!(mute.selected_time_window, 3600);
+    assert_eq!(channel.flags, 1 << 10);
+
+    assert_eq!(dms.guild_id, None);
+    let [dm] = &dms.channel_overrides[..] else {
+        panic!("expected one override, got {:?}", dms.channel_overrides);
+    };
+    assert_eq!(dm.channel_id, Snowflake::new(300_000_000_000_000_010));
+    assert!(dm.muted);
+    assert_eq!(
+        dm.mute_config,
+        Some(MuteConfig {
+            end_time: None,
+            selected_time_window: -1,
+        })
+    );
+    assert_eq!(dm.flags, 0, "a missing flags field is 0");
+
+    assert_eq!(ready.user_settings_proto.as_deref(), Some(""));
+    assert_eq!(
+        ready.notification_settings,
+        Some(NotificationSettings { flags: 16 })
+    );
+}
+
+#[test]
+fn a_broken_guild_settings_entry_is_skipped() {
+    let ready = ready_with(|payload| {
+        payload["d"]["user_guild_settings"]["entries"][0]["muted"] = "yes".into();
+    });
+
+    let guilds: Vec<_> = ready
+        .user_guild_settings
+        .entries
+        .iter()
+        .map(|entry| entry.guild_id)
+        .collect();
+    assert_eq!(guilds, [None]);
+    assert_eq!(ready.user_guild_settings.version, 1234);
+}
+
+#[test]
+fn a_broken_channel_override_is_skipped() {
+    let ready = ready_with(|payload| {
+        payload["d"]["user_guild_settings"]["entries"][0]["channel_overrides"][0]["collapsed"] =
+            "yes".into();
+    });
+
+    let guild = &ready.user_guild_settings.entries[0];
+    assert_eq!(
+        guild.guild_id,
+        Some(Snowflake::new(200_000_000_000_000_001))
+    );
+    let channels: Vec<_> = guild
+        .channel_overrides
+        .iter()
+        .map(|channel| channel.channel_id)
+        .collect();
+    assert_eq!(channels, [Snowflake::new(300_000_000_000_000_002)]);
+}
+
+#[test]
+fn a_broken_settings_part_leaves_ready_intact() {
+    let ready = ready_with(|payload| {
+        let data = &mut payload["d"];
+        data["user_guild_settings"] = 5.into();
+        data["notification_settings"] = serde_json::json!({"flags": "16"});
+        data["user_settings_proto"] = 7.into();
+    });
+
+    assert_eq!(ready.user_guild_settings, Versioned::default());
+    assert_eq!(ready.notification_settings, None);
+    assert_eq!(ready.user_settings_proto, None);
+    assert_eq!(ready.guilds.len(), 2);
+}
+
+#[test]
+fn missing_or_null_settings_parts_are_defaults() {
+    let missing = ready_with(|payload| {
+        let data = payload["d"].as_object_mut().unwrap();
+        for part in [
+            "user_guild_settings",
+            "notification_settings",
+            "user_settings_proto",
+        ] {
+            data.remove(part);
+        }
+    });
+    let null = ready_with(|payload| {
+        let data = &mut payload["d"];
+        for part in [
+            "user_guild_settings",
+            "notification_settings",
+            "user_settings_proto",
+        ] {
+            data[part] = Value::Null;
+        }
+    });
+
+    for ready in [missing, null] {
+        assert_eq!(ready.user_guild_settings, Versioned::default());
+        assert_eq!(ready.notification_settings, None);
+        assert_eq!(ready.user_settings_proto, None);
+    }
+}
+
+#[test]
+fn null_lists_in_guild_settings_count_as_empty() {
+    let ready = ready_with(|payload| {
+        payload["d"]["user_guild_settings"]["entries"][0]["channel_overrides"] = Value::Null;
+    });
+
+    assert_eq!(ready.user_guild_settings.entries.len(), 2);
+    assert!(
+        ready.user_guild_settings.entries[0]
+            .channel_overrides
+            .is_empty()
+    );
+}
+
+#[test]
 fn null_member_list_keeps_alignment() {
     let ready = ready_with(|payload| payload["d"]["merged_members"][0] = Value::Null);
 
@@ -467,6 +637,32 @@ fn captured_ready_decodes_completely() {
     for (members, raw) in ready.merged_members.iter().zip(raw_members) {
         assert_eq!(members.len(), list(raw), "members were skipped");
     }
+
+    let raw_settings = data["user_guild_settings"]["entries"]
+        .as_array()
+        .unwrap_or(&empty);
+    assert_eq!(
+        ready.user_guild_settings.entries.len(),
+        raw_settings.len(),
+        "guild settings entries were skipped"
+    );
+    for (settings, raw) in ready.user_guild_settings.entries.iter().zip(raw_settings) {
+        assert_eq!(
+            settings.channel_overrides.len(),
+            list(&raw["channel_overrides"]),
+            "channel overrides were skipped"
+        );
+    }
+    assert_eq!(
+        ready.notification_settings.is_some(),
+        data["notification_settings"].is_object(),
+        "notification_settings didn't parse"
+    );
+    assert_eq!(
+        ready.user_settings_proto.is_some(),
+        data["user_settings_proto"].is_string(),
+        "user_settings_proto didn't parse"
+    );
 }
 
 #[track_caller]
@@ -620,6 +816,28 @@ fn a_guild_update_reads_properties_too() {
 
     assert_eq!(update.name.as_deref(), Some("Nested"));
     assert_eq!(update.icon, Some(None));
+}
+
+#[test]
+fn a_guild_update_reads_the_default_level() {
+    for data in [
+        r#"{"id": "200000000000000001", "default_message_notifications": 0}"#,
+        r#"{"id": "200000000000000001", "properties": {"default_message_notifications": 0}}"#,
+    ] {
+        let DispatchEvent::GuildUpdate(update) = dispatch("GUILD_UPDATE", data) else {
+            panic!("expected GUILD_UPDATE");
+        };
+        assert_eq!(
+            update.default_message_notifications,
+            Some(MessageNotificationLevel::AllMessages)
+        );
+    }
+    let DispatchEvent::GuildUpdate(update) =
+        dispatch("GUILD_UPDATE", r#"{"id": "200000000000000001"}"#)
+    else {
+        panic!("expected GUILD_UPDATE");
+    };
+    assert_eq!(update.default_message_notifications, None);
 }
 
 #[test]
@@ -930,6 +1148,96 @@ fn a_dispatch_with_a_broken_payload_is_a_dispatch_error() {
     assert!(
         matches!(&err, DecodeError::Dispatch { seq: 8, event, .. } if event == "MESSAGE_CREATE"),
         "{err:?}"
+    );
+}
+
+#[test]
+fn the_settings_dispatches_decode() {
+    let DispatchEvent::UserGuildSettingsUpdate(settings) = dispatch(
+        "USER_GUILD_SETTINGS_UPDATE",
+        r#"{
+            "guild_id": "200000000000000001",
+            "muted": true,
+            "mute_config": {"end_time": "2026-10-01T13:00:00+00:00", "selected_time_window": 3600},
+            "message_notifications": 3,
+            "suppress_everyone": false,
+            "suppress_roles": true,
+            "notify_highlights": 0,
+            "mobile_push": true,
+            "hide_muted_channels": false,
+            "mute_scheduled_events": false,
+            "flags": 2048,
+            "version": 8,
+            "channel_overrides": [{
+                "channel_id": "300000000000000002",
+                "collapsed": false,
+                "message_notifications": 3,
+                "muted": false,
+                "mute_config": null,
+                "flags": 66560
+            }]
+        }"#,
+    ) else {
+        panic!("expected USER_GUILD_SETTINGS_UPDATE");
+    };
+    assert_eq!(
+        settings.guild_id,
+        Some(Snowflake::new(200_000_000_000_000_001))
+    );
+    assert!(settings.muted);
+    assert_eq!(
+        settings
+            .mute_config
+            .and_then(|mute| mute.end_time)
+            .map(Timestamp::unix_millis),
+        Some(1_790_859_600_000)
+    );
+    assert_eq!(
+        settings.message_notifications,
+        MessageNotificationLevel::Inherit
+    );
+    assert!(settings.suppress_roles);
+    assert_eq!(settings.flags, 1 << 11);
+    assert_eq!(
+        settings.channel_overrides[0].flags,
+        (1 << 16) | (1 << 10),
+        "an unknown bit is kept"
+    );
+
+    assert_eq!(
+        dispatch("NOTIFICATION_SETTINGS_UPDATE", r#"{"flags": 48}"#),
+        DispatchEvent::NotificationSettingsUpdate(NotificationSettings { flags: 48 })
+    );
+
+    let DispatchEvent::UserSettingsProtoUpdate(update) = dispatch(
+        "USER_SETTINGS_PROTO_UPDATE",
+        r#"{"settings": {"type": 1, "proto": "cgA="}, "partial": true}"#,
+    ) else {
+        panic!("expected USER_SETTINGS_PROTO_UPDATE");
+    };
+    assert_eq!(update.settings.kind, 1);
+    assert_eq!(update.settings.proto, "cgA=");
+    assert!(update.partial);
+}
+
+#[test]
+fn the_proto_update_keeps_its_type_and_partial() {
+    let DispatchEvent::UserSettingsProtoUpdate(update) = dispatch(
+        "USER_SETTINGS_PROTO_UPDATE",
+        r#"{"settings": {"type": 2, "proto": ""}, "partial": false}"#,
+    ) else {
+        panic!("expected USER_SETTINGS_PROTO_UPDATE");
+    };
+
+    assert_eq!(
+        *update,
+        SettingsProtoUpdate {
+            settings: SettingsProto {
+                kind: 2,
+                proto: String::new(),
+            },
+            partial: false,
+        }
     );
 }
 

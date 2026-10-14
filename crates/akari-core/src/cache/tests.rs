@@ -13,9 +13,10 @@ use crate::model::{
 use crate::state::CachedWindow;
 use crate::state::apply::Entities;
 use crate::state::{
-    Attachment, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
-    EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
-    PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, User,
+    Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
+    EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
+    Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
+    Sticker, ThreadInfo, Unreads, User, UserSettings,
 };
 
 pub(crate) struct TempDir(PathBuf);
@@ -105,6 +106,7 @@ pub(crate) fn guild(id: u64, name: &str) -> Guild {
         .into(),
         member_count: Some(1234),
         large: true,
+        default_message_notifications: crate::state::NotificationLevel::OnlyMentions,
     }
 }
 
@@ -191,6 +193,7 @@ pub(crate) fn entities() -> Entities {
         ]
         .map(|channel| (channel.id, Arc::new(channel)))
         .into(),
+        settings: Default::default(),
     }
 }
 
@@ -331,9 +334,76 @@ fn write_entities(cache: &mut Cache, entities: &Entities) {
             for channel in entities.channels.values() {
                 writer.put_channel(channel)?;
             }
+            for (guild, settings) in &entities.settings.guilds {
+                writer.put_guild_settings(*guild, settings)?;
+            }
+            writer.put_folders(entities.settings.folders.as_deref())?;
+            writer.put_notification_flags(entities.settings.notification_flags)?;
             Ok(())
         })
         .unwrap();
+}
+
+// Folders, guild settings with overrides and a timed mute, the DM settings and the flags.
+pub(crate) fn with_settings(mut entities: Entities) -> Entities {
+    let channels = [
+        (
+            Snowflake::new(10),
+            ChannelSettings {
+                muted: true,
+                mute_ends: Some(time(1_790_856_000_000_000_000)),
+                level: Some(NotificationLevel::Nothing),
+                unreads: Some(Unreads::OnlyMentions),
+            },
+        ),
+        (Snowflake::new(11), ChannelSettings::default()),
+    ];
+    let dm = ChannelSettings {
+        muted: true,
+        ..ChannelSettings::default()
+    };
+    entities.settings = UserSettings {
+        folders: Some(Arc::from(vec![
+            FolderEntry {
+                id: Some(7),
+                name: Some("Games".into()),
+                color: Some(0x5865f2),
+                guilds: [Snowflake::new(200), Snowflake::new(100)].into(),
+            },
+            FolderEntry {
+                id: None,
+                name: None,
+                color: None,
+                guilds: [Snowflake::new(300)].into(),
+            },
+        ])),
+        guilds: [
+            (
+                Some(Snowflake::new(100)),
+                Arc::new(GuildSettings {
+                    muted: true,
+                    mute_ends: Some(time(1_790_859_600_000_000_000)),
+                    level: Some(NotificationLevel::OnlyMentions),
+                    unreads: Some(Unreads::AllMessages),
+                    suppress_everyone: true,
+                    suppress_roles: true,
+                    hide_muted_channels: true,
+                    channels: Arc::new(channels.into()),
+                }),
+            ),
+            (
+                None,
+                Arc::new(GuildSettings {
+                    channels: Arc::new([(Snowflake::new(13), dm)].into()),
+                    ..GuildSettings::default()
+                }),
+            ),
+        ]
+        .into(),
+        notification_flags: 16,
+        unreadable_folders: false,
+    };
+    entities
 }
 
 fn raw(path: &Path) -> rusqlite::Connection {
@@ -432,8 +502,89 @@ fn a_corrupt_file_is_discarded_and_rebuilt() {
 }
 
 #[test]
+fn settings_survive_a_restart() {
+    let dir = TempDir::new();
+    let mut cache = open(&dir);
+    let entities = with_settings(entities());
+
+    write_entities(&mut cache, &entities);
+    drop(cache);
+    let read = open(&dir).read_entities().unwrap();
+
+    assert_eq!(read.skipped, 0);
+    assert_eq!(read.value.settings, entities.settings);
+}
+
+#[test]
+fn no_folders_and_an_empty_list_stay_apart() {
+    for folders in [None, Some(Arc::from(Vec::new()))] {
+        let dir = TempDir::new();
+        let mut cache = open(&dir);
+        let mut entities = with_settings(entities());
+        entities.settings.folders = folders.clone();
+
+        write_entities(&mut cache, &entities);
+        drop(cache);
+
+        assert_eq!(
+            open(&dir).read_entities().unwrap().value.settings.folders,
+            folders
+        );
+    }
+}
+
+#[test]
+fn settings_rows_hold_no_wire_types() {
+    let dir = TempDir::new();
+    let mut cache = open(&dir);
+    write_entities(&mut cache, &with_settings(entities()));
+    drop(cache);
+    let conn = raw(&dir.file(ME));
+    let rows: Vec<String> = [
+        "SELECT data FROM guild_settings",
+        "SELECT data FROM user_settings",
+    ]
+    .iter()
+    .flat_map(|sql| {
+        let mut statement = conn.prepare(sql).unwrap();
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    })
+    .collect();
+
+    let text = rows.join("\n");
+    assert!(text.contains("\"level\""), "{text}");
+    assert!(text.contains("\"channels\""), "{text}");
+    for wire in [
+        "message_notifications",
+        "channel_overrides",
+        "mute_config",
+        "end_time",
+        "guild_ids",
+        "flags",
+        "collapsed",
+    ] {
+        assert!(!text.contains(wire), "{wire} in {text}");
+    }
+}
+
+#[test]
+fn the_settings_tables_exist() {
+    let dir = TempDir::new();
+    drop(open(&dir));
+
+    let tables = stored_names(&dir.file(ME));
+    for table in ["guild_settings", "user_settings", "read_states"] {
+        assert!(tables.contains(&table.to_owned()), "{tables:?}");
+    }
+}
+
+#[test]
 fn any_other_schema_version_is_discarded() {
-    for version in [schema::CURRENT + 1, 0] {
+    for version in [schema::CURRENT - 1, schema::CURRENT + 1, 0] {
         let dir = TempDir::new();
         let mut cache = open(&dir);
         write_entities(&mut cache, &entities());
@@ -597,7 +748,11 @@ fn snapshot(windows: impl IntoIterator<Item = (u64, CachedWindow)>) -> Snapshot 
             .entry(*id)
             .or_insert_with(|| Arc::new(channel(id.get(), Some(100), "cached")));
     }
-    Snapshot { entities, windows }
+    Snapshot {
+        entities,
+        windows,
+        ..Snapshot::default()
+    }
 }
 
 // Every Arc rebuilt with equal values, as a later READY makes them.
@@ -619,7 +774,40 @@ fn rebuilt(entities: &Entities) -> Entities {
         unavailable: entities.unavailable.clone(),
         members: copy(&entities.members),
         channels: copy(&entities.channels),
+        settings: UserSettings {
+            folders: entities
+                .settings
+                .folders
+                .as_deref()
+                .map(|folders| Arc::from(folders.to_vec())),
+            guilds: entities
+                .settings
+                .guilds
+                .iter()
+                .map(|(guild, settings)| {
+                    let channels = Arc::new((*settings.channels).clone());
+                    let settings = GuildSettings {
+                        channels,
+                        ..(**settings).clone()
+                    };
+                    (*guild, Arc::new(settings))
+                })
+                .collect(),
+            ..entities.settings.clone()
+        },
     }
+}
+
+fn stored_names(path: &Path) -> Vec<String> {
+    let conn = raw(path);
+    let mut statement = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .unwrap();
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
 }
 
 fn stored_ids(path: &Path, sql: &str) -> Vec<u64> {
@@ -657,6 +845,75 @@ async fn started(dir: &TempDir) -> CacheThread {
     let thread = CacheThread::start(dir.file(ME), UserId::new(ME));
     thread.read_entities().await.unwrap();
     thread
+}
+
+#[tokio::test]
+async fn a_restart_with_the_same_settings_writes_nothing() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let state = with_settings(entities());
+    thread
+        .flush(Snapshot {
+            entities: state.clone(),
+            ..Snapshot::default()
+        })
+        .await
+        .unwrap();
+    drop(thread);
+
+    let thread = started(&dir).await;
+    let flushed = thread
+        .flush(Snapshot {
+            entities: rebuilt(&state),
+            ..Snapshot::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(flushed, Flushed::default());
+}
+
+#[tokio::test]
+async fn a_changed_setting_writes_only_its_row() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let state = with_settings(entities());
+    thread
+        .flush(Snapshot {
+            entities: state.clone(),
+            ..Snapshot::default()
+        })
+        .await
+        .unwrap();
+    let mut next = rebuilt(&state);
+    let guild = Some(Snowflake::new(100));
+    let changed = GuildSettings {
+        suppress_roles: false,
+        ..(*next.settings.guilds[&guild]).clone()
+    };
+    next.settings.guilds.insert(guild, Arc::new(changed));
+    next.settings.guilds.remove(&None);
+    next.settings.notification_flags = 48;
+
+    let flushed = thread
+        .flush(Snapshot {
+            entities: next.clone(),
+            ..Snapshot::default()
+        })
+        .await
+        .unwrap();
+    drop(thread);
+
+    assert_eq!(
+        flushed,
+        Flushed {
+            other: 2,
+            deleted: 1,
+            ..Flushed::default()
+        }
+    );
+    let read = started(&dir).await.read_entities().await.unwrap();
+    assert_eq!(read.settings, next.settings);
 }
 
 #[tokio::test]
@@ -712,6 +969,7 @@ async fn an_equal_state_writes_nothing() {
     let again = Snapshot {
         entities: state.entities.clone(),
         windows: state.windows.clone(),
+        ..Snapshot::default()
     };
 
     let first = thread.flush(state).await.unwrap();
@@ -729,6 +987,7 @@ async fn a_ready_with_equal_values_rewrites_nothing() {
     let after_ready = Snapshot {
         entities: rebuilt(&state.entities),
         windows: std::collections::HashMap::new(),
+        ..Snapshot::default()
     };
 
     thread.flush(state).await.unwrap();
@@ -749,6 +1008,7 @@ async fn a_restart_with_the_same_state_writes_nothing() {
         .flush(Snapshot {
             entities: rebuilt(&entities()),
             windows: std::collections::HashMap::new(),
+            ..Snapshot::default()
         })
         .await
         .unwrap();
@@ -770,6 +1030,7 @@ async fn entities_gone_since_the_last_write_are_deleted() {
         .flush(Snapshot {
             entities: fewer,
             windows: std::collections::HashMap::new(),
+            ..Snapshot::default()
         })
         .await
         .unwrap();
@@ -839,6 +1100,7 @@ async fn a_removed_channel_loses_its_messages() {
         .flush(Snapshot {
             entities: without,
             windows: std::collections::HashMap::new(),
+            ..Snapshot::default()
         })
         .await
         .unwrap();
@@ -923,6 +1185,7 @@ async fn a_failed_write_keeps_the_account_running() {
             ..entities()
         },
         windows: std::collections::HashMap::new(),
+        ..Snapshot::default()
     };
 
     thread.fail_next_write();

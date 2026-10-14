@@ -168,9 +168,9 @@ bar says "Some messages may be missing" instead.
   selected and copied.
 - A message that mentions the user (by name, through @everyone or @here, or through one of
   their roles) is tinted with `mentionedBackground` (`#f8a300` at 8% dark, 10% light) and has
-  a 2 wide `mentionedBar` at its left edge; hovering darkens it like any row. Akari doesn't
-  read the user's notification settings yet, so it also highlights @everyone in servers where
-  the user suppressed it.
+  a 2 wide `mentionedBar` at its left edge; hovering darkens it like any row. Suppress settings
+  don't change the highlight: the official client still tints a message whose @everyone, @here
+  or role mention the server suppresses, and leaves out only its badge (observed 2026-10-14).
 - Relative timestamps ("in 5 minutes") count on their own while they're on screen, and a row
   that grows or shrinks with them doesn't move the text being read. Akari stops counting while
   the window is hidden or minimized and catches up when it shows again.

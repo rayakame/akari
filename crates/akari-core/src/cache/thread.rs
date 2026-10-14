@@ -158,9 +158,10 @@ fn run(path: &std::path::Path, user: UserId, commands: &mpsc::Receiver<Command>)
             }
             Command::Flush(snapshot, reply) => {
                 let started = Instant::now();
+                let (took, last) = (snapshot.took, snapshot.last);
                 let flushed = match flush(&mut cache, &mut written, *snapshot) {
                     Ok(flushed) => {
-                        if flushed.rows() > 0 || flushed.deleted > 0 {
+                        if flushed.rows() > 0 || flushed.deleted > 0 || last {
                             tracing::info!(
                                 target: LOG,
                                 guilds = flushed.guilds,
@@ -169,6 +170,7 @@ fn run(path: &std::path::Path, user: UserId, commands: &mpsc::Receiver<Command>)
                                 messages = flushed.messages,
                                 other = flushed.other,
                                 deleted = flushed.deleted,
+                                snapshot_ms = crate::ms(took),
                                 write_ms = crate::millis(started.elapsed()),
                                 file_kib = cache.file_kib(),
                                 "cache written"

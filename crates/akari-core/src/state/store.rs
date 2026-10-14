@@ -4,17 +4,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Mutex, mpsc};
 
-use super::apply::{Entities, ReadyDiff, State};
+use super::apply::{Entities, ReadyDiff, State, wall_millis};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
 use super::send::Slowmode;
+use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits};
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
-use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, UserId};
+use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 // Main-thread readers (SwiftUI, AppKit) wait at most this long for a write.
 const LONG_HOLD: Duration = Duration::from_millis(4);
@@ -259,8 +260,11 @@ impl Store {
     // it. Only the pump changes entities, so the diff still holds at the swap.
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
         self.shared.preparing_ready.store(true, Ordering::SeqCst);
-        let entities = Entities::from_ready(ready);
-        let diff = self.read(|inner| inner.state.ready_diff(&entities));
+        let mut entities = Entities::from_ready(ready);
+        let diff = self.read(|inner| {
+            inner.state.keep_folders(&mut entities);
+            inner.state.ready_diff(&entities)
+        });
         #[cfg(test)]
         {
             if let Ok(mut thread) = self.shared.ready_thread.lock() {
@@ -347,6 +351,24 @@ impl Store {
         self.write("load", |inner, events| {
             inner.state.abort_load(ticket, events)
         });
+    }
+
+    pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
+        self.read(|inner| inner.state.next_mute_end(after))
+    }
+
+    // Reports the guilds whose mute, or a channel's, ended within `after..=until`.
+    pub(crate) fn end_mutes(&self, after: Timestamp, until: Timestamp) {
+        let ended = self.read(|inner| inner.state.mutes_ending(after, until));
+        if !ended.is_empty() {
+            self.write("mutes", |_, events| {
+                events.extend(
+                    ended
+                        .into_iter()
+                        .map(|guild_id| StoreEvent::GuildSettingsChanged { guild_id }),
+                );
+            });
+        }
     }
 
     pub(crate) fn changes(&self) -> u64 {
@@ -488,24 +510,63 @@ impl Store {
         self.read(|inner| inner.state.guilds())
     }
 
-    /// Available guilds in server list order. Akari doesn't read the user's own order and
-    /// folders yet; until it does, the most recently joined guild comes first.
+    /// The server list in the user's order, with their folders. Guilds the settings don't
+    /// place yet (joined since) come first, the newest join first. Unavailable guilds are
+    /// left out.
+    pub fn server_list(&self) -> Vec<ServerListItem> {
+        self.read(|inner| inner.state.server_list())
+    }
+
+    /// Available guilds in server list order: [`server_list`](Self::server_list) with every
+    /// folder's guilds in its place.
     pub fn guild_list(&self) -> Vec<Arc<Guild>> {
         self.read(|inner| {
             let state = &inner.state;
-            order::guild_order(
-                state
-                    .guilds()
-                    .into_iter()
-                    .map(|guild| {
-                        let joined = state
-                            .current_member(guild.id)
-                            .and_then(|member| member.joined_at);
-                        (guild, joined)
-                    })
-                    .collect(),
-            )
+            state
+                .server_list()
+                .into_iter()
+                .flat_map(|item| match item {
+                    ServerListItem::Guild(id) => vec![id],
+                    ServerListItem::Folder(folder) => folder.guilds.to_vec(),
+                })
+                .filter_map(|id| state.guild(id))
+                .collect()
         })
+    }
+
+    /// The user's notification settings for a guild, or for DMs with `None`.
+    pub fn guild_settings(&self, guild: Option<GuildId>) -> Arc<GuildSettings> {
+        self.read(|inner| inner.state.guild_settings(guild))
+    }
+
+    /// Muted now by its own settings. Neither a muted category nor a muted guild makes its
+    /// channels muted; see [`guild_settings`](Self::guild_settings).
+    pub fn channel_muted(&self, channel: ChannelId) -> bool {
+        let now = Timestamp::from_unix_millis(wall_millis());
+        self.read(|inner| inner.state.channel_muted_at(channel, now))
+    }
+
+    /// Of `ids`, the channels muted now by their own settings, in the order given.
+    pub fn muted_channels(&self, ids: &[ChannelId]) -> Vec<ChannelId> {
+        let now = Timestamp::from_unix_millis(wall_millis());
+        self.read(|inner| {
+            ids.iter()
+                .copied()
+                .filter(|id| inner.state.channel_muted_at(*id, now))
+                .collect()
+        })
+    }
+
+    /// Whether the guild (`None`: DMs) is muted now. Its channels aren't muted by it.
+    pub fn guild_muted(&self, guild: Option<GuildId>) -> bool {
+        let now = Timestamp::from_unix_millis(wall_millis());
+        self.read(|inner| inner.state.guild_settings(guild).muted_now(now))
+    }
+
+    /// The level that decides which messages notify in a channel: its own, else its
+    /// category's, else the guild's, else the guild's default.
+    pub fn notification_level(&self, channel: ChannelId) -> NotificationLevel {
+        self.read(|inner| inner.state.notification_level(channel))
     }
 
     pub fn guild(&self, id: GuildId) -> Option<Arc<Guild>> {
@@ -523,7 +584,8 @@ impl Store {
     }
 
     /// Whether `message` mentions the current user: by ID, through @everyone or @here, or
-    /// through one of the current member's roles. Ignores notification settings.
+    /// through one of the current member's roles. Suppress settings don't change it: the
+    /// official client still highlights such a message and only leaves out its badge.
     pub fn mentions_me(&self, message: &Message) -> bool {
         self.read(|inner| {
             let state = &inner.state;

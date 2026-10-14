@@ -64,6 +64,20 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
         Self.guildIds
     }
 
+    override func serverList() -> [ServerListItem] {
+        guildIds().map { .guild(guildId: $0) }
+    }
+
+    override func guildSettings(guildId: GuildId?) -> GuildSettings {
+        GuildSettings(
+            muted: false, muteEndsAt: nil, suppressEveryone: false, suppressRoles: false,
+            hideMutedChannels: false)
+    }
+
+    override func mutedChannels(ids: [ChannelId]) -> [ChannelId] {
+        []
+    }
+
     override func guild(id: GuildId) -> Guild? {
         Self.guildIds.contains(id) ? Guild(id: id, name: "Server \(id.rawValue)") : nil
     }

@@ -107,6 +107,13 @@ pub enum StoreEvent {
     CurrentMemberUpdated {
         guild_id: GuildId,
     },
+    /// The server list's order or folders changed; read `server_list` again.
+    ServerListChanged,
+    /// The notification settings for a guild (`None`: DMs) changed, or a timed mute in it
+    /// ended. Mutes, highlights and hidden channels may have changed.
+    GuildSettingsChanged {
+        guild_id: Option<GuildId>,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -180,6 +187,8 @@ impl StoreEvent {
             E::CurrentMemberUpdated(member) => Self::CurrentMemberUpdated {
                 guild_id: member.guild_id,
             },
+            E::ServerListChanged => Self::ServerListChanged,
+            E::GuildSettingsChanged { guild_id } => Self::GuildSettingsChanged { guild_id },
             E::ChannelAdded(channel) => Self::ChannelAdded {
                 channel_id: channel.id,
                 guild_id: channel.guild_id,

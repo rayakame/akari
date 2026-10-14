@@ -129,7 +129,10 @@ async fn the_cache_log_holds_numbers_only() {
         .load_messages(Snowflake::new(GENERAL), MessageLoad::Latest { limit: 50 })
         .await
         .unwrap_or_else(|err| panic!("{err}"));
+    again.flush_cache().await;
     again.close();
+    // After close, this returns once the flusher has written close's snapshot.
+    again.flush_cache().await;
 
     let text = logs.text();
     let cache: Vec<&str> = text
@@ -142,6 +145,20 @@ async fn the_cache_log_holds_numbers_only() {
             "no {wanted:?}: {text}"
         );
     }
+    let written: Vec<&&str> = cache
+        .iter()
+        .filter(|line| line.contains("cache written"))
+        .collect();
+    assert!(
+        written.iter().all(|line| line.contains("snapshot_ms=")),
+        "{text}"
+    );
+    // Close's write is logged even when it has nothing to write, for its snapshot time.
+    let last = cache.last().copied().unwrap_or_default();
+    assert!(
+        last.contains("cache written") && last.contains("channels=0 windows=0 messages=0"),
+        "{text}"
+    );
     let mut forbidden = secrets;
     forbidden.extend(
         [

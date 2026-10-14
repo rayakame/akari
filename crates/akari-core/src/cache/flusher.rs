@@ -53,7 +53,10 @@ impl Source {
         let mut closing = self.closing();
         if !closing.closed {
             closing.closed = true;
-            closing.last = Snapshot::take(&self.store);
+            closing.last = Snapshot::take(&self.store).map(|snapshot| Snapshot {
+                last: true,
+                ..snapshot
+            });
         }
     }
 

@@ -62,9 +62,13 @@ screen, so views render from them without calling into Rust.
   store already restored when the session starts) shows before READY: everything is read as
   after READY and the last place and channel reopen once. The first READY then checks that
   place and falls back as it would at a READY restore (a gone guild to home, a hidden channel
-  to the guild's first one, a gone conversation to nothing). It owns `GuildListModel` (the server
-  list), `DirectMessageListModel` (the DM list, the latest conversation first, with each
-  one's recipients and name), `ChannelListModel` (the open guild's channels) and
+  to the guild's first one, a gone conversation to nothing). It owns `ServerListModel` (the
+  server list in the user's order: `items` are servers and folders, `guilds` the same servers
+  with folders opened; a folder's expansion is Akari's own, kept per account in
+  `AccountMemory`, and starts collapsed), `DirectMessageListModel` (the DM list, the latest conversation first, with each
+  one's recipients and name), `ChannelListModel` (the open guild's channels, which of them
+  their own settings mute, and `shown(open:)`, which leaves muted channels out when the user
+  hides them, except the open one) and
   `MessageListModel` (the open channel's messages and loads; `failedLoads` keeps each kind of
   load's last failure; `lastLoad` is the last load's `LoadTrace` with akari-core's
   `LoadReport` and the model's read time, and `openedAt`/`openedFrom` say when the channel
@@ -83,8 +87,10 @@ screen, so views render from them without calling into Rust.
   `submit()` sends the trimmed draft unless it is blank, too long or held back by slowmode,
   and clears it only once the core has queued the message;
   `retry(_:)` and `discard(_:)` act on failed messages.
-- `CollapsedCategories` keeps the collapsed categories per guild across launches; a collapsed
-  category still shows the open channel.
+- `CollapsedCategories` (`session.collapsed`) keeps the collapsed categories per guild across
+  launches; a collapsed category still shows the open channel. Discord's clients don't sync
+  collapse, so it stays Akari's own (per guild, shared by the accounts on this Mac), and Akari
+  never collapses a category on its own.
 
 The session replaces `messages` on its own when the open channel is deleted or the user can
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.

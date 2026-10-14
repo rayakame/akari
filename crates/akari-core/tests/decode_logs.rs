@@ -15,6 +15,10 @@ fn skipped_entries_never_log_their_values() {
         .unwrap_or_else(|err| panic!("fixture is not JSON: {err}"));
     ready["d"]["users"][0]["accent_color"] = "do-not-log".into();
     ready["d"]["guilds"][0]["properties"]["afk_timeout"] = "do-not-log".into();
+    ready["d"]["user_guild_settings"]["entries"][0]["muted"] = "do-not-log".into();
+    ready["d"]["user_guild_settings"]["entries"][1]["channel_overrides"][0]["muted"] =
+        "do-not-log".into();
+    ready["d"]["notification_settings"] = "do-not-log".into();
     let event = decode(ready.to_string().as_bytes()).unwrap_or_else(|err| panic!("{err}"));
     assert!(matches!(
         event,
@@ -26,7 +30,8 @@ fn skipped_entries_never_log_their_values() {
 
     let logs = logs.text();
     assert!(logs.contains("100000000000000002"), "{logs}");
-    assert!(logs.contains("200000000000000001"), "{logs}");
-    assert_eq!(logs.matches("line 1").count(), 2, "{logs}");
+    assert_eq!(logs.matches("200000000000000001").count(), 2, "{logs}");
+    assert!(logs.contains("300000000000000010"), "{logs}");
+    assert_eq!(logs.matches("line 1").count(), 5, "{logs}");
     assert!(!logs.contains("do-not-log"), "{logs}");
 }

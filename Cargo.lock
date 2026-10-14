@@ -62,6 +62,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "percent-encoding",
+ "proptest",
  "reqwest",
  "rusqlite",
  "rustls",
@@ -88,6 +89,7 @@ version = "0.1.0"
 dependencies = [
  "akari-core",
  "akari-markdown",
+ "base64 0.23.1",
  "futures-util",
  "serde_json",
  "thiserror",

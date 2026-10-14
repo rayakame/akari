@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::model::UserId;
 
 // A file with any other version is deleted and started over, never migrated.
-pub(super) const CURRENT: i32 = 1;
+pub(super) const CURRENT: i32 = 2;
 
 pub(super) fn create(conn: &Connection, user: UserId) -> rusqlite::Result<()> {
     conn.execute_batch(&format!(
@@ -22,6 +22,9 @@ pub(super) fn create(conn: &Connection, user: UserId) -> rusqlite::Result<()> {
              data TEXT NOT NULL,
              PRIMARY KEY (channel_id, id)
          ) WITHOUT ROWID;
+         CREATE TABLE guild_settings (guild_id INTEGER PRIMARY KEY, data TEXT NOT NULL);
+         CREATE TABLE user_settings (key TEXT PRIMARY KEY, data TEXT NOT NULL);
+         CREATE TABLE read_states (channel_id INTEGER PRIMARY KEY, data TEXT NOT NULL);
          INSERT INTO meta (key, value) VALUES ('user_id', '{user}');
          PRAGMA user_version = {CURRENT};
          COMMIT;",

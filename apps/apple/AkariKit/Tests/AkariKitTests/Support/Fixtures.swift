@@ -27,6 +27,19 @@ func channel(
     )
 }
 
+func settings(
+    muted: Bool = false, suppressEveryone: Bool = false, hideMutedChannels: Bool = false
+) -> GuildSettings {
+    GuildSettings(
+        muted: muted, muteEndsAt: nil, suppressEveryone: suppressEveryone, suppressRoles: false,
+        hideMutedChannels: hideMutedChannels
+    )
+}
+
+func folder(_ raw: Int64, _ guilds: [UInt64], name: String? = nil) -> ServerListItem {
+    .folder(folder: Folder(id: raw, name: name, color: nil, guildIds: guilds.map(id)))
+}
+
 func dm(_ raw: UInt64, with recipient: UInt64) -> Channel {
     Channel(
         id: id(raw), kind: .dm, guildId: nil, parentId: nil, name: nil, position: 0, topic: nil,
