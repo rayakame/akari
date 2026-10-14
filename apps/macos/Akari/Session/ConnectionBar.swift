@@ -45,7 +45,7 @@ struct ConnectionBar: View {
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white, lineWidth: 1))
             }
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(TypeScale.connectionBar.font)
         .foregroundStyle(closed ? Color.white : Color(nsColor: Palette.textMuted))
         .frame(maxWidth: .infinity)
         .frame(height: 32)

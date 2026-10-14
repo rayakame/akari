@@ -22,7 +22,7 @@ struct ComposerStatus: View {
                     .modifier(Backdrop())
             }
         }
-        .font(.system(size: 12))
+        .font(TypeScale.small.font)
         .padding(.horizontal, 16 - Backdrop.padding)
         .frame(height: Self.height)
     }

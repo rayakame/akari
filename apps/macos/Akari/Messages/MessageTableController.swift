@@ -7,7 +7,7 @@ struct MessageTableState: Equatable {
     var reachedOldest = false
     var loading: MessageListModel.Load?
     var failedLoads: [MessageListModel.Load: RequestError] = [:]
-    var beginning = ""
+    var start: ChannelStart?
     var channelId: ChannelId?
     var lastLoad: LoadTrace?
     var openedAt: ContinuousClock.Instant?
@@ -175,9 +175,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reload(revealedNow)
         updateRelativeTimer()
+        if previous.start != state.start {
+            remeasureStart()
+        }
         if previous.loading != state.loading || previous.failedLoads != state.failedLoads
-            || previous.reachedOldest != state.reachedOldest
-            || previous.beginning != state.beginning
+            || previous.reachedOldest != state.reachedOldest || previous.start != state.start
         {
             configureEdges()
         }
@@ -604,8 +606,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func configure(_ cell: NSView, _ edge: MessageTimeline.Edge) {
-        if let cell = cell as? EdgeCell {
-            cell.show(state.beginning)
+        if let cell = cell as? ChannelStartCell {
+            cell.show(state.start)
         } else if let cell = cell as? PlaceholderCell {
             let failure: String? =
                 if state.rows.isEmpty {
@@ -616,6 +618,31 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                     state.failedLoads[.newer] == nil ? nil : "Couldn't load newer messages."
                 }
             cell.show(edge, height: placeholderHeight, failure: failure)
+        }
+    }
+
+    // The channel's name arrives after READY or changes with a rename, and the header's height
+    // with it; the reader's place stays.
+    private func remeasureStart() {
+        guard
+            let index = timeline.items.firstIndex(where: {
+                if case .edge(.beginning) = $0 { true } else { false }
+            })
+        else {
+            return
+        }
+        let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
+        if let place {
+            anchor = place
+        }
+        rowHeights[timeline.items[index].id] = nil
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        tableView.noteHeightOfRows(withIndexesChanged: [index])
+        if pinsToBottom {
+            scrollToBottom()
+        } else {
+            restoreAnchor()
         }
     }
 
@@ -698,12 +725,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private func height(of item: MessageTimeline.Item, width: CGFloat) -> CGFloat {
         switch item {
         case .edge(.beginning):
-            return EdgeCell.height
+            return ChannelStartCell.height(state.start, width: width)
         case .edge:
             return placeholderHeight
-        case .day(let day):
-            return DayDividerCell.height(
-                MessageFormat.dayDivider(day, calendar: calendar, locale: locale))
+        case .day:
+            return DayDividerCell.height
         case .message(let row, let startsGroup):
             let message = row.message
             if let notice = message.notice {
@@ -727,7 +753,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     func cell(for item: MessageTimeline.Item) -> NSTableCellView {
         switch item {
         case .edge(.beginning):
-            let cell = reuse(EdgeCell.identifier) as? EdgeCell ?? EdgeCell()
+            let cell = reuse(ChannelStartCell.identifier) as? ChannelStartCell ?? ChannelStartCell()
             configure(cell, .beginning)
             return cell
         case .edge(let edge):
@@ -1037,6 +1063,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let point = tableView.convert(location, from: nil)
             if tableView.visibleRect.contains(point) {
                 row = tableView.row(at: point)
+            }
+            // The space before a group and the scrollbar's gutter belong to no message.
+            if row >= 0,
+                let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                    as? MessageCell,
+                !cell.box.contains(cell.convert(point, from: tableView))
+            {
+                row = -1
             }
         }
         hovered = timeline.items.indices.contains(row) ? timeline.items[row].id : nil

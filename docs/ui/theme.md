@@ -47,6 +47,7 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `spoilerRevealed` | a revealed spoiler's background | `#97979f` at 16% | `#97979f` at 16% |
 | `timestampBackground` | a timestamp's pill | `#97979f` at 12% | `#97979f` at 12% |
 | `folder` | a server folder without a color: its tile and, expanded, its column (Akari's value for the neutral gray observed on 2026-10-14) | `#97979f` at 16% | `#97979f` at 20% |
+| `startIcon` | the circle behind a channel's symbol at its start (dark measured on 2026-10-14 as `#242428` on `chat`; light **unverified**) | `#97979f` at 8% | `#97979f` at 10% |
 
 On the dark message list (`#1a1a1e`), `hoverBackground` comes out at about `#29292d` and
 `selectedBackground` at about `#333338`.

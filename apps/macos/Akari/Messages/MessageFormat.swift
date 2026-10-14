@@ -4,7 +4,7 @@ enum MessageFormat {
     static func groupTime(_ date: Date, now: Date, calendar: Calendar, locale: Locale) -> String {
         let time = shortTime(date, calendar: calendar, locale: locale)
         if calendar.isDate(date, inSameDayAs: now) {
-            return "Today at \(time)"
+            return time
         }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
             calendar.isDate(date, inSameDayAs: yesterday)

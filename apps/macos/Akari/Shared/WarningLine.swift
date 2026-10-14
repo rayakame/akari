@@ -16,7 +16,7 @@ struct WarningLine: View {
             .buttonStyle(.plain)
             .help("Dismiss")
         }
-        .font(.system(size: 13))
+        .font(TypeScale.warning.font)
         .foregroundStyle(Color(nsColor: Palette.textStrong))
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

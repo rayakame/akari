@@ -52,7 +52,7 @@ final class NoticeCell: NSTableCellView {
             NSAttributedString(
                 string: "  \(time)",
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.chatTextMuted,
+                    .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
                 ]))
         text.attributedStringValue = line
         text.toolTip = fullDate

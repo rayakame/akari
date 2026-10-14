@@ -31,10 +31,14 @@ Sending shrinks it back to one line.
 
 ## Placeholder
 
-Akari's own wording, in `textMuted`:
+The official client's wording, in `textMuted`, at the size of message text:
 
-- a guild channel: "Write a message in #general";
-- a DM or group DM: "Write a message to Mira".
+- a guild channel or thread: "Message #general";
+- a DM: "Message @Mira", with the other person's display name.
+- a group DM: "Message Weekend plans", the group's name without "@" (**unverified**).
+
+The official placeholder measured `#6c6d75` on the dark theme, darker than `textMuted`
+(observed 2026-10-14); Akari keeps `textMuted` for now.
 
 ## Keys
 

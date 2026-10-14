@@ -11,10 +11,10 @@ struct UserPanel: View {
                 InitialsAvatar(user, size: 32)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(user.displayName)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(TypeScale.panelName.font)
                         .foregroundStyle(Color(nsColor: Palette.textStrong))
                     Text(user.username)
-                        .font(.system(size: 12))
+                        .font(TypeScale.panelUsername.font)
                         .foregroundStyle(Color(nsColor: Palette.textMuted))
                 }
                 .lineLimit(1)

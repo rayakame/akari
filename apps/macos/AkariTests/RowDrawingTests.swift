@@ -261,7 +261,7 @@ struct ConstraintConflictTests {
             let message = row(UInt64(raw), by: user, at: noon).message
             cell.configure(
                 message, body: NSAttributedString(string: message.content), startsGroup: true,
-                groupTime: "Today at 12:00", shortTime: "12:00", fullDate: "")
+                groupTime: "12:00", shortTime: "12:00", fullDate: "")
             window.layoutIfNeeded()
         }
 
@@ -344,7 +344,7 @@ struct CellBuildingTests {
         let message = row(1, at: berlinTime(2026, 10, 10, 12, 0), delivery: delivery).message
         cell.configure(
             message, body: NSAttributedString(string: message.content), startsGroup: true,
-            groupTime: "Today at 12:00", shortTime: "12:00",
+            groupTime: "12:00", shortTime: "12:00",
             fullDate: "Saturday, 10 October 2026 at 12:00")
     }
 

@@ -43,7 +43,7 @@ struct CredentialsForm: View {
                 Link("Create one on discord.com", destination: Self.register)
                     .foregroundStyle(Color(nsColor: Palette.textLink))
             }
-            .font(.system(size: 14))
+            .font(TypeScale.detail.font)
         }
     }
 

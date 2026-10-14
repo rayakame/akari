@@ -9,10 +9,10 @@ struct QrPanel: View {
             tile
             VStack(spacing: 8) {
                 Text(heading)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(TypeScale.qrTitle.font)
                     .foregroundStyle(Color(nsColor: Palette.textStrong))
                 Text(detail)
-                    .font(.system(size: 14))
+                    .font(TypeScale.detail.font)
                     .foregroundStyle(Color(nsColor: Palette.textMuted))
                     .fixedSize(horizontal: false, vertical: true)
                 action

@@ -38,8 +38,12 @@ final class MessageCell: NSTableCellView {
     private var top: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
 
-    private static let groupTop: CGFloat = 18
+    // The official client keeps the space before a group outside the message's box, so two
+    // highlighted groups in a row show a gap; its scrollbar's gutter stays clear too.
+    private static let groupSpacing: CGFloat = 16
     private static let continuationTop: CGFloat = 2
+    private static let groupTop = groupSpacing + continuationTop
+    private static let scrollbarGutter: CGFloat = 16
     private static let bottomInset: CGFloat = 2
     private static let textLeading: CGFloat = 72
     private static let textTrailing: CGFloat = 16
@@ -157,16 +161,27 @@ final class MessageCell: NSTableCellView {
         return max(height, top + replyHeight - Self.avatarLift + Self.avatarSize + Self.bottomInset)
     }
 
+    /// The message's own area, which hover and the mention highlight cover.
+    var box: NSRect {
+        let spacing = showsHeader ? Self.groupSpacing : 0
+        // A legacy scroller sits in a gutter of its own beside the list.
+        let gutter = enclosingScrollView?.scrollerStyle == .legacy ? 0 : Self.scrollbarGutter
+        return NSRect(
+            x: 0, y: isFlipped ? spacing : 0, width: max(0, bounds.width - gutter),
+            height: max(0, bounds.height - spacing))
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        let box = box
         if mentioned {
             Palette.mentionedBackground.setFill()
-            bounds.fill(using: .sourceOver)
+            box.fill(using: .sourceOver)
             Palette.mentionedBar.setFill()
-            NSRect(x: 0, y: 0, width: 2, height: bounds.height).fill()
+            NSRect(x: box.minX, y: box.minY, width: 2, height: box.height).fill()
         }
         if isHovered {
             Palette.hoverBackground.setFill()
-            bounds.fill(using: .sourceOver)
+            box.fill(using: .sourceOver)
         }
     }
 
@@ -178,13 +193,13 @@ final class MessageCell: NSTableCellView {
         avatar.translatesAutoresizingMaskIntoConstraints = false
         reply.attributedStringValue = CellText.symbolLine(
             "arrowshape.turn.up.left", "Replying to an earlier message")
-        hoverTime.font = .systemFont(ofSize: 11)
+        hoverTime.font = TypeScale.hoverTime.nsFont
         hoverTime.textColor = Palette.chatTextMuted
         hoverTime.alignment = .right
         extras.isSelectable = true
         // Without it, the field editor drops the attributed string's font on a click.
         extras.allowsEditingTextAttributes = true
-        extras.font = .systemFont(ofSize: 16)
+        extras.font = TypeScale.body.nsFont
 
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -270,11 +285,11 @@ private final class HeaderRow: NSView {
     init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        name.font = .systemFont(ofSize: 16, weight: .semibold)
+        name.font = TypeScale.username.nsFont
         name.textColor = Palette.textStrong
         name.lineBreakMode = .byTruncatingTail
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        time.font = .systemFont(ofSize: 12, weight: .medium)
+        time.font = TypeScale.messageTime.nsFont
         time.textColor = Palette.chatTextMuted
         appTag.translatesAutoresizingMaskIntoConstraints = false
         for view in [name, appTag, time] as [NSView] {
@@ -325,7 +340,7 @@ private final class TagLabel: NSTextField {
         isEditable = false
         isBordered = false
         drawsBackground = false
-        font = .systemFont(ofSize: 10, weight: .semibold)
+        font = TypeScale.appTag.nsFont
         textColor = .white
         alignment = .center
         wantsLayer = true
@@ -384,7 +399,7 @@ private final class FailedLine: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         let label = CellText.label()
         label.stringValue = "Not sent."
-        label.font = .systemFont(ofSize: 14)
+        label.font = TypeScale.detail.nsFont
         label.textColor = Palette.danger
         let row = NSStackView(views: [label, retry, delete])
         row.orientation = .horizontal
@@ -407,7 +422,7 @@ private final class FailedLine: NSView {
         button.isBordered = false
         button.attributedTitle = NSAttributedString(
             string: title,
-            attributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: Palette.textLink])
+            attributes: [.font: TypeScale.detail.nsFont, .foregroundColor: Palette.textLink])
         return button
     }
 }

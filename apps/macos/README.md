@@ -25,7 +25,8 @@ notifications and settings come later.
   present, and so does Escape, from the list or the composer (`docs/ui/message-list.md`).
 - **Up arrow** in an empty composer is reserved for editing the last message, which isn't
   built yet.
-- **Times** ("Today at", day dividers) follow midnight, time zone and locale changes.
+- **Times** (today's time, "Yesterday at", day dividers) follow midnight, time zone and locale
+  changes.
 - **Formatting** (`docs/ui/markdown.md`): `MessageText` builds a message's attributed string
   from `Message.formatted`, once per message, revealed spoilers and relative text, shared by
   the height pass and the cell. `MessageTextView` shows it with TextKit 1, and
@@ -301,3 +302,7 @@ waits for a last write, at most about a second.
 
 View → Theme switches between Dark (the default), Light and Match System. The colors are the
 tokens of `docs/ui/theme.md`.
+
+Text sizes and weights come from `TypeScale` (`Akari/Theme/TypeScale.swift`), one style per
+kind of text at a 16 pt base, as listed in `docs/ui/typography.md`. Views take their fonts
+from it, never a size of their own; glyphs inside icons size with their icon.

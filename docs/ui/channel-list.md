@@ -10,7 +10,8 @@ look and behave.
 
 ## Header
 
-The server's name at the top of the column, 48 tall like the channel header next to it.
+The server's name at the top of the column, in semibold `textStrong`, 48 tall like the channel
+header next to it. Text sizes of the whole column are in [typography.md](typography.md).
 Discord opens a server menu from it; Akari only shows the name for now. At home the same
 header says "Direct Messages" (see [Home](#home)).
 
@@ -21,8 +22,9 @@ title bar.
 
 - A row 24 tall with 16 of space above it (8 in compact density), 16 padding on the left
   and 8 on the right.
-- The name as the server wrote it, in 14 medium weight and `channelDefault`. Before the
-  redesign category names were uppercase and 12; now they keep their case.
+- The name as the server wrote it, in medium weight (14 px in the official client) and
+  `channelDefault`. Before the redesign category names were uppercase and 12; now they keep
+  their case.
 - A small chevron (12) **after** the name, pointing down when open and turned −90° when
   collapsed.
 - Clicking the row collapses or expands the category. The state is kept per server.
@@ -50,8 +52,11 @@ title bar.
 |---|---|---|
 | Normal | none | `channelDefault` |
 | Hovered | `hoverBackground` | `interactiveTextActive` |
-| Selected | `selectedBackground` | `interactiveTextActive`, medium weight (semibold in light) |
-| Unread | none | `interactiveTextActive`, medium weight, plus a 4 × 8 pill on the column's left edge |
+| Selected | `selectedBackground` | `interactiveTextActive` (semibold in light) |
+| Unread | none | `interactiveTextActive`, plus a 4 × 8 pill on the column's left edge |
+
+Names are medium weight in every state; the official client changes only their color (observed
+2026-10-14 in the dark theme).
 | Muted | none | icon and name at half opacity |
 
 - Icons by kind: text, voice, announcement, stage, forum, media, rules and thread. Each has a

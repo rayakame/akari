@@ -326,7 +326,7 @@ final class TimeRefreshTests {
     func midnightTurnsTodayIntoYesterday() async {
         var rows = [row(1, at: berlinTime(2026, 10, 10, 23, 58))]
         show(rows)
-        #expect(texts(ofRow: index(of: 1)).contains("Today at 11:58\u{202F}PM"))
+        #expect(texts(ofRow: index(of: 1)).contains("11:58\u{202F}PM"))
 
         clock.now = berlinTime(2026, 10, 11, 0, 1)
         await post(.NSCalendarDayChanged)
@@ -352,7 +352,7 @@ final class TimeRefreshTests {
             window.setContentSize(NSSize(width: CGFloat(windowWidth), height: 400))
             window.layoutIfNeeded()
             let column = table.tableColumns[0].width
-            if height("Today at 11:58\u{202F}PM", column)
+            if height("11:58\u{202F}PM", column)
                 != height("Yesterday at 11:58\u{202F}PM", column)
             {
                 width = column
@@ -401,12 +401,12 @@ final class TimeRefreshTests {
     func aLocaleChangeReformatsTimes() async {
         clock.now = berlinTime(2026, 10, 10, 15, 0)
         show([row(1, at: berlinTime(2026, 10, 10, 14, 5))])
-        #expect(texts(ofRow: index(of: 1)).contains("Today at 2:05\u{202F}PM"))
+        #expect(texts(ofRow: index(of: 1)).contains("2:05\u{202F}PM"))
 
         clock.locale = Locale(identifier: "de_DE")
         await post(NSLocale.currentLocaleDidChangeNotification)
 
-        #expect(texts(ofRow: index(of: 1)).contains("Today at 14:05"))
+        #expect(texts(ofRow: index(of: 1)).contains("14:05"))
     }
 
     @Test

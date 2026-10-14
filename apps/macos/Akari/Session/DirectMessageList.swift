@@ -36,6 +36,7 @@ private struct ConversationRow: View {
     let selected: Bool
     let open: () -> Void
     @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: open) {
@@ -43,7 +44,7 @@ private struct ConversationRow: View {
                 avatar
                 VStack(alignment: .leading, spacing: 0) {
                     Text(conversation.name)
-                        .font(.system(size: 16, weight: selected ? .medium : .regular))
+                        .font(TypeScale.channelName.weight(weight).font)
                         .foregroundStyle(
                             Color(
                                 nsColor: selected || hovered
@@ -52,7 +53,7 @@ private struct ConversationRow: View {
                         .lineLimit(1)
                     if conversation.channel.kind == .groupDm {
                         Text(DirectMessageList.memberLine(conversation.memberCount))
-                            .font(.system(size: 12))
+                            .font(TypeScale.small.font)
                             .foregroundStyle(Color(nsColor: Palette.textMuted))
                     }
                 }
@@ -71,6 +72,11 @@ private struct ConversationRow: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .padding(.horizontal, 8)
+    }
+
+    // As a channel row's name.
+    private var weight: TextStyle.Weight {
+        selected && colorScheme == .light ? .semibold : .medium
     }
 
     @ViewBuilder private var avatar: some View {

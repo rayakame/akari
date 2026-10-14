@@ -13,16 +13,20 @@ final class AvatarView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        Self.draw(name: name, userId: userId, in: bounds)
+    }
+
+    static func draw(name: String, userId: UInt64, in rect: NSRect) {
         InitialsAvatar.color(userId).setFill()
-        NSBezierPath(ovalIn: bounds).fill()
+        NSBezierPath(ovalIn: rect).fill()
         let letters = InitialsAvatar.letters(name) as NSString
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: bounds.height * 0.4, weight: .semibold),
+            .font: NSFont.systemFont(ofSize: rect.height * 0.4, weight: .semibold),
             .foregroundColor: NSColor.white,
         ]
         let size = letters.size(withAttributes: attributes)
         letters.draw(
-            at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2),
+            at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),
             withAttributes: attributes)
     }
 }

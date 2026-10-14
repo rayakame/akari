@@ -117,6 +117,13 @@ struct SessionView<MessageArea: View>: View {
     }
 
     private var channelName: ChannelName {
-        ChannelName(inGuild: openChannel?.guildId != nil, name: openName)
+        let kind: ChannelName.Kind =
+            switch openChannel?.kind {
+            case .dm: .direct(conversation?.recipients.first)
+            case .groupDm: .group
+            case let kind?: .guildChannel(kind)
+            case nil: .guildChannel(.guildText)
+            }
+        return ChannelName(kind: kind, name: openName)
     }
 }

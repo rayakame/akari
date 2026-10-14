@@ -470,22 +470,53 @@ struct MessageTableTests {
         show(messages(80, longText: true))
         let clip = controller.scrollView.contentView
         pointer.location = NSPoint(x: 300, y: 200)
-        let underPointer = {
-            self.table.row(at: self.table.convert(NSPoint(x: 300, y: 200), from: nil))
-        }
+        let underPointer = { self.boxRow(at: NSPoint(x: 300, y: 200)) }
 
         controller.pointerMoved()
-        #expect(hoveredRows == [underPointer()])
+        #expect(hoveredRows == underPointer())
 
         // Scrolled under a still pointer, with no live-scroll notification.
         clip.scroll(to: NSPoint(x: 0, y: clip.bounds.minY - 300))
         controller.scrollView.reflectScrolledClipView(clip)
         window.layoutIfNeeded()
-        #expect(hoveredRows == [underPointer()])
+        #expect(hoveredRows == underPointer())
 
         pointer.location = nil
         controller.pointerMoved()
         #expect(hoveredRows.isEmpty)
+    }
+
+    // The message row whose box holds a point in window coordinates; the space before a group
+    // and the scrollbar's gutter belong to none.
+    func boxRow(at location: NSPoint) -> [Int] {
+        let point = table.convert(location, from: nil)
+        let row = table.row(at: point)
+        guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageCell
+        else {
+            return []
+        }
+        return cell.box.contains(cell.convert(point, from: table)) ? [row] : []
+    }
+
+    @Test
+    func theSpaceBeforeAGroupHoversNothing() {
+        show([row(1, at: noon), row(2, by: author(2), at: noon + 30)])
+        let second = index(of: 2)
+        let rect = table.rect(ofRow: second)
+        let at = { (x: CGFloat, y: CGFloat) in self.table.convert(NSPoint(x: x, y: y), to: nil) }
+
+        pointer.location = at(300, rect.minY + 8)
+        controller.pointerMoved()
+        #expect(hoveredRows.isEmpty)
+
+        pointer.location = at(300, rect.minY + 30)
+        controller.pointerMoved()
+        #expect(hoveredRows == [second])
+
+        pointer.location = at(table.bounds.maxX - 8, rect.minY + 30)
+        controller.pointerMoved()
+        let legacy = controller.scrollView.scrollerStyle == .legacy
+        #expect(hoveredRows == (legacy ? [second] : []))
     }
 
     func messageText(in view: NSView) -> MessageTextView? {
@@ -1280,15 +1311,74 @@ struct MessageTableTests {
         #expect(heights[0] >= 1.5 * clip.bounds.height)
         #expect(try cell(at: 0) is PlaceholderCell)
 
-        show(
-            MessageTableState(
-                rows: page, reachedOldest: true, beginning: "This is the beginning of #general."))
-        #expect(table.rect(ofRow: 0).height == 48)
+        let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        show(MessageTableState(rows: page, reachedOldest: true, start: general.start))
+        #expect(try cell(at: 0) is ChannelStartCell)
+        let shown = textFields(in: try cell(at: 0)).filter { !$0.isHiddenOrHasHiddenAncestor }
+            .map(\.stringValue)
+        #expect(shown == ["Welcome to #general!", "This is the start of the #general channel."])
+        #expect(table.rect(ofRow: 0).height == fittingHeight(ofRow: 0))
+    }
+
+    // The official client's welcome sits left, above the first message.
+    @Test
+    func theStartHeaderSitsLeftAboveTheFirstMessage() throws {
+        let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        show(MessageTableState(rows: [row(1, at: noon)], reachedOldest: true, start: general.start))
+        let start = try #require(try cell(at: 0) as? ChannelStartCell)
+        let fields = textFields(in: start).filter { !$0.isHiddenOrHasHiddenAncestor }
+        let title = try #require(fields.first { $0.stringValue.hasPrefix("Welcome") })
+        let subtitle = try #require(fields.first { $0.stringValue.hasPrefix("This is") })
+
+        #expect(start.icon.frame.size == NSSize(width: 68, height: 68))
+        #expect(start.icon.frame.minX == 16)
+        // A label's frame reaches 2 past its text.
+        #expect(title.alignmentRect(forFrame: title.frame).minX == 16)
+        #expect(subtitle.alignmentRect(forFrame: subtitle.frame).minX == 16)
+        #expect(title.font == TypeScale.startTitle.nsFont)
+        #expect(subtitle.font == TypeScale.startSubtitle.nsFont)
+        // Measured: the message text's color, not a muted one.
+        #expect(subtitle.textColor == Palette.textDefault)
+        // Measured from the official client: the title's baseline 39 below the icon, the
+        // subtitle's 33.5 below the title's.
+        let fromTop = { (view: NSView, y: CGFloat) in
+            (start.isFlipped ? view.frame.minY : start.bounds.height - view.frame.maxY) + y
+        }
+        let iconBottom = fromTop(start.icon, start.icon.frame.height)
+        let titleBaseline = fromTop(title, title.firstBaselineOffsetFromTop)
+        let subtitleBaseline = fromTop(subtitle, subtitle.firstBaselineOffsetFromTop)
+        #expect(abs(titleBaseline - iconBottom - 39) <= 0.5)
+        #expect(abs(subtitleBaseline - titleBaseline - 33.5) <= 0.5)
+        #expect(controller.timeline.items[1] == .day(berlin.startOfDay(for: noon)))
+    }
+
+    @Test
+    func aLongChannelNameWrapsTheTitleAndTheRowGrows() throws {
+        let short = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        let long = ChannelName(
+            kind: .guildChannel(.guildText),
+            name: String(repeating: "a-very-long-channel-name-", count: 4))
+        show(MessageTableState(rows: page, reachedOldest: true, start: short.start))
+        let one = table.rect(ofRow: 0).height
+
+        show(MessageTableState(rows: page, reachedOldest: true, start: long.start))
+
+        #expect(table.rect(ofRow: 0).height > one)
+        #expect(table.rect(ofRow: 0).height == fittingHeight(ofRow: 0))
+    }
+
+    @Test
+    func aDirectMessageStartsWithTheAvatarAndTheUsername() throws {
+        let mira = ChannelName(kind: .direct(author(7, "Mira")), name: "Mira")
+        show(MessageTableState(rows: page, reachedOldest: true, start: mira.start))
+        let shown = textFields(in: try cell(at: 0)).filter { !$0.isHiddenOrHasHiddenAncestor }
+            .map(\.stringValue)
+
         #expect(
-            textFields(in: try cell(at: 0)).contains {
-                $0.stringValue == "This is the beginning of #general."
-                    && !$0.isHiddenOrHasHiddenAncestor
-            })
+            shown == [
+                "Mira", "mira", "This is the beginning of your direct message history with Mira.",
+            ])
+        #expect(table.rect(ofRow: 0).height == fittingHeight(ofRow: 0))
     }
 
     @Test

@@ -7,7 +7,7 @@ struct StaleCapsule: View {
             ProgressView().controlSize(.mini)
             Text("Catching up…")
         }
-        .font(.system(size: 12))
+        .font(TypeScale.small.font)
         .foregroundStyle(Color(nsColor: Palette.textMuted))
         .padding(.horizontal, 10)
         .frame(height: 24)

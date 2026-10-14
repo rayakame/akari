@@ -43,12 +43,12 @@ final class PlaceholderCell: NSTableCellView {
         errorRow = NSStackView(views: [label, retry])
         super.init(frame: .zero)
         identifier = Self.identifier
-        label.font = .systemFont(ofSize: 14)
+        label.font = TypeScale.detail.nsFont
         label.textColor = Palette.textMuted
         retry.isBordered = false
         retry.attributedTitle = NSAttributedString(
             string: "Try again",
-            attributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: Palette.textLink])
+            attributes: [.font: TypeScale.detail.nsFont, .foregroundColor: Palette.textLink])
         retry.target = self
         retry.action = #selector(retryClicked)
         errorRow.orientation = .horizontal

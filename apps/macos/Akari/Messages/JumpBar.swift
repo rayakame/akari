@@ -16,7 +16,7 @@ struct JumpBar: View {
             }
             .buttonStyle(.plain)
         }
-        .font(.system(size: 14, weight: .medium))
+        .font(TypeScale.jumpBar.font)
         .foregroundStyle(.white)
         .padding(.horizontal, 12)
         .frame(height: Self.height)
