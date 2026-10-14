@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot};
@@ -17,14 +17,61 @@ enum Request {
 // The gateway's pump never waits for it: the pump only bumps the store's change counter.
 pub(crate) struct Flusher {
     requests: mpsc::UnboundedSender<Request>,
+    source: Arc<Source>,
+    #[cfg(test)]
+    paused: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
+}
+
+// Snapshots end with close's, so nothing that changes after close() returns is written.
+struct Source {
+    store: Store,
+    closing: Mutex<Closing>,
+}
+
+#[derive(Default)]
+struct Closing {
+    closed: bool,
+    // Kept here, not in the request: another close's request can reach the task first.
+    last: Option<Snapshot>,
+}
+
+impl Source {
+    fn closing(&self) -> std::sync::MutexGuard<'_, Closing> {
+        self.closing.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    // Under the lock, so none is taken after close's.
+    fn snapshot(&self) -> Option<Snapshot> {
+        let closing = self.closing();
+        if closing.closed {
+            return None;
+        }
+        Snapshot::take(&self.store)
+    }
+
+    fn close(&self) {
+        let mut closing = self.closing();
+        if !closing.closed {
+            closing.closed = true;
+            closing.last = Snapshot::take(&self.store);
+        }
+    }
+
+    fn take_last(&self) -> Option<Snapshot> {
+        self.closing().last.take()
+    }
 }
 
 impl Flusher {
     pub(crate) fn start(runtime: &tokio::runtime::Handle, store: Store, cache: DiskCache) -> Self {
         let (requests, receiver) = mpsc::unbounded_channel();
         let every = cache.every;
-        runtime.spawn(run(
+        let source = Arc::new(Source {
             store,
+            closing: Mutex::default(),
+        });
+        runtime.spawn(run(
+            source.clone(),
             Target {
                 thread: cache.thread,
                 user: cache.user,
@@ -33,7 +80,12 @@ impl Flusher {
             every,
             receiver,
         ));
-        Self { requests }
+        Self {
+            requests,
+            source,
+            #[cfg(test)]
+            paused: Mutex::default(),
+        }
     }
 
     pub(crate) async fn flush(&self) {
@@ -48,7 +100,34 @@ impl Flusher {
     }
 
     pub(crate) fn close(&self) {
+        self.source.close();
+        #[cfg(test)]
+        self.pause();
         let _ = self.requests.send(Request::Close);
+    }
+
+    // The next close() stops between its snapshot and its request until released.
+    #[cfg(test)]
+    pub(crate) fn pause_next_close(
+        &self,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (reached, reaching) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        *self.paused.lock().unwrap_or_else(PoisonError::into_inner) = Some((reached, released));
+        (reaching, release)
+    }
+
+    #[cfg(test)]
+    fn pause(&self) {
+        let paused = self
+            .paused
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some((reached, release)) = paused {
+            let _ = reached.send(());
+            let _ = release.recv();
+        }
     }
 
     pub(crate) fn delete(&self) {
@@ -63,7 +142,7 @@ struct Target {
 }
 
 async fn run(
-    store: Store,
+    source: Arc<Source>,
     mut target: Target,
     every: Duration,
     mut requests: mpsc::UnboundedReceiver<Request>,
@@ -74,19 +153,25 @@ async fn run(
     loop {
         tokio::select! {
             _ = ticks.tick() => {
-                if flushed != Some(store.changes()) {
-                    flush(&store, &mut target, &mut flushed).await;
+                if flushed != Some(source.store.changes()) {
+                    flush(&source, &mut target, &mut flushed).await;
                 }
             }
             request = requests.recv() => match request {
                 Some(Request::Flush(reply)) => {
-                    flush(&store, &mut target, &mut flushed).await;
+                    flush(&source, &mut target, &mut flushed).await;
                     if let Some(reply) = reply {
                         let _ = reply.send(());
                     }
                 }
-                Some(Request::Close) | None => {
-                    flush(&store, &mut target, &mut flushed).await;
+                Some(Request::Close) => {
+                    if let Some(last) = source.take_last() {
+                        write(&mut target, last).await;
+                    }
+                    return;
+                }
+                None => {
+                    flush(&source, &mut target, &mut flushed).await;
                     return;
                 }
                 Some(Request::Delete) => {
@@ -102,11 +187,17 @@ async fn run(
 }
 
 // A failed write leaves `flushed` behind, so the next tick tries again.
-async fn flush(store: &Store, target: &mut Target, flushed: &mut Option<u64>) {
-    let changes = store.changes();
-    let Some(snapshot) = Snapshot::take(store) else {
+async fn flush(source: &Source, target: &mut Target, flushed: &mut Option<u64>) {
+    let changes = source.store.changes();
+    let Some(snapshot) = source.snapshot() else {
         return;
     };
+    if write(target, snapshot).await {
+        *flushed = Some(changes);
+    }
+}
+
+async fn write(target: &mut Target, snapshot: Snapshot) -> bool {
     // The host named another account than READY's: that file stays for its own account.
     if let Some(session) = snapshot
         .entities
@@ -117,13 +208,11 @@ async fn flush(store: &Store, target: &mut Target, flushed: &mut Option<u64>) {
         && let Some(caches) = &target.caches
     {
         let Some(thread) = caches.thread(session) else {
-            return;
+            return false;
         };
         tracing::info!(target: LOG, "cache moved to the session's account");
         target.thread = thread;
         target.user = session;
     }
-    if target.thread.flush(snapshot).await.is_some() {
-        *flushed = Some(changes);
-    }
+    target.thread.flush(snapshot).await.is_some()
 }

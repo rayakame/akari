@@ -743,7 +743,8 @@ impl Account {
         }
     }
 
-    /// Ends the session. Subscriptions end once the connection is closed.
+    /// Ends the session. Subscriptions end once the connection is closed. The disk cache gets
+    /// the state as of this call; nothing that changes later is written.
     pub fn close(&self) {
         self.shared.close();
     }
