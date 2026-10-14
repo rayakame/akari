@@ -70,9 +70,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var lastLiveScroll = Date.distantPast
     private var liveScrollGeneration = 0
     private static let liveScrollQuiet: TimeInterval = 0.5
-    private static let bottomInset: CGFloat = 8
-    // The status strip above the composer lies over the list's bottom.
-    private static let restingInset = bottomInset + ComposerStatus.height
+    // The status strip above the composer lies over the list's bottom; the official client
+    // leaves just that below its newest message.
+    private static let restingInset = ComposerStatus.height
     // Exact heights before a row shows: automatic heights start as estimates and change when a
     // fling first reaches a row, which moves the bottom under it.
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
@@ -732,12 +732,23 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if let height = rowHeights[item.id] {
             return height
         }
-        let height = height(of: item, width: width)
+        let height = height(of: item, followsDay: followsDay(row), width: width)
         rowHeights[item.id] = height
         return height
     }
 
-    private func height(of item: MessageTimeline.Item, width: CGFloat) -> CGFloat {
+    // A day's first message sits closer to its divider; TimelineChanges reloads it when that
+    // changes.
+    private func followsDay(_ row: Int) -> Bool {
+        guard row > 0, case .day = timeline.items[row - 1] else {
+            return false
+        }
+        return true
+    }
+
+    private func height(of item: MessageTimeline.Item, followsDay: Bool, width: CGFloat)
+        -> CGFloat
+    {
         switch item {
         case .edge(.beginning):
             return ChannelStartCell.height(state.start, width: width)
@@ -750,22 +761,26 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             if let notice = message.notice {
                 let time = MessageFormat.groupTime(
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
-                return NoticeCell.height(message, notice: notice, time: time, width: width)
+                return NoticeCell.height(
+                    message, notice: notice, time: time, followsDay: followsDay, width: width)
             }
             return MessageCell.height(
-                message, body: body(row), startsGroup: startsGroup, width: width)
+                message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
+                width: width)
         }
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int)
         -> NSView?
     {
-        let cell = cell(for: timeline.items[row])
+        let cell = cell(forRow: row)
         cell.objectValue = timeline.items[row].id
         return cell
     }
 
-    func cell(for item: MessageTimeline.Item) -> NSTableCellView {
+    func cell(forRow index: Int) -> NSTableCellView {
+        let item = timeline.items[index]
+        let followsDay = followsDay(index)
         switch item {
         case .edge(.beginning):
             let cell = reuse(ChannelStartCell.identifier) as? ChannelStartCell ?? ChannelStartCell()
@@ -788,7 +803,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 message.timestamp, calendar: calendar, locale: locale)
             if let notice = message.notice {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
-                cell.configure(message, notice: notice, time: groupTime, fullDate: fullDate)
+                cell.configure(
+                    message, notice: notice, time: groupTime, followsDay: followsDay,
+                    fullDate: fullDate)
                 return cell
             }
             let cell =
@@ -799,7 +816,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
-                message, body: body(row), startsGroup: startsGroup, groupTime: groupTime,
+                message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
+                groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)

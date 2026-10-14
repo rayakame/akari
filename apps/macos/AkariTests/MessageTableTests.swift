@@ -47,8 +47,8 @@ struct MessageTableTests {
     }
 
     let noon = berlinTime(2026, 10, 10, 12, 0)
-    // Below the newest row when pinned: 8, and the status strip over the list's bottom.
-    let restingInset = 8 + ComposerStatus.height
+    // Below the newest row when pinned: the status strip over the list's bottom.
+    let restingInset = ComposerStatus.height
     let table = CountingTableView()
     let pointer = Pointer()
     let controller: MessageTableController
@@ -88,7 +88,7 @@ struct MessageTableTests {
 
     // What Auto Layout gives the row's cell at the table's width, as automatic row heights do.
     func fittingHeight(ofRow row: Int) -> CGFloat {
-        let cell = controller.cell(for: controller.timeline.items[row])
+        let cell = controller.cell(forRow: row)
         cell.translatesAutoresizingMaskIntoConstraints = false
         let width = cell.widthAnchor.constraint(equalToConstant: table.tableColumns[0].width)
         width.isActive = true
@@ -1758,6 +1758,47 @@ struct MessageTableTests {
         #expect(visibleRows.contains(table.numberOfRows - 1))
         #expect(abs(gapBelowTheRows) <= 0.5)
         #expect(controller.timeline.items.first?.id == .edge(.older))
+    }
+
+    // Measured in the official client: 24 from the newest message's box to the composer.
+    @Test
+    func theNewestBoxEnds24AboveTheComposer() throws {
+        show(messages(40))
+        let cell = try #require(try cell(at: table.numberOfRows - 1) as? MessageCell)
+
+        let boxBottom = cell.convert(cell.box, to: table).maxY
+        #expect(abs(clip.bounds.maxY - boxBottom - 24) <= 0.5)
+    }
+
+    // Measured in the official client: from the divider's line to the first avatar 21.5.
+    @Test
+    func theDividersLineSits21AndAHalfAboveTheFirstAvatar() throws {
+        show(MessageTableState(rows: [row(1, at: noon)], reachedOldest: true))
+        let day = try #require(
+            controller.timeline.items.firstIndex { if case .day = $0 { true } else { false } })
+        let divider = try #require(try cell(at: day) as? DayDividerCell)
+        let message = try cell(of: 1)
+        let date = try #require(textFields(in: divider).first)
+        let avatar = try #require(message.subviews.first { $0 is AvatarView })
+
+        let line = date.convert(date.bounds, to: table).midY
+        let avatarTop = avatar.convert(avatar.bounds, to: table).minY
+        #expect(abs(avatarTop - line - 21.5) <= 0.5)
+        // The date stays inside its own row.
+        #expect(date.convert(date.bounds, to: table).maxY <= table.rect(ofRow: day).maxY)
+    }
+
+    // An older message of its day landing above it moves the divider away from it.
+    @Test
+    func aMessageLeavingItsDividerGetsTheGroupSpacingBack() throws {
+        let first = row(2, by: author(2), at: noon + 600)
+        show(MessageTableState(rows: [first], reachedOldest: true))
+        let close = table.rect(ofRow: index(of: 2)).height
+
+        show(MessageTableState(rows: [row(1, at: noon), first], reachedOldest: true))
+
+        #expect(table.rect(ofRow: index(of: 2)).height == close + 10)
+        #expect(table.rect(ofRow: index(of: 2)).height == fittingHeight(ofRow: index(of: 2)))
     }
 
     @Test

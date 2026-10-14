@@ -31,18 +31,27 @@ author; the rest show only their content.
 **The group's first message:**
 
 - 16 of extra space above it, outside its box: hover and the mention highlight leave it out,
-  so two highlighted groups in a row show a gap (observed 2026-10-14). At least 44 tall.
+  so two highlighted groups in a row show a gap (observed 2026-10-14).
   *Akari: 16, the official setting's default; the official client measured 17 between two
   boxes and 48 for a one-line group start's box, where Akari's is 47 with the name on a 19
   line. Akari keeps its rhythm for now.*
-- The avatar (40) in the left column, 2 above the name's line.
+- Right after a day divider the space above it is smaller: its box starts 17.5 below the
+  divider's line, its avatar 21.5 (measured 2026-10-14). *Akari: 6 instead of 16 below the
+  divider's row; system messages there move up by the same 10.*
+- Inside the box, measured at 2 px per point on 2026-10-14: the avatar (40) in the left column
+  starts 4 below the box's top, the name's baseline sits 18.5 below it and the first text
+  line's 41. *Akari: avatar and name line 4 into its 47 box (name baseline at 19), text
+  baseline 41, the avatar 3 above the box's bottom; a group start whose content is shorter than
+  the avatar is as tall as a one-line one.*
 - The display name in medium `textStrong`. Bots carry a small tag after the name ("APP"
   since 2024). **Unverified** that webhooks get the same tag.
 - The time, 4 after the name, in medium `chatTextMuted` (12 px in the official client;
   Akari's sizes in [typography.md](typography.md)).
 
 **The other messages:** no avatar and no name. Hovering one shows its time (hours and minutes)
-in the left column, right-aligned in a 56 wide space.
+in the left column, right-aligned in a 56 wide space. Their text sits where the first text line
+of a group start sits in its line: its baseline 19 below the box's top (derived from the group
+start's measurement; *Akari: 3 above the text, 1 below*).
 
 ### When a new group starts
 
@@ -103,6 +112,8 @@ a German localization of Akari, a milestone of its own.
   goes.
 - A 1 pt `borderSubtle` line across the list with the date in the middle, in the locale's
   long form ("October 10, 2026"), semibold `textMuted`, on the list's background.
+- The first message under it sits closer than a group usually does: its avatar 21.5 below
+  the line (see [Groups](#groups)).
 
 ## System messages
 

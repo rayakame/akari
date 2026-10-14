@@ -53,6 +53,29 @@ struct TimelineChangesTests {
         #expect(changes.reloaded == [2])
     }
 
+    // The first message after a day divider sits closer to it, so its row changes when an
+    // older message of its day lands above it, and again when that one goes.
+    @Test
+    func aMessageThatStopsOrStartsFollowingItsDayDividerIsReloaded() throws {
+        let first = row(2, by: user(2), at: noon + 600)
+        let alone = items([first])
+        let below = items([row(1, at: noon), first])
+        let message = MessageTimeline.ItemId.message(MessageId(rawValue: 2))
+        // Another author: it still starts a group, so only its place changes.
+        guard case .message(_, let startsGroup) = try #require(below.first { $0.id == message })
+        else {
+            Issue.record("not a message")
+            return
+        }
+        #expect(startsGroup)
+
+        let landed = TimelineChanges(from: alone, to: below)
+        let gone = TimelineChanges(from: below, to: alone)
+
+        #expect(landed.reloaded == [try #require(below.firstIndex { $0.id == message })])
+        #expect(gone.reloaded == [try #require(alone.firstIndex { $0.id == message })])
+    }
+
     @Test
     func deletingAGroupsFirstMessageReloadsTheNextOne() {
         let both = [row(1, at: noon), row(2, at: noon + 60)]

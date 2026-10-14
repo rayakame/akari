@@ -219,13 +219,16 @@ final class TimeRefreshTests {
             Issue.record("not a message")
             return
         }
+        // It's the first message after midnight, right below its day's divider.
+        let followsDay =
+            if case .day = controller.timeline.items[index(of: 2) - 1] { true } else { false }
         #expect(
             shown
                 == MessageCell.height(
                     edited.message,
                     body: MessageText.build(edited.message, revealed: [], now: later, times: times)
                         .text,
-                    startsGroup: startsGroup, width: width))
+                    startsGroup: startsGroup, followsDay: followsDay, width: width))
     }
 
     @Test
@@ -379,7 +382,8 @@ final class TimeRefreshTests {
         let message = notice.message
         let text = try #require(message.notice)
         let height = { (time: String, width: CGFloat) in
-            NoticeCell.height(message, notice: text, time: time, width: width)
+            // The list's first message, right below its day's divider.
+            NoticeCell.height(message, notice: text, time: time, followsDay: true, width: width)
         }
         var width: CGFloat = 0
         for windowWidth in stride(from: 300, through: 1000, by: 2) {

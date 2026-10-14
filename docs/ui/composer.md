@@ -17,9 +17,9 @@ from Discord's documentation.
   there now) and the slowmode note or countdown with a stopwatch on its right. Nothing sits
   below the card.
 - The message list runs on behind the strip down to the card: messages scroll under the strip
-  and disappear behind the card. A pinned list leaves the strip's height and 8 more below its
-  newest message. Akari puts the strip's texts on the chat's background, so they stay readable
-  over a message.
+  and disappear behind the card. A pinned list leaves just the strip's height (24) between its
+  newest message's box and the card (measured 2026-10-14). Akari puts the strip's texts on the
+  chat's background, so they stay readable over a message.
 - Discord puts buttons for attachments, gifts, GIFs, stickers and emoji into the card. Akari
   has none of them yet.
 
