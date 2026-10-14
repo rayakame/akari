@@ -80,6 +80,52 @@ struct RailFolderTests {
     }
 
     @Test
+    func anExpandedFoldersColumnHoldsItsTilesCornersWhole() throws {
+        let tile = RoundedRectangle(cornerRadius: RailShape.cornerRadius, style: .continuous)
+            .fill(Color.blue)
+            .frame(width: 40, height: 40)
+        let column = FolderColumn(color: 0xff0000, expanded: true) {
+            tile
+            tile
+        }
+        .frame(width: SidebarWidth.rail, height: 160)
+        .background(Color.black)
+        let rendered = try Rendered(column, size: NSSize(width: SidebarWidth.rail, height: 160))
+        // The tiles' top and bottom edges: the first and last blue rows down the middle.
+        let middle = SidebarWidth.rail / 2
+        let blue = (0..<rendered.rep.pixelsHigh).filter { y in
+            (rendered.pixel(Int(middle * rendered.scale), y)?.blueComponent ?? 0) > 0.5
+        }
+        let top = CGFloat(try #require(blue.first)) / rendered.scale
+        let bottom = CGFloat(try #require(blue.last) + 1) / rendered.scale
+        // Each outer corner's arc center, and which way is outward.
+        let inset = 20 - RailShape.cornerRadius
+        let corners: [(x: CGFloat, y: CGFloat, dx: CGFloat, dy: CGFloat)] = [
+            (middle - inset, top + RailShape.cornerRadius, -1, -1),
+            (middle + inset, top + RailShape.cornerRadius, 1, -1),
+            (middle - inset, bottom - RailShape.cornerRadius, -1, 1),
+            (middle + inset, bottom - RailShape.cornerRadius, 1, 1),
+        ]
+
+        for corner in corners {
+            for degrees in stride(from: 10.0, through: 80.0, by: 10.0) {
+                let angle = degrees * .pi / 180
+                let at = { (distance: CGFloat) in
+                    rendered.color(
+                        corner.x + corner.dx * distance * cos(angle),
+                        corner.y + corner.dy * distance * sin(angle))
+                }
+                let outside = try #require(at(14))
+                let inside = try #require(at(9))
+                #expect(
+                    outside.redComponent > 0.15 && outside.blueComponent < 0.3,
+                    "outside the tile at \(corner), \(degrees)°: \(outside)")
+                #expect(inside.blueComponent > 0.5, "the tile at \(corner), \(degrees)°")
+            }
+        }
+    }
+
+    @Test
     func anExpandedFoldersHeaderIsItsSymbolAlone() throws {
         func render(_ color: UInt32?) throws -> Rendered {
             let folder = item(["Alpha", "Beta"], color: color)

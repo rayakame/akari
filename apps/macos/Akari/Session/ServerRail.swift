@@ -102,12 +102,17 @@ private struct RailPill: View {
     }
 }
 
+enum RailShape {
+    /// A rail icon's corners, also a collapsed folder's.
+    static let cornerRadius: CGFloat = 12
+}
+
 struct RailIcon<Content: View>: View {
     let highlighted: Bool
     @ViewBuilder let content: Content
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
+        RoundedRectangle(cornerRadius: RailShape.cornerRadius, style: .continuous)
             .fill(Color(nsColor: highlighted ? Palette.brand : Palette.hoverBackground))
             .frame(width: 40, height: 40)
             .overlay {

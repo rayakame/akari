@@ -14,7 +14,7 @@ struct FolderTile: View {
                 .foregroundStyle(Color(nsColor: item.folder.color.map(Self.tint) ?? Palette.brand))
                 .frame(width: 40, height: 40)
         } else {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: RailShape.cornerRadius, style: .continuous)
                 .fill(Color(nsColor: Self.background(item.folder.color)))
                 .frame(width: 40, height: 40)
                 .overlay {
@@ -83,7 +83,10 @@ private struct MiniGrid: View {
     }
 }
 
-/// An expanded folder: one capsule in the folder's color around its header and servers.
+private let columnPadding: CGFloat = 4
+
+/// An expanded folder: one column in the folder's color around its header and servers. A
+/// background, so it never clips them.
 struct FolderColumn<Content: View>: View {
     let color: UInt32?
     let expanded: Bool
@@ -93,12 +96,15 @@ struct FolderColumn<Content: View>: View {
         VStack(spacing: 8) {
             content
         }
-        .padding(.vertical, expanded ? 4 : 0)
+        .padding(.vertical, expanded ? columnPadding : 0)
         .background {
             if expanded {
-                Capsule(style: .continuous)
-                    .fill(Color(nsColor: FolderTile.background(color)))
-                    .frame(width: 48)
+                // Concentric with the servers' corners, so none pokes out of the column.
+                RoundedRectangle(
+                    cornerRadius: RailShape.cornerRadius + columnPadding, style: .continuous
+                )
+                .fill(Color(nsColor: FolderTile.background(color)))
+                .frame(width: 40 + 2 * columnPadding)
             }
         }
     }
