@@ -9,6 +9,7 @@ use super::dispatch::{
 use super::guild::GatewayGuild;
 use super::hello::Hello;
 use super::partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
+use super::read_state::PassiveUpdateV2;
 use super::ready::Ready;
 use super::settings::{NotificationSettings, SettingsProtoUpdate, UserGuildSettings};
 use crate::JsonError;
@@ -63,6 +64,8 @@ pub enum DispatchEvent {
     UserGuildSettingsUpdate(Box<UserGuildSettings>),
     UserSettingsProtoUpdate(Box<SettingsProtoUpdate>),
     NotificationSettingsUpdate(NotificationSettings),
+    /// Sent instead of CHANNEL_UNREAD_UPDATE for guilds without a subscription.
+    PassiveUpdateV2(PassiveUpdateV2),
     /// An event Akari doesn't parse yet, by name.
     Other(String),
 }
@@ -94,6 +97,7 @@ impl DispatchEvent {
             Self::UserGuildSettingsUpdate(_) => "USER_GUILD_SETTINGS_UPDATE",
             Self::UserSettingsProtoUpdate(_) => "USER_SETTINGS_PROTO_UPDATE",
             Self::NotificationSettingsUpdate(_) => "NOTIFICATION_SETTINGS_UPDATE",
+            Self::PassiveUpdateV2(_) => "PASSIVE_UPDATE_V2",
             Self::Other(_) => "other",
         }
     }
@@ -210,6 +214,7 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
             parse(json).map(|update| E::UserSettingsProtoUpdate(Box::new(update)))
         }
         "NOTIFICATION_SETTINGS_UPDATE" => parse(json).map(E::NotificationSettingsUpdate),
+        "PASSIVE_UPDATE_V2" => parse(json).map(E::PassiveUpdateV2),
         _ => return Ok(E::Other(name)),
     };
     event.map_err(|source| DecodeError::Dispatch {

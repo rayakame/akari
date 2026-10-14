@@ -73,6 +73,7 @@ Two details:
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
 | NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; no event |
+| PASSIVE_UPDATE_V2 | `PassiveUpdateV2` | Not applied yet ([Large guilds](#large-guilds)) |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
 `debug` level with its IDs.
@@ -120,6 +121,14 @@ guilds over the threshold are marked `large`, and `state::Guild::large` exposes 
 Akari subscribes every guild with a viewed channel, like the official client, so live
 messages arrive there too ([gateway.md](gateway.md#guild-subscriptions)). **Unverified**
 whether a guild under the threshold needs it.
+
+Identify sends `PASSIVE_GUILD_UPDATE_V2` (bit 14), so guilds without a subscription send
+[PASSIVE_UPDATE_V2](https://docs.discord.food/gateway/gateway-events#passive-update-v2)
+"periodically" instead of CHANNEL_UNREAD_UPDATE, which then comes only for directory
+channels. It carries only what changed: `updated_channels` (each channel's `id`,
+`last_message_id` and `last_pin_timestamp`), voice states and their members. Akari decodes
+`guild_id` and each channel's `id` and `last_message_id`, skipping a channel entry that
+doesn't parse; the store doesn't apply it yet. How often it comes is **unverified**.
 
 ## The state store
 

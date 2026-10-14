@@ -70,7 +70,7 @@ async fn identify_presents_the_same_client_as_rest() {
         identify["d"]["properties"],
         serde_json::to_value(client.properties()).unwrap()
     );
-    assert_eq!(identify["d"]["capabilities"], 1597);
+    assert_eq!(identify["d"]["capabilities"], 17981);
 }
 
 #[tokio::test]

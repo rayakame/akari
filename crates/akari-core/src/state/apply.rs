@@ -453,7 +453,7 @@ impl State {
             E::NotificationSettingsUpdate(settings) => {
                 self.entities.settings.notification_flags = settings.flags;
             }
-            E::Resumed | E::Other(_) => {}
+            E::Resumed | E::PassiveUpdateV2(_) | E::Other(_) => {}
         }
     }
 

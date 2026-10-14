@@ -131,7 +131,7 @@ clients identify before Hello; that the official client waits is **unverified**.
 | Field | Value |
 |---|---|
 | `token` | The account's token |
-| `capabilities` | `1597`: exactly the shape-changing capabilities in [ready.md](ready.md#capabilities). `AUTH_TOKEN_REFRESH` stays off, so READY never carries a replacement token |
+| `capabilities` | `17981`: the shape-changing capabilities in [ready.md](ready.md#capabilities), and `PASSIVE_GUILD_UPDATE_V2` for unread updates in guilds without a subscription. `AUTH_TOKEN_REFRESH` stays off, so READY never carries a replacement token |
 | `properties` | `DiscordClient::properties()`, the same object `X-Super-Properties` encodes, so Identify always matches REST |
 | `presence` | `{status: "unknown", since: 0, activities: [], afk: false}`: the gateway assigns the initial status ([Status Type](https://docs.discord.food/resources/presence#status-type)) |
 | `compress` | `false` (no payload compression; transport compression is used) |

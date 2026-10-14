@@ -1,7 +1,8 @@
 use akari_core::gateway::{
-    ChannelDelete, DecodeError, DispatchEvent, GatewayEvent, GatewayGuild, GuildDelete,
-    GuildRoleDelete, Hello, MessageDelete, MessageDeleteBulk, MuteConfig, NotificationSettings,
-    Ready, SettingsProto, SettingsProtoUpdate, UnavailableGuild, Versioned, decode,
+    ChannelDelete, ChannelUnread, DecodeError, DispatchEvent, GatewayEvent, GatewayGuild,
+    GuildDelete, GuildRoleDelete, Hello, MessageDelete, MessageDeleteBulk, MuteConfig,
+    NotificationSettings, PassiveUpdateV2, Ready, SettingsProto, SettingsProtoUpdate,
+    UnavailableGuild, Versioned, decode,
 };
 use akari_core::model::{
     ChannelType, MessageNotificationLevel, NsfwLevel, Permissions, PremiumTier, PremiumType,
@@ -1239,6 +1240,91 @@ fn the_proto_update_keeps_its_type_and_partial() {
             partial: false,
         }
     );
+}
+
+#[test]
+fn passive_update_v2_decodes() {
+    let DispatchEvent::PassiveUpdateV2(update) = dispatch(
+        "PASSIVE_UPDATE_V2",
+        r#"{
+            "guild_id": "200000000000000001",
+            "updated_channels": [
+                {
+                    "id": "300000000000000002",
+                    "last_message_id": "400000000000000003",
+                    "last_pin_timestamp": "2026-10-01T13:00:00+00:00"
+                },
+                {"id": "300000000000000004", "last_message_id": null}
+            ],
+            "updated_voice_states": [{
+                "user_id": "100000000000000005",
+                "channel_id": "300000000000000006",
+                "session_id": "abc"
+            }],
+            "removed_voice_states": ["100000000000000007"],
+            "updated_members": []
+        }"#,
+    ) else {
+        panic!("expected PASSIVE_UPDATE_V2");
+    };
+
+    assert_eq!(
+        update,
+        PassiveUpdateV2 {
+            guild_id: Snowflake::new(200_000_000_000_000_001),
+            updated_channels: vec![
+                ChannelUnread {
+                    id: Snowflake::new(300_000_000_000_000_002),
+                    last_message_id: Some(Snowflake::new(400_000_000_000_000_003)),
+                },
+                ChannelUnread {
+                    id: Snowflake::new(300_000_000_000_000_004),
+                    last_message_id: None,
+                },
+            ],
+        }
+    );
+}
+
+#[test]
+fn a_broken_updated_channel_is_skipped() {
+    let DispatchEvent::PassiveUpdateV2(update) = dispatch(
+        "PASSIVE_UPDATE_V2",
+        r#"{
+            "guild_id": "200000000000000001",
+            "updated_channels": [
+                {"id": "not a snowflake", "last_message_id": "400000000000000003"},
+                {"id": "300000000000000004", "last_message_id": "400000000000000005"}
+            ]
+        }"#,
+    ) else {
+        panic!("expected PASSIVE_UPDATE_V2");
+    };
+
+    assert_eq!(
+        update.updated_channels,
+        [ChannelUnread {
+            id: Snowflake::new(300_000_000_000_000_004),
+            last_message_id: Some(Snowflake::new(400_000_000_000_000_005)),
+        }]
+    );
+}
+
+#[test]
+fn a_passive_update_with_only_voice_changes_decodes() {
+    for channels in [r#""updated_channels": null,"#, ""] {
+        let DispatchEvent::PassiveUpdateV2(update) = dispatch(
+            "PASSIVE_UPDATE_V2",
+            &format!(
+                r#"{{{channels} "guild_id": "200000000000000001",
+                    "removed_voice_states": ["100000000000000007"]}}"#
+            ),
+        ) else {
+            panic!("expected PASSIVE_UPDATE_V2");
+        };
+
+        assert!(update.updated_channels.is_empty(), "{channels}");
+    }
 }
 
 #[test]

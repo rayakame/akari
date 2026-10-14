@@ -28,6 +28,10 @@ them:
 | 9 | `USER_SETTINGS_PROTO` | No `user_settings`; `user_settings_proto` is a base64 protobuf |
 | 10 | `CLIENT_STATE_V2` | A guild's own fields move into `properties`; adds `data_mode` |
 
+Identify also sends bit 14, `PASSIVE_GUILD_UPDATE_V2`, which leaves READY as it is: guilds
+without a subscription then send PASSIVE_UPDATE_V2 instead of CHANNEL_UNREAD_UPDATE
+([dispatches.md](dispatches.md#large-guilds)). With it, Identify sends `17981`.
+
 The example value also sets bits 17, 19 and 20, which the reference doesn't document.
 
 ## Fields Akari reads

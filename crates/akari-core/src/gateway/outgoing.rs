@@ -165,15 +165,18 @@ const DEDUPE_USER_OBJECTS: u64 = 1 << 4;
 const PRIORITIZED_READY_PAYLOAD: u64 = 1 << 5;
 const USER_SETTINGS_PROTO: u64 = 1 << 9;
 const CLIENT_STATE_V2: u64 = 1 << 10;
+const PASSIVE_GUILD_UPDATE_V2: u64 = 1 << 14;
 
-// The shape READY's models expect; see docs/protocol/ready.md.
+// The shape READY's models expect, and unread updates for guilds without a subscription; see
+// docs/protocol/ready.md.
 pub(crate) const CAPABILITIES: u64 = LAZY_USER_NOTES
     | VERSIONED_READ_STATES
     | VERSIONED_USER_GUILD_SETTINGS
     | DEDUPE_USER_OBJECTS
     | PRIORITIZED_READY_PAYLOAD
     | USER_SETTINGS_PROTO
-    | CLIENT_STATE_V2;
+    | CLIENT_STATE_V2
+    | PASSIVE_GUILD_UPDATE_V2;
 
 // Discord closes the connection with 4002 for anything larger.
 pub(crate) const MAX_PAYLOAD: usize = 15 * 1024;
@@ -294,7 +297,7 @@ mod tests {
 
         assert_eq!(identify["op"], 2);
         assert_eq!(identify["d"]["token"], "t0k");
-        assert_eq!(identify["d"]["capabilities"], 1597);
+        assert_eq!(identify["d"]["capabilities"], 17981);
         assert_eq!(
             identify["d"]["properties"],
             serde_json::to_value(&properties).unwrap()
@@ -312,7 +315,12 @@ mod tests {
 
     #[test]
     fn capabilities_are_the_ones_ready_md_lists() {
-        assert_eq!(CAPABILITIES, 1597);
+        assert_eq!(CAPABILITIES, 17981);
+        assert_ne!(
+            CAPABILITIES & (1 << 14),
+            0,
+            "PASSIVE_GUILD_UPDATE_V2 brings unread updates for unsubscribed guilds"
+        );
         assert_eq!(
             CAPABILITIES & (1 << 8),
             0,
