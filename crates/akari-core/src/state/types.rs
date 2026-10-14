@@ -1,6 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use super::settings::NotificationLevel;
 use crate::model::{
     AttachmentId, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageReferenceType,
     MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake, StickerFormatType,
@@ -54,6 +55,8 @@ pub struct Guild {
     /// Discord sends no live messages for large guilds without a guild subscription,
     /// which Akari doesn't make yet.
     pub large: bool,
+    /// The level for members who set none.
+    pub default_message_notifications: NotificationLevel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

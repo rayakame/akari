@@ -1080,6 +1080,7 @@ fn the_first_ready_after_a_restore_reports_only_changes() {
             "GuildUpdated(2)",
             "GuildRemoved(3)",
             "GuildAdded(4)",
+            "ServerListChanged",
             "Ready"
         ]
     );

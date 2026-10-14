@@ -819,6 +819,28 @@ fn a_guild_update_reads_properties_too() {
 }
 
 #[test]
+fn a_guild_update_reads_the_default_level() {
+    for data in [
+        r#"{"id": "200000000000000001", "default_message_notifications": 0}"#,
+        r#"{"id": "200000000000000001", "properties": {"default_message_notifications": 0}}"#,
+    ] {
+        let DispatchEvent::GuildUpdate(update) = dispatch("GUILD_UPDATE", data) else {
+            panic!("expected GUILD_UPDATE");
+        };
+        assert_eq!(
+            update.default_message_notifications,
+            Some(MessageNotificationLevel::AllMessages)
+        );
+    }
+    let DispatchEvent::GuildUpdate(update) =
+        dispatch("GUILD_UPDATE", r#"{"id": "200000000000000001"}"#)
+    else {
+        panic!("expected GUILD_UPDATE");
+    };
+    assert_eq!(update.default_message_notifications, None);
+}
+
+#[test]
 fn guild_delete_tells_leaving_from_an_outage() {
     let left = dispatch("GUILD_DELETE", r#"{"id": "200000000000000001"}"#);
     let down = dispatch(

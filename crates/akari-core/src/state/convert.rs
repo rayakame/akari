@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::settings::NotificationLevel;
 use super::types::{
     Attachment, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
     EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
@@ -88,6 +89,7 @@ impl Guild {
             roles: guild.roles.into_iter().map(Role::from_wire).collect(),
             member_count: guild.member_count,
             large: guild.large,
+            default_message_notifications: default_level(properties.default_message_notifications),
         }
     }
 
@@ -106,8 +108,16 @@ impl Guild {
         if let Some(roles) = update.roles {
             next.roles = roles.into_iter().map(Role::from_wire).collect();
         }
+        if let Some(level) = update.default_message_notifications {
+            next.default_message_notifications = default_level(level);
+        }
         next
     }
+}
+
+// Discord's default when a guild sends none Akari knows.
+fn default_level(level: model::MessageNotificationLevel) -> NotificationLevel {
+    NotificationLevel::from_wire(level).unwrap_or(NotificationLevel::AllMessages)
 }
 
 impl Role {

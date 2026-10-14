@@ -51,7 +51,7 @@ pub fn display_order(channels: &[Arc<Channel>]) -> Vec<Arc<Channel>> {
     ordered
 }
 
-// The settings proto's order isn't read yet; Discord puts a newly joined server at the top.
+// Newest join first: Discord puts a newly joined server at the top.
 pub(crate) fn guild_order(mut guilds: Vec<(Arc<Guild>, Option<Timestamp>)>) -> Vec<Arc<Guild>> {
     guilds.sort_by(|(a, a_joined), (b, b_joined)| {
         b_joined
@@ -188,6 +188,7 @@ mod tests {
                 roles: Arc::new([]),
                 member_count: None,
                 large: false,
+                default_message_notifications: crate::state::NotificationLevel::AllMessages,
             })
         };
         let joined = |millis| Some(Timestamp::from_unix_millis(millis));

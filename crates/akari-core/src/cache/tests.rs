@@ -105,6 +105,7 @@ pub(crate) fn guild(id: u64, name: &str) -> Guild {
         .into(),
         member_count: Some(1234),
         large: true,
+        default_message_notifications: crate::state::NotificationLevel::OnlyMentions,
     }
 }
 
@@ -191,6 +192,7 @@ pub(crate) fn entities() -> Entities {
         ]
         .map(|channel| (channel.id, Arc::new(channel)))
         .into(),
+        settings: Default::default(),
     }
 }
 
@@ -623,6 +625,7 @@ fn rebuilt(entities: &Entities) -> Entities {
         unavailable: entities.unavailable.clone(),
         members: copy(&entities.members),
         channels: copy(&entities.channels),
+        settings: entities.settings.clone(),
     }
 }
 

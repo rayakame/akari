@@ -256,4 +256,6 @@ impl<'a> Reader<'a> {
 }
 
 #[cfg(test)]
+pub(crate) mod encode;
+#[cfg(test)]
 mod tests;

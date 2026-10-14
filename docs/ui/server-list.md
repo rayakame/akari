@@ -11,9 +11,10 @@ measured from the web client on 2026-10-10; sizes in [layout.md](layout.md), col
 3. Servers the user is only previewing. *Akari: not in READY, so not shown
    ([dispatches.md](../protocol/dispatches.md#open-points)).*
 4. A separator: 32 × 1, `frameBorder`.
-5. The user's servers and folders in the user's own order. *Akari: the order is in the
-   settings proto, which isn't read yet ([user-settings.md](../protocol/user-settings.md));
-   until then the most recently joined server comes first.*
+5. The user's servers and folders in the user's own order. Servers no folder entry places
+   yet (joined since) come first, the newest join first. *Akari: the order comes from the
+   settings proto ([user-settings.md](../protocol/user-settings.md#the-settings-proto));
+   folders aren't drawn yet, so their servers show in the folder's place.*
 6. Servers blocked in the user's region, then one "unavailable servers" item whose tooltip
    gives their number. Discord's item links to its status page.
 7. Add a Server and Discover. *Akari: left out.*

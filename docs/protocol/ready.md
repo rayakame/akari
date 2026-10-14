@@ -47,13 +47,12 @@ The example value also sets bits 17, 19 and 20, which the reference doesn't docu
 | `resume_gateway_url` | `String` | For resuming |
 
 Everything else is ignored for now, notably `read_state`, `relationships`, `sessions` and
-the experiments, which are positional arrays rather than objects. The state store doesn't
-use the three settings parts yet; what they hold, and what ignoring them costs, is in
-[user-settings.md](user-settings.md).
+the experiments, which are positional arrays rather than objects. What the state store
+does with the three settings parts is in [user-settings.md](user-settings.md).
 
 The state store takes the current user, the guilds with their channels, threads and roles,
-the current user's member from `merged_members`, the private channels, and from `users`
-only the DM and group DM recipients. READY_SUPPLEMENTAL, which follows READY, is described
+the current user's member from `merged_members`, the private channels, from `users` only
+the DM and group DM recipients, and the settings. READY_SUPPLEMENTAL, which follows READY, is described
 in [dispatches.md](dispatches.md#ready_supplemental).
 
 READY can also carry secrets: `analytics_token`, `auth_session_id_hash` and, with

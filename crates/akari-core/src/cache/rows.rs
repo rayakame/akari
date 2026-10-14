@@ -13,7 +13,7 @@ use crate::model::{
 use crate::state::{
     Attachment, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
     EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
-    PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, User,
+    NotificationLevel, PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -149,6 +149,29 @@ pub(super) struct GuildRow {
     member_count: Option<u32>,
     #[serde(skip_serializing_if = "is_false")]
     large: bool,
+    // 0 all messages, 1 only mentions, 2 nothing.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    default_level: u8,
+}
+
+fn is_zero(value: &u8) -> bool {
+    *value == 0
+}
+
+fn level_code(level: NotificationLevel) -> u8 {
+    match level {
+        NotificationLevel::OnlyMentions => 1,
+        NotificationLevel::Nothing => 2,
+        NotificationLevel::AllMessages => 0,
+    }
+}
+
+fn level(code: u8) -> NotificationLevel {
+    match code {
+        1 => NotificationLevel::OnlyMentions,
+        2 => NotificationLevel::Nothing,
+        _ => NotificationLevel::AllMessages,
+    }
 }
 
 impl From<&Guild> for GuildRow {
@@ -172,6 +195,7 @@ impl From<&Guild> for GuildRow {
                 .collect(),
             member_count: guild.member_count,
             large: guild.large,
+            default_level: level_code(guild.default_message_notifications),
         }
     }
 }
@@ -198,6 +222,7 @@ impl GuildRow {
                 .collect(),
             member_count: self.member_count,
             large: self.large,
+            default_message_notifications: level(self.default_level),
         }
     }
 }

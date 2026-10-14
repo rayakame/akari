@@ -58,7 +58,7 @@ Two details:
 |---|---|---|
 | READY_SUPPLEMENTAL | `ReadySupplemental` | See [below](#ready_supplemental) |
 | GUILD_CREATE | `GatewayGuild` | A new or returning guild: `GuildAdded` with its channels, threads and the current user's member. A known guild is replaced: `GuildUpdated`, `CurrentMemberUpdated` and channel events for what changed. An unavailable guild: `GuildUnavailable` |
-| GUILD_UPDATE | `GuildUpdate` | `GuildUpdated` if something changed. Roles are replaced only if the update carries them |
+| GUILD_UPDATE | `GuildUpdate` | `GuildUpdated` if something changed (including `default_message_notifications`). Roles are replaced only if the update carries them |
 | GUILD_DELETE | `GuildDelete` | With `unavailable`: an outage, `GuildUnavailable`. Without: the user left or was removed, `GuildRemoved`. Both drop the guild's channels, threads, member and message windows |
 | GUILD_ROLE_CREATE, GUILD_ROLE_UPDATE | `GuildRoleEvent` | The role is added or replaced: `GuildUpdated` |
 | GUILD_ROLE_DELETE | `GuildRoleDelete` | `GuildUpdated` |
@@ -70,12 +70,15 @@ Two details:
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
-| USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | Not applied yet. A full settings object for one guild (`guild_id: null` for DMs) |
-| USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Not applied yet. `settings.type` (1 preloaded, 2 frecency), the base64 `proto`, and `partial` when it carries only the changed fields |
-| NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Not applied yet |
+| USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
+| USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
+| NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; no event |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
 `debug` level with its IDs.
+
+GUILD_CREATE and GUILD_DELETE (and READY's diff) also send `ServerListChanged` after their own
+events when the server list changed: a guild joined, left, went down or came back.
 
 ## READY_SUPPLEMENTAL
 
