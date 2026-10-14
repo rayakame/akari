@@ -17,11 +17,11 @@ struct LabeledField<Field: View>: View {
                         .foregroundStyle(Color(nsColor: Palette.textError))
                 }
             }
-            .font(.system(size: 12, weight: .bold))
+            .font(TypeScale.fieldLabel.font)
             .lineLimit(2)
             field
                 .textFieldStyle(.plain)
-                .font(.system(size: 16))
+                .font(TypeScale.body.font)
                 .foregroundStyle(Color(nsColor: Palette.textDefault))
                 .padding(.horizontal, 10)
                 .frame(height: 40)
@@ -45,7 +45,7 @@ struct PrimaryButton: View {
                     ProgressView().controlSize(.small).tint(.white)
                 }
             }
-            .font(.system(size: 16, weight: .medium))
+            .font(TypeScale.button.font)
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: Palette.brand)))
@@ -69,7 +69,7 @@ struct LinkButton: View {
     var body: some View {
         Button(title, action: action)
             .buttonStyle(.plain)
-            .font(.system(size: 14))
+            .font(TypeScale.detail.font)
             .foregroundStyle(Color(nsColor: Palette.textLink))
     }
 }

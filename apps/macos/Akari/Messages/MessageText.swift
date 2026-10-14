@@ -100,13 +100,16 @@ private final class Typeface {
     private let alwaysBold: Bool
     private let monospaced: Bool
 
+    // `offset` and `mono` are in points at the type scale's base, like the style.
     init(
-        size: CGFloat, line: CGFloat, offset: CGFloat, monoSize: CGFloat,
-        alwaysBold: Bool = false, monospaced: Bool = false
+        _ style: TextStyle, offset: CGFloat, mono monoPoints: CGFloat, alwaysBold: Bool = false,
+        monospaced: Bool = false
     ) {
+        let size = style.size
+        let monoSize = TypeScale.size(monoPoints)
         self.size = size
-        self.line = line
-        self.offset = offset
+        line = style.line
+        self.offset = TypeScale.size(offset)
         self.alwaysBold = alwaysBold
         self.monospaced = monospaced
         func italic(_ font: NSFont, _ traits: NSFontDescriptor.SymbolicTraits) -> NSFont {
@@ -136,15 +139,15 @@ private final class Typeface {
         return fonts[(bold ? 2 : medium ? 4 : 0) + (italic ? 1 : 0)]
     }
 
-    static let body = Typeface(size: 16, line: 22, offset: 3, monoSize: 14)
+    static let body = Typeface(TypeScale.body, offset: 3, mono: 14)
     static let headings = [
-        Typeface(size: 24, line: 32, offset: 3, monoSize: 21, alwaysBold: true),
-        Typeface(size: 20, line: 28, offset: 3, monoSize: 18, alwaysBold: true),
-        Typeface(size: 16, line: 22, offset: 3, monoSize: 14, alwaysBold: true),
+        Typeface(TypeScale.heading1, offset: 3, mono: 21, alwaysBold: true),
+        Typeface(TypeScale.heading2, offset: 3, mono: 18, alwaysBold: true),
+        Typeface(TypeScale.heading3, offset: 3, mono: 14, alwaysBold: true),
     ]
-    static let subtext = Typeface(size: 13, line: 18, offset: 2, monoSize: 11)
-    static let code = Typeface(size: 14, line: 18, offset: 1, monoSize: 14, monospaced: true)
-    static let jumbo = Typeface(size: 48, line: 56, offset: 0, monoSize: 42)
+    static let subtext = Typeface(TypeScale.subtext, offset: 2, mono: 11)
+    static let code = Typeface(TypeScale.codeBlock, offset: 1, mono: 14, monospaced: true)
+    static let jumbo = Typeface(TypeScale.jumbo, offset: 0, mono: 42)
 }
 
 private enum Marker: Hashable {

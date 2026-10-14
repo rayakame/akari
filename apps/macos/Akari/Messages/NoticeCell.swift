@@ -7,6 +7,9 @@ final class NoticeCell: NSTableCellView {
     private let icon = NSImageView()
     private let text = CellText.label(wrapping: true)
     private static let top: CGFloat = 18
+    // 10 less right after a day divider, as a message's (MessageCell).
+    private static let dayTop: CGFloat = 8
+    private var textTop: NSLayoutConstraint?
     private static let bottom: CGFloat = 2
     private static let leading: CGFloat = 72
     private static let trailing: CGFloat = 16
@@ -20,8 +23,10 @@ final class NoticeCell: NSTableCellView {
         icon.symbolConfiguration = .init(pointSize: 16, weight: .regular)
         addSubview(icon)
         addSubview(text)
+        let textTop = text.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
+        self.textTop = textTop
         NSLayoutConstraint.activate([
-            text.topAnchor.constraint(equalTo: topAnchor, constant: Self.top),
+            textTop,
             text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leading),
             text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailing),
@@ -35,15 +40,20 @@ final class NoticeCell: NSTableCellView {
     }
 
     /// The row height for a notice at `width`, as Auto Layout would size the cell.
-    static func height(_ message: Message, notice: String, time: String, width: CGFloat)
-        -> CGFloat
-    {
+    static func height(
+        _ message: Message, notice: String, time: String, followsDay: Bool = false,
+        width: CGFloat
+    ) -> CGFloat {
         sizing.configure(message, notice: notice, time: time, fullDate: "")
         sizing.text.preferredMaxLayoutWidth = width - leading - trailing
-        return top + sizing.text.intrinsicContentSize.height + bottom
+        return (followsDay ? dayTop : top) + sizing.text.intrinsicContentSize.height + bottom
     }
 
-    func configure(_ message: Message, notice: String, time: String, fullDate: String) {
+    func configure(
+        _ message: Message, notice: String, time: String, followsDay: Bool = false,
+        fullDate: String
+    ) {
+        textTop?.constant = followsDay ? Self.dayTop : Self.top
         icon.image = NSImage(
             systemSymbolName: Self.symbol(message.kind), accessibilityDescription: nil)
         let line = NSMutableAttributedString(
@@ -52,7 +62,7 @@ final class NoticeCell: NSTableCellView {
             NSAttributedString(
                 string: "  \(time)",
                 attributes: [
-                    .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.chatTextMuted,
+                    .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
                 ]))
         text.attributedStringValue = line
         text.toolTip = fullDate

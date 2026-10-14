@@ -6,7 +6,8 @@ public struct TimelineChanges: Equatable, Sendable {
     public let removed: IndexSet
     /// Indexes in the new items; insert these after removing.
     public let inserted: IndexSet
-    /// Indexes in the new items of kept items whose content changed.
+    /// Indexes in the new items of kept items whose content changed, or that started or stopped
+    /// coming right after a day divider.
     public let reloaded: IndexSet
 
     public var isEmpty: Bool {
@@ -23,9 +24,19 @@ public struct TimelineChanges: Equatable, Sendable {
             }
         }
         let oldIndexes = Dictionary(old.enumerated().map { ($1.id, $0) }) { first, _ in first }
+        // A day divider's first message sits closer to it, so a message that starts or stops
+        // following one changes too.
+        func followsDay(_ items: [MessageTimeline.Item], _ index: Int) -> Bool {
+            guard index > 0, case .day = items[index - 1] else {
+                return false
+            }
+            return true
+        }
         var reloaded = IndexSet()
         for (index, item) in new.enumerated() where !inserted.contains(index) {
-            if let oldIndex = oldIndexes[item.id], old[oldIndex] != item {
+            if let oldIndex = oldIndexes[item.id],
+                old[oldIndex] != item || followsDay(old, oldIndex) != followsDay(new, index)
+            {
                 reloaded.insert(index)
             }
         }

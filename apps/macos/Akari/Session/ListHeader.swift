@@ -6,7 +6,7 @@ struct ListHeader: View {
 
     var body: some View {
         Text(title)
-            .font(.system(size: 16, weight: .semibold))
+            .font(TypeScale.serverHeader.font)
             .foregroundStyle(Color(nsColor: Palette.textStrong))
             .lineLimit(1)
             .padding(.horizontal, 16)

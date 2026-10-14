@@ -7,7 +7,7 @@ struct MessageTableState: Equatable {
     var reachedOldest = false
     var loading: MessageListModel.Load?
     var failedLoads: [MessageListModel.Load: RequestError] = [:]
-    var beginning = ""
+    var start: ChannelStart?
     var channelId: ChannelId?
     var lastLoad: LoadTrace?
     var openedAt: ContinuousClock.Instant?
@@ -70,9 +70,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var lastLiveScroll = Date.distantPast
     private var liveScrollGeneration = 0
     private static let liveScrollQuiet: TimeInterval = 0.5
-    private static let bottomInset: CGFloat = 8
-    // The status strip above the composer lies over the list's bottom.
-    private static let restingInset = bottomInset + ComposerStatus.height
+    // The status strip above the composer lies over the list's bottom; the official client
+    // leaves just that below its newest message.
+    private static let restingInset = ComposerStatus.height
     // Exact heights before a row shows: automatic heights start as estimates and change when a
     // fling first reaches a row, which moves the bottom under it.
     private var rowHeights: [MessageTimeline.ItemId: CGFloat] = [:]
@@ -175,9 +175,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reload(revealedNow)
         updateRelativeTimer()
+        if previous.start != state.start {
+            remeasureStart()
+        }
         if previous.loading != state.loading || previous.failedLoads != state.failedLoads
-            || previous.reachedOldest != state.reachedOldest
-            || previous.beginning != state.beginning
+            || previous.reachedOldest != state.reachedOldest || previous.start != state.start
         {
             configureEdges()
         }
@@ -318,11 +320,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         ownChanges += 1
         defer { ownChanges -= 1 }
-        let visible = tableView.rows(in: tableView.visibleRect)
-        if visible.length > 0 {
-            tableView.reloadData(
-                forRowIndexes: IndexSet(integersIn: visible.location..<NSMaxRange(visible)),
-                columnIndexes: [0])
+        // Not only the visible rows: AppKit prepares row views beyond them, and a slight scroll
+        // shows those as they are.
+        var held = IndexSet()
+        tableView.enumerateAvailableRowViews { _, row in
+            if row >= 0 {
+                held.insert(row)
+            }
+        }
+        if !held.isEmpty {
+            tableView.reloadData(forRowIndexes: held, columnIndexes: [0])
         }
         tableView.noteHeightOfRows(
             withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows))
@@ -604,8 +611,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func configure(_ cell: NSView, _ edge: MessageTimeline.Edge) {
-        if let cell = cell as? EdgeCell {
-            cell.show(state.beginning)
+        if let cell = cell as? ChannelStartCell {
+            cell.show(state.start)
         } else if let cell = cell as? PlaceholderCell {
             let failure: String? =
                 if state.rows.isEmpty {
@@ -617,6 +624,41 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 }
             cell.show(edge, height: placeholderHeight, failure: failure)
         }
+    }
+
+    // The channel's name arrives after READY or changes with a rename, and the header's height
+    // with it; the reader's place stays.
+    private func remeasureStart() {
+        guard
+            let index = timeline.items.firstIndex(where: {
+                if case .edge(.beginning) = $0 { true } else { false }
+            })
+        else {
+            return
+        }
+        let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
+        if let place {
+            anchor = place
+        }
+        rowHeights[timeline.items[index].id] = nil
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        // Inside an update the table moves its row views, as for apply's inserts; at zero
+        // duration it does so at once.
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        tableView.beginUpdates()
+        tableView.noteHeightOfRows(withIndexesChanged: [index])
+        tableView.endUpdates()
+        NSAnimationContext.endGrouping()
+        if pinsToBottom {
+            scrollToBottom()
+        } else {
+            restoreAnchor()
+        }
+        // As in apply: inside a SwiftUI update the table's own layout can come a frame later.
+        tableView.layoutSubtreeIfNeeded()
+        updateHover()
     }
 
     // Without rows the placeholders stand in for the latest page.
@@ -690,44 +732,58 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if let height = rowHeights[item.id] {
             return height
         }
-        let height = height(of: item, width: width)
+        let height = height(of: item, followsDay: followsDay(row), width: width)
         rowHeights[item.id] = height
         return height
     }
 
-    private func height(of item: MessageTimeline.Item, width: CGFloat) -> CGFloat {
+    // A day's first message sits closer to its divider; TimelineChanges reloads it when that
+    // changes.
+    private func followsDay(_ row: Int) -> Bool {
+        guard row > 0, case .day = timeline.items[row - 1] else {
+            return false
+        }
+        return true
+    }
+
+    private func height(of item: MessageTimeline.Item, followsDay: Bool, width: CGFloat)
+        -> CGFloat
+    {
         switch item {
         case .edge(.beginning):
-            return EdgeCell.height
+            return ChannelStartCell.height(state.start, width: width)
         case .edge:
             return placeholderHeight
-        case .day(let day):
-            return DayDividerCell.height(
-                MessageFormat.dayDivider(day, calendar: calendar, locale: locale))
+        case .day:
+            return DayDividerCell.height
         case .message(let row, let startsGroup):
             let message = row.message
             if let notice = message.notice {
                 let time = MessageFormat.groupTime(
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
-                return NoticeCell.height(message, notice: notice, time: time, width: width)
+                return NoticeCell.height(
+                    message, notice: notice, time: time, followsDay: followsDay, width: width)
             }
             return MessageCell.height(
-                message, body: body(row), startsGroup: startsGroup, width: width)
+                message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
+                width: width)
         }
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int)
         -> NSView?
     {
-        let cell = cell(for: timeline.items[row])
+        let cell = cell(forRow: row)
         cell.objectValue = timeline.items[row].id
         return cell
     }
 
-    func cell(for item: MessageTimeline.Item) -> NSTableCellView {
+    func cell(forRow index: Int) -> NSTableCellView {
+        let item = timeline.items[index]
+        let followsDay = followsDay(index)
         switch item {
         case .edge(.beginning):
-            let cell = reuse(EdgeCell.identifier) as? EdgeCell ?? EdgeCell()
+            let cell = reuse(ChannelStartCell.identifier) as? ChannelStartCell ?? ChannelStartCell()
             configure(cell, .beginning)
             return cell
         case .edge(let edge):
@@ -747,7 +803,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 message.timestamp, calendar: calendar, locale: locale)
             if let notice = message.notice {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
-                cell.configure(message, notice: notice, time: groupTime, fullDate: fullDate)
+                cell.configure(
+                    message, notice: notice, time: groupTime, followsDay: followsDay,
+                    fullDate: fullDate)
                 return cell
             }
             let cell =
@@ -758,7 +816,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
-                message, body: body(row), startsGroup: startsGroup, groupTime: groupTime,
+                message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
+                groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)
@@ -818,6 +877,17 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 self?.relativeTimeChanged()
             }
         )
+    }
+
+    // A message's box keeps a gutter unless a legacy scroller shows.
+    @objc private func scrollerStyleChanged() {
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            (rowView.view(atColumn: 0) as? MessageCell)?.needsDisplay = true
+        }
+        // The scroll view takes the new style on the same notification; hover waits for it.
+        Task { @MainActor [weak self] in
+            self?.updateHover()
+        }
     }
 
     @objc private func windowShownOrHidden(_ notification: Notification) {
@@ -937,6 +1007,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             notifications.addObserver(
                 self, selector: #selector(windowShownOrHidden(_:)), name: name, object: nil)
         }
+        notifications.addObserver(
+            self, selector: #selector(scrollerStyleChanged),
+            name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
         tableView.windowChanged = { [weak self] in
             self?.updateRelativeTimer()
         }
@@ -1037,6 +1110,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let point = tableView.convert(location, from: nil)
             if tableView.visibleRect.contains(point) {
                 row = tableView.row(at: point)
+            }
+            // The space before a group and the scrollbar's gutter belong to no message.
+            if row >= 0,
+                let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                    as? MessageCell,
+                !cell.box.contains(cell.convert(point, from: tableView))
+            {
+                row = -1
             }
         }
         hovered = timeline.items.indices.contains(row) ? timeline.items[row].id : nil

@@ -7,7 +7,7 @@ struct CaptchaSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Captcha required")
-                .font(.title2.weight(.semibold))
+                .font(TypeScale.sheetTitle.font)
             Text(
                 "Discord wants a captcha for this login, and Akari can't show captchas yet. "
                     + "Log in with the QR code instead: scan it with the Discord app on your phone."

@@ -5,6 +5,8 @@ final class MessageCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("message")
 
     private(set) var showsHeader = false
+    // Above a group start's box.
+    private var spacing: CGFloat = 0
     // Set by the table's controller, which knows the one row under the pointer.
     var isHovered = false {
         didSet {
@@ -36,16 +38,26 @@ final class MessageCell: NSTableCellView {
     }
     private let stack = NSStackView()
     private var top: NSLayoutConstraint?
+    private var bottom: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
 
-    private static let groupTop: CGFloat = 18
-    private static let continuationTop: CGFloat = 2
-    private static let bottomInset: CGFloat = 2
+    // The official client keeps the space before a group outside the message's box, so two
+    // highlighted groups in a row show a gap; its scrollbar's gutter stays clear too.
+    private static let groupSpacing: CGFloat = 16
+    // A day's first message: the divider's row brings the rest, its box starts 17.5 below the line.
+    private static let daySpacing: CGFloat = 6
+    // Measured there too: a group start's avatar and name 4 into its box, a follow-up's text 3.
+    // What's below them is what's left of the box, so rows keep their heights.
+    private static let groupInset: CGFloat = 4
+    private static let groupBottom: CGFloat = 0
+    private static let continuationTop: CGFloat = 3
+    private static let continuationBottom: CGFloat = 1
+    private static let avatarBottomInset: CGFloat = 3
+    private static let scrollbarGutter: CGFloat = 16
     private static let textLeading: CGFloat = 72
     private static let textTrailing: CGFloat = 16
     private static let spacing: CGFloat = 2
     private static let avatarSize: CGFloat = 40
-    private static let avatarLift: CGFloat = 2
     private static let sizing = MessageCell()
 
     init() {
@@ -59,12 +71,12 @@ final class MessageCell: NSTableCellView {
     }
 
     func configure(
-        _ message: Message, body: NSAttributedString, startsGroup: Bool, groupTime: String,
-        shortTime: String, fullDate: String
+        _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
+        groupTime: String, shortTime: String, fullDate: String
     ) {
         configureAllButTheBody(
-            message, startsGroup: startsGroup, groupTime: groupTime, shortTime: shortTime,
-            fullDate: fullDate)
+            message, startsGroup: startsGroup, followsDay: followsDay, groupTime: groupTime,
+            shortTime: shortTime, fullDate: fullDate)
         let same = self.message?.id == message.id
         self.message = message
         mentioned = message.mentionsMe
@@ -84,14 +96,16 @@ final class MessageCell: NSTableCellView {
 
     // The sizing cell measures the body instead of laying it out in its text view.
     private func configureAllButTheBody(
-        _ message: Message, startsGroup: Bool, groupTime: String, shortTime: String,
-        fullDate: String
+        _ message: Message, startsGroup: Bool, followsDay: Bool, groupTime: String,
+        shortTime: String, fullDate: String
     ) {
         showsHeader = startsGroup
+        spacing = startsGroup ? (followsDay ? Self.daySpacing : Self.groupSpacing) : 0
         header.isHidden = !startsGroup
         avatar.isHidden = !startsGroup
         avatarBottom?.isActive = startsGroup
-        top?.constant = startsGroup ? Self.groupTop : Self.continuationTop
+        top?.constant = startsGroup ? spacing + Self.groupInset : Self.continuationTop
+        bottom?.constant = -(startsGroup ? Self.groupBottom : Self.continuationBottom)
         avatar.name = message.author.displayName
         avatar.userId = message.author.id.rawValue
         header.show(
@@ -124,10 +138,12 @@ final class MessageCell: NSTableCellView {
     /// The row height for `message` showing `body` at `width`, as Auto Layout would size the
     /// cell.
     static func height(
-        _ message: Message, body: NSAttributedString, startsGroup: Bool, width: CGFloat
+        _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
+        width: CGFloat
     ) -> CGFloat {
         sizing.configureAllButTheBody(
-            message, startsGroup: startsGroup, groupTime: "", shortTime: "", fullDate: "")
+            message, startsGroup: startsGroup, followsDay: followsDay, groupTime: "",
+            shortTime: "", fullDate: "")
         let textWidth = width - textLeading - textTrailing
         let body = message.content.isEmpty ? 0 : TextMeasurer.shared.height(body, width: textWidth)
         return sizing.height(width: width, body: body)
@@ -148,25 +164,38 @@ final class MessageCell: NSTableCellView {
                         ? body : view === failed ? FailedLine.height : view.intrinsicContentSize.height
             }
             .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
-        let top = showsHeader ? Self.groupTop : Self.continuationTop
-        let height = top + stacked + Self.bottomInset
+        let top = showsHeader ? spacing + Self.groupInset : Self.continuationTop
+        let height = top + stacked + (showsHeader ? Self.groupBottom : Self.continuationBottom)
         guard showsHeader else {
             return height
         }
         let replyHeight = reply.isHidden ? 0 : reply.intrinsicContentSize.height + Self.spacing
-        return max(height, top + replyHeight - Self.avatarLift + Self.avatarSize + Self.bottomInset)
+        return max(height, top + replyHeight + Self.avatarSize + Self.avatarBottomInset)
+    }
+
+    /// The message's own area, which hover and the mention highlight cover.
+    var box: NSRect {
+        // A legacy scroller sits in a gutter of its own beside the list, while it shows.
+        let legacy = enclosingScrollView.map {
+            $0.scrollerStyle == .legacy && $0.verticalScroller?.isHidden == false
+        }
+        let gutter = legacy == true ? 0 : Self.scrollbarGutter
+        return NSRect(
+            x: 0, y: isFlipped ? spacing : 0, width: max(0, bounds.width - gutter),
+            height: max(0, bounds.height - spacing))
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        let box = box
         if mentioned {
             Palette.mentionedBackground.setFill()
-            bounds.fill(using: .sourceOver)
+            box.fill(using: .sourceOver)
             Palette.mentionedBar.setFill()
-            NSRect(x: 0, y: 0, width: 2, height: bounds.height).fill()
+            NSRect(x: box.minX, y: box.minY, width: 2, height: box.height).fill()
         }
         if isHovered {
             Palette.hoverBackground.setFill()
-            bounds.fill(using: .sourceOver)
+            box.fill(using: .sourceOver)
         }
     }
 
@@ -178,13 +207,13 @@ final class MessageCell: NSTableCellView {
         avatar.translatesAutoresizingMaskIntoConstraints = false
         reply.attributedStringValue = CellText.symbolLine(
             "arrowshape.turn.up.left", "Replying to an earlier message")
-        hoverTime.font = .systemFont(ofSize: 11)
+        hoverTime.font = TypeScale.hoverTime.nsFont
         hoverTime.textColor = Palette.chatTextMuted
         hoverTime.alignment = .right
         extras.isSelectable = true
         // Without it, the field editor drops the attributed string's font on a click.
         extras.allowsEditingTextAttributes = true
-        extras.font = .systemFont(ofSize: 16)
+        extras.font = TypeScale.body.nsFont
 
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -196,23 +225,25 @@ final class MessageCell: NSTableCellView {
         }
 
         let top = stack.topAnchor.constraint(equalTo: topAnchor, constant: Self.continuationTop)
+        let bottom = stack.bottomAnchor.constraint(
+            equalTo: bottomAnchor, constant: -Self.continuationBottom)
         let avatarBottom = bottomAnchor.constraint(
-            greaterThanOrEqualTo: avatar.bottomAnchor, constant: Self.bottomInset)
+            greaterThanOrEqualTo: avatar.bottomAnchor, constant: Self.avatarBottomInset)
         // While the table moves row views in an update, a group start can sit in a shorter row
         // for a moment; required, this would conflict with it and log at length.
         avatarBottom.priority = .init(999)
         self.top = top
+        self.bottom = bottom
         self.avatarBottom = avatarBottom
         NSLayoutConstraint.activate([
-            top,
+            top, bottom,
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.textTrailing),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottomInset),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             content.widthAnchor.constraint(equalTo: stack.widthAnchor),
             extras.widthAnchor.constraint(equalTo: stack.widthAnchor),
             avatar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            avatar.topAnchor.constraint(equalTo: header.topAnchor, constant: -Self.avatarLift),
+            avatar.topAnchor.constraint(equalTo: header.topAnchor),
             avatar.widthAnchor.constraint(equalToConstant: Self.avatarSize),
             avatar.heightAnchor.constraint(equalToConstant: Self.avatarSize),
             hoverTime.trailingAnchor.constraint(equalTo: leadingAnchor, constant: 56),
@@ -270,11 +301,11 @@ private final class HeaderRow: NSView {
     init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        name.font = .systemFont(ofSize: 16, weight: .semibold)
+        name.font = TypeScale.username.nsFont
         name.textColor = Palette.textStrong
         name.lineBreakMode = .byTruncatingTail
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        time.font = .systemFont(ofSize: 12, weight: .medium)
+        time.font = TypeScale.messageTime.nsFont
         time.textColor = Palette.chatTextMuted
         appTag.translatesAutoresizingMaskIntoConstraints = false
         for view in [name, appTag, time] as [NSView] {
@@ -325,7 +356,7 @@ private final class TagLabel: NSTextField {
         isEditable = false
         isBordered = false
         drawsBackground = false
-        font = .systemFont(ofSize: 10, weight: .semibold)
+        font = TypeScale.appTag.nsFont
         textColor = .white
         alignment = .center
         wantsLayer = true
@@ -384,7 +415,7 @@ private final class FailedLine: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         let label = CellText.label()
         label.stringValue = "Not sent."
-        label.font = .systemFont(ofSize: 14)
+        label.font = TypeScale.detail.nsFont
         label.textColor = Palette.danger
         let row = NSStackView(views: [label, retry, delete])
         row.orientation = .horizontal
@@ -407,7 +438,7 @@ private final class FailedLine: NSView {
         button.isBordered = false
         button.attributedTitle = NSAttributedString(
             string: title,
-            attributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: Palette.textLink])
+            attributes: [.font: TypeScale.detail.nsFont, .foregroundColor: Palette.textLink])
         return button
     }
 }

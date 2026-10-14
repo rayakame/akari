@@ -11,6 +11,7 @@ struct MessageTableTests {
         var removes = 0
         var inserts = 0
         var reloaded: [IndexSet] = []
+        var afterReload: (IndexSet) -> Void = { _ in }
 
         override func reloadData() {
             fullReloads += 1
@@ -20,6 +21,7 @@ struct MessageTableTests {
         override func reloadData(forRowIndexes rows: IndexSet, columnIndexes columns: IndexSet) {
             reloaded.append(rows)
             super.reloadData(forRowIndexes: rows, columnIndexes: columns)
+            afterReload(rows)
         }
 
         override func removeRows(at indexes: IndexSet, withAnimation options: AnimationOptions = [])
@@ -45,8 +47,8 @@ struct MessageTableTests {
     }
 
     let noon = berlinTime(2026, 10, 10, 12, 0)
-    // Below the newest row when pinned: 8, and the status strip over the list's bottom.
-    let restingInset = 8 + ComposerStatus.height
+    // Below the newest row when pinned: the status strip over the list's bottom.
+    let restingInset = ComposerStatus.height
     let table = CountingTableView()
     let pointer = Pointer()
     let controller: MessageTableController
@@ -86,7 +88,7 @@ struct MessageTableTests {
 
     // What Auto Layout gives the row's cell at the table's width, as automatic row heights do.
     func fittingHeight(ofRow row: Int) -> CGFloat {
-        let cell = controller.cell(for: controller.timeline.items[row])
+        let cell = controller.cell(forRow: row)
         cell.translatesAutoresizingMaskIntoConstraints = false
         let width = cell.widthAnchor.constraint(equalToConstant: table.tableColumns[0].width)
         width.isActive = true
@@ -470,22 +472,110 @@ struct MessageTableTests {
         show(messages(80, longText: true))
         let clip = controller.scrollView.contentView
         pointer.location = NSPoint(x: 300, y: 200)
-        let underPointer = {
-            self.table.row(at: self.table.convert(NSPoint(x: 300, y: 200), from: nil))
-        }
+        let underPointer = { self.boxRow(at: NSPoint(x: 300, y: 200)) }
 
         controller.pointerMoved()
-        #expect(hoveredRows == [underPointer()])
+        #expect(hoveredRows == underPointer())
 
         // Scrolled under a still pointer, with no live-scroll notification.
         clip.scroll(to: NSPoint(x: 0, y: clip.bounds.minY - 300))
         controller.scrollView.reflectScrolledClipView(clip)
         window.layoutIfNeeded()
-        #expect(hoveredRows == [underPointer()])
+        #expect(hoveredRows == underPointer())
 
         pointer.location = nil
         controller.pointerMoved()
         #expect(hoveredRows.isEmpty)
+    }
+
+    // The message row whose box holds a point in window coordinates; the space before a group
+    // and the scrollbar's gutter belong to none.
+    func boxRow(at location: NSPoint) -> [Int] {
+        let point = table.convert(location, from: nil)
+        let row = table.row(at: point)
+        guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageCell
+        else {
+            return []
+        }
+        return cell.box.contains(cell.convert(point, from: table)) ? [row] : []
+    }
+
+    @Test
+    func theSpaceBeforeAGroupHoversNothing() {
+        controller.scrollView.scrollerStyle = .overlay
+        show([row(1, at: noon), row(2, by: author(2), at: noon + 30)])
+        let second = index(of: 2)
+        let rect = table.rect(ofRow: second)
+        let at = { (x: CGFloat, y: CGFloat) in self.table.convert(NSPoint(x: x, y: y), to: nil) }
+
+        pointer.location = at(300, rect.minY + 8)
+        controller.pointerMoved()
+        #expect(hoveredRows.isEmpty)
+
+        pointer.location = at(300, rect.minY + 30)
+        controller.pointerMoved()
+        #expect(hoveredRows == [second])
+
+        pointer.location = at(table.bounds.maxX - 8, rect.minY + 30)
+        controller.pointerMoved()
+        #expect(hoveredRows.isEmpty)
+    }
+
+    // A legacy scroller that shows up takes the gutter itself; messages then reach it.
+    @Test
+    func aScrollerStyleChangeRedrawsAndHoversAgain() async throws {
+        let center = NotificationCenter()
+        let pointer = Pointer()
+        let table = MessageTableView()
+        let controller = MessageTableController(
+            tableView: table, calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) },
+            pointer: { pointer.location }, notifications: center)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.contentView = controller.scrollView
+        controller.scrollView.scrollerStyle = .overlay
+        // Highlighted, so a box that changes shows.
+        let rows = messages(30).map { row in
+            var message = row.message
+            message.mentionsMe = true
+            return MessageListModel.Row(id: row.id, message: message)
+        }
+        controller.show(MessageTableState(rows: rows))
+        window.layoutIfNeeded()
+        let visible = table.rows(in: table.visibleRect)
+        let cells = (visible.location..<NSMaxRange(visible)).filter {
+            table.view(atColumn: 0, row: $0, makeIfNecessary: false) is MessageCell
+        }
+        let row = try #require(cells.last)
+        let cell = try #require(table.view(atColumn: 0, row: row, makeIfNecessary: false))
+        let first = try #require(cells.first)
+        let other = try #require(table.view(atColumn: 0, row: first, makeIfNecessary: false))
+        let hovered = { (cell as? MessageCell)?.isHovered == true }
+        let atTheEdge = {
+            table.convert(
+                NSPoint(x: table.bounds.maxX - 4, y: table.rect(ofRow: row).maxY - 4), to: nil)
+        }
+        pointer.location = atTheEdge()
+        controller.pointerMoved()
+        #expect(!hovered())
+
+        controller.scrollView.scrollerStyle = .legacy
+        window.layoutIfNeeded()
+        try #require(controller.scrollView.verticalScroller?.isHidden == false)
+        pointer.location = atTheEdge()
+        // Its backing layer says whether it will draw again; NSView's flag reads false there.
+        let redraws = { other.layer?.needsDisplay() == true }
+        window.displayIfNeeded()
+        CATransaction.flush()
+        try #require(!redraws())
+        #expect(!hovered())
+
+        center.post(name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
+
+        #expect(redraws())
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(hovered())
     }
 
     func messageText(in view: NSView) -> MessageTextView? {
@@ -1280,15 +1370,92 @@ struct MessageTableTests {
         #expect(heights[0] >= 1.5 * clip.bounds.height)
         #expect(try cell(at: 0) is PlaceholderCell)
 
-        show(
-            MessageTableState(
-                rows: page, reachedOldest: true, beginning: "This is the beginning of #general."))
-        #expect(table.rect(ofRow: 0).height == 48)
+        let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        show(MessageTableState(rows: page, reachedOldest: true, start: general.start))
+        #expect(try cell(at: 0) is ChannelStartCell)
+        let shown = textFields(in: try cell(at: 0)).filter { !$0.isHiddenOrHasHiddenAncestor }
+            .map(\.stringValue)
+        #expect(shown == ["Welcome to #general!", "This is the start of the #general channel."])
+        #expect(table.rect(ofRow: 0).height == fittingHeight(ofRow: 0))
+    }
+
+    // Its rows reach their places in this update, as a page's do; a SwiftUI update can lay
+    // the table out a frame later.
+    @Test
+    func aRenameThatGrowsTheStartKeepsTheVisibleRowsInPlace() {
+        let short = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        let long = ChannelName(
+            kind: .guildChannel(.guildText),
+            name: String(repeating: "a-very-long-channel-name-", count: 4))
+        show(MessageTableState(rows: page, reachedOldest: true, start: short.start))
+        scroll(toRowOf: 102)
+        let before = visibleViews()
+        #expect(!before.isEmpty)
+
+        controller.show(MessageTableState(rows: page, reachedOldest: true, start: long.start))
+
+        expectTheSameViewsInPlace(before)
+    }
+
+    // The official client's welcome sits left, above the first message.
+    @Test
+    func theStartHeaderSitsLeftAboveTheFirstMessage() throws {
+        let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        show(MessageTableState(rows: [row(1, at: noon)], reachedOldest: true, start: general.start))
+        let start = try #require(try cell(at: 0) as? ChannelStartCell)
+        let fields = textFields(in: start).filter { !$0.isHiddenOrHasHiddenAncestor }
+        let title = try #require(fields.first { $0.stringValue.hasPrefix("Welcome") })
+        let subtitle = try #require(fields.first { $0.stringValue.hasPrefix("This is") })
+
+        #expect(start.icon.frame.size == NSSize(width: 68, height: 68))
+        #expect(start.icon.frame.minX == 16)
+        // A label's frame reaches 2 past its text.
+        #expect(title.alignmentRect(forFrame: title.frame).minX == 16)
+        #expect(subtitle.alignmentRect(forFrame: subtitle.frame).minX == 16)
+        #expect(title.font == TypeScale.startTitle.nsFont)
+        #expect(subtitle.font == TypeScale.startSubtitle.nsFont)
+        // Measured: the message text's color, not a muted one.
+        #expect(subtitle.textColor == Palette.textDefault)
+        // Measured from the official client: the title's baseline 39 below the icon, the
+        // subtitle's 33.5 below the title's.
+        let fromTop = { (view: NSView, y: CGFloat) in
+            (start.isFlipped ? view.frame.minY : start.bounds.height - view.frame.maxY) + y
+        }
+        let iconBottom = fromTop(start.icon, start.icon.frame.height)
+        let titleBaseline = fromTop(title, title.firstBaselineOffsetFromTop)
+        let subtitleBaseline = fromTop(subtitle, subtitle.firstBaselineOffsetFromTop)
+        #expect(abs(titleBaseline - iconBottom - 39) <= 0.5)
+        #expect(abs(subtitleBaseline - titleBaseline - 33.5) <= 0.5)
+        #expect(controller.timeline.items[1] == .day(berlin.startOfDay(for: noon)))
+    }
+
+    @Test
+    func aLongChannelNameWrapsTheTitleAndTheRowGrows() throws {
+        let short = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        let long = ChannelName(
+            kind: .guildChannel(.guildText),
+            name: String(repeating: "a-very-long-channel-name-", count: 4))
+        show(MessageTableState(rows: page, reachedOldest: true, start: short.start))
+        let one = table.rect(ofRow: 0).height
+
+        show(MessageTableState(rows: page, reachedOldest: true, start: long.start))
+
+        #expect(table.rect(ofRow: 0).height > one)
+        #expect(table.rect(ofRow: 0).height == fittingHeight(ofRow: 0))
+    }
+
+    @Test
+    func aDirectMessageStartsWithTheAvatarAndTheUsername() throws {
+        let mira = ChannelName(kind: .direct(author(7, "Mira")), name: "Mira")
+        show(MessageTableState(rows: page, reachedOldest: true, start: mira.start))
+        let shown = textFields(in: try cell(at: 0)).filter { !$0.isHiddenOrHasHiddenAncestor }
+            .map(\.stringValue)
+
         #expect(
-            textFields(in: try cell(at: 0)).contains {
-                $0.stringValue == "This is the beginning of #general."
-                    && !$0.isHiddenOrHasHiddenAncestor
-            })
+            shown == [
+                "Mira", "mira", "This is the beginning of your direct message history with Mira.",
+            ])
+        #expect(table.rect(ofRow: 0).height == fittingHeight(ofRow: 0))
     }
 
     @Test
@@ -1591,6 +1758,47 @@ struct MessageTableTests {
         #expect(visibleRows.contains(table.numberOfRows - 1))
         #expect(abs(gapBelowTheRows) <= 0.5)
         #expect(controller.timeline.items.first?.id == .edge(.older))
+    }
+
+    // Measured in the official client: 24 from the newest message's box to the composer.
+    @Test
+    func theNewestBoxEnds24AboveTheComposer() throws {
+        show(messages(40))
+        let cell = try #require(try cell(at: table.numberOfRows - 1) as? MessageCell)
+
+        let boxBottom = cell.convert(cell.box, to: table).maxY
+        #expect(abs(clip.bounds.maxY - boxBottom - 24) <= 0.5)
+    }
+
+    // Measured in the official client: from the divider's line to the first avatar 21.5.
+    @Test
+    func theDividersLineSits21AndAHalfAboveTheFirstAvatar() throws {
+        show(MessageTableState(rows: [row(1, at: noon)], reachedOldest: true))
+        let day = try #require(
+            controller.timeline.items.firstIndex { if case .day = $0 { true } else { false } })
+        let divider = try #require(try cell(at: day) as? DayDividerCell)
+        let message = try cell(of: 1)
+        let date = try #require(textFields(in: divider).first)
+        let avatar = try #require(message.subviews.first { $0 is AvatarView })
+
+        let line = date.convert(date.bounds, to: table).midY
+        let avatarTop = avatar.convert(avatar.bounds, to: table).minY
+        #expect(abs(avatarTop - line - 21.5) <= 0.5)
+        // The date stays inside its own row.
+        #expect(date.convert(date.bounds, to: table).maxY <= table.rect(ofRow: day).maxY)
+    }
+
+    // An older message of its day landing above it moves the divider away from it.
+    @Test
+    func aMessageLeavingItsDividerGetsTheGroupSpacingBack() throws {
+        let first = row(2, by: author(2), at: noon + 600)
+        show(MessageTableState(rows: [first], reachedOldest: true))
+        let close = table.rect(ofRow: index(of: 2)).height
+
+        show(MessageTableState(rows: [row(1, at: noon), first], reachedOldest: true))
+
+        #expect(table.rect(ofRow: index(of: 2)).height == close + 10)
+        #expect(table.rect(ofRow: index(of: 2)).height == fittingHeight(ofRow: index(of: 2)))
     }
 
     @Test

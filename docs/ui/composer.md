@@ -17,9 +17,9 @@ from Discord's documentation.
   there now) and the slowmode note or countdown with a stopwatch on its right. Nothing sits
   below the card.
 - The message list runs on behind the strip down to the card: messages scroll under the strip
-  and disappear behind the card. A pinned list leaves the strip's height and 8 more below its
-  newest message. Akari puts the strip's texts on the chat's background, so they stay readable
-  over a message.
+  and disappear behind the card. A pinned list leaves just the strip's height (24) between its
+  newest message's box and the card (measured 2026-10-14). Akari puts the strip's texts on the
+  chat's background, so they stay readable over a message.
 - Discord puts buttons for attachments, gifts, GIFs, stickers and emoji into the card. Akari
   has none of them yet.
 
@@ -31,10 +31,14 @@ Sending shrinks it back to one line.
 
 ## Placeholder
 
-Akari's own wording, in `textMuted`:
+The official client's wording, in `textMuted`, at the size of message text:
 
-- a guild channel: "Write a message in #general";
-- a DM or group DM: "Write a message to Mira".
+- a guild channel or thread: "Message #general";
+- a DM: "Message @Mira", with the other person's display name.
+- a group DM: "Message Weekend plans", the group's name without "@" (**unverified**).
+
+The official placeholder measured `#6c6d75` on the dark theme, darker than `textMuted`
+(observed 2026-10-14); Akari keeps `textMuted` for now.
 
 ## Keys
 

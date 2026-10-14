@@ -52,7 +52,7 @@ struct CategoryRow: View {
         Button(action: toggle) {
             HStack(spacing: 4) {
                 Text(name)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(TypeScale.category.font)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
@@ -91,7 +91,7 @@ struct ChannelRow: View {
             HStack(spacing: 8) {
                 ChannelSymbol(channel: channel)
                 Text(channel.name ?? "")
-                    .font(.system(size: 16, weight: selected ? selectedWeight : .regular))
+                    .font(TypeScale.channelName.weight(weight).font)
                     .foregroundStyle(
                         Color(
                             nsColor: selected || hovered
@@ -119,8 +119,8 @@ struct ChannelRow: View {
         .padding(.horizontal, 8)
     }
 
-    private var selectedWeight: Font.Weight {
-        colorScheme == .light ? .semibold : .medium
+    private var weight: TextStyle.Weight {
+        selected && colorScheme == .light ? .semibold : .medium
     }
 
     private var background: Color {

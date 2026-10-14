@@ -219,13 +219,16 @@ final class TimeRefreshTests {
             Issue.record("not a message")
             return
         }
+        // It's the first message after midnight, right below its day's divider.
+        let followsDay =
+            if case .day = controller.timeline.items[index(of: 2) - 1] { true } else { false }
         #expect(
             shown
                 == MessageCell.height(
                     edited.message,
                     body: MessageText.build(edited.message, revealed: [], now: later, times: times)
                         .text,
-                    startsGroup: startsGroup, width: width))
+                    startsGroup: startsGroup, followsDay: followsDay, width: width))
     }
 
     @Test
@@ -308,6 +311,10 @@ final class TimeRefreshTests {
         guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) else {
             return []
         }
+        return texts(in: cell)
+    }
+
+    func texts(in cell: NSView) -> [String] {
         cell.layoutSubtreeIfNeeded()
         return fields(in: cell).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
     }
@@ -326,7 +333,7 @@ final class TimeRefreshTests {
     func midnightTurnsTodayIntoYesterday() async {
         var rows = [row(1, at: berlinTime(2026, 10, 10, 23, 58))]
         show(rows)
-        #expect(texts(ofRow: index(of: 1)).contains("Today at 11:58\u{202F}PM"))
+        #expect(texts(ofRow: index(of: 1)).contains("11:58\u{202F}PM"))
 
         clock.now = berlinTime(2026, 10, 11, 0, 1)
         await post(.NSCalendarDayChanged)
@@ -337,6 +344,36 @@ final class TimeRefreshTests {
         #expect(dividers == 2)
     }
 
+    // AppKit keeps row views ready beyond the visible rows; a slight scroll shows them as they are.
+    @Test
+    func midnightReachesRowViewsPreparedOutOfSight() async throws {
+        let start = berlinTime(2026, 10, 10, 23, 58)
+        // Every author change starts a group, so every row shows its time.
+        show((1...60).map { row(UInt64($0), by: author(UInt64($0 % 2 + 1)), at: start + 1) })
+        let first = index(of: 1)
+        try #require(!table.visibleRect.intersects(table.rect(ofRow: first)))
+        // As AppKit's overdraw does ahead of a scroll.
+        let prepared = try #require(table.view(atColumn: 0, row: first, makeIfNecessary: true))
+        window.layoutIfNeeded()
+        try #require(table.view(atColumn: 0, row: first, makeIfNecessary: false) === prepared)
+        #expect(texts(in: prepared).contains("11:58\u{202F}PM"))
+        // An offscreen table drops it at its next tile, which the refresh brings; on screen it
+        // stays. So it's read as the refresh reloads it.
+        var shown: [String] = []
+        table.afterReload = { [table] rows in
+            if rows.contains(first),
+                let cell = table.view(atColumn: 0, row: first, makeIfNecessary: false)
+            {
+                shown = self.texts(in: cell)
+            }
+        }
+
+        clock.now = berlinTime(2026, 10, 11, 0, 1)
+        await post(.NSCalendarDayChanged)
+
+        #expect(shown.contains("Yesterday at 11:58\u{202F}PM"))
+    }
+
     @Test
     func aNoticeRowTakesItsNewHeightWhenItsTimeChanges() async throws {
         let start = berlinTime(2026, 10, 10, 23, 58)
@@ -345,14 +382,15 @@ final class TimeRefreshTests {
         let message = notice.message
         let text = try #require(message.notice)
         let height = { (time: String, width: CGFloat) in
-            NoticeCell.height(message, notice: text, time: time, width: width)
+            // The list's first message, right below its day's divider.
+            NoticeCell.height(message, notice: text, time: time, followsDay: true, width: width)
         }
         var width: CGFloat = 0
         for windowWidth in stride(from: 300, through: 1000, by: 2) {
             window.setContentSize(NSSize(width: CGFloat(windowWidth), height: 400))
             window.layoutIfNeeded()
             let column = table.tableColumns[0].width
-            if height("Today at 11:58\u{202F}PM", column)
+            if height("11:58\u{202F}PM", column)
                 != height("Yesterday at 11:58\u{202F}PM", column)
             {
                 width = column
@@ -401,12 +439,12 @@ final class TimeRefreshTests {
     func aLocaleChangeReformatsTimes() async {
         clock.now = berlinTime(2026, 10, 10, 15, 0)
         show([row(1, at: berlinTime(2026, 10, 10, 14, 5))])
-        #expect(texts(ofRow: index(of: 1)).contains("Today at 2:05\u{202F}PM"))
+        #expect(texts(ofRow: index(of: 1)).contains("2:05\u{202F}PM"))
 
         clock.locale = Locale(identifier: "de_DE")
         await post(NSLocale.currentLocaleDidChangeNotification)
 
-        #expect(texts(ofRow: index(of: 1)).contains("Today at 14:05"))
+        #expect(texts(ofRow: index(of: 1)).contains("14:05"))
     }
 
     @Test

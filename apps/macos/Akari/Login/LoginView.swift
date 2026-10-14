@@ -58,10 +58,10 @@ struct StepHeading: View {
     var body: some View {
         VStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 24, weight: .semibold))
+                .font(TypeScale.loginTitle.font)
                 .foregroundStyle(Color(nsColor: Palette.textStrong))
             Text(subtitle)
-                .font(.system(size: 16))
+                .font(TypeScale.body.font)
                 .foregroundStyle(Color(nsColor: Palette.textMuted))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -95,7 +95,7 @@ struct SubmitArea: View {
 
     private func problem(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 14))
+            .font(TypeScale.detail.font)
             .foregroundStyle(Color(nsColor: Palette.danger))
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -106,7 +106,7 @@ private struct NoticeBanner: View {
 
     var body: some View {
         Label(text, systemImage: "info.circle")
-            .font(.system(size: 14))
+            .font(TypeScale.detail.font)
             .foregroundStyle(Color(nsColor: Palette.textDefault))
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

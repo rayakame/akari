@@ -1,21 +1,58 @@
+import AkariKit
+
 // The name is empty before READY, while the store doesn't know the channel yet.
 struct ChannelName: Equatable {
-    let inGuild: Bool
+    enum Kind: Equatable {
+        case guildChannel(ChannelType)
+        // The recipient, if the store knows them.
+        case direct(User?)
+        case group
+    }
+
+    let kind: Kind
     let name: String
 
     var placeholder: String {
         if name.isEmpty {
-            return "Write a message"
+            return "Message"
         }
-        return inGuild ? "Write a message in #\(name)" : "Write a message to \(name)"
+        return switch kind {
+        case .guildChannel: "Message #\(name)"
+        case .direct: "Message @\(name)"
+        case .group: "Message \(name)"
+        }
     }
 
-    var beginning: String {
+    var start: ChannelStart? {
         if name.isEmpty {
-            return ""
+            return nil
         }
-        return inGuild
-            ? "This is the beginning of #\(name)."
-            : "This is the beginning of your conversation with \(name)."
+        return switch kind {
+        case .guildChannel(let type):
+            ChannelStart(
+                icon: .symbol(ChannelSymbols.name(for: type)), title: "Welcome to #\(name)!",
+                subtitle: "This is the start of the #\(name) channel.")
+        case .direct(let user):
+            ChannelStart(
+                icon: .avatar(name: name, id: user?.id.rawValue ?? 0), title: name,
+                username: user?.username,
+                subtitle: "This is the beginning of your direct message history with \(name).")
+        case .group:
+            ChannelStart(
+                icon: .symbol(ChannelSymbols.name(for: .groupDm)), title: name,
+                subtitle: "Welcome to the beginning of the \(name) group.")
+        }
     }
+}
+
+struct ChannelStart: Equatable {
+    enum Icon: Equatable {
+        case symbol(String)
+        case avatar(name: String, id: UInt64)
+    }
+
+    let icon: Icon
+    let title: String
+    var username: String?
+    let subtitle: String
 }

@@ -28,7 +28,7 @@ struct ComposerView: View {
                 Text(
                     denied ? "You can't send messages in this channel." : placeholder
                 )
-                .font(.system(size: 16))
+                .font(TypeScale.body.font)
                 .foregroundStyle(Color(nsColor: Palette.textMuted))
                 .lineLimit(1)
                 .padding(.leading, ComposerTextView.insets.width)
@@ -52,7 +52,7 @@ struct ComposerView: View {
     @ViewBuilder private var counter: some View {
         if let remaining = composer.remaining {
             Text(remaining.formatted())
-                .font(.system(size: 12))
+                .font(TypeScale.small.font)
                 .monospacedDigit()
                 .foregroundStyle(Color(nsColor: remaining < 0 ? Palette.danger : Palette.textMuted))
                 .padding(.trailing, 14)

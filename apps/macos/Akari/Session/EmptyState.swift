@@ -7,7 +7,7 @@ struct EmptyState: View {
         Group {
             if let text {
                 Text(text)
-                    .font(.system(size: 16))
+                    .font(TypeScale.body.font)
                     .foregroundStyle(Color(nsColor: Palette.textMuted))
             } else {
                 ProgressView()

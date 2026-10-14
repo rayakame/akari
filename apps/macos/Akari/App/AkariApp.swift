@@ -21,6 +21,9 @@ struct AkariApp: App {
         }
         .defaultSize(width: 1280, height: 800)
         .windowResizability(.contentMinSize)
+        // The session centers its own title (TitleBar); SwiftUI would show the window's title
+        // again whenever a navigation title changes.
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             AccountCommands(app: launch.app)
             ThemeCommands()

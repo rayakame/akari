@@ -21,10 +21,12 @@ app can mirror it and Discord users can switch with zero relearning.
 - [server-list.md](server-list.md): the server rail, its order, icons, pill and initials
 - [channel-list.md](channel-list.md): categories, channel rows, and the DM list at home
 - [message-list.md](message-list.md): message layout, the grouping rule, times, day dividers,
-  system messages, loading history, jump to present, edits and deletes
+  system messages, loading history, the channel's start, jump to present, edits and deletes
 - [markdown.md](markdown.md): message formatting: Discord's markdown, mentions and tokens, and
   the cases still to observe
 - [theme.md](theme.md): the dark and light color tokens
+- [typography.md](typography.md): the type scale, every text style's size and weight, and how
+  they were matched to the official client
 - [composer.md](composer.md): the composer, sending, failed messages, slowmode and the length
   limit
 - [shortcuts.md](shortcuts.md): keyboard shortcuts and which ones Akari has

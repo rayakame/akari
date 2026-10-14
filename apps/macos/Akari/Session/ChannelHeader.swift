@@ -12,7 +12,7 @@ struct ChannelHeader: View {
             if let channel {
                 ChannelSymbol(channel: channel)
                 Text(name)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(TypeScale.channelHeader.font)
                     .foregroundStyle(Color(nsColor: Palette.textStrong))
                     .lineLimit(1)
                 if let topic = channel.topic, !topic.isEmpty {
@@ -21,7 +21,7 @@ struct ChannelHeader: View {
                         .frame(width: 1, height: 24)
                         .padding(.horizontal, 4)
                     Text(topic)
-                        .font(.system(size: 14))
+                        .font(TypeScale.topic.font)
                         .foregroundStyle(Color(nsColor: Palette.textMuted))
                         .lineLimit(1)
                         .help(topic)

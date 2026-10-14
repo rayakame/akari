@@ -25,17 +25,40 @@ struct ComposerFormatTests {
         #expect(note(10, true) == "Slowmode is on, but it doesn't apply to you")
     }
 
-    @Test
-    func namesGivePlaceholdersAndBeginnings() {
-        let general = ChannelName(inGuild: true, name: "general")
-        let mira = ChannelName(inGuild: false, name: "Mira")
-        let unknown = ChannelName(inGuild: false, name: "")
+    let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
+    let mira = ChannelName(kind: .direct(author(7, "Mira")), name: "Mira")
+    let group = ChannelName(kind: .group, name: "Weekend plans")
+    let thread = ChannelName(kind: .guildChannel(.publicThread), name: "release-notes")
+    let unknown = ChannelName(kind: .direct(nil), name: "")
 
-        #expect(general.placeholder == "Write a message in #general")
-        #expect(mira.placeholder == "Write a message to Mira")
-        #expect(unknown.placeholder == "Write a message")
-        #expect(general.beginning == "This is the beginning of #general.")
-        #expect(mira.beginning == "This is the beginning of your conversation with Mira.")
-        #expect(unknown.beginning == "")
+    // The official client's wording.
+    @Test
+    func namesGivePlaceholders() {
+        #expect(general.placeholder == "Message #general")
+        #expect(mira.placeholder == "Message @Mira")
+        #expect(group.placeholder == "Message Weekend plans")
+        #expect(thread.placeholder == "Message #release-notes")
+        #expect(unknown.placeholder == "Message")
+    }
+
+    @Test
+    func namesGiveTheChannelsStart() {
+        #expect(
+            general.start
+                == ChannelStart(
+                    icon: .symbol("number"), title: "Welcome to #general!",
+                    subtitle: "This is the start of the #general channel."))
+        #expect(
+            mira.start
+                == ChannelStart(
+                    icon: .avatar(name: "Mira", id: 7), title: "Mira", username: "mira",
+                    subtitle: "This is the beginning of your direct message history with Mira."))
+        #expect(
+            group.start
+                == ChannelStart(
+                    icon: .symbol("person.2.fill"), title: "Weekend plans",
+                    subtitle: "Welcome to the beginning of the Weekend plans group."))
+        #expect(thread.start?.icon == .symbol("text.bubble"))
+        #expect(unknown.start == nil)
     }
 }

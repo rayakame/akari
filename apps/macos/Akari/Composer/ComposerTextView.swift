@@ -4,9 +4,9 @@ import AppKit
 // Return, Shift+Return, input-method composition and an empty Up arrow need AppKit's key
 // commands; SwiftUI's text editors can't tell them apart.
 final class ComposerTextView: NSTextView {
-    static let lineHeight: CGFloat = 22
+    static let lineHeight = TypeScale.body.line
     static let insets = NSSize(width: 16, height: 17)
-    static let font = NSFont.systemFont(ofSize: 16)
+    static let font = TypeScale.body.nsFont
 
     var onSubmit: () -> Void = {}
     var onEscape: () -> Void = {}

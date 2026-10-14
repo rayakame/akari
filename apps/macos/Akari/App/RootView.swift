@@ -9,6 +9,7 @@ struct RootView: View {
             switch launch {
             case .testing:
                 Color(nsColor: Palette.frame)
+                    .navigationTitle(TestingWindowTitle.shared.text)
             case .failed(let message):
                 Text(message)
                     .foregroundStyle(Color(nsColor: Palette.textMuted))

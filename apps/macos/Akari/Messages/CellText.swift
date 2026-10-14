@@ -14,24 +14,21 @@ enum CellText {
     }
 
     static func body(_ text: String, color: NSColor) -> NSAttributedString {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = 22
-        paragraph.maximumLineHeight = 22
-        return NSAttributedString(
+        NSAttributedString(
             string: text,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 16), .foregroundColor: color,
-                .paragraphStyle: paragraph, .baselineOffset: 3,
+                .font: TypeScale.body.nsFont, .foregroundColor: color,
+                .paragraphStyle: bodyLine, .baselineOffset: TypeScale.size(3),
             ])
     }
 
-    static func symbolLine(_ symbol: String, _ text: String, size: CGFloat = 14)
+    static func symbolLine(_ symbol: String, _ text: String, style: TextStyle = TypeScale.detail)
         -> NSAttributedString
     {
         let line = NSMutableAttributedString()
-        let font = NSFont.systemFont(ofSize: size)
+        let font = style.nsFont
         if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: size, weight: .regular))
+            .withSymbolConfiguration(.init(pointSize: style.size, weight: .regular))
         {
             let attachment = NSTextAttachment()
             attachment.image = image
@@ -46,14 +43,18 @@ enum CellText {
     }
 
     static func editedMark() -> NSAttributedString {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = 22
-        paragraph.maximumLineHeight = 22
-        return NSAttributedString(
+        NSAttributedString(
             string: " (edited)",
             attributes: [
-                .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.chatTextMuted,
-                .paragraphStyle: paragraph, .baselineOffset: 3,
+                .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
+                .paragraphStyle: bodyLine, .baselineOffset: TypeScale.size(3),
             ])
+    }
+
+    private static var bodyLine: NSParagraphStyle {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = TypeScale.body.line
+        paragraph.maximumLineHeight = TypeScale.body.line
+        return paragraph
     }
 }

@@ -15,8 +15,13 @@ client on 2026-10-10; colors in [theme.md](theme.md).
   being at the bottom.
 - Each message has 2 of vertical padding and 16 on the right. Its content starts 72 from the
   left: 16 margin, a 40 avatar column, 16 gap.
-- Text is 16 on a 22 line height.
-- Hovering a message tints its background with `hoverBackground`.
+- Text is 16 on a 22 line height. Sizes of every text style are in
+  [typography.md](typography.md).
+- Hovering a message tints its **box** with `hoverBackground`: the message with its 2 of
+  padding above and below, not the space before a group (see below), and not the 16 at the
+  right edge where the official client keeps its scrollbar. Under macOS's legacy scrollers the
+  scroller has a gutter of its own, and the box runs up to it. Hovering the space before a group
+  or the scrollbar's gutter hovers no message (observed 2026-10-14).
 
 ## Groups
 
@@ -25,15 +30,28 @@ author; the rest show only their content.
 
 **The group's first message:**
 
-- 16 of extra space above it, and at least 44 tall. **Unverified** that 16 is the default
-  group spacing.
-- The avatar (40) in the left column, 2 above the name's line.
-- The display name in semibold `textStrong`. Bots carry a small tag after the name ("APP"
+- 16 of extra space above it, outside its box: hover and the mention highlight leave it out,
+  so two highlighted groups in a row show a gap (observed 2026-10-14).
+  *Akari: 16, the official setting's default; the official client measured 17 between two
+  boxes and 48 for a one-line group start's box, where Akari's is 47 with the name on a 19
+  line. Akari keeps its rhythm for now.*
+- Right after a day divider the space above it is smaller: its box starts 17.5 below the
+  divider's line, its avatar 21.5 (measured 2026-10-14). *Akari: 6 instead of 16 below the
+  divider's row; system messages there move up by the same 10.*
+- Inside the box, measured at 2 px per point on 2026-10-14: the avatar (40) in the left column
+  starts 4 below the box's top, the name's baseline sits 18.5 below it and the first text
+  line's 41. *Akari: avatar and name line 4 into its 47 box (name baseline at 19), text
+  baseline 41, the avatar 3 above the box's bottom; a group start whose content is shorter than
+  the avatar is as tall as a one-line one.*
+- The display name in medium `textStrong`. Bots carry a small tag after the name ("APP"
   since 2024). **Unverified** that webhooks get the same tag.
-- The time, 4 after the name, in 12 medium `chatTextMuted`.
+- The time, 4 after the name, in medium `chatTextMuted` (12 px in the official client;
+  Akari's sizes in [typography.md](typography.md)).
 
 **The other messages:** no avatar and no name. Hovering one shows its time (hours and minutes)
-in the left column, right-aligned in a 56 wide space.
+in the left column, right-aligned in a 56 wide space. Their text sits where the first text line
+of a group start sits in its line: its baseline 19 below the box's top (derived from the group
+start's measurement; *Akari: 3 above the text, 1 below*).
 
 ### When a new group starts
 
@@ -64,15 +82,25 @@ The time in a group's first line:
 
 | When | Shown as (en-US) |
 |---|---|
-| Today | "Today at 2:05 PM" |
-| Yesterday | "Yesterday at 11:59 PM" |
-| Earlier, or a date in the future | numeric date and short time, "10/03/2026, 2:05 PM" |
+| Today | the time only, "2:05 PM" (observed 2026-10-14) |
+| Yesterday | "Yesterday at 11:59 PM" (**unverified** since the today form changed) |
+| Earlier, or a date in the future | numeric date and short time, "10/03/2026, 2:05 PM" (**unverified** since then) |
 
 All of them follow the user's locale and time zone, also when those change while the app
-runs: at midnight "Today at" becomes "Yesterday at", and a new time zone or locale redraws the
-times and moves day dividers without reopening the channel. Hovering the time shows the full
-date and time. Discord writes the older form without the comma; Akari uses the platform's date format
-for the locale.
+runs: at midnight "2:05 PM" becomes "Yesterday at 2:05 PM", and a new time zone or locale
+redraws the times and moves day dividers without reopening the channel. Hovering the time
+shows the full date and time. Discord writes the older form without the comma; Akari uses the
+platform's date format for the locale.
+
+### Locale
+
+Every date and time goes through the platform's locale-aware formats (on Apple platforms
+`Date.FormatStyle` fields, the same templates `DateFormatter.setLocalizedDateFormatFromTemplate`
+takes); no app has a fixed date pattern. The order, the separators and 12 or 24 hours follow
+the user's region and the system's 24-hour setting; the words (month and weekday names,
+"Yesterday at") follow the app's language. Akari is English only for now, so on a German Mac
+its dates are those of `en_DE`: "14. October 2026", "03.10.2026, 14:05". German words come with
+a German localization of Akari, a milestone of its own.
 
 ## Day dividers
 
@@ -83,7 +111,9 @@ for the locale.
 - A divider stays while any message of its day is shown, also when the day's first message
   goes.
 - A 1 pt `borderSubtle` line across the list with the date in the middle, in the locale's
-  long form ("October 10, 2026"), 12 semibold `textMuted`, on the list's background.
+  long form ("October 10, 2026"), semibold `textMuted`, on the list's background.
+- The first message under it sits closer than a group usually does: its avatar 21.5 below
+  the line (see [Groups](#groups)).
 
 ## System messages
 
@@ -124,10 +154,33 @@ Akari doesn't know. A type Akari doesn't know shows its content like an ordinary
 - If a page can't be loaded, the placeholders next to the loaded messages say so and offer
   "Try again". Nothing retries on its own, so a failing request doesn't repeat on every
   scroll, and a success at the other end doesn't retry it either.
-- At the beginning of a channel a single row says "This is the beginning of #general." (a DM:
-  "This is the beginning of your conversation with Mira."), in Akari's words.
+- At the beginning of a channel, once the list holds its first message, a header sits above
+  it, left aligned (see [Channel start](#channel-start)).
 - Placeholder rows keep their height in every state, so their changes never move the
   messages.
+
+## Channel start
+
+Above the first message of a channel, when the history has reached it. Measured from the
+official client on 2026-10-14:
+
+- 16 from the list's left edge, like the avatars: a 68 circle (`startIcon`) with the channel's
+  symbol in `textStrong`, about 35 tall.
+- The title's baseline 39 below the circle: "Welcome to #general!" in heavy `textStrong`. A
+  long name wraps.
+- The subtitle's baseline 33.5 below the title's: "This is the start of the #general channel."
+  in `textDefault`, the message text's color.
+- Then the day divider of the first message, its line about 30 below the subtitle's baseline.
+
+The official client also shows an "Edit Channel" button under the subtitle to those who may
+edit the channel. *Akari leaves it out until it has channel settings.*
+
+**DMs** show the other person's avatar (80) in the circle's place, their display name as the
+title, their username under it, and "This is the beginning of your direct message history
+with Mira." **Group DMs** show the group symbol, the group's name and "Welcome to the
+beginning of the Weekend plans group." **Unverified**: the DM and group sizes, spacing and
+wording, which no screenshot showed yet; the official DM header also has buttons (add friend,
+block) that Akari leaves out.
 
 ## Jump to present
 
