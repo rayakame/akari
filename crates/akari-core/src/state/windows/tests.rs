@@ -77,6 +77,9 @@ fn describe(events: &[StoreEvent]) -> Vec<String> {
                 format!("Trimmed({}..{})", first.get(), last.get())
             }
             StoreEvent::MessagesStale { channel_id } => format!("Stale({})", channel_id.get()),
+            StoreEvent::MessagesRefreshed { channel_id } => {
+                format!("Refreshed({})", channel_id.get())
+            }
             StoreEvent::MessagesCleared { channel_id } => format!("Cleared({})", channel_id.get()),
             StoreEvent::MessageReplaced {
                 pending_id,
@@ -558,7 +561,8 @@ fn refresh_reconciles_a_stale_window() {
             "Deleted(12)",
             "Updated(11)",
             "Loaded(13..13)",
-            "Loaded(14..14)"
+            "Loaded(14..14)",
+            "Refreshed(1)"
         ]
     );
     assert_eq!(harness.ids(), [10, 11, 13, 14]);
@@ -578,7 +582,7 @@ fn reconcile_touches_only_the_pages_range() {
     let ticket = harness.begin(LoadKind::Refresh).unwrap();
     let events = harness.finish(ticket, &[8, 10], 5);
 
-    assert_eq!(events, ["Deleted(9)", "Loaded(10..10)"]);
+    assert_eq!(events, ["Deleted(9)", "Loaded(10..10)", "Refreshed(1)"]);
     assert_eq!(harness.ids(), [5, 6, 7, 8, 10]);
 }
 
@@ -1002,7 +1006,7 @@ fn refreshing_an_empty_stale_window_fills_it() {
 
     let events = harness.finish(ticket, &[10, 11], 3);
 
-    assert_eq!(events, ["Loaded(10..11)"]);
+    assert_eq!(events, ["Loaded(10..11)", "Refreshed(1)"]);
     let window = harness.window();
     assert!(window.latest && !window.stale && window.oldest);
 }
@@ -1075,7 +1079,8 @@ fn a_delete_during_a_refresh_isnt_brought_back() {
 
     let events = harness.finish(ticket, &[10, 11, 12], 3);
 
-    assert!(events.is_empty(), "{events:?}");
+    // Nothing changed but the window's state.
+    assert_eq!(events, ["Refreshed(1)"]);
     assert_eq!(harness.ids(), [10, 11]);
 }
 
@@ -1223,7 +1228,15 @@ fn cached_messages_fill_an_empty_loading_window_as_stale() {
 
     let landed = harness.finish(ticket, &[2, 3, 4], 3);
 
-    assert_eq!(landed, ["Loaded(4..4)", "Loaded(9..9)", "Trimmed(2..9)"]);
+    assert_eq!(
+        landed,
+        [
+            "Loaded(4..4)",
+            "Loaded(9..9)",
+            "Trimmed(2..9)",
+            "Refreshed(1)"
+        ]
+    );
     assert_eq!(harness.ids(), [2, 3, 4, 9]);
     let window = harness.window();
     assert!(!window.stale && window.latest);

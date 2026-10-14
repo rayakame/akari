@@ -35,6 +35,9 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::ChannelUpdated(channel) => format!("ChannelUpdated({})", channel.id.get()),
         StoreEvent::MessageInserted(message) => format!("MessageInserted({})", message.id.get()),
         StoreEvent::MessagesStale { channel_id } => format!("MessagesStale({})", channel_id.get()),
+        StoreEvent::MessagesRefreshed { channel_id } => {
+            format!("MessagesRefreshed({})", channel_id.get())
+        }
         StoreEvent::MessageUpdated(message) => format!("MessageUpdated({})", message.id.get()),
         StoreEvent::MessageDeleted { message_id, .. } => {
             format!("MessageDeleted({})", message_id.get())
@@ -3140,6 +3143,42 @@ mod cache {
 
         events_until(&subscription, "MessagesLoaded(13..13)").await;
         assert!(!account.store().messages(general()).unwrap().stale);
+    }
+
+    // The launch path: the cached channel opens, the gateway connects, and the catch-up after
+    // READY finds nothing new. Consumers learn the window is current again, or they'd show it as
+    // catching up until it's reopened.
+    #[tokio::test]
+    async fn a_refresh_that_finds_nothing_new_still_says_the_window_is_current() {
+        use wiremock::matchers::path;
+
+        let dir = TempDir::new();
+        let mut fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        seed(&fake, &dir, 1..=50).await;
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let subscription = restored(&account).await;
+        wiremock::Mock::given(path(MESSAGES))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(page(&(1..=50).collect::<Vec<_>>())),
+            )
+            .mount(&server)
+            .await;
+        account
+            .load_messages(general(), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+        assert!(!account.store().messages(general()).unwrap().stale);
+
+        let _connection = online(&mut fake, &account).await;
+
+        let events = events_until(&subscription, &format!("MessagesRefreshed({GENERAL})")).await;
+        let stale = format!("MessagesStale({GENERAL})");
+        assert!(events.contains(&stale), "{events:?}");
+        let window = account.store().messages(general()).unwrap();
+        assert!(window.latest && !window.stale);
+        assert_eq!(ids(&account), (1..=50).collect::<Vec<_>>());
     }
 
     #[tokio::test]

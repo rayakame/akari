@@ -197,8 +197,10 @@ block) that Akari leaves out.
 ## Catching up
 
 After a new session (a reconnect that couldn't resume), Akari checks the open channel for
-messages it missed. While it does, a small capsule at the top of the list says "Catching up…"
-with a spinner, in `textMuted` on `panel`. If the check can't join the missed messages to the
+messages it missed; so does the first session after a launch, for a channel shown from the
+disk cache. While it does, a small capsule at the top of the list says "Catching up…"
+with a spinner, in `textMuted` on `panel`, and it goes as soon as the check is done, also when
+it found nothing new. If the check can't join the missed messages to the
 list (more than 100 missed, or the request failed), the list becomes detached and the jump
 bar says "Some messages may be missing" instead.
 

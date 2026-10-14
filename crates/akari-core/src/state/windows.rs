@@ -685,6 +685,7 @@ impl Windows {
         else {
             return;
         };
+        let was_stale = window.stale;
         if ticket.holds {
             window.holding = window.holding.saturating_sub(1);
         }
@@ -814,6 +815,10 @@ impl Windows {
         window.filled = true;
         window.from_disk = false;
         window.release_or_drop_held(channel_id, window_limit, events);
+        // A refresh that found nothing new sends no other event.
+        if was_stale && !window.stale {
+            events.push(StoreEvent::MessagesRefreshed { channel_id });
+        }
     }
 
     // Cached messages show while the window's first page loads; they may be outdated, so the

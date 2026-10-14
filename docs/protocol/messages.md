@@ -67,7 +67,8 @@ every stale window with the latest 100 messages:
   newest), the page is the truth within its ID range: messages missing from it are
   deleted (`MessageDeleted`), changed ones updated (`MessageUpdated`), missed ones
   inserted (`MessagesLoaded` with the range). The held live messages follow, and the
-  window is fresh and at the present again.
+  window is fresh and at the present again (`MessagesRefreshed`, sent also when the page
+  changed nothing, so a UI that shows the catch-up knows it's over).
 - If more than 100 messages were missed, the page can't be joined to the window. The
   window keeps its messages, stays stale, and stops being at the present (`latest` false,
   `MessagesStale` again); the UI offers "jump to present", which is a `Latest` load.

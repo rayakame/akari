@@ -162,6 +162,11 @@ pub enum StoreEvent {
     MessagesStale {
         channel_id: ChannelId,
     },
+    /// A stale window is current again, also when that changed none of its messages; read its
+    /// state again.
+    MessagesRefreshed {
+        channel_id: ChannelId,
+    },
     /// The window's messages were dropped.
     MessagesCleared {
         channel_id: ChannelId,
@@ -247,6 +252,7 @@ impl StoreEvent {
                 last,
             },
             E::MessagesStale { channel_id } => Self::MessagesStale { channel_id },
+            E::MessagesRefreshed { channel_id } => Self::MessagesRefreshed { channel_id },
             E::MessagesCleared { channel_id } => Self::MessagesCleared { channel_id },
             // The event itself could hold message content, which logs never do.
             _ => {

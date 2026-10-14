@@ -181,7 +181,8 @@ and applies each event.
 - A new session marks every window stale (`MessagesStale`) instead of clearing it, so a UI
   keeps its scroll position. Edits and deletes still apply, but new messages are held back
   until the window is refreshed and reconciled, because appending them could leave a gap.
-  `Account` refreshes stale windows right after READY; see
+  `Account` refreshes stale windows right after READY; a window that is current again sends
+  `MessagesRefreshed`, also when the refresh found nothing new. See
   [messages.md](messages.md#after-a-new-session).
 - A channel's first page can show the cache's copy of the channel while it loads: if the
   copy is read before the page arrives (or the page fails), it fills the empty window as

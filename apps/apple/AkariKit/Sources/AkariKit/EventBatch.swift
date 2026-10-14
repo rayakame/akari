@@ -52,7 +52,8 @@ struct EventBatch {
                 removedChannels.insert(channel)
             case .messageInserted(let channel, _), .messageDeleted(let channel, _),
                 .messagesLoaded(let channel, _, _), .messagesTrimmed(let channel, _, _),
-                .messagesStale(let channel), .messagesCleared(let channel):
+                .messagesStale(let channel), .messagesRefreshed(let channel),
+                .messagesCleared(let channel):
                 windowsChanged.insert(channel)
             case .messageUpdated(let channel, let message):
                 updatedMessages[channel, default: []].insert(message)
