@@ -43,6 +43,13 @@ struct FolderTile: View {
         color == nil ? Palette.folder : tint(color).withAlphaComponent(0.3)
     }
 
+    /// Whether the tile carries the selected pill: the open server is inside, out of sight.
+    static func selected(
+        _ item: ServerListModel.FolderItem, expanded: Bool, place: SessionModel.Place
+    ) -> Bool {
+        !expanded && item.guilds.contains { place == .guild($0.id) }
+    }
+
     /// The folder's name, or its servers' names when it has none.
     static func help(_ item: ServerListModel.FolderItem) -> String {
         item.folder.name ?? item.guilds.map(\.name).joined(separator: ", ")

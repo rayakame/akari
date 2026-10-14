@@ -36,6 +36,19 @@ struct RailFolderTests {
     }
 
     @Test
+    func aCollapsedFolderShowsTheOpenServerInside() {
+        let folder = item(["Alpha", "Beta"])
+        let beta = SessionModel.Place.guild(GuildId(rawValue: 2))
+
+        #expect(FolderTile.selected(folder, expanded: false, place: beta))
+        #expect(!FolderTile.selected(folder, expanded: true, place: beta), "its server shows it")
+        #expect(!FolderTile.selected(folder, expanded: false, place: .home))
+        #expect(
+            !FolderTile.selected(
+                folder, expanded: false, place: .guild(GuildId(rawValue: 9))))
+    }
+
+    @Test
     func aFoldersTooltipIsItsNameOrItsServers() {
         #expect(FolderTile.help(item(["Alpha", "Beta"], name: "Games")) == "Games")
         #expect(FolderTile.help(item(["Alpha", "Beta"])) == "Alpha, Beta")

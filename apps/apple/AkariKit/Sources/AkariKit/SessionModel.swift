@@ -238,6 +238,8 @@ public final class SessionModel {
     }
 
     func apply(_ batch: EventBatch) {
+        // Until a session is online, its events describe what changed while Akari was away.
+        let live = connection == .online
         if let state = batch.connection {
             if case .closed(let error) = state {
                 closed(error)
@@ -262,7 +264,7 @@ public final class SessionModel {
         directMessages.apply(batch)
         let muted = channels?.apply(batch) ?? []
         // Like the official client, which collapses a category as it's muted there.
-        if case .guild(let guildId) = place {
+        if live, case .guild(let guildId) = place {
             for category in muted {
                 collapsed.collapse(category, in: guildId)
             }

@@ -25,7 +25,11 @@ struct ServerRail: View {
                     case .folder(let folder):
                         let expanded = session.servers.isExpanded(folder: folder.id)
                         FolderColumn(color: folder.folder.color, expanded: expanded) {
-                            RailItem(selected: false, help: FolderTile.help(folder)) { _ in
+                            RailItem(
+                                selected: FolderTile.selected(
+                                    folder, expanded: expanded, place: session.place),
+                                help: FolderTile.help(folder)
+                            ) { _ in
                                 FolderTile(item: folder, expanded: expanded)
                             } action: {
                                 session.servers.toggle(folder: folder.id)

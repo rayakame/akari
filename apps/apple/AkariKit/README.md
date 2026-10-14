@@ -90,8 +90,10 @@ screen, so views render from them without calling into Rust.
   `retry(_:)` and `discard(_:)` act on failed messages.
 - `CollapsedCategories` (`session.collapsed`) keeps the collapsed categories per guild across
   launches; a collapsed category still shows the open channel. Discord's clients don't sync
-  collapse, so it stays Akari's own; like the official client, the session collapses a
-  category once when it becomes muted while Akari runs, and the user can expand it again.
+  collapse, so it stays Akari's own (per guild, shared by the accounts on this Mac). Like the
+  official client, the session collapses a category of the open guild once when it becomes
+  muted while the session is online, and the user can expand it again; events that arrive
+  before the session is online (what changed while Akari was away) collapse nothing.
 
 The session replaces `messages` on its own when the open channel is deleted or the user can
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.

@@ -40,6 +40,7 @@ public final class ChannelListModel {
             readSettings()
             return []
         }
+        let before = muted
         let changed = batch.channelsChanged[guildId]
         // Member and role changes can show or hide channels.
         if changed != nil || batch.membersChanged.contains(guildId)
@@ -50,7 +51,6 @@ public final class ChannelListModel {
         guard batch.guildSettingsChanged.contains(guildId) else {
             return []
         }
-        let before = muted
         readSettings()
         let categories = Set(channels.filter { $0.kind == .guildCategory }.map(\.id))
         return muted.subtracting(before).intersection(categories)

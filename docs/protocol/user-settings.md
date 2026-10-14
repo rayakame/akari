@@ -85,8 +85,8 @@ changed those ([User Guild Settings](https://docs.discord.food/resources/user-se
 - **Category collapse isn't synced.** `channel_overrides[].collapsed` exists, but the
   official clients don't write it: collapsing or expanding a category in the web or the
   desktop client sends no request, and categories collapsed on the phone were expanded on
-  the web (observed 2026-10-14). Akari ignores the field and keeps collapse local per
-  account. Don't add a sync for it.
+  the web (observed 2026-10-14). Akari ignores the field and keeps collapse in the app,
+  per server. Don't add a sync for it.
 - **How the official clients write levels** (observed 2026-10-14, for the follow-up that
   adds settings writes): the bulk route `PATCH /users/@me/guilds/settings` with only the
   changed field, e.g. `{"guilds":{"<guild>":{"channel_overrides":{"<channel>":{"message_notifications":0}}}}}`

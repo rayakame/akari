@@ -59,7 +59,8 @@ Observed in the official desktop client on 2026-10-14:
 square in `hoverBackground`. A colored folder's tile and column use its color at 30%; one
 without a color uses `folder`. The expanded tile's symbol is `folder.fill` in the folder's
 color (`interactiveText` without one), and the column is 48 wide behind the tile and its
-servers. Expansion is kept per account.
+servers. Expansion is kept per account. A collapsed folder holding the open server carries
+the selected pill. **Unverified:** that the official client does the same.
 
 ## Mention badge
 

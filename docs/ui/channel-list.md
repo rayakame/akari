@@ -36,8 +36,10 @@ title bar.
 - A muted category's name shows at half opacity. Muting a category collapses it at once, its
   channels still look normal (muting the category doesn't mute them), and while it is muted
   and collapsed only a channel with a mention stays under it (observed 2026-10-14). *Akari:
-  collapse is local, as in Discord's clients, which don't sync it; a category that becomes
-  muted while Akari runs collapses once, and the user can expand it again.*
+  collapse is local, as in Discord's clients, which don't sync it, and kept per server. A
+  category of the open server that becomes muted while the session is online collapses
+  once, and the user can expand it again; a mute that happened while Akari was away
+  collapses nothing.*
 
 ## Channels
 

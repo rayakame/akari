@@ -134,6 +134,24 @@ struct ChannelListModelTests {
     }
 
     @Test
+    func aMuteInTheSameBatchAsANewChannelIsReported() {
+        let model = loaded()
+        store.update { state in
+            state.list(
+                [channel(10, kind: .guildCategory), channel(11), channel(13), channel(12)], in: 1)
+            state.mutedChannels = [id(10)]
+        }
+
+        let muted = model.apply(
+            EventBatch([
+                .channelAdded(channelId: id(13), guildId: id(1)),
+                .guildSettingsChanged(guildId: id(1)),
+            ]))
+
+        #expect(muted == [id(10)])
+    }
+
+    @Test
     func aCategoryMutedByAChangeIsReportedOnce() {
         let model = loaded()
         store.update { $0.mutedChannels = [id(10), id(11)] }
