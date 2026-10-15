@@ -520,3 +520,54 @@ async fn errors_never_contain_the_token() {
         assert!(!chain(&err).contains(TOKEN), "{}", chain(&err));
     }
 }
+
+#[test]
+fn last_viewed_rounds_up() {
+    let midnight = 1_792_022_400_000; // 2026-10-15T00:00:00.000Z
+
+    assert_eq!(last_viewed(midnight), 4305);
+    assert_eq!(last_viewed(midnight + 1), 4306);
+    assert_eq!(last_viewed(midnight + 86_400_000), 4306);
+}
+
+#[tokio::test]
+async fn the_date_header_is_read_as_discords_clock() {
+    let noon = 1_792_065_600_000; // 2026-10-15T12:00:00Z
+    let server = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({"message": "Unknown Channel", "code": 10003}))
+                .insert_header("date", "Thu, 15 Oct 2026 12:00:00 GMT"),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path(MESSAGES))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([]))
+                .insert_header("date", "the middle of October"),
+        )
+        .mount(&server)
+        .await;
+    let rest = rest(&server).await;
+    let before = rest.server_now_millis();
+
+    let refused = rest.list_messages(channel(), Query::Latest, 3).await;
+    let first = rest.server_now_millis();
+    rest.list_messages(channel(), Query::Latest, 3)
+        .await
+        .unwrap();
+    let second = rest.server_now_millis();
+
+    assert!(refused.is_err());
+    assert_eq!(before, None);
+    let first = first.unwrap();
+    assert!((noon..noon + 5_000).contains(&first), "{first}");
+    let second = second.unwrap();
+    assert!(
+        (first..noon + 5_000).contains(&second),
+        "an unparsable Date is ignored: {second}"
+    );
+}

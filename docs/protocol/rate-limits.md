@@ -64,6 +64,31 @@ their 429s are reported to the caller.
 - A retry sends the same request body, so a message send keeps its nonce (see
   [messages.md](messages.md#sending)).
 
+## Acks
+
+Acks go through `AccountRest` like every other request, with pacing of their own on top
+(`crates/akari-core/src/account/acks.rs`). What the official client sends is in
+[read-states.md](read-states.md#acks-in-the-official-client).
+
+- **Route keys.** `POST channels/{}/messages/{}/ack` is keyed by its channel, like a send, so
+  each channel's acks have their own lane and bucket. `POST read-states/ack-bulk` names no
+  channel or guild and has one key for the account (top-level ID `0`).
+- **One request at a time.** All acks, single and bulk, go out one after another, the oldest
+  due first; never two in flight. Loads and sends have their own keys and don't wait for them.
+- **Paced acks** (the user reads): a channel's ack waits for a 2 s lull after its latest
+  target, but no longer than 10 s after its first pending one, so a busy channel is still
+  acked at least every 10 s (the official client's cap isn't observed). **Explicit acks**
+  (Escape, the menus) go at once, and take a pending paced target of the channel with them.
+- **One pending ack per channel.** A new target merges with a pending one; the newer ID wins.
+- **Bulks** go out in chunks of 50 entries (the most one official request was seen with), one
+  request per chunk, in order. A channel's pending single ack joins its entry in the bulk.
+- **Never backwards.** An ack at or below what Discord took for the channel this session isn't
+  sent; a bulk whose entries are all skipped sends nothing.
+- **Errors.** An ack still rate limited after the waits and retries above is dropped, as is
+  one Discord refuses. A network error or 5xx (after the 502/504 retry above) is retried once
+  more after 1 s, then dropped. A 401 or `close()` stops the acks, and what's pending is
+  dropped. Nothing is rolled back.
+
 ## Not implemented yet
 
 - `X-RateLimit-Scope: shared` 429s, which "are not counted against you", are handled

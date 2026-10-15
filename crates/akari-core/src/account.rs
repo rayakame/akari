@@ -16,6 +16,7 @@ use crate::state::{
     ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
+use acks::AckSender;
 
 const REFRESH_LIMIT: u8 = 100;
 const JUMP_LIMIT: u8 = 50;
@@ -95,7 +96,8 @@ impl MessageLoad {
 pub(crate) struct Shared {
     gateway: Gateway,
     store: Store,
-    rest: AccountRest,
+    rest: Arc<AccountRest>,
+    acks: AckSender,
     nonces: Nonces,
     status: Mutex<Status>,
     // What op 37 last asked for per guild in this session.
@@ -624,6 +626,7 @@ impl Shared {
     fn close(&self) {
         self.gateway.close();
         self.rest.close();
+        self.acks.close();
         if let Some(flusher) = &self.flusher {
             if self.expired() {
                 flusher.delete();
@@ -662,7 +665,12 @@ impl Account {
         cache: Option<DiskCache>,
     ) -> Result<Self, GatewayError> {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
-        let rest = AccountRest::new(client.clone(), token.clone(), SERVER_ERROR_RETRY);
+        let rest = Arc::new(AccountRest::new(
+            client.clone(),
+            token.clone(),
+            SERVER_ERROR_RETRY,
+        ));
+        let acks = AckSender::start(&runtime, rest.clone(), SERVER_ERROR_RETRY);
         let store = Store::new(limits);
         let thread = cache
             .as_ref()
@@ -689,6 +697,7 @@ impl Account {
             gateway: Gateway::start(client, token, timing)?,
             store,
             rest,
+            acks,
             nonces: Nonces::default(),
             status: Mutex::default(),
             subscribed: Mutex::default(),
@@ -1020,6 +1029,7 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
     }
 }
 
+mod acks;
 mod mutes;
 
 #[cfg(test)]

@@ -4,17 +4,21 @@ use std::time::{Duration, Instant};
 use reqwest::Method as HttpMethod;
 use serde::Serialize;
 
+use super::clock::ServerClock;
 use super::error::RestError;
 use super::ratelimit::{Method, Permit, RateLimiter, ResponseLimits, RouteKey};
 use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
 use crate::lenient::parse_list;
-use crate::model::{self, ChannelId, MessageId};
+use crate::model::{self, ChannelId, DISCORD_EPOCH, MessageId};
 use crate::state::limit_in;
 use crate::{DiscordClient, LoadReport, Token};
 
 const MESSAGES: &str = "channels/{}/messages";
+const ACK: &str = "channels/{}/messages/{}/ack";
+const ACK_BULK: &str = "read-states/ack-bulk";
+const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
 const RATE_LIMIT_RETRIES: u32 = 3;
 // Longer waits, such as slowmode, fail so the UI can say so instead of showing a pending message.
@@ -146,6 +150,25 @@ impl CreateMessage {
     }
 }
 
+#[derive(Serialize)]
+struct Ack {
+    // Not the account's token: an old ack token, which the official client sends as null.
+    token: Option<String>,
+    last_viewed: u32,
+}
+
+#[derive(Serialize)]
+struct BulkAck {
+    read_states: Vec<BulkAckEntry>,
+}
+
+#[derive(Serialize)]
+struct BulkAckEntry {
+    channel_id: String,
+    message_id: String,
+    read_state_type: u8,
+}
+
 #[derive(Debug)]
 pub(crate) struct Page {
     pub(crate) messages: Vec<model::Message>,
@@ -163,6 +186,7 @@ pub(crate) struct AccountRest {
     client: DiscordClient,
     token: Token,
     limiter: RateLimiter,
+    clock: ServerClock,
     retry_delay: Duration,
     unauthorized: AtomicBool,
     closed: AtomicBool,
@@ -174,6 +198,7 @@ impl AccountRest {
             client,
             token,
             limiter: RateLimiter::new(MAX_RATE_LIMIT_WAIT),
+            clock: ServerClock::default(),
             retry_delay,
             unauthorized: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -246,6 +271,51 @@ impl AccountRest {
         serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
     }
 
+    pub(crate) async fn ack(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        last_viewed: u32,
+    ) -> Result<(), RequestError> {
+        let path = format!("channels/{}/messages/{}/ack", channel.get(), message.get());
+        let route = RouteKey::new(Method::Post, ACK, channel.get());
+        let body = Ack {
+            token: None,
+            last_viewed,
+        };
+        self.send(route, || {
+            Ok(self.request(HttpMethod::POST, &path)?.json(&body))
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn ack_bulk(
+        &self,
+        entries: &[(ChannelId, MessageId)],
+    ) -> Result<(), RequestError> {
+        let body = BulkAck {
+            read_states: entries
+                .iter()
+                .map(|(channel, message)| BulkAckEntry {
+                    channel_id: channel.get().to_string(),
+                    message_id: message.get().to_string(),
+                    read_state_type: 0,
+                })
+                .collect(),
+        };
+        let route = RouteKey::new(Method::Post, ACK_BULK, 0);
+        self.send(route, || {
+            Ok(self.request(HttpMethod::POST, ACK_BULK)?.json(&body))
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub(crate) fn server_now_millis(&self) -> Option<i64> {
+        self.clock.now_millis()
+    }
+
     fn request(
         &self,
         method: HttpMethod,
@@ -297,6 +367,7 @@ impl AccountRest {
                 body,
                 timing,
             } = self.client.rest().send_raw(request).await?;
+            self.clock.observe(&headers, timing.headers_at);
             let limits = ResponseLimits::from_response(status, &headers, &body);
             permit.finish(&limits, timing.headers_at);
             report.headers += timing.headers;
@@ -329,6 +400,12 @@ impl AccountRest {
             }
         }
     }
+}
+
+// An ack's `last_viewed`: days since the Discord epoch, rounded up like the official client.
+pub(crate) fn last_viewed(unix_millis: i64) -> u32 {
+    let since_epoch = u64::try_from(unix_millis.saturating_sub(DISCORD_EPOCH)).unwrap_or(0);
+    u32::try_from(since_epoch.div_ceil(DAY_MILLIS)).unwrap_or(u32::MAX)
 }
 
 fn too_long(wait: Duration) -> RequestError {
