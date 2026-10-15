@@ -65,10 +65,13 @@ screen, so views render from them without calling into Rust.
   to the guild's first one, a gone conversation to nothing). It owns `ServerListModel` (the
   server list in the user's order: `items` are servers and folders, `guilds` the same servers
   with folders opened; a folder's expansion is Akari's own, kept per account in
-  `AccountMemory`, and starts collapsed), `DirectMessageListModel` (the DM list, the latest conversation first, with each
-  one's recipients and name), `ChannelListModel` (the open guild's channels, which of them
-  their own settings mute, and `shown(open:)`, which leaves muted channels out when the user
-  hides them, except the open one) and
+  `AccountMemory`, and starts collapsed; `badges` holds each server's `Badge`, and
+  `tileBadge(of:)` adds up a collapsed folder's, while an expanded one shows nothing),
+  `DirectMessageListModel` (the DM list, the latest conversation first, with each one's
+  recipients, name and `Badge`; `unread` holds the conversations with mentions, newest first,
+  for the rail's icons under Home), `ChannelListModel` (the open guild's channels, their
+  badges, which of them their own settings mute, `shown(open:)`, which leaves muted channels
+  out when the user hides them, except the open one, and `staysWhenCollapsed(_:open:)`) and
   `MessageListModel` (the open channel's messages and loads; `failedLoads` keeps each kind of
   load's last failure; `lastLoad` is the last load's `LoadTrace` with akari-core's
   `LoadReport` and the model's read time, and `openedAt`/`openedFrom` say when the channel
@@ -88,7 +91,9 @@ screen, so views render from them without calling into Rust.
   and clears it only once the core has queued the message;
   `retry(_:)` and `discard(_:)` act on failed messages.
 - `CollapsedCategories` (`session.collapsed`) keeps the collapsed categories per guild across
-  launches; a collapsed category still shows the open channel. Discord's clients don't sync
+  launches; `visible(_:in:keeps:)` leaves out a collapsed category's channels except those the
+  channel list keeps: the open channel, channels with mentions, and unread channels unless the
+  category is muted (then only mentions stay, as in Discord). Discord's clients don't sync
   collapse, so it stays Akari's own (per guild, shared by the accounts on this Mac), and Akari
   never collapses a category on its own.
 
@@ -113,7 +118,8 @@ Every model sees the same events in the same order.
 A batch becomes an `EventBatch`, the IDs it touched per kind. A list model re-reads its ID
 list once when the batch touched it, then reads records only for new and changed IDs. Events
 that a model's first read already shows change nothing, so a model created mid-stream
-converges to the store without duplicates.
+converges to the store without duplicates. `BadgeChanged` and `GuildBadgeChanged` make a list
+read only those badges (`channelBadges`, `guildBadges`), and the DM list its `unread` order.
 
 Swift cancellation doesn't reach Rust, so the loop closes the subscription when its task is
 cancelled: by `close()`, or by releasing the session without calling it.

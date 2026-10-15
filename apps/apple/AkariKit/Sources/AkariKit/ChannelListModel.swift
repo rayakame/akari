@@ -11,6 +11,8 @@ public final class ChannelListModel {
     public private(set) var muted: Set<ChannelId> = []
     /// The user hides muted channels in this guild.
     public private(set) var hidesMuted = false
+    /// What each channel's row shows; channels without one show nothing.
+    public private(set) var badges: [ChannelId: Badge] = [:]
 
     @ObservationIgnored private let store: Store
 
@@ -32,6 +34,18 @@ public final class ChannelListModel {
         }
     }
 
+    public func badge(of channel: ChannelId) -> Badge {
+        badges[channel] ?? Badge(unread: false, mentions: 0)
+    }
+
+    /// Whether a channel stays in view under its collapsed category: the open one, one with
+    /// mentions, and an unread one unless its category is muted.
+    public func staysWhenCollapsed(_ channel: Channel, open: ChannelId?) -> Bool {
+        let badge = badge(of: channel.id)
+        return channel.id == open || badge.mentions > 0
+            || (badge.unread && !(channel.parentId.map(muted.contains) ?? false))
+    }
+
     func apply(_ batch: EventBatch) {
         if batch.everythingChanged {
             reload(rereading: nil)
@@ -47,6 +61,9 @@ public final class ChannelListModel {
         }
         if batch.guildSettingsChanged.contains(guildId) {
             readSettings()
+        }
+        if let changed = batch.badgesChanged[guildId] {
+            readBadges(channels.map(\.id).filter(changed.contains))
         }
     }
 
@@ -64,8 +81,18 @@ public final class ChannelListModel {
         }
         let listed = channels.map(\.id)
         channels = ids.compactMap { held[$0] }
+        readBadges(changed == nil ? channels.map(\.id) : unread.filter { !listed.contains($0) })
         if changed != nil, channels.map(\.id) != listed {
             muted = Set(store.mutedChannels(ids: channels.map(\.id)))
+        }
+    }
+
+    private func readBadges(_ ids: [ChannelId]) {
+        guard !ids.isEmpty else {
+            return
+        }
+        for read in store.channelBadges(ids: ids) {
+            badges[read.channelId] = read.badge
         }
     }
 

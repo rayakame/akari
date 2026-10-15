@@ -32,6 +32,8 @@ public final class ServerListModel {
     /// Every listed server in order, folders opened.
     public private(set) var guilds: [Guild] = []
     public private(set) var unavailableIds: [GuildId] = []
+    /// What each server's icon shows.
+    public private(set) var badges: [GuildId: Badge] = [:]
     private var expanded: Set<Int64>
 
     @ObservationIgnored private let store: Store
@@ -58,6 +60,22 @@ public final class ServerListModel {
         memory.remember(expandedFolders: expanded, of: account)
     }
 
+    public func badge(of guild: GuildId) -> Badge {
+        badges[guild] ?? Badge(unread: false, mentions: 0)
+    }
+
+    /// A collapsed folder's tile shows its servers' badges added up; an expanded one's shows
+    /// nothing, since its servers show their own.
+    public func tileBadge(of folder: FolderItem) -> Badge {
+        guard !isExpanded(folder: folder.id) else {
+            return Badge(unread: false, mentions: 0)
+        }
+        let badges = folder.guilds.map { badge(of: $0.id) }
+        return Badge(
+            unread: badges.contains(where: \.unread),
+            mentions: badges.reduce(0) { $0 &+ $1.mentions })
+    }
+
     func reload() {
         rebuild(rereading: nil)
     }
@@ -76,6 +94,9 @@ public final class ServerListModel {
                 return store.guild(id: id) ?? held[id]
             })
         }
+        if !batch.everythingChanged, !batch.guildBadgesChanged.isEmpty {
+            readBadges(guilds.map(\.id).filter(batch.guildBadgesChanged.contains))
+        }
     }
 
     // `nil` re-reads every guild, e.g. after a new session.
@@ -89,6 +110,20 @@ public final class ServerListModel {
             }
             return store.guild(id: id)
         })
+        let joined = guilds.map(\.id).filter { changed == nil || held[$0] == nil }
+        if changed == nil {
+            badges = [:]
+        }
+        readBadges(joined)
+    }
+
+    private func readBadges(_ ids: [GuildId]) {
+        guard !ids.isEmpty else {
+            return
+        }
+        for read in store.guildBadges(ids: ids) {
+            badges[read.guildId] = read.badge
+        }
     }
 
     private func layOut(guild: (GuildId) -> Guild?) {

@@ -28,7 +28,8 @@ struct ChannelListModelTests {
         #expect(
             store.reads == [
                 .channelList(id(1)), .channels([id(10), id(11), id(12)]),
-                .mutedChannels([id(10), id(11), id(12)]), .guildSettings(id(1)),
+                .channelBadges([id(10), id(11), id(12)]), .mutedChannels([id(10), id(11), id(12)]),
+                .guildSettings(id(1)),
             ])
     }
 
@@ -80,7 +81,7 @@ struct ChannelListModelTests {
         #expect(model.channels.map(\.id) == [id(10), id(11), id(13), id(12)])
         #expect(
             store.reads == [
-                .channelList(id(1)), .channels([id(13)]),
+                .channelList(id(1)), .channels([id(13)]), .channelBadges([id(13)]),
                 .mutedChannels([id(10), id(11), id(13), id(12)]),
             ])
 
@@ -149,5 +150,62 @@ struct ChannelListModelTests {
             ]))
 
         #expect(model.muted == [id(10)])
+    }
+
+    @Test
+    func channelRowsCarryTheirBadges() {
+        store.update { $0.channelBadges = [id(11): badge(mentions: 2)] }
+
+        let model = ChannelListModel(guildId: id(1), store: store)
+
+        #expect(model.badge(of: id(11)) == badge(mentions: 2))
+        #expect(model.badge(of: id(12)) == noBadge)
+    }
+
+    @Test
+    func aBadgeEventRereadsOnlyItsRow() {
+        let model = loaded()
+        store.update { $0.channelBadges[id(12)] = badge() }
+
+        model.apply(
+            EventBatch([
+                .badgeChanged(channelId: id(12), guildId: id(1)),
+                .badgeChanged(channelId: id(20), guildId: id(2)),
+            ]))
+
+        #expect(store.reads == [.channelBadges([id(12)])])
+        #expect(model.badge(of: id(12)) == badge())
+    }
+
+    func collapsedCategory(muted: Bool) -> [ChannelId] {
+        store.update { state in
+            state.list(
+                [
+                    channel(10, kind: .guildCategory), channel(11, parent: 10),
+                    channel(12, parent: 10), channel(13, parent: 10), channel(14, parent: 10),
+                    channel(15, parent: 10),
+                ], in: 1)
+            // The core leaves a muted channel's row read; its mentions still show.
+            state.channelBadges = [
+                id(11): badge(), id(12): badge(unread: false, mentions: 1), id(14): noBadge,
+            ]
+            state.mutedChannels = muted ? [id(10), id(14)] : [id(14)]
+        }
+        let model = ChannelListModel(guildId: id(1), store: store)
+        let collapsed = CollapsedCategories(defaults: MemoryDefaults())
+        collapsed.toggle(id(10), in: id(1))
+        return collapsed.visible(model.channels, in: id(1)) {
+            model.staysWhenCollapsed($0, open: id(15))
+        }.map(\.id)
+    }
+
+    @Test
+    func aCollapsedCategoryShowsUnreadAndMentionedChannels() {
+        #expect(collapsedCategory(muted: false) == [id(10), id(11), id(12), id(15)])
+    }
+
+    @Test
+    func aMutedCollapsedCategoryShowsOnlyMentions() {
+        #expect(collapsedCategory(muted: true) == [id(10), id(12), id(15)])
     }
 }

@@ -14,7 +14,9 @@ struct ChannelSidebar: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     let open = session.messages?.channelId
                     ForEach(
-                        collapsed.visible(list.shown(open: open), in: list.guildId, open: open),
+                        collapsed.visible(list.shown(open: open), in: list.guildId) {
+                            list.staysWhenCollapsed($0, open: open)
+                        },
                         id: \.id
                     ) {
                         channel in

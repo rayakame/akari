@@ -34,7 +34,8 @@ title bar.
   - channels with mentions or active threads the user joined;
   - voice channels with people in them.
 
-  Akari shows only the selected channel until it tracks unread state.
+  *Akari: the same, except threads and voice channels with people in them, which it doesn't
+  list yet.*
 - A muted category's name shows at half opacity. Muting a category collapses it at once, its
   channels still look normal (muting the category doesn't mute them), and while it is muted
   and collapsed only a channel with a mention stays under it (observed 2026-10-14). *Akari:

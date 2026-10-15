@@ -13,7 +13,7 @@ final class CollapsedCategoriesTests {
     ]
 
     @Test
-    func collapsedCategoriesKeepOnlyTheOpenChannel() {
+    func collapsedCategoriesKeepOnlyWhatTheListKeeps() {
         let collapsed = CollapsedCategories(defaults: defaults)
 
         collapsed.toggle(id(10), in: id(5))
@@ -21,13 +21,13 @@ final class CollapsedCategoriesTests {
         #expect(collapsed.isCollapsed(id(10), in: id(5)))
         #expect(!collapsed.isCollapsed(id(20), in: id(5)))
         #expect(
-            collapsed.visible(channels, in: id(5), open: id(12)).map(\.id)
+            collapsed.visible(channels, in: id(5)) { $0.id == id(12) }.map(\.id)
                 == [id(1), id(10), id(12), id(20), id(21)])
         #expect(
-            collapsed.visible(channels, in: id(5), open: nil).map(\.id)
+            collapsed.visible(channels, in: id(5)) { _ in false }.map(\.id)
                 == [id(1), id(10), id(20), id(21)])
         collapsed.toggle(id(10), in: id(5))
-        #expect(collapsed.visible(channels, in: id(5), open: nil) == channels)
+        #expect(collapsed.visible(channels, in: id(5)) { _ in false } == channels)
     }
 
     @Test
