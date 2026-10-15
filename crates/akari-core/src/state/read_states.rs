@@ -87,7 +87,6 @@ impl ReadStates {
         self.ignored.remove(&user);
     }
 
-    // Forward unless `manual`; without a count, mentions clear once the ack reaches `newest`.
     pub(crate) fn ack(&mut self, ack: &MessageAck, newest: Option<u64>) -> bool {
         let position = ack.message_id.get();
         let known = self.get(ack.channel_id);
@@ -109,7 +108,6 @@ impl ReadStates {
         )
     }
 
-    // The user's own message: read up to it.
     pub(crate) fn read_up_to(&mut self, channel: ChannelId, message: MessageId) -> bool {
         if self
             .get(channel)
@@ -127,7 +125,6 @@ impl ReadStates {
         )
     }
 
-    // A channel without a read state starts at `acked` when one is first needed.
     pub(crate) fn start(&mut self, channel: ChannelId, acked: Option<MessageId>) {
         self.channels
             .entry(channel)

@@ -57,7 +57,7 @@ Two details:
 | Dispatch | Model | Store |
 |---|---|---|
 | READY_SUPPLEMENTAL | `ReadySupplemental` | See [below](#ready_supplemental) |
-| GUILD_CREATE | `GatewayGuild` | A new or returning guild: `GuildAdded` with its channels, threads and the current user's member. A known guild is replaced: `GuildUpdated`, `CurrentMemberUpdated` and channel events for what changed. An unavailable guild: `GuildUnavailable` |
+| GUILD_CREATE | `GatewayGuild` | A new or returning guild: `GuildAdded` with its channels, threads and the current user's member. A known guild is replaced: `GuildUpdated`, `CurrentMemberUpdated` and channel events for what changed; a known channel keeps its `last_message_id` if that is newer. An unavailable guild: `GuildUnavailable` |
 | GUILD_UPDATE | `GuildUpdate` | `GuildUpdated` if something changed (including `default_message_notifications`). Roles are replaced only if the update carries them |
 | GUILD_DELETE | `GuildDelete` | With `unavailable`: an outage, `GuildUnavailable`. Without: the user left or was removed, `GuildRemoved`. Both drop the guild's channels, threads, member and message windows |
 | GUILD_ROLE_CREATE, GUILD_ROLE_UPDATE | `GuildRoleEvent` | The role is added or replaced: `GuildUpdated` |
@@ -72,13 +72,15 @@ Two details:
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
-| NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; no event |
+| NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; only the badges that change send events |
 | MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([read-states.md](read-states.md)): `BadgeChanged`, and `GuildBadgeChanged` if the guild's badge changed. Acks of other read state types are ignored |
 | CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without a channel event; a channel that turns unread sends `BadgeChanged` ([read-states.md](read-states.md#badges)). A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
 | RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Keep the blocked and ignored users, whose messages never count as mentions. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
-`debug` level with its IDs.
+`debug` level with its IDs. A change that moves a badge (a message, an ack, settings, roles,
+the member, a channel's overwrites) also sends `BadgeChanged` and `GuildBadgeChanged` after its
+own events ([read-states.md](read-states.md#badges)).
 
 GUILD_CREATE and GUILD_DELETE (and READY's diff) also send `ServerListChanged` after their own
 events when the server list changed: a guild joined, left, went down or came back.

@@ -203,10 +203,29 @@ fn an_unjoined_threads_messages_give_the_server_no_dot() {
     apply(
         &mut state,
         "MESSAGE_CREATE",
-        message(400_000_000_000_000_008, 300_000_000_000_000_021),
+        plain(400_000_000_000_000_008, 300_000_000_000_000_021),
     );
 
     assert_eq!(guild_badge(&state, G1), badge(false, 0));
+}
+
+// Being mentioned adds the user to a thread, which Akari doesn't hear about until READY.
+#[test]
+fn a_ping_in_an_unjoined_thread_reaches_the_server_badge() {
+    let mut state = ready_where(read_general);
+    let mut thread = fixture(include_str!(
+        "../../../../tests/fixtures/thread_create.json"
+    ));
+    thread.as_object_mut().unwrap().remove("member");
+    apply(&mut state, "THREAD_CREATE", thread);
+
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(AFTER_JOIN + 8, 300_000_000_000_000_021),
+    );
+
+    assert_eq!(guild_badge(&state, G1), badge(false, 1));
 }
 
 #[test]

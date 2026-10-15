@@ -829,6 +829,43 @@ thread_local! {
         std::cell::RefCell::new(None);
 }
 
+thread_local! {
+    static THREAD_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn scanned_for_threads() {
+    THREAD_SCANS.with(|count| count.set(count.get() + 1));
+}
+
+fn thread_scans() -> usize {
+    THREAD_SCANS.with(std::cell::Cell::get)
+}
+
+#[test]
+fn only_channels_that_can_hold_threads_are_scanned_for_them() {
+    let mut state = ready_state();
+    let before = thread_scans();
+
+    let mut dm = fixture(include_str!(
+        "../../../tests/fixtures/channel_create_dm.json"
+    ));
+    apply(&mut state, "CHANNEL_CREATE", dm.clone());
+    dm["name"] = "renamed".into();
+    apply(&mut state, "CHANNEL_UPDATE", dm);
+    assert_eq!(thread_scans(), before, "a DM holds no threads");
+
+    apply(
+        &mut state,
+        "CHANNEL_UPDATE",
+        json!({"id": GENERAL.to_string(), "topic": "changed"}),
+    );
+    assert_eq!(
+        thread_scans(),
+        before + 1,
+        "a text channel's threads follow it"
+    );
+}
+
 pub(crate) fn on_next_diff(hook: impl FnOnce() + 'static) {
     DIFF_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
 }

@@ -21,10 +21,9 @@ pub struct Badge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
-    // Text, announcement, forum and media channels.
     Text,
     Thread,
-    // Voice and stage chats: their mentions count, their messages never show as unread.
+    // The official client never shows their chats as unread; mentions still count.
     Voice,
     Private,
 }
@@ -46,7 +45,6 @@ impl Kind {
     }
 }
 
-// What one channel shows, and what it adds to its guild.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Slot {
     badge: Badge,
@@ -312,7 +310,8 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
         .settings
         .guild(Some(guild))
         .is_some_and(|settings| settings.hide_muted_channels);
-    let counted = !(muted && hides_muted)
+    let hidden = muted && hides_muted;
+    let counted = !hidden
         && (kind != Kind::Thread
             || channel
                 .thread
@@ -323,12 +322,11 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
         read_state,
         guild: Some(guild),
         dot: counted && unread && !under_muted_parent(entities, channel, now),
-        mentions: if counted { mentions } else { 0 },
+        // A mention adds the user to a thread, which Akari only learns at the next READY.
+        mentions: if hidden { 0 } else { mentions },
     })
 }
 
-// The unread flags of the channel, its parent and its category, then the guild's; without
-// them, with the account's new notifications, the level decides.
 fn shows_unreads(entities: &Entities, channel: &Channel) -> bool {
     let settings = entities.settings.guild(channel.guild_id);
     let mut next = Some(channel.id);
@@ -354,8 +352,7 @@ fn shows_unreads(entities: &Entities, channel: &Channel) -> bool {
         || entities.notification_level(channel.id) == NotificationLevel::AllMessages
 }
 
-// A muted category (or a thread's muted channel) keeps its channels' plain unreads off the
-// guild's dot, though their rows look unread.
+// In the official client a muted category's channels look unread but add no dot to the server.
 fn under_muted_parent(entities: &Entities, channel: &Channel, now: Timestamp) -> bool {
     let mut next = channel.parent_id;
     for _ in 0..2 {
@@ -379,6 +376,7 @@ pub(crate) mod hooks {
 
     thread_local! {
         static IN_WRITE: Cell<bool> = const { Cell::new(false) };
+        static READS: Cell<usize> = const { Cell::new(0) };
         static LOCKED_BUILDS: Cell<usize> = const { Cell::new(0) };
     }
 
@@ -386,13 +384,23 @@ pub(crate) mod hooks {
         IN_WRITE.with(|cell| cell.set(active));
     }
 
+    pub(crate) fn reading(active: bool) {
+        READS.with(|cell| {
+            cell.set(if active {
+                cell.get() + 1
+            } else {
+                cell.get() - 1
+            })
+        });
+    }
+
     pub(super) fn built() {
-        if IN_WRITE.with(Cell::get) {
+        if IN_WRITE.with(Cell::get) || READS.with(Cell::get) > 0 {
             LOCKED_BUILDS.with(|cell| cell.set(cell.get() + 1));
         }
     }
 
-    /// Full builds that ran under the store's write lock on this thread.
+    /// Full builds that ran under the store's read or write lock on this thread.
     pub(crate) fn locked_builds() -> usize {
         LOCKED_BUILDS.with(Cell::get)
     }

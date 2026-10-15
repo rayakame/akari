@@ -18,7 +18,9 @@ use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
-use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
+use crate::model::{
+    self, ChannelId, ChannelType, GuildId, MessageId, Permissions, Timestamp, UserId,
+};
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -481,15 +483,27 @@ impl State {
     }
 
     // The channel, and its threads, whose permissions follow its overwrites.
-    fn mark_channel(&mut self, channel: ChannelId) {
-        self.dirty.channel(channel);
-        let threads = self
+    fn mark_channel(&mut self, channel: &Channel) {
+        self.dirty.channel(channel.id);
+        if !matches!(
+            channel.kind,
+            ChannelType::GuildText
+                | ChannelType::GuildNews
+                | ChannelType::GuildForum
+                | ChannelType::GuildMedia
+        ) {
+            return;
+        }
+        #[cfg(test)]
+        tests::scanned_for_threads();
+        let threads: Vec<ChannelId> = self
             .entities
             .channels
             .values()
-            .filter(|stored| stored.parent_id == Some(channel) && stored.is_thread())
-            .map(|stored| stored.id);
-        for thread in threads.collect::<Vec<_>>() {
+            .filter(|stored| stored.parent_id == Some(channel.id) && stored.is_thread())
+            .map(|stored| stored.id)
+            .collect();
+        for thread in threads {
             self.dirty.channel(thread);
         }
     }
@@ -642,7 +656,7 @@ impl State {
             }
         }
         let channel = Arc::new(channel);
-        self.mark_channel(channel.id);
+        self.mark_channel(&channel);
         match self.entities.channels.get(&channel.id) {
             Some(known) if *known == channel => {}
             Some(_) => {
@@ -708,7 +722,7 @@ impl State {
         }
         let next = Arc::new(known.patch(update));
         if next != known {
-            self.mark_channel(next.id);
+            self.mark_channel(&next);
             self.entities.channels.insert(next.id, next.clone());
             events.push(StoreEvent::ChannelUpdated(next));
         }
@@ -756,10 +770,20 @@ impl State {
         self.refresh_badges(wall_millis(), events);
     }
 
-    fn merge_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
+    fn merge_guild(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         let Some((&id, after)) = next.guilds.iter().next() else {
             return;
         };
+        for (channel, merged) in &mut next.channels {
+            if let Some(last) = self
+                .entities
+                .channels
+                .get(channel)
+                .and_then(|known| known.last_message_id)
+            {
+                Arc::make_mut(merged).note_message(last);
+            }
+        }
         self.dirty.guild(Some(id));
         let after = after.clone();
         match self.entities.guilds.get(&id).cloned() {

@@ -55,7 +55,14 @@ impl State {
         let Some(channel) = self.entities.channels.get(&message.channel_id).cloned() else {
             return;
         };
-        if message.id.get() <= self.entities.read_position(&channel) {
+        let joined = self.entities.joined_position(&channel);
+        let mut position = self.entities.read_position(&channel);
+        let unstarted = joined.is_none() && self.entities.read_states.get(channel.id).is_none();
+        // The CHANNEL_CREATE of a DM opened by this message can already name it as the newest.
+        if unstarted && channel.last_message_id == Some(message.id.cast()) {
+            position = message.id.get() - 1;
+        }
+        if message.id.get() <= position {
             return;
         }
         if Some(message.author.id) == self.entities.me() {
@@ -64,12 +71,12 @@ impl State {
             }
             return;
         }
-        let joined = self.entities.joined_position(&channel);
-        let start = joined
-            .map(Snowflake::new)
-            .or(channel.last_message_id)
-            .map(Snowflake::cast);
-        if joined.is_none() {
+        let start = match joined {
+            Some(joined) => Some(Snowflake::new(joined)),
+            None if position == 0 => None,
+            None => Some(Snowflake::new(position)),
+        };
+        if unstarted {
             self.entities.read_states.start(channel.id, start);
         }
         if self.counts_as_mention(&channel, message, wall_millis()) {
@@ -77,7 +84,6 @@ impl State {
         }
     }
 
-    // The read state topic's rules for what raises a channel's mention count.
     fn counts_as_mention(
         &self,
         channel: &Channel,
@@ -126,7 +132,6 @@ impl State {
             })
     }
 
-    // `MENTION_ON_ALL_MESSAGES`: every message where all messages notify counts, low importance.
     fn counts_every_message(&self, channel: &Channel, guild: GuildId, now: Timestamp) -> bool {
         self.entities.settings.notification_flags & MENTION_ON_ALL_MESSAGES != 0
             && !matches!(

@@ -35,12 +35,12 @@ A channel without a read state:
   `joined_at` as a snowflake): messages from before the join never show unread, later ones
   do. The official client showed a never-opened channel with a new message as unread.
 - **A DM or group DM** is read until its next message, which starts its read state at the
-  message before it.
+  message before it, also when the DM's CHANNEL_CREATE already named that message.
 - **A guild whose join time is unknown** is treated like a DM.
 - **A thread** uses its guild's join time.
 
-The newest message only moves forward: from MESSAGE_CREATE, CHANNEL_CREATE and
-CHANNEL_UPDATE (an older or missing `last_message_id` changes nothing), and from the unread
+The newest message only moves forward: from MESSAGE_CREATE, CHANNEL_CREATE, CHANNEL_UPDATE
+and GUILD_CREATE (an older or missing `last_message_id` changes nothing), and from the unread
 updates of guilds without a subscription. Only READY replaces it. A new thread in a forum or
 media channel is the forum's newest "message": THREAD_CREATE raises the parent's
 `last_message_id` to the thread's ID. A thread's own messages move only the thread, so an
@@ -89,8 +89,8 @@ one until the user opens it.
 ## Badges
 
 The store keeps every channel's and guild's `Badge` (`unread`, `mentions`) as it changes, so
-`Store::channel_badge`, `guild_badge` and `unread_private_channels` cost a lookup and never
-compute permissions.
+`Store::channel_badge` and `guild_badge` cost a lookup, and `unread_private_channels` a pass
+over the DMs; none computes permissions.
 
 - **A channel's row** is unread when the channel is, unless it is muted itself, it is a voice
   or stage channel (their chats never show unread), or its unread setting says only mentions.
@@ -100,7 +100,8 @@ compute permissions.
   channel shows. Its count is the read state's mentions. A channel the user can't view shows
   nothing.
 - **A guild** sums its text, announcement, forum, media, voice and stage channels and its
-  joined, unarchived threads that the user can view. Its dot needs one of them unread and
+  joined, unarchived threads that the user can view; a thread's mentions count even before
+  Akari learns that the mention added the user to it. Its dot needs one of them unread and
   not under a muted category or muted channel, and the guild itself unmuted; its count adds
   up all their mentions, muted or not. With "hide muted channels", muted channels don't count
   at all. A folder's badge is its guilds' sum, added up by the host.

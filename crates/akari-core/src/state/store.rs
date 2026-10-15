@@ -186,7 +186,12 @@ impl Store {
             .inner
             .read()
             .unwrap_or_else(PoisonError::into_inner);
-        read(&inner)
+        #[cfg(test)]
+        super::badges::hooks::reading(true);
+        let value = read(&inner);
+        #[cfg(test)]
+        super::badges::hooks::reading(false);
+        value
     }
 
     fn write<T>(
@@ -268,13 +273,11 @@ impl Store {
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
         self.shared.preparing_ready.store(true, Ordering::SeqCst);
         let mut entities = Entities::from_ready(ready);
+        let badges = Badges::build(&entities, wall_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
-            let badges = Badges::build(&entities, wall_millis());
-            let diff = inner.state.ready_diff(&entities, &badges);
-            (badges, diff)
+            inner.state.ready_diff(&entities, &badges)
         });
-        let (badges, diff) = diff;
         #[cfg(test)]
         {
             if let Ok(mut thread) = self.shared.ready_thread.lock() {

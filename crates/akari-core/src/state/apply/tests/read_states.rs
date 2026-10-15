@@ -880,3 +880,39 @@ fn read_states_of_other_types_are_left_out() {
 
     assert_eq!(read_state(&state, G1), None);
 }
+
+#[test]
+fn a_guild_create_after_a_passive_update_keeps_the_channel_unread() {
+    let mut state = general_read();
+    apply(
+        &mut state,
+        "PASSIVE_UPDATE_V2",
+        passive(G1, GENERAL, 400_000_000_000_000_006),
+    );
+    let mut guild = ready_value()["guilds"][0].clone();
+    guild["channels"][1]["last_message_id"] = "400000000000000003".into();
+
+    apply(&mut state, "GUILD_CREATE", guild);
+
+    assert!(unread(&state, GENERAL));
+    assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_006));
+}
+
+#[test]
+fn a_dm_opened_by_its_first_message_is_unread() {
+    let mut state = ready_state();
+    let mut opened = fixture(include_str!(
+        "../../../../tests/fixtures/channel_create_dm.json"
+    ));
+    opened["last_message_id"] = "400000000000000040".into();
+    apply(&mut state, "CHANNEL_CREATE", opened);
+
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_plain(400_000_000_000_000_040, 300_000_000_000_000_013),
+    );
+
+    assert!(unread(&state, 300_000_000_000_000_013));
+    assert_eq!(mentions(&state, 300_000_000_000_000_013), 1);
+}
