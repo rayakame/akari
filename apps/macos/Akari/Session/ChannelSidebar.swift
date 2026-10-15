@@ -36,6 +36,9 @@ struct ChannelSidebar: View {
                             ) {
                                 session.open(channel: channel.id)
                             }
+                            .markReadMenu(enabled: session.canMarkRead(channel: channel.id)) {
+                                session.markRead(channel: channel.id)
+                            }
                         }
                     }
                 }

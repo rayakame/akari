@@ -16,13 +16,18 @@ struct ServerRail: View {
                     session.open(.home)
                 }
                 ForEach(session.directMessages.unread) { conversation in
+                    // The open DM is here when it turned unread while the user wasn't reading.
                     RailItem(
-                        selected: false, help: conversation.name,
+                        selected: session.messages?.channelId == conversation.id,
+                        help: conversation.name,
                         badge: session.directMessages.badge(of: conversation.id)
                     ) { _ in
                         RailAvatar(conversation: conversation)
                     } action: {
                         Self.open(conversation, in: session)
+                    }
+                    .markReadMenu(enabled: session.canMarkRead(channel: conversation.id)) {
+                        session.markRead(channel: conversation.id)
                     }
                 }
                 Rectangle()
@@ -44,6 +49,11 @@ struct ServerRail: View {
                                 FolderTile(item: folder, expanded: expanded)
                             } action: {
                                 session.servers.toggle(folder: folder.id)
+                            }
+                            .markReadMenu(
+                                "Mark Folder As Read", enabled: session.canMarkRead(folder: folder)
+                            ) {
+                                session.markRead(folder: folder)
                             }
                             if expanded {
                                 ForEach(folder.guilds, id: \.id) { guild in
@@ -84,6 +94,9 @@ struct ServerRail: View {
             GuildIcon(name: guild.name, highlighted: highlighted)
         } action: {
             session.open(.guild(guild.id))
+        }
+        .markReadMenu(enabled: session.canMarkRead(guild: guild.id)) {
+            session.markRead(guild: guild.id)
         }
     }
 }

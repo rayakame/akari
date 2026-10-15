@@ -97,6 +97,38 @@ struct RailUnreadTests {
         #expect(session.messages?.channelId == serverChannel, "the server keeps its channel")
     }
 
+    // It turns unread while the user isn't reading it, e.g. with another app in front.
+    @Test
+    func anOpenDmThatTurnsUnreadShowsOnTheRailSelected() throws {
+        let open = CrowdedStore.dmIds[3]
+        let session = SessionModel(
+            userId: UserId(rawValue: 1), account: CrowdedAccount(unread: [open]),
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(channel: open)
+        #expect(session.directMessages.unread.map(\.id) == [open])
+        let rail = try Rendered(
+            ServerRail(session: session)
+                .frame(width: SidebarWidth.rail, height: 200)
+                .background(Color(nsColor: Palette.frame)),
+            size: NSSize(width: SidebarWidth.rail, height: 200))
+
+        // The pills down the rail's left edge: Home's and the open DM's, both tall.
+        var pills: [CGFloat] = []
+        var run = 0
+        for y in 0...rail.rep.pixelsHigh {
+            if y < rail.rep.pixelsHigh, isBright(rail.pixel(Int(rail.scale), y)) {
+                run += 1
+            } else if run > 0 {
+                pills.append(CGFloat(run) / rail.scale)
+                run = 0
+            }
+        }
+        #expect(pills.count == 2, "\(pills)")
+        #expect(pills.allSatisfy { abs($0 - 40) <= 1 }, "\(pills)")
+    }
+
     @Test
     func unreadDirectMessagesSitUnderHome() throws {
         let unread = [CrowdedStore.dmIds[3], CrowdedStore.dmIds[1]]

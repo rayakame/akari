@@ -17,6 +17,9 @@ struct DirectMessageList: View {
                         ) {
                             session.open(channel: conversation.id)
                         }
+                        .markReadMenu(enabled: session.canMarkRead(channel: conversation.id)) {
+                            session.markRead(channel: conversation.id)
+                        }
                     }
                 }
                 .padding(.top, 8)

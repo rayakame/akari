@@ -205,6 +205,32 @@ struct SessionScreenTests {
     }
 
     @Test
+    func shiftEscapeInTheComposerMarksTheServerRead() async throws {
+        let account = GuildAccount()
+        let host = NSHostingView(
+            rootView: SessionScreen(session: session(account, defaults: MemoryDefaults())))
+        let window = shownWindow(host)
+        defer { window.orderOut(nil) }
+        var found: ComposerTextView?
+        try await waitUntil(host) {
+            found = views(ComposerTextView.self, in: host).first
+            return found != nil
+        }
+        let composer = try #require(found)
+
+        composer.modifiers = { .shift }
+        composer.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(account.markedGuildsRead.withLock { $0 } == [[GuildId(rawValue: 1)]])
+        #expect(account.markedRead.withLock { $0 }.isEmpty)
+
+        composer.modifiers = { [] }
+        composer.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        try await waitUntil(host) { !account.markedRead.withLock { $0 }.isEmpty }
+        #expect(account.markedRead.withLock { $0 } == [ChannelId(rawValue: 11)])
+        #expect(account.markedGuildsRead.withLock { $0 }.count == 1)
+    }
+
+    @Test
     func anUnloadedChannelShowsPlaceholdersAndNoSpinner() async throws {
         let defaults = MemoryDefaults()
         let account = GuildAccount(holdsLoads: true)

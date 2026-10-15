@@ -934,6 +934,10 @@ struct MessageTableTests {
             calls.append("escape")
         }
 
+        func markServerRead() {
+            calls.append("server read")
+        }
+
         func atBottomChanged(_ atBottom: Bool) {
             bottoms.append(atBottom)
         }
@@ -1513,6 +1517,18 @@ struct MessageTableTests {
         table.cancelOperation(nil)
 
         #expect(actions.calls == ["escape"])
+    }
+
+    @Test
+    func shiftEscapeInTheListMarksTheServerRead() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        table.modifiers = { .shift }
+
+        table.cancelOperation(nil)
+
+        #expect(actions.calls == ["server read"])
     }
 
     @Test

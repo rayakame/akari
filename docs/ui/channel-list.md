@@ -101,8 +101,7 @@ rows the same, without the pill.*
 
 The first item of a channel row's menu is "Mark As Read" (observed 2026-10-15 in the German
 client as "Als gelesen markieren"; the English label is unconfirmed). It is disabled, not
-hidden, when the channel has nothing unread. *Akari: later, with acks
-([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).*
+hidden, when the channel has nothing unread. *Akari: the same, for every channel row.*
 
 ### In Akari
 
@@ -138,7 +137,7 @@ At home the column holds the DM list instead of a server's channels.
   the members' names separated by commas when it has none.
 - The first item of a row's context menu is "Mark As Read" (German: "Als gelesen markieren";
   the English label is unconfirmed). With nothing unread it is disabled, not hidden (observed
-  2026-10-15). *Akari: later, with acks.*
+  2026-10-15). *Akari: the same.*
 
 ### DM order
 

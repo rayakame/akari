@@ -10,6 +10,7 @@ final class ComposerTextView: NSTextView {
 
     var onSubmit: () -> Void = {}
     var onEscape: () -> Void = {}
+    var onShiftEscape: () -> Void = {}
     var onEditLastMessage: (() -> Void)?
     var onWindow: () -> Void = {}
     var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
@@ -125,7 +126,12 @@ final class ComposerTextView: NSTextView {
             onEditLastMessage?()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
-            onEscape()
+            // Shift+Escape arrives as the same command.
+            if modifiers().contains(.shift) {
+                onShiftEscape()
+            } else {
+                onEscape()
+            }
             return true
         default:
             return false

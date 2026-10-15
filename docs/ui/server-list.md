@@ -108,7 +108,10 @@ Observed in the official web client on 2026-10-15 (German UI):
   that DM open and another app focused, a new DM message brings the avatar back with the tall
   (selected) pill and a red badge; it goes when the user clicks back into the client.
 
-*Akari: none of this yet; the menus and the rail's DM behavior come with acks
+*Akari: the same menus, the read item first and disabled while the server, folder or DM
+shows neither the unread pill nor a badge. Opening a DM from the rail reads it, so its avatar
+goes; an open DM that turns unread while the user isn't reading it (another app in front, the
+list scrolled up) comes back with the tall pill and its badge
 ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).*
 
 ## Initials

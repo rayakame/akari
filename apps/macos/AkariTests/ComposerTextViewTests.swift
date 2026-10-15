@@ -13,6 +13,7 @@ final class ComposerTextViewTests {
     let window: NSWindow
     var submits = 0
     var escapes = 0
+    var serverReads = 0
     var editLast = 0
     var modifiers: NSEvent.ModifierFlags = []
 
@@ -25,6 +26,7 @@ final class ComposerTextViewTests {
         window.contentView?.addSubview(scrollView)
         textView.onSubmit = { [unowned self] in submits += 1 }
         textView.onEscape = { [unowned self] in escapes += 1 }
+        textView.onShiftEscape = { [unowned self] in serverReads += 1 }
         textView.onEditLastMessage = { [unowned self] in editLast += 1 }
         textView.modifiers = { [unowned self] in modifiers }
         window.makeFirstResponder(textView)
@@ -91,7 +93,17 @@ final class ComposerTextViewTests {
         type("ab")
         textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
         #expect(escapes == 1)
+        #expect(serverReads == 0)
         #expect(textView.string == "ab")
+    }
+
+    // AppKit's key bindings give Shift+Escape the same command as Escape.
+    @Test
+    func shiftEscapeMarksTheServerReadInstead() {
+        modifiers = .shift
+        textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(serverReads == 1)
+        #expect(escapes == 0)
     }
 
     @Test

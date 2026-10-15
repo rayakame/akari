@@ -11,6 +11,8 @@ protocol MessageListActions: AnyObject {
     func jumpToLatest()
     // One action for Escape from the list and the composer: marks read and jumps to the present.
     func escape()
+    // Shift+Escape from the list and the composer.
+    func markServerRead()
     // The user scrolled away from the bottom, or the list is back there.
     func atBottomChanged(_ atBottom: Bool)
     func reveal(_ spoiler: SpoilerKey)

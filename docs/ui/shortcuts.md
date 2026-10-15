@@ -12,7 +12,7 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | New line | Shift+Return | Done; Option+Return too |
 | Edit the last message | Up arrow in an empty composer | Reserved: the key is taken, editing comes later |
 | Mark the channel read, or cancel an edit or reply | Escape | Marks the channel read and jumps to the present (below) |
-| Mark the server read | Shift+Escape | Later, with read state |
+| Mark the server read | Shift+Escape | Done |
 | Quick switcher | Cmd+K | Later |
 | Previous or next channel | Option+Up / Option+Down | Later |
 | Scroll the messages | Page Up / Page Down (**unverified**) | The list's native scrolling |
@@ -31,7 +31,7 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   reply in progress. Akari has no edits or replies yet, so Escape marks the channel read and
   jumps to the present: it loads the newest messages if the list shows older ones, and
   scrolls to the bottom. It does this from the message list and from the composer, through
-  one action.
+  one action. Shift+Escape, from the same places, marks the open server read.
 - **Escape marks read.** In the web client, Escape jumps to the present and marks the channel
   read, also when the list is scrolled up; with nothing unread it sends nothing.
   Shift+Escape marks the whole server read, and does nothing at Home

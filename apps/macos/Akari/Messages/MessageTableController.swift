@@ -977,6 +977,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.onEscape = { [weak self] in
             self?.actions?.escape()
         }
+        tableView.onShiftEscape = { [weak self] in
+            self?.actions?.markServerRead()
+        }
         tableView.pointerMoved = { [weak self] in
             self?.updateHover()
         }
@@ -1244,6 +1247,8 @@ final class BottomClipView: NSClipView {
 class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
     var onEscape: (() -> Void)?
+    var onShiftEscape: (() -> Void)?
+    var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
     var pointerMoved: (() -> Void)?
     var windowChanged: (() -> Void)?
     private(set) var isLayingOut = false
@@ -1253,8 +1258,13 @@ class MessageTableView: NSTableView {
         numberOfRows > 0 ? rect(ofRow: numberOfRows - 1).maxY : 0
     }
 
+    // Shift+Escape arrives as the same command.
     override func cancelOperation(_ sender: Any?) {
-        onEscape?()
+        if modifiers().contains(.shift) {
+            onShiftEscape?()
+        } else {
+            onEscape?()
+        }
     }
 
     override func viewDidMoveToWindow() {

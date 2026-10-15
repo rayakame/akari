@@ -111,7 +111,8 @@ struct SessionScreen: View {
         ) { messages, name in
             MessageArea(
                 messages: messages, name: name, links: links,
-                go: { [session] in session.go(to: $0) })
+                go: { [session] in session.go(to: $0) },
+                markServerRead: { [session] in session.markServerRead() })
         }
         .background(ReadingSignals.Attach(session: session))
         // A reconnect brings a new session for the same channel; without a new identity its

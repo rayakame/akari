@@ -34,10 +34,12 @@ struct MessageArea: View {
     let name: ChannelName
     let links: LinkFollower
     let go: (ChannelId) -> Void
+    let markServerRead: () -> Void
     @State private var link = MessageTableLink()
 
     var body: some View {
-        let bridge = MessageListBridge(messages: messages, link: link, links: links, go: go)
+        let bridge = MessageListBridge(
+            messages: messages, link: link, links: links, go: go, markServerRead: markServerRead)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
@@ -68,6 +70,7 @@ struct MessageArea: View {
                     areaHeight: geometry.size.height,
                     onSend: { link.controller?.jumpToPresent(load: false) },
                     onEscape: { bridge.escape() },
+                    onShiftEscape: { bridge.markServerRead() },
                     onAttach: { link.composer = $0 }
                 )
                 .id(messages.channelId)
@@ -92,15 +95,17 @@ final class MessageListBridge: MessageListActions {
     let link: MessageTableLink
     let links: LinkFollower
     let go: (ChannelId) -> Void
+    let serverRead: () -> Void
 
     init(
         messages: MessageListModel, link: MessageTableLink, links: LinkFollower,
-        go: @escaping (ChannelId) -> Void
+        go: @escaping (ChannelId) -> Void, markServerRead: @escaping () -> Void
     ) {
         self.messages = messages
         self.link = link
         self.links = links
         self.go = go
+        serverRead = markServerRead
     }
 
     func retry(_ message: MessageId) {
@@ -135,6 +140,10 @@ final class MessageListBridge: MessageListActions {
     func jumpToPresent() {
         link.controller?.jumpToPresent(load: true)
         link.composer?.takeFocus()
+    }
+
+    func markServerRead() {
+        serverRead()
     }
 
     func atBottomChanged(_ atBottom: Bool) {
