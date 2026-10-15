@@ -59,6 +59,26 @@ title bar.
 Names are medium weight in every state; the official client changes only their color (observed
 2026-10-14 in the dark theme).
 
+### What makes a row unread
+
+Observed in the official desktop client on 2026-10-14:
+
+- A text or announcement channel turns unread when a message newer than the user's read
+  position arrives, also in a channel the user never opened.
+- **Voice and stage channels never look unread from their text chat:** a message there
+  leaves the row as it was, with no bright name and no pill. The gray count the support
+  article describes isn't what the client shows. **Unverified:** what a mention there shows.
+- **A forum or media channel** looks unread when a new post appears, without a count.
+- **Threads the user hasn't joined** aren't listed. Starting one posts a "started a thread"
+  message in its parent, which makes the parent unread like any message; messages inside the
+  thread leave the parent alone.
+- **Deleting messages doesn't clear a row:** with its only unread message deleted, the row
+  stays unread, and with a message that mentioned the user deleted, it keeps its count, until
+  the channel is read.
+- An @silent mention counts like any other; it only skips the notification.
+
+*Akari: later, with unread state.*
+
 - Icons by kind: text, voice, announcement, stage, forum, media, rules and thread. Each has a
   private variant (with a lock) and an NSFW variant (with a warning mark).
 - Voice channels list the people connected to them underneath.

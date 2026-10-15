@@ -73,6 +73,24 @@ A red (`#d22d39`) badge at the icon's bottom right, cut out of the icon, 16 tall
 wide for counts under 10, 22 under 100 and 30 above; from 1000 it shows "1k+" up to "9k+".
 *Akari: later, with unread state.*
 
+## What makes a server unread
+
+Observed in the official desktop client on 2026-10-14:
+
+- **The pill** shows when one of the server's channels looks unread
+  ([channel-list.md](channel-list.md#what-makes-a-row-unread)). So a message in a voice or
+  stage channel's chat gives the server no pill, and neither do messages inside a thread the
+  user hasn't joined. A new forum post makes the forum unread; **unverified:** the server's
+  pill for it.
+- **The badge** counts mentions of the user, @everyone and @here, and the user's roles,
+  @silent ones included. With the server's "Suppress @everyone and @here" or "Suppress all
+  role @mentions", those messages are plain unreads, with no badge.
+- **Mutes:** a muted server shows no pill for plain messages, only the badge for mentions,
+  and its icon is never dimmed. Plain messages in a muted channel, or in a channel under a
+  muted category, give the server no pill.
+- **Deleting messages lowers nothing:** the badge stays when a mentioning message is deleted,
+  and the pill when the only unread message is, until the channels are read.
+
 ## Initials
 
 A server without an icon shows letters made from its name:

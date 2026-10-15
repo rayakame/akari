@@ -114,13 +114,14 @@ they stay in the store until the next session.
 
 ## Large guilds
 
-For user accounts, the gateway stops "sending non-stateful events for guilds without a
+The reference says the gateway stops "sending non-stateful events for guilds without a
 subscription" once a guild has more members than `large_threshold`, 250 by default
 ([Identify](https://docs.discord.food/gateway/gateway-events#identify-structure)). Gateway
-guilds over the threshold are marked `large`, and `state::Guild::large` exposes the flag.
-Akari subscribes every guild with a viewed channel, like the official client, so live
-messages arrive there too ([gateway.md](gateway.md#guild-subscriptions)). **Unverified**
-whether a guild under the threshold needs it.
+guilds over the threshold are marked `large`, and `state::Guild::large` exposes the flag. In
+practice the line is higher: guilds of up to 75,000 members are subscribed automatically on
+connect (discord.py-self), and an observation on 2026-10-15 agrees
+([gateway.md](gateway.md#guild-subscriptions)). Akari subscribes every guild with a viewed
+channel, like the official client, so live messages arrive in the biggest ones too.
 
 Identify sends `PASSIVE_GUILD_UPDATE_V2` (bit 14), so guilds without a subscription send
 [PASSIVE_UPDATE_V2](https://docs.discord.food/gateway/gateway-events#passive-update-v2)
@@ -128,7 +129,20 @@ Identify sends `PASSIVE_GUILD_UPDATE_V2` (bit 14), so guilds without a subscript
 channels. It carries only what changed: `updated_channels` (each channel's `id`,
 `last_message_id` and `last_pin_timestamp`), voice states and their members. Akari decodes
 `guild_id` and each channel's `id` and `last_message_id`, skipping a channel entry that
-doesn't parse; the store doesn't apply it yet. How often it comes is **unverified**.
+doesn't parse; the store doesn't apply it yet.
+
+Observed on 2026-10-15 with akari-cli on a test account:
+
+- Only the account's server over 75,000 members sent PASSIVE_UPDATE_V2, also when Akari had
+  sent no op 37 at all. The servers of 250 to 75,000 members sent none.
+- With that server's channels marked read just before, it came 4 times in 20 minutes, 4 to 6
+  minutes apart, and once in a second run. In an earlier run, with all its channels already
+  unread, none came in 10 minutes. So it most likely comes when a channel goes from read to
+  unread, not for every message (**unverified**). A channel then gets no further update until
+  it has been read again, so the update must never be undone by anything but an ack or READY.
+- CHANNEL_UNREAD_UPDATE came twice in a 10-minute run with bit 14 set and not at all in a
+  20-minute one, although the account has no directory channels. Where it came from is
+  **unverified**.
 
 ## The state store
 
