@@ -653,3 +653,82 @@ fn a_thread_created_later_follows_its_parent() {
         Badge::default()
     );
 }
+
+const OPT_IN_CHANNELS_ON: u64 = 1 << 14;
+const OPT_IN_ENABLED: u64 = 1 << 12;
+
+// A community server with "Channels & Roles" opt-in on, as the user's settings say.
+fn opt_in(ready: &mut Value) {
+    ready["guilds"][0]["properties"]["features"] = json!(["COMMUNITY"]);
+    let settings = &mut ready["user_guild_settings"]["entries"][0];
+    let flags = settings["flags"].as_u64().unwrap();
+    settings["flags"] = (flags | OPT_IN_CHANNELS_ON).into();
+}
+
+fn opt_into(override_: &mut Value) {
+    let flags = override_["flags"].as_u64().unwrap_or(0);
+    override_["flags"] = (flags | OPT_IN_ENABLED).into();
+}
+
+// GENERAL's newest message a day old, past its read position.
+fn recent_general(ready: &mut Value) {
+    opt_in(ready);
+    let day_ago =
+        Snowflake::<model::GenericMarker>::from_unix_millis(wall_millis() - 86_400_000, 0);
+    ready["guilds"][0]["channels"][1]["last_message_id"] = day_ago.get().to_string().into();
+}
+
+#[test]
+fn an_opt_in_server_shows_nothing_for_a_channel_quiet_for_a_week() {
+    // The fixture's GENERAL has two old mentions and a newest message from 2018.
+    let state = ready_where(opt_in);
+
+    assert_eq!(channel_badge(&state, GENERAL), Badge::default());
+    assert_eq!(guild_badge(&state, G1), Badge::default());
+}
+
+#[test]
+fn opt_in_needs_a_community_server() {
+    let state = ready_where(|ready| {
+        opt_in(ready);
+        ready["guilds"][0]["properties"]["features"] = json!([]);
+    });
+
+    assert_eq!(channel_badge(&state, GENERAL), badge(true, 2));
+}
+
+#[test]
+fn a_recent_channel_the_user_opted_into_shows_unread() {
+    let state = ready_where(|ready| {
+        recent_general(ready);
+        ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+        opt_into(general_override(ready));
+    });
+
+    assert_eq!(channel_badge(&state, GENERAL), badge(true, 0));
+    assert_eq!(guild_badge(&state, G1), badge(true, 0));
+}
+
+#[test]
+fn an_opted_in_category_covers_its_channels() {
+    let state = ready_where(|ready| {
+        recent_general(ready);
+        ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+        opt_into(&mut ready["user_guild_settings"]["entries"][0]["channel_overrides"][0]);
+    });
+
+    assert_eq!(channel_badge(&state, GENERAL), badge(true, 0));
+}
+
+#[test]
+fn a_channel_not_opted_into_shows_only_with_mentions() {
+    let quiet = ready_where(|ready| {
+        recent_general(ready);
+        ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+    });
+    let pinged = ready_where(recent_general);
+
+    assert_eq!(channel_badge(&quiet, GENERAL), Badge::default());
+    assert_eq!(guild_badge(&quiet, G1), Badge::default());
+    assert_eq!(channel_badge(&pinged, GENERAL), badge(true, 2));
+}

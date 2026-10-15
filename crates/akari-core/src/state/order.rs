@@ -191,6 +191,7 @@ mod tests {
                 member_count: None,
                 large: false,
                 default_message_notifications: crate::state::NotificationLevel::AllMessages,
+                community: false,
             })
         };
         let joined = |millis| Some(Timestamp::from_unix_millis(millis));

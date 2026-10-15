@@ -150,6 +150,8 @@ pub(super) struct GuildRow {
     member_count: Option<u32>,
     #[serde(skip_serializing_if = "is_false")]
     large: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    community: bool,
     // 0 all messages, 1 only mentions, 2 nothing.
     #[serde(default, skip_serializing_if = "is_zero")]
     default_level: u8,
@@ -196,6 +198,7 @@ impl From<&Guild> for GuildRow {
                 .collect(),
             member_count: guild.member_count,
             large: guild.large,
+            community: guild.community,
             default_level: level_code(guild.default_message_notifications),
         }
     }
@@ -224,6 +227,7 @@ impl GuildRow {
             member_count: self.member_count,
             large: self.large,
             default_message_notifications: level(self.default_level),
+            community: self.community,
         }
     }
 }
@@ -819,6 +823,8 @@ pub(super) struct GuildSettingsRow {
     suppress_roles: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     hide_muted_channels: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    opt_in: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     channels: Vec<ChannelSettingsRow>,
 }
@@ -834,6 +840,8 @@ struct ChannelSettingsRow {
     level: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     unreads: Option<u8>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    opted_in: bool,
 }
 
 // 0 all messages, 1 only mentions.
@@ -862,6 +870,7 @@ impl From<&GuildSettings> for GuildSettingsRow {
                 mute_ends: channel.mute_ends.map(nanos),
                 level: channel.level.map(level_code),
                 unreads: channel.unreads.map(unreads_code),
+                opted_in: channel.opted_in,
             })
             .collect();
         channels.sort_unstable_by_key(|channel| channel.id);
@@ -873,6 +882,7 @@ impl From<&GuildSettings> for GuildSettingsRow {
             suppress_everyone: settings.suppress_everyone,
             suppress_roles: settings.suppress_roles,
             hide_muted_channels: settings.hide_muted_channels,
+            opt_in: settings.opt_in,
             channels,
         }
     }
@@ -888,6 +898,7 @@ impl GuildSettingsRow {
             suppress_everyone: self.suppress_everyone,
             suppress_roles: self.suppress_roles,
             hide_muted_channels: self.hide_muted_channels,
+            opt_in: self.opt_in,
             channels: Arc::new(
                 self.channels
                     .into_iter()
@@ -897,6 +908,7 @@ impl GuildSettingsRow {
                             mute_ends: channel.mute_ends.map(timestamp),
                             level: channel.level.map(level),
                             unreads: channel.unreads.map(unreads),
+                            opted_in: channel.opted_in,
                         };
                         (Snowflake::new(channel.id), settings)
                     })

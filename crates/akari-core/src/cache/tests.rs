@@ -108,6 +108,7 @@ pub(crate) fn guild(id: u64, name: &str) -> Guild {
         member_count: Some(1234),
         large: true,
         default_message_notifications: crate::state::NotificationLevel::OnlyMentions,
+        community: id == 100,
     }
 }
 
@@ -359,6 +360,7 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
                 mute_ends: Some(time(1_790_856_000_000_000_000)),
                 level: Some(NotificationLevel::Nothing),
                 unreads: Some(Unreads::OnlyMentions),
+                opted_in: true,
             },
         ),
         (Snowflake::new(11), ChannelSettings::default()),
@@ -393,6 +395,7 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
                     suppress_everyone: true,
                     suppress_roles: true,
                     hide_muted_channels: true,
+                    opt_in: true,
                     channels: Arc::new(channels.into()),
                 }),
             ),

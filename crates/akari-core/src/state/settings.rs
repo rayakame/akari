@@ -12,6 +12,8 @@ const GUILD_UNREADS_ALL_MESSAGES: u64 = 1 << 11;
 const GUILD_UNREADS_ONLY_MENTIONS: u64 = 1 << 12;
 const CHANNEL_UNREADS_ONLY_MENTIONS: u64 = 1 << 9;
 const CHANNEL_UNREADS_ALL_MESSAGES: u64 = 1 << 10;
+const OPT_IN_CHANNELS_ON: u64 = 1 << 14;
+const OPT_IN_ENABLED: u64 = 1 << 12;
 
 /// One entry of the server list, top to bottom.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +81,8 @@ pub struct GuildSettings {
     pub suppress_everyone: bool,
     pub suppress_roles: bool,
     pub hide_muted_channels: bool,
+    /// The user picks this community server's channels ("Channels & Roles").
+    pub opt_in: bool,
     pub channels: Arc<HashMap<ChannelId, ChannelSettings>>,
 }
 
@@ -101,6 +105,7 @@ impl GuildSettings {
             suppress_everyone: settings.suppress_everyone,
             suppress_roles: settings.suppress_roles,
             hide_muted_channels: settings.hide_muted_channels,
+            opt_in: flags & OPT_IN_CHANNELS_ON != 0,
             channels: Arc::new(
                 settings
                     .channel_overrides
@@ -121,6 +126,8 @@ pub struct ChannelSettings {
     /// `None` inherits: the category's, then the guild's.
     pub level: Option<NotificationLevel>,
     pub unreads: Option<Unreads>,
+    /// The user chose this channel, or this category's channels, in "Channels & Roles".
+    pub opted_in: bool,
 }
 
 impl ChannelSettings {
@@ -139,6 +146,7 @@ impl ChannelSettings {
                 CHANNEL_UNREADS_ALL_MESSAGES,
                 CHANNEL_UNREADS_ONLY_MENTIONS,
             ),
+            opted_in: channel.flags & OPT_IN_ENABLED != 0,
         }
     }
 }

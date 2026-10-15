@@ -17,6 +17,7 @@ pub struct GuildUpdate {
     pub owner_id: Option<UserId>,
     pub roles: Option<Vec<Role>>,
     pub default_message_notifications: Option<MessageNotificationLevel>,
+    pub features: Option<Vec<String>>,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -30,6 +31,7 @@ struct GuildFields {
     owner_id: Option<UserId>,
     roles: Option<Vec<Role>>,
     default_message_notifications: Option<MessageNotificationLevel>,
+    features: Option<Vec<String>>,
     properties: Option<Box<GuildFields>>,
 }
 
@@ -56,6 +58,7 @@ impl<'de> Deserialize<'de> for GuildUpdate {
             default_message_notifications: nested
                 .default_message_notifications
                 .or(top.default_message_notifications),
+            features: nested.features.or(top.features),
         })
     }
 }

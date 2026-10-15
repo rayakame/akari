@@ -57,6 +57,8 @@ pub struct Guild {
     pub large: bool,
     /// The level for members who set none.
     pub default_message_notifications: NotificationLevel,
+    /// A community server, where the user can choose its channels ("Channels & Roles").
+    pub community: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

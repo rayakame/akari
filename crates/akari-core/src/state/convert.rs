@@ -90,6 +90,7 @@ impl Guild {
             member_count: guild.member_count,
             large: guild.large,
             default_message_notifications: default_level(properties.default_message_notifications),
+            community: community(&properties.features),
         }
     }
 
@@ -111,8 +112,15 @@ impl Guild {
         if let Some(level) = update.default_message_notifications {
             next.default_message_notifications = default_level(level);
         }
+        if let Some(features) = update.features {
+            next.community = community(&features);
+        }
         next
     }
+}
+
+fn community(features: &[String]) -> bool {
+    features.iter().any(|feature| feature == "COMMUNITY")
 }
 
 // Discord's default when a guild sends none Akari knows.

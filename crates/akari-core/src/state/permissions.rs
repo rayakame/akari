@@ -140,6 +140,7 @@ mod tests {
             member_count: None,
             large: false,
             default_message_notifications: crate::state::NotificationLevel::AllMessages,
+            community: false,
         }
     }
 

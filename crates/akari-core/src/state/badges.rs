@@ -8,6 +8,7 @@ use super::types::Channel;
 use crate::model::{ChannelId, ChannelType, GuildId, Permissions, Timestamp};
 
 const USE_NEW_NOTIFICATIONS: u64 = 1 << 4;
+const WEEK_MILLIS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 /// What a list shows for a channel, a guild or a folder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -302,8 +303,19 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
     if !visible {
         return Some(hidden);
     }
+    // The official client's gates for community servers with "Channels & Roles": a channel
+    // quiet for a week shows nothing, one the user didn't pick only its mentions.
+    let opt_in = opt_in_enabled(entities, guild);
+    let stale = opt_in
+        && channel
+            .last_message_id
+            .is_none_or(|last| last.unix_millis() < now_millis - WEEK_MILLIS);
+    let mentions = if stale { 0 } else { mentions };
+    let unpicked = opt_in && kind != Kind::Thread && mentions == 0 && !opted_in(entities, channel);
     let unread = kind != Kind::Voice
         && !muted
+        && !stale
+        && !unpicked
         && entities.unread(channel)
         && shows_unreads(entities, channel);
     let hides_muted = entities
@@ -325,6 +337,27 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
         // A mention adds the user to a thread, which Akari only learns at the next READY.
         mentions: if hidden { 0 } else { mentions },
     })
+}
+
+fn opt_in_enabled(entities: &Entities, guild: GuildId) -> bool {
+    entities
+        .guilds
+        .get(&guild)
+        .is_some_and(|stored| stored.community)
+        && entities
+            .settings
+            .guild(Some(guild))
+            .is_some_and(|settings| settings.opt_in)
+}
+
+fn opted_in(entities: &Entities, channel: &Channel) -> bool {
+    let Some(settings) = entities.settings.guild(channel.guild_id) else {
+        return false;
+    };
+    [Some(channel.id), channel.parent_id]
+        .into_iter()
+        .flatten()
+        .any(|id| settings.channels.get(&id).is_some_and(|own| own.opted_in))
 }
 
 fn shows_unreads(entities: &Entities, channel: &Channel) -> bool {

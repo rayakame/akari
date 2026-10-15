@@ -111,6 +111,13 @@ over the DMs; none computes permissions.
   not under a muted category or muted channel, and the guild itself unmuted; its count adds
   up all their mentions, muted or not. With "hide muted channels", muted channels don't count
   at all. A folder's badge is its guilds' sum, added up by the host.
+- **Community servers with opt-in channels** ("Channels & Roles": the `COMMUNITY` feature and
+  the user's `OPT_IN_CHANNELS_ON`) follow the official client's two extra rules: a channel
+  whose newest message is over 7 days old shows neither unread nor mentions, and one that
+  neither it nor its category is picked in (`OPT_IN_ENABLED`) shows unread only with mentions
+  ([user-settings.md](user-settings.md#opt-in-channels-community-onboarding)). Without them,
+  old mentions there showed in Akari, and reading the channel in the official client never
+  cleared them: that client sends no ack for a channel it shows as read.
 - **DMs and group DMs** show unread unless muted; every message in an unmuted one counts as a
   mention, and `unread_private_channels` lists those with mentions, newest message first,
   leaving out message requests and spam as the official client does.
