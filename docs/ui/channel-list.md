@@ -78,7 +78,9 @@ Observed in the official desktop client on 2026-10-14:
   the channel is read.
 - An @silent mention counts like any other; it only skips the notification.
 
-*Akari: later, with unread state.*
+*Akari: an unread row has the bright name and the 4 × 8 pill on the column's left edge (not
+while selected), and a row with mentions the red badge at its right end, as on the rail; DM
+rows the same, without the pill.*
 
 - Icons by kind: text, voice, announcement, stage, forum, media, rules and thread. Each has a
   private variant (with a lock) and an NSFW variant (with a warning mark).

@@ -15,6 +15,16 @@ struct ServerRail: View {
                 } action: {
                     session.open(.home)
                 }
+                ForEach(session.directMessages.unread) { conversation in
+                    RailItem(
+                        selected: false, help: conversation.name,
+                        badge: session.directMessages.badge(of: conversation.id)
+                    ) { _ in
+                        RailAvatar(conversation: conversation)
+                    } action: {
+                        session.open(channel: conversation.id)
+                    }
+                }
                 Rectangle()
                     .fill(Color(nsColor: Palette.frameBorder))
                     .frame(width: 32, height: 1)
@@ -28,7 +38,8 @@ struct ServerRail: View {
                             RailItem(
                                 selected: FolderTile.selected(
                                     folder, expanded: expanded, place: session.place),
-                                help: FolderTile.help(folder)
+                                help: FolderTile.help(folder),
+                                badge: session.servers.tileBadge(of: folder)
                             ) { _ in
                                 FolderTile(item: folder, expanded: expanded)
                             } action: {
@@ -61,7 +72,10 @@ struct ServerRail: View {
     }
 
     private func guildItem(_ guild: Guild) -> some View {
-        RailItem(selected: session.place == .guild(guild.id), help: guild.name) { highlighted in
+        RailItem(
+            selected: session.place == .guild(guild.id), help: guild.name,
+            badge: session.servers.badge(of: guild.id)
+        ) { highlighted in
             GuildIcon(name: guild.name, highlighted: highlighted)
         } action: {
             session.open(.guild(guild.id))
@@ -69,9 +83,10 @@ struct ServerRail: View {
     }
 }
 
-private struct RailItem<Icon: View>: View {
+struct RailItem<Icon: View>: View {
     let selected: Bool
     let help: String
+    var badge = Badge(unread: false, mentions: 0)
     @ViewBuilder let icon: (_ highlighted: Bool) -> Icon
     let action: () -> Void
     @State private var hovered = false
@@ -79,19 +94,31 @@ private struct RailItem<Icon: View>: View {
     var body: some View {
         Button(action: action) {
             icon(selected || hovered)
+                .mentionBadge(badge.mentions)
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help(help)
         .frame(width: SidebarWidth.rail, height: 40)
         .overlay(alignment: .leading) {
-            RailPill(height: selected ? 40 : hovered ? 20 : 0)
+            RailPill(height: RailPill.height(selected: selected, hovered: hovered, unread: badge.unread))
         }
     }
 }
 
-private struct RailPill: View {
+struct RailPill: View {
     let height: CGFloat
+
+    /// Selection and hover win over the short unread pill.
+    static func height(selected: Bool, hovered: Bool, unread: Bool) -> CGFloat {
+        if selected {
+            40
+        } else if hovered {
+            20
+        } else {
+            unread ? 8 : 0
+        }
+    }
 
     var body: some View {
         UnevenRoundedRectangle(bottomTrailingRadius: 4, topTrailingRadius: 4)
@@ -145,6 +172,19 @@ struct GuildIcon: View {
         case 5: 14
         case 6: 12
         default: 10
+        }
+    }
+}
+
+/// A DM with unread mentions on the rail: the other person's avatar, or a group's.
+private struct RailAvatar: View {
+    let conversation: DirectMessageListModel.Conversation
+
+    var body: some View {
+        if conversation.channel.kind == .dm, let user = conversation.recipients.first {
+            InitialsAvatar(user, size: 40)
+        } else {
+            InitialsAvatar(name: conversation.name, id: conversation.id.rawValue, size: 40)
         }
     }
 }

@@ -12,7 +12,8 @@ struct DirectMessageList: View {
                     ForEach(session.directMessages.conversations) { conversation in
                         ConversationRow(
                             conversation: conversation,
-                            selected: session.messages?.channelId == conversation.id
+                            selected: session.messages?.channelId == conversation.id,
+                            badge: session.directMessages.badge(of: conversation.id)
                         ) {
                             session.open(channel: conversation.id)
                         }
@@ -34,6 +35,7 @@ extension DirectMessageList {
 private struct ConversationRow: View {
     let conversation: DirectMessageListModel.Conversation
     let selected: Bool
+    var badge = Badge(unread: false, mentions: 0)
     let open: () -> Void
     @State private var hovered = false
     @Environment(\.colorScheme) private var colorScheme
@@ -47,7 +49,7 @@ private struct ConversationRow: View {
                         .font(TypeScale.channelName.weight(weight).font)
                         .foregroundStyle(
                             Color(
-                                nsColor: selected || hovered
+                                nsColor: selected || hovered || badge.unread
                                     ? Palette.interactiveTextActive : Palette.channelDefault)
                         )
                         .lineLimit(1)
@@ -58,6 +60,9 @@ private struct ConversationRow: View {
                     }
                 }
                 Spacer(minLength: 0)
+                if badge.mentions > 0 {
+                    MentionBadge(count: badge.mentions)
+                }
             }
             .padding(.horizontal, 8)
             .frame(height: 42)

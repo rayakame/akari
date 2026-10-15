@@ -4,7 +4,11 @@ import Foundation
 // An online account with more of everything than a window shows: 40 servers, 60 channels in
 // server 1, 60 DMs, and 100 messages in each conversation.
 nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
-    init() {
+    private let unread: [ChannelId]
+
+    // `unread`: DMs with mentions, as the rail lists them.
+    init(unread: [ChannelId] = []) {
+        self.unread = unread
         super.init(noHandle: NoHandle())
     }
 
@@ -13,7 +17,7 @@ nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
     }
 
     override func store() -> Store {
-        CrowdedStore()
+        CrowdedStore(unread: unread)
     }
 
     override func connect() throws {}
@@ -29,8 +33,10 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
     static let guildIds = (1...40).map { GuildId(rawValue: $0) }
     static let channelIds = (1001...1060).map { ChannelId(rawValue: $0) }
     static let dmIds = (5001...5060).map { ChannelId(rawValue: $0) }
+    private let unread: [ChannelId]
 
-    init() {
+    init(unread: [ChannelId] = []) {
+        self.unread = unread
         super.init(noHandle: NoHandle())
     }
 
@@ -150,7 +156,11 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
     }
 
     override func channelBadges(ids: [ChannelId]) -> [ChannelBadge] {
-        ids.map { ChannelBadge(channelId: $0, badge: Badge(unread: false, mentions: 0)) }
+        ids.map { id in
+            ChannelBadge(
+                channelId: id,
+                badge: Badge(unread: unread.contains(id), mentions: unread.contains(id) ? 2 : 0))
+        }
     }
 
     override func guildBadges(ids: [GuildId]) -> [GuildBadge] {
@@ -158,7 +168,7 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
     }
 
     override func unreadPrivateChannels() -> [ChannelId] {
-        []
+        unread
     }
 }
 

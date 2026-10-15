@@ -7,7 +7,9 @@ measured from the web client on 2026-10-10; sizes in [layout.md](layout.md), col
 ## Order, top to bottom
 
 1. Home, which opens the DM list.
-2. Avatars of DMs with unread messages. *Akari: later, with unread state.*
+2. Avatars of DMs with unread messages. *Akari: the DMs and group DMs with mentions (every
+   message in an unmuted DM is one), newest first, as initials avatars with the badge and the
+   unread pill; clicking one opens it.*
 3. Servers the user is only previewing. *Akari: not in READY, so not shown
    ([dispatches.md](../protocol/dispatches.md#open-points)).*
 4. A separator: 32 × 1, `frameBorder`.
@@ -53,8 +55,9 @@ Observed in the official desktop client on 2026-10-14:
   (Discord's blue-violet, `brand`, without one). Items keep the rail's gap. The state survives
   a restart; Discord doesn't sync it (each client keeps its own).
 - **Unread:** a collapsed folder shows the white pill when a server in it is unread, and a red
-  badge with the count at the tile's bottom right for mentions, plus the pill. *Akari: later,
-  with unread state.*
+  badge with the count at the tile's bottom right for mentions, plus the pill. *Akari: the
+  same, adding up the servers' badges; an expanded folder's header shows neither, since its
+  servers show their own.*
 - The tooltip is the folder's name, or its servers' names joined with ", " when it has none.
 - Clicking the tile expands or collapses it.
 
@@ -71,7 +74,8 @@ the selected pill. **Unverified:** that the official client does the same.
 
 A red (`#d22d39`) badge at the icon's bottom right, cut out of the icon, 16 tall. It is 16
 wide for counts under 10, 22 under 100 and 30 above; from 1000 it shows "1k+" up to "9k+".
-*Akari: later, with unread state.*
+*Akari: `mentionBadge`, 12 pt bold white text, offset 4 past the icon's corner and cut out by
+a 3 wide ring of the rail's color.*
 
 ## What makes a server unread
 
