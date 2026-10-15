@@ -9,8 +9,10 @@ protocol MessageListActions: AnyObject {
     func loadMore(_ edge: MessageTimeline.Edge)
     // The model's latest page; scrolling to the bottom is the table's part.
     func jumpToLatest()
-    // One action for Escape from the list and the composer; read state adds marking as read.
+    // One action for Escape from the list and the composer: marks read and jumps to the present.
     func escape()
+    // The user scrolled away from the bottom, or the list is back there.
+    func atBottomChanged(_ atBottom: Bool)
     func reveal(_ spoiler: SpoilerKey)
     // Wherever the channel is: another server's, or a conversation.
     func openChannel(_ id: ChannelId)

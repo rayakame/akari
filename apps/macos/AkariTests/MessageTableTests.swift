@@ -912,6 +912,7 @@ struct MessageTableTests {
 
     final class RecordingActions: MessageListActions {
         var calls: [String] = []
+        var bottoms: [Bool] = []
 
         func retry(_ message: MessageId) {
             calls.append("retry \(message.rawValue)")
@@ -931,6 +932,10 @@ struct MessageTableTests {
 
         func escape() {
             calls.append("escape")
+        }
+
+        func atBottomChanged(_ atBottom: Bool) {
+            bottoms.append(atBottom)
         }
 
         func reveal(_ spoiler: SpoilerKey) {
@@ -1508,6 +1513,27 @@ struct MessageTableTests {
         table.cancelOperation(nil)
 
         #expect(actions.calls == ["escape"])
+    }
+
+    @Test
+    func theTableReportsWhetherItIsAtTheBottom() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        #expect(actions.bottoms.isEmpty, "a list opens at the bottom")
+
+        scroll(toRowOf: 120)
+        #expect(actions.bottoms == [false])
+
+        let bottomClip = try #require(clip as? BottomClipView)
+        clip.scroll(to: NSPoint(x: 0, y: bottomClip.originRange.upperBound))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        #expect(actions.bottoms == [false, true])
+
+        scroll(toRowOf: 150)
+        controller.jumpToPresent(load: true)
+        #expect(actions.bottoms == [false, true, false, true])
     }
 
     @Test

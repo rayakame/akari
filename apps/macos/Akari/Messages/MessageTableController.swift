@@ -41,7 +41,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // Where the pointer is, in window coordinates; nil when hover shouldn't show.
     private let pointer: () -> NSPoint?
     private var filled = false
-    private var sticksToBottom = true
+    private var sticksToBottom = true {
+        didSet {
+            if sticksToBottom != oldValue {
+                actions?.atBottomChanged(sticksToBottom)
+            }
+        }
+    }
     private var atPresent = true
     private var state = MessageTableState(rows: [])
     private var revealed: [MessageId: Set<UInt16>] = [:]

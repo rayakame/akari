@@ -57,6 +57,10 @@ public final class MessageListModel {
     public private(set) var openedFrom = Origin.network
     /// Revealed for as long as the model lives: through rereads and loads, not a channel switch.
     public private(set) var revealedSpoilers: Set<SpoilerKey> = []
+    /// Whether the view is scrolled to the bottom of its rows, as it reports; a list opens there.
+    public private(set) var atBottom = true
+    /// At the present and scrolled to its bottom: where the user reads new messages.
+    public var atPresentBottom: Bool { atPresent && atBottom }
 
     private static let pageSize: UInt8 = 50
 
@@ -71,6 +75,8 @@ public final class MessageListModel {
     @ObservationIgnored private var pendingKeys: [MessageId: MessageId] = [:]
     @ObservationIgnored private var loads = 0
     @ObservationIgnored private var activeLoads: [Int: Load] = [:]
+    // For the session's reading signal; `true` when the user scrolled away from the bottom.
+    @ObservationIgnored var bottomChanged: ((_ scrolledAway: Bool) -> Void)?
 
     init(channelId: ChannelId, account: Account, store: Store, drafts: Drafts = Drafts()) {
         self.channelId = channelId
@@ -110,6 +116,24 @@ public final class MessageListModel {
 
     public func jumpToPresent() async {
         await load(.latest)
+    }
+
+    /// Escape: marks the channel read, and loads the present when the list shows older
+    /// messages. Scrolling to the bottom is the view's part.
+    public func escape() async {
+        account.markRead(channelId: channelId)
+        if !atPresent {
+            await load(.latest)
+        }
+    }
+
+    /// The view reports whether it's scrolled to the bottom.
+    public func setAtBottom(_ atBottom: Bool) {
+        guard atBottom != self.atBottom else {
+            return
+        }
+        self.atBottom = atBottom
+        bottomChanged?(!atBottom)
     }
 
     public func reveal(_ key: SpoilerKey) {
@@ -199,6 +223,12 @@ public final class MessageListModel {
     }
 
     private func reload(rereading changed: Set<MessageId>) {
+        let wasAtPresent = atPresent
+        defer {
+            if atPresent != wasAtPresent {
+                bottomChanged?(false)
+            }
+        }
         guard let window = store.window(channelId: channelId) else {
             rows = []
             pendingKeys = [:]

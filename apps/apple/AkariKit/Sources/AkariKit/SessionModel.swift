@@ -24,6 +24,10 @@ public final class SessionModel {
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
     /// with `.task(id: messages.channelId) { await messages.open() }`.
     public private(set) var messages: MessageListModel?
+    /// The channel the user is reading, as the core was told: the open channel while the app is
+    /// active, its window key and visible, the list at the present's bottom and the user
+    /// engaged.
+    public private(set) var reading: ChannelId?
     /// What the connection bar says; `nil` while online.
     public var notice: ConnectionNotice? {
         switch connection {
@@ -50,6 +54,11 @@ public final class SessionModel {
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
+    @ObservationIgnored private var appActive = false
+    @ObservationIgnored private var windowKey = false
+    @ObservationIgnored private var windowVisible = false
+    // The official client acks after a break only once the user clicks or types (D88).
+    @ObservationIgnored private var engaged = false
 
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
     /// means the user has to log in again. The first READY reopens the place and channel
@@ -123,9 +132,10 @@ public final class SessionModel {
         // messages load while the gateway connects; READY then places it.
         if let channel = spotToRestore?.channel {
             openedChannels.insert(channel)
-            messages = MessageListModel(
-                channelId: channel, account: account, store: store, drafts: drafts)
+            messages = list(of: channel)
+            engaged = true
         }
+        updateReading()
     }
 
     /// The hosts the account trusts for masked links, kept with the rest of its memory.
@@ -136,6 +146,7 @@ public final class SessionModel {
     /// A guild opens the channel last opened there, else its first text channel; home opens
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
+        defer { updateReading() }
         guard place != self.place else {
             // The session starts at home, so choosing home before READY cancels a server restore.
             if case .guild = spotToRestore?.place {
@@ -154,7 +165,7 @@ public final class SessionModel {
             if let last = lastHomeChannel,
                 directMessages.conversations.contains(where: { $0.id == last })
             {
-                open(channel: last)
+                show(channel: last)
             } else {
                 messages = nil
             }
@@ -165,18 +176,10 @@ public final class SessionModel {
         openListedChannel(in: list, guildId: guildId)
     }
 
+    /// Opening a channel engages the user, also the one already open.
     public func open(channel id: ChannelId) {
-        spotToRestore = nil
-        switch place {
-        case .guild(let guildId): lastChannels[guildId] = id
-        case .home: lastHomeChannel = id
-        }
-        defer { rememberSpot() }
-        guard messages?.channelId != id else {
-            return
-        }
-        openedChannels.insert(id)
-        messages = MessageListModel(channelId: id, account: account, store: store, drafts: drafts)
+        engaged = true
+        show(channel: id)
     }
 
     /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
@@ -192,6 +195,69 @@ public final class SessionModel {
             }
         }
         open(channel: channel)
+    }
+
+    /// Whether "Mark As Read" has something to mark: the server's badge shows unread or
+    /// mentions.
+    public func canMarkRead(guild: GuildId) -> Bool {
+        Self.showsUnread(servers.badge(of: guild))
+    }
+
+    public func canMarkRead(folder: ServerListModel.FolderItem) -> Bool {
+        Self.showsUnread(servers.badge(of: folder))
+    }
+
+    /// A channel of the open server, or a conversation.
+    public func canMarkRead(channel: ChannelId) -> Bool {
+        (channels?.badges[channel] ?? directMessages.badges[channel]).map(Self.showsUnread)
+            ?? false
+    }
+
+    public func markRead(guild: GuildId) {
+        account.markGuildsRead(guildIds: [guild])
+    }
+
+    /// One bulk ack for all of the folder's servers.
+    public func markRead(folder: ServerListModel.FolderItem) {
+        account.markGuildsRead(guildIds: folder.guilds.map(\.id))
+    }
+
+    public func markRead(channel: ChannelId) {
+        account.markRead(channelId: channel)
+    }
+
+    /// Shift+Escape: marks the open server read; does nothing at home.
+    public func markServerRead() {
+        if case .guild(let guildId) = place {
+            markRead(guild: guildId)
+        }
+    }
+
+    /// What reading needs from the host: the app active, and its window key and visible (not
+    /// minimized or covered). Losing one ends the user's engagement until the next click or
+    /// key press.
+    public func setAppActive(_ active: Bool) {
+        let lost = appActive && !active
+        appActive = active
+        readingInputChanged(lost: lost)
+    }
+
+    public func setWindowKey(_ key: Bool) {
+        let lost = windowKey && !key
+        windowKey = key
+        readingInputChanged(lost: lost)
+    }
+
+    public func setWindowVisible(_ visible: Bool) {
+        let lost = windowVisible && !visible
+        windowVisible = visible
+        readingInputChanged(lost: lost)
+    }
+
+    /// A click or key press in the window; scroll-wheel events aren't one.
+    public func userInteracted() {
+        engaged = true
+        updateReading()
     }
 
     /// Disconnects but keeps the session, e.g. before the Mac sleeps.
@@ -228,6 +294,7 @@ public final class SessionModel {
     /// Ends the session. Releasing the model without calling it ends the event loop too.
     public func close() {
         ended = true
+        updateReading()
         account.close()
         subscription?.close()
         loop.cancel()
@@ -238,6 +305,7 @@ public final class SessionModel {
     }
 
     func apply(_ batch: EventBatch) {
+        defer { updateReading() }
         if let state = batch.connection {
             if case .closed(let error) = state {
                 closed(error)
@@ -326,7 +394,7 @@ public final class SessionModel {
             if let channel = spot.channel,
                 directMessages.conversations.contains(where: { $0.id == channel })
             {
-                open(channel: channel)
+                show(channel: channel)
             } else {
                 messages = nil
                 rememberSpot()
@@ -344,10 +412,67 @@ public final class SessionModel {
         }
         let first = list.channels.first(where: \.opensMessageList)
         if let channel = last ?? first {
-            open(channel: channel.id)
+            show(channel: channel.id)
         } else {
             messages = nil
         }
+    }
+
+    // A new list engages the user; the open one stays as it is.
+    private func show(channel id: ChannelId) {
+        spotToRestore = nil
+        switch place {
+        case .guild(let guildId): lastChannels[guildId] = id
+        case .home: lastHomeChannel = id
+        }
+        defer {
+            rememberSpot()
+            updateReading()
+        }
+        guard messages?.channelId != id else {
+            return
+        }
+        openedChannels.insert(id)
+        messages = list(of: id)
+        engaged = true
+    }
+
+    private func list(of channel: ChannelId) -> MessageListModel {
+        let list = MessageListModel(
+            channelId: channel, account: account, store: store, drafts: drafts)
+        list.bottomChanged = { [weak self, weak list] scrolledAway in
+            guard let self, let list, list === self.messages else {
+                return
+            }
+            if scrolledAway {
+                engaged = false
+            }
+            updateReading()
+        }
+        return list
+    }
+
+    private func readingInputChanged(lost: Bool) {
+        if lost {
+            engaged = false
+        }
+        updateReading()
+    }
+
+    private func updateReading() {
+        let reads =
+            engaged && appActive && windowKey && windowVisible && !ended
+            && messages?.atPresentBottom == true
+        let channel = reads ? messages?.channelId : nil
+        guard channel != reading else {
+            return
+        }
+        reading = channel
+        account.setReading(channelId: channel)
+    }
+
+    private static func showsUnread(_ badge: Badge) -> Bool {
+        badge.unread || badge.mentions > 0
     }
 
     private func closed(_ error: GatewayError?) {
@@ -356,6 +481,7 @@ public final class SessionModel {
         }
         ended = true
         connection = .closed(error: error)
+        updateReading()
         onClosed(error)
     }
 }

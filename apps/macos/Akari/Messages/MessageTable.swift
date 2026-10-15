@@ -56,7 +56,7 @@ struct MessageArea: View {
                                 atPresent: messages.atPresent, isStale: messages.isStale,
                                 hasRows: !messages.rows.isEmpty)
                             {
-                                JumpBar(text: text) { bridge.escape() }
+                                JumpBar(text: text) { bridge.jumpToPresent() }
                             }
                             // Above the composer, as in the official client: send errors on
                             // the left, slowmode on the right, over the list's last pixels.
@@ -126,8 +126,19 @@ final class MessageListBridge: MessageListActions {
     }
 
     func escape() {
+        Task { await messages.escape() }
+        link.controller?.jumpToPresent(load: false)
+        link.composer?.takeFocus()
+    }
+
+    // The jump bar's button jumps like Escape but leaves marking read to reading.
+    func jumpToPresent() {
         link.controller?.jumpToPresent(load: true)
         link.composer?.takeFocus()
+    }
+
+    func atBottomChanged(_ atBottom: Bool) {
+        messages.setAtBottom(atBottom)
     }
 
     func reveal(_ spoiler: SpoilerKey) {

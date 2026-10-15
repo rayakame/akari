@@ -189,7 +189,8 @@ block) that Akari leaves out.
   with a down arrow. It doesn't show after a short scroll up, only when the newest messages
   aren't loaded, as in the official client.
 - Clicking it, or pressing Escape ([shortcuts.md](shortcuts.md)), loads the newest messages
-  and scrolls to the bottom. At the present, Escape only scrolls to the bottom.
+  and scrolls to the bottom. At the present, Escape only scrolls to the bottom. Either way,
+  Escape also marks the channel read.
 - Sending a message also jumps to the present.
 - Akari's bar: 32 tall, 16 from the sides, corner radius 8, `brand` with white 14 medium text:
   "You're reading older messages" and "Jump to present".
