@@ -76,6 +76,7 @@ private struct ConversationRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+        .accessibilityValue(MentionBadge.accessibilityValue(badge))
         .padding(.horizontal, 8)
     }
 

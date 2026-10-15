@@ -9,7 +9,7 @@ measured from the web client on 2026-10-10; sizes in [layout.md](layout.md), col
 1. Home, which opens the DM list.
 2. Avatars of DMs with unread messages. *Akari: the DMs and group DMs with mentions (every
    message in an unmuted DM is one), newest first, as initials avatars with the badge and the
-   unread pill; clicking one opens it.*
+   unread pill; clicking one goes home and opens it there.*
 3. Servers the user is only previewing. *Akari: not in READY, so not shown
    ([dispatches.md](../protocol/dispatches.md#open-points)).*
 4. A separator: 32 × 1, `frameBorder`.
@@ -74,8 +74,9 @@ the selected pill. **Unverified:** that the official client does the same.
 
 A red (`#d22d39`) badge at the icon's bottom right, cut out of the icon, 16 tall. It is 16
 wide for counts under 10, 22 under 100 and 30 above; from 1000 it shows "1k+" up to "9k+".
-*Akari: `mentionBadge`, 12 pt bold white text, offset 4 past the icon's corner and cut out by
-a 3 wide ring of the rail's color.*
+*Akari: `mentionBadge` with `mentionBadgeText` in the `mentionBadge` type style (12, bold),
+offset 4 past the icon's corner and cut out by a 3 wide ring of the rail's color. VoiceOver
+reads the state after the name, for example "unread, 3 mentions".*
 
 ## What makes a server unread
 

@@ -94,21 +94,24 @@ struct ChannelRow: View {
             }
         } label: {
             HStack(spacing: 8) {
-                ChannelSymbol(channel: channel)
-                Text(channel.name ?? "")
-                    .font(TypeScale.channelName.weight(weight).font)
-                    .foregroundStyle(
-                        Color(
-                            nsColor: selected || hovered || badge.unread
-                                ? Palette.interactiveTextActive : Palette.channelDefault)
-                    )
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    ChannelSymbol(channel: channel)
+                    Text(channel.name ?? "")
+                        .font(TypeScale.channelName.weight(weight).font)
+                        .foregroundStyle(
+                            Color(
+                                nsColor: selected || hovered || badge.unread
+                                    ? Palette.interactiveTextActive : Palette.channelDefault)
+                        )
+                        .lineLimit(1)
+                }
+                // A muted channel's mentions still show in full red.
+                .opacity(muted && !selected ? 0.5 : 1)
                 Spacer(minLength: 0)
                 if badge.mentions > 0 {
                     MentionBadge(count: badge.mentions)
                 }
             }
-            .opacity(muted && !selected ? 0.5 : 1)
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .frame(height: 32)
@@ -124,6 +127,7 @@ struct ChannelRow: View {
             channel.opensMessageList
                 ? channel.topic ?? "" : ChannelSymbols.unsupported(channel.kind)
         )
+        .accessibilityValue(MentionBadge.accessibilityValue(badge))
         .padding(.horizontal, 8)
         .overlay(alignment: .leading) {
             if badge.unread && !selected {

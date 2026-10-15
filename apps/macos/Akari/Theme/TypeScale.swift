@@ -96,6 +96,7 @@ nonisolated enum TypeScale {
     static let jumpBar = TextStyle(14, .medium)
     static let connectionBar = TextStyle(13, .medium)
     static let warning = TextStyle(13)
+    static let mentionBadge = TextStyle(12, .bold)
 
     static let heading1 = TextStyle(24, .bold, line: 32)
     static let heading2 = TextStyle(20, .bold, line: 28)

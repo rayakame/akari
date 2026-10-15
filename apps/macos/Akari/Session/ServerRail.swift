@@ -22,7 +22,7 @@ struct ServerRail: View {
                     ) { _ in
                         RailAvatar(conversation: conversation)
                     } action: {
-                        session.open(channel: conversation.id)
+                        Self.open(conversation, in: session)
                     }
                 }
                 Rectangle()
@@ -71,6 +71,11 @@ struct ServerRail: View {
         .padding(.top, 4)
     }
 
+    /// Opens an unread DM from the rail, at home wherever the user is.
+    static func open(_ conversation: DirectMessageListModel.Conversation, in session: SessionModel) {
+        session.go(to: conversation.id)
+    }
+
     private func guildItem(_ guild: Guild) -> some View {
         RailItem(
             selected: session.place == .guild(guild.id), help: guild.name,
@@ -99,6 +104,7 @@ struct RailItem<Icon: View>: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help(help)
+        .accessibilityValue(MentionBadge.accessibilityValue(badge))
         .frame(width: SidebarWidth.rail, height: 40)
         .overlay(alignment: .leading) {
             RailPill(height: RailPill.height(selected: selected, hovered: hovered, unread: badge.unread))

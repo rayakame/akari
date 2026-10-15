@@ -95,8 +95,9 @@ rows the same, without the pill.*
   channels need the server's rules channel ID, which it doesn't receive either.
 - Voice, stage, forum, media and directory channels are listed but don't open anything; their
   tooltip says the kind isn't supported yet.
-- Muted rows and categories are drawn at half opacity; the unread style comes with unread
-  state. A muted channel that is selected keeps full opacity.
+- Muted rows and categories are drawn at half opacity, except a row's mention count, which
+  stays full red. A muted channel that is selected keeps full opacity. VoiceOver reads a row's
+  unread state and count after its name ("unread, 2 mentions").
 - "Hide muted channels" (a server setting) leaves channels muted by their own settings out of
   the list, except the open one. **Unverified:** what the official client does with a muted
   category there; Akari keeps categories.

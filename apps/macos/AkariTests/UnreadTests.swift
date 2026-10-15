@@ -67,7 +67,7 @@ struct RailUnreadTests {
     }
 
     @Test
-    func aMutedServerShowsNoPillButItsBadge() throws {
+    func aServerWithOnlyMentionsShowsTheBadgeWithoutThePill() throws {
         let muted = try render(Badge(unread: false, mentions: 3))
         let unread = try render(Badge(unread: true, mentions: 0))
 
@@ -75,6 +75,26 @@ struct RailUnreadTests {
         #expect(count(unread, in: 0..<4, where: isBright) > 0, "the unread pill")
         #expect(count(muted, in: 36..<SidebarWidth.rail, where: isRed) > 0, "the badge")
         #expect(count(unread, in: 36..<SidebarWidth.rail, where: isRed) == 0)
+    }
+
+    @Test
+    func aRailDirectMessageOpensAtHomeFromAServer() throws {
+        let unread = [CrowdedStore.dmIds[3]]
+        let session = SessionModel(
+            userId: UserId(rawValue: 1), account: CrowdedAccount(unread: unread),
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(.guild(CrowdedStore.guildIds[0]))
+        let serverChannel = session.messages?.channelId
+        let conversation = try #require(session.directMessages.unread.first)
+
+        ServerRail.open(conversation, in: session)
+
+        #expect(session.place == .home)
+        #expect(session.messages?.channelId == unread[0])
+        session.open(.guild(CrowdedStore.guildIds[0]))
+        #expect(session.messages?.channelId == serverChannel, "the server keeps its channel")
     }
 
     @Test
@@ -158,5 +178,54 @@ struct UnreadRowTests {
 
         #expect(count(plain, in: 180..<240, where: isRed) == 0)
         #expect(count(mentioned, in: 180..<240, where: isRed) > 0)
+    }
+}
+
+@MainActor
+struct BadgeAccessibilityTests {
+    @Test
+    func badgesReadOutTheirState() {
+        #expect(MentionBadge.accessibilityValue(Badge(unread: true, mentions: 3)) == "unread, 3 mentions")
+        #expect(MentionBadge.accessibilityValue(Badge(unread: false, mentions: 1)) == "1 mention")
+        #expect(MentionBadge.accessibilityValue(Badge(unread: true, mentions: 0)) == "unread")
+        #expect(MentionBadge.accessibilityValue(Badge(unread: false, mentions: 0)) == "")
+    }
+}
+
+@MainActor
+struct MutedBadgeTests {
+    let general = Channel(
+        id: ChannelId(rawValue: 11), kind: .guildText, guildId: GuildId(rawValue: 1),
+        parentId: nil, name: "general", position: 0, topic: nil, nsfw: false,
+        rateLimitPerUser: 0, recipientIds: [])
+
+    // The reddest pixel in the row's right end, where the count sits.
+    func reddest(muted: Bool) throws -> CGFloat {
+        let rendered = try Rendered(
+            ChannelRow(
+                channel: general, selected: false, muted: muted,
+                badge: Badge(unread: false, mentions: 2)
+            ) {}
+            .frame(width: 240, height: 40)
+            .background(Color(nsColor: Palette.frame)),
+            size: NSSize(width: 240, height: 40))
+        var top: CGFloat = 0
+        for x in Int(180 * rendered.scale)..<rendered.rep.pixelsWide {
+            for y in 0..<rendered.rep.pixelsHigh {
+                if let color = rendered.pixel(x, y) {
+                    top = max(top, color.redComponent - color.greenComponent)
+                }
+            }
+        }
+        return top
+    }
+
+    @Test
+    func aMutedRowKeepsItsBadgeFullyRed() throws {
+        let normal = try reddest(muted: false)
+        let muted = try reddest(muted: true)
+
+        #expect(normal > 0.4)
+        #expect(abs(muted - normal) < 0.02, "\(muted) against \(normal)")
     }
 }

@@ -1,3 +1,4 @@
+import AkariKit
 import AppKit
 import SwiftUI
 
@@ -7,8 +8,8 @@ struct MentionBadge: View {
 
     var body: some View {
         Text(Self.text(count))
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(Color.white)
+            .font(TypeScale.mentionBadge.font)
+            .foregroundStyle(Color(nsColor: Palette.mentionBadgeText))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
             .frame(width: Self.width(count), height: 16)
@@ -25,6 +26,18 @@ struct MentionBadge: View {
 
     static func text(_ count: UInt32) -> String {
         count < 1000 ? "\(count)" : "\(min(count / 1000, 9))k+"
+    }
+
+    /// What VoiceOver reads after a row's or an icon's name.
+    static func accessibilityValue(_ badge: Badge) -> String {
+        let mentions: String? =
+            switch badge.mentions {
+            case 0: nil
+            case 1: "1 mention"
+            default: "\(badge.mentions) mentions"
+            }
+        return [badge.unread ? "unread" : nil, mentions].compactMap { $0 }
+            .joined(separator: ", ")
     }
 }
 
