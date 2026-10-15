@@ -70,6 +70,8 @@ Observed in the official desktop client on 2026-10-14:
   leaves the row as it was, with no bright name and no pill. The gray count the support
   article describes isn't what the client shows. **Unverified:** what a mention there shows.
 - **A forum or media channel** looks unread when a new post appears, without a count.
+- **Threads the user joined** are listed under their parent channel, each with its own unread
+  state and count (observed 2026-10-15).
 - **Threads the user hasn't joined** aren't listed. Starting one posts a "started a thread"
   message in its parent, which makes the parent unread like any message; messages inside the
   thread leave the parent alone.
@@ -104,6 +106,8 @@ rows the same, without the pill.*
 - "Hide muted channels" (a server setting) leaves channels muted by their own settings out of
   the list, except the open one. **Unverified:** what the official client does with a muted
   category there; Akari keeps categories.
+- **Known gap: threads aren't listed.** A ping in a thread the user joined raises the server's
+  badge but shows on no row, and a thread's messages can't be opened yet.
 
 ## Home
 
