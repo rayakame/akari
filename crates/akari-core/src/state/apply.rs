@@ -453,7 +453,14 @@ impl State {
             E::NotificationSettingsUpdate(settings) => {
                 self.entities.settings.notification_flags = settings.flags;
             }
-            E::Resumed | E::PassiveUpdateV2(_) | E::Other(_) => {}
+            E::Resumed
+            | E::MessageAck(_)
+            | E::ChannelUnreadUpdate(_)
+            | E::PassiveUpdateV2(_)
+            | E::RelationshipAdd(_)
+            | E::RelationshipUpdate(_)
+            | E::RelationshipRemove(_)
+            | E::Other(_) => {}
         }
     }
 

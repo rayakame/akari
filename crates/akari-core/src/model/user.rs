@@ -61,6 +61,18 @@ pub struct PrimaryGuild {
 }
 
 int_enum! {
+    /// How the current user relates to another user.
+    pub enum RelationshipType {
+        Friend = 1,
+        Blocked = 2,
+        IncomingRequest = 3,
+        OutgoingRequest = 4,
+        /// Someone the user interacts with, such as in a shared voice channel.
+        Implicit = 5,
+    }
+}
+
+int_enum! {
     /// The user's Nitro subscription.
     #[derive(Default)]
     pub enum PremiumType {

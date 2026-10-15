@@ -9,8 +9,9 @@ use super::dispatch::{
 use super::guild::GatewayGuild;
 use super::hello::Hello;
 use super::partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
-use super::read_state::PassiveUpdateV2;
+use super::read_state::{ChannelUnreadUpdate, MessageAck, PassiveUpdateV2};
 use super::ready::Ready;
+use super::relationship::{Relationship, RelationshipRemove, RelationshipUpdate};
 use super::settings::{NotificationSettings, SettingsProtoUpdate, UserGuildSettings};
 use crate::JsonError;
 use crate::model::{Channel, GenericMarker, Message, Snowflake};
@@ -64,8 +65,14 @@ pub enum DispatchEvent {
     UserGuildSettingsUpdate(Box<UserGuildSettings>),
     UserSettingsProtoUpdate(Box<SettingsProtoUpdate>),
     NotificationSettingsUpdate(NotificationSettings),
+    /// The user read a channel, here or elsewhere.
+    MessageAck(MessageAck),
+    ChannelUnreadUpdate(ChannelUnreadUpdate),
     /// Sent instead of CHANNEL_UNREAD_UPDATE for guilds without a subscription.
     PassiveUpdateV2(PassiveUpdateV2),
+    RelationshipAdd(Relationship),
+    RelationshipUpdate(RelationshipUpdate),
+    RelationshipRemove(RelationshipRemove),
     /// An event Akari doesn't parse yet, by name.
     Other(String),
 }
@@ -97,7 +104,12 @@ impl DispatchEvent {
             Self::UserGuildSettingsUpdate(_) => "USER_GUILD_SETTINGS_UPDATE",
             Self::UserSettingsProtoUpdate(_) => "USER_SETTINGS_PROTO_UPDATE",
             Self::NotificationSettingsUpdate(_) => "NOTIFICATION_SETTINGS_UPDATE",
+            Self::MessageAck(_) => "MESSAGE_ACK",
+            Self::ChannelUnreadUpdate(_) => "CHANNEL_UNREAD_UPDATE",
             Self::PassiveUpdateV2(_) => "PASSIVE_UPDATE_V2",
+            Self::RelationshipAdd(_) => "RELATIONSHIP_ADD",
+            Self::RelationshipUpdate(_) => "RELATIONSHIP_UPDATE",
+            Self::RelationshipRemove(_) => "RELATIONSHIP_REMOVE",
             Self::Other(_) => "other",
         }
     }
@@ -214,7 +226,12 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
             parse(json).map(|update| E::UserSettingsProtoUpdate(Box::new(update)))
         }
         "NOTIFICATION_SETTINGS_UPDATE" => parse(json).map(E::NotificationSettingsUpdate),
+        "MESSAGE_ACK" => parse(json).map(E::MessageAck),
+        "CHANNEL_UNREAD_UPDATE" => parse(json).map(E::ChannelUnreadUpdate),
         "PASSIVE_UPDATE_V2" => parse(json).map(E::PassiveUpdateV2),
+        "RELATIONSHIP_ADD" => parse(json).map(E::RelationshipAdd),
+        "RELATIONSHIP_UPDATE" => parse(json).map(E::RelationshipUpdate),
+        "RELATIONSHIP_REMOVE" => parse(json).map(E::RelationshipRemove),
         _ => return Ok(E::Other(name)),
     };
     event.map_err(|source| DecodeError::Dispatch {

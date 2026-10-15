@@ -24,7 +24,9 @@ pub use snowflake::{
     RoleMarker, SkuMarker, Snowflake, StickerMarker, UserMarker, WebhookMarker,
 };
 pub use timestamp::Timestamp;
-pub use user::{AvatarDecorationData, CurrentUser, PremiumType, PrimaryGuild, User};
+pub use user::{
+    AvatarDecorationData, CurrentUser, PremiumType, PrimaryGuild, RelationshipType, User,
+};
 
 pub type AttachmentId = Snowflake<AttachmentMarker>;
 pub type ChannelId = Snowflake<ChannelMarker>;

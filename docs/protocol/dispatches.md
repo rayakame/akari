@@ -73,7 +73,10 @@ Two details:
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
 | NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; no event |
+| MESSAGE_ACK | `MessageAck` | Not applied yet |
+| CHANNEL_UNREAD_UPDATE | `ChannelUnreadUpdate` | Not applied yet ([Large guilds](#large-guilds)) |
 | PASSIVE_UPDATE_V2 | `PassiveUpdateV2` | Not applied yet ([Large guilds](#large-guilds)) |
+| RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Not applied yet. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
 `debug` level with its IDs.

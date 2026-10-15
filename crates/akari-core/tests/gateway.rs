@@ -1,12 +1,13 @@
 use akari_core::gateway::{
-    ChannelDelete, ChannelUnread, DecodeError, DispatchEvent, GatewayEvent, GatewayGuild,
-    GuildDelete, GuildRoleDelete, Hello, MessageDelete, MessageDeleteBulk, MuteConfig,
-    NotificationSettings, PassiveUpdateV2, Ready, SettingsProto, SettingsProtoUpdate,
+    ChannelDelete, ChannelUnread, ChannelUnreadUpdate, DecodeError, DispatchEvent, GatewayEvent,
+    GatewayGuild, GuildDelete, GuildRoleDelete, Hello, MessageAck, MessageDelete,
+    MessageDeleteBulk, MuteConfig, NotificationSettings, PassiveUpdateV2, ReadStateEntry, Ready,
+    Relationship, RelationshipRemove, RelationshipUpdate, SettingsProto, SettingsProtoUpdate,
     UnavailableGuild, Versioned, decode,
 };
 use akari_core::model::{
     ChannelType, MessageNotificationLevel, NsfwLevel, Permissions, PremiumTier, PremiumType,
-    Snowflake, Timestamp,
+    RelationshipType, Snowflake, Timestamp,
 };
 use serde_json::Value;
 
@@ -505,6 +506,132 @@ fn missing_or_null_settings_parts_are_defaults() {
 }
 
 #[test]
+fn ready_reads_the_read_states() {
+    let (_, ready) = ready_from(include_str!("fixtures/ready.json"));
+
+    let read_states = &ready.read_state;
+    assert!(!read_states.partial);
+    assert_eq!(read_states.version, 4321);
+    assert_eq!(
+        read_states.entries,
+        [
+            ReadStateEntry {
+                id: Snowflake::new(300_000_000_000_000_002),
+                read_state_type: 0,
+                last_message_id: Some(Snowflake::new(400_000_000_000_000_002)),
+                mention_count: 2,
+                flags: 1,
+            },
+            ReadStateEntry {
+                id: Snowflake::new(300_000_000_000_000_020),
+                read_state_type: 0,
+                last_message_id: Some(Snowflake::new(400_000_000_000_000_030)),
+                mention_count: 0,
+                flags: 3,
+            },
+            ReadStateEntry {
+                id: Snowflake::new(300_000_000_000_000_010),
+                read_state_type: 0,
+                last_message_id: Some(Snowflake::new(400_000_000_000_000_020)),
+                mention_count: 0,
+                flags: 0,
+            },
+            ReadStateEntry {
+                id: Snowflake::new(200_000_000_000_000_001),
+                read_state_type: 1,
+                last_message_id: None,
+                mention_count: 0,
+                flags: 0,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_broken_read_state_entry_is_skipped() {
+    let ready = ready_with(|payload| {
+        payload["d"]["read_state"]["entries"][0]["mention_count"] = "two".into();
+    });
+
+    let ids: Vec<u64> = ready
+        .read_state
+        .entries
+        .iter()
+        .map(|entry| entry.id.get())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            300_000_000_000_000_020,
+            300_000_000_000_000_010,
+            200_000_000_000_000_001
+        ]
+    );
+    assert_eq!(ready.read_state.version, 4321);
+}
+
+#[test]
+fn broken_read_states_leave_ready_intact() {
+    let ready = ready_with(|payload| payload["d"]["read_state"] = "nope".into());
+
+    assert_eq!(ready.read_state, Versioned::default());
+    assert_eq!(ready.relationships.len(), 2);
+}
+
+#[test]
+fn ready_reads_the_relationships() {
+    let (_, ready) = ready_from(include_str!("fixtures/ready.json"));
+
+    assert_eq!(
+        ready.relationships,
+        [
+            Relationship {
+                id: Snowflake::new(100_000_000_000_000_003),
+                kind: RelationshipType::Friend,
+                user_ignored: true,
+            },
+            Relationship {
+                id: Snowflake::new(100_000_000_000_000_004),
+                kind: RelationshipType::Blocked,
+                user_ignored: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_broken_relationship_is_skipped() {
+    let ready = ready_with(|payload| {
+        payload["d"]["relationships"][0]["type"] = "friend".into();
+    });
+
+    let ids: Vec<u64> = ready
+        .relationships
+        .iter()
+        .map(|relationship| relationship.id.get())
+        .collect();
+    assert_eq!(ids, [100_000_000_000_000_004]);
+}
+
+#[test]
+fn missing_or_null_read_states_and_relationships_are_empty() {
+    let missing = ready_with(|payload| {
+        let data = payload["d"].as_object_mut().unwrap();
+        data.remove("read_state");
+        data.remove("relationships");
+    });
+    let null = ready_with(|payload| {
+        payload["d"]["read_state"] = Value::Null;
+        payload["d"]["relationships"] = Value::Null;
+    });
+
+    for ready in [missing, null] {
+        assert_eq!(ready.read_state, Versioned::default());
+        assert!(ready.relationships.is_empty());
+    }
+}
+
+#[test]
 fn null_lists_in_guild_settings_count_as_empty() {
     let ready = ready_with(|payload| {
         payload["d"]["user_guild_settings"]["entries"][0]["channel_overrides"] = Value::Null;
@@ -654,6 +781,16 @@ fn captured_ready_decodes_completely() {
             "channel overrides were skipped"
         );
     }
+    assert_eq!(
+        ready.read_state.entries.len(),
+        list(&data["read_state"]["entries"]),
+        "read states were skipped"
+    );
+    assert_eq!(
+        ready.relationships.len(),
+        list(&data["relationships"]),
+        "relationships were skipped"
+    );
     assert_eq!(
         ready.notification_settings.is_some(),
         data["notification_settings"].is_object(),
@@ -1325,6 +1462,181 @@ fn a_passive_update_with_only_voice_changes_decodes() {
 
         assert!(update.updated_channels.is_empty(), "{channels}");
     }
+}
+
+#[test]
+fn message_ack_decodes() {
+    let DispatchEvent::MessageAck(ack) = dispatch(
+        "MESSAGE_ACK",
+        r#"{
+            "channel_id": "300000000000000002",
+            "message_id": "400000000000000004",
+            "mention_count": 1,
+            "flags": 1,
+            "last_viewed": 4302,
+            "version": 4322
+        }"#,
+    ) else {
+        panic!("expected MESSAGE_ACK");
+    };
+
+    assert_eq!(
+        ack,
+        MessageAck {
+            ack_type: 0,
+            channel_id: Snowflake::new(300_000_000_000_000_002),
+            message_id: Snowflake::new(400_000_000_000_000_004),
+            manual: false,
+            mention_count: Some(1),
+            version: 4322,
+        }
+    );
+}
+
+#[test]
+fn a_manual_ack_without_a_count_keeps_the_count() {
+    for count in [r#""mention_count": null,"#, ""] {
+        let DispatchEvent::MessageAck(ack) = dispatch(
+            "MESSAGE_ACK",
+            &format!(
+                r#"{{{count} "ack_type": 0, "channel_id": "300000000000000002",
+                    "message_id": "400000000000000001", "manual": true, "version": 4323}}"#
+            ),
+        ) else {
+            panic!("expected MESSAGE_ACK");
+        };
+
+        assert!(ack.manual, "{count}");
+        assert_eq!(ack.mention_count, None, "{count}");
+    }
+}
+
+#[test]
+fn an_ack_of_another_read_state_type_keeps_its_type() {
+    let DispatchEvent::MessageAck(ack) = dispatch(
+        "MESSAGE_ACK",
+        r#"{"ack_type": 1, "channel_id": "200000000000000001",
+            "message_id": "500000000000000002", "version": 4324}"#,
+    ) else {
+        panic!("expected MESSAGE_ACK");
+    };
+
+    assert_eq!(ack.ack_type, 1);
+}
+
+#[test]
+fn an_ack_of_a_thread_id_in_a_forum_decodes() {
+    let DispatchEvent::MessageAck(ack) = dispatch(
+        "MESSAGE_ACK",
+        r#"{"channel_id": "300000000000000003", "message_id": "300000000000000021",
+            "version": 4325}"#,
+    ) else {
+        panic!("expected MESSAGE_ACK");
+    };
+
+    assert_eq!(ack.message_id.get(), 300_000_000_000_000_021);
+}
+
+#[test]
+fn channel_unread_update_decodes() {
+    let DispatchEvent::ChannelUnreadUpdate(update) = dispatch(
+        "CHANNEL_UNREAD_UPDATE",
+        r#"{
+            "guild_id": "200000000000000001",
+            "channel_unread_updates": [
+                {
+                    "id": "300000000000000002",
+                    "last_message_id": "400000000000000005",
+                    "last_pin_timestamp": null
+                },
+                {"id": "not a snowflake", "last_message_id": "400000000000000006"},
+                {"id": "300000000000000003", "last_message_id": null}
+            ]
+        }"#,
+    ) else {
+        panic!("expected CHANNEL_UNREAD_UPDATE");
+    };
+
+    assert_eq!(
+        update,
+        ChannelUnreadUpdate {
+            guild_id: Snowflake::new(200_000_000_000_000_001),
+            channel_unread_updates: vec![
+                ChannelUnread {
+                    id: Snowflake::new(300_000_000_000_000_002),
+                    last_message_id: Some(Snowflake::new(400_000_000_000_000_005)),
+                },
+                ChannelUnread {
+                    id: Snowflake::new(300_000_000_000_000_003),
+                    last_message_id: None,
+                },
+            ],
+        }
+    );
+}
+
+#[test]
+fn relationship_events_decode() {
+    let DispatchEvent::RelationshipAdd(added) = dispatch(
+        "RELATIONSHIP_ADD",
+        r#"{
+            "id": "100000000000000005",
+            "type": 2,
+            "user": {"id": "100000000000000005", "username": "kai", "discriminator": "0", "avatar": null},
+            "nickname": null,
+            "user_ignored": false,
+            "should_notify": false
+        }"#,
+    ) else {
+        panic!("expected RELATIONSHIP_ADD");
+    };
+    assert_eq!(
+        added,
+        Relationship {
+            id: Snowflake::new(100_000_000_000_000_005),
+            kind: RelationshipType::Blocked,
+            user_ignored: false,
+        }
+    );
+
+    let DispatchEvent::RelationshipUpdate(updated) = dispatch(
+        "RELATIONSHIP_UPDATE",
+        r#"{"id": "100000000000000003", "type": 1, "nickname": "pal", "user_ignored": false}"#,
+    ) else {
+        panic!("expected RELATIONSHIP_UPDATE");
+    };
+    assert_eq!(
+        updated,
+        RelationshipUpdate {
+            id: Snowflake::new(100_000_000_000_000_003),
+            user_ignored: Some(false),
+        }
+    );
+
+    let DispatchEvent::RelationshipRemove(removed) = dispatch(
+        "RELATIONSHIP_REMOVE",
+        r#"{"id": "100000000000000004", "type": 2, "nickname": null}"#,
+    ) else {
+        panic!("expected RELATIONSHIP_REMOVE");
+    };
+    assert_eq!(
+        removed,
+        RelationshipRemove {
+            id: Snowflake::new(100_000_000_000_000_004),
+        }
+    );
+}
+
+#[test]
+fn a_relationship_update_without_the_ignored_flag_leaves_it_unknown() {
+    let DispatchEvent::RelationshipUpdate(updated) = dispatch(
+        "RELATIONSHIP_UPDATE",
+        r#"{"id": "100000000000000003", "type": 1, "nickname": "pal"}"#,
+    ) else {
+        panic!("expected RELATIONSHIP_UPDATE");
+    };
+
+    assert_eq!(updated.user_ignored, None);
 }
 
 #[test]
