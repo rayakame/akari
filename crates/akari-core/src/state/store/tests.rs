@@ -1360,3 +1360,20 @@ fn badge_batches_read_in_the_order_given() {
     assert_eq!(channels, [Badge::default(), unread, Badge::default()]);
     assert_eq!(guilds, [unread, Badge::default()]);
 }
+
+#[test]
+fn message_requests_and_spam_stay_out_of_the_dm_list() {
+    let mut ready = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    ready["private_channels"][0]["is_spam"] = true.into();
+    ready["private_channels"][1]["is_message_request"] = true.into();
+    let store = Store::new(DEFAULT_LIMITS);
+
+    store.apply(dispatch("READY", &ready));
+
+    assert!(store.private_channel_list().is_empty());
+    assert_eq!(
+        store.private_channels().len(),
+        2,
+        "the store still has them"
+    );
+}

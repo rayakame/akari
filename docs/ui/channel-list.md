@@ -125,8 +125,7 @@ At home the column holds the DM list instead of a server's channels.
 2. The rest, the most recent first: by the newest message, or for a conversation without
    messages by when it was created. Ties go by channel ID, newest first.
 
-Discord leaves message requests and conversations marked as spam out of this list. *Akari
-keeps them in the list for now*, because the store doesn't keep those two flags yet
-([dispatches.md](../protocol/dispatches.md#open-points)).
+Discord leaves message requests and conversations marked as spam out of this list, and so does
+Akari.
 
 A new message moves its conversation to the top at once.

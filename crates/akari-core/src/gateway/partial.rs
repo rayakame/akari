@@ -88,6 +88,8 @@ pub struct ChannelUpdate {
     pub message_count: Option<u32>,
     pub member_count: Option<u32>,
     pub flags: Option<u64>,
+    pub is_message_request: Option<bool>,
+    pub is_spam: Option<bool>,
 }
 
 /// MESSAGE_UPDATE. A missing field is unchanged, `Some(None)` is `null`. `tts` isn't

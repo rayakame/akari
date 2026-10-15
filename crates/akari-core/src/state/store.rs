@@ -706,7 +706,12 @@ impl Store {
     /// DMs and group DMs as the DM list shows them: the latest conversation first. One
     /// without messages counts from when it was created.
     pub fn private_channel_list(&self) -> Vec<Arc<Channel>> {
-        order::private_channel_order(self.read(|inner| inner.state.private_channels()))
+        let listed = self
+            .read(|inner| inner.state.private_channels())
+            .into_iter()
+            .filter(|channel| !channel.message_request && !channel.spam)
+            .collect();
+        order::private_channel_order(listed)
     }
 
     /// The current user's permissions in a guild channel or thread; in a thread,

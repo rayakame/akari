@@ -255,8 +255,9 @@ so they live in the core.
 - **`Store::private_channel_list`**: the DM list. The latest conversation comes first, by
   `last_message_id`, or by the channel's own ID (its creation time) when it has none; ties
   by channel ID, newest first. The official client sorts the same way after the user's
-  favorites, which are in the settings proto. It also leaves out message requests and
-  conversations marked as spam; Akari lists them for now (see the open points).
+  favorites, which are in the settings proto. Like it, Akari leaves out message requests
+  and conversations marked as spam (`is_message_request`, `is_spam` from READY,
+  CHANNEL_CREATE and CHANNEL_UPDATE; accepting a request brings the DM back).
 
 Every channel keeps `last_message_id` from READY, CHANNEL_CREATE, CHANNEL_UPDATE and
 MESSAGE_CREATE. In forum and media channels it holds the newest post's thread ID, so its
@@ -278,7 +279,4 @@ doesn't bring an event for every active channel.
   without a window: the channel, the message ID, and whether it mentions the current user
   (directly, through a role, or `@everyone`). Each channel's `last_message_id` is already
   tracked; only that event is missing.
-- **Message requests and spam DMs.** READY marks them with `is_message_request` and
-  `is_spam`, and the official client keeps them out of the DM list. The store doesn't keep
-  those flags yet, so `private_channel_list` includes them.
 - **THREAD_LIST_SYNC**, which guild subscriptions bring, for the full thread list.

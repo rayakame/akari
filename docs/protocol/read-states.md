@@ -108,7 +108,8 @@ over the DMs; none computes permissions.
   up all their mentions, muted or not. With "hide muted channels", muted channels don't count
   at all. A folder's badge is its guilds' sum, added up by the host.
 - **DMs and group DMs** show unread unless muted; every message in an unmuted one counts as a
-  mention, and `unread_private_channels` lists those with mentions, newest message first.
+  mention, and `unread_private_channels` lists those with mentions, newest message first,
+  leaving out message requests and spam as the official client does.
 
 `BadgeChanged { channel_id, guild_id }` comes when a channel's badge or read state changes,
 `GuildBadgeChanged` when a guild's badge does; a message in a channel that is already unread

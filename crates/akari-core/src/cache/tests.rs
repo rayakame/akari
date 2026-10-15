@@ -156,6 +156,8 @@ pub(crate) fn channel(id: u64, guild: Option<u64>, name: &str) -> Channel {
         owner_id: None,
         thread: None,
         flags: 0,
+        message_request: guild.is_none(),
+        spam: false,
     }
 }
 

@@ -117,6 +117,10 @@ pub struct Channel {
     /// Set for threads.
     pub thread: Option<Box<ThreadInfo>>,
     pub flags: u64,
+    /// A DM from someone the user hasn't accepted yet. The official client lists neither
+    /// these nor `spam` DMs.
+    pub message_request: bool,
+    pub spam: bool,
 }
 
 impl Channel {

@@ -328,6 +328,10 @@ pub(super) struct ChannelRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     thread: Option<ThreadRow>,
     flags: u64,
+    #[serde(skip_serializing_if = "is_false")]
+    message_request: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    spam: bool,
 }
 
 impl From<&Channel> for ChannelRow {
@@ -366,6 +370,8 @@ impl From<&Channel> for ChannelRow {
                 member_count: thread.member_count,
             }),
             flags: channel.flags,
+            message_request: channel.message_request,
+            spam: channel.spam,
         }
     }
 }
@@ -409,6 +415,8 @@ impl ChannelRow {
                 })
             }),
             flags: self.flags,
+            message_request: self.message_request,
+            spam: self.spam,
         }
     }
 }

@@ -141,6 +141,8 @@ mod tests {
             thread: None,
             flags: 0,
             last_message_id: None,
+            message_request: false,
+            spam: false,
         })
     }
 

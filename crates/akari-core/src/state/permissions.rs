@@ -188,6 +188,8 @@ mod tests {
             owner_id: None,
             thread: None,
             flags: 0,
+            message_request: false,
+            spam: false,
         }
     }
 

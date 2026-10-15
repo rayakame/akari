@@ -1159,7 +1159,10 @@ impl State {
 
     pub(crate) fn unread_private_channels(&self) -> Vec<Arc<Channel>> {
         order::private_channel_order(self.channels_where(|channel| {
-            channel.guild_id.is_none() && self.badges.channel(channel.id).mentions > 0
+            channel.guild_id.is_none()
+                && !channel.message_request
+                && !channel.spam
+                && self.badges.channel(channel.id).mentions > 0
         }))
     }
 

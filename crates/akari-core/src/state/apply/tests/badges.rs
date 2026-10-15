@@ -535,3 +535,63 @@ fn categories_have_no_badge() {
 
     assert_eq!(channel_badge(&state, CATEGORY), Badge::default());
 }
+
+fn requests_and_spam(ready: &mut Value) {
+    let (group, dm) = (GROUP.to_string(), DM.to_string());
+    for channel in ready["private_channels"].as_array_mut().unwrap() {
+        let id = channel["id"].as_str().map(str::to_owned);
+        if id.as_deref() == Some(group.as_str()) {
+            channel["is_message_request"] = true.into();
+        } else if id.as_deref() == Some(dm.as_str()) {
+            channel["is_spam"] = true.into();
+        }
+    }
+}
+
+#[test]
+fn message_requests_and_spam_stay_off_the_rail() {
+    let mut state = ready_where(requests_and_spam);
+
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_message(400_000_000_000_000_022, GROUP),
+    );
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_message(400_000_000_000_000_023, DM),
+    );
+
+    assert!(state.unread_private_channels().is_empty());
+    assert_eq!(
+        channel_badge(&state, GROUP).mentions,
+        1,
+        "the row's own badge stays"
+    );
+}
+
+#[test]
+fn an_accepted_message_request_comes_back() {
+    let mut state = ready_where(requests_and_spam);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_message(400_000_000_000_000_022, GROUP),
+    );
+
+    let events = apply(
+        &mut state,
+        "CHANNEL_UPDATE",
+        json!({"id": GROUP.to_string(), "is_message_request": false}),
+    );
+
+    assert!(
+        events.contains(&format!("ChannelUpdated({GROUP})")),
+        "{events:?}"
+    );
+    assert_eq!(
+        channel_ids_in_order(state.unread_private_channels()),
+        [GROUP]
+    );
+}
