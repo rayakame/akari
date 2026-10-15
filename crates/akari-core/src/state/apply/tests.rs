@@ -882,6 +882,26 @@ fn last_message(state: &State, channel: u64) -> Option<u64> {
         .map(|id| id.get())
 }
 
+// A history page of the fixture's message, oldest first, as a load of `kind` brings it.
+fn load_page(
+    state: &mut State,
+    channel: u64,
+    kind: LoadKind,
+    ids: &[u64],
+    reached_end: bool,
+) -> Vec<String> {
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(channel), kind, &mut events)
+        .unwrap();
+    let page = ids
+        .iter()
+        .map(|id| serde_json::from_str(&message(*id, channel).to_string()).unwrap())
+        .collect();
+    state.finish_load(ticket, page, reached_end, &mut events);
+    events.iter().map(describe).collect()
+}
+
 fn dm_message(id: u64, channel: u64) -> Value {
     let mut message = message(id, channel);
     let fields = message.as_object_mut().unwrap();

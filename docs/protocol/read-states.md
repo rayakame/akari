@@ -44,8 +44,9 @@ mention) is marked `estimated`: its `acked` is the join or the message before, n
 the user read. An ack or the user's own message replaces it with a real one.
 
 The newest message only moves forward: from MESSAGE_CREATE, CHANNEL_CREATE, CHANNEL_UPDATE
-and GUILD_CREATE (an older or missing `last_message_id` changes nothing), and from the unread
-updates of guilds without a subscription. Only READY replaces it. A new thread in a forum or
+and GUILD_CREATE (an older or missing `last_message_id` changes nothing), from the unread
+updates of guilds without a subscription, and from a history page that reaches the present
+(the newest messages, or a newer page that hit the end). Only READY replaces it. A new thread in a forum or
 media channel is the forum's newest "message": THREAD_CREATE raises the parent's
 `last_message_id` to the thread's ID. A thread's own messages move only the thread, so an
 unjoined thread leaves its parent read; the "started a thread" message in the parent is an

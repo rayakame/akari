@@ -14,7 +14,9 @@ use super::settings::{
 };
 use super::threads::ThreadIndex;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
-use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
+use super::windows::{
+    CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows,
+};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
@@ -670,13 +672,20 @@ impl State {
 
     // DM lists sort by the newest message; guild channels change silently, or every message
     // in a busy server would be an event.
-    fn note_message(&mut self, channel: ChannelId, id: MessageId, events: &mut Vec<StoreEvent>) {
+    fn note_message(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) -> bool {
         let Some(stored) = self.entities.channels.get_mut(&channel) else {
-            return;
+            return false;
         };
-        if Arc::make_mut(stored).note_message(id.cast()) && stored.guild_id.is_none() {
+        let moved = Arc::make_mut(stored).note_message(id.cast());
+        if moved && stored.guild_id.is_none() {
             events.push(StoreEvent::ChannelUpdated(stored.clone()));
         }
+        moved
     }
 
     // Discord enforces slowmode per user, so a message from another device starts it too.
@@ -996,8 +1005,21 @@ impl State {
         reached_end: bool,
         events: &mut Vec<StoreEvent>,
     ) {
+        let present =
+            ticket.cursor == Cursor::Latest || (ticket.kind == LoadKind::Newer && reached_end);
+        let newest = page
+            .iter()
+            .map(|message| message.id)
+            .max()
+            .filter(|_| present);
         self.windows
             .finish_load(ticket, page, &self.entities.users, reached_end, events);
+        if let Some(newest) = newest
+            && self.note_message(ticket.channel, newest, events)
+        {
+            self.dirty.channel(ticket.channel);
+        }
+        self.refresh_badges(wall_millis(), events);
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {
