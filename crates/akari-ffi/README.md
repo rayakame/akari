@@ -48,6 +48,12 @@ sent none is `estimated`, and its `acked` isn't a message the user read.
 for the rail. `BadgeChanged { channel_id, guild_id }` says to reread that channel's badge or
 read state, and `GuildBadgeChanged { guild_id }` that guild's badge and its folder's.
 
+Acks: `set_reading(channel_id)` names the channel the user is reading at its newest messages
+(or `None`), `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request
+(Escape, context menus). All three return at once: the badges clear and the events fire
+before Discord answers, and the core sends the acks in the background. The host decides when
+the user is reading; the core never infers it.
+
 ## Formatted messages
 
 `Message.formatted` is the content as Discord formats it (`FormattedText`), flat so it maps
@@ -101,7 +107,7 @@ read.
   `StoreSubscription.next`) are polled directly.
 - Sync methods are cheap. A store read takes one read lock, and akari-core warns when a
   write holds the lock for more than 4 ms. `connect`, `disconnect`, `close` and
-  `view_channel` only signal.
+  `view_channel`, `set_reading`, `mark_read` and `mark_guilds_read` only signal.
 - The host's `TokenStore` runs on a blocking thread, never on the main thread or a runtime
   worker, so it may block or show a dialog.
 - Markdown is parsed on the runtime where it can be: each account registers its documents as

@@ -32,6 +32,9 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     { nil }
 
     override func viewChannel(channelId: ChannelId) {}
+    override func setReading(channelId: ChannelId?) {}
+    override func markRead(channelId: ChannelId) {}
+    override func markGuildsRead(guildIds: [GuildId]) {}
 }
 
 nonisolated final class FormattedStore: Store, @unchecked Sendable {

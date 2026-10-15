@@ -32,6 +32,9 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
     }
 
     override func viewChannel(channelId: ChannelId) {}
+    override func setReading(channelId: ChannelId?) {}
+    override func markRead(channelId: ChannelId) {}
+    override func markGuildsRead(guildIds: [GuildId]) {}
 }
 
 // One server with one text channel, and no messages.

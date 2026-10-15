@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use akari_core::model::{ChannelId, MessageId};
+use akari_core::model::{ChannelId, GuildId, MessageId};
 use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
@@ -67,6 +67,24 @@ impl Account {
     /// Keeps the channel's messages and adds new ones from the gateway.
     pub fn view_channel(&self, channel_id: ChannelId) {
         self.core.view_channel(channel_id);
+    }
+
+    /// The channel the user is reading at its newest messages, or `None`. While set, the
+    /// channel is acked when it's unread, and again when messages arrive, paced. Hosts set it
+    /// only while the user is engaged with the channel at the bottom of its list.
+    pub fn set_reading(&self, channel_id: Option<ChannelId>) {
+        self.core.set_reading(channel_id);
+    }
+
+    /// Marks the channel read now (Escape, the context menu).
+    pub fn mark_read(&self, channel_id: ChannelId) {
+        self.core.mark_read(channel_id);
+    }
+
+    /// Marks these guilds read now with one bulk ack (Shift+Escape, a server's or a folder's
+    /// context menu).
+    pub fn mark_guilds_read(&self, guild_ids: Vec<GuildId>) {
+        self.core.mark_guilds_read(&guild_ids);
     }
 
     /// Loads messages into the channel's window within Discord's rate limits. `Latest` and

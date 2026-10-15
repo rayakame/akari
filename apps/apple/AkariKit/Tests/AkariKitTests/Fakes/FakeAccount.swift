@@ -17,6 +17,9 @@ final class FakeAccount: Account, @unchecked Sendable {
     // While set, each send waits for a reply: `nil` succeeds, an error fails it.
     let holdSends = Locked(false)
     let sendReplies = AsyncQueue<RequestError?>()
+    let readingCalls = Locked<[ChannelId?]>([])
+    let markedRead = Locked<[ChannelId]>([])
+    let markedGuildsRead = Locked<[[GuildId]]>([])
 
     init(store: FakeStore = FakeStore()) {
         fakeStore = store
@@ -53,6 +56,18 @@ final class FakeAccount: Account, @unchecked Sendable {
 
     override func viewChannel(channelId: ChannelId) {
         log.append(.view(channelId))
+    }
+
+    override func setReading(channelId: ChannelId?) {
+        readingCalls.withLock { $0.append(channelId) }
+    }
+
+    override func markRead(channelId: ChannelId) {
+        markedRead.withLock { $0.append(channelId) }
+    }
+
+    override func markGuildsRead(guildIds: [GuildId]) {
+        markedGuildsRead.withLock { $0.append(guildIds) }
     }
 
     override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
