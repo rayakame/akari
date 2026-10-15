@@ -71,6 +71,11 @@ impl ReadStates {
         true
     }
 
+    pub(crate) fn forget(&mut self, channel: ChannelId) {
+        self.channels.remove(&channel);
+        self.counted.remove(&channel);
+    }
+
     pub(crate) fn get(&self, channel: ChannelId) -> Option<ReadState> {
         self.channels.get(&channel).copied()
     }

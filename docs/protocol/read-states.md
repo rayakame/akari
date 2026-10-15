@@ -119,6 +119,10 @@ settings; everything for the account's notification flags), and the index update
 the end of the write. READY's index is built before the write lock with the rest of the new
 state, and a later READY reports only the badges that changed.
 
+A deleted channel or thread, a channel a repeated GUILD_CREATE no longer lists, and every
+channel of a guild the user leaves lose their read state, in memory and, with the next flush,
+in the cache. An outage keeps them: the guild's GUILD_CREATE brings no read states back.
+
 ## The disk cache
 
 The read states are cached per channel ([cache.md](cache.md)), so a cold start shows the

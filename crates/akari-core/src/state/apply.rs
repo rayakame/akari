@@ -737,6 +737,7 @@ impl State {
             return;
         };
         self.windows.drop_channel(removed.id);
+        self.entities.read_states.forget(removed.id);
         self.dirty.channel(removed.id);
         events.push(StoreEvent::ChannelRemoved {
             channel_id: removed.id,
@@ -752,6 +753,7 @@ impl State {
         for thread in threads {
             self.entities.channels.remove(&thread);
             self.windows.drop_channel(thread);
+            self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {
                 channel_id: thread,
@@ -800,6 +802,7 @@ impl State {
                 push_channel_changes(&old, &next.channels, |_| false, events);
                 for channel in old.keys().filter(|id| !next.channels.contains_key(id)) {
                     self.entities.channels.remove(channel);
+                    self.entities.read_states.forget(*channel);
                     self.windows.drop_channel(*channel);
                 }
             }
@@ -837,6 +840,16 @@ impl State {
         } else if self.entities.guilds.contains_key(&delete.id)
             || self.entities.unavailable.contains(&delete.id)
         {
+            let channels: Vec<ChannelId> = self
+                .entities
+                .channels
+                .values()
+                .filter(|channel| channel.guild_id == Some(delete.id))
+                .map(|channel| channel.id)
+                .collect();
+            for channel in channels {
+                self.entities.read_states.forget(channel);
+            }
             self.remove_guild_data(delete.id);
             self.entities.unavailable.remove(&delete.id);
             events.push(StoreEvent::GuildRemoved {

@@ -985,3 +985,67 @@ fn a_repeated_message_counts_once() {
     assert_eq!(mentions(&state, GENERAL), 3);
     assert_eq!(mentions(&state, GROUP), 1);
 }
+
+#[test]
+fn deleting_a_channel_forgets_its_read_state_and_its_threads() {
+    let mut state = ready_state();
+
+    apply(
+        &mut state,
+        "CHANNEL_DELETE",
+        json!({"id": GENERAL.to_string(), "guild_id": G1.to_string(), "type": 0}),
+    );
+
+    assert_eq!(read_state(&state, GENERAL), None);
+    assert_eq!(read_state(&state, THREAD), None);
+    assert!(read_state(&state, DM).is_some());
+}
+
+#[test]
+fn deleting_a_thread_forgets_its_read_state() {
+    let mut state = ready_state();
+
+    apply(
+        &mut state,
+        "THREAD_DELETE",
+        json!({"id": THREAD.to_string(), "guild_id": G1.to_string(),
+               "parent_id": GENERAL.to_string(), "type": 11}),
+    );
+
+    assert_eq!(read_state(&state, THREAD), None);
+    assert!(read_state(&state, GENERAL).is_some());
+}
+
+#[test]
+fn leaving_a_guild_forgets_its_read_states_but_an_outage_keeps_them() {
+    let mut left = ready_state();
+    let mut down = ready_state();
+
+    apply(&mut left, "GUILD_DELETE", json!({"id": G1.to_string()}));
+    apply(
+        &mut down,
+        "GUILD_DELETE",
+        json!({"id": G1.to_string(), "unavailable": true}),
+    );
+
+    assert_eq!(read_state(&left, GENERAL), None);
+    assert_eq!(read_state(&left, THREAD), None);
+    assert!(read_state(&left, DM).is_some());
+    assert!(
+        read_state(&down, GENERAL).is_some(),
+        "it comes back with GUILD_CREATE"
+    );
+}
+
+#[test]
+fn a_channel_gone_from_a_repeated_guild_create_forgets_its_read_state() {
+    let mut state = ready_state();
+    let mut guild = ready_value()["guilds"][0].clone();
+    guild["channels"].as_array_mut().unwrap().remove(1);
+    guild["threads"] = json!([]);
+
+    apply(&mut state, "GUILD_CREATE", guild);
+
+    assert_eq!(read_state(&state, GENERAL), None);
+    assert_eq!(read_state(&state, THREAD), None);
+}
