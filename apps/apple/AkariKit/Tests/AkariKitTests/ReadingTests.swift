@@ -207,6 +207,57 @@ final class ReadingTests {
         #expect(readings == [general, nil, general, nil])
     }
 
+    // Going elsewhere first opens the place's last or first channel; that one isn't read.
+    @Test
+    func goingToAChannelElsewhereReadsOnlyThatChannel() {
+        store.update { state in
+            state.add(guild(2))
+            state.list([channel(13, guild: 2), channel(14, guild: 2)], in: 2)
+            state.talk(dm(20, with: 5), dm(21, with: 6), with: user(5), user(6))
+        }
+        let session = readingSession()
+        session.open(.home)
+        session.open(channel: id(20))
+        session.open(.guild(id(1)))
+        let before = readings.count
+
+        session.go(to: id(21))
+        #expect(Array(readings.dropFirst(before)) == [id(21)], "not the DM last opened at home")
+
+        session.go(to: id(14))
+        #expect(
+            Array(readings.dropFirst(before)) == [id(21), id(14)],
+            "not the server's first channel")
+        session.close()
+    }
+
+    @Test
+    func aListReplacedOnItsOwnKeepsTheEngagementItFound() {
+        store.update { $0.list([channel(11), channel(12), channel(16)], in: 1) }
+        let session = readingSession()
+
+        store.update { state in
+            state.channelLists[id(1)] = [id(12), id(16)]
+            state.channels[id(11)] = nil
+        }
+        session.apply(EventBatch([.channelRemoved(channelId: general, guildId: id(1))]))
+        #expect(session.reading == random, "engaged")
+
+        session.setWindowKey(false)
+        store.update { state in
+            state.channelLists[id(1)] = [id(16)]
+            state.channels[id(12)] = nil
+        }
+        session.apply(EventBatch([.channelRemoved(channelId: random, guildId: id(1))]))
+        #expect(session.messages?.channelId == id(16))
+        session.setWindowKey(true)
+        #expect(session.reading == nil, "not engaged")
+
+        session.userInteracted()
+        #expect(readings == [general, random, nil, id(16)])
+        session.close()
+    }
+
     @Test
     func aReplacedListNoLongerCounts() throws {
         let session = readingSession()

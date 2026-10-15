@@ -59,6 +59,7 @@ public final class SessionModel {
     @ObservationIgnored private var windowVisible = false
     // The official client acks after a break only once the user clicks or types (D88).
     @ObservationIgnored private var engaged = false
+    @ObservationIgnored private var navigating = false
 
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
     /// means the user has to log in again. The first READY reopens the place and channel
@@ -133,8 +134,9 @@ public final class SessionModel {
         if let channel = spotToRestore?.channel {
             openedChannels.insert(channel)
             messages = list(of: channel)
-            engaged = true
         }
+        // Reopening the last place counts as opening it, also when the cache or READY does.
+        engaged = true
         updateReading()
     }
 
@@ -146,6 +148,39 @@ public final class SessionModel {
     /// A guild opens the channel last opened there, else its first text channel; home opens
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
+        engaged = true
+        enter(place)
+    }
+
+    /// Opening a channel engages the user, also the one already open.
+    public func open(channel id: ChannelId) {
+        engaged = true
+        show(channel: id)
+    }
+
+    /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
+    /// the store doesn't have opens where the user is; one without a message list doesn't open.
+    public func go(to channel: ChannelId) {
+        // The place opens its own last or first channel on the way, which isn't being read.
+        navigating = true
+        defer {
+            navigating = false
+            updateReading()
+        }
+        if let found = store.channel(id: channel) {
+            guard found.opensMessageList else {
+                return
+            }
+            let place: Place = found.guildId.map { .guild($0) } ?? .home
+            if place != self.place {
+                open(place)
+            }
+        }
+        open(channel: channel)
+    }
+
+    // Without engaging: the session's own moves keep the engagement they find.
+    private func enter(_ place: Place) {
         defer { updateReading() }
         guard place != self.place else {
             // The session starts at home, so choosing home before READY cancels a server restore.
@@ -174,27 +209,6 @@ public final class SessionModel {
         let list = ChannelListModel(guildId: guildId, store: store)
         channels = list
         openListedChannel(in: list, guildId: guildId)
-    }
-
-    /// Opening a channel engages the user, also the one already open.
-    public func open(channel id: ChannelId) {
-        engaged = true
-        show(channel: id)
-    }
-
-    /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
-    /// the store doesn't have opens where the user is; one without a message list doesn't open.
-    public func go(to channel: ChannelId) {
-        if let found = store.channel(id: channel) {
-            guard found.opensMessageList else {
-                return
-            }
-            let place: Place = found.guildId.map { .guild($0) } ?? .home
-            if place != self.place {
-                open(place)
-            }
-        }
-        open(channel: channel)
     }
 
     /// Whether "Mark As Read" has something to mark: the server's badge shows unread or
@@ -322,7 +336,7 @@ public final class SessionModel {
         if case .guild(let id) = place, batch.ready || batch.guildListChanged,
             store.guild(id: id) == nil
         {
-            open(.home)
+            enter(.home)
         }
         let open = messages?.channelId
         let wasListed = open.map(isListed) ?? false
@@ -388,9 +402,9 @@ public final class SessionModel {
             if let channel = spot.channel {
                 lastChannels[guildId] = channel
             }
-            open(.guild(guildId))
+            enter(.guild(guildId))
         case .home:
-            open(.home)
+            enter(.home)
             if let channel = spot.channel,
                 directMessages.conversations.contains(where: { $0.id == channel })
             {
@@ -418,7 +432,6 @@ public final class SessionModel {
         }
     }
 
-    // A new list engages the user; the open one stays as it is.
     private func show(channel id: ChannelId) {
         spotToRestore = nil
         switch place {
@@ -434,7 +447,6 @@ public final class SessionModel {
         }
         openedChannels.insert(id)
         messages = list(of: id)
-        engaged = true
     }
 
     private func list(of channel: ChannelId) -> MessageListModel {
@@ -460,6 +472,9 @@ public final class SessionModel {
     }
 
     private func updateReading() {
+        guard !navigating else {
+            return
+        }
         let reads =
             engaged && appActive && windowKey && windowVisible && !ended
             && messages?.atPresentBottom == true
