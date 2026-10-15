@@ -37,8 +37,8 @@ folders and order, mutes and notification settings; and the read states, with un
 and mention counts per channel and server) and `Account`, which keeps the store
 current from the gateway, ends timed mutes, loads message history and sends messages over
 rate-limited REST, applying the message length limit and slowmode;
-`akari-cli` can log in, log out, connect, list guilds and channels, and read, send and tail
-messages. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
+`akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
+messages, and show where a channel's unread state and mentions come from. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules and `end_session`, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, and the composer) and the message

@@ -143,6 +143,17 @@ last session's badges before the gateway connects; READY then reports only what 
 Blocked and ignored users aren't cached: they only matter for live messages, which come
 after READY.
 
+## Checking one channel
+
+`akari-cli read-state <channel_id>` shows where a channel's badge comes from:
+- READY's raw read state entry and the channel's fields;
+- what Akari holds after READY, and with `--cache <file>` what a copy of the app's cache held;
+- the badges, permissions and opt-in flags;
+- how the newest 100 messages over REST compare with the read position.
+
+`--watch` then follows new messages and badge changes. It prints IDs, flags and counts, never
+names or message content.
+
 ## Open points
 
 - **Acks:** Akari doesn't acknowledge channels yet, nor mark them read.

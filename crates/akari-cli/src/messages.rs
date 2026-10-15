@@ -456,7 +456,7 @@ fn channel_line(kind: ChannelKind, name: &str, id: u64, nested: bool) -> String 
 }
 
 // Howard Hinnant's days-to-civil-date algorithm, so the CLI needs no date crate.
-fn utc_minute(unix_millis: i64) -> String {
+pub(crate) fn utc_minute(unix_millis: i64) -> String {
     let seconds = unix_millis.div_euclid(1000);
     let days = seconds.div_euclid(86_400);
     let minute = seconds.rem_euclid(86_400) / 60;
