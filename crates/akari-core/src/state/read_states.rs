@@ -19,6 +19,8 @@ pub struct ReadState {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ReadStates {
     channels: HashMap<ChannelId, ReadState>,
+    // The newest message counted per channel, so a repeated MESSAGE_CREATE adds nothing.
+    counted: HashMap<ChannelId, MessageId>,
     blocked: HashSet<UserId>,
     ignored: HashSet<UserId>,
 }
@@ -55,6 +57,18 @@ impl ReadStates {
 
     pub(crate) fn insert(&mut self, channel: ChannelId, state: ReadState) {
         self.channels.insert(channel, state);
+    }
+
+    pub(crate) fn first_sight(&mut self, channel: ChannelId, message: MessageId) -> bool {
+        if self
+            .counted
+            .get(&channel)
+            .is_some_and(|counted| *counted >= message)
+        {
+            return false;
+        }
+        self.counted.insert(channel, message);
+        true
     }
 
     pub(crate) fn get(&self, channel: ChannelId) -> Option<ReadState> {

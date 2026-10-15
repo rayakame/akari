@@ -916,3 +916,72 @@ fn a_dm_opened_by_its_first_message_is_unread() {
     assert!(unread(&state, 300_000_000_000_000_013));
     assert_eq!(mentions(&state, 300_000_000_000_000_013), 1);
 }
+
+fn unjoined_thread(state: &mut State) {
+    let mut thread = fixture(include_str!(
+        "../../../../tests/fixtures/thread_create.json"
+    ));
+    thread.as_object_mut().unwrap().remove("member");
+    apply(state, "THREAD_CREATE", thread);
+}
+
+#[test]
+fn only_a_direct_mention_counts_in_a_thread_the_user_hasnt_joined() {
+    let mut state = ready_where(|ready| {
+        ready["user_guild_settings"]["entries"][0]["suppress_everyone"] = false.into();
+        ready["notification_settings"]["flags"] = (16 | 32).into();
+        ready["user_guild_settings"]["entries"][0]["channel_overrides"][1]["message_notifications"] =
+            0.into();
+    });
+    unjoined_thread(&mut state);
+    let mut everyone = plain(AFTER_JOIN + 1, UNJOINED);
+    everyone["mention_everyone"] = true.into();
+    let mut role = plain(AFTER_JOIN + 2, UNJOINED);
+    role["mention_roles"] = json!([ROLE.to_string()]);
+
+    for ignored in [everyone, role, plain(AFTER_JOIN + 3, UNJOINED)] {
+        apply(&mut state, "MESSAGE_CREATE", ignored);
+    }
+    assert_eq!(mentions(&state, UNJOINED), 0);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(AFTER_JOIN + 4, UNJOINED),
+    );
+
+    assert_eq!(mentions(&state, UNJOINED), 1);
+}
+
+#[test]
+fn everyone_counts_in_a_joined_thread() {
+    let mut state = ready_where(|ready| {
+        ready["user_guild_settings"]["entries"][0]["suppress_everyone"] = false.into();
+    });
+    let mut everyone = plain(400_000_000_000_000_031, THREAD);
+    everyone["mention_everyone"] = true.into();
+
+    apply(&mut state, "MESSAGE_CREATE", everyone);
+
+    assert_eq!(mentions(&state, THREAD), 1);
+}
+
+#[test]
+fn a_repeated_message_counts_once() {
+    let mut state = ready_state();
+
+    for _ in 0..2 {
+        apply(
+            &mut state,
+            "MESSAGE_CREATE",
+            message(400_000_000_000_000_004, GENERAL),
+        );
+        apply(
+            &mut state,
+            "MESSAGE_CREATE",
+            dm_plain(400_000_000_000_000_022, GROUP),
+        );
+    }
+
+    assert_eq!(mentions(&state, GENERAL), 3);
+    assert_eq!(mentions(&state, GROUP), 1);
+}

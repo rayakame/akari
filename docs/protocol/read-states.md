@@ -59,13 +59,15 @@ ordinary message there.
 
 Discord doesn't send a channel's new mention count; clients count it from MESSAGE_CREATE
 ([read state topic, "Automations"](https://docs.discord.food/topics/read-state)). Akari counts
-a message only when it is past the read position, so a repeated or old message adds nothing:
+a message only when it is past the read position and newer than the last message it counted
+in that channel, so a repeated or old message adds nothing:
 
 | Where | Counts |
 |---|---|
 | DM or group DM | Every message except "recipient removed" (type 2); in a muted one only messages that mention the user |
 | Guild channel the user can see | A direct mention of the user; @everyone and @here unless the guild suppresses them; a role of the user's unless the guild suppresses roles; muted or not |
 | Guild channel, with the account's `MENTION_ON_ALL_MESSAGES` | Every message where the notification level is all messages, unless the channel or guild is muted or it is a voice or stage channel |
+| Thread the user hasn't joined | Only a direct mention of the user, which adds them to the thread. @everyone, roles and "all messages" don't: no source says they reach anyone but the thread's members |
 | The user's own message | Reads the channel up to it and clears its count, except a poll result |
 
 @silent messages (`SUPPRESS_NOTIFICATIONS`) count like any other; they only skip the

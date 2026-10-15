@@ -62,7 +62,12 @@ impl State {
         if unstarted && channel.last_message_id == Some(message.id.cast()) {
             position = message.id.get() - 1;
         }
-        if message.id.get() <= position {
+        if message.id.get() <= position
+            || !self
+                .entities
+                .read_states
+                .first_sight(channel.id, message.id)
+        {
             return;
         }
         if Some(message.author.id) == self.entities.me() {
@@ -102,9 +107,12 @@ impl State {
             return message.kind != MessageType::RecipientRemove
                 && (mentions_me || !self.channel_muted_at(channel.id, now));
         };
+        // Only a direct mention adds the user to a thread; nothing reaches one they haven't joined.
+        let member = channel.thread.as_deref().is_none_or(|info| info.joined);
         let counts = mentions_me
-            || self.mentions_through_everyone_or_roles(guild, message)
-            || self.counts_every_message(channel, guild, now);
+            || (member
+                && (self.mentions_through_everyone_or_roles(guild, message)
+                    || self.counts_every_message(channel, guild, now)));
         counts
             && self
                 .permissions(channel.id, now_millis)
