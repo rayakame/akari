@@ -42,7 +42,8 @@ in the order given, in one read: what a channel row, a server icon or (added up 
 a folder shows. The core keeps them current, so reads compute nothing. A channel the user
 can't view, or a category, has `Badge { unread: false, mentions: 0 }`; a muted guild's
 `unread` is false and its mentions stay. `read_state(channel_id)` is where the user stopped
-reading (`acked`, `mentions`), `None` when Discord sent nothing for the channel.
+reading (`acked`, `mentions`), `None` while there is none; one Akari started because Discord
+sent none is `estimated`, and its `acked` isn't a message the user read.
 `unread_private_channels()` lists the DMs and group DMs with mentions, newest message first,
 for the rail. `BadgeChanged { channel_id, guild_id }` says to reread that channel's badge or
 read state, and `GuildBadgeChanged { guild_id }` that guild's badge and its folder's.

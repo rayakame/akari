@@ -678,9 +678,10 @@ impl Store {
         self.read(|inner| inner.state.unread_private_channels())
     }
 
-    /// Where the user stopped reading the channel, and its unread mentions. `None` when
-    /// Discord sent none: a guild channel then counts as read up to when the user joined, a
-    /// DM until its next message.
+    /// Where the user stopped reading the channel, and its unread mentions. `None` while there
+    /// is none: Discord sent none and no message or ack has come since, so a guild channel
+    /// counts as read up to when the user joined and a DM until its next message. One the
+    /// store started itself is `estimated`.
     pub fn read_state(&self, channel: ChannelId) -> Option<ReadState> {
         self.read(|inner| inner.state.read_state(channel))
     }

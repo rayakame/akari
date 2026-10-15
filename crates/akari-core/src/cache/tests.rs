@@ -1287,6 +1287,7 @@ fn with_read_states(mut entities: Entities) -> Entities {
         ReadState {
             acked: Some(Snowflake::new(1_000)),
             mentions: 2,
+            estimated: false,
         },
     );
     entities.read_states.insert(
@@ -1294,6 +1295,7 @@ fn with_read_states(mut entities: Entities) -> Entities {
         ReadState {
             acked: None,
             mentions: 1,
+            estimated: true,
         },
     );
     entities
@@ -1371,6 +1373,7 @@ async fn a_changed_read_state_writes_only_its_row() {
         ReadState {
             acked: Some(Snowflake::new(1_001)),
             mentions: 0,
+            estimated: false,
         },
     );
     let mut gone = read.clone();

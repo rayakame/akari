@@ -94,6 +94,7 @@ async fn the_read_state_crosses() {
         Some(ReadState {
             acked: Some(MessageId::new(400_000_000_000_000_002)),
             mentions: 2,
+            estimated: false,
         })
     );
     assert_eq!(store.read_state(GROUP), None);

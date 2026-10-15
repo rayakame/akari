@@ -1049,3 +1049,43 @@ fn a_channel_gone_from_a_repeated_guild_create_forgets_its_read_state() {
     assert_eq!(read_state(&state, GENERAL), None);
     assert_eq!(read_state(&state, THREAD), None);
 }
+
+fn estimated(state: &State, channel: u64) -> Option<bool> {
+    state
+        .read_state(Snowflake::new(channel))
+        .map(|read| read.estimated)
+}
+
+#[test]
+fn read_states_the_store_starts_are_marked_estimated() {
+    let mut state = ready_where(|ready| without_read_state(ready, GENERAL));
+    assert_eq!(estimated(&state, THREAD), Some(false), "from READY");
+
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_plain(400_000_000_000_000_022, GROUP),
+    );
+    apply(&mut state, "MESSAGE_CREATE", message(AFTER_JOIN, GENERAL));
+
+    assert_eq!(estimated(&state, GROUP), Some(true));
+    assert_eq!(estimated(&state, GENERAL), Some(true));
+
+    apply(
+        &mut state,
+        "MESSAGE_ACK",
+        ack(GROUP, 400_000_000_000_000_022),
+    );
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        by(plain(AFTER_JOIN + 1, GENERAL), ME),
+    );
+
+    assert_eq!(estimated(&state, GROUP), Some(false), "an ack is real");
+    assert_eq!(
+        estimated(&state, GENERAL),
+        Some(false),
+        "so is the user's own message"
+    );
+}

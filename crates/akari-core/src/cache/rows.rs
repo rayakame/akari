@@ -945,6 +945,8 @@ pub(super) struct ReadStateRow {
     acked: Option<u64>,
     #[serde(default)]
     mentions: u32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    estimated: bool,
 }
 
 impl From<&ReadState> for ReadStateRow {
@@ -952,6 +954,7 @@ impl From<&ReadState> for ReadStateRow {
         Self {
             acked: id(state.acked),
             mentions: state.mentions,
+            estimated: state.estimated,
         }
     }
 }
@@ -961,6 +964,7 @@ impl ReadStateRow {
         ReadState {
             acked: snowflake(self.acked),
             mentions: self.mentions,
+            estimated: self.estimated,
         }
     }
 }

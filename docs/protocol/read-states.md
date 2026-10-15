@@ -39,6 +39,10 @@ A channel without a read state:
 - **A guild whose join time is unknown** is treated like a DM.
 - **A thread** uses its guild's join time.
 
+A read state the store starts this way (for a DM's first message, or a guild channel's first
+mention) is marked `estimated`: its `acked` is the join or the message before, not a message
+the user read. An ack or the user's own message replaces it with a real one.
+
 The newest message only moves forward: from MESSAGE_CREATE, CHANNEL_CREATE, CHANNEL_UPDATE
 and GUILD_CREATE (an older or missing `last_message_id` changes nothing), and from the unread
 updates of guilds without a subscription. Only READY replaces it. A new thread in a forum or

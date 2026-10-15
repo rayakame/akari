@@ -123,6 +123,8 @@ pub struct ReadState {
     /// The last acknowledged message; `None` when nothing is read yet.
     pub acked: Option<MessageId>,
     pub mentions: u32,
+    /// Akari started it because Discord sent none: `acked` isn't a message the user read.
+    pub estimated: bool,
 }
 
 impl From<state::ReadState> for ReadState {
@@ -130,6 +132,7 @@ impl From<state::ReadState> for ReadState {
         Self {
             acked: state.acked,
             mentions: state.mentions,
+            estimated: state.estimated,
         }
     }
 }

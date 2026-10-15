@@ -14,6 +14,9 @@ pub struct ReadState {
     pub acked: Option<MessageId>,
     /// Unread mentions, the red count.
     pub mentions: u32,
+    /// Discord sent no read state, so Akari started one: `acked` is then the user's join or
+    /// the message before the first one it saw, not a message the user read.
+    pub estimated: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -39,6 +42,7 @@ impl ReadStates {
                     let state = ReadState {
                         acked: entry.last_message_id.map(Snowflake::cast),
                         mentions: entry.mention_count,
+                        estimated: false,
                     };
                     (entry.id.cast(), state)
                 })
@@ -123,6 +127,7 @@ impl ReadStates {
             ReadState {
                 acked: Some(Snowflake::new(position)),
                 mentions,
+                estimated: false,
             },
         )
     }
@@ -140,14 +145,17 @@ impl ReadStates {
             ReadState {
                 acked: Some(message),
                 mentions: 0,
+                estimated: false,
             },
         )
     }
 
     pub(crate) fn start(&mut self, channel: ChannelId, acked: Option<MessageId>) {
-        self.channels
-            .entry(channel)
-            .or_insert(ReadState { acked, mentions: 0 });
+        self.channels.entry(channel).or_insert(ReadState {
+            acked,
+            mentions: 0,
+            estimated: true,
+        });
     }
 
     pub(crate) fn mention(&mut self, channel: ChannelId, start: Option<MessageId>) {
