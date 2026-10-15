@@ -115,9 +115,12 @@ over the DMs; none computes permissions.
   the user's `OPT_IN_CHANNELS_ON`) follow the official client's two extra rules: a channel
   whose newest message is over 7 days old shows neither unread nor mentions, and one that
   neither it nor its category is picked in (`OPT_IN_ENABLED`) shows unread only with mentions
-  ([user-settings.md](user-settings.md#opt-in-channels-community-onboarding)). Without them,
-  old mentions there showed in Akari, and reading the channel in the official client never
-  cleared them: that client sends no ack for a channel it shows as read.
+  ([user-settings.md](user-settings.md#opt-in-channels-community-onboarding)). Without opt-in
+  the age doesn't matter: an old mention still shows.
+- **Server Guide resource channels** (the channel flag `IS_GUILD_RESOURCE_CHANNEL`, 1 << 7) show
+  neither unread nor mentions and add nothing to their server, in every server: the official
+  client tracks no unreads there. Discord still reports them: on 2026-10-15 READY sent one as
+  unread with an @everyone mention, which the official client showed read and never acked.
 - **DMs and group DMs** show unread unless muted; every message in an unmuted one counts as a
   mention, and `unread_private_channels` lists those with mentions, newest message first,
   leaving out message requests and spam as the official client does.

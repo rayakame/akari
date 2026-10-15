@@ -732,3 +732,61 @@ fn a_channel_not_opted_into_shows_only_with_mentions() {
     assert_eq!(guild_badge(&quiet, G1), Badge::default());
     assert_eq!(channel_badge(&pinged, GENERAL), badge(true, 2));
 }
+
+const IS_GUILD_RESOURCE_CHANNEL: u64 = 1 << 7;
+
+fn community(ready: &mut Value) {
+    ready["guilds"][0]["properties"]["features"] = json!(["COMMUNITY"]);
+}
+
+// A Server Guide resource channel.
+fn resource(ready: &mut Value) {
+    let channel = &mut ready["guilds"][0]["channels"][1];
+    let flags = channel["flags"].as_u64().unwrap_or(0);
+    channel["flags"] = (flags | IS_GUILD_RESOURCE_CHANNEL).into();
+}
+
+// GENERAL's newest message `days` old, past its read position.
+fn general_last_message(ready: &mut Value, days: i64) {
+    let then =
+        Snowflake::<model::GenericMarker>::from_unix_millis(wall_millis() - days * 86_400_000, 0);
+    ready["guilds"][0]["channels"][1]["last_message_id"] = then.get().to_string().into();
+}
+
+// Manual check B2 on #21: Discord reported this channel unread with an @everyone mention, and
+// the official client showed it read without ever acking it.
+#[test]
+fn a_server_guide_resource_channel_shows_nothing() {
+    let state = ready_where(|ready| {
+        community(ready);
+        resource(ready);
+        general_last_message(ready, 19);
+        ready["read_state"]["entries"][0]["mention_count"] = 1.into();
+    });
+
+    assert_eq!(channel_badge(&state, GENERAL), Badge::default());
+    assert_eq!(guild_badge(&state, G1), Badge::default());
+}
+
+#[test]
+fn a_resource_channel_shows_nothing_in_any_server_however_recent() {
+    let state = ready_where(|ready| {
+        resource(ready);
+        general_last_message(ready, 0);
+    });
+
+    assert_eq!(channel_badge(&state, GENERAL), Badge::default());
+    assert_eq!(guild_badge(&state, G1), Badge::default());
+}
+
+#[test]
+fn without_opt_in_a_quiet_community_channel_keeps_its_mention() {
+    let state = ready_where(|ready| {
+        community(ready);
+        general_last_message(ready, 19);
+        ready["read_state"]["entries"][0]["mention_count"] = 1.into();
+    });
+
+    assert_eq!(channel_badge(&state, GENERAL), badge(true, 1));
+    assert_eq!(guild_badge(&state, G1).mentions, 1);
+}

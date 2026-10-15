@@ -82,6 +82,10 @@ Observed in the official desktop client on 2026-10-14:
 - **In community servers with "Channels & Roles"** (from the official client's code): a
   channel whose newest message is over a week old shows neither unread nor a count, and a
   channel the user didn't pick shows unread only when it has mentions.
+- **Server Guide resource channels** never look unread and never show a count, in any server
+  (from the official client's code; observed 2026-10-15 on a channel Discord reports unread
+  with a mention). **Unverified:** whether the official client lists them; the docs say it
+  doesn't, Akari does.
 
 *Akari: an unread row has the bright name and the 4 × 8 pill on the column's left edge (not
 while selected), and a row with mentions the red badge at its right end, as on the rail; DM

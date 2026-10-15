@@ -9,6 +9,7 @@ use crate::model::{ChannelId, ChannelType, GuildId, Permissions, Timestamp};
 
 const USE_NEW_NOTIFICATIONS: u64 = 1 << 4;
 const WEEK_MILLIS: i64 = 7 * 24 * 60 * 60 * 1000;
+const IS_GUILD_RESOURCE_CHANNEL: u64 = 1 << 7;
 
 /// What a list shows for a channel, a guild or a folder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -300,7 +301,9 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
     let visible = entities
         .permissions(channel.id, now_millis)
         .is_some_and(|permissions| permissions.contains(Permissions::VIEW_CHANNEL));
-    if !visible {
+    // The official client tracks no unreads in Server Guide resource channels, in any server.
+    let resource = channel.flags & IS_GUILD_RESOURCE_CHANNEL != 0;
+    if !visible || resource {
         return Some(hidden);
     }
     // The official client's gates for community servers with "Channels & Roles": a channel
