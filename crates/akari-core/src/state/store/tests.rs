@@ -133,7 +133,9 @@ async fn a_stalled_subscriber_never_blocks_the_store() {
     store.view_channel(Snowflake::new(GENERAL));
     let stalled = store.subscribe();
     let reader = store.subscribe();
-    let template = message_template();
+    // Mentions would add badge events to every message.
+    let mut template = message_template();
+    template.mentions.clear();
     let last = 400_000_000_000_020_000;
     let reading = tokio::spawn(async move {
         let mut seen = 0_usize;
@@ -1267,4 +1269,75 @@ fn the_store_reads_a_channels_read_state() {
         Some((Some(400_000_000_000_000_002), 2))
     );
     assert_eq!(group, None);
+}
+
+#[test]
+fn badges_cross_the_store() {
+    let store = ready_store();
+
+    assert_eq!(
+        store.channel_badge(Snowflake::new(300_000_000_000_000_002)),
+        Badge {
+            unread: true,
+            mentions: 2
+        }
+    );
+    assert_eq!(
+        store.guild_badge(Snowflake::new(200_000_000_000_000_001)),
+        Badge {
+            unread: true,
+            mentions: 2
+        }
+    );
+    assert!(store.unread_private_channels().is_empty());
+}
+
+#[test]
+fn the_index_builds_off_the_lock_with_ready() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let before = crate::state::badges::hooks::locked_builds();
+
+    store.apply(ready());
+    store.apply(ready());
+
+    assert_eq!(crate::state::badges::hooks::locked_builds(), before);
+    assert_eq!(
+        store
+            .guild_badge(Snowflake::new(200_000_000_000_000_001))
+            .mentions,
+        2
+    );
+}
+
+#[test]
+fn a_rail_read_takes_no_permission_check() {
+    let store = ready_store();
+    let before = crate::state::permissions::computed();
+
+    for _ in 0..10 {
+        store.guild_badge(Snowflake::new(200_000_000_000_000_001));
+        store.channel_badge(Snowflake::new(300_000_000_000_000_002));
+        store.unread_private_channels();
+    }
+
+    assert_eq!(crate::state::permissions::computed(), before);
+}
+
+#[test]
+fn a_mute_ending_restores_the_guilds_dot() {
+    let mut ready = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    ready["user_guild_settings"]["entries"][0]["muted"] = true.into();
+    ready["user_guild_settings"]["entries"][0]["mute_config"] =
+        json!({"end_time": "2030-03-17T17:46:40.000000+00:00", "selected_time_window": 3600});
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(dispatch("READY", &ready));
+    let guild = Snowflake::new(200_000_000_000_000_001);
+    assert!(!store.guild_badge(guild).unread);
+
+    store.end_mutes(
+        Timestamp::from_unix_millis(1_899_999_999_000),
+        Timestamp::from_unix_millis(1_900_000_000_000),
+    );
+
+    assert!(store.guild_badge(guild).unread);
 }

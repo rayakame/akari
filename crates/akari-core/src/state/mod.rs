@@ -1,6 +1,7 @@
 //! The account's state as a UI reads it, kept current by the gateway.
 
 pub(crate) mod apply;
+mod badges;
 mod convert;
 mod events;
 mod order;
@@ -13,6 +14,7 @@ mod types;
 mod windows;
 
 pub(crate) use apply::wall_millis;
+pub use badges::Badge;
 pub use events::{ConnectionState, StoreEvent};
 pub use order::display_order;
 pub use read_states::ReadState;

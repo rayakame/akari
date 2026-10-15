@@ -1170,9 +1170,12 @@ async fn the_echo_first_replaces_the_pending_message() {
 
     assert_eq!(sent.unwrap().get(), 400_000_000_000_000_050);
     let events = sync(&mut connection, &subscription, 3).await;
-    assert_eq!(events.len(), 2, "{events:?}");
+    // The user's own message reads the unread channel, so its badges change too.
+    assert_eq!(events.len(), 4, "{events:?}");
     assert!(events[0].starts_with("MessageInserted("), "{events:?}");
     assert_eq!(events[1], "MessageReplaced(400000000000000050)");
+    assert!(events[2].starts_with("BadgeChanged {"), "{events:?}");
+    assert!(events[3].starts_with("GuildBadgeChanged {"), "{events:?}");
     assert_eq!(ids(&account), [400_000_000_000_000_050]);
     assert!(outbox(&account).is_empty());
 }
@@ -1198,8 +1201,10 @@ async fn a_late_echo_after_the_response_changes_nothing() {
         .await;
 
     let events = sync(&mut connection, &subscription, 4).await;
-    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events.len(), 4, "{events:?}");
     assert_eq!(events[1], "MessageReplaced(400000000000000050)");
+    assert!(events[2].starts_with("BadgeChanged {"), "{events:?}");
+    assert!(events[3].starts_with("GuildBadgeChanged {"), "{events:?}");
     assert_eq!(ids(&account), [400_000_000_000_000_050]);
 }
 

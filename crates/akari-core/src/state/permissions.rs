@@ -1,6 +1,17 @@
 use super::types::{Channel, Guild, Member};
 use crate::model::{Permissions, UserId};
 
+#[cfg(test)]
+thread_local! {
+    static COMPUTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Permission computations on this thread so far.
+#[cfg(test)]
+pub(crate) fn computed() -> usize {
+    COMPUTED.with(std::cell::Cell::get)
+}
+
 // AUTOMOD_QUARANTINED_NAME and AUTOMOD_QUARANTINED_GUILD_TAG.
 const QUARANTINED: u64 = (1 << 7) | (1 << 10);
 const SEND_EXTRAS: Permissions = Permissions(
@@ -20,6 +31,8 @@ pub(crate) fn compute(
     parent: Option<&Channel>,
     now_millis: i64,
 ) -> Permissions {
+    #[cfg(test)]
+    COMPUTED.with(|count| count.set(count.get() + 1));
     if guild.owner_id == Some(user) {
         return Permissions::ALL;
     }
@@ -184,6 +197,7 @@ mod tests {
             kind: ChannelType::PublicThread,
             parent_id: Some(Snowflake::new(100)),
             thread: Some(Box::new(ThreadInfo {
+                joined: true,
                 archived: false,
                 locked: false,
                 auto_archive_duration: 60,

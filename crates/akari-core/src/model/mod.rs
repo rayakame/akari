@@ -9,7 +9,9 @@ mod snowflake;
 mod timestamp;
 mod user;
 
-pub use channel::{Channel, ChannelType, OverwriteType, PermissionOverwrite, ThreadMetadata};
+pub use channel::{
+    Channel, ChannelType, OverwriteType, PermissionOverwrite, ThreadMember, ThreadMetadata,
+};
 pub use guild::{
     Guild, GuildMember, MessageNotificationLevel, NsfwLevel, PremiumTier, Role, RoleColors,
 };

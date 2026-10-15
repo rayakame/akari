@@ -5,6 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, mpsc};
 
 use super::apply::{Entities, ReadyDiff, State, wall_millis};
+use super::badges::{Badge, Badges};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
 use super::read_states::ReadState;
@@ -23,6 +24,7 @@ const LONG_HOLD: Duration = Duration::from_millis(4);
 
 pub(crate) struct PreparedReady {
     entities: Entities,
+    badges: Badges,
     diff: Option<ReadyDiff>,
 }
 
@@ -199,7 +201,11 @@ impl Store {
             .unwrap_or_else(PoisonError::into_inner);
         let taken = Instant::now();
         let mut events = Vec::new();
+        #[cfg(test)]
+        super::badges::hooks::writing(true);
         let value = write(&mut inner, &mut events);
+        #[cfg(test)]
+        super::badges::hooks::writing(false);
         self.shared.changes.fetch_add(1, Ordering::Relaxed);
         inner.publish(events);
         #[cfg(test)]
@@ -264,8 +270,11 @@ impl Store {
         let mut entities = Entities::from_ready(ready);
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
-            inner.state.ready_diff(&entities)
+            let badges = Badges::build(&entities, wall_millis());
+            let diff = inner.state.ready_diff(&entities, &badges);
+            (badges, diff)
         });
+        let (badges, diff) = diff;
         #[cfg(test)]
         {
             if let Ok(mut thread) = self.shared.ready_thread.lock() {
@@ -273,13 +282,19 @@ impl Store {
             }
             self.park();
         }
-        PreparedReady { entities, diff }
+        PreparedReady {
+            entities,
+            badges,
+            diff,
+        }
     }
 
     pub(crate) fn replace(&self, next: PreparedReady) {
         let old = self.write("READY", |inner, events| {
             self.shared.preparing_ready.store(false, Ordering::SeqCst);
-            inner.state.swap(next.entities, next.diff, events)
+            inner
+                .state
+                .swap(next.entities, next.badges, next.diff, events)
         });
         drop(old);
     }
@@ -332,9 +347,10 @@ impl Store {
     }
 
     pub(crate) fn restore(&self, cached: Entities) -> bool {
+        let badges = Badges::build(&cached, wall_millis());
         let restored = self.write("restore", |inner, events| {
             !self.shared.preparing_ready.load(Ordering::SeqCst)
-                && inner.state.restore(cached, events)
+                && inner.state.restore(cached, badges, events)
         });
         if !restored {
             tracing::info!(target: "akari_core::cache", reason = "ready_first", "cache not used");
@@ -362,12 +378,8 @@ impl Store {
     pub(crate) fn end_mutes(&self, after: Timestamp, until: Timestamp) {
         let ended = self.read(|inner| inner.state.mutes_ending(after, until));
         if !ended.is_empty() {
-            self.write("mutes", |_, events| {
-                events.extend(
-                    ended
-                        .into_iter()
-                        .map(|guild_id| StoreEvent::GuildSettingsChanged { guild_id }),
-                );
+            self.write("mutes", |inner, events| {
+                inner.state.end_mutes(&ended, until.unix_millis(), events);
             });
         }
     }
@@ -609,6 +621,24 @@ impl Store {
                             .any(|role| message.mention_roles.contains(role))
                     })
         })
+    }
+
+    /// What the channel's row shows. `Badge::default()` for channels the user can't view
+    /// and for kinds without messages, such as categories.
+    pub fn channel_badge(&self, channel: ChannelId) -> Badge {
+        self.read(|inner| inner.state.channel_badge(channel))
+    }
+
+    /// The sum over the guild's channels and joined threads that count for it. `unread` is
+    /// false while the guild is muted; its mentions stay.
+    pub fn guild_badge(&self, guild: GuildId) -> Badge {
+        self.read(|inner| inner.state.guild_badge(guild))
+    }
+
+    /// DMs and group DMs with unread mentions, the newest message first: the rail's DM
+    /// icons. Every message in an unmuted DM counts as a mention.
+    pub fn unread_private_channels(&self) -> Vec<Arc<Channel>> {
+        self.read(|inner| inner.state.unread_private_channels())
     }
 
     /// Where the user stopped reading the channel, and its unread mentions. `None` when

@@ -178,11 +178,13 @@ impl Channel {
         } else {
             channel.recipient_ids.into_boxed_slice()
         };
+        let joined = channel.member.is_some();
         let thread = channel.thread_metadata.map(|metadata| {
             Box::new(thread_info(
                 metadata,
                 channel.message_count,
                 channel.member_count,
+                joined,
             ))
         });
         Self {
@@ -264,7 +266,8 @@ impl Channel {
         };
         if let Some(metadata) = update.thread_metadata {
             let (messages, members) = counts(next.thread.as_deref());
-            next.thread = Some(Box::new(thread_info(metadata, messages, members)));
+            let joined = next.thread.as_deref().is_some_and(|info| info.joined);
+            next.thread = Some(Box::new(thread_info(metadata, messages, members, joined)));
         } else if let Some(info) = next.thread.as_deref_mut() {
             (info.message_count, info.member_count) = counts(Some(info));
         }
@@ -276,8 +279,10 @@ fn thread_info(
     metadata: model::ThreadMetadata,
     message_count: Option<u32>,
     member_count: Option<u32>,
+    joined: bool,
 ) -> ThreadInfo {
     ThreadInfo {
+        joined,
         archived: metadata.archived,
         locked: metadata.locked,
         auto_archive_duration: metadata.auto_archive_duration,

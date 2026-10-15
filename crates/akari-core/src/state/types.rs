@@ -142,6 +142,8 @@ pub struct PermissionOverwrite {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ThreadInfo {
+    /// The user joined the thread. Only joined threads count toward their guild's badge.
+    pub joined: bool,
     pub archived: bool,
     pub locked: bool,
     /// Minutes of inactivity before the thread is archived.

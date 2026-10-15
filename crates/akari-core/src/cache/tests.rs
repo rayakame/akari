@@ -164,6 +164,7 @@ pub(crate) fn thread(id: u64, guild: u64, parent: u64) -> Channel {
         parent_id: Some(Snowflake::new(parent)),
         owner_id: Some(Snowflake::new(ME)),
         thread: Some(Box::new(ThreadInfo {
+            joined: true,
             archived: false,
             locked: true,
             auto_archive_duration: 1440,

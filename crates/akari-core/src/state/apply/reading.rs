@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{State, wall_millis};
+use super::{Entities, State, wall_millis};
 use crate::gateway::{ChannelUnread, MessageAck};
 use crate::model::{
     self, ChannelId, ChannelType, GenericMarker, GuildId, MessageType, Permissions, Snowflake,
@@ -12,23 +12,16 @@ use crate::state::types::Channel;
 
 const MENTION_ON_ALL_MESSAGES: u64 = 1 << 5;
 
-impl State {
-    pub(crate) fn read_state(&self, channel: ChannelId) -> Option<ReadState> {
-        self.entities.read_states.get(channel)
-    }
-
+impl Entities {
     /// The channel's newest message is past where the user stopped reading.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the badge index reads it"))]
-    pub(crate) fn unread(&self, channel: ChannelId) -> bool {
-        self.entities.channels.get(&channel).is_some_and(|stored| {
-            stored
-                .last_message_id
-                .is_some_and(|last| last.get() > self.read_position(stored))
-        })
+    pub(crate) fn unread(&self, channel: &Channel) -> bool {
+        channel
+            .last_message_id
+            .is_some_and(|last| last.get() > self.read_position(channel))
     }
 
     fn read_position(&self, channel: &Channel) -> u64 {
-        match self.entities.read_states.get(channel.id) {
+        match self.read_states.get(channel.id) {
             Some(state) => state.acked.map_or(0, Snowflake::get),
             None => self
                 .joined_position(channel)
@@ -39,8 +32,22 @@ impl State {
     // Without a read state, what was posted before the user joined is read. DMs, and guilds
     // whose join is unknown, are read until a message arrives.
     fn joined_position(&self, channel: &Channel) -> Option<u64> {
-        let joined = self.entities.members.get(&channel.guild_id?)?.joined_at?;
+        let joined = self.members.get(&channel.guild_id?)?.joined_at?;
         Some(Snowflake::<GenericMarker>::from_unix_millis(joined.unix_millis(), 0).get())
+    }
+}
+
+impl State {
+    #[cfg(test)]
+    pub(crate) fn unread(&self, channel: ChannelId) -> bool {
+        self.entities
+            .channels
+            .get(&channel)
+            .is_some_and(|stored| self.entities.unread(stored))
+    }
+
+    pub(crate) fn read_state(&self, channel: ChannelId) -> Option<ReadState> {
+        self.entities.read_states.get(channel)
     }
 
     // Runs before the message raises the channel's newest message, which a DM's start needs.
@@ -48,7 +55,7 @@ impl State {
         let Some(channel) = self.entities.channels.get(&message.channel_id).cloned() else {
             return;
         };
-        if message.id.get() <= self.read_position(&channel) {
+        if message.id.get() <= self.entities.read_position(&channel) {
             return;
         }
         if Some(message.author.id) == self.entities.me() {
@@ -57,7 +64,7 @@ impl State {
             }
             return;
         }
-        let joined = self.joined_position(&channel);
+        let joined = self.entities.joined_position(&channel);
         let start = joined
             .map(Snowflake::new)
             .or(channel.last_message_id)
@@ -141,7 +148,9 @@ impl State {
             .get(&ack.channel_id)
             .and_then(|channel| channel.last_message_id)
             .map(Snowflake::get);
-        self.entities.read_states.ack(ack, newest);
+        if self.entities.read_states.ack(ack, newest) {
+            self.dirty.channel(ack.channel_id);
+        }
     }
 
     // CHANNEL_UNREAD_UPDATE and PASSIVE_UPDATE_V2 come once, when a channel turns unread, so
@@ -153,7 +162,9 @@ impl State {
             };
             match self.entities.channels.get_mut(&unread.id) {
                 Some(stored) if stored.guild_id == Some(guild) => {
-                    Arc::make_mut(stored).note_message(last);
+                    if Arc::make_mut(stored).note_message(last) {
+                        self.dirty.channel(unread.id);
+                    }
                 }
                 _ => tracing::debug!(
                     channel_id = unread.id.get(),
@@ -172,8 +183,9 @@ impl State {
         if matches!(
             stored.kind,
             ChannelType::GuildForum | ChannelType::GuildMedia
-        ) {
-            Arc::make_mut(stored).note_message(thread.cast());
+        ) && Arc::make_mut(stored).note_message(thread.cast())
+        {
+            self.dirty.channel(stored.id);
         }
     }
 }

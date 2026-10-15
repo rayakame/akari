@@ -73,8 +73,8 @@ Two details:
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
 | NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; no event |
-| MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([Read states](#read-states)); no event yet. Acks of other read state types are ignored |
-| CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without an event. A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
+| MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([Read states](#read-states)): `BadgeChanged`, and `GuildBadgeChanged` if the guild's badge changed. Acks of other read state types are ignored |
+| CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without a channel event; a channel that turns unread sends `BadgeChanged` ([Badges](#badges)). A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
 | RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Keep the blocked and ignored users, whose messages never count as mentions. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
@@ -107,7 +107,10 @@ captures READY.
 
 User accounts "are only synced threads they have been added to"
 ([gateway guild](https://docs.discord.food/gateway/gateway-events#gateway-guild-object)).
-The store keeps the joined threads from READY and whatever THREAD_CREATE brings. The full
+The store keeps the joined threads from READY and whatever THREAD_CREATE brings.
+`ThreadInfo::joined` is true for READY's and GUILD_CREATE's threads, and for a THREAD_CREATE
+that carries the user's thread `member`; only joined threads count toward their guild's badge.
+Leaving or joining a thread elsewhere (THREAD_MEMBER_UPDATE) isn't decoded yet. The full
 thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
 `threads: true`. Akari's guild subscriptions ask for it, but THREAD_LIST_SYNC isn't decoded
 yet, so the store ignores it. Losing access to a channel doesn't
@@ -168,6 +171,37 @@ below were compared with the official client on 2026-10-14:
   isn't muted, nor a voice or stage channel. @silent messages count. Messages of blocked and
   ignored users never do.
 - **Own messages** read the channel up to them and clear its count, except a poll result.
+
+### Badges
+
+The store keeps every channel's and guild's `Badge` (`unread`, `mentions`) as it changes, so
+`Store::channel_badge`, `guild_badge` and `unread_private_channels` cost a lookup and never
+compute permissions. What they show follows the official client (observed 2026-10-14, see
+[server-list.md](../ui/server-list.md#what-makes-a-server-unread) and
+[channel-list.md](../ui/channel-list.md#what-makes-a-row-unread)):
+
+- **A channel's row** is unread when the channel is, unless it is muted itself, it is a
+  voice or stage channel (their chats never show unread), or its unread setting says only
+  mentions. That setting is the first `UNREADS_*` flag of the channel, its parent and its
+  category, then the guild's; without one, and with the account's `USE_NEW_NOTIFICATIONS`,
+  the notification level decides (only mentions and nothing show no dot); otherwise every
+  unread channel shows. Its count is the read state's mentions. A channel the user can't
+  view shows nothing.
+- **A guild** sums its text, announcement, forum, media, voice and stage channels and its
+  joined, unarchived threads that the user can view. Its dot needs one of them unread and
+  not under a muted category or muted channel, and the guild itself unmuted; its count adds
+  up all their mentions, muted or not. With "hide muted channels", muted channels don't
+  count at all. A folder's badge is its guilds' sum, added up by the host.
+- **DMs and group DMs** show unread unless muted; every message in an unmuted one counts as
+  a mention, and `unread_private_channels` lists those with mentions, newest message first.
+
+`BadgeChanged { channel_id, guild_id }` comes when a channel's badge or read state changes,
+`GuildBadgeChanged` when a guild's badge does; a message in a channel that is already unread
+sends neither. A write marks what it touched (a channel and its threads; a whole guild for
+roles, the member and its settings; everything for the account's notification flags), and
+the index updates those at the end of the write. READY's index is built before the write
+lock with the rest of the new state, and a later READY reports only the badges that
+changed.
 
 ## The state store
 

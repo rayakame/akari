@@ -286,6 +286,7 @@ struct OverwriteRow {
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 struct ThreadRow {
+    joined: bool,
     archived: bool,
     locked: bool,
     auto_archive_duration: u32,
@@ -355,6 +356,7 @@ impl From<&Channel> for ChannelRow {
             icon: hash(channel.icon.as_ref()),
             owner_id: id(channel.owner_id),
             thread: channel.thread.as_deref().map(|thread| ThreadRow {
+                joined: thread.joined,
                 archived: thread.archived,
                 locked: thread.locked,
                 auto_archive_duration: thread.auto_archive_duration,
@@ -396,6 +398,7 @@ impl ChannelRow {
             owner_id: snowflake(self.owner_id),
             thread: self.thread.map(|thread| {
                 Box::new(ThreadInfo {
+                    joined: thread.joined,
                     archived: thread.archived,
                     locked: thread.locked,
                     auto_archive_duration: thread.auto_archive_duration,
