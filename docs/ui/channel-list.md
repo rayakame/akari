@@ -34,7 +34,8 @@ title bar.
   - channels with mentions or active threads the user joined;
   - voice channels with people in them.
 
-  Akari shows only the selected channel until it tracks unread state.
+  *Akari: the same, except threads and voice channels with people in them, which it doesn't
+  list yet.*
 - A muted category's name shows at half opacity. Muting a category collapses it at once, its
   channels still look normal (muting the category doesn't mute them), and while it is muted
   and collapsed only a channel with a mention stays under it (observed 2026-10-14). *Akari:
@@ -59,6 +60,37 @@ title bar.
 Names are medium weight in every state; the official client changes only their color (observed
 2026-10-14 in the dark theme).
 
+### What makes a row unread
+
+Observed in the official desktop client on 2026-10-14:
+
+- A text or announcement channel turns unread when a message newer than the user's read
+  position arrives, also in a channel the user never opened.
+- **Voice and stage channels never look unread from their text chat:** a message there
+  leaves the row as it was, with no bright name and no pill. The gray count the support
+  article describes isn't what the client shows. **Unverified:** what a mention there shows.
+- **A forum or media channel** looks unread when a new post appears, without a count.
+- **Threads the user joined** are listed under their parent channel, each with its own unread
+  state and count (observed 2026-10-15).
+- **Threads the user hasn't joined** aren't listed. Starting one posts a "started a thread"
+  message in its parent, which makes the parent unread like any message; messages inside the
+  thread leave the parent alone.
+- **Deleting messages doesn't clear a row:** with its only unread message deleted, the row
+  stays unread, and with a message that mentioned the user deleted, it keeps its count, until
+  the channel is read.
+- An @silent mention counts like any other; it only skips the notification.
+- **In community servers with "Channels & Roles"** (from the official client's code): a
+  channel whose newest message is over a week old shows neither unread nor a count, and a
+  channel the user didn't pick shows unread only when it has mentions.
+- **Server Guide resource channels** never look unread and never show a count, in any server
+  (from the official client's code; observed 2026-10-15 on a channel Discord reports unread
+  with a mention). **Unverified:** whether the official client lists them; the docs say it
+  doesn't, Akari does.
+
+*Akari: an unread row has the bright name and the 4 × 8 pill on the column's left edge (not
+while selected), and a row with mentions the red badge at its right end, as on the rail; DM
+rows the same, without the pill.*
+
 - Icons by kind: text, voice, announcement, stage, forum, media, rules and thread. Each has a
   private variant (with a lock) and an NSFW variant (with a warning mark).
 - Voice channels list the people connected to them underneath.
@@ -72,11 +104,14 @@ Names are medium weight in every state; the official client changes only their c
   channels need the server's rules channel ID, which it doesn't receive either.
 - Voice, stage, forum, media and directory channels are listed but don't open anything; their
   tooltip says the kind isn't supported yet.
-- Muted rows and categories are drawn at half opacity; the unread style comes with unread
-  state. A muted channel that is selected keeps full opacity.
+- Muted rows and categories are drawn at half opacity, except a row's mention count, which
+  stays full red. A muted channel that is selected keeps full opacity. VoiceOver reads a row's
+  unread state and count after its name ("unread, 2 mentions").
 - "Hide muted channels" (a server setting) leaves channels muted by their own settings out of
   the list, except the open one. **Unverified:** what the official client does with a muted
   category there; Akari keeps categories.
+- **Known gap: threads aren't listed.** A ping in a thread the user joined raises the server's
+  badge but shows on no row, and a thread's messages can't be opened yet.
 
 ## Home
 
@@ -102,8 +137,7 @@ At home the column holds the DM list instead of a server's channels.
 2. The rest, the most recent first: by the newest message, or for a conversation without
    messages by when it was created. Ties go by channel ID, newest first.
 
-Discord leaves message requests and conversations marked as spam out of this list. *Akari
-keeps them in the list for now*, because the store doesn't keep those two flags yet
-([dispatches.md](../protocol/dispatches.md#open-points)).
+Discord leaves message requests and conversations marked as spam out of this list, and so does
+Akari.
 
 A new message moves its conversation to the top at once.

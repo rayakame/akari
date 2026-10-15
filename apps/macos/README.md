@@ -7,8 +7,10 @@ macOS 14 or later.
 So far it has the login screen (QR code, email or phone and password, two-factor codes,
 new-location confirmation) and the main window: a centered title naming the server or DM
 (drawn by `TitleBar` over the native title bar, whose own title stays set but hidden), the
-server rail (the user's order, with folders), a server's channel list (muted channels dimmed, "hide muted channels" followed),
-the DM list at home, the channel header, the user panel, the message list with formatted
+server rail (the user's order, with folders, unread pills and mention badges, and the DMs
+with mentions under Home), a server's channel list (muted channels dimmed, "hide muted
+channels" followed, unread rows bright with their counts, and a collapsed category keeping
+its unread and mentioned channels), the DM list at home, the channel header, the user panel, the message list with formatted
 messages, and the composer. Images, attachments, reactions, replies, threads, voice,
 notifications and settings come later.
 

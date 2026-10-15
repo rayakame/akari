@@ -37,6 +37,10 @@ final class CallLog: Sendable {
         case messages(ChannelId, [MessageId])
         case messageLengthLimit
         case slowmode(ChannelId)
+        case channelBadges([ChannelId])
+        case guildBadges([GuildId])
+        case readState(ChannelId)
+        case unreadPrivateChannels
     }
 
     private let state = Locked<(calls: [Call], offMainThread: Int)>(([], 0))

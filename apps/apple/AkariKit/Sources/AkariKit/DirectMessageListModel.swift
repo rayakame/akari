@@ -19,6 +19,10 @@ public final class DirectMessageListModel {
 
     /// The latest conversation first.
     public private(set) var conversations: [Conversation] = []
+    /// Conversations with unread mentions, the newest first: the rail's icons under Home.
+    public private(set) var unread: [Conversation] = []
+    /// What each conversation's row shows.
+    public private(set) var badges: [ChannelId: Badge] = [:]
 
     @ObservationIgnored private let store: Store
     // A `nil` value is a recipient the store doesn't know, so it isn't asked again.
@@ -26,6 +30,10 @@ public final class DirectMessageListModel {
 
     init(store: Store) {
         self.store = store
+    }
+
+    public func badge(of channel: ChannelId) -> Badge {
+        badges[channel] ?? Badge(unread: false, mentions: 0)
     }
 
     func reload() {
@@ -40,10 +48,20 @@ public final class DirectMessageListModel {
         for id in renamed {
             users[id] = .some(store.user(id: id))
         }
-        if let changed = batch.channelsChanged[nil] {
-            rebuild(rereading: changed)
+        let moved = batch.channelsChanged[nil]
+        if let moved {
+            rebuild(rereading: moved)
         } else if !renamed.isEmpty {
             conversations = conversations.map { conversation($0.channel) }
+        }
+        let badged = batch.badgesChanged[nil]
+        if let badged {
+            readBadges(conversations.map(\.id).filter(badged.contains))
+        }
+        if badged != nil || (moved != nil && !unread.isEmpty) {
+            readUnread()
+        } else if !renamed.isEmpty {
+            unread = unread.map { conversation($0.channel) }
         }
     }
 
@@ -68,7 +86,29 @@ public final class DirectMessageListModel {
         for id in channels.flatMap(\.recipientIds) where users[id] == nil {
             users[id] = .some(store.user(id: id))
         }
+        let listed = Set(conversations.map(\.id))
         conversations = channels.map(conversation)
+        if changed == nil {
+            badges = [:]
+        }
+        readBadges(ids.filter { changed == nil || !listed.contains($0) })
+        if changed == nil {
+            readUnread()
+        }
+    }
+
+    private func readBadges(_ ids: [ChannelId]) {
+        guard !ids.isEmpty else {
+            return
+        }
+        for read in store.channelBadges(ids: ids) {
+            badges[read.channelId] = read.badge
+        }
+    }
+
+    private func readUnread() {
+        let byId = Dictionary(conversations.map { ($0.id, $0) }) { first, _ in first }
+        unread = store.unreadPrivateChannels().compactMap { byId[$0] }
     }
 
     private func conversation(_ channel: Channel) -> Conversation {

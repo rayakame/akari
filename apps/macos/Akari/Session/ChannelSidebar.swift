@@ -14,7 +14,9 @@ struct ChannelSidebar: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     let open = session.messages?.channelId
                     ForEach(
-                        collapsed.visible(list.shown(open: open), in: list.guildId, open: open),
+                        collapsed.visible(list.shown(open: open), in: list.guildId) {
+                            list.staysWhenCollapsed($0, open: open)
+                        },
                         id: \.id
                     ) {
                         channel in
@@ -28,8 +30,10 @@ struct ChannelSidebar: View {
                                 collapsed.toggle(channel.id, in: list.guildId)
                             }
                         } else {
-                            ChannelRow(channel: channel, selected: channel.id == open, muted: muted)
-                            {
+                            ChannelRow(
+                                channel: channel, selected: channel.id == open, muted: muted,
+                                badge: list.badge(of: channel.id)
+                            ) {
                                 session.open(channel: channel.id)
                             }
                         }
@@ -78,6 +82,7 @@ struct ChannelRow: View {
     let channel: Channel
     let selected: Bool
     let muted: Bool
+    var badge = Badge(unread: false, mentions: 0)
     let open: () -> Void
     @State private var hovered = false
     @Environment(\.colorScheme) private var colorScheme
@@ -89,18 +94,24 @@ struct ChannelRow: View {
             }
         } label: {
             HStack(spacing: 8) {
-                ChannelSymbol(channel: channel)
-                Text(channel.name ?? "")
-                    .font(TypeScale.channelName.weight(weight).font)
-                    .foregroundStyle(
-                        Color(
-                            nsColor: selected || hovered
-                                ? Palette.interactiveTextActive : Palette.channelDefault)
-                    )
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    ChannelSymbol(channel: channel)
+                    Text(channel.name ?? "")
+                        .font(TypeScale.channelName.weight(weight).font)
+                        .foregroundStyle(
+                            Color(
+                                nsColor: selected || hovered || badge.unread
+                                    ? Palette.interactiveTextActive : Palette.channelDefault)
+                        )
+                        .lineLimit(1)
+                }
+                // A muted channel's mentions still show in full red.
+                .opacity(muted && !selected ? 0.5 : 1)
                 Spacer(minLength: 0)
+                if badge.mentions > 0 {
+                    MentionBadge(count: badge.mentions)
+                }
             }
-            .opacity(muted && !selected ? 0.5 : 1)
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .frame(height: 32)
@@ -116,7 +127,13 @@ struct ChannelRow: View {
             channel.opensMessageList
                 ? channel.topic ?? "" : ChannelSymbols.unsupported(channel.kind)
         )
+        .accessibilityValue(MentionBadge.accessibilityValue(badge))
         .padding(.horizontal, 8)
+        .overlay(alignment: .leading) {
+            if badge.unread && !selected {
+                UnreadPill()
+            }
+        }
     }
 
     private var weight: TextStyle.Weight {
@@ -151,5 +168,14 @@ struct ChannelSymbol: View {
                         .offset(x: 3, y: 3)
                 }
             }
+    }
+}
+
+/// The 4 × 8 pill on the column's left edge beside an unread row.
+struct UnreadPill: View {
+    var body: some View {
+        UnevenRoundedRectangle(bottomTrailingRadius: 4, topTrailingRadius: 4)
+            .fill(Color(nsColor: Palette.textStrong))
+            .frame(width: 4, height: 8)
     }
 }

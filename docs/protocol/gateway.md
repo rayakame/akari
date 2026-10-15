@@ -131,7 +131,7 @@ clients identify before Hello; that the official client waits is **unverified**.
 | Field | Value |
 |---|---|
 | `token` | The account's token |
-| `capabilities` | `1597`: exactly the shape-changing capabilities in [ready.md](ready.md#capabilities). `AUTH_TOKEN_REFRESH` stays off, so READY never carries a replacement token |
+| `capabilities` | `17981`: the shape-changing capabilities in [ready.md](ready.md#capabilities), and `PASSIVE_GUILD_UPDATE_V2` for unread updates in guilds without a subscription. `AUTH_TOKEN_REFRESH` stays off, so READY never carries a replacement token |
 | `properties` | `DiscordClient::properties()`, the same object `X-Super-Properties` encodes, so Identify always matches REST |
 | `presence` | `{status: "unknown", since: 0, activities: [], afk: false}`: the gateway assigns the initial status ([Status Type](https://docs.discord.food/resources/presence#status-type)) |
 | `compress` | `false` (no payload compression; transport compression is used) |
@@ -311,8 +311,8 @@ Which subscription a guild needs for live messages depends on its size:
 | Members | Live MESSAGE_CREATE, UPDATE, DELETE | Source |
 |---|---|---|
 | Up to 250 (not `large`) | Always | [Identify](https://docs.discord.food/gateway/gateway-events#identify-structure): `large_threshold` |
-| 250 to 75,000 | Subscribed automatically on connect | discord.py-self (**unverified**; the reference says they need a subscription) |
-| Over 75,000 | Only with the guild subscription | discord.py-self |
+| 250 to 75,000 | Subscribed automatically on connect | discord.py-self, and observed on 2026-10-15 (the reference says they need a subscription) |
+| Over 75,000 | Only with the guild subscription; without it, unread updates come as PASSIVE_UPDATE_V2 ([dispatches.md](dispatches.md#large-guilds)) | discord.py-self, and observed on 2026-10-15 |
 | Millions | With the guild subscription; the channel's member list isn't needed | A/B test on 2026-10-09 in a server of 4,518,424 members (below). [discord.py #6340](https://github.com/Rapptz/discord.py/issues/6340) saw no messages in 500,000 and 700,000 member servers until an op 14 that also set `typing`, so it was most likely the guild subscription there too |
 
 Observed on 2026-10-09 with `akari-cli tail` on a test account:
@@ -328,6 +328,10 @@ Observed on 2026-10-09 with `akari-cli tail` on a test account:
   the member list isn't needed for live messages. A first run had shown nothing live because
   the account was only previewing the server: the guild wasn't in READY and no op 37 was
   sent. Joining it was the fix.
+- **Without any op 37** (2026-10-15, 20 minutes, a test account in 6 servers under 250
+  members, 11 of 250 to 75,000 and 1 over 75,000): message events arrived from 3 of the
+  servers between 250 and 75,000 members, and none from the one over 75,000, which sent
+  PASSIVE_UPDATE_V2 instead.
 - A guild the user only previews (lurks) isn't in READY, so Akari can't view it yet; see
   [Not implemented yet](#not-implemented-yet).
 

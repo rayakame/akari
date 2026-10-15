@@ -142,12 +142,12 @@ async fn live_messages_cross_as_ids_and_read_as_records() {
         matches!(event, StoreEvent::MessageInserted { .. })
     })
     .await;
-    assert_eq!(
-        events.last(),
-        Some(&StoreEvent::MessageInserted {
+    assert!(
+        events.contains(&StoreEvent::MessageInserted {
             channel_id: GENERAL,
             message_id: MESSAGE
-        })
+        }),
+        "{events:?}"
     );
     let store = account.store();
     let window = store.window(GENERAL).unwrap();
@@ -240,12 +240,12 @@ async fn a_dm_message_moves_its_conversation_up() {
         matches!(event, StoreEvent::ChannelUpdated { .. })
     })
     .await;
-    assert_eq!(
-        events.last(),
-        Some(&StoreEvent::ChannelUpdated {
+    assert!(
+        events.contains(&StoreEvent::ChannelUpdated {
             channel_id: DM,
             guild_id: None
-        })
+        }),
+        "{events:?}"
     );
     assert_eq!(account.store().private_channel_list(), [DM, GROUP]);
     account.close();

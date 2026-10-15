@@ -45,6 +45,7 @@ dependencies = [
  "keyring",
  "qrcode",
  "rpassword",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

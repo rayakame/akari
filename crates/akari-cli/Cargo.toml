@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 akari-core = { workspace = true, features = ["capture", "flags-only", "repeat-nonce"] }
 akari-markdown.workspace = true
+serde_json.workspace = true
 clap.workspace = true
 keyring.workspace = true
 qrcode.workspace = true

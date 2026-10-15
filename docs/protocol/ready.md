@@ -28,6 +28,10 @@ them:
 | 9 | `USER_SETTINGS_PROTO` | No `user_settings`; `user_settings_proto` is a base64 protobuf |
 | 10 | `CLIENT_STATE_V2` | A guild's own fields move into `properties`; adds `data_mode` |
 
+Identify also sends bit 14, `PASSIVE_GUILD_UPDATE_V2`, which leaves READY as it is: guilds
+without a subscription then send PASSIVE_UPDATE_V2 instead of CHANNEL_UNREAD_UPDATE
+([dispatches.md](dispatches.md#large-guilds)). With it, Identify sends `17981`.
+
 The example value also sets bits 17, 19 and 20, which the reference doesn't document.
 
 ## Fields Akari reads
@@ -40,14 +44,16 @@ The example value also sets bits 17, 19 and 20, which the reference doesn't docu
 | `guilds` | `Vec<GatewayGuild>` | See below |
 | `merged_members` | `Vec<Vec<GuildMember>>` | Same order as `guilds`; members have `user_id`, not `user` |
 | `private_channels` | `Vec<Channel>` | DMs and group DMs with `recipient_ids` |
+| `relationships` | `Vec<Relationship>` | The other user's `id`, the type (1 friend, 2 blocked, 3 incoming request, 4 outgoing request, 5 implicit) and `user_ignored` |
+| `read_state` | `Versioned<ReadStateEntry>` | `{entries, partial, version}` with `VERSIONED_READ_STATES`: per channel the last acknowledged `last_message_id`, `mention_count` and `flags` (`IS_GUILD_CHANNEL`, `IS_THREAD`). Entries of other types (`read_state_type` 1–5: guild events, the notification center and others) are kept with their type. Whole (`partial: false`), because Identify names no version. `last_pin_timestamp`, `last_viewed`, `badge_count` and `last_acked_id` aren't read |
 | `user_guild_settings` | `Versioned<UserGuildSettings>` | `{entries, partial, version}`: per guild (`guild_id: null` for DMs) mutes, the notification level, suppress settings, flags and `channel_overrides` (muted channels, collapsed categories). Whole (`partial: false`), because Identify names no version |
 | `user_settings_proto` | `Option<String>` | The preloaded settings proto in base64; `None` means the defaults. Its server folders are described in [user-settings.md](user-settings.md) |
 | `notification_settings` | `Option<NotificationSettings>` | Account-wide `flags` (`USE_NEW_NOTIFICATIONS`, `MENTION_ON_ALL_MESSAGES`) |
 | `session_id` | `String` | For resuming |
 | `resume_gateway_url` | `String` | For resuming |
 
-Everything else is ignored for now, notably `read_state`, `relationships`, `sessions` and
-the experiments, which are positional arrays rather than objects. What the state store
+Everything else is ignored for now, notably `sessions` and the experiments, which are
+positional arrays rather than objects. What the state store
 does with the three settings parts is in [user-settings.md](user-settings.md).
 
 The state store takes the current user, the guilds with their channels, threads and roles,
@@ -105,9 +111,9 @@ failing:
 | A private channel | Skipped |
 | A member in `merged_members` | Skipped; the outer list keeps one entry per guild |
 | An entry in `users` | Skipped; whatever refers to that ID shows an unknown user |
-| An entry in `user_guild_settings` | Skipped |
+| An entry in `user_guild_settings`, `read_state` or `relationships` | Skipped |
 | A channel override in a `user_guild_settings` entry | Skipped; the entry keeps the others |
-| `user_guild_settings`, `user_settings_proto` or `notification_settings` as a whole | Its default: no entries, no proto (the defaults), no flags |
+| `user_guild_settings`, `read_state`, `user_settings_proto` or `notification_settings` as a whole | Its default: no entries, no proto (the defaults), no flags |
 | `null` instead of one of these lists, or of a member list | Treated as empty; `merged_members` keeps one entry per guild |
 
 Each case logs a `tracing` warning with the entry's ID and the serde error's category, line
@@ -143,7 +149,8 @@ AKARI_READY_FIXTURE="$PWD/captures/ready-<unix time>.json" \
 
 It fails if a guild that the payload doesn't mark unavailable decodes as unavailable, if
 `merged_members` doesn't have one entry per guild, if any user, private channel, member,
-guild channel, thread, guild settings entry or channel override is skipped, or if
+guild channel, thread, guild settings entry, channel override, read state or relationship
+is skipped, or if
 `notification_settings` or `user_settings_proto` didn't parse. Its own messages name only guild IDs, and when a strict
 part of READY fails, the panic shows only where: the error's category, line and column
 (`DecodeError` keeps no serde message, so no value from the payload).

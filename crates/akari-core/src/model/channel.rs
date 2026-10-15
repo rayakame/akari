@@ -5,6 +5,7 @@ use super::permissions::Permissions;
 use super::snowflake::{ChannelMarker, GenericMarker, GuildMarker, Snowflake, UserMarker};
 use super::timestamp::Timestamp;
 use super::user::User;
+use crate::lenient::default_on_error;
 
 /// A guild channel, thread, DM or group DM. Which fields are set depends on `kind`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -40,6 +41,9 @@ pub struct Channel {
     /// The category of a guild channel, or the parent channel of a thread.
     pub parent_id: Option<Snowflake<ChannelMarker>>,
     pub thread_metadata: Option<ThreadMetadata>,
+    /// The current user's membership, on threads the user joined.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub member: Option<ThreadMember>,
     pub message_count: Option<u32>,
     pub member_count: Option<u32>,
     #[serde(default)]
@@ -60,6 +64,14 @@ pub struct PermissionOverwrite {
     pub allow: Permissions,
     #[serde(default)]
     pub deny: Permissions,
+}
+
+/// The current user's membership of a thread.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ThreadMember {
+    pub join_timestamp: Timestamp,
+    #[serde(default)]
+    pub flags: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

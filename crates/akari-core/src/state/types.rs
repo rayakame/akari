@@ -57,6 +57,8 @@ pub struct Guild {
     pub large: bool,
     /// The level for members who set none.
     pub default_message_notifications: NotificationLevel,
+    /// A community server, where the user can choose its channels ("Channels & Roles").
+    pub community: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +119,10 @@ pub struct Channel {
     /// Set for threads.
     pub thread: Option<Box<ThreadInfo>>,
     pub flags: u64,
+    /// A DM from someone the user hasn't accepted yet. The official client lists neither
+    /// these nor `spam` DMs.
+    pub message_request: bool,
+    pub spam: bool,
 }
 
 impl Channel {
@@ -142,6 +148,8 @@ pub struct PermissionOverwrite {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ThreadInfo {
+    /// The user joined the thread. Only joined threads count toward their guild's badge.
+    pub joined: bool,
     pub archived: bool,
     pub locked: bool,
     /// Minutes of inactivity before the thread is archived.

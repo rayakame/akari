@@ -87,6 +87,56 @@ pub struct Folder {
     pub guild_ids: Vec<GuildId>,
 }
 
+/// What a list shows for a channel, a guild or (added up by the host) a folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct Badge {
+    /// Shows as unread: the white dot or pill, a bright row.
+    pub unread: bool,
+    /// The red count, shown also when muted.
+    pub mentions: u32,
+}
+
+impl From<state::Badge> for Badge {
+    fn from(badge: state::Badge) -> Self {
+        Self {
+            unread: badge.unread,
+            mentions: badge.mentions,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct ChannelBadge {
+    pub channel_id: ChannelId,
+    pub badge: Badge,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct GuildBadge {
+    pub guild_id: GuildId,
+    pub badge: Badge,
+}
+
+/// Where the user stopped reading a channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct ReadState {
+    /// The last acknowledged message; `None` when nothing is read yet.
+    pub acked: Option<MessageId>,
+    pub mentions: u32,
+    /// Akari started it because Discord sent none: `acked` isn't a message the user read.
+    pub estimated: bool,
+}
+
+impl From<state::ReadState> for ReadState {
+    fn from(state: state::ReadState) -> Self {
+        Self {
+            acked: state.acked,
+            mentions: state.mentions,
+            estimated: state.estimated,
+        }
+    }
+}
+
 /// The user's notification settings for a guild, or for DMs.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct GuildSettings {

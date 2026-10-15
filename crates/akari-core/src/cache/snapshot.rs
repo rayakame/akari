@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use super::{Cache, CacheError, Writer};
 use crate::model::ChannelId;
 use crate::state::apply::Entities;
-use crate::state::{CachedWindow, Message, Store, UserSettings};
+use crate::state::{CachedWindow, Message, ReadStates, Store, UserSettings};
 
 pub(crate) const MESSAGES_PER_CHANNEL: usize = 50;
 pub(crate) const CHANNELS_WITH_MESSAGES: usize = 50;
@@ -44,7 +44,8 @@ pub(crate) struct Flushed {
     pub(crate) channels: usize,
     pub(crate) windows: usize,
     pub(crate) messages: usize,
-    // The current user, DM recipients, memberships, unavailable guilds and settings.
+    // The current user, DM recipients, memberships, unavailable guilds, settings and read
+    // states.
     pub(crate) other: usize,
     pub(crate) deleted: usize,
 }
@@ -148,6 +149,26 @@ fn settings_changes(
     Ok(counts)
 }
 
+fn read_state_changes(
+    old: &ReadStates,
+    new: &ReadStates,
+    writer: &mut Writer<'_>,
+) -> rusqlite::Result<(usize, usize)> {
+    let mut counts = (0, 0);
+    let (old, new) = (old.channels(), new.channels());
+    for (channel, state) in new {
+        if old.get(channel) != Some(state) {
+            writer.put_read_state(*channel, state)?;
+            counts.0 += 1;
+        }
+    }
+    for channel in old.keys().filter(|channel| !new.contains_key(channel)) {
+        writer.delete_read_state(*channel)?;
+        counts.1 += 1;
+    }
+    Ok(counts)
+}
+
 // `written` follows only once the transaction committed, so a failed write is retried in full.
 pub(crate) fn flush(
     cache: &mut Cache,
@@ -212,6 +233,9 @@ pub(crate) fn flush(
             flushed.deleted += 1;
         }
         let (put, deleted) = settings_changes(&old.settings, &new.settings, writer)?;
+        flushed.other += put;
+        flushed.deleted += deleted;
+        let (put, deleted) = read_state_changes(&old.read_states, &new.read_states, writer)?;
         flushed.other += put;
         flushed.deleted += deleted;
         for (channel, window) in &next.windows {

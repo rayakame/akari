@@ -133,7 +133,9 @@ async fn a_stalled_subscriber_never_blocks_the_store() {
     store.view_channel(Snowflake::new(GENERAL));
     let stalled = store.subscribe();
     let reader = store.subscribe();
-    let template = message_template();
+    // Mentions would add badge events to every message.
+    let mut template = message_template();
+    template.mentions.clear();
     let last = 400_000_000_000_020_000;
     let reading = tokio::spawn(async move {
         let mut seen = 0_usize;
@@ -1253,4 +1255,159 @@ fn a_pending_message_mentions_nobody() {
         0,
     );
     assert!(!store.mentions_me(&pending));
+}
+
+#[test]
+fn the_store_reads_a_channels_read_state() {
+    let store = ready_store();
+
+    let general = store.read_state(Snowflake::new(300_000_000_000_000_002));
+    let group = store.read_state(Snowflake::new(300_000_000_000_000_011));
+
+    assert_eq!(
+        general.map(|state| (state.acked.map(|id| id.get()), state.mentions)),
+        Some((Some(400_000_000_000_000_002), 2))
+    );
+    assert_eq!(group, None);
+}
+
+#[test]
+fn badges_cross_the_store() {
+    let store = ready_store();
+
+    assert_eq!(
+        store.channel_badge(Snowflake::new(300_000_000_000_000_002)),
+        Badge {
+            unread: true,
+            mentions: 2
+        }
+    );
+    assert_eq!(
+        store.guild_badge(Snowflake::new(200_000_000_000_000_001)),
+        Badge {
+            unread: true,
+            mentions: 2
+        }
+    );
+    assert!(store.unread_private_channels().is_empty());
+}
+
+#[test]
+fn the_index_builds_off_the_lock_with_ready() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let before = crate::state::badges::hooks::locked_builds();
+
+    store.apply(ready());
+    store.apply(ready());
+
+    assert_eq!(crate::state::badges::hooks::locked_builds(), before);
+    assert_eq!(
+        store
+            .guild_badge(Snowflake::new(200_000_000_000_000_001))
+            .mentions,
+        2
+    );
+}
+
+#[test]
+fn a_rail_read_takes_no_permission_check() {
+    let store = ready_store();
+    let before = crate::state::permissions::computed();
+
+    for _ in 0..10 {
+        store.guild_badge(Snowflake::new(200_000_000_000_000_001));
+        store.channel_badge(Snowflake::new(300_000_000_000_000_002));
+        store.unread_private_channels();
+    }
+
+    assert_eq!(crate::state::permissions::computed(), before);
+}
+
+#[test]
+fn a_mute_ending_restores_the_guilds_dot() {
+    let mut ready = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    ready["user_guild_settings"]["entries"][0]["muted"] = true.into();
+    ready["user_guild_settings"]["entries"][0]["mute_config"] =
+        json!({"end_time": "2030-03-17T17:46:40.000000+00:00", "selected_time_window": 3600});
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(dispatch("READY", &ready));
+    let guild = Snowflake::new(200_000_000_000_000_001);
+    assert!(!store.guild_badge(guild).unread);
+
+    store.end_mutes(
+        Timestamp::from_unix_millis(1_899_999_999_000),
+        Timestamp::from_unix_millis(1_900_000_000_000),
+    );
+
+    assert!(store.guild_badge(guild).unread);
+}
+
+#[test]
+fn badge_batches_read_in_the_order_given() {
+    let store = ready_store();
+    let unread = Badge {
+        unread: true,
+        mentions: 2,
+    };
+
+    let channels = store.channel_badges(&[
+        Snowflake::new(300_000_000_000_000_003),
+        Snowflake::new(300_000_000_000_000_002),
+        Snowflake::new(1),
+    ]);
+    let guilds = store.guild_badges(&[Snowflake::new(200_000_000_000_000_001), Snowflake::new(1)]);
+
+    assert_eq!(channels, [Badge::default(), unread, Badge::default()]);
+    assert_eq!(guilds, [unread, Badge::default()]);
+}
+
+#[test]
+fn message_requests_and_spam_stay_out_of_the_dm_list() {
+    let mut ready = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    ready["private_channels"][0]["is_spam"] = true.into();
+    ready["private_channels"][1]["is_message_request"] = true.into();
+    let store = Store::new(DEFAULT_LIMITS);
+
+    store.apply(dispatch("READY", &ready));
+
+    assert!(store.private_channel_list().is_empty());
+    assert_eq!(
+        store.private_channels().len(),
+        2,
+        "the store still has them"
+    );
+}
+
+#[test]
+fn a_notification_flags_change_builds_badges_off_the_lock() {
+    let mut ready = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    // GENERAL then shows unread only without USE_NEW_NOTIFICATIONS: G1 notifies mentions only.
+    ready["user_guild_settings"]["entries"][0]["flags"] = 0.into();
+    ready["user_guild_settings"]["entries"][0]["channel_overrides"][1]["flags"] = 0.into();
+    ready["user_guild_settings"]["entries"][0]["channel_overrides"][1]["message_notifications"] =
+        3.into();
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(dispatch("READY", &ready));
+    let guild = Snowflake::new(200_000_000_000_000_001);
+    assert!(!store.guild_badge(guild).unread);
+    let subscription = store.subscribe();
+    let before = crate::state::badges::hooks::locked_builds();
+
+    store.apply(dispatch(
+        "NOTIFICATION_SETTINGS_UPDATE",
+        &json!({"flags": 0}),
+    ));
+
+    assert!(store.guild_badge(guild).unread);
+    assert_eq!(crate::state::badges::hooks::locked_builds(), before);
+    let mut events = Vec::new();
+    while let Some(event) = futures_util::FutureExt::now_or_never(subscription.next()).flatten() {
+        events.push(describe(&event));
+    }
+    assert!(
+        events
+            .iter()
+            .any(|event| event.contains("GuildBadgeChanged")),
+        "{events:?}"
+    );
 }

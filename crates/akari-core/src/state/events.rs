@@ -44,6 +44,15 @@ pub enum StoreEvent {
     GuildSettingsChanged {
         guild_id: Option<GuildId>,
     },
+    /// The channel's [`Badge`](super::Badge) or [`ReadState`](super::ReadState) changed.
+    BadgeChanged {
+        channel_id: ChannelId,
+        guild_id: Option<GuildId>,
+    },
+    /// The guild's [`Badge`](super::Badge) changed. A folder's badge is its guilds' sum.
+    GuildBadgeChanged {
+        guild_id: GuildId,
+    },
     /// A channel, category, thread, DM or group DM appeared.
     ChannelAdded(Arc<Channel>),
     ChannelUpdated(Arc<Channel>),

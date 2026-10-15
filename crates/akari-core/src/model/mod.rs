@@ -9,7 +9,9 @@ mod snowflake;
 mod timestamp;
 mod user;
 
-pub use channel::{Channel, ChannelType, OverwriteType, PermissionOverwrite, ThreadMetadata};
+pub use channel::{
+    Channel, ChannelType, OverwriteType, PermissionOverwrite, ThreadMember, ThreadMetadata,
+};
 pub use guild::{
     Guild, GuildMember, MessageNotificationLevel, NsfwLevel, PremiumTier, Role, RoleColors,
 };
@@ -24,7 +26,9 @@ pub use snowflake::{
     RoleMarker, SkuMarker, Snowflake, StickerMarker, UserMarker, WebhookMarker,
 };
 pub use timestamp::Timestamp;
-pub use user::{AvatarDecorationData, CurrentUser, PremiumType, PrimaryGuild, User};
+pub use user::{
+    AvatarDecorationData, CurrentUser, PremiumType, PrimaryGuild, RelationshipType, User,
+};
 
 pub type AttachmentId = Snowflake<AttachmentMarker>;
 pub type ChannelId = Snowflake<ChannelMarker>;

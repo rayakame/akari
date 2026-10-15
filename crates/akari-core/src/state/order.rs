@@ -141,6 +141,8 @@ mod tests {
             thread: None,
             flags: 0,
             last_message_id: None,
+            message_request: false,
+            spam: false,
         })
     }
 
@@ -189,6 +191,7 @@ mod tests {
                 member_count: None,
                 large: false,
                 default_message_notifications: crate::state::NotificationLevel::AllMessages,
+                community: false,
             })
         };
         let joined = |millis| Some(Timestamp::from_unix_millis(millis));

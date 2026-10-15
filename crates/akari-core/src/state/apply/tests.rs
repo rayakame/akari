@@ -73,6 +73,12 @@ fn describe(event: &StoreEvent) -> String {
             format!("MessageDeleted({})", message_id.get())
         }
         StoreEvent::MessagesStale { channel_id } => format!("MessagesStale({})", channel_id.get()),
+        StoreEvent::BadgeChanged { channel_id, .. } => {
+            format!("BadgeChanged({})", channel_id.get())
+        }
+        StoreEvent::GuildBadgeChanged { guild_id } => {
+            format!("GuildBadgeChanged({})", guild_id.get())
+        }
         other => format!("{other:?}"),
     }
 }
@@ -385,7 +391,8 @@ fn channel_events_add_update_and_remove() {
         parent_deleted,
         [
             format!("ChannelRemoved({GENERAL})"),
-            format!("ChannelRemoved({THREAD})")
+            format!("ChannelRemoved({THREAD})"),
+            format!("GuildBadgeChanged({G1})")
         ]
     );
     assert_eq!(dm, ["ChannelAdded(300000000000000013)"]);
@@ -739,7 +746,8 @@ fn removing_a_channel_or_guild_drops_its_window() {
         deleted,
         [
             format!("ChannelRemoved({GENERAL})"),
-            format!("ChannelRemoved({THREAD})")
+            format!("ChannelRemoved({THREAD})"),
+            format!("GuildBadgeChanged({G1})")
         ]
     );
     assert_eq!(
@@ -788,6 +796,7 @@ fn a_new_session_drops_the_windows_of_channels_that_are_gone() {
         [
             format!("ChannelRemoved({GENERAL})"),
             format!("ChannelRemoved({THREAD})"),
+            format!("GuildBadgeChanged({G1})"),
             "Ready".to_owned()
         ]
     );
@@ -818,6 +827,42 @@ fn a_repeated_guild_create_keeps_its_windows_and_member() {
 thread_local! {
     static DIFF_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         std::cell::RefCell::new(None);
+}
+
+thread_local! {
+    static THREAD_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn scanned_for_threads() {
+    THREAD_SCANS.with(|count| count.set(count.get() + 1));
+}
+
+fn thread_scans() -> usize {
+    THREAD_SCANS.with(std::cell::Cell::get)
+}
+
+#[test]
+fn channel_writes_find_threads_without_scanning_every_channel() {
+    let mut state = ready_state();
+    let before = thread_scans();
+
+    apply(
+        &mut state,
+        "CHANNEL_UPDATE",
+        json!({"id": GENERAL.to_string(), "topic": "changed"}),
+    );
+    let mut created = fixture(include_str!(
+        "../../../tests/fixtures/channel_guild_text.json"
+    ));
+    created["id"] = "300000000000000040".into();
+    apply(&mut state, "CHANNEL_CREATE", created);
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        fixture(include_str!("../../../tests/fixtures/thread_create.json")),
+    );
+
+    assert_eq!(thread_scans(), before);
 }
 
 pub(crate) fn on_next_diff(hook: impl FnOnce() + 'static) {
@@ -895,7 +940,14 @@ fn a_dm_message_raises_its_last_message_and_reports_it() {
         dm_message(400_000_000_000_000_030, DM),
     );
 
-    assert_eq!(events, [format!("ChannelUpdated({DM})")]);
+    assert_eq!(
+        events,
+        [
+            format!("ChannelUpdated({DM})"),
+            format!("BadgeChanged({DM})")
+        ],
+        "the message mentions the user"
+    );
     assert_eq!(last_message(&state, DM), Some(400_000_000_000_000_030));
 }
 
@@ -914,7 +966,8 @@ fn a_viewed_dm_reports_the_message_first() {
         events,
         [
             "MessageInserted(400000000000000030)".to_owned(),
-            format!("ChannelUpdated({DM})")
+            format!("ChannelUpdated({DM})"),
+            format!("BadgeChanged({DM})")
         ]
     );
 }
@@ -922,12 +975,10 @@ fn a_viewed_dm_reports_the_message_first() {
 #[test]
 fn a_message_in_a_guild_channel_changes_it_silently() {
     let mut state = ready_state();
+    let mut plain = message(400_000_000_000_000_030, GENERAL);
+    plain["mentions"] = json!([]);
 
-    let events = apply(
-        &mut state,
-        "MESSAGE_CREATE",
-        message(400_000_000_000_000_030, GENERAL),
-    );
+    let events = apply(&mut state, "MESSAGE_CREATE", plain);
 
     assert!(events.is_empty(), "{events:?}");
     assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_030));
@@ -1013,3 +1064,6 @@ fn a_window_opened_before_the_first_ready_survives_it() {
     assert_eq!(events, ["Ready"]);
     assert_eq!(message_ids(&state, GENERAL), Some(vec![10, 11]));
 }
+
+mod badges;
+mod read_states;

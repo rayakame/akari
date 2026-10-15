@@ -28,8 +28,10 @@ public final class CollapsedCategories {
         defaults.set(categories.map(\.description), forKey: Self.key(guild))
     }
 
-    /// The list as shown: a collapsed category keeps only the open channel among its own.
-    public func visible(_ channels: [Channel], in guild: GuildId, open: ChannelId?) -> [Channel] {
+    /// The list as shown: a collapsed category keeps only the channels `keeps` accepts.
+    public func visible(
+        _ channels: [Channel], in guild: GuildId, keeps: (Channel) -> Bool
+    ) -> [Channel] {
         let categories = categories(in: guild)
         guard !categories.isEmpty else {
             return channels
@@ -38,7 +40,7 @@ public final class CollapsedCategories {
             guard let parent = channel.parentId, categories.contains(parent) else {
                 return true
             }
-            return channel.id == open
+            return keeps(channel)
         }
     }
 

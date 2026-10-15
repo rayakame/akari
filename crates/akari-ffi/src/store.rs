@@ -7,8 +7,8 @@ use crate::contents::{Contents, Found};
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
-    Channel, ConnectionState, ContentStats, Guild, GuildSettings, Message, MessageWindow,
-    ServerListItem, Slowmode, User,
+    Badge, Channel, ChannelBadge, ConnectionState, ContentStats, Guild, GuildBadge, GuildSettings,
+    Message, MessageWindow, ReadState, ServerListItem, Slowmode, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -83,6 +83,47 @@ impl Store {
     /// category or guild doesn't mute its channels.
     pub fn muted_channels(&self, ids: Vec<ChannelId>) -> Vec<ChannelId> {
         self.core.muted_channels(&ids)
+    }
+
+    /// The badges of `ids`, in the order given. A channel the user can't view, or a kind
+    /// without messages such as a category, has none.
+    pub fn channel_badges(&self, ids: Vec<ChannelId>) -> Vec<ChannelBadge> {
+        let badges = self.core.channel_badges(&ids);
+        ids.into_iter()
+            .zip(badges)
+            .map(|(channel_id, badge)| ChannelBadge {
+                channel_id,
+                badge: Badge::from(badge),
+            })
+            .collect()
+    }
+
+    /// The badges of `ids`, in the order given. `unread` is false while a guild is muted;
+    /// its mentions stay. A folder's badge is its guilds' sum.
+    pub fn guild_badges(&self, ids: Vec<GuildId>) -> Vec<GuildBadge> {
+        let badges = self.core.guild_badges(&ids);
+        ids.into_iter()
+            .zip(badges)
+            .map(|(guild_id, badge)| GuildBadge {
+                guild_id,
+                badge: Badge::from(badge),
+            })
+            .collect()
+    }
+
+    /// Where the user stopped reading the channel; `None` when Discord sent nothing for it.
+    pub fn read_state(&self, channel_id: ChannelId) -> Option<ReadState> {
+        self.core.read_state(channel_id).map(ReadState::from)
+    }
+
+    /// DMs and group DMs with unread mentions, the newest message first: the rail's DM
+    /// icons.
+    pub fn unread_private_channels(&self) -> Vec<ChannelId> {
+        self.core
+            .unread_private_channels()
+            .iter()
+            .map(|channel| channel.id)
+            .collect()
     }
 
     /// Available guilds in server list order: `server_list` with each folder's guilds in its

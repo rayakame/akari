@@ -25,11 +25,15 @@ fn dispatches_log_their_name_and_guild_only() {
     let member_list = json!({"guild_id": "200000000000000001", "id": "everyone",
         "member_count": 3, "online_count": 2, "groups": [],
         "ops": [{"op": "SYNC", "range": [0, 99], "items": [{"member": {"nick": "do-not-log"}}]}]});
+    let passive = json!({"guild_id": "200000000000000001",
+        "updated_channels": [{"id": "300000000000000002", "last_message_id": "400000000000000003"}],
+        "updated_members": [{"nick": "do-not-log", "user": {"id": "100000000000000002"}}]});
 
     let events = [
         decode(&dispatch("MESSAGE_CREATE", message)),
         decode(&dispatch("TYPING_START", typing)),
         decode(&dispatch("GUILD_MEMBER_LIST_UPDATE", member_list)),
+        decode(&dispatch("PASSIVE_UPDATE_V2", passive)),
     ];
 
     assert!(matches!(
@@ -40,12 +44,17 @@ fn dispatches_log_their_name_and_guild_only() {
         }) if name == "GUILD_MEMBER_LIST_UPDATE"
     ));
     let logs = logs.text();
-    for name in ["MESSAGE_CREATE", "TYPING_START", "GUILD_MEMBER_LIST_UPDATE"] {
+    for name in [
+        "MESSAGE_CREATE",
+        "TYPING_START",
+        "GUILD_MEMBER_LIST_UPDATE",
+        "PASSIVE_UPDATE_V2",
+    ] {
         assert!(logs.contains(name), "{logs}");
     }
     assert_eq!(
         logs.matches("guild_id=200000000000000001").count(),
-        3,
+        4,
         "{logs}"
     );
     assert!(!logs.contains("do-not-log"), "{logs}");

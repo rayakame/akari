@@ -1,19 +1,25 @@
 //! The account's state as a UI reads it, kept current by the gateway.
 
 pub(crate) mod apply;
+mod badges;
 mod convert;
 mod events;
 mod order;
 mod permissions;
+mod read_states;
 mod send;
 mod settings;
 mod store;
+mod threads;
 mod types;
 mod windows;
 
 pub(crate) use apply::wall_millis;
+pub use badges::Badge;
 pub use events::{ConnectionState, StoreEvent};
 pub use order::display_order;
+pub use read_states::ReadState;
+pub(crate) use read_states::ReadStates;
 pub(crate) use send::limit_in;
 pub use send::{Slowmode, message_length};
 pub use settings::{

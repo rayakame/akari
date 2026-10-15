@@ -92,7 +92,8 @@ struct ServerListModelTests {
 
         #expect(model.guilds == [guild(4), guild(3), guild(2)])
         #expect(model.unavailableIds == [id(5)])
-        #expect(store.reads == [.serverList, .unavailableGuildIds, .guild(id(4))])
+        #expect(
+            store.reads == [.serverList, .unavailableGuildIds, .guild(id(4)), .guildBadges([id(4)])])
     }
 
     @Test
@@ -159,5 +160,88 @@ struct ServerListModelTests {
         model.apply(EventBatch([.serverListChanged]))
 
         #expect(model.isExpanded(folder: 7))
+    }
+
+    @Test
+    func serverBadgesAreReadWithTheList() {
+        store.update { state in
+            state.add(guild(1), guild(2))
+            state.guildBadges = [id(1): badge(mentions: 2)]
+        }
+        let model = model()
+
+        model.reload()
+
+        #expect(model.badge(of: id(1)) == badge(mentions: 2))
+        #expect(model.badge(of: id(2)) == noBadge)
+        #expect(store.reads.contains(.guildBadges([id(1), id(2)])))
+    }
+
+    func gamesFolder() -> ServerListModel {
+        store.update { state in
+            state.add(guild(1), guild(2), guild(3))
+            state.serverList = [folder(7, [1, 2]), .guild(guildId: id(3))]
+            state.guildBadges = [
+                id(1): badge(unread: false, mentions: 2), id(2): badge(mentions: 3),
+                id(3): badge(mentions: 9),
+            ]
+        }
+        let model = model()
+        model.reload()
+        return model
+    }
+
+    func folderItem(_ model: ServerListModel) -> ServerListModel.FolderItem? {
+        guard case .folder(let item) = model.items.first else {
+            return nil
+        }
+        return item
+    }
+
+    @Test
+    func aFolderAddsUpItsServersBadges() throws {
+        let model = gamesFolder()
+
+        let games = try #require(folderItem(model))
+
+        #expect(model.tileBadge(of: games) == badge(unread: true, mentions: 5))
+    }
+
+    @Test
+    func aCollapsedFolderShowsItsBadgeAndAnExpandedOneDoesnt() throws {
+        let model = gamesFolder()
+        let games = try #require(folderItem(model))
+
+        model.toggle(folder: 7)
+
+        #expect(model.tileBadge(of: games) == noBadge)
+        #expect(model.badge(of: id(2)) == badge(mentions: 3), "its servers show their own")
+    }
+
+    @Test
+    func aGuildBadgeEventRereadsOnlyThatGuild() {
+        store.update { state in state.add(guild(1), guild(2)) }
+        let model = loaded()
+        store.update { $0.guildBadges[id(2)] = badge(mentions: 1) }
+
+        model.apply(EventBatch([.guildBadgeChanged(guildId: id(2))]))
+
+        #expect(store.reads == [.guildBadges([id(2)])])
+        #expect(model.badge(of: id(2)) == badge(mentions: 1))
+    }
+
+    @Test
+    func aJoinedGuildsBadgeIsRead() {
+        store.update { state in state.add(guild(1)) }
+        let model = loaded()
+        store.update { state in
+            state.add(guild(2))
+            state.guildBadges[id(2)] = badge()
+        }
+
+        model.apply(EventBatch([.guildAdded(guildId: id(2))]))
+
+        #expect(model.badge(of: id(2)) == badge())
+        #expect(store.reads.contains(.guildBadges([id(2)])))
     }
 }

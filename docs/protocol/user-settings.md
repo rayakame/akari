@@ -133,8 +133,12 @@ Where the state lives:
   ([Channel Flags](https://docs.discord.food/resources/channel#channel-flags)). Akari
   doesn't filter these yet either.
 
-The docs don't state the official client's rule. **Unverified**, to check on the second
-account before implementing: opt-in applies when the guild has `GUILD_ONBOARDING` and the
-entry has `OPT_IN_CHANNELS_ON`; a channel shows when it or its category has
-`OPT_IN_ENABLED`, and channels `@everyone` can't view, the selected channel, favorites and
-channels with unread mentions show regardless.
+The docs don't state the official client's rule. Its code (the mobile client's read state
+store, read for facts on 2026-10-15) treats opt-in as on when the guild has the `COMMUNITY`
+feature and the user's entry has `OPT_IN_CHANNELS_ON`, and a channel as picked when it or its
+category has `OPT_IN_ENABLED`. Akari's badges follow its two rules there
+([read-states.md](read-states.md#badges)): a channel whose newest message is over 7 days old
+shows neither unread nor mentions, and a channel that isn't picked shows unread only with
+mentions. Akari still lists every channel. **Unverified**, for the list: channels `@everyone`
+can't view, the selected channel, favorites and channels with unread mentions show
+regardless.

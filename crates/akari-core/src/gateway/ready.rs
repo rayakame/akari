@@ -1,6 +1,8 @@
 use serde::Deserialize;
 
 use super::guild::GatewayGuild;
+use super::read_state::ReadStateEntry;
+use super::relationship::Relationship;
 use super::settings::{NotificationSettings, UserGuildSettings, Versioned};
 use crate::lenient::{default_on_error, skip_invalid, skip_invalid_in_each};
 use crate::model::{Channel, CurrentUser, GuildMember, User};
@@ -22,6 +24,12 @@ pub struct Ready {
     /// DMs and group DMs, with `recipient_ids` instead of `recipients`.
     #[serde(default, deserialize_with = "skip_invalid")]
     pub private_channels: Vec<Channel>,
+    /// Friends, blocked users and friend requests.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub relationships: Vec<Relationship>,
+    /// Where the user stopped reading, per channel (and for other read state types).
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub read_state: Versioned<ReadStateEntry>,
     /// The user's notification settings per guild, and for DMs.
     #[serde(default, deserialize_with = "default_on_error")]
     pub user_guild_settings: Versioned<UserGuildSettings>,

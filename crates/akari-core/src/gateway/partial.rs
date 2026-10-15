@@ -17,6 +17,7 @@ pub struct GuildUpdate {
     pub owner_id: Option<UserId>,
     pub roles: Option<Vec<Role>>,
     pub default_message_notifications: Option<MessageNotificationLevel>,
+    pub features: Option<Vec<String>>,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -30,6 +31,7 @@ struct GuildFields {
     owner_id: Option<UserId>,
     roles: Option<Vec<Role>>,
     default_message_notifications: Option<MessageNotificationLevel>,
+    features: Option<Vec<String>>,
     properties: Option<Box<GuildFields>>,
 }
 
@@ -56,6 +58,7 @@ impl<'de> Deserialize<'de> for GuildUpdate {
             default_message_notifications: nested
                 .default_message_notifications
                 .or(top.default_message_notifications),
+            features: nested.features.or(top.features),
         })
     }
 }
@@ -88,6 +91,8 @@ pub struct ChannelUpdate {
     pub message_count: Option<u32>,
     pub member_count: Option<u32>,
     pub flags: Option<u64>,
+    pub is_message_request: Option<bool>,
+    pub is_spam: Option<bool>,
 }
 
 /// MESSAGE_UPDATE. A missing field is unchanged, `Some(None)` is `null`. `tts` isn't

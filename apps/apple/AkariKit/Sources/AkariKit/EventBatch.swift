@@ -12,6 +12,9 @@ struct EventBatch {
     var guildSettingsChanged: Set<GuildId?> = []
     // The `nil` guild holds DMs and group DMs.
     var channelsChanged: [GuildId?: Set<ChannelId>] = [:]
+    // Channels whose badge or read state changed, by guild (`nil`: DMs).
+    var badgesChanged: [GuildId?: Set<ChannelId>] = [:]
+    var guildBadgesChanged: Set<GuildId> = []
     var removedChannels: Set<ChannelId> = []
     var windowsChanged: Set<ChannelId> = []
     var updatedMessages: [ChannelId: Set<MessageId>] = [:]
@@ -45,6 +48,10 @@ struct EventBatch {
                 guildListChanged = true
             case .guildSettingsChanged(let guild):
                 guildSettingsChanged.insert(guild)
+            case .badgeChanged(let channel, let guild):
+                badgesChanged[guild, default: []].insert(channel)
+            case .guildBadgeChanged(let guild):
+                guildBadgesChanged.insert(guild)
             case .channelAdded(let channel, let guild), .channelUpdated(let channel, let guild):
                 channelsChanged[guild, default: []].insert(channel)
             case .channelRemoved(let channel, let guild):

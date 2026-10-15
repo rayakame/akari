@@ -13,8 +13,8 @@ use crate::model::{
 use crate::state::{
     Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
     EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
-    Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
-    Sticker, ThreadInfo, Unreads, User,
+    Message, MessageReference, NotificationLevel, PermissionOverwrite, ReadState,
+    ReferencedMessage, Role, Sticker, ThreadInfo, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -150,6 +150,8 @@ pub(super) struct GuildRow {
     member_count: Option<u32>,
     #[serde(skip_serializing_if = "is_false")]
     large: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    community: bool,
     // 0 all messages, 1 only mentions, 2 nothing.
     #[serde(default, skip_serializing_if = "is_zero")]
     default_level: u8,
@@ -196,6 +198,7 @@ impl From<&Guild> for GuildRow {
                 .collect(),
             member_count: guild.member_count,
             large: guild.large,
+            community: guild.community,
             default_level: level_code(guild.default_message_notifications),
         }
     }
@@ -224,6 +227,7 @@ impl GuildRow {
             member_count: self.member_count,
             large: self.large,
             default_message_notifications: level(self.default_level),
+            community: self.community,
         }
     }
 }
@@ -286,6 +290,7 @@ struct OverwriteRow {
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 struct ThreadRow {
+    joined: bool,
     archived: bool,
     locked: bool,
     auto_archive_duration: u32,
@@ -327,6 +332,10 @@ pub(super) struct ChannelRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     thread: Option<ThreadRow>,
     flags: u64,
+    #[serde(skip_serializing_if = "is_false")]
+    message_request: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    spam: bool,
 }
 
 impl From<&Channel> for ChannelRow {
@@ -355,6 +364,7 @@ impl From<&Channel> for ChannelRow {
             icon: hash(channel.icon.as_ref()),
             owner_id: id(channel.owner_id),
             thread: channel.thread.as_deref().map(|thread| ThreadRow {
+                joined: thread.joined,
                 archived: thread.archived,
                 locked: thread.locked,
                 auto_archive_duration: thread.auto_archive_duration,
@@ -364,6 +374,8 @@ impl From<&Channel> for ChannelRow {
                 member_count: thread.member_count,
             }),
             flags: channel.flags,
+            message_request: channel.message_request,
+            spam: channel.spam,
         }
     }
 }
@@ -396,6 +408,7 @@ impl ChannelRow {
             owner_id: snowflake(self.owner_id),
             thread: self.thread.map(|thread| {
                 Box::new(ThreadInfo {
+                    joined: thread.joined,
                     archived: thread.archived,
                     locked: thread.locked,
                     auto_archive_duration: thread.auto_archive_duration,
@@ -406,6 +419,8 @@ impl ChannelRow {
                 })
             }),
             flags: self.flags,
+            message_request: self.message_request,
+            spam: self.spam,
         }
     }
 }
@@ -808,6 +823,8 @@ pub(super) struct GuildSettingsRow {
     suppress_roles: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     hide_muted_channels: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    opt_in: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     channels: Vec<ChannelSettingsRow>,
 }
@@ -823,6 +840,8 @@ struct ChannelSettingsRow {
     level: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     unreads: Option<u8>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    opted_in: bool,
 }
 
 // 0 all messages, 1 only mentions.
@@ -851,6 +870,7 @@ impl From<&GuildSettings> for GuildSettingsRow {
                 mute_ends: channel.mute_ends.map(nanos),
                 level: channel.level.map(level_code),
                 unreads: channel.unreads.map(unreads_code),
+                opted_in: channel.opted_in,
             })
             .collect();
         channels.sort_unstable_by_key(|channel| channel.id);
@@ -862,6 +882,7 @@ impl From<&GuildSettings> for GuildSettingsRow {
             suppress_everyone: settings.suppress_everyone,
             suppress_roles: settings.suppress_roles,
             hide_muted_channels: settings.hide_muted_channels,
+            opt_in: settings.opt_in,
             channels,
         }
     }
@@ -877,6 +898,7 @@ impl GuildSettingsRow {
             suppress_everyone: self.suppress_everyone,
             suppress_roles: self.suppress_roles,
             hide_muted_channels: self.hide_muted_channels,
+            opt_in: self.opt_in,
             channels: Arc::new(
                 self.channels
                     .into_iter()
@@ -886,6 +908,7 @@ impl GuildSettingsRow {
                             mute_ends: channel.mute_ends.map(timestamp),
                             level: channel.level.map(level),
                             unreads: channel.unreads.map(unreads),
+                            opted_in: channel.opted_in,
                         };
                         (Snowflake::new(channel.id), settings)
                     })
@@ -924,6 +947,36 @@ impl From<FolderRow> for FolderEntry {
             name: row.name,
             color: row.color,
             guilds: row.guilds.into_iter().map(Snowflake::new).collect(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct ReadStateRow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    acked: Option<u64>,
+    #[serde(default)]
+    mentions: u32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    estimated: bool,
+}
+
+impl From<&ReadState> for ReadStateRow {
+    fn from(state: &ReadState) -> Self {
+        Self {
+            acked: id(state.acked),
+            mentions: state.mentions,
+            estimated: state.estimated,
+        }
+    }
+}
+
+impl ReadStateRow {
+    pub(super) fn into_read_state(self) -> ReadState {
+        ReadState {
+            acked: snowflake(self.acked),
+            mentions: self.mentions,
+            estimated: self.estimated,
         }
     }
 }

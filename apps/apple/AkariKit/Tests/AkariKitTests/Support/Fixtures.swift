@@ -103,3 +103,9 @@ func loadReport(
         remaining: remaining, resetAfter: resetAfter, parse: parse, parsed: parsed
     )
 }
+
+let noBadge = Badge(unread: false, mentions: 0)
+
+func badge(unread: Bool = true, mentions: UInt32 = 0) -> Badge {
+    Badge(unread: unread, mentions: mentions)
+}

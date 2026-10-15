@@ -4,9 +4,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Mutex, mpsc};
 
-use super::apply::{Entities, ReadyDiff, State, wall_millis};
+use super::apply::{Derived, Entities, ReadyDiff, State, wall_millis};
+use super::badges::{Badge, Badges};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
+use super::read_states::ReadState;
 use super::send::Slowmode;
 use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
@@ -22,6 +24,7 @@ const LONG_HOLD: Duration = Duration::from_millis(4);
 
 pub(crate) struct PreparedReady {
     entities: Entities,
+    derived: Derived,
     diff: Option<ReadyDiff>,
 }
 
@@ -183,7 +186,12 @@ impl Store {
             .inner
             .read()
             .unwrap_or_else(PoisonError::into_inner);
-        read(&inner)
+        #[cfg(test)]
+        super::badges::hooks::reading(true);
+        let value = read(&inner);
+        #[cfg(test)]
+        super::badges::hooks::reading(false);
+        value
     }
 
     fn write<T>(
@@ -198,7 +206,11 @@ impl Store {
             .unwrap_or_else(PoisonError::into_inner);
         let taken = Instant::now();
         let mut events = Vec::new();
+        #[cfg(test)]
+        super::badges::hooks::writing(true);
         let value = write(&mut inner, &mut events);
+        #[cfg(test)]
+        super::badges::hooks::writing(false);
         self.shared.changes.fetch_add(1, Ordering::Relaxed);
         inner.publish(events);
         #[cfg(test)]
@@ -249,6 +261,9 @@ impl Store {
                     });
                 }
             },
+            DispatchEvent::NotificationSettingsUpdate(settings) => {
+                self.set_notification_flags(settings.flags);
+            }
             event => {
                 let name = event.name();
                 self.write(name, |inner, events| inner.state.apply(event, events));
@@ -256,14 +271,32 @@ impl Store {
         }
     }
 
+    // New flags can move every badge. They are built from a copy before the write lock; a write
+    // in between means the copy is stale, and they are rebuilt under the lock instead.
+    fn set_notification_flags(&self, flags: u64) {
+        let start = self.shared.changes.load(Ordering::SeqCst);
+        let Some(next) = self.read(|inner| inner.state.with_notification_flags(flags)) else {
+            return;
+        };
+        let badges = Badges::build(&next, wall_millis());
+        drop(next);
+        self.write("NOTIFICATION_SETTINGS_UPDATE", |inner, events| {
+            let current = self.shared.changes.load(Ordering::SeqCst) == start;
+            inner
+                .state
+                .set_notification_flags(flags, current.then_some(badges), events);
+        });
+    }
+
     // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
     // it. Only the pump changes entities, so the diff still holds at the swap.
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
         self.shared.preparing_ready.store(true, Ordering::SeqCst);
         let mut entities = Entities::from_ready(ready);
+        let derived = Derived::build(&entities, wall_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
-            inner.state.ready_diff(&entities)
+            inner.state.ready_diff(&entities, &derived)
         });
         #[cfg(test)]
         {
@@ -272,13 +305,19 @@ impl Store {
             }
             self.park();
         }
-        PreparedReady { entities, diff }
+        PreparedReady {
+            entities,
+            derived,
+            diff,
+        }
     }
 
     pub(crate) fn replace(&self, next: PreparedReady) {
         let old = self.write("READY", |inner, events| {
             self.shared.preparing_ready.store(false, Ordering::SeqCst);
-            inner.state.swap(next.entities, next.diff, events)
+            inner
+                .state
+                .swap(next.entities, next.derived, next.diff, events)
         });
         drop(old);
     }
@@ -331,9 +370,10 @@ impl Store {
     }
 
     pub(crate) fn restore(&self, cached: Entities) -> bool {
+        let derived = Derived::build(&cached, wall_millis());
         let restored = self.write("restore", |inner, events| {
             !self.shared.preparing_ready.load(Ordering::SeqCst)
-                && inner.state.restore(cached, events)
+                && inner.state.restore(cached, derived, events)
         });
         if !restored {
             tracing::info!(target: "akari_core::cache", reason = "ready_first", "cache not used");
@@ -361,12 +401,8 @@ impl Store {
     pub(crate) fn end_mutes(&self, after: Timestamp, until: Timestamp) {
         let ended = self.read(|inner| inner.state.mutes_ending(after, until));
         if !ended.is_empty() {
-            self.write("mutes", |_, events| {
-                events.extend(
-                    ended
-                        .into_iter()
-                        .map(|guild_id| StoreEvent::GuildSettingsChanged { guild_id }),
-                );
+            self.write("mutes", |inner, events| {
+                inner.state.end_mutes(&ended, until.unix_millis(), events);
             });
         }
     }
@@ -610,6 +646,46 @@ impl Store {
         })
     }
 
+    /// What the channel's row shows. `Badge::default()` for channels the user can't view
+    /// and for kinds without messages, such as categories.
+    pub fn channel_badge(&self, channel: ChannelId) -> Badge {
+        self.read(|inner| inner.state.channel_badge(channel))
+    }
+
+    /// The badges of `ids`, in the order given, in one read.
+    pub fn channel_badges(&self, ids: &[ChannelId]) -> Vec<Badge> {
+        self.read(|inner| {
+            ids.iter()
+                .map(|id| inner.state.channel_badge(*id))
+                .collect()
+        })
+    }
+
+    /// The badges of `ids`, in the order given, in one read.
+    pub fn guild_badges(&self, ids: &[GuildId]) -> Vec<Badge> {
+        self.read(|inner| ids.iter().map(|id| inner.state.guild_badge(*id)).collect())
+    }
+
+    /// The sum over the guild's channels and joined threads that count for it. `unread` is
+    /// false while the guild is muted; its mentions stay.
+    pub fn guild_badge(&self, guild: GuildId) -> Badge {
+        self.read(|inner| inner.state.guild_badge(guild))
+    }
+
+    /// DMs and group DMs with unread mentions, the newest message first: the rail's DM
+    /// icons. Every message in an unmuted DM counts as a mention.
+    pub fn unread_private_channels(&self) -> Vec<Arc<Channel>> {
+        self.read(|inner| inner.state.unread_private_channels())
+    }
+
+    /// Where the user stopped reading the channel, and its unread mentions. `None` while there
+    /// is none: Discord sent none and no message or ack has come since, so a guild channel
+    /// counts as read up to when the user joined and a DM until its next message. One the
+    /// store started itself is `estimated`.
+    pub fn read_state(&self, channel: ChannelId) -> Option<ReadState> {
+        self.read(|inner| inner.state.read_state(channel))
+    }
+
     /// A guild channel, category, thread, DM or group DM.
     pub fn channel(&self, id: ChannelId) -> Option<Arc<Channel>> {
         self.read(|inner| inner.state.channel(id))
@@ -651,7 +727,12 @@ impl Store {
     /// DMs and group DMs as the DM list shows them: the latest conversation first. One
     /// without messages counts from when it was created.
     pub fn private_channel_list(&self) -> Vec<Arc<Channel>> {
-        order::private_channel_order(self.read(|inner| inner.state.private_channels()))
+        let listed = self
+            .read(|inner| inner.state.private_channels())
+            .into_iter()
+            .filter(|channel| !channel.message_request && !channel.spam)
+            .collect();
+        order::private_channel_order(listed)
     }
 
     /// The current user's permissions in a guild channel or thread; in a thread,

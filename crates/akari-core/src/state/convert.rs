@@ -90,6 +90,7 @@ impl Guild {
             member_count: guild.member_count,
             large: guild.large,
             default_message_notifications: default_level(properties.default_message_notifications),
+            community: community(&properties.features),
         }
     }
 
@@ -111,8 +112,15 @@ impl Guild {
         if let Some(level) = update.default_message_notifications {
             next.default_message_notifications = default_level(level);
         }
+        if let Some(features) = update.features {
+            next.community = community(&features);
+        }
         next
     }
+}
+
+fn community(features: &[String]) -> bool {
+    features.iter().any(|feature| feature == "COMMUNITY")
 }
 
 // Discord's default when a guild sends none Akari knows.
@@ -178,11 +186,13 @@ impl Channel {
         } else {
             channel.recipient_ids.into_boxed_slice()
         };
+        let joined = channel.member.is_some();
         let thread = channel.thread_metadata.map(|metadata| {
             Box::new(thread_info(
                 metadata,
                 channel.message_count,
                 channel.member_count,
+                joined,
             ))
         });
         Self {
@@ -202,6 +212,8 @@ impl Channel {
             owner_id: channel.owner_id,
             thread,
             flags: channel.flags,
+            message_request: channel.is_message_request,
+            spam: channel.is_spam,
         }
     }
 
@@ -252,6 +264,8 @@ impl Channel {
         }
         next.owner_id = update.owner_id.or(next.owner_id);
         next.flags = update.flags.unwrap_or(next.flags);
+        next.message_request = update.is_message_request.unwrap_or(next.message_request);
+        next.spam = update.is_spam.unwrap_or(next.spam);
         let counts = |info: Option<&ThreadInfo>| {
             (
                 update
@@ -264,7 +278,8 @@ impl Channel {
         };
         if let Some(metadata) = update.thread_metadata {
             let (messages, members) = counts(next.thread.as_deref());
-            next.thread = Some(Box::new(thread_info(metadata, messages, members)));
+            let joined = next.thread.as_deref().is_some_and(|info| info.joined);
+            next.thread = Some(Box::new(thread_info(metadata, messages, members, joined)));
         } else if let Some(info) = next.thread.as_deref_mut() {
             (info.message_count, info.member_count) = counts(Some(info));
         }
@@ -276,8 +291,10 @@ fn thread_info(
     metadata: model::ThreadMetadata,
     message_count: Option<u32>,
     member_count: Option<u32>,
+    joined: bool,
 ) -> ThreadInfo {
     ThreadInfo {
+        joined,
         archived: metadata.archived,
         locked: metadata.locked,
         auto_archive_duration: metadata.auto_archive_duration,

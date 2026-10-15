@@ -9,7 +9,9 @@ mod limiter;
 mod outgoing;
 mod partial;
 mod payload;
+mod read_state;
 mod ready;
+mod relationship;
 pub(crate) mod session;
 mod settings;
 pub(crate) mod settings_proto;
@@ -26,7 +28,11 @@ pub use hello::Hello;
 pub use outgoing::{GatewayCommand, GuildSubscription, MemberLists, PresenceStatus};
 pub use partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
 pub use payload::{DecodeError, DispatchEvent, GatewayEvent, decode};
+pub use read_state::{
+    ChannelUnread, ChannelUnreadUpdate, MessageAck, PassiveUpdateV2, ReadStateEntry,
+};
 pub use ready::Ready;
+pub use relationship::{Relationship, RelationshipRemove, RelationshipUpdate};
 pub use settings::{
     ChannelOverride, MuteConfig, NotificationSettings, SettingsProto, SettingsProtoUpdate,
     UserGuildSettings, Versioned,

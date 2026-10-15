@@ -1,4 +1,5 @@
 mod account;
+mod badges;
 mod cache;
 mod client;
 mod contents;

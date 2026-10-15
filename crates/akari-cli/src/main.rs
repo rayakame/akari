@@ -6,11 +6,13 @@ mod host;
 mod keychain;
 mod login;
 mod messages;
+mod read_state;
 mod session;
 
 use std::borrow::Cow;
 use std::error::Error;
 use std::io::IsTerminal as _;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -40,6 +42,9 @@ enum Command {
     Logout,
     /// Connect to the gateway with the stored login and print a summary of READY.
     Connect(ConnectArgs),
+    /// Print what Discord sent and what Akari has for one channel's unread state and
+    /// mentions: IDs, flags and counts, no names or message content.
+    ReadState(ReadStateArgs),
     #[command(flatten)]
     Session(SessionCommand),
 }
@@ -66,6 +71,19 @@ struct ConnectArgs {
     /// Set this session's status after READY.
     #[arg(long, value_enum)]
     status: Option<connect::Status>,
+}
+
+#[derive(Args)]
+struct ReadStateArgs {
+    channel_id: u64,
+    /// The app's disk cache file (`<user ID>.sqlite`) to compare with READY. Akari reads a
+    /// copy; quit the app first.
+    #[arg(long)]
+    cache: Option<PathBuf>,
+    /// Stay connected and print the channel's new and deleted messages and badge changes
+    /// until Ctrl+C.
+    #[arg(long)]
+    watch: bool,
 }
 
 #[tokio::main]
@@ -97,6 +115,14 @@ async fn main() -> ExitCode {
                 status: args.status,
             };
             connect::run(&client, &store, options).await
+        }
+        Command::ReadState(args) => {
+            let options = read_state::Options {
+                channel_id: args.channel_id,
+                cache: args.cache,
+                watch: args.watch,
+            };
+            read_state::run(&client, &store, options).await
         }
         Command::Session(command) => messages::run(&client, &store, command).await,
     }

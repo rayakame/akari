@@ -57,25 +57,30 @@ Two details:
 | Dispatch | Model | Store |
 |---|---|---|
 | READY_SUPPLEMENTAL | `ReadySupplemental` | See [below](#ready_supplemental) |
-| GUILD_CREATE | `GatewayGuild` | A new or returning guild: `GuildAdded` with its channels, threads and the current user's member. A known guild is replaced: `GuildUpdated`, `CurrentMemberUpdated` and channel events for what changed. An unavailable guild: `GuildUnavailable` |
+| GUILD_CREATE | `GatewayGuild` | A new or returning guild: `GuildAdded` with its channels, threads and the current user's member. A known guild is replaced: `GuildUpdated`, `CurrentMemberUpdated` and channel events for what changed; a known channel keeps its `last_message_id` if that is newer. An unavailable guild: `GuildUnavailable` |
 | GUILD_UPDATE | `GuildUpdate` | `GuildUpdated` if something changed (including `default_message_notifications`). Roles are replaced only if the update carries them |
 | GUILD_DELETE | `GuildDelete` | With `unavailable`: an outage, `GuildUnavailable`. Without: the user left or was removed, `GuildRemoved`. Both drop the guild's channels, threads, member and message windows |
 | GUILD_ROLE_CREATE, GUILD_ROLE_UPDATE | `GuildRoleEvent` | The role is added or replaced: `GuildUpdated` |
 | GUILD_ROLE_DELETE | `GuildRoleDelete` | `GuildUpdated` |
 | GUILD_MEMBER_UPDATE | `GuildMemberUpdate` | Only for the current user: `CurrentMemberUpdated`. Users also get it for friends and DM partners; those are skipped |
-| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer |
+| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer. A thread in a forum or media channel also raises its parent's `last_message_id` to the thread's ID, without an event: a new post is the forum's newest "message" |
 | CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it |
 | CHANNEL_DELETE, THREAD_DELETE | `ChannelDelete` | `ChannelRemoved`, also for the threads of a deleted channel. CHANNEL_DELETE "will be partial" for private channels and THREAD_DELETE has only `id`, `guild_id`, `parent_id` and `type`, so only those are read |
-| MESSAGE_CREATE | `Message` | Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
+| MESSAGE_CREATE | `Message` | Counts toward the channel's read state first: a message of the current user reads the channel up to it (not a poll result), and others can raise its mention count ([read-states.md](read-states.md)). Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
-| NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; no event |
+| NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; only the badges that change send events |
+| MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([read-states.md](read-states.md)): `BadgeChanged`, and `GuildBadgeChanged` if the guild's badge changed. Acks of other read state types are ignored |
+| CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without a channel event; a channel that turns unread sends `BadgeChanged` ([read-states.md](read-states.md#badges)). A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
+| RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Keep the blocked and ignored users, whose messages never count as mentions. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
-`debug` level with its IDs.
+`debug` level with its IDs. A change that moves a badge (a message, an ack, settings, roles,
+the member, a channel's overwrites) also sends `BadgeChanged` and `GuildBadgeChanged` after its
+own events ([read-states.md](read-states.md#badges)).
 
 GUILD_CREATE and GUILD_DELETE (and READY's diff) also send `ServerListChanged` after their own
 events when the server list changed: a guild joined, left, went down or came back.
@@ -104,7 +109,10 @@ captures READY.
 
 User accounts "are only synced threads they have been added to"
 ([gateway guild](https://docs.discord.food/gateway/gateway-events#gateway-guild-object)).
-The store keeps the joined threads from READY and whatever THREAD_CREATE brings. The full
+The store keeps the joined threads from READY and whatever THREAD_CREATE brings.
+`ThreadInfo::joined` is true for READY's and GUILD_CREATE's threads, and for a THREAD_CREATE
+that carries the user's thread `member`; only joined threads count toward their guild's badge.
+Leaving or joining a thread elsewhere (THREAD_MEMBER_UPDATE) isn't decoded yet. The full
 thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
 `threads: true`. Akari's guild subscriptions ask for it, but THREAD_LIST_SYNC isn't decoded
 yet, so the store ignores it. Losing access to a channel doesn't
@@ -113,13 +121,41 @@ they stay in the store until the next session.
 
 ## Large guilds
 
-For user accounts, the gateway stops "sending non-stateful events for guilds without a
+The reference says the gateway stops "sending non-stateful events for guilds without a
 subscription" once a guild has more members than `large_threshold`, 250 by default
 ([Identify](https://docs.discord.food/gateway/gateway-events#identify-structure)). Gateway
-guilds over the threshold are marked `large`, and `state::Guild::large` exposes the flag.
-Akari subscribes every guild with a viewed channel, like the official client, so live
-messages arrive there too ([gateway.md](gateway.md#guild-subscriptions)). **Unverified**
-whether a guild under the threshold needs it.
+guilds over the threshold are marked `large`, and `state::Guild::large` exposes the flag. In
+practice the line is higher: guilds of up to 75,000 members are subscribed automatically on
+connect (discord.py-self), and an observation on 2026-10-15 agrees
+([gateway.md](gateway.md#guild-subscriptions)). Akari subscribes every guild with a viewed
+channel, like the official client, so live messages arrive in the biggest ones too.
+
+Identify sends `PASSIVE_GUILD_UPDATE_V2` (bit 14), so guilds without a subscription send
+[PASSIVE_UPDATE_V2](https://docs.discord.food/gateway/gateway-events#passive-update-v2)
+"periodically" instead of CHANNEL_UNREAD_UPDATE, which then comes only for directory
+channels. It carries only what changed: `updated_channels` (each channel's `id`,
+`last_message_id` and `last_pin_timestamp`), voice states and their members. Akari decodes
+`guild_id` and each channel's `id` and `last_message_id`, skipping a channel entry that
+doesn't parse, and the store raises those channels' `last_message_id`.
+
+Observed on 2026-10-15 with akari-cli on a test account:
+
+- Only the account's server over 75,000 members sent PASSIVE_UPDATE_V2, also when Akari had
+  sent no op 37 at all. The servers of 250 to 75,000 members sent none.
+- With that server's channels marked read just before, it came 4 times in 20 minutes, 4 to 6
+  minutes apart, and once in a second run. In an earlier run, with all its channels already
+  unread, none came in 10 minutes. So it most likely comes when a channel goes from read to
+  unread, not for every message (**unverified**). A channel then gets no further update until
+  it has been read again, so the update must never be undone by anything but an ack or READY.
+- CHANNEL_UNREAD_UPDATE came twice in a 10-minute run with bit 14 set and not at all in a
+  20-minute one, although the account has no directory channels. Where it came from is
+  **unverified**.
+
+## Read states
+
+The store keeps READY's channel read states and changes them with MESSAGE_ACK, MESSAGE_CREATE
+and the unread updates, and keeps every channel's and guild's badge as it goes; the rules are
+in [read-states.md](read-states.md).
 
 ## The state store
 
@@ -219,8 +255,9 @@ so they live in the core.
 - **`Store::private_channel_list`**: the DM list. The latest conversation comes first, by
   `last_message_id`, or by the channel's own ID (its creation time) when it has none; ties
   by channel ID, newest first. The official client sorts the same way after the user's
-  favorites, which are in the settings proto. It also leaves out message requests and
-  conversations marked as spam; Akari lists them for now (see the open points).
+  favorites, which are in the settings proto. Like it, Akari leaves out message requests
+  and conversations marked as spam (`is_message_request`, `is_spam` from READY,
+  CHANNEL_CREATE and CHANNEL_UPDATE; accepting a request brings the DM back).
 
 Every channel keeps `last_message_id` from READY, CHANNEL_CREATE, CHANNEL_UPDATE and
 MESSAGE_CREATE. In forum and media channels it holds the newest post's thread ID, so its
@@ -242,7 +279,4 @@ doesn't bring an event for every active channel.
   without a window: the channel, the message ID, and whether it mentions the current user
   (directly, through a role, or `@everyone`). Each channel's `last_message_id` is already
   tracked; only that event is missing.
-- **Message requests and spam DMs.** READY marks them with `is_message_request` and
-  `is_spam`, and the official client keeps them out of the DM list. The store doesn't keep
-  those flags yet, so `private_channel_list` includes them.
 - **THREAD_LIST_SYNC**, which guild subscriptions bring, for the full thread list.

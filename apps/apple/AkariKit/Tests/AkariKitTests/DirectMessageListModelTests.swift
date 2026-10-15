@@ -116,7 +116,11 @@ struct DirectMessageListModelTests {
 
         model.apply(EventBatch([.ready]))
 
-        #expect(store.reads == [.privateChannelList, .channels([id(1)]), .user(id(10))])
+        #expect(
+            store.reads == [
+                .privateChannelList, .channels([id(1)]), .user(id(10)), .channelBadges([id(1)]),
+                .unreadPrivateChannels,
+            ])
         #expect(model.conversations.map(\.name) == ["New"])
     }
 
@@ -130,5 +134,67 @@ struct DirectMessageListModelTests {
 
         #expect(model.conversations.map(\.id) == [id(2)])
         #expect(store.reads == [.privateChannelList])
+    }
+
+    @Test
+    func dmRowsCarryTheirCount() {
+        store.update { state in
+            state.talk(dm(1, with: 10), dm(2, with: 20), with: user(10), user(20))
+            state.channelBadges = [id(2): badge(mentions: 3)]
+        }
+
+        let model = loaded()
+
+        #expect(model.badge(of: id(2)) == badge(mentions: 3))
+        #expect(model.badge(of: id(1)) == noBadge)
+    }
+
+    @Test
+    func unreadDirectMessagesAppearInTheRailNewestFirst() {
+        store.update { state in
+            state.talk(
+                dm(1, with: 10), dm(2, with: 20), with: user(10, name: "Ann"), user(20, name: "Bo"))
+            state.unreadPrivateChannels = [id(2), id(1)]
+        }
+
+        let model = loaded()
+
+        #expect(model.unread.map(\.id) == [id(2), id(1)])
+        #expect(model.unread.map(\.name) == ["Bo", "Ann"])
+    }
+
+    @Test
+    func aBadgeEventRereadsOnlyItsRowAndTheRail() {
+        store.update { state in
+            state.talk(dm(1, with: 10), dm(2, with: 20), with: user(10), user(20))
+        }
+        let model = loaded()
+        store.update { state in
+            state.channelBadges[id(1)] = badge(mentions: 1)
+            state.unreadPrivateChannels = [id(1)]
+        }
+
+        model.apply(EventBatch([.badgeChanged(channelId: id(1), guildId: nil)]))
+
+        #expect(store.reads == [.channelBadges([id(1)]), .unreadPrivateChannels])
+        #expect(model.badge(of: id(1)) == badge(mentions: 1))
+        #expect(model.unread.map(\.id) == [id(1)])
+    }
+
+    @Test
+    func aConversationMovingUpReordersTheRail() {
+        store.update { state in
+            state.talk(dm(1, with: 10), dm(2, with: 20), with: user(10), user(20))
+            state.unreadPrivateChannels = [id(1), id(2)]
+        }
+        let model = loaded()
+        store.update { state in
+            state.privateChannels = [id(2), id(1)]
+            state.unreadPrivateChannels = [id(2), id(1)]
+        }
+
+        model.apply(EventBatch([.channelUpdated(channelId: id(2), guildId: nil)]))
+
+        #expect(model.unread.map(\.id) == [id(2), id(1)])
     }
 }

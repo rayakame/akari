@@ -130,8 +130,55 @@
       { "id": "300000000000000010", "type": 1, "last_message_id": "400000000000000020", "flags": 0, "recipient_ids": ["100000000000000002"], "is_message_request": false, "is_message_request_timestamp": null, "is_spam": false, "safety_warnings": [] },
       { "id": "300000000000000011", "type": 3, "name": "Weekend plans", "icon": null, "owner_id": "100000000000000001", "last_message_id": "400000000000000021", "flags": 0, "recipient_ids": ["100000000000000002", "100000000000000003"], "blocked_user_warning_dismissed": false }
     ],
-    "relationships": [],
-    "read_state": { "entries": [], "partial": false, "version": 0 },
+    "relationships": [
+      {
+        "id": "100000000000000003",
+        "user_id": "100000000000000003",
+        "type": 1,
+        "nickname": null,
+        "user_ignored": true,
+        "since": "2026-01-02T03:04:05.000000+00:00"
+      },
+      {
+        "id": "100000000000000004",
+        "user_id": "100000000000000004",
+        "type": 2,
+        "nickname": null,
+        "user_ignored": false
+      }
+    ],
+    "read_state": {
+      "entries": [
+        {
+          "id": "300000000000000002",
+          "last_message_id": "400000000000000002",
+          "mention_count": 2,
+          "last_pin_timestamp": "1970-01-01T00:00:00+00:00",
+          "last_viewed": 4300,
+          "flags": 1
+        },
+        {
+          "id": "300000000000000020",
+          "last_message_id": "400000000000000030",
+          "last_pin_timestamp": "1970-01-01T00:00:00+00:00",
+          "flags": 3
+        },
+        {
+          "id": "300000000000000010",
+          "last_message_id": "400000000000000020",
+          "mention_count": 0,
+          "last_viewed": 4301
+        },
+        {
+          "id": "200000000000000001",
+          "read_state_type": 1,
+          "last_acked_id": "500000000000000001",
+          "badge_count": 0
+        }
+      ],
+      "partial": false,
+      "version": 4321
+    },
     "user_guild_settings": {
       "entries": [
         {

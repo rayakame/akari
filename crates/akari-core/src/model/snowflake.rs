@@ -33,7 +33,6 @@ impl<M> Snowflake<M> {
         Self::new((since_epoch << TIMESTAMP_SHIFT) | (sequence & SEQUENCE_MASK))
     }
 
-    #[cfg(test)]
     pub(crate) fn unix_millis(self) -> i64 {
         i64::try_from(self.value >> TIMESTAMP_SHIFT).unwrap_or(i64::MAX - DISCORD_EPOCH)
             + DISCORD_EPOCH

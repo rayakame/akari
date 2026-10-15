@@ -21,6 +21,10 @@ final class FakeStore: Store, @unchecked Sendable {
         var messages: [MessageId: Message] = [:]
         var lengthLimit: UInt32 = 2000
         var slowmodes: [ChannelId: Slowmode] = [:]
+        var channelBadges: [ChannelId: Badge] = [:]
+        var guildBadges: [GuildId: Badge] = [:]
+        var readStates: [ChannelId: ReadState] = [:]
+        var unreadPrivateChannels: [ChannelId] = []
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -158,5 +162,25 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func slowmode(channelId: ChannelId) -> Slowmode? {
         read(.slowmode(channelId)) { $0.slowmodes[channelId] }
+    }
+
+    override func channelBadges(ids: [ChannelId]) -> [ChannelBadge] {
+        read(.channelBadges(ids)) { state in
+            ids.map { ChannelBadge(channelId: $0, badge: state.channelBadges[$0] ?? noBadge) }
+        }
+    }
+
+    override func guildBadges(ids: [GuildId]) -> [GuildBadge] {
+        read(.guildBadges(ids)) { state in
+            ids.map { GuildBadge(guildId: $0, badge: state.guildBadges[$0] ?? noBadge) }
+        }
+    }
+
+    override func readState(channelId: ChannelId) -> ReadState? {
+        read(.readState(channelId)) { $0.readStates[channelId] }
+    }
+
+    override func unreadPrivateChannels() -> [ChannelId] {
+        read(.unreadPrivateChannels) { $0.unreadPrivateChannels }
     }
 }

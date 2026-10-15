@@ -172,4 +172,16 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     override func slowmode(channelId: ChannelId) -> Slowmode? {
         slowmode
     }
+
+    override func channelBadges(ids: [ChannelId]) -> [ChannelBadge] {
+        ids.map { ChannelBadge(channelId: $0, badge: Badge(unread: false, mentions: 0)) }
+    }
+
+    override func guildBadges(ids: [GuildId]) -> [GuildBadge] {
+        ids.map { GuildBadge(guildId: $0, badge: Badge(unread: false, mentions: 0)) }
+    }
+
+    override func unreadPrivateChannels() -> [ChannelId] {
+        []
+    }
 }
