@@ -84,8 +84,8 @@ Observed in the official desktop client on 2026-10-14:
   channel the user didn't pick shows unread only when it has mentions.
 - **Server Guide resource channels** never look unread and never show a count, in any server
   (from the official client's code; observed 2026-10-15 on a channel Discord reports unread
-  with a mention). **Unverified:** whether the official client lists them; the docs say it
-  doesn't, Akari does.
+  with a mention). The official client does list them in the normal channel list (observed
+  2026-10-15); only the badge is left out. Akari lists them too.
 
 *Akari: an unread row has the bright name and the 4 × 8 pill on the column's left edge (not
 while selected), and a row with mentions the red badge at its right end, as on the rail; DM
@@ -96,6 +96,13 @@ rows the same, without the pill.*
 - Voice channels list the people connected to them underneath.
 - Clicking a text or announcement channel opens its messages. Clicking a voice channel joins
   it.
+
+### Context menu
+
+The first item of a channel row's menu is "Mark As Read" (observed 2026-10-15 in the German
+client as "Als gelesen markieren"; the English label is unconfirmed). It is disabled, not
+hidden, when the channel has nothing unread. *Akari: later, with acks
+([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).*
 
 ### In Akari
 
@@ -129,6 +136,9 @@ At home the column holds the DM list instead of a server's channels.
   second line ("3 Members"). **Unverified**: the exact wording of the member line.
 - A conversation's name is the other person's display name. A group shows its own name, or
   the members' names separated by commas when it has none.
+- The first item of a row's context menu is "Mark As Read" (German: "Als gelesen markieren";
+  the English label is unconfirmed). With nothing unread it is disabled, not hidden (observed
+  2026-10-15). *Akari: later, with acks.*
 
 ### DM order
 

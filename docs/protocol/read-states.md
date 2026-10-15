@@ -59,6 +59,55 @@ ordinary message there.
 - An ack for a channel without a read state starts one. Acks of other read state types are
   ignored.
 
+## Acks in the official client
+
+What the official web client sends when the user reads, observed on 2026-10-15 in the
+browser's Network list (German UI, a second account, the main account posting from a phone).
+*Akari: sends none of this yet.*
+
+**One channel.** `POST /channels/{channel_id}/messages/{message_id}/ack`, answered 200, with
+the body
+
+```json
+{"token":null,"last_viewed":4306}
+```
+
+No `flags`, no `manual`. `last_viewed` is the number of days since the Discord epoch
+(2015-01-01 UTC). It was 4306 at 15:13 and at 19:58 UTC on 2026-10-15, so the client rounds up
+or to the nearest day (rounding down would give 4305). Which of the two is open until an ack
+before 12:00 UTC is seen, where they differ.
+
+**When it goes out:**
+
+- About 1–2 s after the user opens an unread channel. Opening a read channel sends nothing.
+- At the bottom of the list, a burst of messages (five in quick succession) gives one ack,
+  about 2 s after the last.
+- Not while the list is scrolled up, while another app is focused, or while the window is
+  minimized. Scrolling back down, focusing the browser again or restoring the window sends
+  nothing either; the ack goes out on the next click (or key) in the client.
+- Escape sends one plain ack with the same body, and nothing when the channel is read.
+- Posting in a forum sends one plain ack. The forum stays unread, also after a reload.
+
+**Many channels.** Shift+Escape (the server) and a server's or folder's "Mark As Read" send
+`POST /read-states/ack-bulk`, answered 204:
+
+```json
+{"read_states":[{"channel_id":"…","message_id":"…","read_state_type":0}]}
+```
+
+- The entries are the server's unread channels plus its forum channel(s). The forum was in
+  every bulk, also when nothing had been posted there since the last one. Read channels and
+  threads the user hasn't joined (such as a new forum post) have no entry.
+- Shift+Escape at Home sends nothing.
+- **Message IDs:** each channel's newest message ID. A forum's entry is a snowflake with only
+  a timestamp (the low 22 bits are zero) for the moment of the click.
+- **Chunks:** a 75,000+ member server marked read right after a reload, never opened, gave
+  one request with exactly 50 entries. Most carried each channel's newest message ID; 6 shared
+  one "now" snowflake. Whether 50 is a cap per request or that server's number of unread
+  channels is **open**. [docs.discord.food](https://docs.discord.food/topics/read-state)
+  documents no limit. One mark-as-read gave 254 MESSAGE_ACK events in another session, which
+  points to chunks.
+
 ## Mentions
 
 Discord doesn't send a channel's new mention count; clients count it from MESSAGE_CREATE
@@ -159,7 +208,9 @@ names or message content.
 
 ## Open points
 
-- **Acks:** Akari doesn't acknowledge channels yet, nor mark them read.
+- **Acks:** Akari doesn't acknowledge channels yet, nor mark them read; what the official
+  client does is [above](#acks-in-the-official-client). Open there: `last_viewed` rounding
+  and the size of a bulk.
 - **Mentions in a voice channel's chat:** counted, but what the official client shows for
   them is **unverified**.
 - **Joining or leaving a thread elsewhere** (THREAD_MEMBER_UPDATE) isn't decoded; such a

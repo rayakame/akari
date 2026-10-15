@@ -230,10 +230,31 @@ bar says "Some messages may be missing" instead.
   that grows or shrinks with them doesn't move the text being read. Akari stops counting while
   the window is hidden or minimized and catches up when it shows again.
 
+## The new messages line and the unread bar
+
+Observed in the official web client on 2026-10-15 (German UI).
+
+- **An unread channel opens at the bottom**, at the present, not at the first unread message.
+- **The line:** a red (`#d22d39`) line with a "NEW" tag at its right end, in the gap above the
+  first unread message. It is a line of its own between two messages, not part of either.
+- **It also appears while the user reads.** At the bottom, the first of several new messages
+  gets the line above it. The ack that follows doesn't remove it. It goes as soon as the user
+  sends a message.
+- **The bar:** a blue bar at the top of the list, "1 new message since 17:13" (the German UI
+  said it in German; the English wording is a translation), with a "Mark As Read" button on
+  its right. It showed while the list was scrolled up and the new message was below the
+  view. With three unread messages all visible there was no bar.
+- **Escape while scrolled up** jumps to the bottom and marks the channel read
+  ([shortcuts.md](shortcuts.md)).
+- **Not observed yet:** the line next to a day divider, the line after Escape or after
+  leaving the channel and coming back, and opening a channel with 80 or more unread messages
+  and clicking the bar.
+
+*Akari: neither the line nor the bar exists yet; they come with acks
+([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).*
+
 ## Later
 
-- A red (`#d22d39`) "new messages" line with a "NEW" tag at its right end, at the first unread
-  message.
 - Emoji images, embeds and images.
 - Components V2 layouts ([messages.md](../protocol/messages.md#components-v2)). Until Akari
   renders them, such a message shows one muted placeholder line where its content would be.
