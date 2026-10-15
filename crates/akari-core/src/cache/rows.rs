@@ -13,8 +13,8 @@ use crate::model::{
 use crate::state::{
     Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
     EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
-    Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
-    Sticker, ThreadInfo, Unreads, User,
+    Message, MessageReference, NotificationLevel, PermissionOverwrite, ReadState,
+    ReferencedMessage, Role, Sticker, ThreadInfo, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -927,6 +927,32 @@ impl From<FolderRow> for FolderEntry {
             name: row.name,
             color: row.color,
             guilds: row.guilds.into_iter().map(Snowflake::new).collect(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct ReadStateRow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    acked: Option<u64>,
+    #[serde(default)]
+    mentions: u32,
+}
+
+impl From<&ReadState> for ReadStateRow {
+    fn from(state: &ReadState) -> Self {
+        Self {
+            acked: id(state.acked),
+            mentions: state.mentions,
+        }
+    }
+}
+
+impl ReadStateRow {
+    pub(super) fn into_read_state(self) -> ReadState {
+        ReadState {
+            acked: snowflake(self.acked),
+            mentions: self.mentions,
         }
     }
 }

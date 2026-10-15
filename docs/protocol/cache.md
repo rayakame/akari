@@ -2,8 +2,10 @@
 
 `akari_core::cache` keeps what a cold start draws before the gateway connects: the guilds,
 channels, roles and the current member (for permissions), the DM recipients, the current
-user, the user's settings (server folders and order, mutes, notification levels), and the
-newest messages of recently opened channels. A launch shows the last session
+user, the user's settings (server folders and order, mutes, notification levels), the read
+states (where the user stopped reading each channel, and its mentions), and the newest
+messages of recently opened channels. The badges are computed from them at the restore, so a
+cold start shows the last session's unread dots and counts. A launch shows the last session
 from it at once; READY then brings only what changed. Linux and Android get it with the core.
 
 ## What is never cached
@@ -14,6 +16,8 @@ from it at once; READY then brings only what changed. Linux and Android get it w
   session (no resume across launches). Each holds what the user typed or needs the exact state
   at the end of a session, so each is its own decision for later.
 - Images. Akari loads none yet.
+- Blocked and ignored users. They only decide which live messages count as mentions, and
+  none arrive before READY brings them again.
 
 ## One file per account
 
@@ -41,13 +45,16 @@ every other target builds rusqlite's bundled copy.
   `channels`, `windows` (a cached channel and when it was last viewed), `messages` (per
   channel and ID), `guild_settings` (per guild; `guild_id` 0 holds the DM settings),
   `user_settings` (per key: `folders`, absent when the settings proto had none, and
-  `notification_flags`) and `read_states` (empty until read states are kept). Each row is its key columns plus a `data` column of JSON in the cache's own
+  `notification_flags`) and `read_states` (per channel: the acknowledged message and the
+  mention count). Each row is its key columns plus a `data` column of JSON in the cache's own
   row types, never the wire structs or the state types, so either can change without breaking
   files already written. A field added later reads old rows through its default.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
-- **Version:** `PRAGMA user_version`, 2 since the settings tables (version 1 files are deleted
-  once, so the first launch after that update starts empty). A file with any other version is
+- **Version:** `PRAGMA user_version`, 3 since the read states and threads' `joined` (older
+  files are deleted once, so the first launch after that update starts empty; a version 2 file
+  would restore without read states, and every channel since the join would look unread until
+  READY). A file with any other version is
   deleted and started empty, never migrated. The cache refills from Discord, so a migration
   would only add risk.
 

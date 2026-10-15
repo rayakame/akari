@@ -20,14 +20,15 @@ pub(crate) use self::caches::Caches;
 pub(crate) use self::flusher::Flusher;
 use self::rows::{
     ChannelRow, CurrentUserRow, FolderRow, GuildRow, GuildSettingsRow, MemberRow, MessageRow,
-    UserRow,
+    ReadStateRow, UserRow,
 };
 pub(crate) use self::snapshot::Snapshot;
 pub(crate) use self::thread::CacheThread;
 use crate::model::{ChannelId, GuildId, Snowflake, UserId};
 use crate::state::apply::Entities;
 use crate::state::{
-    Channel, CurrentUser, Delivery, FolderEntry, Guild, GuildSettings, Member, Message, User,
+    Channel, CurrentUser, Delivery, FolderEntry, Guild, GuildSettings, Member, Message, ReadState,
+    User,
 };
 
 const LOG: &str = "akari_core::cache";
@@ -274,6 +275,13 @@ impl Cache {
                 .insert(guild, Arc::new(row.into_settings()));
             Some(())
         })?;
+        skipped += self.each("SELECT channel_id, data FROM read_states", |id, data| {
+            let row: ReadStateRow = serde_json::from_str(data).ok()?;
+            entities
+                .read_states
+                .insert(ChannelId::new(id), row.into_read_state());
+            Some(())
+        })?;
         let mut statement = self.conn.prepare("SELECT key, data FROM user_settings")?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -496,6 +504,27 @@ impl Writer<'_> {
         self.delete(
             "DELETE FROM guild_settings WHERE guild_id = ?1",
             guild.map_or(DM_SETTINGS, GuildId::get),
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn put_read_state(
+        &mut self,
+        channel: ChannelId,
+        state: &ReadState,
+    ) -> rusqlite::Result<()> {
+        let data = json(&ReadStateRow::from(state))?;
+        self.put(
+            "INSERT OR REPLACE INTO read_states (channel_id, data) VALUES (?1, ?2)",
+            channel.get(),
+            data,
+        )
+    }
+
+    pub(crate) fn delete_read_state(&mut self, channel: ChannelId) -> rusqlite::Result<()> {
+        self.delete(
+            "DELETE FROM read_states WHERE channel_id = ?1",
+            channel.get(),
         )?;
         Ok(())
     }

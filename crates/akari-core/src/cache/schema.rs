@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::model::UserId;
 
 // A file with any other version is deleted and started over, never migrated.
-pub(super) const CURRENT: i32 = 2;
+pub(super) const CURRENT: i32 = 3;
 
 pub(super) fn create(conn: &Connection, user: UserId) -> rusqlite::Result<()> {
     conn.execute_batch(&format!(

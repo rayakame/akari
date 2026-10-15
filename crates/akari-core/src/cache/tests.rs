@@ -6,11 +6,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::snapshot::Flushed;
 use super::*;
+use crate::gateway::DispatchEvent;
 use crate::model::{
     ChannelType, MessageReferenceType, MessageType, OverwriteType, Permissions, PremiumType,
     Snowflake, StickerFormatType, Timestamp,
 };
-use crate::state::CachedWindow;
 use crate::state::apply::Entities;
 use crate::state::{
     Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
@@ -18,6 +18,7 @@ use crate::state::{
     Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
     Sticker, ThreadInfo, Unreads, User, UserSettings,
 };
+use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
 pub(crate) struct TempDir(PathBuf);
 
@@ -1276,4 +1277,191 @@ async fn a_forgotten_account_is_not_recreated_by_its_session() {
     assert!(caches.thread(UserId::new(ME)).is_none());
     assert!(!dir.file(ME).exists());
     assert!(caches.account(UserId::new(ME)).is_some());
+}
+
+fn with_read_states(mut entities: Entities) -> Entities {
+    entities.read_states.insert(
+        Snowflake::new(10),
+        ReadState {
+            acked: Some(Snowflake::new(1_000)),
+            mentions: 2,
+        },
+    );
+    entities.read_states.insert(
+        Snowflake::new(13),
+        ReadState {
+            acked: None,
+            mentions: 1,
+        },
+    );
+    entities
+}
+
+fn snapshot_of(entities: Entities) -> Snapshot {
+    Snapshot {
+        entities,
+        ..Snapshot::default()
+    }
+}
+
+#[tokio::test]
+async fn read_states_survive_a_restart() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let state = with_read_states(entities());
+    thread.flush(snapshot_of(state.clone())).await.unwrap();
+    drop(thread);
+
+    let read = open(&dir).read_entities().unwrap();
+
+    assert_eq!(read.skipped, 0);
+    assert_eq!(read.value.read_states, state.read_states);
+}
+
+#[tokio::test]
+async fn read_state_rows_hold_no_wire_types() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread
+        .flush(snapshot_of(with_read_states(entities())))
+        .await
+        .unwrap();
+    drop(thread);
+    let conn = raw(&dir.file(ME));
+    let mut statement = conn.prepare("SELECT data FROM read_states").unwrap();
+    let rows: Vec<String> = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+
+    let text = rows.join("\n");
+    assert_eq!(rows.len(), 2, "{text}");
+    assert!(text.contains("\"mentions\""), "{text}");
+    for wire in ["last_message_id", "mention_count", "read_state_type"] {
+        assert!(!text.contains(wire), "{wire} in {text}");
+    }
+}
+
+#[tokio::test]
+async fn a_restart_with_the_same_read_states_writes_nothing() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let state = with_read_states(entities());
+    thread.flush(snapshot_of(state.clone())).await.unwrap();
+    drop(thread);
+
+    let thread = started(&dir).await;
+    let flushed = thread.flush(snapshot_of(rebuilt(&state))).await.unwrap();
+
+    assert_eq!(flushed, Flushed::default());
+}
+
+#[tokio::test]
+async fn a_changed_read_state_writes_only_its_row() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let state = with_read_states(entities());
+    thread.flush(snapshot_of(state.clone())).await.unwrap();
+    let mut read = state.clone();
+    read.read_states.insert(
+        Snowflake::new(10),
+        ReadState {
+            acked: Some(Snowflake::new(1_001)),
+            mentions: 0,
+        },
+    );
+    let mut gone = read.clone();
+
+    let changed = thread.flush(snapshot_of(read)).await.unwrap();
+    gone.read_states = crate::state::ReadStates::default();
+    let deleted = thread.flush(snapshot_of(gone)).await.unwrap();
+
+    assert_eq!(
+        changed,
+        Flushed {
+            other: 1,
+            ..Flushed::default()
+        }
+    );
+    assert_eq!(
+        deleted,
+        Flushed {
+            deleted: 2,
+            ..Flushed::default()
+        }
+    );
+}
+
+fn fixture_entities(edit: impl FnOnce(&mut serde_json::Value)) -> (Entities, DispatchEvent) {
+    let mut payload: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/ready.json")).unwrap();
+    edit(&mut payload["d"]);
+    let ready = || match crate::gateway::decode(payload.to_string().as_bytes()) {
+        Ok(crate::gateway::GatewayEvent::Dispatch { event, .. }) => event,
+        other => panic!("not a dispatch: {other:?}"),
+    };
+    let DispatchEvent::Ready(decoded) = ready() else {
+        panic!("not READY");
+    };
+    (Entities::from_ready(*decoded), ready())
+}
+
+const FIXTURE_GENERAL: u64 = 300_000_000_000_000_002;
+const FIXTURE_GUILD: u64 = 200_000_000_000_000_001;
+
+async fn restored_from_the_cache(entities: Entities) -> Store {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    thread.flush(snapshot_of(entities)).await.unwrap();
+    drop(thread);
+    let store = Store::new(DEFAULT_LIMITS);
+    assert!(store.restore(open(&dir).read_entities().unwrap().value));
+    store
+}
+
+#[tokio::test]
+async fn a_restored_store_shows_badges_before_ready() {
+    let (entities, _) = fixture_entities(|_| {});
+
+    let store = restored_from_the_cache(entities).await;
+
+    let badge = store.channel_badge(Snowflake::new(FIXTURE_GENERAL));
+    assert_eq!((badge.unread, badge.mentions), (true, 2));
+    let badge = store.guild_badge(Snowflake::new(FIXTURE_GUILD));
+    assert_eq!((badge.unread, badge.mentions), (true, 2));
+}
+
+#[tokio::test]
+async fn ready_reports_only_badges_that_changed_since_the_cache() {
+    let (entities, _) = fixture_entities(|_| {});
+    let store = restored_from_the_cache(entities).await;
+    let subscription = store.subscribe();
+    let (_, ready) = fixture_entities(|data| {
+        data["read_state"]["entries"][0]["last_message_id"] = "400000000000000003".into();
+        data["read_state"]["entries"][0]["mention_count"] = 0.into();
+    });
+
+    store.apply(ready);
+
+    let mut badges = Vec::new();
+    while let Some(event) = futures_util::FutureExt::now_or_never(subscription.next()).flatten() {
+        match event {
+            StoreEvent::BadgeChanged { channel_id, .. } => {
+                badges.push(format!("BadgeChanged({})", channel_id.get()));
+            }
+            StoreEvent::GuildBadgeChanged { guild_id } => {
+                badges.push(format!("GuildBadgeChanged({})", guild_id.get()));
+            }
+            StoreEvent::Ready => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        badges,
+        [
+            format!("BadgeChanged({FIXTURE_GENERAL})"),
+            format!("GuildBadgeChanged({FIXTURE_GUILD})")
+        ]
+    );
 }

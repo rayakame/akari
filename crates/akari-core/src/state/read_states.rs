@@ -49,6 +49,14 @@ impl ReadStates {
         next
     }
 
+    pub(crate) fn channels(&self) -> &HashMap<ChannelId, ReadState> {
+        &self.channels
+    }
+
+    pub(crate) fn insert(&mut self, channel: ChannelId, state: ReadState) {
+        self.channels.insert(channel, state);
+    }
+
     pub(crate) fn get(&self, channel: ChannelId) -> Option<ReadState> {
         self.channels.get(&channel).copied()
     }
