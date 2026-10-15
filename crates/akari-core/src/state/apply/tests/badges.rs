@@ -595,3 +595,61 @@ fn an_accepted_message_request_comes_back() {
         [GROUP]
     );
 }
+
+fn not_an_admin(ready: &mut Value) {
+    ready["guilds"][0]["properties"]["owner_id"] = MIRA.to_string().into();
+    ready["merged_members"][0][0]["roles"] = json!([]);
+    read_general(ready);
+}
+
+fn hide_general() -> Value {
+    json!({
+        "id": GENERAL.to_string(),
+        "permission_overwrites": [{"id": G1.to_string(), "type": 0, "allow": "0", "deny": "1024"}]
+    })
+}
+
+#[test]
+fn hiding_a_channel_also_hides_its_threads() {
+    let mut state = ready_where(|ready| {
+        not_an_admin(ready);
+        ready["read_state"]["entries"][1]["mention_count"] = 1.into();
+    });
+    assert_eq!(channel_badge(&state, THREAD), badge(false, 1));
+
+    let events = apply(&mut state, "CHANNEL_UPDATE", hide_general());
+
+    assert_eq!(channel_badge(&state, THREAD), Badge::default());
+    assert!(
+        events.contains(&format!("BadgeChanged({THREAD})")),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn a_thread_created_later_follows_its_parent() {
+    let mut state = ready_where(not_an_admin);
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        fixture(include_str!(
+            "../../../../tests/fixtures/thread_create.json"
+        )),
+    );
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(AFTER_JOIN + 9, 300_000_000_000_000_021),
+    );
+    assert_eq!(
+        channel_badge(&state, 300_000_000_000_000_021),
+        badge(true, 1)
+    );
+
+    apply(&mut state, "CHANNEL_UPDATE", hide_general());
+
+    assert_eq!(
+        channel_badge(&state, 300_000_000_000_000_021),
+        Badge::default()
+    );
+}

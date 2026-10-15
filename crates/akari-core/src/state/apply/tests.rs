@@ -842,28 +842,27 @@ fn thread_scans() -> usize {
 }
 
 #[test]
-fn only_channels_that_can_hold_threads_are_scanned_for_them() {
+fn channel_writes_find_threads_without_scanning_every_channel() {
     let mut state = ready_state();
     let before = thread_scans();
-
-    let mut dm = fixture(include_str!(
-        "../../../tests/fixtures/channel_create_dm.json"
-    ));
-    apply(&mut state, "CHANNEL_CREATE", dm.clone());
-    dm["name"] = "renamed".into();
-    apply(&mut state, "CHANNEL_UPDATE", dm);
-    assert_eq!(thread_scans(), before, "a DM holds no threads");
 
     apply(
         &mut state,
         "CHANNEL_UPDATE",
         json!({"id": GENERAL.to_string(), "topic": "changed"}),
     );
-    assert_eq!(
-        thread_scans(),
-        before + 1,
-        "a text channel's threads follow it"
+    let mut created = fixture(include_str!(
+        "../../../tests/fixtures/channel_guild_text.json"
+    ));
+    created["id"] = "300000000000000040".into();
+    apply(&mut state, "CHANNEL_CREATE", created);
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        fixture(include_str!("../../../tests/fixtures/thread_create.json")),
     );
+
+    assert_eq!(thread_scans(), before);
 }
 
 pub(crate) fn on_next_diff(hook: impl FnOnce() + 'static) {

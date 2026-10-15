@@ -4,7 +4,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Mutex, mpsc};
 
-use super::apply::{Entities, ReadyDiff, State, wall_millis};
+use super::apply::{Derived, Entities, ReadyDiff, State, wall_millis};
 use super::badges::{Badge, Badges};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
@@ -24,7 +24,7 @@ const LONG_HOLD: Duration = Duration::from_millis(4);
 
 pub(crate) struct PreparedReady {
     entities: Entities,
-    badges: Badges,
+    derived: Derived,
     diff: Option<ReadyDiff>,
 }
 
@@ -261,6 +261,9 @@ impl Store {
                     });
                 }
             },
+            DispatchEvent::NotificationSettingsUpdate(settings) => {
+                self.set_notification_flags(settings.flags);
+            }
             event => {
                 let name = event.name();
                 self.write(name, |inner, events| inner.state.apply(event, events));
@@ -268,15 +271,32 @@ impl Store {
         }
     }
 
+    // New flags can move every badge. They are built from a copy before the write lock; a write
+    // in between means the copy is stale, and they are rebuilt under the lock instead.
+    fn set_notification_flags(&self, flags: u64) {
+        let start = self.shared.changes.load(Ordering::SeqCst);
+        let Some(next) = self.read(|inner| inner.state.with_notification_flags(flags)) else {
+            return;
+        };
+        let badges = Badges::build(&next, wall_millis());
+        drop(next);
+        self.write("NOTIFICATION_SETTINGS_UPDATE", |inner, events| {
+            let current = self.shared.changes.load(Ordering::SeqCst) == start;
+            inner
+                .state
+                .set_notification_flags(flags, current.then_some(badges), events);
+        });
+    }
+
     // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
     // it. Only the pump changes entities, so the diff still holds at the swap.
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
         self.shared.preparing_ready.store(true, Ordering::SeqCst);
         let mut entities = Entities::from_ready(ready);
-        let badges = Badges::build(&entities, wall_millis());
+        let derived = Derived::build(&entities, wall_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
-            inner.state.ready_diff(&entities, &badges)
+            inner.state.ready_diff(&entities, &derived)
         });
         #[cfg(test)]
         {
@@ -287,7 +307,7 @@ impl Store {
         }
         PreparedReady {
             entities,
-            badges,
+            derived,
             diff,
         }
     }
@@ -297,7 +317,7 @@ impl Store {
             self.shared.preparing_ready.store(false, Ordering::SeqCst);
             inner
                 .state
-                .swap(next.entities, next.badges, next.diff, events)
+                .swap(next.entities, next.derived, next.diff, events)
         });
         drop(old);
     }
@@ -350,10 +370,10 @@ impl Store {
     }
 
     pub(crate) fn restore(&self, cached: Entities) -> bool {
-        let badges = Badges::build(&cached, wall_millis());
+        let derived = Derived::build(&cached, wall_millis());
         let restored = self.write("restore", |inner, events| {
             !self.shared.preparing_ready.load(Ordering::SeqCst)
-                && inner.state.restore(cached, badges, events)
+                && inner.state.restore(cached, derived, events)
         });
         if !restored {
             tracing::info!(target: "akari_core::cache", reason = "ready_first", "cache not used");

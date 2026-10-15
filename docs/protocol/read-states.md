@@ -114,10 +114,12 @@ over the DMs; none computes permissions.
 `BadgeChanged { channel_id, guild_id }` comes when a channel's badge or read state changes,
 `GuildBadgeChanged` when a guild's badge does; a message in a channel that is already unread
 sends neither, and a channel or guild that is gone has its own event instead. A write marks
-what it touched (a channel and its threads; a whole guild for roles, the member and its
-settings; everything for the account's notification flags), and the index updates those at
-the end of the write. READY's index is built before the write lock with the rest of the new
-state, and a later READY reports only the badges that changed.
+what it touched (a channel and its threads, found through an index of each channel's threads;
+a whole guild for roles, the member and its settings), and the index updates those at the end
+of the write. READY's badges are built before the write lock with the rest of the new state,
+and a later READY reports only the badges that changed. New notification flags can move every
+badge, so their badges are built from a copy of the state before the write lock too, and
+rebuilt under it only if another write came in between.
 
 A deleted channel or thread, a channel a repeated GUILD_CREATE no longer lists, and every
 channel of a guild the user leaves lose their read state, in memory and, with the next flush,

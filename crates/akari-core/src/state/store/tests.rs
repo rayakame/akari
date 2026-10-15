@@ -1377,3 +1377,37 @@ fn message_requests_and_spam_stay_out_of_the_dm_list() {
         "the store still has them"
     );
 }
+
+#[test]
+fn a_notification_flags_change_builds_badges_off_the_lock() {
+    let mut ready = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    // GENERAL then shows unread only without USE_NEW_NOTIFICATIONS: G1 notifies mentions only.
+    ready["user_guild_settings"]["entries"][0]["flags"] = 0.into();
+    ready["user_guild_settings"]["entries"][0]["channel_overrides"][1]["flags"] = 0.into();
+    ready["user_guild_settings"]["entries"][0]["channel_overrides"][1]["message_notifications"] =
+        3.into();
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(dispatch("READY", &ready));
+    let guild = Snowflake::new(200_000_000_000_000_001);
+    assert!(!store.guild_badge(guild).unread);
+    let subscription = store.subscribe();
+    let before = crate::state::badges::hooks::locked_builds();
+
+    store.apply(dispatch(
+        "NOTIFICATION_SETTINGS_UPDATE",
+        &json!({"flags": 0}),
+    ));
+
+    assert!(store.guild_badge(guild).unread);
+    assert_eq!(crate::state::badges::hooks::locked_builds(), before);
+    let mut events = Vec::new();
+    while let Some(event) = futures_util::FutureExt::now_or_never(subscription.next()).flatten() {
+        events.push(describe(&event));
+    }
+    assert!(
+        events
+            .iter()
+            .any(|event| event.contains("GuildBadgeChanged")),
+        "{events:?}"
+    );
+}

@@ -12,15 +12,14 @@ use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
     GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
 };
+use super::threads::ThreadIndex;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
 use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
-use crate::model::{
-    self, ChannelId, ChannelType, GuildId, MessageId, Permissions, Timestamp, UserId,
-};
+use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -278,6 +277,21 @@ fn push_channel_changes(
     }
 }
 
+/// What the store derives from its entities, built before a READY or a restore takes the lock.
+pub(crate) struct Derived {
+    badges: Badges,
+    threads: ThreadIndex,
+}
+
+impl Derived {
+    pub(crate) fn build(entities: &Entities, now_millis: i64) -> Self {
+        Self {
+            badges: Badges::build(entities, now_millis),
+            threads: ThreadIndex::build(entities),
+        }
+    }
+}
+
 pub(crate) struct ReadyDiff {
     events: Vec<StoreEvent>,
     removed_channels: Vec<ChannelId>,
@@ -287,6 +301,7 @@ pub(crate) struct ReadyDiff {
 pub(crate) struct State {
     entities: Entities,
     badges: Badges,
+    threads: ThreadIndex,
     // What the current write changed that can move a badge.
     dirty: Dirty,
     ready: bool,
@@ -305,6 +320,7 @@ impl State {
         Self {
             entities: Entities::default(),
             badges: Badges::default(),
+            threads: ThreadIndex::default(),
             dirty: Dirty::default(),
             ready: false,
             restored: false,
@@ -315,9 +331,9 @@ impl State {
 
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_folders(&mut next);
-        let badges = Badges::build(&next, wall_millis());
-        let diff = self.ready_diff(&next, &badges);
-        self.swap(next, badges, diff, events);
+        let derived = Derived::build(&next, wall_millis());
+        let diff = self.ready_diff(&next, &derived);
+        self.swap(next, derived, diff, events);
     }
 
     // A READY whose settings proto didn't decode keeps the folders the store had.
@@ -328,13 +344,13 @@ impl State {
     }
 
     // `None` before the first READY or a restore, which leave nothing to diff against.
-    pub(crate) fn ready_diff(&self, next: &Entities, badges: &Badges) -> Option<ReadyDiff> {
+    pub(crate) fn ready_diff(&self, next: &Entities, derived: &Derived) -> Option<ReadyDiff> {
         if !self.ready && !self.restored {
             return None;
         }
         let mut events = Vec::new();
         self.diff(next, &mut events);
-        self.badges.diff(badges, &mut events);
+        self.badges.diff(&derived.badges, &mut events);
         let removed_channels = self
             .entities
             .channels
@@ -348,14 +364,14 @@ impl State {
         })
     }
 
-    // Returns the old entities and badges, so the caller can drop them after releasing the lock.
+    // Returns the old state, so the caller can drop it after releasing the lock.
     pub(crate) fn swap(
         &mut self,
         next: Entities,
-        badges: Badges,
+        derived: Derived,
         diff: Option<ReadyDiff>,
         events: &mut Vec<StoreEvent>,
-    ) -> (Entities, Badges) {
+    ) -> (Entities, Derived) {
         if let Some(diff) = diff {
             events.extend(diff.events);
             for channel in diff.removed_channels {
@@ -368,10 +384,11 @@ impl State {
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
-        (
-            std::mem::replace(&mut self.entities, next),
-            std::mem::replace(&mut self.badges, badges),
-        )
+        let old = Derived {
+            badges: std::mem::replace(&mut self.badges, derived.badges),
+            threads: std::mem::replace(&mut self.threads, derived.threads),
+        };
+        (std::mem::replace(&mut self.entities, next), old)
     }
 
     pub(crate) fn me(&self) -> Option<UserId> {
@@ -386,14 +403,15 @@ impl State {
     pub(crate) fn restore(
         &mut self,
         cached: Entities,
-        badges: Badges,
+        derived: Derived,
         events: &mut Vec<StoreEvent>,
     ) -> bool {
         if self.ready || self.restored {
             return false;
         }
         self.entities = cached;
-        self.badges = badges;
+        self.badges = derived.badges;
+        self.threads = derived.threads;
         self.restored = true;
         events.push(StoreEvent::Restored);
         true
@@ -485,25 +503,7 @@ impl State {
     // The channel, and its threads, whose permissions follow its overwrites.
     fn mark_channel(&mut self, channel: &Channel) {
         self.dirty.channel(channel.id);
-        if !matches!(
-            channel.kind,
-            ChannelType::GuildText
-                | ChannelType::GuildNews
-                | ChannelType::GuildForum
-                | ChannelType::GuildMedia
-        ) {
-            return;
-        }
-        #[cfg(test)]
-        tests::scanned_for_threads();
-        let threads: Vec<ChannelId> = self
-            .entities
-            .channels
-            .values()
-            .filter(|stored| stored.parent_id == Some(channel.id) && stored.is_thread())
-            .map(|stored| stored.id)
-            .collect();
-        for thread in threads {
+        for thread in self.threads.of(channel.id) {
             self.dirty.channel(thread);
         }
     }
@@ -583,10 +583,7 @@ impl State {
                 });
             }
             E::NotificationSettingsUpdate(settings) => {
-                if self.entities.settings.notification_flags != settings.flags {
-                    self.entities.settings.notification_flags = settings.flags;
-                    self.dirty.all();
-                }
+                self.set_notification_flags(settings.flags, None, events);
             }
             E::MessageAck(ack) => self.apply_ack(&ack),
             E::ChannelUnreadUpdate(update) => {
@@ -657,6 +654,7 @@ impl State {
         }
         let channel = Arc::new(channel);
         self.mark_channel(&channel);
+        self.threads.add(&channel);
         match self.entities.channels.get(&channel.id) {
             Some(known) if *known == channel => {}
             Some(_) => {
@@ -723,6 +721,8 @@ impl State {
         let next = Arc::new(known.patch(update));
         if next != known {
             self.mark_channel(&next);
+            self.threads.remove(&known);
+            self.threads.add(&next);
             self.entities.channels.insert(next.id, next.clone());
             events.push(StoreEvent::ChannelUpdated(next));
         }
@@ -743,15 +743,12 @@ impl State {
             channel_id: removed.id,
             guild_id: removed.guild_id,
         });
-        let threads: BTreeSet<ChannelId> = self
-            .entities
-            .channels
-            .values()
-            .filter(|channel| channel.is_thread() && channel.parent_id == Some(removed.id))
-            .map(|channel| channel.id)
-            .collect();
+        let threads: Vec<ChannelId> = self.threads.of(removed.id).collect();
+        self.threads.remove(&removed);
         for thread in threads {
-            self.entities.channels.remove(&thread);
+            if let Some(gone) = self.entities.channels.remove(&thread) {
+                self.threads.remove(&gone);
+            }
             self.windows.drop_channel(thread);
             self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
@@ -800,10 +797,11 @@ impl State {
                 }
                 let old = self.entities.guild_channels(id);
                 push_channel_changes(&old, &next.channels, |_| false, events);
-                for channel in old.keys().filter(|id| !next.channels.contains_key(id)) {
-                    self.entities.channels.remove(channel);
-                    self.entities.read_states.forget(*channel);
-                    self.windows.drop_channel(*channel);
+                for (id, channel) in old.iter().filter(|(id, _)| !next.channels.contains_key(id)) {
+                    self.entities.channels.remove(id);
+                    self.threads.remove(channel);
+                    self.entities.read_states.forget(*id);
+                    self.windows.drop_channel(*id);
                 }
             }
             None => events.push(StoreEvent::GuildAdded(after)),
@@ -811,6 +809,9 @@ impl State {
         self.entities.unavailable.remove(&id);
         self.entities.guilds.extend(next.guilds);
         self.entities.members.extend(next.members);
+        for channel in next.channels.values() {
+            self.threads.add(channel);
+        }
         self.entities.channels.extend(next.channels);
     }
 
@@ -875,10 +876,12 @@ impl State {
         self.entities.guilds.remove(&id);
         self.entities.members.remove(&id);
         let windows = &mut self.windows;
+        let threads = &mut self.threads;
         self.entities.channels.retain(|channel_id, channel| {
             let keep = channel.guild_id != Some(id);
             if !keep {
                 windows.drop_channel(*channel_id);
+                threads.remove(channel);
             }
             keep
         });
@@ -1145,6 +1148,38 @@ impl State {
 
     pub(crate) fn notification_level(&self, channel: ChannelId) -> NotificationLevel {
         self.entities.notification_level(channel)
+    }
+
+    /// A copy of the entities with `flags`, or `None` when the flags are already these.
+    pub(crate) fn with_notification_flags(&self, flags: u64) -> Option<Entities> {
+        (self.entities.settings.notification_flags != flags).then(|| {
+            let mut next = self.entities.clone();
+            next.settings.notification_flags = flags;
+            next
+        })
+    }
+
+    // `badges` were built for the new flags; without them they are rebuilt here.
+    pub(crate) fn set_notification_flags(
+        &mut self,
+        flags: u64,
+        badges: Option<Badges>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if self.entities.settings.notification_flags == flags {
+            return;
+        }
+        self.entities.settings.notification_flags = flags;
+        match badges {
+            Some(badges) => {
+                self.badges.diff(&badges, events);
+                self.badges = badges;
+            }
+            None => {
+                self.dirty.all();
+                self.refresh_badges(wall_millis(), events);
+            }
+        }
     }
 
     pub(crate) fn end_mutes(
