@@ -66,15 +66,15 @@ Two details:
 | CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer. A thread in a forum or media channel also raises its parent's `last_message_id` to the thread's ID, without an event: a new post is the forum's newest "message" |
 | CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it |
 | CHANNEL_DELETE, THREAD_DELETE | `ChannelDelete` | `ChannelRemoved`, also for the threads of a deleted channel. CHANNEL_DELETE "will be partial" for private channels and THREAD_DELETE has only `id`, `guild_id`, `parent_id` and `type`, so only those are read |
-| MESSAGE_CREATE | `Message` | Counts toward the channel's read state first: a message of the current user reads the channel up to it (not a poll result), and others can raise its mention count ([Read states](#read-states)). Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
+| MESSAGE_CREATE | `Message` | Counts toward the channel's read state first: a message of the current user reads the channel up to it (not a poll result), and others can raise its mention count ([read-states.md](read-states.md)). Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
 | NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; no event |
-| MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([Read states](#read-states)): `BadgeChanged`, and `GuildBadgeChanged` if the guild's badge changed. Acks of other read state types are ignored |
-| CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without a channel event; a channel that turns unread sends `BadgeChanged` ([Badges](#badges)). A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
+| MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([read-states.md](read-states.md)): `BadgeChanged`, and `GuildBadgeChanged` if the guild's badge changed. Acks of other read state types are ignored |
+| CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without a channel event; a channel that turns unread sends `BadgeChanged` ([read-states.md](read-states.md#badges)). A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
 | RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Keep the blocked and ignored users, whose messages never count as mentions. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
@@ -151,57 +151,9 @@ Observed on 2026-10-15 with akari-cli on a test account:
 
 ## Read states
 
-The store keeps READY's channel read states (`Store::read_state`) and changes them the way
-the [read state topic](https://docs.discord.food/topics/read-state) asks clients to; the rules
-below were compared with the official client on 2026-10-14:
-
-- **Unread:** a channel is unread when its `last_message_id` is newer than its read state's.
-  Without a read state, a guild channel counts as read up to when the user joined the guild
-  (the member's `joined_at`), and a DM or group DM as read until its next message. Deleting
-  messages never makes a channel read again.
-- **MESSAGE_ACK** moves the position forward, or anywhere with `manual`. Its
-  `mention_count` replaces the count; without one the count stays, and drops to 0 once the
-  ack reaches the channel's newest message.
-- **Mentions** are counted on MESSAGE_CREATE for messages past the read position. In a DM
-  or group DM every message counts, except "recipient removed" ones, and in a muted one only
-  messages that mention the user. In a guild channel the user can see, a mention of the user
-  counts, @everyone and @here unless the guild suppresses them, and a role of the user's
-  unless the guild suppresses roles, muted or not; with the account's
-  `MENTION_ON_ALL_MESSAGES` flag, so does every message in a channel set to all messages that
-  isn't muted, nor a voice or stage channel. @silent messages count. Messages of blocked and
-  ignored users never do.
-- **Own messages** read the channel up to them and clear its count, except a poll result.
-
-### Badges
-
-The store keeps every channel's and guild's `Badge` (`unread`, `mentions`) as it changes, so
-`Store::channel_badge`, `guild_badge` and `unread_private_channels` cost a lookup and never
-compute permissions. What they show follows the official client (observed 2026-10-14, see
-[server-list.md](../ui/server-list.md#what-makes-a-server-unread) and
-[channel-list.md](../ui/channel-list.md#what-makes-a-row-unread)):
-
-- **A channel's row** is unread when the channel is, unless it is muted itself, it is a
-  voice or stage channel (their chats never show unread), or its unread setting says only
-  mentions. That setting is the first `UNREADS_*` flag of the channel, its parent and its
-  category, then the guild's; without one, and with the account's `USE_NEW_NOTIFICATIONS`,
-  the notification level decides (only mentions and nothing show no dot); otherwise every
-  unread channel shows. Its count is the read state's mentions. A channel the user can't
-  view shows nothing.
-- **A guild** sums its text, announcement, forum, media, voice and stage channels and its
-  joined, unarchived threads that the user can view. Its dot needs one of them unread and
-  not under a muted category or muted channel, and the guild itself unmuted; its count adds
-  up all their mentions, muted or not. With "hide muted channels", muted channels don't
-  count at all. A folder's badge is its guilds' sum, added up by the host.
-- **DMs and group DMs** show unread unless muted; every message in an unmuted one counts as
-  a mention, and `unread_private_channels` lists those with mentions, newest message first.
-
-`BadgeChanged { channel_id, guild_id }` comes when a channel's badge or read state changes,
-`GuildBadgeChanged` when a guild's badge does; a message in a channel that is already unread
-sends neither. A write marks what it touched (a channel and its threads; a whole guild for
-roles, the member and its settings; everything for the account's notification flags), and
-the index updates those at the end of the write. READY's index is built before the write
-lock with the rest of the new state, and a later READY reports only the badges that
-changed.
+The store keeps READY's channel read states and changes them with MESSAGE_ACK, MESSAGE_CREATE
+and the unread updates, and keeps every channel's and guild's badge as it goes; the rules are
+in [read-states.md](read-states.md).
 
 ## The state store
 

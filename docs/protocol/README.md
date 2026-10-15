@@ -22,8 +22,11 @@ surprises we found.
   a nonce, request errors
 - [rate-limits.md](rate-limits.md): per-route and global REST limits and how Akari stays
   within them
-- [user-settings.md](user-settings.md): the settings proto (server folders and order,
-  status) and opt-in channels, which READY carries and Akari doesn't read yet
+- [user-settings.md](user-settings.md): the settings proto (server folders and order) and
+  the user guild settings (mutes, notification levels, suppress settings), and opt-in
+  channels, which Akari doesn't read yet
+- [read-states.md](read-states.md): read states, the unread rule, mention counting and the
+  badges on channels, servers, folders and DMs
 - [cache.md](cache.md): the SQLite disk cache per account, the cold start from it, and when
   it's written and deleted
 

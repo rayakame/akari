@@ -33,7 +33,8 @@ This is the intended layout. So far `akari-core` has the wire models, gateway de
 shared `DiscordClient` with both login flows (email/password and QR code), the token
 storage trait, the gateway connection (zstd-stream, heartbeats, resume, rate-limited
 sends), the state store (`akari_core::state`, which also keeps the user's settings: server
-folders and order, mutes and notification settings) and `Account`, which keeps the store
+folders and order, mutes and notification settings; and the read states, with unread dots
+and mention counts per channel and server) and `Account`, which keeps the store
 current from the gateway, ends timed mutes, loads message history and sends messages over
 rate-limited REST, applying the message length limit and slowmode;
 `akari-cli` can log in, log out, connect, list guilds and channels, and read, send and tail
@@ -42,7 +43,8 @@ and the message APIs, including the send rules and `end_session`, through UniFFI
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, and the composer) and the message
 timeline. `apps/macos` is the first app: the login screen and the main window with the server
-rail (the user's order, with folders), the channel and DM lists (muted channels dimmed), a
+rail (the user's order, with folders, unread pills and mention badges, and unread DMs under
+Home), the channel and DM lists (muted channels dimmed, unread rows bright with their counts), a
 message list that loads history in both directions, and the composer; it shows the
 connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
