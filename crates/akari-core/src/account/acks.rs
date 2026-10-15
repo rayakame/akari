@@ -10,7 +10,7 @@ use super::mutes::until;
 use crate::model::{ChannelId, MessageId};
 use crate::ms;
 use crate::rest::{AccountRest, RequestError, last_viewed};
-use crate::state::wall_millis;
+use crate::state::{Ack, wall_millis};
 
 const TARGET: &str = "akari_core::acks";
 // Like the official client: an ack about 2 s after the last message read.
@@ -25,6 +25,15 @@ pub(crate) enum AckTarget {
     Message(MessageId),
     // A timestamp-only snowflake for Discord's "now", never below `floor`.
     Now { floor: Option<MessageId> },
+}
+
+impl From<Ack> for AckTarget {
+    fn from(ack: Ack) -> Self {
+        match ack.cursor {
+            Some(cursor) if !ack.now => Self::Message(cursor),
+            floor => Self::Now { floor },
+        }
+    }
 }
 
 impl AckTarget {
@@ -142,9 +151,11 @@ impl Queue {
             }
             Entry::Occupied(mut entry) => {
                 let wanted = entry.get_mut();
-                wanted.target = wanted.target.merge(target);
+                let merged = wanted.target.merge(target);
+                let advanced = merged != wanted.target;
+                wanted.target = merged;
                 wanted.kind = match (wanted.kind, pace) {
-                    (Kind::Paced { .. }, Pace::Paced) => Kind::Paced { last: now },
+                    (Kind::Paced { .. }, Pace::Paced) if advanced => Kind::Paced { last: now },
                     (Kind::Paced { .. }, Pace::Explicit) => Kind::Explicit {
                         at: now.min(wanted.due()),
                     },
@@ -288,36 +299,75 @@ impl Wants {
     }
 }
 
+// What the account handed to the sender, as tests see it.
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Handed {
+    One(ChannelId, AckTarget, Pace),
+    Bulk(Vec<(ChannelId, AckTarget)>),
+}
+
 // Closing or dropping it drops what's pending; a request already on its way isn't cancelled.
 pub(crate) struct AckSender {
     wants: Arc<Wants>,
+    #[cfg(test)]
+    handed: Mutex<Vec<Handed>>,
 }
 
 impl AckSender {
+    // `unauthorized` runs once if Discord answers an ack with 401; the sender has stopped then.
     pub(crate) fn start(
         runtime: &tokio::runtime::Handle,
         rest: Arc<AccountRest>,
         retry_delay: Duration,
+        unauthorized: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let wants = Arc::new(Wants::default());
-        runtime.spawn(send(wants.clone(), rest, retry_delay));
-        Self { wants }
+        runtime.spawn(send(
+            wants.clone(),
+            rest,
+            retry_delay,
+            Box::new(unauthorized),
+        ));
+        Self {
+            wants,
+            #[cfg(test)]
+            handed: Mutex::default(),
+        }
     }
 
     // Returns at once; a pending target for the channel merges with this one.
-    #[cfg_attr(not(test), expect(dead_code, reason = "no caller outside tests yet"))]
     pub(crate) fn want(&self, channel: ChannelId, target: AckTarget, pace: Pace) {
+        #[cfg(test)]
+        self.hand(Handed::One(channel, target, pace));
         self.wants.want(channel, target, pace);
     }
 
     // Explicit; takes over the channels' pending single acks.
-    #[cfg_attr(not(test), expect(dead_code, reason = "no caller outside tests yet"))]
     pub(crate) fn want_bulk(&self, entries: Vec<(ChannelId, AckTarget)>) {
+        #[cfg(test)]
+        self.hand(Handed::Bulk(entries.clone()));
         self.wants.want_bulk(entries);
     }
 
     pub(crate) fn close(&self) {
         self.wants.close();
+    }
+
+    #[cfg(test)]
+    fn hand(&self, handed: Handed) {
+        self.handed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(handed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn handed(&self) -> Vec<Handed> {
+        self.handed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -327,7 +377,12 @@ impl Drop for AckSender {
     }
 }
 
-async fn send(wants: Arc<Wants>, rest: Arc<AccountRest>, retry_delay: Duration) {
+async fn send(
+    wants: Arc<Wants>,
+    rest: Arc<AccountRest>,
+    retry_delay: Duration,
+    unauthorized: Box<dyn Fn() + Send + Sync>,
+) {
     // Per channel, the highest ID Discord took this session.
     let mut sent: HashMap<ChannelId, MessageId> = HashMap::new();
     while let Some(request) = wants.next().await {
@@ -380,6 +435,9 @@ async fn send(wants: Arc<Wants>, rest: Arc<AccountRest>, retry_delay: Duration) 
                 log(&request, &entries, Outcome::Dropped(&err));
                 if matches!(err, RequestError::Unauthorized | RequestError::Closed) {
                     wants.close();
+                    if matches!(err, RequestError::Unauthorized) {
+                        unauthorized();
+                    }
                     return;
                 }
             }

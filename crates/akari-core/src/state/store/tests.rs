@@ -1343,6 +1343,51 @@ fn a_mute_ending_restores_the_guilds_dot() {
 }
 
 #[test]
+fn marking_a_guild_read_is_one_change_batch() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_of(&[1], |data| {
+        data["notification_settings"]["flags"] = 0.into();
+        data["guilds"][0] = generated_guild(1, 60, 2, 0);
+        for (n, channel) in data["guilds"][0]["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            channel["last_message_id"] = (1_300_000_000_000_000_000 + n as u64).to_string().into();
+        }
+    }));
+    let guild = Snowflake::new(1);
+    let unread: Vec<ChannelId> = store
+        .guild_channels(guild)
+        .iter()
+        .filter(|channel| store.channel_badge(channel.id).unread)
+        .map(|channel| channel.id)
+        .collect();
+    assert!(unread.len() > 50, "{}", unread.len());
+    let subscription = store.subscribe();
+    store.record_holds();
+
+    let acks = store.mark_guilds_read(&[guild]);
+
+    assert_eq!(acks.len(), unread.len());
+    assert_eq!(store.guild_badge(guild), Badge::default());
+    let writes: Vec<&str> = store.take_holds().iter().map(|(event, _)| *event).collect();
+    assert_eq!(writes, ["mark read"]);
+    let events = changes(&subscription);
+    let guild_events = events
+        .iter()
+        .filter(|event| event.starts_with("GuildBadgeChanged"))
+        .count();
+    let channel_events = events
+        .iter()
+        .filter(|event| event.starts_with("BadgeChanged"))
+        .count();
+    assert_eq!(guild_events, 1, "{events:?}");
+    assert_eq!(channel_events, unread.len());
+}
+
+#[test]
 fn badge_batches_read_in_the_order_given() {
     let store = ready_store();
     let unread = Badge {

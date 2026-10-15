@@ -80,6 +80,30 @@ async fn an_ack_waits_for_a_two_second_lull() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_target_that_adds_nothing_doesnt_restart_the_lull() {
+    let wants = Arc::new(Wants::default());
+    let taken = collect(&wants);
+    let started = Instant::now();
+
+    wants.want(channel(1), at(message(2)), Pace::Paced);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    wants.want(channel(1), at(message(2)), Pace::Paced);
+    wants.want(channel(1), at(message(1)), Pace::Paced);
+    tokio::time::sleep(Duration::from_secs(30)).await;
+
+    let taken = taken.lock().unwrap();
+    assert_eq!(taken.len(), 1, "{taken:?}");
+    let (sent_at, request) = &taken[0];
+    assert_eq!(single(request), (channel(1), at(message(2))));
+    assert!(*sent_at >= started + Duration::from_secs(2));
+    assert!(
+        *sent_at < started + Duration::from_millis(3500),
+        "the lull restarted: {:?}",
+        sent_at.duration_since(started)
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_busy_channel_is_acked_at_least_every_ten_seconds() {
     let wants = Arc::new(Wants::default());
     let taken = collect(&wants);
@@ -201,6 +225,25 @@ fn merged_targets_keep_the_newest() {
     );
 }
 
+#[test]
+fn an_ack_at_now_keeps_the_cursor_as_its_floor() {
+    let ack = |cursor: Option<MessageId>, now: bool| Ack {
+        channel: channel(1),
+        cursor,
+        now,
+    };
+
+    assert_eq!(
+        AckTarget::from(ack(Some(message(5)), false)),
+        at(message(5))
+    );
+    assert_eq!(
+        AckTarget::from(ack(Some(message(5)), true)),
+        now(Some(message(5)))
+    );
+    assert_eq!(AckTarget::from(ack(None, false)), now(None));
+}
+
 fn rest(server: &MockServer) -> Arc<AccountRest> {
     Arc::new(AccountRest::new(
         client_with(
@@ -217,6 +260,7 @@ fn sender(server: &MockServer) -> AckSender {
         &tokio::runtime::Handle::current(),
         rest(server),
         Duration::from_millis(10),
+        || {},
     )
 }
 
@@ -415,23 +459,54 @@ async fn a_failed_ack_is_retried_once() {
     );
 }
 
+// Holds the first answer until the test releases it; later requests are answered at once.
+struct Gated {
+    arrived: std::sync::mpsc::Sender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+    first: std::sync::atomic::AtomicBool,
+}
+
+impl Respond for Gated {
+    fn respond(&self, _: &Received) -> ResponseTemplate {
+        if self.first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let _ = self.arrived.send(());
+            // Blocks wiremock's server thread, which only this request needs meanwhile.
+            let _ = self
+                .release
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(10));
+        }
+        answered()
+    }
+}
+
 #[tokio::test]
 async fn nothing_is_sent_after_close() {
     let server = MockServer::start().await;
-    let arrivals = Arc::new(Mutex::new(Vec::new()));
+    let (arrived, on_arrival) = std::sync::mpsc::channel();
+    let (release, on_release) = std::sync::mpsc::channel();
     Mock::given(method("POST"))
-        .respond_with(Slow(arrivals))
+        .respond_with(Gated {
+            arrived,
+            release: Mutex::new(on_release),
+            first: std::sync::atomic::AtomicBool::new(true),
+        })
         .mount(&server)
         .await;
     let sender = sender(&server);
 
     sender.want(channel(1), at(message(1)), Pace::Explicit);
-    assert_eq!(received(&server, 1).await.len(), 1);
+    tokio::task::spawn_blocking(move || on_arrival.recv_timeout(Duration::from_secs(5)))
+        .await
+        .unwrap()
+        .expect("the first ack never arrived");
     sender.want(channel(2), at(message(2)), Pace::Explicit);
     sender.want(channel(3), at(message(3)), Pace::Paced);
     sender.close();
     sender.want(channel(4), at(message(4)), Pace::Explicit);
-    tokio::time::sleep(SLOW * 4).await;
+    release.send(()).unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
 
     assert_eq!(
         acks(&server.received_requests().await.unwrap()),

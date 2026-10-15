@@ -54,7 +54,9 @@ ordinary message there.
 
 ## MESSAGE_ACK
 
-- **The position** moves forward. With `manual` (mark as unread) it can move back.
+- **The position** moves forward. An ack at or behind it changes nothing, its count included,
+  so a late echo can't clear a mention counted since; only a read state the store started
+  (`estimated`) takes it anyway. With `manual` (mark as unread) it can move back.
 - **The count:** `mention_count` replaces it. Without one it stays, and drops to 0 once the
   ack reaches the channel's newest message (discord.py-self and concord do the same).
 - An ack for a channel without a read state starts one. Acks of other read state types are

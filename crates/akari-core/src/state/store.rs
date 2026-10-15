@@ -8,7 +8,7 @@ use super::apply::{Derived, Entities, ReadyDiff, State, wall_millis};
 use super::badges::{Badge, Badges};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
-use super::read_states::ReadState;
+use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
@@ -237,11 +237,12 @@ impl Store {
         value
     }
 
-    pub(crate) fn apply(&self, event: DispatchEvent) {
+    // Returns the ack of the channel being read, when the event left it unread.
+    pub(crate) fn apply(&self, event: DispatchEvent) -> Option<Ack> {
         match event {
             DispatchEvent::Ready(ready) => {
                 let next = self.prepare_ready(*ready);
-                self.replace(next);
+                self.replace(next)
             }
             DispatchEvent::GuildCreate(guild) => match *guild {
                 GatewayGuild::Available(guild) => {
@@ -252,21 +253,27 @@ impl Store {
                     self.park();
                     self.write("GUILD_CREATE", |inner, events| {
                         inner.state.add_guild(next, events);
-                    });
+                        inner.state.take_reading_ack()
+                    })
                 }
                 unavailable => {
                     let event = DispatchEvent::GuildCreate(Box::new(unavailable));
                     self.write("GUILD_CREATE", |inner, events| {
                         inner.state.apply(event, events);
-                    });
+                        inner.state.take_reading_ack()
+                    })
                 }
             },
             DispatchEvent::NotificationSettingsUpdate(settings) => {
                 self.set_notification_flags(settings.flags);
+                None
             }
             event => {
                 let name = event.name();
-                self.write(name, |inner, events| inner.state.apply(event, events));
+                self.write(name, |inner, events| {
+                    inner.state.apply(event, events);
+                    inner.state.take_reading_ack()
+                })
             }
         }
     }
@@ -312,14 +319,16 @@ impl Store {
         }
     }
 
-    pub(crate) fn replace(&self, next: PreparedReady) {
-        let old = self.write("READY", |inner, events| {
+    pub(crate) fn replace(&self, next: PreparedReady) -> Option<Ack> {
+        let (old, ack) = self.write("READY", |inner, events| {
             self.shared.preparing_ready.store(false, Ordering::SeqCst);
-            inner
+            let old = inner
                 .state
-                .swap(next.entities, next.derived, next.diff, events)
+                .swap(next.entities, next.derived, next.diff, events);
+            (old, inner.state.take_reading_ack())
         });
         drop(old);
+        ack
     }
 
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
@@ -363,10 +372,33 @@ impl Store {
         ticket: LoadTicket,
         page: Vec<model::Message>,
         reached_end: bool,
-    ) {
+    ) -> Option<Ack> {
         self.write("load", |inner, events| {
             inner.state.finish_load(ticket, page, reached_end, events);
-        });
+            inner.state.take_reading_ack()
+        })
+    }
+
+    // Returns the channel's ack when it was unread; before the first READY, none.
+    pub(crate) fn set_reading(&self, channel: Option<ChannelId>) -> Option<Ack> {
+        self.write("reading", |inner, events| {
+            inner.state.set_reading(channel, events)
+        })
+    }
+
+    // `None` when the channel was read already.
+    pub(crate) fn mark_read(&self, channel: ChannelId) -> Option<Ack> {
+        self.write("mark read", |inner, events| {
+            inner.state.mark_read(channel, events)
+        })
+    }
+
+    // Empty when nothing but forums would be acked.
+    pub(crate) fn mark_guilds_read(&self, guilds: &[GuildId]) -> Vec<Ack> {
+        let now = now_millis();
+        self.write("mark read", |inner, events| {
+            inner.state.mark_guilds_read(guilds, now, events)
+        })
     }
 
     pub(crate) fn restore(&self, cached: Entities) -> bool {

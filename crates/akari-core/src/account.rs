@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cache::{CacheThread, DiskCache, Flusher};
@@ -13,10 +13,11 @@ use crate::gateway::{
 use crate::model::{ChannelId, GuildId, MessageId, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
-    ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
+    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits,
+    message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
-use acks::AckSender;
+use acks::{AckSender, Pace};
 
 const REFRESH_LIMIT: u8 = 100;
 const JUMP_LIMIT: u8 = 50;
@@ -285,8 +286,9 @@ impl Shared {
                 unfinished.ticket = None;
                 let reached_end = received < usize::from(limit);
                 let storing = Instant::now();
-                self.store.finish_load(ticket, messages, reached_end);
+                let ack = self.store.finish_load(ticket, messages, reached_end);
                 report.store = storing.elapsed();
+                self.ack_reading(ack);
                 (report.prepare, report.prepared) = prepared;
                 log_page(channel, ticket.kind, &report);
                 Ok(Some(report))
@@ -375,6 +377,13 @@ impl Shared {
             let error = Some(Arc::new(GatewayError::AuthenticationFailed));
             self.store.set_connection(ConnectionState::Closed { error });
             self.gateway.close();
+        }
+    }
+
+    // While the user follows a channel, its acks go out paced, like the official client's.
+    fn ack_reading(&self, ack: Option<Ack>) {
+        if let Some(ack) = ack {
+            self.acks.want(ack.channel, ack.into(), Pace::Paced);
         }
     }
 
@@ -670,7 +679,6 @@ impl Account {
             token.clone(),
             SERVER_ERROR_RETRY,
         ));
-        let acks = AckSender::start(&runtime, rest.clone(), SERVER_ERROR_RETRY);
         let store = Store::new(limits);
         let thread = cache
             .as_ref()
@@ -693,20 +701,29 @@ impl Account {
             });
         }
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
-        let shared = Arc::new(Shared {
-            gateway: Gateway::start(client, token, timing)?,
-            store,
-            rest,
-            acks,
-            nonces: Nonces::default(),
-            status: Mutex::default(),
-            subscribed: Mutex::default(),
-            member_lists: AtomicBool::new(true),
-            delivering: Mutex::default(),
-            runtime: runtime.clone(),
-            flusher,
-            cache: thread,
-            preparer: RwLock::new(None),
+        let gateway = Gateway::start(client, token, timing)?;
+        let shared = Arc::new_cyclic(|weak: &Weak<Shared>| {
+            let weak = weak.clone();
+            let unauthorized = move || {
+                if let Some(shared) = weak.upgrade() {
+                    shared.failed(&RequestError::Unauthorized);
+                }
+            };
+            Shared {
+                gateway,
+                store,
+                acks: AckSender::start(&runtime, rest.clone(), SERVER_ERROR_RETRY, unauthorized),
+                rest,
+                nonces: Nonces::default(),
+                status: Mutex::default(),
+                subscribed: Mutex::default(),
+                member_lists: AtomicBool::new(true),
+                delivering: Mutex::default(),
+                runtime: runtime.clone(),
+                flusher,
+                cache: thread,
+                preparer: RwLock::new(None),
+            }
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
@@ -770,6 +787,36 @@ impl Account {
     /// failed messages loses its messages.
     pub fn view_channel(&self, channel: ChannelId) {
         self.shared.view(channel);
+    }
+
+    /// The channel the user is reading at its newest messages, or `None`. While set, the
+    /// channel is acked when it's unread, and again when messages arrive, paced. Hosts set it
+    /// only while the user is engaged with the channel at the bottom of its list.
+    pub fn set_reading(&self, channel: Option<ChannelId>) {
+        let ack = self.shared.store.set_reading(channel);
+        self.shared.ack_reading(ack);
+    }
+
+    /// Marks the channel read now (Escape, the context menu).
+    pub fn mark_read(&self, channel: ChannelId) {
+        if let Some(ack) = self.shared.store.mark_read(channel) {
+            self.shared
+                .acks
+                .want(ack.channel, ack.into(), Pace::Explicit);
+        }
+    }
+
+    /// Marks these guilds read now with one bulk ack (Shift+Escape, a server's or a folder's
+    /// context menu).
+    pub fn mark_guilds_read(&self, guilds: &[GuildId]) {
+        let acks = self.shared.store.mark_guilds_read(guilds);
+        if !acks.is_empty() {
+            self.shared.acks.want_bulk(
+                acks.into_iter()
+                    .map(|ack| (ack.channel, ack.into()))
+                    .collect(),
+            );
+        }
     }
 
     /// Loads messages into the channel's window within Discord's rate limits. `Latest` and
@@ -973,7 +1020,8 @@ async fn pump(mut finish: Finish) {
                 let store = shared.store.clone();
                 match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
                     Ok(next) => {
-                        shared.store.replace(next);
+                        let ack = shared.store.replace(next);
+                        shared.ack_reading(ack);
                         let convert_ms = crate::millis(started.elapsed());
                         tracing::info!(convert_ms, "READY applied");
                         shared.forget_subscriptions();
@@ -1002,7 +1050,10 @@ async fn pump(mut finish: Finish) {
                 let subscriptions = shared.clone();
                 tokio::spawn(async move { subscriptions.resubscribe().await });
             }
-            Ok(event) => on_event(&shared.store, event, &connecting),
+            Ok(event) => {
+                let ack = on_event(&shared.store, event, &connecting);
+                shared.ack_reading(ack);
+            }
             Err(GatewayError::Closed) => break None,
             Err(error) => break Some(Arc::new(error)),
         }
@@ -1012,20 +1063,22 @@ async fn pump(mut finish: Finish) {
 
 // Queued events mustn't make a disconnected account look connected. disconnect() idles the
 // gateway before it takes the store's lock, so `connecting` checked under that lock sees it.
-fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
+fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool) -> Option<Ack> {
     match event {
         ConnectionEvent::Dispatch(event) => {
             let ready = matches!(event, DispatchEvent::Ready(_) | DispatchEvent::Resumed);
-            store.apply(event);
+            let ack = store.apply(event);
             if ready {
                 store.set_connection_if(ConnectionState::Online, connecting);
             }
+            ack
         }
         ConnectionEvent::Reconnecting { .. } => {
             store.set_connection_if(ConnectionState::Connecting, connecting);
+            None
         }
         #[cfg(feature = "capture")]
-        ConnectionEvent::CapturedReady(_) => {}
+        ConnectionEvent::CapturedReady(_) => None,
     }
 }
 

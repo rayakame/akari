@@ -1085,5 +1085,6 @@ fn a_window_opened_before_the_first_ready_survives_it() {
     assert_eq!(message_ids(&state, GENERAL), Some(vec![10, 11]));
 }
 
+mod acks;
 mod badges;
 mod read_states;

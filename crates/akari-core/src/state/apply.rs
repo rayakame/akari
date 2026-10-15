@@ -7,7 +7,7 @@ use super::badges::{Badge, Badges, Dirty};
 use super::events::StoreEvent;
 use super::order::{self, guild_order};
 use super::permissions::compute;
-use super::read_states::ReadStates;
+use super::read_states::{Ack, ReadStates};
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
     GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
@@ -21,7 +21,9 @@ use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
-use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
+use crate::model::{
+    self, ChannelId, GenericMarker, GuildId, MessageId, Permissions, Snowflake, Timestamp, UserId,
+};
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -310,6 +312,12 @@ pub(crate) struct State {
     restored: bool,
     windows: Windows,
     cooldowns: Cooldowns,
+    // The channel the user is reading, with its cursor as of the last write.
+    reading: Option<(ChannelId, Option<Snowflake<GenericMarker>>)>,
+    // Its local ack from the latest write, for the account to send.
+    due: Option<Ack>,
+    // Channels whose cursor came from an unread update and may be behind Discord's.
+    stale_cursors: HashSet<ChannelId>,
 }
 
 impl State {
@@ -328,6 +336,9 @@ impl State {
             restored: false,
             windows: Windows::new(limits),
             cooldowns: Cooldowns::default(),
+            reading: None,
+            due: None,
+            stale_cursors: HashSet::new(),
         }
     }
 
@@ -390,7 +401,12 @@ impl State {
             badges: std::mem::replace(&mut self.badges, derived.badges),
             threads: std::mem::replace(&mut self.threads, derived.threads),
         };
-        (std::mem::replace(&mut self.entities, next), old)
+        let old = (std::mem::replace(&mut self.entities, next), old);
+        // READY's cursors are fresh.
+        self.stale_cursors.clear();
+        self.read_again();
+        self.refresh_badges(wall_millis(), events);
+        old
     }
 
     pub(crate) fn me(&self) -> Option<UserId> {
@@ -490,7 +506,13 @@ impl State {
 
     pub(crate) fn apply(&mut self, event: DispatchEvent, events: &mut Vec<StoreEvent>) {
         self.apply_event(event, events);
-        self.refresh_badges(wall_millis(), events);
+        self.settle(wall_millis(), events);
+    }
+
+    // The end of a write that can move a cursor: the channel being read stays read.
+    fn settle(&mut self, now_millis: i64, events: &mut Vec<StoreEvent>) {
+        self.follow_reading();
+        self.refresh_badges(now_millis, events);
     }
 
     fn refresh_badges(&mut self, now_millis: i64, events: &mut Vec<StoreEvent>) {
@@ -775,7 +797,7 @@ impl State {
 
     pub(crate) fn add_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         self.tracking_server_list(events, |state, events| state.merge_guild(next, events));
-        self.refresh_badges(wall_millis(), events);
+        self.settle(wall_millis(), events);
     }
 
     fn merge_guild(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
@@ -1014,12 +1036,10 @@ impl State {
             .filter(|_| present);
         self.windows
             .finish_load(ticket, page, &self.entities.users, reached_end, events);
-        if let Some(newest) = newest
-            && self.note_message(ticket.channel, newest, events)
-        {
-            self.dirty.channel(ticket.channel);
+        if let Some(newest) = newest {
+            self.reach_present(ticket.channel, newest, events);
         }
-        self.refresh_badges(wall_millis(), events);
+        self.settle(wall_millis(), events);
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {

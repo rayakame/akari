@@ -3,10 +3,11 @@ use std::sync::Arc;
 use super::{Entities, State, wall_millis};
 use crate::gateway::{ChannelUnread, MessageAck};
 use crate::model::{
-    self, ChannelId, ChannelType, GenericMarker, GuildId, MessageType, Permissions, Snowflake,
-    Timestamp,
+    self, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageType, Permissions,
+    Snowflake, Timestamp,
 };
-use crate::state::read_states::ReadState;
+use crate::state::events::StoreEvent;
+use crate::state::read_states::{Ack, ReadState};
 use crate::state::settings::NotificationLevel;
 use crate::state::types::Channel;
 
@@ -34,6 +35,14 @@ impl Entities {
     fn joined_position(&self, channel: &Channel) -> Option<u64> {
         let joined = self.members.get(&channel.guild_id?)?.joined_at?;
         Some(Snowflake::<GenericMarker>::from_unix_millis(joined.unix_millis(), 0).get())
+    }
+
+    fn needs_ack(&self, channel: &Channel) -> bool {
+        self.unread(channel)
+            || self
+                .read_states
+                .get(channel.id)
+                .is_some_and(|state| state.mentions > 0)
     }
 }
 
@@ -178,6 +187,8 @@ impl State {
                     if Arc::make_mut(stored).note_message(last) {
                         self.dirty.channel(unread.id);
                     }
+                    // Sent once, as the channel turns unread: Discord's newest may be past it.
+                    self.stale_cursors.insert(unread.id);
                 }
                 _ => tracing::debug!(
                     channel_id = unread.id.get(),
@@ -185,6 +196,164 @@ impl State {
                     "skipping an unread update for an unknown channel"
                 ),
             }
+        }
+    }
+
+    fn cursor(&self, channel: ChannelId) -> Option<Snowflake<GenericMarker>> {
+        self.entities
+            .channels
+            .get(&channel)
+            .and_then(|stored| stored.last_message_id)
+    }
+
+    // Before the first READY the channel is only remembered.
+    pub(crate) fn set_reading(
+        &mut self,
+        channel: Option<ChannelId>,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<Ack> {
+        self.reading = channel.map(|id| (id, self.cursor(id)));
+        let ack = channel
+            .filter(|_| self.ready)
+            .and_then(|id| self.ack_locally(id));
+        self.refresh_badges(wall_millis(), events);
+        ack
+    }
+
+    // Only a moved cursor reads the channel again: an ack from elsewhere (mark as unread) moves
+    // none, and acking it back would loop.
+    pub(super) fn follow_reading(&mut self) {
+        let Some((channel, seen)) = self.reading else {
+            return;
+        };
+        let cursor = self.cursor(channel);
+        if cursor == seen {
+            return;
+        }
+        self.reading = Some((channel, cursor));
+        if self.ready
+            && let Some(ack) = self.ack_locally(channel)
+        {
+            self.due = Some(ack);
+        }
+    }
+
+    pub(super) fn read_again(&mut self) {
+        let Some((channel, _)) = self.reading else {
+            return;
+        };
+        self.reading = Some((channel, self.cursor(channel)));
+        if let Some(ack) = self.ack_locally(channel) {
+            self.due = Some(ack);
+        }
+    }
+
+    pub(crate) fn take_reading_ack(&mut self) -> Option<Ack> {
+        self.due.take()
+    }
+
+    // `None` when the channel is read and has no mentions: nothing to send.
+    fn ack_locally(&mut self, channel: ChannelId) -> Option<Ack> {
+        let stored = self.entities.channels.get(&channel)?;
+        if !self.entities.needs_ack(stored) {
+            return None;
+        }
+        self.read_locally(channel)
+    }
+
+    fn read_locally(&mut self, channel: ChannelId) -> Option<Ack> {
+        let stored = self.entities.channels.get(&channel)?;
+        let ack = self.ack_of(stored);
+        if self.entities.needs_ack(stored) && self.entities.read_states.read(channel, ack.cursor) {
+            self.dirty.channel(channel);
+        }
+        Some(ack)
+    }
+
+    // The official client acks forums at "now"; a stale cursor may be behind Discord's.
+    fn ack_of(&self, channel: &Channel) -> Ack {
+        Ack {
+            channel: channel.id,
+            cursor: channel.last_message_id.map(Snowflake::cast),
+            now: matches!(
+                channel.kind,
+                ChannelType::GuildForum | ChannelType::GuildMedia
+            ) || self.stale_cursors.contains(&channel.id),
+        }
+    }
+
+    pub(crate) fn mark_read(
+        &mut self,
+        channel: ChannelId,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<Ack> {
+        let ack = self.ack_locally(channel);
+        self.refresh_badges(wall_millis(), events);
+        ack
+    }
+
+    // As the official client's bulk: what the badges show, never unjoined threads, and every
+    // forum the user can view, read or not.
+    pub(crate) fn mark_guilds_read(
+        &mut self,
+        guilds: &[GuildId],
+        now_millis: i64,
+        events: &mut Vec<StoreEvent>,
+    ) -> Vec<Ack> {
+        let mut shown = Vec::new();
+        let mut forums = Vec::new();
+        for channel in self.entities.channels.values() {
+            if !channel
+                .guild_id
+                .is_some_and(|guild| guilds.contains(&guild))
+            {
+                continue;
+            }
+            if matches!(
+                channel.kind,
+                ChannelType::GuildForum | ChannelType::GuildMedia
+            ) {
+                if self
+                    .entities
+                    .permissions(channel.id, now_millis)
+                    .is_some_and(|permissions| permissions.contains(Permissions::VIEW_CHANNEL))
+                {
+                    forums.push(channel.id);
+                }
+                continue;
+            }
+            let joined = channel
+                .thread
+                .as_deref()
+                .is_none_or(|info| info.joined && !info.archived);
+            let badge = self.badges.channel(channel.id);
+            if joined && (badge.unread || badge.mentions > 0) {
+                shown.push(channel.id);
+            }
+        }
+        if shown.is_empty() {
+            return Vec::new();
+        }
+        let mut acks: Vec<Ack> = shown
+            .into_iter()
+            .chain(forums)
+            .filter_map(|channel| self.read_locally(channel))
+            .collect();
+        acks.sort_unstable_by_key(|ack| ack.channel);
+        self.refresh_badges(now_millis, events);
+        acks
+    }
+
+    // A history page that ends at the channel's newest message.
+    pub(super) fn reach_present(
+        &mut self,
+        channel: ChannelId,
+        newest: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.stale_cursors.remove(&channel);
+        if self.note_message(channel, newest, events) {
+            self.dirty.channel(channel);
         }
     }
 

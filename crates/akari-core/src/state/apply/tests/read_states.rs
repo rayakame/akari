@@ -598,6 +598,55 @@ fn an_older_ack_is_ignored_unless_manual() {
 }
 
 #[test]
+fn an_echo_at_our_position_keeps_a_later_mention() {
+    let mut state = general_read();
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(400_000_000_000_000_004, GENERAL),
+    );
+    assert_eq!(mentions(&state, GENERAL), 1);
+    let mut echo = ack(GENERAL, 400_000_000_000_000_003);
+    echo["mention_count"] = 0.into();
+
+    apply(&mut state, "MESSAGE_ACK", echo);
+    apply(
+        &mut state,
+        "MESSAGE_ACK",
+        ack(GENERAL, 400_000_000_000_000_002),
+    );
+
+    assert_eq!(
+        read_state(&state, GENERAL),
+        Some((Some(400_000_000_000_000_003), 1))
+    );
+}
+
+#[test]
+fn an_ack_at_an_estimated_position_still_replaces_it() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_plain(400_000_000_000_000_022, GROUP),
+    );
+    assert_eq!(
+        read_state(&state, GROUP),
+        Some((Some(400_000_000_000_000_021), 1))
+    );
+    let mut real = ack(GROUP, 400_000_000_000_000_021);
+    real["mention_count"] = 0.into();
+
+    apply(&mut state, "MESSAGE_ACK", real);
+
+    assert_eq!(
+        read_state(&state, GROUP),
+        Some((Some(400_000_000_000_000_021), 0))
+    );
+    assert_eq!(estimated(&state, GROUP), Some(false));
+}
+
+#[test]
 fn an_ack_without_a_count_clears_mentions_once_it_reaches_the_newest_message() {
     let mut state = ready_state();
 
