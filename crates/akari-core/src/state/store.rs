@@ -7,6 +7,7 @@ use tokio::sync::{Mutex, mpsc};
 use super::apply::{Entities, ReadyDiff, State, wall_millis};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
+use super::read_states::ReadState;
 use super::send::Slowmode;
 use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
@@ -608,6 +609,13 @@ impl Store {
                             .any(|role| message.mention_roles.contains(role))
                     })
         })
+    }
+
+    /// Where the user stopped reading the channel, and its unread mentions. `None` when
+    /// Discord sent none: a guild channel then counts as read up to when the user joined, a
+    /// DM until its next message.
+    pub fn read_state(&self, channel: ChannelId) -> Option<ReadState> {
+        self.read(|inner| inner.state.read_state(channel))
     }
 
     /// A guild channel, category, thread, DM or group DM.

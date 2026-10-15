@@ -194,6 +194,7 @@ pub(crate) fn entities() -> Entities {
         .map(|channel| (channel.id, Arc::new(channel)))
         .into(),
         settings: Default::default(),
+        read_states: Default::default(),
     }
 }
 
@@ -795,6 +796,7 @@ fn rebuilt(entities: &Entities) -> Entities {
                 .collect(),
             ..entities.settings.clone()
         },
+        read_states: entities.read_states.clone(),
     }
 }
 

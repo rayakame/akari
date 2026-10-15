@@ -6,6 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use super::events::StoreEvent;
 use super::order::guild_order;
 use super::permissions::compute;
+use super::read_states::ReadStates;
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
     GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
@@ -30,6 +31,7 @@ pub(crate) struct Entities {
     pub(crate) members: HashMap<GuildId, Arc<Member>>,
     pub(crate) channels: HashMap<ChannelId, Arc<Channel>>,
     pub(crate) settings: UserSettings,
+    pub(crate) read_states: ReadStates,
 }
 
 impl Entities {
@@ -43,6 +45,7 @@ impl Entities {
                 ready.user_settings_proto,
                 ready.notification_settings,
             ),
+            read_states: ReadStates::from_ready(ready.read_state, ready.relationships),
             ..Self::default()
         };
         let mut recipients = HashSet::new();
@@ -409,8 +412,11 @@ impl State {
             E::GuildRoleCreate(event) | E::GuildRoleUpdate(event) => self.put_role(*event, events),
             E::GuildRoleDelete(delete) => self.delete_role(delete, events),
             E::GuildMemberUpdate(update) => self.member_update(*update, events),
-            E::ChannelCreate(channel) | E::ThreadCreate(channel) => {
-                self.put_channel(*channel, events);
+            E::ChannelCreate(channel) => self.put_channel(*channel, events),
+            E::ThreadCreate(thread) => {
+                let (id, parent) = (thread.id, thread.parent_id);
+                self.put_channel(*thread, events);
+                self.note_post(parent, id);
             }
             E::ChannelUpdate(update) | E::ThreadUpdate(update) => {
                 self.channel_update(*update, events);
@@ -426,6 +432,7 @@ impl State {
                     .as_ref()
                     .and_then(model::Nonce::as_u64)
                     .map(MessageId::new);
+                self.read_message(&message);
                 self.windows.live(*message, &self.entities.users, events);
                 self.note_message(channel, id, events);
                 if Some(author) == self.entities.me() {
@@ -453,14 +460,19 @@ impl State {
             E::NotificationSettingsUpdate(settings) => {
                 self.entities.settings.notification_flags = settings.flags;
             }
-            E::Resumed
-            | E::MessageAck(_)
-            | E::ChannelUnreadUpdate(_)
-            | E::PassiveUpdateV2(_)
-            | E::RelationshipAdd(_)
-            | E::RelationshipUpdate(_)
-            | E::RelationshipRemove(_)
-            | E::Other(_) => {}
+            E::MessageAck(ack) => self.apply_ack(&ack),
+            E::ChannelUnreadUpdate(update) => {
+                self.note_unreads(update.guild_id, &update.channel_unread_updates);
+            }
+            E::PassiveUpdateV2(update) => {
+                self.note_unreads(update.guild_id, &update.updated_channels);
+            }
+            E::RelationshipAdd(relationship) => self.entities.read_states.relate(relationship),
+            E::RelationshipUpdate(update) => {
+                self.entities.read_states.update_relationship(update);
+            }
+            E::RelationshipRemove(removed) => self.entities.read_states.unrelate(removed.id),
+            E::Resumed | E::Other(_) => {}
         }
     }
 
@@ -1128,6 +1140,8 @@ pub(crate) fn wall_millis() -> i64 {
             i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
         })
 }
+
+mod reading;
 
 #[cfg(test)]
 pub(crate) mod tests;

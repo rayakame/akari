@@ -63,20 +63,19 @@ Two details:
 | GUILD_ROLE_CREATE, GUILD_ROLE_UPDATE | `GuildRoleEvent` | The role is added or replaced: `GuildUpdated` |
 | GUILD_ROLE_DELETE | `GuildRoleDelete` | `GuildUpdated` |
 | GUILD_MEMBER_UPDATE | `GuildMemberUpdate` | Only for the current user: `CurrentMemberUpdated`. Users also get it for friends and DM partners; those are skipped |
-| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer |
+| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer. A thread in a forum or media channel also raises its parent's `last_message_id` to the thread's ID, without an event: a new post is the forum's newest "message" |
 | CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it |
 | CHANNEL_DELETE, THREAD_DELETE | `ChannelDelete` | `ChannelRemoved`, also for the threads of a deleted channel. CHANNEL_DELETE "will be partial" for private channels and THREAD_DELETE has only `id`, `guild_id`, `parent_id` and `type`, so only those are read |
-| MESSAGE_CREATE | `Message` | Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
+| MESSAGE_CREATE | `Message` | Counts toward the channel's read state first: a message of the current user reads the channel up to it (not a poll result), and others can raise its mention count ([Read states](#read-states)). Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
 | NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; no event |
-| MESSAGE_ACK | `MessageAck` | Not applied yet |
-| CHANNEL_UNREAD_UPDATE | `ChannelUnreadUpdate` | Not applied yet ([Large guilds](#large-guilds)) |
-| PASSIVE_UPDATE_V2 | `PassiveUpdateV2` | Not applied yet ([Large guilds](#large-guilds)) |
-| RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Not applied yet. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
+| MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([Read states](#read-states)); no event yet. Acks of other read state types are ignored |
+| CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without an event. A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
+| RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Keep the blocked and ignored users, whose messages never count as mentions. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
 `debug` level with its IDs.
@@ -132,7 +131,7 @@ Identify sends `PASSIVE_GUILD_UPDATE_V2` (bit 14), so guilds without a subscript
 channels. It carries only what changed: `updated_channels` (each channel's `id`,
 `last_message_id` and `last_pin_timestamp`), voice states and their members. Akari decodes
 `guild_id` and each channel's `id` and `last_message_id`, skipping a channel entry that
-doesn't parse; the store doesn't apply it yet.
+doesn't parse, and the store raises those channels' `last_message_id`.
 
 Observed on 2026-10-15 with akari-cli on a test account:
 
@@ -146,6 +145,29 @@ Observed on 2026-10-15 with akari-cli on a test account:
 - CHANNEL_UNREAD_UPDATE came twice in a 10-minute run with bit 14 set and not at all in a
   20-minute one, although the account has no directory channels. Where it came from is
   **unverified**.
+
+## Read states
+
+The store keeps READY's channel read states (`Store::read_state`) and changes them the way
+the [read state topic](https://docs.discord.food/topics/read-state) asks clients to; the rules
+below were compared with the official client on 2026-10-14:
+
+- **Unread:** a channel is unread when its `last_message_id` is newer than its read state's.
+  Without a read state, a guild channel counts as read up to when the user joined the guild
+  (the member's `joined_at`), and a DM or group DM as read until its next message. Deleting
+  messages never makes a channel read again.
+- **MESSAGE_ACK** moves the position forward, or anywhere with `manual`. Its
+  `mention_count` replaces the count; without one the count stays, and drops to 0 once the
+  ack reaches the channel's newest message.
+- **Mentions** are counted on MESSAGE_CREATE for messages past the read position. In a DM
+  or group DM every message counts, except "recipient removed" ones, and in a muted one only
+  messages that mention the user. In a guild channel the user can see, a mention of the user
+  counts, @everyone and @here unless the guild suppresses them, and a role of the user's
+  unless the guild suppresses roles, muted or not; with the account's
+  `MENTION_ON_ALL_MESSAGES` flag, so does every message in a channel set to all messages that
+  isn't muted, nor a voice or stage channel. @silent messages count. Messages of blocked and
+  ignored users never do.
+- **Own messages** read the channel up to them and clear its count, except a poll result.
 
 ## The state store
 

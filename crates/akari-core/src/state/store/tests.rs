@@ -1254,3 +1254,17 @@ fn a_pending_message_mentions_nobody() {
     );
     assert!(!store.mentions_me(&pending));
 }
+
+#[test]
+fn the_store_reads_a_channels_read_state() {
+    let store = ready_store();
+
+    let general = store.read_state(Snowflake::new(300_000_000_000_000_002));
+    let group = store.read_state(Snowflake::new(300_000_000_000_000_011));
+
+    assert_eq!(
+        general.map(|state| (state.acked.map(|id| id.get()), state.mentions)),
+        Some((Some(400_000_000_000_000_002), 2))
+    );
+    assert_eq!(group, None);
+}

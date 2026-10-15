@@ -5,6 +5,7 @@ mod convert;
 mod events;
 mod order;
 mod permissions;
+mod read_states;
 mod send;
 mod settings;
 mod store;
@@ -14,6 +15,7 @@ mod windows;
 pub(crate) use apply::wall_millis;
 pub use events::{ConnectionState, StoreEvent};
 pub use order::display_order;
+pub use read_states::ReadState;
 pub(crate) use send::limit_in;
 pub use send::{Slowmode, message_length};
 pub use settings::{
