@@ -47,6 +47,22 @@ struct EventBatchTests {
     }
 
     @Test
+    func badgeEventsAreCollectedPerGuild() {
+        let batch = EventBatch([
+            .badgeChanged(channelId: id(10), guildId: id(1)),
+            .badgeChanged(channelId: id(11), guildId: id(1)),
+            .badgeChanged(channelId: id(13), guildId: nil),
+            .guildBadgeChanged(guildId: id(1)),
+        ])
+
+        let badges: [GuildId?: Set<ChannelId>] = [id(1): [id(10), id(11)], nil: [id(13)]]
+        #expect(batch.badgesChanged == badges)
+        #expect(batch.guildBadgesChanged == [id(1)])
+        #expect(batch.channelsChanged.isEmpty)
+        #expect(batch.guildsChanged.isEmpty)
+    }
+
+    @Test
     func settingsEventsAreCollected() {
         let batch = EventBatch([
             .serverListChanged,

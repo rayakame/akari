@@ -629,6 +629,20 @@ impl Store {
         self.read(|inner| inner.state.channel_badge(channel))
     }
 
+    /// The badges of `ids`, in the order given, in one read.
+    pub fn channel_badges(&self, ids: &[ChannelId]) -> Vec<Badge> {
+        self.read(|inner| {
+            ids.iter()
+                .map(|id| inner.state.channel_badge(*id))
+                .collect()
+        })
+    }
+
+    /// The badges of `ids`, in the order given, in one read.
+    pub fn guild_badges(&self, ids: &[GuildId]) -> Vec<Badge> {
+        self.read(|inner| ids.iter().map(|id| inner.state.guild_badge(*id)).collect())
+    }
+
     /// The sum over the guild's channels and joined threads that count for it. `unread` is
     /// false while the guild is muted; its mentions stay.
     pub fn guild_badge(&self, guild: GuildId) -> Badge {

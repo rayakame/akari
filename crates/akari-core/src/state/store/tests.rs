@@ -1341,3 +1341,22 @@ fn a_mute_ending_restores_the_guilds_dot() {
 
     assert!(store.guild_badge(guild).unread);
 }
+
+#[test]
+fn badge_batches_read_in_the_order_given() {
+    let store = ready_store();
+    let unread = Badge {
+        unread: true,
+        mentions: 2,
+    };
+
+    let channels = store.channel_badges(&[
+        Snowflake::new(300_000_000_000_000_003),
+        Snowflake::new(300_000_000_000_000_002),
+        Snowflake::new(1),
+    ]);
+    let guilds = store.guild_badges(&[Snowflake::new(200_000_000_000_000_001), Snowflake::new(1)]);
+
+    assert_eq!(channels, [Badge::default(), unread, Badge::default()]);
+    assert_eq!(guilds, [unread, Badge::default()]);
+}

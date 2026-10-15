@@ -114,6 +114,15 @@ pub enum StoreEvent {
     GuildSettingsChanged {
         guild_id: Option<GuildId>,
     },
+    /// The channel's badge or read state changed; read `channel_badges` or `read_state`.
+    BadgeChanged {
+        channel_id: ChannelId,
+        guild_id: Option<GuildId>,
+    },
+    /// The guild's badge changed, and with it the badge of a folder holding it.
+    GuildBadgeChanged {
+        guild_id: GuildId,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -194,6 +203,14 @@ impl StoreEvent {
             },
             E::ServerListChanged => Self::ServerListChanged,
             E::GuildSettingsChanged { guild_id } => Self::GuildSettingsChanged { guild_id },
+            E::BadgeChanged {
+                channel_id,
+                guild_id,
+            } => Self::BadgeChanged {
+                channel_id,
+                guild_id,
+            },
+            E::GuildBadgeChanged { guild_id } => Self::GuildBadgeChanged { guild_id },
             E::ChannelAdded(channel) => Self::ChannelAdded {
                 channel_id: channel.id,
                 guild_id: channel.guild_id,

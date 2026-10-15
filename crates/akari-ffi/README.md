@@ -19,9 +19,9 @@ Kotlin (Android, later). This crate holds bindings only: logic belongs in `akari
   item in a batch collapse into one read, and a view model always converges to the store's
   state at batch time.
 - **Reads by ID** come in single and batch form (`channel(id)`, `channels(ids)`,
-  `messages(channel_id, ids)`, `muted_channels(ids)`); lists cross as ID lists (`guild_ids`,
-  `channel_list`, `window`), or as `server_list`'s entries (a guild ID, or a folder with its
-  guild IDs).
+  `messages(channel_id, ids)`, `muted_channels(ids)`, `channel_badges(ids)`); lists cross as
+  ID lists (`guild_ids`, `channel_list`, `window`), or as `server_list`'s entries (a guild ID,
+  or a folder with its guild IDs).
 
 ## Settings
 
@@ -34,6 +34,18 @@ own settings mute now, in one read; a muted category or guild doesn't mute its c
 `ServerListChanged` says to read `server_list` again, `GuildSettingsChanged` to reread a
 guild's settings and mutes; it also comes when a timed mute ends. Category collapse isn't
 here: Discord's clients don't sync it, so each app keeps its own.
+
+## Badges and read states
+
+`channel_badges(ids)` and `guild_badges(ids)` return a `Badge` (`unread`, `mentions`) per ID,
+in the order given, in one read: what a channel row, a server icon or (added up by the host)
+a folder shows. The core keeps them current, so reads compute nothing. A channel the user
+can't view, or a category, has `Badge { unread: false, mentions: 0 }`; a muted guild's
+`unread` is false and its mentions stay. `read_state(channel_id)` is where the user stopped
+reading (`acked`, `mentions`), `None` when Discord sent nothing for the channel.
+`unread_private_channels()` lists the DMs and group DMs with mentions, newest message first,
+for the rail. `BadgeChanged { channel_id, guild_id }` says to reread that channel's badge or
+read state, and `GuildBadgeChanged { guild_id }` that guild's badge and its folder's.
 
 ## Formatted messages
 
