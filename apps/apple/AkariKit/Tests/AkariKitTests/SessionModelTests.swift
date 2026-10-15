@@ -106,6 +106,34 @@ final class SessionModelTests {
         session.close()
     }
 
+    // A bulk "mark as read" elsewhere: hundreds of acks at once.
+    @Test
+    func aBurstOfBadgeEventsIsOneReadPerList() async {
+        let channels = (1...254).map { channel(UInt64(1000 + $0)) }
+        store.update { state in
+            state.add(guild(1))
+            state.list(channels, in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        store.log.forget()
+
+        subscription.batches.send(
+            channels.map { .badgeChanged(channelId: $0.id, guildId: id(1)) }
+                + [.guildBadgeChanged(guildId: id(1))])
+        await subscription.batches.pulled(2)
+
+        let badgeReads = store.reads.filter { read in
+            switch read {
+            case .channelBadges, .guildBadges: true
+            default: false
+            }
+        }
+        #expect(badgeReads == [.guildBadges([id(1)]), .channelBadges(channels.map(\.id))])
+        session.close()
+    }
+
     @Test
     func cancellingTheSessionClosesTheSubscription() async {
         let session = makeSession()
