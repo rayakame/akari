@@ -255,8 +255,13 @@ Akari's line (acks: [read-states.md](../protocol/read-states.md#acks-in-the-offi
 
 - It goes before the first loaded message from someone else that is newer than the channel's
   read position when the list opened. Akari marks the channel the user reads read at once, so
-  the list keeps that position for as long as it's open. A channel without a read position counts as read up
-  to what the list first shows. The user's own messages never start the line.
+  the list keeps that position for as long as it's open. A channel without a read position
+  counts as read up to what the list first shows. The user's own messages never start the line.
+- Until Akari has read the channel, a new session's READY moves the position forward to
+  Discord's, never back. That covers a list opened from the disk cache at launch after the user
+  read on another device while Akari was closed. Akari sets no channel as being read until the
+  session is online, so READY's positions aren't Akari's own acks; once Akari has read the
+  channel, a later READY moves nothing.
 - While there is no line, the next message from someone else gets one, also while the user
   reads at the bottom; later messages go below it. Acks, scrolling and reconnects keep it.
   Sending a message, Escape, and "Mark As Read" of the channel or its server remove it, and

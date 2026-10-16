@@ -247,4 +247,84 @@ struct NewMessagesLineTests {
 
         #expect(model.newMessagesLine == id(3))
     }
+
+    // Guild 1 with this channel, opened from the cache while the gateway connects, in an
+    // active key window.
+    func connectingSession() throws -> (SessionModel, MessageListModel) {
+        store.update { state in
+            state.connection = .connecting
+            state.add(guild(1))
+            state.list([channel(10)], in: 1)
+        }
+        let session = SessionModel(
+            userId: id(1), account: account, memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(.guild(id(1)))
+        session.setAppActive(true)
+        session.setWindowKey(true)
+        session.setWindowVisible(true)
+        return (session, try #require(session.messages))
+    }
+
+    // Read on another device while Akari was closed: READY has a newer position than the cache.
+    @Test
+    func aReadyWithANewerReadPositionMovesTheLineDown() throws {
+        shown([1, 2, 3, 4, 5, 6], readUpTo: 2)
+        let (session, list) = try connectingSession()
+        #expect(list.newMessagesLine == id(3))
+
+        store.update { [here] in $0.readStates[here] = readState(4) }
+        session.apply(EventBatch([.ready]))
+        #expect(list.newMessagesLine == id(5))
+
+        store.update { [here] in $0.readStates[here] = readState(6) }
+        session.apply(EventBatch([.ready]))
+        #expect(list.newMessagesLine == nil, "past every loaded message")
+        session.close()
+    }
+
+    // The core acks the channel as soon as it's set as being read, here in READY's own batch.
+    @Test
+    func aReadyMovesTheLineBeforeTheChannelIsRead() throws {
+        shown([1, 2, 3, 4, 5, 6], readUpTo: 2)
+        account.readStateAfterReading.withLock { $0 = readState(6) }
+        let (session, list) = try connectingSession()
+
+        store.update { [here] in $0.readStates[here] = readState(4) }
+        session.apply(EventBatch([.ready, .connection(state: .online)]))
+
+        #expect(account.readingCalls.current == [here])
+        #expect(list.newMessagesLine == id(5))
+        session.close()
+    }
+
+    @Test
+    func aReadyNeverMovesTheLineUp() throws {
+        shown([1, 2, 3, 4, 5, 6], readUpTo: 4)
+        let (session, list) = try connectingSession()
+
+        store.update { [here] in $0.readStates[here] = readState(2) }
+        session.apply(EventBatch([.ready]))
+
+        #expect(list.newMessagesLine == id(5))
+        session.close()
+    }
+
+    // After Akari read the channel, READY's position is Akari's own ack.
+    @Test
+    func aReconnectAfterReadingKeepsTheLine() throws {
+        shown([1, 2, 3, 4, 5, 6], readUpTo: 2)
+        account.readStateAfterReading.withLock { $0 = readState(6) }
+        let (session, list) = try connectingSession()
+        session.apply(EventBatch([.ready, .connection(state: .online)]))
+        #expect(account.readingCalls.current == [here])
+
+        session.apply(EventBatch([.connection(state: .connecting)]))
+        session.apply(EventBatch([.ready]))
+        session.apply(EventBatch([.connection(state: .online)]))
+
+        #expect(list.newMessagesLine == id(3))
+        session.close()
+    }
 }

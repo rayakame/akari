@@ -72,6 +72,38 @@ final class ReadingTests {
         session.close()
     }
 
+    // At READY the store has no channel being read, so READY's read states reach the lists.
+    @Test
+    func readingWaitsForTheSessionToBeOnline() {
+        store.update { $0.connection = .connecting }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.setAppActive(true)
+        session.setWindowKey(true)
+        session.setWindowVisible(true)
+        session.apply(EventBatch([.ready]))
+        #expect(readings.isEmpty)
+
+        session.apply(EventBatch([.connection(state: .online)]))
+
+        #expect(readings == [general])
+        session.close()
+    }
+
+    @Test
+    func goingOfflineStopsReading() {
+        let session = readingSession()
+
+        session.apply(EventBatch([.connection(state: .connecting)]))
+        #expect(session.reading == nil)
+        session.apply(EventBatch([.connection(state: .offline)]))
+        session.apply(EventBatch([.connection(state: .online)]))
+
+        #expect(readings == [general, nil, general], "the engagement stays")
+        session.close()
+    }
+
     @Test
     func aListAwayFromThePresentIsntRead() {
         store.update { $0.windows[id(12)] = window([3], latest: false) }

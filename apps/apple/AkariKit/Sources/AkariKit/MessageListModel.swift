@@ -77,6 +77,8 @@ public final class MessageListModel {
     @ObservationIgnored private var readUpTo: MessageId?
     // Whether `readUpTo` came from the store or a mark as read, not from the first rows shown.
     @ObservationIgnored private var readUpToKnown = false
+    // Set once the session has had the core read the channel: a READY then brings our own ack.
+    @ObservationIgnored var readHere = false
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
     @ObservationIgnored private var hasMessages = false
@@ -169,6 +171,20 @@ public final class MessageListModel {
             readUpTo = position
             readUpToKnown = true
         }
+        placeNewMessagesLine()
+    }
+
+    // READY's position is Discord's, newer when the user read on another device meanwhile.
+    func newSession() {
+        guard !readHere, let state = store.readState(channelId: channelId) else {
+            return
+        }
+        let position = state.acked ?? MessageId(rawValue: 0)
+        if let readUpTo, readUpTo >= position {
+            return
+        }
+        readUpTo = position
+        readUpToKnown = true
         placeNewMessagesLine()
     }
 

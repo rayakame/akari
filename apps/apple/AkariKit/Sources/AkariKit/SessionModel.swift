@@ -24,9 +24,9 @@ public final class SessionModel {
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
     /// with `.task(id: messages.channelId) { await messages.open() }`.
     public private(set) var messages: MessageListModel?
-    /// The channel the user is reading, as the core was told: the open channel while the app is
-    /// active, its window key and visible, the list at the present's bottom and the user
-    /// engaged.
+    /// The channel the user is reading, as the core was told: the open channel while the
+    /// session is online, the app active, its window key and visible, the list at the present's
+    /// bottom and the user engaged.
     public private(set) var reading: ChannelId?
     /// What the connection bar says; `nil` while online.
     public var notice: ConnectionNotice? {
@@ -334,6 +334,10 @@ public final class SessionModel {
 
     func apply(_ batch: EventBatch) {
         defer { updateReading() }
+        // Before anything here sets the channel as being read, which the core acks at once.
+        if batch.ready {
+            messages?.newSession()
+        }
         if let state = batch.connection {
             if case .closed(let error) = state {
                 closed(error)
@@ -489,10 +493,14 @@ public final class SessionModel {
         guard !navigating else {
             return
         }
+        // Not before READY: the core would ack inside READY's write, over Discord's position.
         let reads =
-            engaged && appActive && windowKey && windowVisible && !ended
+            connection == .online && engaged && appActive && windowKey && windowVisible && !ended
             && messages?.atPresentBottom == true
         let channel = reads ? messages?.channelId : nil
+        if channel != nil {
+            messages?.readHere = true
+        }
         guard channel != reading else {
             return
         }
