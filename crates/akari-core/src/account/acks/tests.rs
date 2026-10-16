@@ -1651,3 +1651,38 @@ async fn a_bulk_doesnt_wait_for_a_channel_acks_retry() {
         "a bulk that took over a waiting channel ack"
     );
 }
+
+// J1 went through and READY's position lies between it and J2: an undo of J2 stops at READY's.
+#[tokio::test(start_paused = true)]
+async fn a_refused_ack_never_goes_back_below_ready() {
+    let wants = Wants::default();
+    wants.forget_all();
+    wants.want(
+        channel(1),
+        message(11),
+        read_at(1, 1),
+        read_at(11, 0),
+        Pace::Explicit,
+    );
+    wants.next().await.unwrap();
+    wants.confirmed();
+    wants.want(
+        channel(1),
+        message(13),
+        read_at(11, 0),
+        read_at(13, 0),
+        Pace::Explicit,
+    );
+    wants.reconcile(|_| read_at(12, 2));
+
+    wants.next().await.unwrap();
+    assert_eq!(
+        wants.refuse(),
+        [refusal(
+            channel(1),
+            read_at(12, 2),
+            read_at(13, 0),
+            message(13)
+        )]
+    );
+}

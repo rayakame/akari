@@ -514,9 +514,14 @@ impl Queue {
                     return false;
                 }
                 before.state = ready(*channel);
-            } else if replaced && !sent.contains_key(channel) {
-                // READY's state lacks an ack Discord took since; then the one taken over stays.
-                before.state = ready(*channel);
+            } else if replaced {
+                // READY's state lacks an ack Discord took since, which the one taken over has.
+                let ready = ready(*channel);
+                before.state = if sent.contains_key(channel) {
+                    further(before.state, ready)
+                } else {
+                    ready
+                };
             }
             true
         };
@@ -867,6 +872,16 @@ async fn send(
         if let Some((.., handled)) = park {
             let _ = handled.send(());
         }
+    }
+}
+
+// The one read further; on a tie, `then`'s, Discord's newer count.
+fn further(first: Option<ReadState>, then: Option<ReadState>) -> Option<ReadState> {
+    let position = |state: Option<ReadState>| state.and_then(|state| state.acked);
+    if position(first) > position(then) {
+        first
+    } else {
+        then
     }
 }
 
