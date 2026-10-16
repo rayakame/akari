@@ -34,6 +34,11 @@ fn handed(account: &Account) -> Vec<Handed> {
     account.shared.acks.handed()
 }
 
+// Acks queued, waiting for a retry, or on their way.
+fn pending(account: &Account) -> usize {
+    account.shared.acks.pending()
+}
+
 fn badge(account: &Account, channel: u64) -> Badge {
     account.store().channel_badge(id(channel))
 }
@@ -579,11 +584,12 @@ async fn closing_the_account_stops_the_sender() {
     showing(&online, &[NEWEST]).await;
     online.account.set_reading(Some(general()));
     assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST)]);
+    assert_eq!(pending(&online.account), 1);
 
     online.account.close();
     online.account.mark_read(id(THREAD));
-    tokio::time::sleep(Duration::from_secs(3)).await;
 
+    assert_eq!(pending(&online.account), 0, "nothing left to send");
     assert!(posted(&online.server).await.is_empty());
 }
 
@@ -615,14 +621,15 @@ async fn ready_drops_a_pending_ack_whose_position_changed_elsewhere() {
     limit_the_first_ack(&online.server).await;
     online.account.mark_read(general());
     sent(&online.server, 1).await;
+    assert_eq!(pending(&online.account), 1);
 
     // Marked unread further back on another device meanwhile.
     let _fresh = new_session(&mut online, |ready| {
         ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000001".into();
     })
     .await;
-    tokio::time::sleep(Duration::from_millis(2500)).await;
 
+    assert_eq!(pending(&online.account), 0, "nothing left to send");
     assert_eq!(sent(&online.server, 1).await, [Sent::Ack(GENERAL, NEWEST)]);
     assert!(badge(&online.account, GENERAL).unread);
 }
@@ -648,6 +655,7 @@ async fn a_manual_ack_elsewhere_stops_akaris_retry() {
     limit_the_first_ack(&online.server).await;
     online.account.mark_read(general());
     sent(&online.server, 1).await;
+    assert_eq!(pending(&online.account), 1);
 
     online
         .connection
@@ -659,8 +667,8 @@ async fn a_manual_ack_elsewhere_stops_akaris_retry() {
         ))
         .await;
     sync(&mut online.connection, &online.subscription, 3).await;
-    tokio::time::sleep(Duration::from_millis(2500)).await;
 
+    assert_eq!(pending(&online.account), 0, "nothing left to send");
     assert_eq!(sent(&online.server, 1).await, [Sent::Ack(GENERAL, NEWEST)]);
 }
 

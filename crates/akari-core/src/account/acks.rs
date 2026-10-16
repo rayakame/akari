@@ -777,6 +777,13 @@ impl AckSender {
         (on_taken, release, on_handled)
     }
 
+    // Queued, waiting for a retry, or on its way.
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> usize {
+        let queue = self.wants.lock();
+        queue.wanted.len() + queue.flight.entries.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn handed(&self) -> Vec<Handed> {
         self.handed
