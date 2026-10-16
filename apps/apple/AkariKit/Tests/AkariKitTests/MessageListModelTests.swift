@@ -42,13 +42,13 @@ struct MessageListModelTests {
     }
 
     @Test
-    func openOnlyViewsAFilledWindow() async {
+    func openViewsAFilledWindowWithoutLoadingIt() async {
         shown(window([1, 2]))
         let model = loaded()
 
         await model.open()
 
-        #expect(store.log.actions == [.view(here)])
+        #expect(store.log.actions == [.supersede(here), .view(here)])
     }
 
     @Test

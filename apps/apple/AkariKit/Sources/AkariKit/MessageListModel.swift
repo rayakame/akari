@@ -151,9 +151,11 @@ public final class MessageListModel {
         }
     }
 
-    /// Views the channel; loads the latest page when it has no messages or is stale.
+    /// Views the channel; loads the latest page when it has no messages or is stale. A jump to
+    /// unread an earlier list of the channel started doesn't land.
     public func open() async {
         if hasMessages && !isStale {
+            account.supersedeAroundLoads(channelId: channelId)
             account.viewChannel(channelId: channelId)
         } else {
             await load(.latest)

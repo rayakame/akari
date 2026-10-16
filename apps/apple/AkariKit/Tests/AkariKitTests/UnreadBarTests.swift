@@ -547,6 +547,28 @@ struct UnreadBarTests {
         #expect(model.unreadBar != nil)
     }
 
+    // The bar clicked in this channel, then a switch away and back while the jump loads.
+    @Test
+    func aJumpFromAnEarlierListOfTheChannelDoesntLand() async {
+        shown([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false))
+        let earlier = makeModel()
+        let jump = await waitingJump(earlier)
+
+        let model = makeModel()
+        await model.open()
+        account.loadReplies.send(nil)
+        await finished(jump)
+        await model.escape()
+
+        #expect(store.window(channelId: here)?.latest == true, "the jump's page didn't land")
+        #expect(loads == [aroundLoad])
+        #expect(ids(model) == [5, 6, 7, 8])
+        #expect(model.atPresent)
+        #expect(earlier.unreadJumps == 0)
+    }
+
     // The around page reached the list before its load returned, and the user clicked again.
     @Test
     func aSecondClickWhileTheJumpLoadsEndsAtTheLine() async {
