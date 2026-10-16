@@ -1612,3 +1612,42 @@ async fn a_bucket_the_limiter_holds_is_waited_out_without_a_backoff() {
         asked.elapsed()
     );
 }
+
+// The channel ack's route may be what's limited, not the bulk's.
+#[tokio::test(start_paused = true)]
+async fn a_bulk_doesnt_wait_for_a_channel_acks_retry() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(1), None, None, Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.want_bulk(vec![
+        (channel(1), message(2), None, None),
+        (channel(2), message(3), None, None),
+    ]);
+    wants.retry(Instant::now() + Duration::from_secs(60));
+    let joined = timeout(Duration::from_secs(1), wants.next())
+        .await
+        .expect("waited for the channel ack's retry")
+        .unwrap();
+    assert_eq!(
+        joined.entries,
+        [(channel(1), message(2)), (channel(2), message(3))],
+        "a bulk that came during the channel ack's flight"
+    );
+
+    wants.want(channel(3), message(4), None, None, Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.retry(Instant::now() + Duration::from_secs(60));
+    wants.want_bulk(vec![
+        (channel(3), message(5), None, None),
+        (channel(4), message(6), None, None),
+    ]);
+    let taken_over = timeout(Duration::from_secs(1), wants.next())
+        .await
+        .expect("waited for the channel ack's retry")
+        .unwrap();
+    assert_eq!(
+        taken_over.entries,
+        [(channel(3), message(5)), (channel(4), message(6))],
+        "a bulk that took over a waiting channel ack"
+    );
+}

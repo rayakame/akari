@@ -296,6 +296,7 @@ impl Queue {
                             alone: false,
                         };
                         wanted.order = order;
+                        wanted.retry = None;
                     }
                 }
             }
@@ -456,8 +457,8 @@ impl Queue {
                 newer.id = newer.id.max(back.id);
                 newer.before = back.before.then(newer.before);
                 newer.since = newer.since.min(back.since);
-                // The bulk's route may be what's limited, not the channel's own.
-                if !back.bulk() || newer.bulk() {
+                // A retry waits on its own route's limit, not on the other one's.
+                if back.bulk() == newer.bulk() {
                     newer.retry = back.retry.or(newer.retry);
                 }
                 if let Kind::Bulk { alone, .. } = &mut newer.kind {
