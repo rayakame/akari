@@ -18,7 +18,7 @@ const LULL: Duration = Duration::from_secs(2);
 // A busy channel still reaches the user's other devices.
 const CAP: Duration = Duration::from_secs(10);
 const BULK_CHUNK: usize = 50;
-// A failed ack's wait doubles from the first retry's up to this.
+// A failed ack's wait doubles up to this; a 429's retry_after counts at any length.
 const RETRY_CAP: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,6 +173,11 @@ impl Queue {
                     (Kind::Paced { .. }, Pace::Explicit) => Kind::Explicit {
                         at: now.min(wanted.due()),
                     },
+                    // The bulk's route may be what's limited; the channel's own goes now.
+                    (Kind::Bulk { .. }, Pace::Explicit) if wanted.retry.is_some() => {
+                        wanted.retry = None;
+                        Kind::Explicit { at: now }
+                    }
                     (kind, _) => kind,
                 };
             }
@@ -389,7 +394,8 @@ pub(crate) struct AckSender {
 
 impl AckSender {
     // `unauthorized` runs once on a 401, after which the sender has stopped.
-    // A failed ack is retried after `retry_delay`, doubling each time up to a minute.
+    // A failed ack is retried after `retry_delay`, doubling each time up to a minute, or after
+    // a longer retry_after.
     pub(crate) fn start(
         runtime: &tokio::runtime::Handle,
         rest: Arc<AccountRest>,
@@ -516,9 +522,11 @@ async fn send(
             Err(err) => err,
         };
         let failures = request.failures.saturating_add(1);
-        if let Some(wait) = retry_wait(&err, failures, retry_delay) {
+        if let Some(wait) = retry_wait(&err, failures, retry_delay)
+            && let Some(at) = Instant::now().checked_add(wait)
+        {
             log(&request, Outcome::Retrying(&err, wait));
-            wants.retry(request, Instant::now() + wait);
+            wants.retry(request, at);
             continue;
         }
         log(&request, Outcome::Dropped(&err));
@@ -542,7 +550,7 @@ fn retry_wait(err: &RequestError, failures: u32, first: Duration) -> Option<Dura
     let wait = backoff(first, failures);
     match err {
         RequestError::RateLimited { retry_after } => {
-            Some(retry_after.map_or(wait, |after| wait.max(after.min(RETRY_CAP))))
+            Some(retry_after.map_or(wait, |after| wait.max(after)))
         }
         err if err.is_transient() => Some(wait),
         _ => None,

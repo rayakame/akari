@@ -565,7 +565,6 @@ fn only_rate_limits_and_transient_errors_are_retried() {
         Some(Duration::from_secs(30)),
         "Discord's wait when it's longer"
     );
-    assert_eq!(retry_wait(&limited(Some(3600)), 1, first), Some(RETRY_CAP));
     for dropped in [
         RequestError::Discord {
             status: 403,
@@ -875,4 +874,140 @@ async fn a_retry_sends_the_id_resolved_when_queued() {
     assert_eq!(sent.len(), 3, "{sent:?}");
     assert_eq!(sent[1].0, channel(2).get());
     assert_eq!(sent[1], sent[2], "the retry sent another ID");
+}
+
+#[test]
+fn a_retry_after_over_a_minute_is_honored() {
+    let first = Duration::from_secs(2);
+    let limited = |secs: u64| RequestError::RateLimited {
+        retry_after: Some(Duration::from_secs(secs)),
+    };
+
+    assert_eq!(
+        retry_wait(&limited(90), 1, first),
+        Some(Duration::from_secs(90))
+    );
+    assert_eq!(
+        retry_wait(&limited(3600), 8, first),
+        Some(Duration::from_secs(3600))
+    );
+}
+
+// Answers the first bulk with a 429; every answer comes after `SLOW`.
+struct LimitedBulk {
+    arrivals: Arc<Mutex<Vec<std::time::Instant>>>,
+    limited: std::sync::atomic::AtomicBool,
+    retry_after: f64,
+}
+
+impl Respond for LimitedBulk {
+    fn respond(&self, request: &Received) -> ResponseTemplate {
+        self.arrivals
+            .lock()
+            .unwrap()
+            .push(std::time::Instant::now());
+        let answer = if request.url.path() != BULK {
+            answered()
+        } else if !self.limited.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            ResponseTemplate::new(429).set_body_json(
+                json!({"message": "You are being rate limited.", "retry_after": self.retry_after, "global": false}),
+            )
+        } else {
+            ResponseTemplate::new(204)
+        };
+        answer.set_delay(SLOW)
+    }
+}
+
+#[tokio::test]
+async fn an_explicit_ack_goes_ahead_of_a_rate_limited_bulk() {
+    let server = MockServer::start().await;
+    let arrivals = Arc::new(Mutex::new(Vec::new()));
+    Mock::given(method("POST"))
+        .respond_with(LimitedBulk {
+            arrivals: arrivals.clone(),
+            limited: std::sync::atomic::AtomicBool::new(false),
+            retry_after: 1.0,
+        })
+        .mount(&server)
+        .await;
+    let sender = sender(&server);
+
+    sender.want_bulk(vec![
+        ack(channel(1), at(message(1))),
+        ack(channel(2), at(message(2))),
+    ]);
+    received(&server, 1).await;
+    sender.want(ack(channel(3), at(message(3))), Pace::Explicit);
+    let requests = received(&server, 3).await;
+
+    assert_eq!(
+        acks(&requests),
+        [(0, 2), ack_of(channel(3), message(3)), (0, 2)]
+    );
+    let arrivals = arrivals.lock().unwrap().clone();
+    assert!(
+        arrivals[2] - arrivals[0] >= Duration::from_secs(1),
+        "the bulk went again before Discord's retry_after"
+    );
+    for pair in arrivals.windows(2) {
+        assert!(pair[1] - pair[0] >= SLOW, "{:?}", pair[1] - pair[0]);
+    }
+}
+
+#[tokio::test]
+async fn an_exhausted_bucket_doesnt_hold_other_acks() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path_regex(ACKS))
+        .respond_with(
+            answered()
+                .insert_header("x-ratelimit-remaining", "0")
+                .insert_header("x-ratelimit-reset-after", "1"),
+        )
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    mock_acks(&server, answered()).await;
+    let sender = sender(&server);
+
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    received(&server, 1).await;
+    sender.want(ack(channel(1), at(message(2))), Pace::Explicit);
+    sender.want(ack(channel(2), at(message(3))), Pace::Explicit);
+    let requests = received(&server, 3).await;
+
+    assert_eq!(
+        acks(&requests),
+        [
+            ack_of(channel(1), message(1)),
+            ack_of(channel(2), message(3)),
+            ack_of(channel(1), message(2))
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_explicit_ack_doesnt_wait_for_its_channels_bulk_retry() {
+    let wants = Wants::default();
+    wants.want_bulk(vec![(channel(1), message(1)), (channel(2), message(2))]);
+    let failed = wants.next().await.unwrap();
+    let retry_at = Instant::now() + Duration::from_secs(60);
+    wants.retry(failed, retry_at);
+
+    let asked = Instant::now();
+    wants.want(channel(1), message(3), Pace::Explicit);
+    let escaped = wants.next().await.unwrap();
+
+    assert!(
+        asked.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        asked.elapsed()
+    );
+    assert_eq!(single(&escaped), (channel(1), message(3)));
+    let retried = wants.next().await.unwrap();
+    assert!(Instant::now() >= retry_at);
+    assert!(retried.bulk);
+    assert_eq!(retried.entries, [(channel(2), message(2))]);
 }

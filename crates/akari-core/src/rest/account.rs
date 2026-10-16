@@ -169,6 +169,14 @@ struct BulkAckEntry {
     read_state_type: u8,
 }
 
+// Acks are retried by their sender, which mustn't be held up by one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Waiting {
+    // Out rate limits up to MAX_RATE_LIMIT_WAIT, and before retrying a 429, 502 or 504.
+    Allowed,
+    Never,
+}
+
 #[derive(Debug)]
 pub(crate) struct Page {
     pub(crate) messages: Vec<model::Message>,
@@ -239,7 +247,9 @@ impl AccountRest {
         let path = format!("channels/{}/messages?limit={limit}{cursor}", channel.get());
         let route = RouteKey::new(Method::Get, MESSAGES, channel.get());
         let Exchange { body, mut report } = self
-            .send(route, || self.request(HttpMethod::GET, &path))
+            .send(route, Waiting::Allowed, || {
+                self.request(HttpMethod::GET, &path)
+            })
             .await?;
         let decoding = Instant::now();
         let (mut messages, received): (Vec<model::Message>, usize) =
@@ -264,7 +274,7 @@ impl AccountRest {
         let path = format!("channels/{}/messages", channel.get());
         let route = RouteKey::new(Method::Post, MESSAGES, channel.get());
         let Exchange { body, .. } = self
-            .send(route, || {
+            .send(route, Waiting::Allowed, || {
                 Ok(self.request(HttpMethod::POST, &path)?.json(message))
             })
             .await?;
@@ -283,7 +293,7 @@ impl AccountRest {
             token: None,
             last_viewed,
         };
-        self.send(route, || {
+        self.send(route, Waiting::Never, || {
             Ok(self.request(HttpMethod::POST, &path)?.json(&body))
         })
         .await?;
@@ -305,7 +315,7 @@ impl AccountRest {
                 .collect(),
         };
         let route = RouteKey::new(Method::Post, ACK_BULK, 0);
-        self.send(route, || {
+        self.send(route, Waiting::Never, || {
             Ok(self.request(HttpMethod::POST, ACK_BULK)?.json(&body))
         })
         .await?;
@@ -331,8 +341,10 @@ impl AccountRest {
     async fn send(
         &self,
         route: RouteKey,
+        waiting: Waiting,
         build: impl Fn() -> Result<reqwest::RequestBuilder, RequestError>,
     ) -> Result<Exchange, RequestError> {
+        let waits = waiting == Waiting::Allowed;
         let mut rate_limited = 0;
         let mut server_errors = 0;
         let mut permit: Option<Permit<'_>> = None;
@@ -349,11 +361,12 @@ impl AccountRest {
                     held
                 }
                 None => {
-                    let acquired = self
-                        .limiter
-                        .acquire(route.clone())
-                        .await
-                        .map_err(too_long)?;
+                    let acquired = if waits {
+                        self.limiter.acquire(route.clone()).await
+                    } else {
+                        self.limiter.acquire_now(route.clone()).await
+                    }
+                    .map_err(too_long)?;
                     report.queued = behind_warm_up + acquired.queued;
                     report.limited = acquired.limited;
                     permit.insert(acquired)
@@ -382,7 +395,10 @@ impl AccountRest {
                     self.unauthorized.store(true, Ordering::Release);
                     return Err(RequestError::Unauthorized);
                 }
-                429 if limits.retry_after.is_some() && rate_limited < RATE_LIMIT_RETRIES => {
+                429 if waits
+                    && limits.retry_after.is_some()
+                    && rate_limited < RATE_LIMIT_RETRIES =>
+                {
                     rate_limited += 1;
                     report.retries += 1;
                 }
@@ -391,7 +407,7 @@ impl AccountRest {
                         retry_after: limits.retry_after,
                     });
                 }
-                502 | 504 if server_errors == 0 => {
+                502 | 504 if waits && server_errors == 0 => {
                     server_errors += 1;
                     report.retries += 1;
                     tokio::time::sleep(self.retry_delay).await;

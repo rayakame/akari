@@ -197,6 +197,19 @@ impl RateLimiter {
     }
 
     pub(crate) async fn acquire(&self, route: RouteKey) -> Result<Permit<'_>, Duration> {
+        self.acquire_within(route, self.max_wait).await
+    }
+
+    // Err with the wait instead of waiting for a limit at all.
+    pub(crate) async fn acquire_now(&self, route: RouteKey) -> Result<Permit<'_>, Duration> {
+        self.acquire_within(route, Duration::ZERO).await
+    }
+
+    async fn acquire_within(
+        &self,
+        route: RouteKey,
+        max_wait: Duration,
+    ) -> Result<Permit<'_>, Duration> {
         let lane = {
             let mut lanes = self.lanes.lock().unwrap_or_else(PoisonError::into_inner);
             lanes.retain(|_, lane| Arc::strong_count(lane) > 1);
@@ -206,7 +219,7 @@ impl RateLimiter {
         // tokio's Mutex is fair, so waiters on one route start in the order they came.
         let guard = lane.lock_owned().await;
         let queued = asked.elapsed();
-        let limited = self.reserve(&route).await?;
+        let limited = self.reserve(&route, max_wait).await?;
         Ok(Permit {
             limiter: self,
             route,
@@ -217,7 +230,7 @@ impl RateLimiter {
     }
 
     // Ok: how long it waited for a limit; zero when it didn't have to.
-    async fn reserve(&self, route: &RouteKey) -> Result<Duration, Duration> {
+    async fn reserve(&self, route: &RouteKey, max_wait: Duration) -> Result<Duration, Duration> {
         let started = Instant::now();
         let mut waited = false;
         loop {
@@ -228,7 +241,7 @@ impl RateLimiter {
                 .unwrap_or_else(PoisonError::into_inner)
                 .reserve(route, now);
             match wait {
-                Some(at) if at.duration_since(now) > self.max_wait => {
+                Some(at) if at.duration_since(now) > max_wait => {
                     return Err(at.duration_since(now));
                 }
                 Some(at) => {
@@ -245,7 +258,9 @@ impl RateLimiter {
 impl Permit<'_> {
     /// Waits until the route may start again, so a retry goes before later requests.
     pub(crate) async fn renew(&self) -> Result<Duration, Duration> {
-        self.limiter.reserve(&self.route).await
+        self.limiter
+            .reserve(&self.route, self.limiter.max_wait)
+            .await
     }
 
     // Discord's Reset-After counts from its answer; the headers are the closest we see of it.
