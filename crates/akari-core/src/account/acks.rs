@@ -9,7 +9,7 @@ use tokio::time::Instant;
 use super::mutes::until;
 use crate::model::{ChannelId, MessageId};
 use crate::ms;
-use crate::rest::{AccountRest, RequestError, last_viewed};
+use crate::rest::{AccountRest, Failure, RequestError, last_viewed};
 use crate::state::{Ack, ReadState, wall_millis};
 
 const TARGET: &str = "akari_core::acks";
@@ -400,6 +400,21 @@ impl Queue {
         }
     }
 
+    // The limiter holds the request's route until `at`: that's no failure, so no longer backoff.
+    fn hold(&mut self, at: Instant) {
+        let flight = std::mem::take(&mut self.flight);
+        if self.closed {
+            return;
+        }
+        for (channel, mut wanted) in flight.entries {
+            wanted.retry = Some(Retry {
+                at,
+                failures: wanted.failures(),
+            });
+            self.requeue(channel, wanted);
+        }
+    }
+
     // A bulk of several entries goes again entry by entry. A single one is handed back, unless
     // a newer ack for the channel is pending: that one goes out and carries the undo.
     fn refuse(&mut self, now: Instant) -> Vec<Refusal> {
@@ -553,6 +568,10 @@ impl Wants {
 
     fn retry(&self, at: Instant) {
         self.lock().retry(at);
+    }
+
+    fn hold(&self, at: Instant) {
+        self.lock().hold(at);
     }
 
     fn refuse(&self) -> Vec<Refusal> {
@@ -749,7 +768,17 @@ async fn send(
                 log(&request, Outcome::Sent);
                 continue;
             }
-            Err(err) => err,
+            Err(Failure::Held(wait)) => match Instant::now().checked_add(wait) {
+                Some(at) => {
+                    log(&request, Outcome::Held(wait));
+                    wants.hold(at);
+                    continue;
+                }
+                None => RequestError::RateLimited {
+                    retry_after: Some(wait),
+                },
+            },
+            Err(Failure::Request(err)) => err,
         };
         if matches!(err, RequestError::Unauthorized | RequestError::Closed) {
             log(&request, Outcome::Dropped(&err));
@@ -800,6 +829,7 @@ fn retry_wait(err: &RequestError, failures: u32, first: Duration) -> Option<Dura
 
 enum Outcome<'a> {
     Sent,
+    Held(Duration),
     Retrying(&'a RequestError, Duration),
     Refused(&'a RequestError),
     Dropped(&'a RequestError),
@@ -822,6 +852,16 @@ fn log(request: &Request, outcome: Outcome<'_>) {
             pace,
             waited_ms,
             "ack sent"
+        ),
+        Outcome::Held(wait) => tracing::debug!(
+            target: TARGET,
+            channel_id,
+            message_id,
+            entries,
+            pace,
+            waited_ms,
+            retry_ms = ms(wait),
+            "ack held by the rate limiter"
         ),
         Outcome::Retrying(err, wait) => tracing::debug!(
             target: TARGET,

@@ -578,9 +578,16 @@ fn message() -> MessageId {
     Snowflake::new(400_000_000_000_000_010)
 }
 
-fn limited_for(result: &Result<(), RequestError>) -> Option<Duration> {
+fn limited_for(result: &Result<(), Failure>) -> Option<Duration> {
     match result {
-        Err(RequestError::RateLimited { retry_after }) => *retry_after,
+        Err(Failure::Request(RequestError::RateLimited { retry_after })) => *retry_after,
+        _ => None,
+    }
+}
+
+fn held_for(result: &Result<(), Failure>) -> Option<Duration> {
+    match result {
+        Err(Failure::Held(wait)) => Some(*wait),
         _ => None,
     }
 }
@@ -602,13 +609,9 @@ async fn an_ack_hands_a_429_back_instead_of_retrying_it() {
     let first = rest.ack(channel(), message(), 4305).await;
     let second = rest.ack(channel(), message(), 4305).await;
 
-    for result in [&first, &second] {
-        let wait = limited_for(result);
-        assert!(
-            wait.is_some_and(|wait| wait > Duration::ZERO && wait <= Duration::from_millis(500)),
-            "{result:?}"
-        );
-    }
+    let short = |wait: Duration| wait > Duration::ZERO && wait <= Duration::from_millis(500);
+    assert!(limited_for(&first).is_some_and(short), "{first:?}");
+    assert!(held_for(&second).is_some_and(short), "{second:?}");
     assert_eq!(requests(&server).await.len(), 1, "the 429 holds the route");
 }
 
@@ -632,7 +635,7 @@ async fn an_ack_fails_at_once_instead_of_waiting_for_its_bucket() {
         .expect("waited for the bucket");
 
     assert!(
-        limited_for(&second).is_some_and(|wait| wait > Duration::from_secs(3)),
+        held_for(&second).is_some_and(|wait| wait > Duration::from_secs(3)),
         "{second:?}"
     );
     assert_eq!(requests(&server).await.len(), 1);
@@ -654,7 +657,10 @@ async fn an_ack_hands_a_502_back_instead_of_retrying_it() {
     let result = rest(&server).await.ack(channel(), message(), 4305).await;
 
     assert!(
-        matches!(result, Err(RequestError::ServerError { status: 502 })),
+        matches!(
+            result,
+            Err(Failure::Request(RequestError::ServerError { status: 502 }))
+        ),
         "{result:?}"
     );
     assert_eq!(requests(&server).await.len(), 1);

@@ -1558,3 +1558,57 @@ async fn a_reading_ack_doesnt_wait_for_its_channels_bulk_retry() {
     assert!(Instant::now() >= retry_at);
     assert_eq!(retried.entries, [(channel(2), message(2))]);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_request_the_limiter_holds_waits_without_a_failure() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(1), None, None, Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.retry(Instant::now());
+    wants.next().await.unwrap();
+
+    let held_until = Instant::now() + Duration::from_millis(300);
+    wants.hold(held_until);
+    let request = wants.next().await.unwrap();
+
+    assert!(Instant::now() >= held_until);
+    assert_eq!(single(&request), (channel(1), message(1)));
+    assert_eq!(request.failures, 1, "the hold counted as a failure");
+}
+
+#[tokio::test]
+async fn a_bucket_the_limiter_holds_is_waited_out_without_a_backoff() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path_regex(ACKS))
+        .respond_with(
+            answered()
+                .insert_header("x-ratelimit-remaining", "0")
+                .insert_header("x-ratelimit-reset-after", "0.3"),
+        )
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    mock_acks(&server, answered()).await;
+    let sender = sender_retrying_after(&server, Duration::from_secs(2));
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    received(&server, 1).await;
+
+    let asked = std::time::Instant::now();
+    sender.want(ack(channel(1), at(message(2))), Pace::Explicit);
+    let requests = received(&server, 2).await;
+
+    assert_eq!(
+        acks(&requests),
+        [
+            ack_of(channel(1), message(1)),
+            ack_of(channel(1), message(2))
+        ]
+    );
+    assert!(
+        asked.elapsed() < Duration::from_millis(1500),
+        "waited {:?}, a failure's backoff",
+        asked.elapsed()
+    );
+}
