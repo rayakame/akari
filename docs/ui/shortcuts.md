@@ -38,8 +38,8 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
 - **Only the Escape key.** macOS sends Cmd+. as the same cancel command as Escape; in Akari it
   marks nothing read, and Cmd+Shift+. doesn't mark the server read. In the composer it does
-  nothing, as in the official client; in the message list and a message's text AppKit handles
-  it as usual.
+  nothing, as in the official client (**unverified**); in the message list and a message's
+  text AppKit handles it as usual.
 - **Escape with something open.** Once Akari has replies, edits and popups, Escape closes the
   open one first and doesn't also mark the channel read, as in the official client
   (**unverified**).

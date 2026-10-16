@@ -50,14 +50,15 @@ before compression. The 4 MiB body limit applies to the decompressed body.
   end of the window was trimmed or deleted meanwhile, since it would leave a gap. Both are
   `Outdated`.
 - **The last request places the window.** `Latest` and `Around` loads and
-  `Account::supersede_around_loads` (Escape, a mark as read, a send or opening the channel
-  again during a jump) take a number in the order the host asked for them: from
+  `Account::supersede_around_loads` (Escape, a mark as read, a send, leaving the channel or
+  opening it again during a jump) take a number in the order the host asked for them: from
   `Account::reserve_placing`, passed to `load_messages_placed`, or, without one, when the load
-  begins. An `Around` page is dropped (`Overtaken`) when one of them came after it. A `Latest`
-  page that would replace the window is dropped while a newer `Around` load is the last
-  request; it still raises the channel's newest message, and a stale window it would have
-  replaced stops being at the present, as after a failed refresh, so live messages aren't held
-  back should the `Around` load fail.
+  begins. An `Around` page is dropped (`Overtaken`, or `Outdated` once the newer page has
+  replaced the window) when one of them came after it. A `Latest` page that would replace the
+  window is dropped while a newer `Around` load is the last request; it still raises the
+  channel's newest message, and a stale window it would have replaced stops being at the
+  present, as after a failed refresh, so live messages aren't held back should the `Around` load
+  fail.
 - A page is short if Discord sent fewer entries than the limit; messages skipped because
   they didn't decode still count.
 - Edits and deletes that arrive while a page is loading are applied to the page when it

@@ -133,14 +133,19 @@ coming back to the bottom or the window alone doesn't read
 opened on its own (the open channel deleted or hidden, its server gone) isn't read until the
 user clicks.
 
-**What reading acks.** Up to the newest message the channel's list shows, while that list is
-at the present and not stale; never a message past it, and never "now". When the host sets the
-channel, the store marks it read up to that message at once, so its badge goes, and the ack
-follows, if the message is past the read position or the channel has mentions. After that,
-only the list growing at its present end reads again: a live message, or a page that reaches
-the present. A newest message raised any other way (a GUILD_CREATE, an unread update) reads
-nothing until the list shows it, so a channel whose newest message is past its list stays
-unread. `set_reading(None)` stops reading and clears nothing.
+**What reading acks.** Up to the newest message the channel's list shows, while that list is at
+the present and not stale, and never "now". Past that row it acks only messages known to be
+deleted, since Discord keeps a deleted message as the channel's newest
+([the unread rule](#the-unread-rule)): those a page reaching the present lacks, up to what was
+the channel's newest message when the page was asked for, and the list's newest row when it is
+deleted at the present. So a channel whose newest message was deleted reads like any other, and
+a message that exists is never acked before the list shows it. When the host sets the channel,
+the store marks it read up to that message at once, so its badge goes, and the ack follows, if
+the message is past the read position or the channel has mentions. After that, only the list
+growing at its present end reads again: a live message, or a page that reaches the present. A
+newest message raised any other way (a GUILD_CREATE, an unread update) reads nothing until the
+list shows it, so a channel whose newest message is past its list stays unread.
+`set_reading(None)` stops reading and clears nothing.
 
 **Connection drops.** The core stops reading whenever the connection drops (every reconnect,
 a resume included), on `disconnect()` and when the account closes: the session that comes back
@@ -174,7 +179,8 @@ request. The channels are those whose badge shows unread or mentions, with their
 unarchived threads (never unjoined ones), plus every forum and media channel the user can
 view, read or not. With nothing unread there is no bulk, and no forum goes alone.
 
-**Which message ID.** Reading acks the newest message the channel's list shows (above).
+**Which message ID.** Reading acks the newest message the channel's list shows, or a deleted
+one past it (above).
 Escape, the menus and Shift+Escape ack each channel's newest message, as the official client
 sends. A "now" snowflake (a timestamp, the low 22 bits zero) goes instead for:
 
@@ -184,8 +190,8 @@ sends. A "now" snowflake (a timestamp, the low 22 bits zero) goes instead for:
   history page that reaches the present, or a MESSAGE_CREATE that moves the newest message
   makes it ordinary again. A message Discord sends because it mentions the user (directly,
   through @everyone or @here, or through one of their roles) doesn't: Discord sends those even
-  from a large guild it sends no other messages of, so the messages after one may never
-  arrive;
+  from a large guild it sends no other messages of (**unverified**; docs.discord.food doesn't
+  say), so the messages after one may never arrive;
 - every channel marked read before the first READY (Escape, the menus, Shift+Escape), whose
   newest messages come from the disk cache; reading itself waits for READY.
 
@@ -222,7 +228,9 @@ retry, or on its way), and sending it afterwards would undo that:
   applies them on top of READY's read states, forward only, and builds their channels' badges
   again, so a badge the user cleared stays cleared. One that reaches READY's newest message for
   the channel clears its count. Otherwise READY's count stays, since a mention READY counts
-  past the ack is still unread, until the ack's echo brings Discord's count.
+  past the ack is still unread, until the ack's echo brings Discord's count. One still pending
+  once READY is in, waiting for its turn or a retry, is dropped if READY's position is past
+  it; one at READY's position still goes, since it clears READY's count.
 
 ### Refused acks
 

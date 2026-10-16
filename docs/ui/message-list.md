@@ -300,9 +300,10 @@ Akari's bar:
   bar stays for another click.
 - The user's last request places the list. Escape, Shift+Escape, "Jump to present", "Mark As
   Read" (the bar's, or the channel's, its server's or its folder's menu item), sending a
-  message and opening the channel again cancel a jump that is still loading, and the list goes
-  where that request takes it; the cancelled jump doesn't count as seeing the line. A second
-  click while the jump loads starts no second load; one after such a request starts a new jump.
+  message and switching to another channel cancel a jump that is still loading, and the list
+  goes where that request takes it; back in the channel after a switch, it opens at the present
+  with the bar. The cancelled jump doesn't count as seeing the line. A second click while the
+  jump loads starts no second load; one after such a request starts a new jump.
   A jump clicked while the list is still loading the present takes that load's place; if the
   jump then fails or a mark as read cancels it, the list still goes to the present.
 - "Mark As Read" on its right marks the channel read like the channel's menu item, which ends
@@ -334,9 +335,9 @@ window isn't enough. Akari tells the core which channel the user reads
   height, whichever is larger. That is looser than the 2 that keep the list at the bottom
   ([Layout](#layout)): a shorter scroll or a trackpad's bounce only pauses reading until the
   list is back at the bottom, and the list's own scrolls (the unread bar's jump, the jump to
-  the present, following new messages) never end it; after the bar's jump, the count starts
-  where the jump left the list. The window losing key, the app going inactive, the window
-  being hidden, the Mac going to sleep and fast user switching to another account end it too.
+  the present, following new messages) never end it; the jump's own move doesn't count toward
+  it. The window losing key, the app going inactive, the window being hidden, the Mac going to
+  sleep and fast user switching to another account end it too.
   It is stricter than the official client in one place: a click while scrolled up reads
   nothing until the list is back at the bottom, but it counts: once the list is there, reading
   starts without another click.

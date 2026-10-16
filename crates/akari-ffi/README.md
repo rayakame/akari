@@ -163,10 +163,10 @@ such requests for one channel overlap, the one the host made last wins. `reserve
 returns the next number in that order; a host takes it where the user acts and passes it to
 `load_messages(…, placing)`, since the load itself begins later, on Akari's runtime (`None`
 takes a number when the load begins). `supersede_around_loads(channel_id)` takes one without
-loading, for Escape, a mark as read, a send or opening the channel again during a jump; both
-return at once. The core drops an `Around` page when a newer request came after it, and a
-`Latest` page that would replace the window while a newer `Around` load is the channel's last
-request (the page still raises the channel's newest message). `LoadReport.outcome` says what
+loading, for Escape, a mark as read, a send, leaving the channel or opening it again during a
+jump; both return at once. The core drops an `Around` page when a newer request came after it,
+and a `Latest` page that would replace the window while a newer `Around` load is the channel's
+last request (the page still raises the channel's newest message). `LoadReport.outcome` says what
 became of a page: `Applied`, `Overtaken` (a newer request came first) or `Outdated` (the window
 was replaced, or the end the page continues from changed, meanwhile). A jump has happened only
 once its page is `Applied`. The rules are in
