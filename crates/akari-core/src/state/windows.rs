@@ -53,6 +53,8 @@ pub(crate) struct LoadTicket {
     generation: u64,
     placing: u64,
     holds: bool,
+    // The channel's newest message when the load began.
+    newest: Option<MessageId>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +98,8 @@ struct Window {
     placing: u64,
     // The newest Around load's placing: a Latest page from before it leaves it the window.
     around_placing: u64,
+    // At the present, a message up to this one that isn't among `messages` was deleted.
+    present_through: Option<MessageId>,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
     loading: u32,
@@ -455,13 +459,18 @@ impl Windows {
         })
     }
 
-    // The newest row of a list at the present; `None` while it's away from it or stale.
+    // The newest row of a list at the present, or a deleted message past it, which Discord keeps
+    // as the channel's newest; `None` while the list is away from the present or stale.
     pub(crate) fn newest_at_present(&self, channel: ChannelId) -> Option<MessageId> {
         let window = self.windows.get(&channel)?;
         if !window.latest || window.stale {
             return None;
         }
-        window.messages.last().map(|message| message.id)
+        window
+            .messages
+            .last()
+            .map(|message| message.id)
+            .max(window.present_through)
     }
 
     pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
@@ -650,6 +659,7 @@ impl Windows {
         channel: ChannelId,
         kind: LoadKind,
         placing: u64,
+        newest: Option<MessageId>,
         events: &mut Vec<StoreEvent>,
     ) -> Option<LoadTicket> {
         if matches!(kind, LoadKind::Latest | LoadKind::Around(_)) {
@@ -688,6 +698,7 @@ impl Windows {
             generation: window.generation,
             placing,
             holds,
+            newest,
         })
     }
 
@@ -702,6 +713,12 @@ impl Windows {
         let window_limit = self.limits.messages;
         let generation = self.next_generation();
         let channel_id = ticket.channel;
+        // Asked for after the load began: what it lacks up to the channel's newest was deleted.
+        let through = page
+            .iter()
+            .map(|message| message.id)
+            .max()
+            .max(ticket.newest);
         let Some(window) = self
             .windows
             .get_mut(&channel_id)
@@ -786,6 +803,9 @@ impl Windows {
                 );
                 // Older parts of a stale window aren't re-checked, like the official client.
                 window.stale &= !reached_end;
+                if reached_end {
+                    window.present_through = window.present_through.max(through);
+                }
             }
             LoadKind::Latest if window.appends_live() => {
                 window.merge(
@@ -796,11 +816,13 @@ impl Windows {
                     window_limit,
                     events,
                 );
+                window.present_through = window.present_through.max(through);
             }
             LoadKind::Refresh if !window.stale => {}
             LoadKind::Latest | LoadKind::Refresh if window.stale && window.reaches(&page) => {
                 let first = page.first().map(|message| message.id);
                 window.reconcile(channel_id, page, reached_end, window_limit, events);
+                window.present_through = window.present_through.max(through);
                 if window.from_disk {
                     window.drop_before(first, channel_id, events);
                 }
@@ -843,6 +865,7 @@ impl Windows {
                 window.messages = page;
                 window.oldest = at_present && reached_end;
                 window.latest = at_present;
+                window.present_through = through.filter(|_| at_present);
                 if at_present {
                     let newest = window.messages.last().map(|message| message.id);
                     for message in held
@@ -970,6 +993,9 @@ impl Windows {
         }
         if let Ok(index) = Window::position(&window.messages, id) {
             window.messages.remove(index);
+            if index == window.messages.len() && window.latest && !window.stale {
+                window.present_through = window.present_through.max(Some(id));
+            }
             events.push(StoreEvent::MessageDeleted {
                 channel_id,
                 message_id: id,

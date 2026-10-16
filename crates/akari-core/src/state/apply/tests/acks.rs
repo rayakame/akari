@@ -525,6 +525,89 @@ fn reading_a_channel_without_a_present_window_acks_nothing_until_it_loads() {
     assert_eq!(taken(&mut state), at(GENERAL, NEWEST));
 }
 
+fn delete(state: &mut State, id: u64, channel: u64) {
+    apply(
+        state,
+        "MESSAGE_DELETE",
+        json!({"id": id.to_string(), "channel_id": channel.to_string()}),
+    );
+}
+
+// Posted and deleted while the user was elsewhere: Discord keeps it as the newest message.
+#[test]
+fn reading_a_channel_whose_newest_message_was_deleted_reads_it() {
+    let mut state = general_read();
+    apply(&mut state, "MESSAGE_CREATE", plain(NEWEST + 1, GENERAL));
+    delete(&mut state, NEWEST + 1, GENERAL);
+    assert!(badge(&state, GENERAL).unread);
+    showing(&mut state, GENERAL, &[NEWEST]);
+
+    let (ack, _) = reading(&mut state, Some(GENERAL));
+
+    assert_eq!(ack, at(GENERAL, NEWEST + 1));
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 1), 0)));
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+    assert_eq!(state.guild_badge(Snowflake::new(G1)), Badge::default());
+}
+
+#[test]
+fn a_newest_row_deleted_while_reading_paused_is_read_once_it_resumes() {
+    let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
+    reading(&mut state, Some(GENERAL));
+    reading(&mut state, None);
+    apply(&mut state, "MESSAGE_CREATE", plain(NEWEST + 1, GENERAL));
+    delete(&mut state, NEWEST + 1, GENERAL);
+    assert!(badge(&state, GENERAL).unread);
+
+    let (ack, _) = reading(&mut state, Some(GENERAL));
+
+    assert_eq!(ack, at(GENERAL, NEWEST + 1));
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+}
+
+#[test]
+fn reading_a_dm_whose_mentioning_message_was_deleted_reads_it() {
+    let (dm_newest, deleted) = (400_000_000_000_000_020, 400_000_000_000_000_022);
+    let mut state = ready_state();
+    assert_eq!(read_state(&state, DM), Some((Some(dm_newest), 0)));
+    apply(&mut state, "MESSAGE_CREATE", dm_message(deleted, DM));
+    delete(&mut state, deleted, DM);
+    assert!(state.unread(id(DM)));
+    assert_eq!(badge(&state, DM).mentions, 1);
+    showing(&mut state, DM, &[dm_newest]);
+
+    let (ack, _) = reading(&mut state, Some(DM));
+
+    assert_eq!(ack, at(DM, deleted));
+    assert_eq!(read_state(&state, DM), Some((Some(deleted), 0)));
+    assert!(!state.unread(id(DM)));
+    assert_eq!(badge(&state, DM), Badge::default());
+}
+
+// A message that arrives after the page was asked for may be missing from it.
+#[test]
+fn a_page_asked_for_before_a_message_arrived_doesnt_read_it() {
+    let mut state = general_read();
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(id(GENERAL), LoadKind::Latest, 1, &mut events)
+        .unwrap();
+    apply(
+        &mut state,
+        "PASSIVE_UPDATE_V2",
+        passive(GENERAL, NEWEST + 6),
+    );
+    let page = vec![serde_json::from_str(&plain(NEWEST, GENERAL).to_string()).unwrap()];
+    state.finish_load(ticket, page, true, &mut events);
+
+    let (ack, _) = reading(&mut state, Some(GENERAL));
+
+    assert_eq!(ack, None);
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 0)));
+    assert!(badge(&state, GENERAL).unread);
+}
+
 // From the disk cache, before the first READY.
 fn restored_state() -> State {
     let DispatchEvent::Ready(ready) = dispatch("READY", &ready_value()) else {

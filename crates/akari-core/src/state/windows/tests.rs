@@ -463,7 +463,7 @@ impl Harness {
         let mut events = Vec::new();
         let ticket = self
             .windows
-            .begin_load(channel(CH), kind, placing, &mut events);
+            .begin_load(channel(CH), kind, placing, None, &mut events);
         assert!(describe(&events).is_empty(), "{:?}", describe(&events));
         ticket
     }

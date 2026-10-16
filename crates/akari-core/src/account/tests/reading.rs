@@ -225,6 +225,33 @@ async fn a_message_arriving_while_reading_is_acked() {
     );
 }
 
+// Posted and deleted while the user was elsewhere: Discord keeps it as the newest message.
+#[tokio::test]
+async fn reading_a_channel_whose_newest_message_was_deleted_acks_it() {
+    let mut online = acking(general_read).await;
+    online.connection.send(message(2, NEWEST + 1)).await;
+    online
+        .connection
+        .send(dispatch(
+            3,
+            "MESSAGE_DELETE",
+            json!({"id": (NEWEST + 1).to_string(), "channel_id": GENERAL.to_string()}),
+        ))
+        .await;
+    sync(&mut online.connection, &online.subscription, 4).await;
+    assert!(badge(&online.account, GENERAL).unread);
+    showing(&online, &[NEWEST]).await;
+
+    online.account.set_reading(Some(general()));
+
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
+    assert_eq!(
+        sent(&online.server, 1).await,
+        [Sent::Ack(GENERAL, NEWEST + 1)]
+    );
+}
+
 #[tokio::test]
 async fn a_message_arriving_after_reading_stopped_isnt() {
     let mut online = acking(general_read).await;

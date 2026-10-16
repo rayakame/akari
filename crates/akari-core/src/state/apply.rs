@@ -1053,7 +1053,14 @@ impl State {
         placing: u64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<LoadTicket> {
-        self.windows.begin_load(channel, kind, placing, events)
+        let newest = self
+            .entities
+            .channels
+            .get(&channel)
+            .and_then(|stored| stored.last_message_id)
+            .map(|newest| newest.cast());
+        self.windows
+            .begin_load(channel, kind, placing, newest, events)
     }
 
     pub(crate) fn finish_load(
