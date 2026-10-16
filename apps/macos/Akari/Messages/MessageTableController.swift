@@ -45,11 +45,17 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var filled = false
     private var sticksToBottom = true {
         didSet {
+            if !sticksToBottom {
+                heldPinBottom = nil
+            }
             if sticksToBottom != oldValue {
                 actions?.atBottomChanged(sticksToBottom)
             }
         }
     }
+    // Where the rows ended when pinning began waiting for a gesture to end: measured from it,
+    // rows arriving below don't unpin the list, only the user's own scroll to older ones does.
+    private var heldPinBottom: CGFloat?
     private var atPresent = true
     private var state = MessageTableState(rows: [])
     private var revealed: [MessageId: Set<UInt16>] = [:]
@@ -474,6 +480,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private func apply(_ next: MessageTimeline, _ changes: TimelineChanges) {
         let firstFill = !filled && !state.rows.isEmpty
         let pin = firstFill || pinsToBottom
+        let bottomBefore = tableView.contentHeight
         // Taken right before the update, live scroll or not: compensating for it moves nothing
         // the user sees, so it never fights a gesture.
         let place = pin ? nil : visibleAnchor(skipping: changes.removed)
@@ -532,6 +539,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             // Pinning moves the content, so it waits until the user lets go.
             if !isLiveScrolling {
                 scrollToBottom()
+            } else if heldPinBottom == nil {
+                heldPinBottom = bottomBefore
             }
         } else if let place, let before {
             restoreAnchor()
@@ -770,7 +779,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     var isPinnedToBottom: Bool {
-        scrollView.contentView.bounds.maxY >= tableView.contentHeight - 2
+        isPinned(to: tableView.contentHeight)
+    }
+
+    private func isPinned(to bottom: CGFloat) -> Bool {
+        scrollView.contentView.bounds.maxY >= bottom - 2
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -1226,7 +1239,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         reportLine()
-        sticksToBottom = isPinnedToBottom
+        sticksToBottom = isPinned(to: heldPinBottom ?? tableView.contentHeight)
         actions?.userScrolled(by: lastClipOrigin.y - origin.y, height: clipView.bounds.height)
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()
@@ -1300,6 +1313,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func scrollToBottom() {
+        heldPinBottom = nil
         let bottom = clipView.originRange.upperBound
         guard tableView.numberOfRows > 0, clipView.bounds.minY != bottom else {
             return

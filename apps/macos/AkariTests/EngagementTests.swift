@@ -63,19 +63,37 @@ struct EngagementTests {
         #expect(session.reading == channel)
     }
 
+    var tallMessage: MessageListModel.Row {
+        row(
+            201, by: author(2), at: list.noon + 201 * 120,
+            content: String(repeating: "words that wrap ", count: 80))
+    }
+
+    // Rows below wait for the gesture to end; only the user's own movement unpins.
     @Test
     func aMessageArrivingMidGestureKeepsEngagement() throws {
         list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
-        let tall = row(
-            201, by: author(2), at: list.noon + 201 * 120,
-            content: String(repeating: "words that wrap ", count: 80))
-        list.show(list.page + [tall])
+        list.show(list.page + [tallMessage])
         nudge(by: 5)
-        list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
-        #expect(session.reading == nil, "the message is below the view")
+        nudge(by: -3)
+        #expect(session.reading == channel, "still pinned")
 
-        try scrollToBottom()
+        list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+
+        #expect(list.clip.bounds.minY == (try #require(bottomClip)).originRange.upperBound)
         #expect(session.reading == channel)
+    }
+
+    @Test
+    func movingTowardOlderMessagesMidGestureStillUnpins() throws {
+        list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        list.show(list.page + [tallMessage])
+        nudge(by: 40)
+        #expect(session.reading == nil)
+
+        list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+
+        #expect(list.clip.bounds.minY < (try #require(bottomClip)).originRange.upperBound)
     }
 
     @Test
