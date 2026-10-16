@@ -1,6 +1,8 @@
 import AkariKit
 import Foundation
 
+private let pageReport = loadReport()
+
 final class FakeAccount: Account, @unchecked Sendable {
     let fakeStore: FakeStore
     let connectError = Locked<GatewayError?>(nil)
@@ -10,11 +12,15 @@ final class FakeAccount: Account, @unchecked Sendable {
     let loadError = Locked<RequestError?>(nil)
     // The window a successful load leaves in the store, as akari-core's load would.
     let windowAfterLoad = Locked<MessageWindow?>(nil)
-    // Wins over `windowAfterLoad`: the window each load leaves; `nil` leaves the store as it is,
-    // as a load whose window was replaced meanwhile does.
+    // Wins over `windowAfterLoad`: the window each load leaves; `nil` drops the page, as the
+    // core does when the window was replaced meanwhile.
     let windowAfter = Locked<(@Sendable (MessageLoad) -> MessageWindow?)?>(nil)
-    // What a successful load reports; `nil` is a load with nothing to load.
-    let loadReport = Locked<LoadReport?>(nil)
+    // What a successful load reports, its outcome set as the core would; `nil` is a load with
+    // nothing to load.
+    let loadReport = Locked<LoadReport?>(pageReport)
+    // Like akari-core: latest and around loads and supersedes place a channel's window, and an
+    // around page that something placed after it is dropped.
+    private let placings = Locked<[ChannelId: Int]>([:])
     // Fails sends and retries.
     let sendError = Locked<RequestError?>(nil)
     // While set, each send waits for a reply: `nil` succeeds, an error fails it.
@@ -87,18 +93,46 @@ final class FakeAccount: Account, @unchecked Sendable {
         -> LoadReport?
     {
         log.append(.load(channelId, load))
+        let placing: Int? =
+            switch load {
+            case .latest, .around: place(channelId)
+            default: nil
+            }
         let error = holdLoads.current ? await loadReplies.next() ?? nil : loadError.current
         if let error {
             throw error
         }
+        guard var report = loadReport.current else {
+            return nil
+        }
+        if case .around = load, placing != placings.current[channelId] {
+            report.outcome = .overtaken
+            return report
+        }
+        report.outcome = .applied
         if let after = windowAfter.current {
-            if let window = after(load) {
-                fakeStore.update { $0.windows[channelId] = window }
+            guard let window = after(load) else {
+                report.outcome = .outdated
+                return report
             }
+            fakeStore.update { $0.windows[channelId] = window }
         } else if let window = windowAfterLoad.current {
             fakeStore.update { $0.windows[channelId] = window }
         }
-        return loadReport.current
+        return report
+    }
+
+    override func supersedeAroundLoads(channelId: ChannelId) {
+        log.append(.supersede(channelId))
+        place(channelId)
+    }
+
+    @discardableResult
+    private func place(_ channel: ChannelId) -> Int {
+        placings.withLock { placings in
+            placings[channel, default: 0] += 1
+            return placings[channel, default: 0]
+        }
     }
 
     // Refuses queueing, as the core does before anything is queued.

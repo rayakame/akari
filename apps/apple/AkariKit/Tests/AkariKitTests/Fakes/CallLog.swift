@@ -11,6 +11,7 @@ final class CallLog: Sendable {
         case close
         case view(ChannelId)
         case load(ChannelId, MessageLoad)
+        case supersede(ChannelId)
         case send(ChannelId, String)
         case deliver(ChannelId, MessageId)
         case retry(ChannelId, MessageId)

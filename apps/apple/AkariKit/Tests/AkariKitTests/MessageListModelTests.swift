@@ -406,6 +406,7 @@ struct MessageListModelTests {
     @Test
     func aLoadWithNothingToLoadHasNoReport() async {
         shown(window([3, 4, 5]))
+        account.loadReport.withLock { $0 = nil }
         let model = loaded()
 
         await model.loadOlder()
