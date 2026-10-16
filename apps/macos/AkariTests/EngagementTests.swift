@@ -84,15 +84,19 @@ struct EngagementTests {
         #expect(session.reading == channel)
     }
 
-    // The bottom held during the gesture goes with it.
+    // A short arrival leaves the list pinned without a scroll when the gesture ends. A nudge that
+    // unpins against the rows now, but not against the bottom held before them, must unpin.
     @Test
-    func aGestureEndingAtTheNewBottomUnpinsAsBefore() throws {
+    func theHeldBottomEndsWithTheGesture() throws {
+        let slack = list.controller.scrollView.contentInsets.bottom + 2
+        let before = list.table.contentHeight
         list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
-        list.show(list.page + [tallMessage])
-        try scrollToBottom()
+        list.show(list.page + [row(201, by: author(1), at: list.noon + 201 * 120)])
+        let grown = list.table.contentHeight - before
+        try #require(grown > 3 && grown <= slack)
         list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
 
-        nudge(by: 40)
+        nudge(by: slack - grown / 2)
 
         #expect(session.messages?.atBottom == false)
         #expect(session.reading == nil)
