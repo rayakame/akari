@@ -389,7 +389,7 @@ impl Shared {
     // While the user follows a channel, its acks go out paced, like the official client's.
     fn ack_reading(&self, ack: Option<Ack>) {
         if let Some(ack) = ack {
-            self.acks.want(ack.channel, ack.into(), Pace::Paced);
+            self.acks.want(ack, Pace::Paced);
         }
     }
 
@@ -817,9 +817,7 @@ impl Account {
     /// Marks the channel read now (Escape, the context menu).
     pub fn mark_read(&self, channel: ChannelId) {
         if let Some(ack) = self.shared.store.mark_read(channel) {
-            self.shared
-                .acks
-                .want(ack.channel, ack.into(), Pace::Explicit);
+            self.shared.acks.want(ack, Pace::Explicit);
         }
     }
 
@@ -828,11 +826,7 @@ impl Account {
     pub fn mark_guilds_read(&self, guilds: &[GuildId]) {
         let acks = self.shared.store.mark_guilds_read(guilds);
         if !acks.is_empty() {
-            self.shared.acks.want_bulk(
-                acks.into_iter()
-                    .map(|ack| (ack.channel, ack.into()))
-                    .collect(),
-            );
+            self.shared.acks.want_bulk(acks);
         }
     }
 

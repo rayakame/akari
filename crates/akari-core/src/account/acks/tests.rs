@@ -32,6 +32,18 @@ fn now(floor: Option<MessageId>) -> AckTarget {
     AckTarget::Now { floor }
 }
 
+fn ack(channel: ChannelId, target: AckTarget) -> Ack {
+    let (cursor, now) = match target {
+        AckTarget::Message(id) => (Some(id), false),
+        AckTarget::Now { floor } => (floor, true),
+    };
+    Ack {
+        channel,
+        cursor,
+        now,
+    }
+}
+
 type Taken = Arc<Mutex<Vec<(Instant, Request)>>>;
 
 // Takes what `next` hands out, with when, as the sender's loop would.
@@ -46,7 +58,7 @@ fn collect(wants: &Arc<Wants>) -> Taken {
     taken
 }
 
-fn single(request: &Request) -> (ChannelId, AckTarget) {
+fn single(request: &Request) -> (ChannelId, MessageId) {
     assert!(!request.bulk, "{request:?}");
     match request.entries[..] {
         [entry] => entry,
@@ -60,9 +72,9 @@ async fn an_ack_waits_for_a_two_second_lull() {
     let taken = collect(&wants);
     let started = Instant::now();
 
-    wants.want(channel(1), at(message(1)), Pace::Paced);
+    wants.want(channel(1), message(1), Pace::Paced);
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    wants.want(channel(1), at(message(2)), Pace::Paced);
+    wants.want(channel(1), message(2), Pace::Paced);
     tokio::time::sleep(Duration::from_millis(1900)).await;
     assert!(
         taken.lock().unwrap().is_empty(),
@@ -73,7 +85,7 @@ async fn an_ack_waits_for_a_two_second_lull() {
     let taken = taken.lock().unwrap();
     assert_eq!(taken.len(), 1, "{taken:?}");
     let (sent_at, request) = &taken[0];
-    assert_eq!(single(request), (channel(1), at(message(2))));
+    assert_eq!(single(request), (channel(1), message(2)));
     assert_eq!(request.pace, Pace::Paced);
     assert!(*sent_at >= started + Duration::from_millis(3500));
     assert!(*sent_at < started + Duration::from_secs(5));
@@ -85,16 +97,16 @@ async fn a_target_that_adds_nothing_doesnt_restart_the_lull() {
     let taken = collect(&wants);
     let started = Instant::now();
 
-    wants.want(channel(1), at(message(2)), Pace::Paced);
+    wants.want(channel(1), message(2), Pace::Paced);
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    wants.want(channel(1), at(message(2)), Pace::Paced);
-    wants.want(channel(1), at(message(1)), Pace::Paced);
+    wants.want(channel(1), message(2), Pace::Paced);
+    wants.want(channel(1), message(1), Pace::Paced);
     tokio::time::sleep(Duration::from_secs(30)).await;
 
     let taken = taken.lock().unwrap();
     assert_eq!(taken.len(), 1, "{taken:?}");
     let (sent_at, request) = &taken[0];
-    assert_eq!(single(request), (channel(1), at(message(2))));
+    assert_eq!(single(request), (channel(1), message(2)));
     assert!(*sent_at >= started + Duration::from_secs(2));
     assert!(
         *sent_at < started + Duration::from_millis(3500),
@@ -110,7 +122,7 @@ async fn a_busy_channel_is_acked_at_least_every_ten_seconds() {
     let mut wanted = Vec::new();
 
     for n in 1..=25 {
-        wants.want(channel(1), at(message(n)), Pace::Paced);
+        wants.want(channel(1), message(n), Pace::Paced);
         wanted.push((Instant::now(), message(n)));
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -120,10 +132,7 @@ async fn a_busy_channel_is_acked_at_least_every_ten_seconds() {
         .lock()
         .unwrap()
         .iter()
-        .map(|(sent_at, request)| match single(request) {
-            (_, AckTarget::Message(id)) => (*sent_at, id),
-            other => panic!("{other:?}"),
-        })
+        .map(|(sent_at, request)| (*sent_at, single(request).1))
         .collect();
     assert!(
         sent.windows(2).all(|pair| pair[0].1 < pair[1].1),
@@ -147,15 +156,15 @@ async fn a_busy_channel_is_acked_at_least_every_ten_seconds() {
 #[tokio::test(start_paused = true)]
 async fn an_explicit_ack_goes_out_at_once() {
     let wants = Wants::default();
-    wants.want(channel(1), at(message(5)), Pace::Paced);
+    wants.want(channel(1), message(5), Pace::Paced);
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let asked = Instant::now();
-    wants.want(channel(1), at(message(3)), Pace::Explicit);
+    wants.want(channel(1), message(3), Pace::Explicit);
     let request = wants.next().await.unwrap();
 
     assert!(asked.elapsed() < Duration::from_millis(10));
-    assert_eq!(single(&request), (channel(1), at(message(5))));
+    assert_eq!(single(&request), (channel(1), message(5)));
     assert_eq!(request.pace, Pace::Explicit);
     assert!(
         timeout(Duration::from_secs(60), wants.next())
@@ -170,10 +179,10 @@ async fn the_oldest_due_ack_goes_first() {
     let wants = Arc::new(Wants::default());
     let taken = collect(&wants);
 
-    wants.want(channel(1), at(message(1)), Pace::Paced);
+    wants.want(channel(1), message(1), Pace::Paced);
     tokio::time::sleep(Duration::from_secs(1)).await;
-    wants.want(channel(2), at(message(2)), Pace::Explicit);
-    wants.want_bulk(vec![(channel(3), at(message(3)))]);
+    wants.want(channel(2), message(2), Pace::Explicit);
+    wants.want_bulk(vec![(channel(3), message(3))]);
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     let channels: Vec<Vec<ChannelId>> = taken
@@ -191,38 +200,19 @@ async fn the_oldest_due_ack_goes_first() {
 #[tokio::test(start_paused = true)]
 async fn a_bulk_takes_over_a_pending_ack_for_its_channel() {
     let wants = Wants::default();
-    wants.want(channel(1), at(message(7)), Pace::Paced);
-    wants.want(channel(2), at(message(8)), Pace::Paced);
+    wants.want(channel(1), message(7), Pace::Paced);
+    wants.want(channel(2), message(8), Pace::Paced);
 
-    wants.want_bulk(vec![(channel(1), at(message(5))), (channel(3), now(None))]);
+    wants.want_bulk(vec![(channel(1), message(5)), (channel(3), message(9))]);
     let request = wants.next().await.unwrap();
 
     assert!(request.bulk);
     assert_eq!(
         request.entries,
-        [(channel(1), at(message(7))), (channel(3), now(None))]
+        [(channel(1), message(7)), (channel(3), message(9))]
     );
     let left = wants.next().await.unwrap();
-    assert_eq!(single(&left), (channel(2), at(message(8))));
-}
-
-#[test]
-fn merged_targets_keep_the_newest() {
-    assert_eq!(at(message(2)).merge(at(message(1))), at(message(2)));
-    assert_eq!(at(message(1)).merge(at(message(2))), at(message(2)));
-    assert_eq!(at(message(2)).merge(now(None)), now(Some(message(2))));
-    assert_eq!(
-        now(Some(message(1))).merge(at(message(2))),
-        now(Some(message(2)))
-    );
-    assert_eq!(
-        at(message(1)).merge(now(Some(message(2)))),
-        now(Some(message(2)))
-    );
-    assert_eq!(
-        now(Some(message(3))).merge(now(None)),
-        now(Some(message(3)))
-    );
+    assert_eq!(single(&left), (channel(2), message(8)));
 }
 
 #[test]
@@ -260,12 +250,7 @@ fn sender(server: &MockServer) -> AckSender {
 }
 
 fn sender_retrying_after(server: &MockServer, first_retry: Duration) -> AckSender {
-    AckSender::start(
-        &tokio::runtime::Handle::current(),
-        rest(server),
-        first_retry,
-        || {},
-    )
+    sender_on(rest(server), first_retry)
 }
 
 fn answered() -> ResponseTemplate {
@@ -337,7 +322,7 @@ async fn an_ack_posts_the_target_with_a_null_token_and_last_viewed() {
     let sender = sender(&server);
     let before = last_viewed(wall_millis());
 
-    sender.want(channel(1), at(message(7)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(7))), Pace::Explicit);
     let requests = received(&server, 1).await;
     let after = last_viewed(wall_millis());
 
@@ -382,11 +367,11 @@ async fn requests_never_overlap() {
         .await;
     let sender = sender(&server);
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
-    sender.want(channel(2), at(message(2)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    sender.want(ack(channel(2), at(message(2))), Pace::Explicit);
     sender.want_bulk(vec![
-        (channel(3), at(message(3))),
-        (channel(4), at(message(4))),
+        ack(channel(3), at(message(3))),
+        ack(channel(4), at(message(4))),
     ]);
     let requests = received(&server, 3).await;
 
@@ -429,8 +414,8 @@ async fn a_rate_limited_ack_is_retried_after_the_acks_due_before_it() {
     mock_acks(&server, answered()).await;
     let sender = sender(&server);
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
-    sender.want(channel(2), at(message(2)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    sender.want(ack(channel(2), at(message(2))), Pace::Explicit);
     let requests = received(&server, 3).await;
 
     assert_eq!(
@@ -450,7 +435,7 @@ async fn a_failed_ack_is_retried_until_it_goes_through() {
     mock_acks(&server, answered()).await;
     let sender = sender(&server);
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
     let requests = received(&server, 5).await;
 
     assert_eq!(acks(&requests), [ack_of(channel(1), message(1)); 5]);
@@ -465,9 +450,9 @@ async fn a_retry_takes_the_channels_newer_target_with_it() {
     mock_acks(&server, answered()).await;
     let sender = sender_retrying_after(&server, Duration::from_millis(300));
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
     received(&server, 1).await;
-    sender.want(channel(1), at(message(2)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(2))), Pace::Explicit);
     let requests = received(&server, 2).await;
 
     assert_eq!(
@@ -485,7 +470,7 @@ async fn closing_drops_the_acks_waiting_for_a_retry() {
     mock_acks(&server, ResponseTemplate::new(503)).await;
     let sender = sender_retrying_after(&server, Duration::from_millis(300));
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
     received(&server, 1).await;
     sender.close();
     tokio::time::sleep(Duration::from_millis(700)).await;
@@ -527,11 +512,11 @@ async fn retries_never_overlap() {
         .await;
     let sender = sender(&server);
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
-    sender.want(channel(2), at(message(2)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    sender.want(ack(channel(2), at(message(2))), Pace::Explicit);
     sender.want_bulk(vec![
-        (channel(3), at(message(3))),
-        (channel(4), at(message(4))),
+        ack(channel(3), at(message(3))),
+        ack(channel(4), at(message(4))),
     ]);
     let requests = received(&server, 6).await;
 
@@ -598,21 +583,21 @@ fn only_rate_limits_and_transient_errors_are_retried() {
 #[tokio::test(start_paused = true)]
 async fn a_retried_target_waits_for_its_backoff_with_a_newer_one() {
     let wants = Wants::default();
-    wants.want(channel(1), at(message(1)), Pace::Explicit);
+    wants.want(channel(1), message(1), Pace::Explicit);
     let failed = wants.next().await.unwrap();
     let retry_at = Instant::now() + Duration::from_secs(2);
 
     wants.retry(failed, retry_at);
-    wants.want(channel(1), at(message(2)), Pace::Explicit);
-    wants.want(channel(2), at(message(3)), Pace::Explicit);
+    wants.want(channel(1), message(2), Pace::Explicit);
+    wants.want(channel(2), message(3), Pace::Explicit);
 
     assert_eq!(
         single(&wants.next().await.unwrap()),
-        (channel(2), at(message(3)))
+        (channel(2), message(3))
     );
     let retried = wants.next().await.unwrap();
     assert!(Instant::now() >= retry_at);
-    assert_eq!(single(&retried), (channel(1), at(message(2))));
+    assert_eq!(single(&retried), (channel(1), message(2)));
     assert_eq!(retried.failures, 1);
 }
 
@@ -653,15 +638,15 @@ async fn nothing_is_sent_after_close() {
         .await;
     let sender = sender(&server);
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
     tokio::task::spawn_blocking(move || on_arrival.recv_timeout(Duration::from_secs(5)))
         .await
         .unwrap()
         .expect("the first ack never arrived");
-    sender.want(channel(2), at(message(2)), Pace::Explicit);
-    sender.want(channel(3), at(message(3)), Pace::Paced);
+    sender.want(ack(channel(2), at(message(2))), Pace::Explicit);
+    sender.want(ack(channel(3), at(message(3))), Pace::Paced);
     sender.close();
-    sender.want(channel(4), at(message(4)), Pace::Explicit);
+    sender.want(ack(channel(4), at(message(4))), Pace::Explicit);
     release.send(()).unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -678,15 +663,15 @@ async fn an_ack_never_moves_backwards() {
     mock_bulk(&server).await;
     let sender = sender(&server);
 
-    sender.want(channel(1), at(message(10)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(10))), Pace::Explicit);
     received(&server, 1).await;
-    sender.want(channel(1), at(message(10)), Pace::Explicit);
-    sender.want(channel(2), at(message(1)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(10))), Pace::Explicit);
+    sender.want(ack(channel(2), at(message(1))), Pace::Explicit);
     received(&server, 2).await;
-    sender.want_bulk(vec![(channel(1), at(message(9)))]);
-    sender.want(channel(3), at(message(1)), Pace::Explicit);
+    sender.want_bulk(vec![ack(channel(1), at(message(9)))]);
+    sender.want(ack(channel(3), at(message(1))), Pace::Explicit);
     received(&server, 3).await;
-    sender.want(channel(1), at(message(11)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(11))), Pace::Explicit);
     let requests = received(&server, 4).await;
 
     assert_eq!(
@@ -705,10 +690,15 @@ async fn bulk_acks_go_out_fifty_at_a_time() {
     let server = MockServer::start().await;
     mock_bulk(&server).await;
     let sender = sender(&server);
-    let entries: Vec<(ChannelId, AckTarget)> =
-        (1..=120).map(|n| (channel(n), at(message(n)))).collect();
+    let entries: Vec<(ChannelId, MessageId)> =
+        (1..=120).map(|n| (channel(n), message(n))).collect();
 
-    sender.want_bulk(entries.clone());
+    sender.want_bulk(
+        entries
+            .iter()
+            .map(|(channel, message)| ack(*channel, at(*message)))
+            .collect(),
+    );
     let requests = received(&server, 3).await;
 
     let bodies: Vec<String> = requests
@@ -720,10 +710,7 @@ async fn bulk_acks_go_out_fifty_at_a_time() {
         .map(|chunk| {
             let entries: Vec<String> = chunk
                 .iter()
-                .map(|(channel, target)| {
-                    let AckTarget::Message(message) = target else {
-                        unreachable!()
-                    };
+                .map(|(channel, message)| {
                     format!(
                         r#"{{"channel_id":"{}","message_id":"{}","read_state_type":0}}"#,
                         channel.get(),
@@ -758,10 +745,12 @@ async fn a_now_ack_with_discord_off_by(offset: i64, floor: Option<MessageId>) ->
     let date = (wall_millis() + offset).div_euclid(1000) * 1000;
     let server = MockServer::start().await;
     mock_acks(&server, answered().insert_header("date", http_date(date))).await;
-    let sender = sender(&server);
+    let rest = rest(&server);
+    let sender = sender_on(rest.clone(), Duration::from_millis(10));
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
-    sender.want(channel(2), now(floor), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    discords_time(&rest).await;
+    sender.want(ack(channel(2), now(floor)), Pace::Explicit);
     let requests = received(&server, 2).await;
 
     let sent = acks(&requests);
@@ -792,10 +781,12 @@ async fn a_now_target_never_goes_below_the_newest_known_message() {
     let server = MockServer::start().await;
     let date = http_date(wall_millis() - HOUR);
     mock_acks(&server, answered().insert_header("date", date)).await;
-    let sender = sender(&server);
+    let rest = rest(&server);
+    let sender = sender_on(rest.clone(), Duration::from_millis(10));
 
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
-    sender.want(channel(2), now(Some(newest)), Pace::Explicit);
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    discords_time(&rest).await;
+    sender.want(ack(channel(2), now(Some(newest))), Pace::Explicit);
     let requests = received(&server, 2).await;
 
     assert_eq!(acks(&requests)[1], ack_of(channel(2), newest));
@@ -807,9 +798,81 @@ async fn without_a_server_time_a_now_target_sends_its_floor() {
     mock_acks(&server, answered()).await;
     let sender = sender(&server);
 
-    sender.want(channel(1), now(None), Pace::Explicit);
-    sender.want(channel(2), now(Some(message(7))), Pace::Explicit);
+    sender.want(ack(channel(1), now(None)), Pace::Explicit);
+    sender.want(ack(channel(2), now(Some(message(7)))), Pace::Explicit);
     let requests = received(&server, 1).await;
 
     assert_eq!(acks(&requests), [ack_of(channel(2), message(7))]);
+}
+
+fn sender_on(rest: Arc<AccountRest>, first_retry: Duration) -> AckSender {
+    AckSender::start(&tokio::runtime::Handle::current(), rest, first_retry, || {})
+}
+
+// Discord's time once an answer brought it.
+async fn discords_time(rest: &AccountRest) -> i64 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(now) = rest.server_now_millis() {
+            return now;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no answer with a Date"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_now_ack_is_resolved_when_it_is_queued() {
+    let server = MockServer::start().await;
+    mock_acks(&server, answered()).await;
+    let rest = rest(&server);
+    let sender = sender_on(rest.clone(), Duration::from_millis(10));
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    let queued = discords_time(&rest).await;
+
+    sender.want(ack(channel(2), now(None)), Pace::Paced);
+    let requests = received(&server, 2).await;
+
+    let sent = MessageId::new(acks(&requests)[1].1).unix_millis();
+    assert!(
+        (queued..queued + 1_000).contains(&sent),
+        "queued at {queued}, sent {sent}: the lull isn't in the ID"
+    );
+}
+
+#[tokio::test]
+async fn a_retry_sends_the_id_resolved_when_queued() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(answered())
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(answered())
+        .with_priority(3)
+        .mount(&server)
+        .await;
+    let rest = rest(&server);
+    let sender = sender_on(rest.clone(), Duration::from_millis(300));
+    sender.want(ack(channel(1), at(message(1))), Pace::Explicit);
+    discords_time(&rest).await;
+
+    sender.want(ack(channel(2), now(None)), Pace::Explicit);
+    let requests = received(&server, 3).await;
+
+    let sent = acks(&requests);
+    assert_eq!(sent.len(), 3, "{sent:?}");
+    assert_eq!(sent[1].0, channel(2).get());
+    assert_eq!(sent[1], sent[2], "the retry sent another ID");
 }

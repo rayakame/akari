@@ -323,6 +323,14 @@ async fn every_viewable_forum_goes_into_the_bulk() {
     // An answer first, so the sender knows Discord's time.
     account.mark_read(general());
     sent(&online.server, 1).await;
+    let deadline = std::time::Instant::now() + WAIT;
+    while account.shared.rest.server_now_millis().is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no answer with a Date"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
 
     account.mark_guilds_read(&[g1()]);
 
