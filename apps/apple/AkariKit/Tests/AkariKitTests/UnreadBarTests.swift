@@ -421,6 +421,27 @@ struct UnreadBarTests {
         #expect(model.unreadBar == bar)
     }
 
+    // Nothing at or before the read position is left, e.g. deleted: the page starts after it.
+    @Test
+    func aJumpCountsOnceItsPageIsInWithoutTheReadPosition() async {
+        store.update { [mira] state in
+            for raw in UInt64(10)...110 {
+                state.show(message(raw, by: mira))
+            }
+        }
+        shown(Array(60...110), readUpTo: 2)
+        account.windowAfterLoad.withLock { $0 = window(Array(10...59), latest: false) }
+        let model = makeModel()
+        model.setNewMessagesLineOnScreen(false)
+
+        await model.jumpToUnread()
+
+        #expect(store.log.actions == [aroundLoad])
+        #expect(model.newMessagesLine == id(10))
+        #expect(model.unreadJumps == 1)
+        #expect(model.unreadBar == nil)
+    }
+
     @Test
     func aFailedAroundLoadKeepsTheBar() async throws {
         shown([5, 6, 7, 8], readUpTo: 2)

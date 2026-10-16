@@ -197,9 +197,7 @@ public final class MessageListModel {
                 return
             }
             // A failed load, or a page the core dropped for a newer request, leaves the bar.
-            guard await load(.around) == .applied,
-                let position = self.readUpTo, readPositionLoaded(position)
-            else {
+            guard await load(.around) == .applied else {
                 return
             }
         }
