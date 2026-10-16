@@ -307,6 +307,10 @@ impl Queue {
     // Oldest due first; a request takes the bulk entries due in a row, up to a chunk. An entry
     // at or below what Discord took is dropped; one that READY may have overtaken waits.
     fn take(&mut self, now: Instant) -> Next {
+        // Until READY's check, which drops what its position is past.
+        if self.swapping {
+            return Next::Idle;
+        }
         loop {
             let Some((&channel, &head)) = self
                 .wanted
@@ -500,7 +504,6 @@ impl Queue {
     // anything else is a read or a mark as unread elsewhere, which it mustn't undo.
     fn reconcile(&mut self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
         self.swapping = false;
-        let sent = &self.sent;
         let keep = |channel: &ChannelId, wanted: &mut Wanted| {
             // At READY's own position an ack still clears its mentions.
             if seen(ready(*channel)).is_some_and(|position| wanted.id < position) {
@@ -525,13 +528,7 @@ impl Queue {
                 }
                 before.state = ready(*channel);
             } else if replaced {
-                // READY's state lacks an ack Discord took since, which the one taken over has.
-                let ready = ready(*channel);
-                before.state = if sent.contains_key(channel) {
-                    further(before.state, ready)
-                } else {
-                    ready
-                };
+                before.state = ready(*channel);
             }
             true
         };

@@ -1418,8 +1418,7 @@ async fn an_ack_taken_while_ready_is_swapped_in_isnt_dropped_with_an_older_one()
     );
 }
 
-// The store the acks were taken over is gone; undone, a channel goes back to READY's state, but
-// not past an ack Discord took since.
+// The store the acks were taken over is gone; undone, a channel goes back to READY's state.
 #[tokio::test(start_paused = true)]
 async fn a_refused_ack_from_before_ready_goes_back_to_ready_s_read_state() {
     let wants = Wants::default();
@@ -1445,9 +1444,6 @@ async fn a_refused_ack_from_before_ready_goes_back_to_ready_s_read_state() {
         read_at(13, 0),
         Pace::Explicit,
     );
-    let first = wants.next().await.unwrap();
-    assert_eq!(single(&first), (channel(2), message(12)));
-    wants.confirmed();
     wants.want(
         channel(2),
         message(14),
@@ -1467,7 +1463,7 @@ async fn a_refused_ack_from_before_ready_goes_back_to_ready_s_read_state() {
         refused,
         [
             refusal(channel(1), read_at(1, 7), read_at(11, 0), message(11)),
-            refusal(channel(2), read_at(12, 0), read_at(14, 0), message(14)),
+            refusal(channel(2), read_at(2, 7), read_at(14, 0), message(14)),
             refusal(channel(3), read_at(3, 7), read_at(13, 0), message(13)),
         ]
     );
@@ -1652,7 +1648,7 @@ async fn a_bulk_doesnt_wait_for_a_channel_acks_retry() {
     );
 }
 
-// J1 went through and READY's position lies between it and J2: an undo of J2 stops at READY's.
+// Both taken while READY was prepared, whose position lies between them: an undo stops there.
 #[tokio::test(start_paused = true)]
 async fn a_refused_ack_never_goes_back_below_ready() {
     let wants = Wants::default();
@@ -1664,8 +1660,6 @@ async fn a_refused_ack_never_goes_back_below_ready() {
         read_at(11, 0),
         Pace::Explicit,
     );
-    wants.next().await.unwrap();
-    wants.confirmed();
     wants.want(
         channel(1),
         message(13),
