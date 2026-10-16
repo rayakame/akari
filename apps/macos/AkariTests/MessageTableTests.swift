@@ -1599,6 +1599,26 @@ struct MessageTableTests {
         #expect(actions.bottoms == [false, true, false, true])
     }
 
+    // The bar's jump, a jump to the present and pinning; only the user's scrolls are reported.
+    @Test
+    func theTablesOwnScrollsReportNoUserScroll() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        let line = MessageId(rawValue: 150)
+        show(MessageTableState(rows: page, newMessages: line))
+        show(MessageTableState(rows: page, newMessages: line, unreadJumps: 1))
+        controller.jumpToPresent(load: false)
+        show(
+            MessageTableState(rows: page + messages(1, from: 201), newMessages: line, unreadJumps: 1))
+        #expect(actions.bottoms == [false, true])
+        #expect(actions.scrolls.isEmpty)
+
+        scroll(toRowOf: 120)
+
+        #expect(actions.scrolls.count == 1)
+        #expect(actions.scrolls.allSatisfy { $0 > 0 }, "toward older messages")
+    }
+
     @Test
     func sendingPinsTheList() {
         let actions = RecordingActions()

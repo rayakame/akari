@@ -562,12 +562,13 @@ final class ReadingTests {
     }
 
     @Test
-    func aReplacedListNoLongerCounts() throws {
+    func aReplacedListNoLongerCounts() async throws {
         let session = readingSession()
         let old = try #require(session.messages)
         session.open(channel: random)
 
         scrollUp(old)
+        await settle(session)
 
         #expect(readings == [general, random])
         session.close()
