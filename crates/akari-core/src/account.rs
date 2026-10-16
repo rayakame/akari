@@ -28,6 +28,12 @@ const SERVER_ERROR_RETRY: Duration = if cfg!(test) {
 } else {
     Duration::from_secs(1)
 };
+// A failed ack's first retry, short in tests too; later ones wait longer.
+const ACK_RETRY: Duration = if cfg!(test) {
+    Duration::from_millis(10)
+} else {
+    Duration::from_secs(2)
+};
 
 /// A logged-in account: its gateway connection and the [`Store`] that connection keeps
 /// current. Dropping it ends the session like [`Account::close`].
@@ -712,7 +718,7 @@ impl Account {
             Shared {
                 gateway,
                 store,
-                acks: AckSender::start(&runtime, rest.clone(), SERVER_ERROR_RETRY, unauthorized),
+                acks: AckSender::start(&runtime, rest.clone(), ACK_RETRY, unauthorized),
                 rest,
                 nonces: Nonces::default(),
                 status: Mutex::default(),

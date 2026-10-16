@@ -18,6 +18,8 @@ const LULL: Duration = Duration::from_secs(2);
 // A busy channel still reaches the user's other devices.
 const CAP: Duration = Duration::from_secs(10);
 const BULK_CHUNK: usize = 50;
+// A failed ack's wait doubles from the first retry's up to this.
+const RETRY_CAP: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AckTarget {
@@ -81,6 +83,13 @@ enum Kind {
     Bulk { at: Instant },
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Retry {
+    at: Instant,
+    // Failed requests in a row.
+    failures: u32,
+}
+
 #[derive(Debug)]
 struct Wanted {
     target: AckTarget,
@@ -88,14 +97,16 @@ struct Wanted {
     // When the channel's first pending target came.
     since: Instant,
     order: u64,
+    retry: Option<Retry>,
 }
 
 impl Wanted {
     fn due(&self) -> Instant {
-        match self.kind {
+        let due = match self.kind {
             Kind::Paced { last } => (last + LULL).min(self.since + CAP),
             Kind::Explicit { at } | Kind::Bulk { at } => at,
-        }
+        };
+        self.retry.map_or(due, |retry| due.max(retry.at))
     }
 
     fn bulk(&self) -> bool {
@@ -109,6 +120,18 @@ struct Request {
     bulk: bool,
     pace: Pace,
     waited: Duration,
+    since: Instant,
+    failures: u32,
+}
+
+impl Request {
+    fn kind(&self) -> Kind {
+        match (self.bulk, self.pace) {
+            (true, _) => Kind::Bulk { at: self.since },
+            (false, Pace::Paced) => Kind::Paced { last: self.since },
+            (false, Pace::Explicit) => Kind::Explicit { at: self.since },
+        }
+    }
 }
 
 enum Next {
@@ -147,6 +170,7 @@ impl Queue {
                     kind,
                     since: now,
                     order,
+                    retry: None,
                 });
             }
             Entry::Occupied(mut entry) => {
@@ -178,6 +202,7 @@ impl Queue {
                         kind: Kind::Bulk { at: now },
                         since: now,
                         order,
+                        retry: None,
                     });
                 }
                 Entry::Occupied(mut entry) => {
@@ -228,16 +253,54 @@ impl Queue {
                 Kind::Explicit { .. } | Kind::Bulk { .. } => Pace::Explicit,
             },
             waited: Duration::ZERO,
+            since: head.since,
+            failures: 0,
         };
         for channel in channels {
             if let Some(wanted) = self.wanted.remove(&channel) {
                 request.waited = request
                     .waited
                     .max(now.saturating_duration_since(wanted.since));
+                request.since = request.since.min(wanted.since);
+                request.failures = request
+                    .failures
+                    .max(wanted.retry.map_or(0, |retry| retry.failures));
                 request.entries.push((channel, wanted.target));
             }
         }
         Next::Send(request)
+    }
+
+    // A failed request's targets wait until `at`, merged with what came for their channels since.
+    fn retry(&mut self, request: Request, at: Instant) {
+        if self.closed {
+            return;
+        }
+        let kind = request.kind();
+        let retry = Retry {
+            at,
+            failures: request.failures.saturating_add(1),
+        };
+        for (channel, target) in request.entries {
+            let order = self.order();
+            match self.wanted.entry(channel) {
+                Entry::Vacant(entry) => {
+                    entry.insert(Wanted {
+                        target,
+                        kind,
+                        since: request.since,
+                        order,
+                        retry: Some(retry),
+                    });
+                }
+                Entry::Occupied(mut entry) => {
+                    let wanted = entry.get_mut();
+                    wanted.target = wanted.target.merge(target);
+                    wanted.since = wanted.since.min(request.since);
+                    wanted.retry = Some(retry);
+                }
+            }
+        }
     }
 
     fn close(&mut self) {
@@ -267,13 +330,13 @@ impl Wants {
         self.changed.notify_one();
     }
 
+    fn retry(&self, request: Request, at: Instant) {
+        self.lock().retry(request, at);
+    }
+
     fn close(&self) {
         self.lock().close();
         self.changed.notify_one();
-    }
-
-    fn closed(&self) -> bool {
-        self.lock().closed
     }
 
     // None once closed.
@@ -316,6 +379,8 @@ pub(crate) struct AckSender {
 
 impl AckSender {
     // `unauthorized` runs once if Discord answers an ack with 401; the sender has stopped then.
+    // A failed ack is retried after `retry_delay`, then after twice as long each time, up to a
+    // minute.
     pub(crate) fn start(
         runtime: &tokio::runtime::Handle,
         rest: Arc<AccountRest>,
@@ -385,69 +450,77 @@ async fn send(
 ) {
     // Per channel, the highest ID Discord took this session.
     let mut sent: HashMap<ChannelId, MessageId> = HashMap::new();
-    while let Some(request) = wants.next().await {
+    while let Some(mut request) = wants.next().await {
         let server_now = rest.server_now_millis();
-        let entries: Vec<(ChannelId, MessageId)> = request
-            .entries
-            .iter()
-            .filter_map(|&(channel, target)| {
-                let Some(id) = target.resolve(server_now) else {
-                    tracing::debug!(
-                        target: TARGET,
-                        channel_id = channel.get(),
-                        "no ack: neither Discord's time nor a message is known"
-                    );
-                    return None;
-                };
-                sent.get(&channel)
-                    .is_none_or(|last| id > *last)
-                    .then_some((channel, id))
-            })
-            .collect();
+        let mut entries: Vec<(ChannelId, MessageId)> = Vec::with_capacity(request.entries.len());
+        request.entries.retain(|&(channel, target)| {
+            let Some(id) = target.resolve(server_now) else {
+                tracing::debug!(
+                    target: TARGET,
+                    channel_id = channel.get(),
+                    "no ack: neither Discord's time nor a message is known"
+                );
+                return false;
+            };
+            let new = sent.get(&channel).is_none_or(|last| id > *last);
+            if new {
+                entries.push((channel, id));
+            }
+            new
+        });
         if entries.is_empty() {
             continue;
         }
         let last_viewed = last_viewed(server_now.unwrap_or_else(wall_millis));
-        let mut retried = false;
-        let result = loop {
-            let result = match entries[..] {
-                [(channel, id)] if !request.bulk => rest.ack(channel, id, last_viewed).await,
-                _ => rest.ack_bulk(&entries).await,
-            };
-            match result {
-                Err(err) if err.is_transient() && !retried => {
-                    log(&request, &entries, Outcome::Retrying(&err));
-                    retried = true;
-                    tokio::time::sleep(retry_delay).await;
-                    if wants.closed() {
-                        return;
-                    }
-                }
-                result => break result,
-            }
+        let result = match entries[..] {
+            [(channel, id)] if !request.bulk => rest.ack(channel, id, last_viewed).await,
+            _ => rest.ack_bulk(&entries).await,
         };
-        match result {
+        let err = match result {
             Ok(()) => {
                 sent.extend(entries.iter().copied());
                 log(&request, &entries, Outcome::Sent);
+                continue;
             }
-            Err(err) => {
-                log(&request, &entries, Outcome::Dropped(&err));
-                if matches!(err, RequestError::Unauthorized | RequestError::Closed) {
-                    wants.close();
-                    if matches!(err, RequestError::Unauthorized) {
-                        unauthorized();
-                    }
-                    return;
-                }
-            }
+            Err(err) => err,
+        };
+        let failures = request.failures.saturating_add(1);
+        if let Some(wait) = retry_wait(&err, failures, retry_delay) {
+            log(&request, &entries, Outcome::Retrying(&err, wait));
+            wants.retry(request, Instant::now() + wait);
+            continue;
         }
+        log(&request, &entries, Outcome::Dropped(&err));
+        if matches!(err, RequestError::Unauthorized | RequestError::Closed) {
+            wants.close();
+            if matches!(err, RequestError::Unauthorized) {
+                unauthorized();
+            }
+            return;
+        }
+    }
+}
+
+fn backoff(first: Duration, failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(16);
+    first.saturating_mul(1 << doublings).min(RETRY_CAP)
+}
+
+// `None` when the ack isn't worth retrying.
+fn retry_wait(err: &RequestError, failures: u32, first: Duration) -> Option<Duration> {
+    let wait = backoff(first, failures);
+    match err {
+        RequestError::RateLimited { retry_after } => {
+            Some(retry_after.map_or(wait, |after| wait.max(after.min(RETRY_CAP))))
+        }
+        err if err.is_transient() => Some(wait),
+        _ => None,
     }
 }
 
 enum Outcome<'a> {
     Sent,
-    Retrying(&'a RequestError),
+    Retrying(&'a RequestError, Duration),
     Dropped(&'a RequestError),
 }
 
@@ -469,13 +542,14 @@ fn log(request: &Request, entries: &[(ChannelId, MessageId)], outcome: Outcome<'
             waited_ms,
             "ack sent"
         ),
-        Outcome::Retrying(err) => tracing::debug!(
+        Outcome::Retrying(err, wait) => tracing::debug!(
             target: TARGET,
             channel_id,
             message_id,
             entries,
             pace,
             waited_ms,
+            retry_ms = ms(wait),
             error = err.kind(),
             "ack failed; retrying"
         ),

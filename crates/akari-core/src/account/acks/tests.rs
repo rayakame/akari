@@ -256,10 +256,14 @@ fn rest(server: &MockServer) -> Arc<AccountRest> {
 }
 
 fn sender(server: &MockServer) -> AckSender {
+    sender_retrying_after(server, Duration::from_millis(10))
+}
+
+fn sender_retrying_after(server: &MockServer, first_retry: Duration) -> AckSender {
     AckSender::start(
         &tokio::runtime::Handle::current(),
         rest(server),
-        Duration::from_millis(10),
+        first_retry,
         || {},
     )
 }
@@ -271,17 +275,6 @@ fn answered() -> ResponseTemplate {
 async fn mock_acks(server: &MockServer, answer: ResponseTemplate) {
     Mock::given(method("POST"))
         .and(path_regex(ACKS))
-        .respond_with(answer)
-        .mount(server)
-        .await;
-}
-
-async fn mock_ack_of(server: &MockServer, channel: ChannelId, answer: ResponseTemplate) {
-    Mock::given(method("POST"))
-        .and(path_regex(format!(
-            r"^/api/v9/channels/{}/messages/\d+/ack$",
-            channel.get()
-        )))
         .respond_with(answer)
         .mount(server)
         .await;
@@ -418,30 +411,21 @@ fn rate_limited() -> ResponseTemplate {
         .set_body_json(json!({"message": "You are being rate limited.", "global": false}))
 }
 
-#[tokio::test]
-async fn a_rate_limited_ack_is_dropped() {
-    let server = MockServer::start().await;
-    mock_ack_of(&server, channel(1), rate_limited()).await;
-    mock_acks(&server, answered()).await;
-    let sender = sender(&server);
-
-    sender.want(channel(1), at(message(1)), Pace::Explicit);
-    sender.want(channel(2), at(message(2)), Pace::Explicit);
-    let requests = received(&server, 2).await;
-
-    assert_eq!(
-        acks(&requests),
-        [
-            ack_of(channel(1), message(1)),
-            ack_of(channel(2), message(2))
-        ]
-    );
+// Answers the first `failing` requests with `failure`.
+async fn failing_first(server: &MockServer, failing: u64, failure: ResponseTemplate) {
+    Mock::given(method("POST"))
+        .and(path_regex(ACKS))
+        .respond_with(failure)
+        .up_to_n_times(failing)
+        .with_priority(1)
+        .mount(server)
+        .await;
 }
 
 #[tokio::test]
-async fn a_failed_ack_is_retried_once() {
+async fn a_rate_limited_ack_is_retried_after_the_acks_due_before_it() {
     let server = MockServer::start().await;
-    mock_ack_of(&server, channel(1), ResponseTemplate::new(500)).await;
+    failing_first(&server, 1, rate_limited()).await;
     mock_acks(&server, answered()).await;
     let sender = sender(&server);
 
@@ -453,10 +437,183 @@ async fn a_failed_ack_is_retried_once() {
         acks(&requests),
         [
             ack_of(channel(1), message(1)),
+            ack_of(channel(2), message(2)),
+            ack_of(channel(1), message(1))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_ack_is_retried_until_it_goes_through() {
+    let server = MockServer::start().await;
+    failing_first(&server, 4, ResponseTemplate::new(503)).await;
+    mock_acks(&server, answered()).await;
+    let sender = sender(&server);
+
+    sender.want(channel(1), at(message(1)), Pace::Explicit);
+    let requests = received(&server, 5).await;
+
+    assert_eq!(acks(&requests), [ack_of(channel(1), message(1)); 5]);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(server.received_requests().await.unwrap().len(), 5);
+}
+
+#[tokio::test]
+async fn a_retry_takes_the_channels_newer_target_with_it() {
+    let server = MockServer::start().await;
+    failing_first(&server, 1, ResponseTemplate::new(503)).await;
+    mock_acks(&server, answered()).await;
+    let sender = sender_retrying_after(&server, Duration::from_millis(300));
+
+    sender.want(channel(1), at(message(1)), Pace::Explicit);
+    received(&server, 1).await;
+    sender.want(channel(1), at(message(2)), Pace::Explicit);
+    let requests = received(&server, 2).await;
+
+    assert_eq!(
+        acks(&requests),
+        [
+            ack_of(channel(1), message(1)),
+            ack_of(channel(1), message(2))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn closing_drops_the_acks_waiting_for_a_retry() {
+    let server = MockServer::start().await;
+    mock_acks(&server, ResponseTemplate::new(503)).await;
+    let sender = sender_retrying_after(&server, Duration::from_millis(300));
+
+    sender.want(channel(1), at(message(1)), Pace::Explicit);
+    received(&server, 1).await;
+    sender.close();
+    tokio::time::sleep(Duration::from_millis(700)).await;
+
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+// Fails the first `failing` requests; every answer comes after `SLOW`.
+struct SlowlyFailing {
+    arrivals: Arc<Mutex<Vec<std::time::Instant>>>,
+    failing: usize,
+}
+
+impl Respond for SlowlyFailing {
+    fn respond(&self, request: &Received) -> ResponseTemplate {
+        let mut arrivals = self.arrivals.lock().unwrap();
+        arrivals.push(std::time::Instant::now());
+        let answer = if arrivals.len() <= self.failing {
+            ResponseTemplate::new(503)
+        } else if request.url.path() == BULK {
+            ResponseTemplate::new(204)
+        } else {
+            answered()
+        };
+        answer.set_delay(SLOW)
+    }
+}
+
+#[tokio::test]
+async fn retries_never_overlap() {
+    let server = MockServer::start().await;
+    let arrivals = Arc::new(Mutex::new(Vec::new()));
+    Mock::given(method("POST"))
+        .respond_with(SlowlyFailing {
+            arrivals: arrivals.clone(),
+            failing: 3,
+        })
+        .mount(&server)
+        .await;
+    let sender = sender(&server);
+
+    sender.want(channel(1), at(message(1)), Pace::Explicit);
+    sender.want(channel(2), at(message(2)), Pace::Explicit);
+    sender.want_bulk(vec![
+        (channel(3), at(message(3))),
+        (channel(4), at(message(4))),
+    ]);
+    let requests = received(&server, 6).await;
+
+    let mut went_through = acks(&requests[3..]);
+    went_through.sort_unstable();
+    assert_eq!(
+        went_through,
+        [
+            (0, 2),
             ack_of(channel(1), message(1)),
             ack_of(channel(2), message(2))
         ]
     );
+    let arrivals = arrivals.lock().unwrap().clone();
+    for pair in arrivals.windows(2) {
+        assert!(pair[1] - pair[0] >= SLOW, "{:?}", pair[1] - pair[0]);
+    }
+}
+
+#[test]
+fn the_wait_before_a_retry_doubles_up_to_a_minute() {
+    let first = Duration::from_secs(2);
+    let waits: Vec<Duration> = (1..=8).map(|failures| backoff(first, failures)).collect();
+
+    assert!(waits.windows(2).all(|pair| pair[0] <= pair[1]), "{waits:?}");
+    assert_eq!(waits[0], first);
+    assert_eq!(waits[1], first * 2);
+    assert_eq!(backoff(first, 40), RETRY_CAP);
+    assert!(RETRY_CAP <= Duration::from_secs(64));
+}
+
+#[test]
+fn only_rate_limits_and_transient_errors_are_retried() {
+    let first = Duration::from_secs(2);
+    let limited = |after: Option<u64>| RequestError::RateLimited {
+        retry_after: after.map(Duration::from_secs),
+    };
+
+    assert_eq!(
+        retry_wait(&RequestError::ServerError { status: 503 }, 2, first),
+        Some(backoff(first, 2))
+    );
+    assert_eq!(retry_wait(&limited(None), 1, first), Some(first));
+    assert_eq!(
+        retry_wait(&limited(Some(30)), 1, first),
+        Some(Duration::from_secs(30)),
+        "Discord's wait when it's longer"
+    );
+    assert_eq!(retry_wait(&limited(Some(3600)), 1, first), Some(RETRY_CAP));
+    for dropped in [
+        RequestError::Discord {
+            status: 403,
+            code: 50001,
+            message: String::new(),
+        },
+        RequestError::UnexpectedResponse,
+        RequestError::Unauthorized,
+        RequestError::Closed,
+    ] {
+        assert_eq!(retry_wait(&dropped, 1, first), None, "{dropped:?}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_retried_target_waits_for_its_backoff_with_a_newer_one() {
+    let wants = Wants::default();
+    wants.want(channel(1), at(message(1)), Pace::Explicit);
+    let failed = wants.next().await.unwrap();
+    let retry_at = Instant::now() + Duration::from_secs(2);
+
+    wants.retry(failed, retry_at);
+    wants.want(channel(1), at(message(2)), Pace::Explicit);
+    wants.want(channel(2), at(message(3)), Pace::Explicit);
+
+    assert_eq!(
+        single(&wants.next().await.unwrap()),
+        (channel(2), at(message(3)))
+    );
+    let retried = wants.next().await.unwrap();
+    assert!(Instant::now() >= retry_at);
+    assert_eq!(single(&retried), (channel(1), at(message(2))));
+    assert_eq!(retried.failures, 1);
 }
 
 // Holds the first answer until the test releases it; later requests are answered at once.

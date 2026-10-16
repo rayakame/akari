@@ -84,10 +84,12 @@ Acks go through `AccountRest` like every other request, with pacing of their own
   request per chunk, in order. A channel's pending single ack joins its entry in the bulk.
 - **Never backwards.** An ack at or below what Discord took for the channel this session isn't
   sent; a bulk whose entries are all skipped sends nothing.
-- **Errors.** An ack still rate limited after the waits and retries above is dropped, as is
-  one Discord refuses. A network error or 5xx (after the 502/504 retry above) is retried once
-  more after 1 s, then dropped. A 401 or `close()` stops the acks, and what's pending is
-  dropped. Nothing is rolled back.
+- **Errors.** An ack still rate limited after the waits and retries above, or failed with a
+  network error or 5xx (after the 502/504 retry above), stays pending: it's tried again after
+  2 s, then after twice as long each time up to a minute (or after the 429's `retry_after`
+  when that is longer), in due order with the other acks and merged with newer targets for its
+  channel, until it goes through. One Discord refuses otherwise is dropped. A 401 or `close()`
+  stops the acks, and what's pending is dropped. Nothing is rolled back.
 
 ## Not implemented yet
 
