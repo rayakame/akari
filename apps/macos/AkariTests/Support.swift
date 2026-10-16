@@ -42,6 +42,24 @@ func row(
     return MessageListModel.Row(id: MessageId(rawValue: key ?? raw), message: message)
 }
 
+func keyDown(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [])
+    -> NSEvent?
+{
+    NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0,
+        context: nil, characters: characters, charactersIgnoringModifiers: characters,
+        isARepeat: false, keyCode: keyCode)
+}
+
+// Escape and Cmd+. send the same command, cancelOperation(_:).
+func escapeKey(_ modifiers: NSEvent.ModifierFlags = []) -> NSEvent? {
+    keyDown("\u{1b}", keyCode: 53, modifiers: modifiers)
+}
+
+func periodKey(_ modifiers: NSEvent.ModifierFlags) -> NSEvent? {
+    keyDown(".", keyCode: 47, modifiers: modifiers)
+}
+
 /// A view rendered offscreen in a window with a transparent title bar, read by pixel.
 @MainActor
 struct Rendered {

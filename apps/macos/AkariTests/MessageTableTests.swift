@@ -657,11 +657,8 @@ struct MessageTableTests {
         window.makeFirstResponder(text)
         text.setSelectedRange(NSRange(location: 0, length: 3))
 
-        let escape = try #require(
-            NSEvent.keyEvent(
-                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
-                charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        let escape = try #require(escapeKey())
+        table.currentEvent = { escape }
         text.keyDown(with: escape)
 
         #expect(actions.calls.filter { !$0.hasPrefix("more") } == ["escape"])
@@ -1527,10 +1524,12 @@ struct MessageTableTests {
     }
 
     @Test
-    func escapeInTheListJumpsToThePresent() {
+    func escapeInTheListJumpsToThePresent() throws {
         let actions = RecordingActions()
         controller.actions = actions
         show(page)
+        let escape = try #require(escapeKey())
+        table.currentEvent = { escape }
 
         table.cancelOperation(nil)
 
@@ -1538,15 +1537,45 @@ struct MessageTableTests {
     }
 
     @Test
-    func shiftEscapeInTheListMarksTheServerRead() {
+    func shiftEscapeInTheListMarksTheServerRead() throws {
         let actions = RecordingActions()
         controller.actions = actions
         show(page)
-        table.modifiers = { .shift }
+        let escape = try #require(escapeKey(.shift))
+        table.currentEvent = { escape }
 
         table.cancelOperation(nil)
 
         #expect(actions.calls == ["server read"])
+    }
+
+    // In the list and from a message's text.
+    @Test
+    func cmdPeriodDoesntMarkRead() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        let period = try #require(periodKey(.command))
+        table.currentEvent = { period }
+
+        table.cancelOperation(nil)
+        try #require(messageText(in: try cell(of: 200))).cancelOperation(nil)
+
+        #expect(actions.calls.filter { !$0.hasPrefix("more") }.isEmpty)
+    }
+
+    @Test
+    func cmdShiftPeriodDoesntMarkTheServerRead() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        let period = try #require(periodKey([.command, .shift]))
+        table.currentEvent = { period }
+
+        table.cancelOperation(nil)
+        try #require(messageText(in: try cell(of: 200))).cancelOperation(nil)
+
+        #expect(actions.calls.filter { !$0.hasPrefix("more") }.isEmpty)
     }
 
     @Test

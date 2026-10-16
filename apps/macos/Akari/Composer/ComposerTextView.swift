@@ -14,7 +14,7 @@ final class ComposerTextView: NSTextView {
     var onShiftPageUp: () -> Void = {}
     var onEditLastMessage: (() -> Void)?
     var onWindow: () -> Void = {}
-    var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
+    var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
     static func scrollable() -> (NSScrollView, ComposerTextView) {
         let scrollView = NSScrollView()
@@ -113,7 +113,7 @@ final class ComposerTextView: NSTextView {
         switch selector {
         case #selector(NSResponder.insertNewline(_:)):
             // Shift+Return arrives as the same command; it adds a line.
-            if modifiers().contains(.shift) {
+            if currentEvent()?.modifierFlags.contains(.shift) == true {
                 return false
             }
             onSubmit()
@@ -127,8 +127,11 @@ final class ComposerTextView: NSTextView {
             onEditLastMessage?()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
-            // Shift+Escape arrives as the same command.
-            if modifiers().contains(.shift) {
+            // Shift+Escape and Cmd+. arrive as the same command.
+            guard let event = currentEvent(), event.isEscapeKey else {
+                return false
+            }
+            if event.modifierFlags.contains(.shift) {
                 onShiftEscape()
             } else {
                 onEscape()

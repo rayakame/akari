@@ -1341,7 +1341,7 @@ class MessageTableView: NSTableView {
     var onEscape: (() -> Void)?
     var onShiftEscape: (() -> Void)?
     var onShiftPageUp: (() -> Void)?
-    var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
+    var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
     var pointerMoved: (() -> Void)?
     var windowChanged: (() -> Void)?
     private(set) var isLayingOut = false
@@ -1351,9 +1351,13 @@ class MessageTableView: NSTableView {
         numberOfRows > 0 ? rect(ofRow: numberOfRows - 1).maxY : 0
     }
 
-    // Shift+Escape arrives as the same command.
+    // Shift+Escape and Cmd+. arrive as the same command.
     override func cancelOperation(_ sender: Any?) {
-        if modifiers().contains(.shift) {
+        guard let event = currentEvent(), event.isEscapeKey else {
+            super.cancelOperation(sender)
+            return
+        }
+        if event.modifierFlags.contains(.shift) {
             onShiftEscape?()
         } else {
             onEscape?()
@@ -1413,5 +1417,13 @@ class MessageTableView: NSTableView {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         pointerMoved?()
+    }
+}
+
+extension NSEvent {
+    static let escapeKeyCode: UInt16 = 53
+
+    var isEscapeKey: Bool {
+        type == .keyDown && keyCode == Self.escapeKeyCode
     }
 }

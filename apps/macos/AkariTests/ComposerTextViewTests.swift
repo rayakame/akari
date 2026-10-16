@@ -16,7 +16,7 @@ final class ComposerTextViewTests {
     var serverReads = 0
     var editLast = 0
     var unreadJumps = 0
-    var modifiers: NSEvent.ModifierFlags = []
+    var event: NSEvent?
 
     init() {
         (scrollView, textView) = ComposerTextView.scrollable()
@@ -30,7 +30,7 @@ final class ComposerTextViewTests {
         textView.onShiftEscape = { [unowned self] in serverReads += 1 }
         textView.onEditLastMessage = { [unowned self] in editLast += 1 }
         textView.onShiftPageUp = { [unowned self] in unreadJumps += 1 }
-        textView.modifiers = { [unowned self] in modifiers }
+        textView.currentEvent = { [unowned self] in event }
         window.makeFirstResponder(textView)
     }
 
@@ -45,7 +45,7 @@ final class ComposerTextViewTests {
         #expect(submits == 1)
         #expect(textView.string == "a")
 
-        modifiers = .shift
+        event = keyDown("\r", keyCode: 36, modifiers: .shift)
         textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
         #expect(submits == 1)
         #expect(textView.string == "a\n")
@@ -93,6 +93,7 @@ final class ComposerTextViewTests {
     @Test
     func escapeJumpsInsteadOfCompleting() {
         type("ab")
+        event = escapeKey()
         textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
         #expect(escapes == 1)
         #expect(serverReads == 0)
@@ -102,10 +103,24 @@ final class ComposerTextViewTests {
     // AppKit's key bindings give Shift+Escape the same command as Escape.
     @Test
     func shiftEscapeMarksTheServerReadInstead() {
-        modifiers = .shift
+        event = escapeKey(.shift)
         textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
         #expect(serverReads == 1)
         #expect(escapes == 0)
+    }
+
+    @Test
+    func cmdPeriodDoesntMarkRead() {
+        event = periodKey(.command)
+        textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(escapes == 0)
+    }
+
+    @Test
+    func cmdShiftPeriodDoesntMarkTheServerRead() {
+        event = periodKey([.command, .shift])
+        textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(serverReads == 0)
     }
 
     // Shift+Fn+Up on a laptop; AppKit's key bindings make it a selection command.
