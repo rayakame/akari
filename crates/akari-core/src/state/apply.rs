@@ -318,6 +318,8 @@ pub(crate) struct State {
     stale_cursors: HashSet<ChannelId>,
     // While a READY is prepared, the positions of Akari's local acks, which its swap replays.
     journal: Option<Vec<(ChannelId, MessageId)>>,
+    // Replayed acks that kept READY's mention count: their echo brings Discord's.
+    recounts: HashMap<ChannelId, MessageId>,
 }
 
 impl State {
@@ -340,6 +342,7 @@ impl State {
             due: None,
             stale_cursors: HashSet::new(),
             journal: None,
+            recounts: HashMap::new(),
         }
     }
 
@@ -399,9 +402,10 @@ impl State {
         mut diff: Option<ReadyDiff>,
         events: &mut Vec<StoreEvent>,
     ) -> (Entities, Derived) {
-        if let Some(journal) = self.journal.take() {
-            self.replay(&journal, &mut next, &mut derived, diff.as_mut());
-        }
+        self.recounts = match self.journal.take() {
+            Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
+            None => HashMap::new(),
+        };
         if let Some(diff) = diff {
             events.extend(diff.events);
             for channel in diff.removed_channels {

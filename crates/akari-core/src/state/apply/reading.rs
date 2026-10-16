@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use super::{Derived, Entities, ReadyDiff, State, wall_millis};
@@ -172,7 +172,11 @@ impl State {
             .get(&ack.channel_id)
             .and_then(|channel| channel.last_message_id)
             .map(Snowflake::get);
-        if self.entities.read_states.ack(ack, newest) {
+        let recount = self
+            .recounts
+            .remove(&ack.channel_id)
+            .is_some_and(|at| at.get() == ack.message_id.get());
+        if self.entities.read_states.ack(ack, newest, recount) {
             self.dirty.channel(ack.channel_id);
         }
     }
@@ -354,8 +358,9 @@ impl State {
         next: &mut Entities,
         derived: &mut Derived,
         diff: Option<&mut ReadyDiff>,
-    ) {
+    ) -> HashMap<ChannelId, MessageId> {
         let mut replayed = BTreeSet::new();
+        let mut recounts = HashMap::new();
         for &(channel, acked) in journal {
             let Some(stored) = next.channels.get(&channel) else {
                 continue;
@@ -372,6 +377,7 @@ impl State {
             let mentions = if Some(acked) >= newest {
                 0
             } else {
+                recounts.insert(channel, acked);
                 ready.map_or(0, |state| state.mentions)
             };
             next.read_states.insert(
@@ -384,7 +390,7 @@ impl State {
             );
         }
         if replayed.is_empty() {
-            return;
+            return recounts;
         }
         let mut dirty = Dirty::default();
         for channel in &replayed {
@@ -397,6 +403,7 @@ impl State {
             self.badges
                 .rediff(&derived.badges, &replayed, &mut diff.events);
         }
+        recounts
     }
 
     // The official client acks forums at "now". A stale cursor may be behind Discord's, and so

@@ -1595,3 +1595,38 @@ fn a_refused_ack_during_ready_preparation_isnt_replayed() {
 
     assert!(store.channel_badge(general()).unread);
 }
+
+// The replay kept READY's count, past what the user read; Discord's echo of the ack has the real one.
+#[test]
+fn the_echo_of_a_replayed_ack_sets_the_count_ready_kept() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["guilds"][0]["channels"][1]["last_message_id"] = "400000000000000009".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 3.into();
+    }));
+    store.mark_read(general());
+    store.replace(prepared);
+    assert_eq!(store.read_state(general()).unwrap().mentions, 3);
+    let echo = |count: u32| {
+        dispatch(
+            "MESSAGE_ACK",
+            &json!({"channel_id": GENERAL.to_string(), "message_id": "400000000000000003",
+                    "mention_count": count, "version": 7}),
+        )
+    };
+
+    store.apply(echo(0));
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(
+        (read.acked, read.mentions),
+        (Some(Snowflake::new(400_000_000_000_000_003)), 0)
+    );
+    assert_eq!(store.channel_badge(general()).mentions, 0);
+    store.apply(echo(2));
+    assert_eq!(
+        store.read_state(general()).unwrap().mentions,
+        0,
+        "a later echo at the position is one again"
+    );
+}

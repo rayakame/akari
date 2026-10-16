@@ -124,14 +124,15 @@ impl ReadStates {
         self.ignored.remove(&user);
     }
 
-    pub(crate) fn ack(&mut self, ack: &MessageAck, newest: Option<u64>) -> bool {
+    // With `recount`, an ack at the stored position sets the count: a replay kept READY's there.
+    pub(crate) fn ack(&mut self, ack: &MessageAck, newest: Option<u64>, recount: bool) -> bool {
         let position = ack.message_id.get();
         let known = self.get(ack.channel_id);
         // An echo of an ack the store already took mustn't reset a mention counted since; a
         // position the store estimated takes a real one at it.
         let behind = known.is_some_and(|state| {
             state.acked.is_some_and(|acked| {
-                if state.estimated {
+                if state.estimated || recount {
                     acked.get() > position
                 } else {
                     acked.get() >= position
