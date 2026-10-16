@@ -298,6 +298,31 @@ struct UnreadBarTests {
         #expect(model.loading == nil)
     }
 
+    // The core put the around page in the window, but the list hasn't heard yet.
+    @Test
+    func escapeAfterTheJumpsPageLandedInTheCoreEndsAtThePresent() async {
+        shown([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        account.aroundLandsFirst.withLock { $0 = true }
+        let around = window([1, 2, 3, 4, 5, 6], latest: false)
+        windows(around: around, latest: [window([7, 8])])
+        let model = makeModel()
+        let jump = await waitingJump(model)
+        store.update { [here] in $0.windows[here] = around }
+
+        let escape = Task { await model.escape() }
+        await account.loadReplies.pulled(2)
+        account.loadReplies.send(nil)
+        account.loadReplies.send(nil)
+        await finished(jump)
+        await finished(escape)
+
+        #expect(loads == [aroundLoad, latestLoad])
+        #expect(ids(model) == [7, 8])
+        #expect(model.atPresent)
+        #expect(model.unreadJumps == 0)
+    }
+
     @Test
     func jumpToPresentSupersedesARunningAroundLoad() async {
         inHistory([5, 6, 7, 8], readUpTo: 2)

@@ -123,6 +123,8 @@ public final class MessageListModel {
     // The user's own scrolls since the bottom, not the distance to it: a message arriving during
     // a gesture moves the bottom away.
     @ObservationIgnored private var scrolledUp = 0.0
+    // The load ticket of the last latest or around load or supersede: only it places the list.
+    @ObservationIgnored private var lastPlacing = 0
 
     init(
         channelId: ChannelId, userId: UserId, account: Account, store: Store,
@@ -177,7 +179,8 @@ public final class MessageListModel {
     public func escape() async {
         account.markRead(channelId: channelId)
         endNewMessagesLine()
-        if !atPresent {
+        // The core may hold a jump's page the list hasn't shown yet.
+        if !atPresent || store.window(channelId: channelId)?.latest == false {
             await load(.latest)
         }
     }
@@ -192,15 +195,13 @@ public final class MessageListModel {
         }
         // A channel never read has no position to load around; its line is among the loaded rows.
         if readUpTo.rawValue != 0, !readPositionLoaded(readUpTo) {
-            // The running load jumps once its messages are in, unless the jump to the present
-            // overtook it.
-            if let running = activeLoads.filter({ $0.value == .around }).keys.max(),
-                !activeLoads.contains(where: { $0.value == .latest && $0.key > running })
-            {
+            // The running load jumps once its messages are in, if nothing placed the list since.
+            guard activeLoads[lastPlacing] != .around else {
                 return
             }
             // A failed load, or a page the core dropped for a newer request, leaves the bar.
-            guard await load(.around) == .applied else {
+            let (ticket, outcome) = await load(.around)
+            guard outcome == .applied, ticket == lastPlacing else {
                 return
             }
         }
@@ -260,6 +261,8 @@ public final class MessageListModel {
         // A latest load would overtake a running jump too, but at the present none runs.
         if activeLoads.values.contains(.around) {
             account.supersedeAroundLoads(channelId: channelId)
+            loads += 1
+            lastPlacing = loads
         }
         let newest = rows.last { $0.message.delivery == .sent }?.message.id
         // Marking read acks up to the channel's newest message, also one not loaded here.
@@ -322,9 +325,9 @@ public final class MessageListModel {
             || batch.channelsChanged[guildId] != nil
     }
 
-    // `nil` when it failed or there was nothing to load.
+    // The outcome is `nil` when it failed or there was nothing to load.
     @discardableResult
-    private func load(_ kind: Load) async -> PageOutcome? {
+    private func load(_ kind: Load) async -> (ticket: Int, outcome: PageOutcome?) {
         loads += 1
         let ticket = loads
         activeLoads[ticket] = kind
@@ -343,7 +346,11 @@ public final class MessageListModel {
                 .around(messageId: readUpTo ?? MessageId(rawValue: 0), limit: Self.pageSize)
             }
         // Taken now, in the order the user acted: the load begins later, on Akari's runtime.
-        let placing = kind == .latest || kind == .around ? account.reservePlacing() : nil
+        var placing: UInt64?
+        if kind == .latest || kind == .around {
+            placing = account.reservePlacing()
+            lastPlacing = ticket
+        }
         LaunchLog.mark("first message load started")
         let started = ContinuousClock.now
         let held = Set(rows.map(\.id))
@@ -370,7 +377,7 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: report,
                 failure: nil, page: Set(page), read: read, started: started,
                 duration: started.duration(to: .now))
-            return report?.outcome
+            return (ticket, report?.outcome)
         } catch {
             let failure = error as? RequestError ?? .UnexpectedResponse
             failedLoads[kind] = failure
@@ -378,7 +385,7 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: nil,
                 failure: failure, read: .zero, started: started,
                 duration: started.duration(to: .now))
-            return nil
+            return (ticket, nil)
         }
     }
 

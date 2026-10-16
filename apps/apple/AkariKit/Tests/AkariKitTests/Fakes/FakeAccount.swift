@@ -23,6 +23,9 @@ final class FakeAccount: Account, @unchecked Sendable {
     // a latest page that would replace the window when the newest placing is a later around load.
     private let placings = Locked<[ChannelId: (newest: UInt64, around: UInt64)]>([:])
     private let reserved = Locked<UInt64>(0)
+    // Set: an around page counts as in the window before any later request, as when the core
+    // applied it before the list heard.
+    let aroundLandsFirst = Locked(false)
     // While set, each load waits here before its body runs, as on Akari's runtime.
     let holdLoadEntry = Locked(false)
     let loadEntries = AsyncQueue<Void>()
@@ -114,7 +117,9 @@ final class FakeAccount: Account, @unchecked Sendable {
         guard var report = loadReport.current else {
             return nil
         }
-        if let placing, overtaken(load, placing: placing, in: channelId) {
+        let landedFirst: Bool =
+            if case .around = load { aroundLandsFirst.current } else { false }
+        if let placing, !landedFirst, overtaken(load, placing: placing, in: channelId) {
             report.outcome = .overtaken
             return report
         }
