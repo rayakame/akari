@@ -1055,6 +1055,9 @@ async fn pump(mut finish: Finish) {
                     Ok(next) => {
                         shared.acks.forget_all();
                         let ack = shared.store.replace(next);
+                        shared
+                            .acks
+                            .reconcile(|channel| shared.store.read_state(channel));
                         shared.ack_reading(ack);
                         let convert_ms = crate::millis(started.elapsed());
                         tracing::info!(convert_ms, "READY applied");

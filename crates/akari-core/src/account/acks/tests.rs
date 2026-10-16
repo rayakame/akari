@@ -1168,3 +1168,157 @@ async fn a_refused_ack_leaves_its_undo_to_the_channels_newer_one() {
     assert_eq!(single(&newer), (channel(1), message(6)));
     assert_eq!(wants.refuse(), [(channel(1), read_at(3, 2), message(6))]);
 }
+
+// What's left to send, until nothing comes for a minute; each request goes through.
+async fn drain(wants: &Wants) -> Vec<(ChannelId, MessageId)> {
+    let mut sent = Vec::new();
+    while let Ok(Some(request)) = timeout(Duration::from_secs(60), wants.next()).await {
+        sent.extend(request.entries);
+        wants.sent();
+    }
+    sent.sort_unstable();
+    sent
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_manual_ack_elsewhere_drops_the_pending_ack() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(1), None, Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.retry(Instant::now() + Duration::from_secs(2));
+    wants.want(channel(2), message(2), None, Pace::Paced);
+    wants.want(channel(3), message(3), None, Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.want(channel(4), message(4), None, Pace::Paced);
+
+    for n in 1..=3 {
+        wants.forget(channel(n));
+    }
+    wants.retry(Instant::now());
+
+    assert_eq!(
+        drain(&wants).await,
+        [(channel(4), message(4))],
+        "retrying, queued and on its way: all dropped"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn merging_keeps_the_first_seen_and_undo() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(5), read_at(3, 2), Pace::Paced);
+    wants.want(channel(1), message(6), read_at(5, 0), Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.want(channel(1), message(7), read_at(6, 0), Pace::Explicit);
+    wants.retry(Instant::now());
+
+    wants.forget_all();
+    wants.reconcile(|_| read_at(3, 2));
+    let request = timeout(Duration::from_secs(60), wants.next())
+        .await
+        .expect("dropped at READY")
+        .unwrap();
+
+    assert_eq!(single(&request), (channel(1), message(7)));
+    assert_eq!(wants.refuse(), [(channel(1), read_at(3, 2), message(7))]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn ready_checks_the_acks_from_before_it_and_no_later_ones() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(11), read_at(1, 1), Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.want(channel(2), message(12), read_at(2, 1), Pace::Paced);
+    wants.want(channel(3), message(13), read_at(3, 1), Pace::Paced);
+    wants.want(channel(5), message(15), read_at(5, 1), Pace::Paced);
+
+    wants.forget_all();
+    wants.want(channel(4), message(14), read_at(4, 1), Pace::Paced);
+    wants.reconcile(|id| {
+        if id == channel(2) {
+            read_at(2, 3)
+        } else if id == channel(5) {
+            None
+        } else {
+            read_at(9, 0)
+        }
+    });
+    wants.retry(Instant::now());
+
+    assert_eq!(
+        drain(&wants).await,
+        [(channel(2), message(12)), (channel(4), message(14))]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ack_on_its_way_at_ready_doesnt_hold_back_the_next() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(11), read_at(1, 1), Pace::Explicit);
+    wants.next().await.unwrap();
+
+    wants.forget_all();
+    wants.sent();
+    wants.reconcile(|_| read_at(1, 1));
+    wants.want(channel(1), message(11), read_at(1, 1), Pace::Explicit);
+
+    assert_eq!(drain(&wants).await, [(channel(1), message(11))]);
+}
+
+#[test]
+fn an_estimated_position_is_none_of_discords() {
+    let estimated = Some(ReadState {
+        acked: Some(message(1)),
+        mentions: 1,
+        estimated: true,
+    });
+
+    assert_eq!(seen(estimated), None);
+    assert_eq!(seen(read_at(1, 1)), Some(message(1)));
+    assert_eq!(seen(None), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn nothing_from_before_ready_goes_out_until_its_checked() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(1), read_at(1, 1), Pace::Explicit);
+
+    wants.forget_all();
+    assert!(
+        timeout(Duration::from_secs(60), wants.next())
+            .await
+            .is_err(),
+        "sent before READY's check"
+    );
+    wants.reconcile(|_| read_at(1, 1));
+
+    assert_eq!(
+        single(&wants.next().await.unwrap()),
+        (channel(1), message(1))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ack_taken_while_ready_is_swapped_in_isnt_dropped_with_an_older_one() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(1), read_at(1, 1), Pace::Paced);
+
+    wants.forget_all();
+    wants.want(channel(1), message(2), read_at(1, 1), Pace::Explicit);
+    wants.reconcile(|_| read_at(9, 0));
+
+    assert_eq!(drain(&wants).await, [(channel(1), message(2))]);
+
+    wants.want(channel(2), message(3), read_at(2, 1), Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.forget_all();
+    wants.want(channel(2), message(4), read_at(2, 1), Pace::Explicit);
+    wants.retry(Instant::now());
+    wants.reconcile(|_| read_at(9, 0));
+
+    assert_eq!(
+        drain(&wants).await,
+        [(channel(2), message(4))],
+        "one on its way came back into it"
+    );
+}

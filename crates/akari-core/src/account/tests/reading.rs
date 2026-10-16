@@ -516,3 +516,80 @@ async fn closing_the_account_stops_the_sender() {
 
     assert!(online.server.received_requests().await.unwrap().is_empty());
 }
+
+// The first ack waits out a 1.5 s rate limit before it's tried again.
+async fn limit_the_first_ack(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path_regex(ACK_ROUTE))
+        .respond_with(ResponseTemplate::new(429).set_body_json(
+            json!({"message": "You are being rate limited.", "retry_after": 1.5, "global": false}),
+        ))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(server)
+        .await;
+}
+
+async fn new_session(online: &mut Online, edit: impl FnOnce(&mut Value)) -> FakeConnection {
+    online.connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = online.fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh.send(ready_payload(1, &online.fake, edit)).await;
+    events_until(&online.subscription, "Online").await;
+    fresh
+}
+
+#[tokio::test]
+async fn ready_drops_a_pending_ack_whose_position_changed_elsewhere() {
+    let mut online = acking(|_| {}).await;
+    limit_the_first_ack(&online.server).await;
+    online.account.mark_read(general());
+    sent(&online.server, 1).await;
+
+    // Marked unread further back on another device meanwhile.
+    let _fresh = new_session(&mut online, |ready| {
+        ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000001".into();
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+
+    assert_eq!(sent(&online.server, 1).await, [Sent::Ack(GENERAL, NEWEST)]);
+    assert!(badge(&online.account, GENERAL).unread);
+}
+
+#[tokio::test]
+async fn ready_keeps_a_pending_ack_whose_position_is_unchanged() {
+    let mut online = acking(|_| {}).await;
+    limit_the_first_ack(&online.server).await;
+    online.account.mark_read(general());
+    sent(&online.server, 1).await;
+
+    let _fresh = new_session(&mut online, |_| {}).await;
+
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [Sent::Ack(GENERAL, NEWEST), Sent::Ack(GENERAL, NEWEST)]
+    );
+}
+
+#[tokio::test]
+async fn a_manual_ack_elsewhere_stops_akaris_retry() {
+    let mut online = acking(|_| {}).await;
+    limit_the_first_ack(&online.server).await;
+    online.account.mark_read(general());
+    sent(&online.server, 1).await;
+
+    online
+        .connection
+        .send(dispatch(
+            2,
+            "MESSAGE_ACK",
+            json!({"channel_id": GENERAL.to_string(), "message_id": (NEWEST - 1).to_string(),
+                   "manual": true, "mention_count": 1, "version": 5}),
+        ))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+
+    assert_eq!(sent(&online.server, 1).await, [Sent::Ack(GENERAL, NEWEST)]);
+}

@@ -1,5 +1,5 @@
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -79,11 +79,40 @@ struct Retry {
     failures: u32,
 }
 
+// The store's read state before the first of the merged acks.
+#[derive(Debug, Clone, Copy)]
+struct Before {
+    state: Option<ReadState>,
+    // Taken before a READY that it hasn't been checked against yet.
+    unchecked: bool,
+}
+
+impl Before {
+    fn now(state: Option<ReadState>) -> Self {
+        Self {
+            state,
+            unchecked: false,
+        }
+    }
+
+    // `self` came first, over Discord's position; a later ack was taken over Akari's own. One
+    // still to be checked against READY doesn't hold back one taken since, the user's now.
+    fn then(self, later: Self) -> Self {
+        if self.unchecked && !later.unchecked {
+            later
+        } else {
+            Self {
+                state: self.state,
+                unchecked: self.unchecked || later.unchecked,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Wanted {
     id: MessageId,
-    // The store's read state before the first of the merged acks.
-    before: Option<ReadState>,
+    before: Before,
     kind: Kind,
     // When the channel's first pending target came.
     since: Instant,
@@ -117,6 +146,10 @@ impl Wanted {
 
     fn failures(&self) -> u32 {
         self.retry.map_or(0, |retry| retry.failures)
+    }
+
+    fn unchecked(&self) -> bool {
+        self.before.unchecked
     }
 }
 
@@ -155,9 +188,6 @@ struct Queue {
     sent: HashMap<ChannelId, MessageId>,
     orders: u64,
     closed: bool,
-    // Channels whose position Discord set on its own, for the sender to forget.
-    forgotten: HashSet<ChannelId>,
-    forget_all: bool,
 }
 
 impl Queue {
@@ -186,7 +216,7 @@ impl Queue {
                 };
                 entry.insert(Wanted {
                     id,
-                    before,
+                    before: Before::now(before),
                     kind,
                     since: now,
                     order,
@@ -195,6 +225,7 @@ impl Queue {
             }
             Entry::Occupied(mut entry) => {
                 let wanted = entry.get_mut();
+                wanted.before = wanted.before.then(Before::now(before));
                 let advanced = id > wanted.id;
                 wanted.id = wanted.id.max(id);
                 wanted.kind = match (wanted.kind, pace) {
@@ -223,7 +254,7 @@ impl Queue {
                 Entry::Vacant(entry) => {
                     entry.insert(Wanted {
                         id,
-                        before,
+                        before: Before::now(before),
                         kind: Kind::Bulk {
                             at: now,
                             alone: false,
@@ -235,6 +266,7 @@ impl Queue {
                 }
                 Entry::Occupied(mut entry) => {
                     let wanted = entry.get_mut();
+                    wanted.before = wanted.before.then(Before::now(before));
                     wanted.id = wanted.id.max(id);
                     if !wanted.bulk() {
                         wanted.kind = Kind::Bulk {
@@ -249,18 +281,13 @@ impl Queue {
     }
 
     // Oldest due first; a request takes the bulk entries due in a row, up to a chunk. An entry
-    // at or below what Discord took is dropped.
+    // at or below what Discord took is dropped; one that READY may have overtaken waits.
     fn take(&mut self, now: Instant) -> Next {
-        if std::mem::take(&mut self.forget_all) {
-            self.sent.clear();
-        }
-        for channel in self.forgotten.drain() {
-            self.sent.remove(&channel);
-        }
         loop {
             let Some((&channel, &head)) = self
                 .wanted
                 .iter()
+                .filter(|(_, wanted)| !wanted.unchecked())
                 .min_by_key(|(_, wanted)| (wanted.due(), wanted.order))
             else {
                 return Next::Idle;
@@ -272,7 +299,7 @@ impl Queue {
                 let mut due: Vec<(Instant, u64, ChannelId, bool)> = self
                     .wanted
                     .iter()
-                    .filter(|(_, wanted)| wanted.due() <= now)
+                    .filter(|(_, wanted)| wanted.due() <= now && !wanted.unchecked())
                     .map(|(channel, wanted)| {
                         let joins = wanted.bulk() && !wanted.alone();
                         (wanted.due(), wanted.order, *channel, joins)
@@ -323,9 +350,12 @@ impl Queue {
         }
     }
 
+    // What READY may already have overtaken isn't remembered as Discord's.
     fn sent(&mut self) {
         for (channel, wanted) in std::mem::take(&mut self.flight).entries {
-            self.sent.insert(channel, wanted.id);
+            if !wanted.unchecked() {
+                self.sent.insert(channel, wanted.id);
+            }
         }
     }
 
@@ -365,15 +395,14 @@ impl Queue {
                 wanted.retry = None;
                 self.requeue(channel, wanted);
             } else if let Some(newer) = self.wanted.get_mut(&channel) {
-                newer.before = wanted.before;
+                newer.before = wanted.before.then(newer.before);
             } else {
-                refused.push((channel, wanted.before, wanted.id));
+                refused.push((channel, wanted.before.state, wanted.id));
             }
         }
         refused
     }
 
-    // The first of the merged acks keeps its `before`: later ones were taken over Akari's own.
     fn requeue(&mut self, channel: ChannelId, back: Wanted) {
         let order = self.order();
         match self.wanted.entry(channel) {
@@ -383,7 +412,7 @@ impl Queue {
             Entry::Occupied(mut entry) => {
                 let newer = entry.get_mut();
                 newer.id = newer.id.max(back.id);
-                newer.before = back.before;
+                newer.before = back.before.then(newer.before);
                 newer.since = newer.since.min(back.since);
                 newer.retry = back.retry.or(newer.retry);
                 if let Kind::Bulk { alone, .. } = &mut newer.kind {
@@ -391,6 +420,56 @@ impl Queue {
                 }
             }
         }
+    }
+
+    // Discord set the channel's position on its own: whatever Akari still had to send for it
+    // could undo that.
+    fn forget(&mut self, channel: ChannelId) {
+        self.sent.remove(&channel);
+        let queued = self.wanted.remove(&channel).is_some();
+        let flying = self.flight.entries.len();
+        self.flight.entries.retain(|(id, _)| *id != channel);
+        if queued || self.flight.entries.len() < flying {
+            tracing::debug!(
+                target: TARGET,
+                channel_id = channel.get(),
+                "pending ack dropped: Discord's position was set elsewhere"
+            );
+        }
+    }
+
+    fn forget_all(&mut self) {
+        self.sent.clear();
+        for wanted in self.wanted.values_mut() {
+            wanted.before.unchecked = true;
+        }
+        for (_, wanted) in &mut self.flight.entries {
+            wanted.before.unchecked = true;
+        }
+    }
+
+    // An ack taken before READY goes on only where READY has the position Akari acked over:
+    // anything else is a read or a mark as unread elsewhere, which it mustn't undo.
+    fn reconcile(&mut self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
+        let keep = |channel: &ChannelId, wanted: &mut Wanted| {
+            if !wanted.unchecked() {
+                return true;
+            }
+            wanted.before.unchecked = false;
+            let kept = seen(ready(*channel)) == seen(wanted.before.state);
+            if !kept {
+                tracing::debug!(
+                    target: TARGET,
+                    channel_id = channel.get(),
+                    "pending ack dropped: Discord's position moved while Akari was away"
+                );
+            }
+            kept
+        };
+        self.wanted.retain(|channel, wanted| keep(channel, wanted));
+        self.flight
+            .entries
+            .retain_mut(|(channel, wanted)| keep(channel, wanted));
     }
 
     fn close(&mut self) {
@@ -434,11 +513,16 @@ impl Wants {
     }
 
     fn forget(&self, channel: ChannelId) {
-        self.lock().forgotten.insert(channel);
+        self.lock().forget(channel);
     }
 
     fn forget_all(&self) {
-        self.lock().forget_all = true;
+        self.lock().forget_all();
+    }
+
+    fn reconcile(&self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
+        self.lock().reconcile(ready);
+        self.changed.notify_one();
     }
 
     fn close(&self) {
@@ -489,10 +573,8 @@ pub(crate) struct AckSender {
 }
 
 impl AckSender {
-    // `unauthorized` runs once on a 401, after which the sender has stopped. `refused` gets the
-    // channel, its read state before the ack and the ID Discord refused.
-    // A failed ack is retried after `retry_delay`, doubling each time up to a minute, or after
-    // a longer retry_after.
+    // `unauthorized` runs once on a 401, which stops the sender; `refused` gets each ack Discord
+    // won't take. A failed ack waits `retry_delay`, doubling to a minute, or a longer retry_after.
     pub(crate) fn start(
         runtime: &tokio::runtime::Handle,
         rest: Arc<AccountRest>,
@@ -553,15 +635,21 @@ impl AckSender {
         id
     }
 
-    // Discord set the channel's position on its own, maybe behind what was sent (a mark as
-    // unread elsewhere): the next target goes out even if it isn't newer.
+    // Discord set the channel's position on its own, maybe behind what was sent (a mark as unread
+    // elsewhere): what's pending for it is dropped; the next ack goes out even if it isn't newer.
     pub(crate) fn forget(&self, channel: ChannelId) {
         self.wants.forget(channel);
     }
 
-    // READY's read states are Discord's, whatever was sent before.
+    // A READY is coming: its read states are Discord's, whatever was sent before. What's pending
+    // waits for `reconcile`.
     pub(crate) fn forget_all(&self) {
         self.wants.forget_all();
+    }
+
+    // With READY's read states: drops what was pending at `forget_all` where Discord moved.
+    pub(crate) fn reconcile(&self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
+        self.wants.reconcile(ready);
     }
 
     pub(crate) fn close(&self) {
@@ -633,6 +721,13 @@ async fn send(
             refused(channel, undo, id);
         }
     }
+}
+
+// Where Discord had the channel as far as Akari knew; an estimated position was Akari's.
+fn seen(state: Option<ReadState>) -> Option<MessageId> {
+    state
+        .filter(|state| !state.estimated)
+        .and_then(|state| state.acked)
 }
 
 fn backoff(first: Duration, failures: u32) -> Duration {
