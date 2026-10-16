@@ -238,6 +238,35 @@ struct UnreadBarTests {
     }
 
     @Test
+    func aFailedAroundLoadKeepsTheBar() async throws {
+        shown([5, 6, 7, 8], readUpTo: 2)
+        account.loadError.withLock { $0 = .Network(kind: .timeout) }
+        let model = makeModel()
+        model.setNewMessagesLineOnScreen(false)
+        let bar = try #require(model.unreadBar)
+
+        await model.jumpToUnread()
+
+        #expect(model.unreadJumps == 0)
+        #expect(model.unreadBar == bar, "the user can click it again")
+        #expect(model.failedLoads == [.around: .Network(kind: .timeout)])
+        #expect(model.lastLoad?.failure == .Network(kind: .timeout))
+
+        account.loadError.withLock { $0 = nil }
+        account.windowAfterLoad.withLock { $0 = window([1, 2, 3, 4, 5, 6], latest: false) }
+        await model.jumpToUnread()
+
+        #expect(
+            store.log.actions == [
+                .load(here, .around(messageId: id(2), limit: 50)),
+                .load(here, .around(messageId: id(2), limit: 50)),
+            ])
+        #expect(model.unreadJumps == 1)
+        #expect(model.unreadBar == nil)
+        #expect(model.failedLoads.isEmpty)
+    }
+
+    @Test
     func theBarsMarkAsReadMarksRead() throws {
         store.update { state in
             state.add(guild(1))

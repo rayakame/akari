@@ -183,21 +183,24 @@ public final class MessageListModel {
     }
 
     /// The unread bar and Shift+Page Up, when there is a line: loads the messages around the read
-    /// position if the first unread message isn't loaded. Scrolling to the line is the view's part.
+    /// position if the first unread message isn't loaded; a failed load leaves the bar. Scrolling
+    /// to the line is the view's part.
     public func jumpToUnread() async {
         guard newMessagesLine != nil, let readUpTo else {
             return
         }
-        seenLineFrom = readUpTo
-        updateUnreadBar()
         // A channel never read has no position to load around; its line is among the loaded rows.
         if readUpTo.rawValue != 0, !readPositionLoaded(readUpTo) {
             // The running load jumps once its messages are in.
             guard !activeLoads.values.contains(.around) else {
                 return
             }
-            await load(.around)
+            guard await load(.around) else {
+                return
+            }
         }
+        seenLineFrom = readUpTo
+        updateUnreadBar()
         unreadJumps += 1
     }
 
@@ -310,7 +313,9 @@ public final class MessageListModel {
             || batch.channelsChanged[guildId] != nil
     }
 
-    private func load(_ kind: Load) async {
+    // Whether the page came; the core may still have dropped it for a newer one.
+    @discardableResult
+    private func load(_ kind: Load) async -> Bool {
         loads += 1
         let ticket = loads
         activeLoads[ticket] = kind
@@ -353,6 +358,7 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: report,
                 failure: nil, page: Set(page), read: read, started: started,
                 duration: started.duration(to: .now))
+            return true
         } catch {
             let failure = error as? RequestError ?? .UnexpectedResponse
             failedLoads[kind] = failure
@@ -360,6 +366,7 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: nil,
                 failure: failure, read: .zero, started: started,
                 duration: started.duration(to: .now))
+            return false
         }
     }
 
