@@ -64,6 +64,8 @@ public final class SessionModel {
     // may have set it again, so the next derivation is sent whatever it is.
     @ObservationIgnored private var resendReading = false
     @ObservationIgnored private var toldReading: ChannelId?
+    // On a 401 the core has stopped reading itself, and close() can come inside that batch.
+    @ObservationIgnored private var accountClosed = false
     // The list reports from inside the table's scroll callbacks, too often for a call into the
     // core each; it hears the last value.
     @ObservationIgnored private(set) var pendingReading: Task<Void, Never>?
@@ -331,6 +333,7 @@ public final class SessionModel {
         ended = true
         updateReading()
         account.close()
+        accountClosed = true
         subscription?.close()
         loop.cancel()
         if case .closed = connection {
@@ -545,7 +548,7 @@ public final class SessionModel {
     }
 
     private func tellReading() {
-        guard reading != toldReading || resendReading else {
+        guard !accountClosed, reading != toldReading || resendReading else {
             return
         }
         resendReading = false

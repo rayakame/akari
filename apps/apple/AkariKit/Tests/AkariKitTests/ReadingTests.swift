@@ -419,6 +419,27 @@ final class ReadingTests {
         #expect(readings == [general, nil, general, nil])
     }
 
+    // On a 401 AppModel closes the session from onClosed, inside the batch that ended it.
+    @Test
+    func aClosedAccountIsToldNothing() {
+        var closing: SessionModel?
+        let session = SessionModel(
+            userId: id(1), account: account, memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in closing?.close() }
+        closing = session
+        session.start()
+        session.open(.guild(id(1)))
+        session.setAppActive(true)
+        session.setWindowKey(true)
+        session.setWindowVisible(true)
+        #expect(readings == [general])
+
+        session.apply(EventBatch([.connection(state: .closed(error: .AuthenticationFailed))]))
+
+        #expect(session.reading == nil)
+        #expect(readings == [general])
+    }
+
     // Going elsewhere first opens the place's last or first channel; that one isn't read.
     @Test
     func goingToAChannelElsewhereReadsOnlyThatChannel() {
