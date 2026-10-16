@@ -338,6 +338,30 @@ fn a_stale_cursor_is_acked_at_now_above_the_cursor() {
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 6), 0)));
 }
 
+// From the disk cache, before the first READY.
+fn restored_state() -> State {
+    let DispatchEvent::Ready(ready) = dispatch("READY", &ready_value()) else {
+        panic!("not a READY");
+    };
+    let cached = Entities::from_ready(*ready);
+    let derived = Derived::build(&cached, wall_millis());
+    let mut state = State::new();
+    assert!(state.restore(cached, derived, &mut Vec::new()));
+    state
+}
+
+// The cache's cursors may be behind Discord's.
+#[test]
+fn before_ready_every_cursor_is_acked_at_now() {
+    let mut state = restored_state();
+    assert_eq!(mark_read(&mut state, GENERAL), at_now(GENERAL, NEWEST));
+
+    let mut state = restored_state();
+    let (acks, _) = mark_guilds_read(&mut state, &[G1]);
+    assert_eq!(acks.first().copied(), at_now(GENERAL, NEWEST));
+    assert!(acks.iter().all(|ack| ack.now), "{acks:?}");
+}
+
 #[test]
 fn mark_read_reads_the_channel_and_clears_its_mentions() {
     let mut state = ready_state();

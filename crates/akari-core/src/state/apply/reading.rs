@@ -270,15 +270,18 @@ impl State {
         Some(ack)
     }
 
-    // The official client acks forums at "now"; a stale cursor may be behind Discord's.
+    // The official client acks forums at "now". A stale cursor may be behind Discord's, and so
+    // may every cursor before READY, which come from the cache.
     fn ack_of(&self, channel: &Channel) -> Ack {
         Ack {
             channel: channel.id,
             cursor: channel.last_message_id.map(Snowflake::cast),
-            now: matches!(
-                channel.kind,
-                ChannelType::GuildForum | ChannelType::GuildMedia
-            ) || self.stale_cursors.contains(&channel.id),
+            now: !self.ready
+                || matches!(
+                    channel.kind,
+                    ChannelType::GuildForum | ChannelType::GuildMedia
+                )
+                || self.stale_cursors.contains(&channel.id),
         }
     }
 
