@@ -1055,14 +1055,16 @@ async fn pump(mut finish: Finish) {
             // A large READY takes milliseconds to convert; that mustn't hold a runtime worker.
             Ok(ConnectionEvent::Dispatch(DispatchEvent::Ready(ready))) => {
                 let started = std::time::Instant::now();
+                // Before the conversion, whose local acks the swap keeps: those are the user's
+                // now, not ones READY may have overtaken.
+                shared.acks.forget_all();
                 let store = shared.store.clone();
                 match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
                     Ok(next) => {
-                        shared.acks.forget_all();
-                        shared.store.replace(next);
+                        let delivered = shared.store.replace(next);
                         shared
                             .acks
-                            .reconcile(|channel| shared.store.read_state(channel));
+                            .reconcile(|channel| delivered.get(&channel).copied());
                         let convert_ms = crate::millis(started.elapsed());
                         tracing::info!(convert_ms, "READY applied");
                         shared.forget_subscriptions();

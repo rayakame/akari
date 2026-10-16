@@ -663,3 +663,34 @@ async fn a_manual_ack_elsewhere_stops_akaris_retry() {
 
     assert_eq!(sent(&online.server, 1).await, [Sent::Ack(GENERAL, NEWEST)]);
 }
+
+// Escape while a new session's READY is converted: the ack still goes, after the retry it joined.
+#[tokio::test]
+async fn a_mark_read_during_ready_preparation_is_sent() {
+    let mut online = acking(|_| {}).await;
+    limit_the_first_ack(&online.server).await;
+    online.account.mark_read(general());
+    sent(&online.server, 1).await;
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert!(badge(&online.account, GENERAL).unread);
+    let (parked, release) = online.account.store().park_next_conversion();
+
+    online.connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = online.fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh.send(ready_payload(1, &online.fake, |_| {})).await;
+    tokio::task::spawn_blocking(move || parked.recv_timeout(WAIT))
+        .await
+        .unwrap()
+        .expect("READY never reached its conversion");
+    online.account.mark_read(general());
+    release.send(()).unwrap();
+    events_until(&online.subscription, "Online").await;
+
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [Sent::Ack(GENERAL, NEWEST), Sent::Ack(GENERAL, NEWEST + 1)]
+    );
+}

@@ -1,11 +1,13 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use super::{Entities, State, wall_millis};
+use super::{Derived, Entities, ReadyDiff, State, wall_millis};
 use crate::gateway::{ChannelUnread, MessageAck};
 use crate::model::{
     self, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageType, Permissions,
     Snowflake, Timestamp,
 };
+use crate::state::badges::Dirty;
 use crate::state::events::StoreEvent;
 use crate::state::read_states::{Ack, ReadState};
 use crate::state::settings::NotificationLevel;
@@ -274,9 +276,7 @@ impl State {
         {
             return None;
         }
-        if self.entities.read_states.read(channel, Some(shown)) {
-            self.dirty.channel(channel);
-        }
+        self.read_up_to(channel, Some(shown));
         Some(Ack {
             channel,
             cursor: self
@@ -305,10 +305,79 @@ impl State {
     fn read_locally(&mut self, channel: ChannelId) -> Option<Ack> {
         let stored = self.entities.channels.get(&channel)?;
         let ack = self.ack_of(stored);
-        if self.entities.needs_ack(stored) && self.entities.read_states.read(channel, ack.cursor) {
-            self.dirty.channel(channel);
+        if self.entities.needs_ack(stored) {
+            self.read_up_to(channel, ack.cursor);
         }
         Some(ack)
+    }
+
+    // Every local ack: a READY being prepared gets it too.
+    fn read_up_to(&mut self, channel: ChannelId, cursor: Option<MessageId>) {
+        if self.entities.read_states.read(channel, cursor) {
+            self.dirty.channel(channel);
+        }
+        let acked = self
+            .entities
+            .read_states
+            .get(channel)
+            .and_then(|state| state.acked);
+        if let (Some(journal), Some(acked)) = (&mut self.journal, acked) {
+            journal.push((channel, acked));
+        }
+    }
+
+    // Local acks taken while the READY was prepared are newer than it, but only up to where
+    // they read: a mention READY counts past that, posted while Akari was away, stays. Their
+    // badges changed after the diff was made, so theirs are made again.
+    pub(super) fn replay(
+        &self,
+        journal: &[(ChannelId, MessageId)],
+        next: &mut Entities,
+        derived: &mut Derived,
+        diff: Option<&mut ReadyDiff>,
+    ) {
+        let mut replayed = BTreeSet::new();
+        for &(channel, acked) in journal {
+            let Some(stored) = next.channels.get(&channel) else {
+                continue;
+            };
+            replayed.insert(channel);
+            let ready = next.read_states.get(channel);
+            if ready
+                .and_then(|state| state.acked)
+                .is_some_and(|position| acked < position)
+            {
+                continue;
+            }
+            let newest = stored.last_message_id.map(Snowflake::cast);
+            let mentions = if Some(acked) >= newest {
+                0
+            } else {
+                ready.map_or(0, |state| state.mentions)
+            };
+            next.read_states.insert(
+                channel,
+                ReadState {
+                    acked: Some(acked),
+                    mentions,
+                    estimated: false,
+                },
+            );
+        }
+        if replayed.is_empty() {
+            return;
+        }
+        let mut dirty = Dirty::default();
+        for channel in &replayed {
+            dirty.channel(*channel);
+        }
+        derived
+            .badges
+            .update(next, dirty, wall_millis(), &mut Vec::new());
+        if let Some(diff) = diff {
+            self.badges
+                .rediff(&derived.badges, &replayed, &mut diff.events);
+        }
     }
 
     // The official client acks forums at "now". A stale cursor may be behind Discord's, and so

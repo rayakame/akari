@@ -1,4 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -26,6 +27,23 @@ pub(crate) struct PreparedReady {
     entities: Entities,
     derived: Derived,
     diff: Option<ReadyDiff>,
+    read_states: HashMap<ChannelId, ReadState>,
+    preparing: Preparing,
+}
+
+// Ends the READY's journal if it's dropped before its swap, e.g. by a panic while converting.
+struct Preparing {
+    store: Store,
+    swapped: bool,
+}
+
+impl Drop for Preparing {
+    fn drop(&mut self) {
+        if !self.swapped {
+            self.store
+                .write("READY", |inner, _| inner.state.end_journal());
+        }
+    }
 }
 
 /// An account's state, kept current by its gateway connection. Cheap to clone. Reads
@@ -39,8 +57,6 @@ struct Shared {
     inner: RwLock<Inner>,
     // Bumped by every write, so the disk cache skips snapshots while nothing changed.
     changes: AtomicU64,
-    // A READY between its diff and its swap; a restore then would go undiffed.
-    preparing_ready: AtomicBool,
     #[cfg(test)]
     park: std::sync::Mutex<Option<Park>>,
     #[cfg(test)]
@@ -159,7 +175,6 @@ impl Store {
         Self {
             shared: Arc::new(Shared {
                 changes: AtomicU64::new(0),
-                preparing_ready: AtomicBool::new(false),
                 inner: RwLock::new(Inner {
                     state: State::with_limits(limits),
                     connection: ConnectionState::Offline,
@@ -297,10 +312,15 @@ impl Store {
     }
 
     // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
-    // it. Only the pump changes entities, so the diff still holds at the swap.
+    // it. Only the pump changes entities, apart from local acks, which the swap replays.
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
-        self.shared.preparing_ready.store(true, Ordering::SeqCst);
+        self.write("READY", |inner, _| inner.state.begin_journal());
+        let preparing = Preparing {
+            store: self.clone(),
+            swapped: false,
+        };
         let mut entities = Entities::from_ready(ready);
+        let read_states = entities.read_states.channels().clone();
         let derived = Derived::build(&entities, wall_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
@@ -317,17 +337,26 @@ impl Store {
             entities,
             derived,
             diff,
+            read_states,
+            preparing,
         }
     }
 
-    pub(crate) fn replace(&self, next: PreparedReady) {
+    // Returns the read states as READY delivered them, before the local acks replayed on top.
+    pub(crate) fn replace(&self, next: PreparedReady) -> HashMap<ChannelId, ReadState> {
+        let PreparedReady {
+            entities,
+            derived,
+            diff,
+            read_states,
+            mut preparing,
+        } = next;
         let old = self.write("READY", |inner, events| {
-            self.shared.preparing_ready.store(false, Ordering::SeqCst);
-            inner
-                .state
-                .swap(next.entities, next.derived, next.diff, events)
+            inner.state.swap(entities, derived, diff, events)
         });
+        preparing.swapped = true;
         drop(old);
+        read_states
     }
 
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
@@ -411,8 +440,7 @@ impl Store {
     pub(crate) fn restore(&self, cached: Entities) -> bool {
         let derived = Derived::build(&cached, wall_millis());
         let restored = self.write("restore", |inner, events| {
-            !self.shared.preparing_ready.load(Ordering::SeqCst)
-                && inner.state.restore(cached, derived, events)
+            inner.state.restore(cached, derived, events)
         });
         if !restored {
             tracing::info!(target: "akari_core::cache", reason = "ready_first", "cache not used");
@@ -814,6 +842,11 @@ impl Store {
             .lock()
             .ok()
             .and_then(|thread| *thread)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn journaling(&self) -> bool {
+        self.read(|inner| inner.state.journaling())
     }
 
     #[cfg(test)]

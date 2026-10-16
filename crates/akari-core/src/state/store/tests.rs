@@ -1456,3 +1456,130 @@ fn a_notification_flags_change_builds_badges_off_the_lock() {
         "{events:?}"
     );
 }
+
+fn ready_where(edit: impl FnOnce(&mut Value)) -> Ready {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    edit(&mut data);
+    match dispatch("READY", &data) {
+        DispatchEvent::Ready(ready) => *ready,
+        other => panic!("not a READY: {other:?}"),
+    }
+}
+
+fn general() -> ChannelId {
+    Snowflake::new(GENERAL)
+}
+
+#[test]
+fn a_mark_read_during_ready_preparation_survives_the_swap() {
+    let store = ready_store();
+    assert!(store.channel_badge(general()).unread);
+    let prepared = store.prepare_ready(ready_where(|_| {}));
+    assert!(store.mark_read(general()).is_some());
+    let subscription = store.subscribe();
+
+    store.replace(prepared);
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(
+        (read.acked, read.mentions),
+        (Some(Snowflake::new(400_000_000_000_000_003)), 0)
+    );
+    assert_eq!(store.channel_badge(general()), Badge::default());
+    assert_eq!(store.guild_badge(Snowflake::new(G1)), Badge::default());
+    assert_eq!(changes(&subscription), ["Ready"]);
+
+    // READY reads the channel already; the diff made before the mark read says so.
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000003".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+    }));
+    store.mark_read(general());
+    let subscription = store.subscribe();
+
+    store.replace(prepared);
+
+    assert_eq!(store.channel_badge(general()), Badge::default());
+    assert_eq!(changes(&subscription), ["Ready"], "a stale badge event");
+}
+
+// A mention posted while Akari was away, past what the user marked read, stays.
+#[test]
+fn a_mark_read_during_ready_preparation_leaves_later_messages_unread() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["guilds"][0]["channels"][1]["last_message_id"] = "400000000000000009".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 3.into();
+    }));
+    store.mark_read(general());
+
+    store.replace(prepared);
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(
+        (read.acked, read.mentions),
+        (Some(Snowflake::new(400_000_000_000_000_003)), 3)
+    );
+    assert!(store.channel_badge(general()).unread);
+}
+
+#[test]
+fn a_mark_read_behind_ready_changes_nothing() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["guilds"][0]["channels"][1]["last_message_id"] = "400000000000000009".into();
+        ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000005".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 1.into();
+    }));
+    store.mark_read(general());
+
+    store.replace(prepared);
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(
+        (read.acked, read.mentions),
+        (Some(Snowflake::new(400_000_000_000_000_005)), 1)
+    );
+}
+
+#[test]
+fn an_abandoned_preparation_drops_its_journal() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|_| {}));
+    store.mark_read(general());
+    assert!(store.journaling());
+    drop(prepared);
+
+    assert!(!store.journaling());
+    store.apply(ready());
+    assert!(store.channel_badge(general()).unread);
+
+    let store = Store::new(DEFAULT_LIMITS);
+    drop(store.prepare_ready(ready_where(|_| {})));
+    assert!(
+        store.restore(cached(ready_of(&[1], |_| {}))),
+        "still counted as preparing a READY"
+    );
+}
+
+#[test]
+fn reading_and_marking_guilds_read_during_ready_preparation_survive_the_swap() {
+    let thread = Snowflake::new(300_000_000_000_000_020);
+    let thread_unread = |ready: &mut Value| {
+        ready["read_state"]["entries"][1]["last_message_id"] = "400000000000000029".into();
+    };
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(thread_unread))));
+    load_page(&store, GENERAL, 400_000_000_000_000_003);
+    let prepared = store.prepare_ready(ready_where(thread_unread));
+
+    assert!(store.set_reading(Some(general())).is_some());
+    assert!(!store.mark_guilds_read(&[Snowflake::new(G1)]).is_empty());
+    store.replace(prepared);
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(read.acked, Some(Snowflake::new(400_000_000_000_000_005)));
+    assert_eq!(store.channel_badge(general()), Badge::default());
+    assert_eq!(store.channel_badge(thread), Badge::default());
+}

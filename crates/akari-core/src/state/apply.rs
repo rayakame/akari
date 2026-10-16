@@ -316,6 +316,8 @@ pub(crate) struct State {
     due: Option<Ack>,
     // Channels whose cursor came from an unread update and may be behind Discord's.
     stale_cursors: HashSet<ChannelId>,
+    // While a READY is prepared, the positions of Akari's local acks, which its swap replays.
+    journal: Option<Vec<(ChannelId, MessageId)>>,
 }
 
 impl State {
@@ -337,6 +339,7 @@ impl State {
             reading: None,
             due: None,
             stale_cursors: HashSet::new(),
+            journal: None,
         }
     }
 
@@ -375,14 +378,30 @@ impl State {
         })
     }
 
+    pub(crate) fn begin_journal(&mut self) {
+        self.journal = Some(Vec::new());
+    }
+
+    pub(crate) fn end_journal(&mut self) {
+        self.journal = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn journaling(&self) -> bool {
+        self.journal.is_some()
+    }
+
     // Returns the old state, so the caller can drop it after releasing the lock.
     pub(crate) fn swap(
         &mut self,
-        next: Entities,
-        derived: Derived,
-        diff: Option<ReadyDiff>,
+        mut next: Entities,
+        mut derived: Derived,
+        mut diff: Option<ReadyDiff>,
         events: &mut Vec<StoreEvent>,
     ) -> (Entities, Derived) {
+        if let Some(journal) = self.journal.take() {
+            self.replay(&journal, &mut next, &mut derived, diff.as_mut());
+        }
         if let Some(diff) = diff {
             events.extend(diff.events);
             for channel in diff.removed_channels {
@@ -415,14 +434,15 @@ impl State {
         self.ready
     }
 
-    // Only before the first READY: a READY that came first is fresher than any cache.
+    // Only before the first READY: a READY that came first is fresher than any cache, and one
+    // being prepared would be swapped in undiffed.
     pub(crate) fn restore(
         &mut self,
         cached: Entities,
         derived: Derived,
         events: &mut Vec<StoreEvent>,
     ) -> bool {
-        if self.ready || self.restored {
+        if self.ready || self.restored || self.journal.is_some() {
             return false;
         }
         self.entities = cached;
