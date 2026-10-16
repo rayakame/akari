@@ -4,6 +4,7 @@ import SwiftUI
 
 extension EnvironmentValues {
     @Entry var announce: @MainActor (String) -> Void = UnreadBar.announce
+    @Entry var appIsActive: @MainActor () -> Bool = { NSApp.isActive }
 }
 
 struct UnreadBar: View {
@@ -14,6 +15,7 @@ struct UnreadBar: View {
     let jump: () -> Void
     let markRead: () -> Void
     @Environment(\.announce) private var announce
+    @Environment(\.appIsActive) private var appIsActive
 
     var body: some View {
         // All of the bar jumps but its button.
@@ -39,8 +41,13 @@ struct UnreadBar: View {
         .background(Color(nsColor: Palette.brand), in: RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal, 16)
         .padding(.top, Self.margin)
-        // Not on a recount: VoiceOver would repeat the bar with every new message.
-        .onAppear { announce(text) }
+        // Not on a recount: VoiceOver would repeat the bar with every new message. Not from
+        // the background either, where a visible window can still show the bar.
+        .onAppear {
+            if appIsActive() {
+                announce(text)
+            }
+        }
     }
 
     static func announce(_ text: String) {

@@ -285,12 +285,20 @@ struct UnreadBarScreenTests {
         return try #require(rep.tiffRepresentation)
     }
 
+    func announcingHost(_ session: SessionModel, active: Bool, into announced: Announcements)
+        -> NSHostingView<some View>
+    {
+        NSHostingView(
+            rootView: SessionScreen(session: session)
+                .environment(\.announce, announced.add)
+                .environment(\.appIsActive, { active }))
+    }
+
     @Test
     func theBarIsAnnouncedOnceWhenItAppears() async throws {
         let session = screens.formattedSession(account)
         let announced = Announcements()
-        let host = NSHostingView(
-            rootView: SessionScreen(session: session).environment(\.announce, announced.add))
+        let host = announcingHost(session, active: true, into: announced)
         let window = screens.shownWindow(host)
         defer { window.orderOut(nil) }
         let table = try await shownWithItsBar(session, in: host)
@@ -304,6 +312,21 @@ struct UnreadBarScreenTests {
         #expect(session.messages?.unreadBar?.count == bar.count + 1)
         try await screens.waitUntil(host) { try barText(in: host, table: table) != drawn }
         #expect(announced.texts.count == 1)
+    }
+
+    // A visible window of an app in the background shows the bar without a word.
+    @Test
+    func theBarIsntAnnouncedWhileAkariIsInTheBackground() async throws {
+        let session = screens.formattedSession(account)
+        let announced = Announcements()
+        let host = announcingHost(session, active: false, into: announced)
+        let window = screens.shownWindow(host)
+        defer { window.orderOut(nil) }
+
+        _ = try await shownWithItsBar(session, in: host)
+
+        #expect(session.messages?.unreadBar != nil)
+        #expect(announced.texts.isEmpty)
     }
 
     @Test
