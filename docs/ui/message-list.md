@@ -315,7 +315,8 @@ window isn't enough. Akari tells the core which channel the user reads
   place at launch, a click or a key press in the window. Scrolling away from the bottom, the
   window losing key, the app going inactive or the window being hidden ends it, and
   scroll-wheel events don't engage. It is stricter than the official client in one place: a
-  click while scrolled up reads nothing until the list is back at the bottom.
+  click while scrolled up reads nothing until the list is back at the bottom, but it
+  counts: once the list is there, reading starts without another click.
 
 A list the session opens on its own (the open channel deleted or hidden, its server gone)
 isn't read until the user clicks.

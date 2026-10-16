@@ -163,7 +163,8 @@ snowflake (a timestamp, the low 22 bits zero) goes instead for:
 - channels whose newest message came from a PASSIVE_UPDATE_V2 or CHANNEL_UNREAD_UPDATE, which
   arrive once and may be behind Discord's (see [Large guilds](#large-guilds)). A READY or a
   history page that reaches the present makes it ordinary again;
-- every channel before the first READY, whose newest messages come from the disk cache.
+- every channel marked read before the first READY (Escape, the menus, Shift+Escape), whose
+  newest messages come from the disk cache; reading itself waits for READY.
 
 "Now" is never below the channel's newest known message. It comes from Discord's clock: the
 `Date` header of the latest REST response plus the monotonic time since it arrived, never the
@@ -173,8 +174,9 @@ about a second behind Discord, and behind after a sleep, never ahead. Without a 
 newest message goes instead, and `last_viewed` falls back to the Mac's date.
 
 **Echoes.** Discord answers an ack with MESSAGE_ACK on the gateway, also to Akari's own. One
-at or behind the stored position changes nothing, so it can't clear a mention counted since
-([MESSAGE_ACK](#message_ack)).
+at or behind the stored position changes nothing, so it can't clear a mention counted since,
+unless it is manual (mark as unread) or the stored position is Akari's own estimate at the
+same position ([MESSAGE_ACK](#message_ack)).
 
 ## Mentions
 
