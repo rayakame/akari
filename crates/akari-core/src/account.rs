@@ -390,8 +390,6 @@ impl Shared {
         }
     }
 
-    // Discord refused an ack the store took: the channel shows what it did before, unless its
-    // read state changed since.
     fn ack_refused(&self, refusal: Refusal) {
         let channel_id = refusal.channel.get();
         let message_id = refusal.sent.get();

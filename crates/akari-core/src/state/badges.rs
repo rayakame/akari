@@ -172,8 +172,8 @@ impl Badges {
         }
     }
 
-    /// `diff`'s events for `channels` and their guilds, replacing the ones it gave them before
-    /// they changed in `next`.
+    // `diff`'s events for `channels` and their guilds, replacing the ones it gave them before
+    // they changed in `next`.
     pub(crate) fn rediff(
         &self,
         next: &Self,
