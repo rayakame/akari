@@ -608,6 +608,107 @@ fn a_page_asked_for_before_a_message_arrived_doesnt_read_it() {
     assert!(badge(&state, GENERAL).unread);
 }
 
+fn page_of(ids: &[u64]) -> Vec<model::Message> {
+    ids.iter()
+        .map(|id| serde_json::from_str(&plain(*id, GENERAL).to_string()).unwrap())
+        .collect()
+}
+
+fn create(state: &mut State, id: u64) {
+    apply(state, "MESSAGE_CREATE", plain(id, GENERAL));
+}
+
+// GENERAL's list away from the present, at NEWEST - 1, read up to NEWEST and being read.
+fn reading_in_history() -> State {
+    let mut state = general_read();
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Around(Snowflake::new(NEWEST - 1)),
+        &[NEWEST - 1],
+        false,
+    );
+    assert_eq!(reading(&mut state, Some(GENERAL)).0, None);
+    state
+}
+
+// The refresh after READY holds live messages back until its page is in.
+#[test]
+fn a_message_created_and_deleted_during_a_held_load_is_read_once_it_lands() {
+    let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
+    let mut ready = ready_value();
+    ready["read_state"]["entries"][0]["last_message_id"] = NEWEST.to_string().into();
+    ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+    state.apply(dispatch("READY", &ready), &mut Vec::new());
+    assert_eq!(reading(&mut state, Some(GENERAL)).0, None, "a stale list");
+    let refresh = state
+        .begin_load(id(GENERAL), LoadKind::Refresh, 2, &mut Vec::new())
+        .unwrap();
+    create(&mut state, NEWEST + 1);
+    delete(&mut state, NEWEST + 1, GENERAL);
+
+    state.finish_load(refresh, page_of(&[NEWEST]), true, &mut Vec::new());
+
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 1));
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+}
+
+// The list reached the present with a newer page while the jump to the present still holds
+// messages: it can be read, but not past a message that isn't a row yet.
+#[test]
+fn a_deleted_message_below_a_held_one_reads_nothing_past_it_before_it_shows() {
+    let mut state = reading_in_history();
+    let present = state
+        .begin_load(id(GENERAL), LoadKind::Latest, 2, &mut Vec::new())
+        .unwrap();
+    let newer = state
+        .begin_load(id(GENERAL), LoadKind::Newer, 3, &mut Vec::new())
+        .unwrap();
+    create(&mut state, NEWEST + 1);
+    create(&mut state, NEWEST + 2);
+    create(&mut state, NEWEST + 3);
+    delete(&mut state, NEWEST + 2, GENERAL);
+
+    state.finish_load(newer, page_of(&[NEWEST]), true, &mut Vec::new());
+    assert_eq!(taken(&mut state), None);
+    assert_eq!(reading(&mut state, Some(GENERAL)).0, None, "two are held");
+    state.finish_load(
+        present,
+        page_of(&[NEWEST - 1, NEWEST]),
+        true,
+        &mut Vec::new(),
+    );
+
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 3));
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+}
+
+#[test]
+fn a_deleted_message_past_every_held_one_is_read_once_they_show() {
+    let mut state = reading_in_history();
+    let present = state
+        .begin_load(id(GENERAL), LoadKind::Latest, 2, &mut Vec::new())
+        .unwrap();
+    create(&mut state, NEWEST + 1);
+    create(&mut state, NEWEST + 2);
+    delete(&mut state, NEWEST + 2, GENERAL);
+
+    state.finish_load(
+        present,
+        page_of(&[NEWEST - 1, NEWEST]),
+        true,
+        &mut Vec::new(),
+    );
+
+    assert_eq!(
+        message_ids(&state, GENERAL),
+        Some(vec![NEWEST - 1, NEWEST, NEWEST + 1])
+    );
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 2));
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+}
+
 // From the disk cache, before the first READY.
 fn restored_state() -> State {
     let DispatchEvent::Ready(ready) = dispatch("READY", &ready_value()) else {

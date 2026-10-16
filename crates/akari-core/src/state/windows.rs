@@ -100,6 +100,8 @@ struct Window {
     around_placing: u64,
     // At the present, a message up to this one that isn't among `messages` was deleted.
     present_through: Option<MessageId>,
+    // The newest held message that was deleted: `present_through` once the held ones are rows.
+    held_deleted: Option<MessageId>,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
     loading: u32,
@@ -143,6 +145,7 @@ impl Window {
             self.release_held(channel_id, limit, events);
         } else if !self.holds_live() {
             self.held.clear();
+            self.held_deleted = None;
         }
     }
 
@@ -189,6 +192,7 @@ impl Window {
             .filter(|message| newest.is_none_or(|newest| message.id > newest))
             .collect();
         self.merge(channel_id, held, End::Newer, false, limit, events);
+        self.present_through = self.present_through.max(self.held_deleted.take());
     }
 
     // The page is the channel's newest; within its range it is the truth.
@@ -850,6 +854,7 @@ impl Windows {
                 }
                 let at_present = ticket.kind == LoadKind::Latest;
                 let held = std::mem::take(&mut window.held);
+                let held_deleted = window.held_deleted;
                 let outbox = std::mem::take(&mut window.outbox);
                 *window = Window {
                     generation,
@@ -865,7 +870,7 @@ impl Windows {
                 window.messages = page;
                 window.oldest = at_present && reached_end;
                 window.latest = at_present;
-                window.present_through = through.filter(|_| at_present);
+                window.present_through = through.max(held_deleted).filter(|_| at_present);
                 if at_present {
                     let newest = window.messages.last().map(|message| message.id);
                     for message in held
@@ -1002,6 +1007,7 @@ impl Windows {
             });
         } else if let Ok(index) = Window::position(&window.held, id) {
             window.held.remove(index);
+            window.held_deleted = window.held_deleted.max(Some(id));
         }
     }
 
