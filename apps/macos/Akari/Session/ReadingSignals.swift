@@ -15,6 +15,7 @@ final class ReadingSignals: NSObject {
     private let isActive: @MainActor () -> Bool
     private let isKey: @MainActor (NSWindow) -> Bool
     private let isVisible: @MainActor (NSWindow) -> Bool
+    private let monitors: Bool
     // False while fast user switching shows another user's session.
     private var sessionActive = true
     nonisolated(unsafe) private var monitor: Any?
@@ -32,6 +33,7 @@ final class ReadingSignals: NSObject {
         self.isActive = isActive
         self.isKey = isKey
         self.isVisible = isVisible
+        self.monitors = monitors
         super.init()
         // Selector observers go away with the object.
         for name in [
@@ -56,14 +58,18 @@ final class ReadingSignals: NSObject {
             self, selector: #selector(sessionBecameActive),
             name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
         if monitors {
-            monitor = NSEvent.addLocalMonitorForEvents(matching: Self.mask) { [weak self] event in
-                MainActor.assumeIsolated {
-                    self?.handle(event)
-                }
-                return event
-            }
+            startMonitoring()
         }
         changed()
+    }
+
+    private func startMonitoring() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: Self.mask) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.handle(event)
+            }
+            return event
+        }
     }
 
     deinit {
@@ -95,6 +101,10 @@ final class ReadingSignals: NSObject {
         session.setAppActive(isActive())
         session.setWindowKey(isKey(window))
         session.setWindowVisible(sessionActive && isVisible(window))
+        // A closed window can come back with this view still in it.
+        if monitors, monitor == nil, isKey(window), isVisible(window) {
+            startMonitoring()
+        }
     }
 
     @objc private func sessionResigned() {
@@ -125,7 +135,7 @@ final class ReadingSignals: NSObject {
         func updateNSView(_ nsView: NSView, context: Context) {}
     }
 
-    private final class AttachView: NSView {
+    final class AttachView: NSView {
         private let session: SessionModel
         private var signals: ReadingSignals?
 

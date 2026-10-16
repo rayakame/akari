@@ -186,4 +186,47 @@ final class ReadingSignalsTests {
         NSApp.sendEvent(try rightClick(in: window))
         #expect(session.reading == nil)
     }
+
+    // SwiftUI can keep the session's view while its window is closed and opened again.
+    @Test
+    func theMonitorComesBackWithTheWindow() throws {
+        let signals = signals(monitors: true)
+        let channel = try #require(session.messages?.channelId)
+
+        (key, visible) = (false, false)
+        center.post(name: NSWindow.willCloseNotification, object: window)
+        center.post(name: NSWindow.didResignKeyNotification, object: window)
+        #expect(!signals.isMonitoring)
+        (key, visible) = (true, true)
+        center.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        center.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        #expect(signals.isMonitoring)
+
+        #expect(session.reading == nil)
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == channel)
+    }
+
+    // The test host is never active, so the session's inputs are set by hand.
+    @Test
+    func theMonitorGoesWhenTheViewLeavesItsWindow() throws {
+        let channel = try #require(session.messages?.channelId)
+        let attach = ReadingSignals.AttachView(session: session)
+        let disengage = { [session] in
+            session.setAppActive(true)
+            session.setWindowVisible(true)
+            session.setWindowKey(true)
+            session.setWindowKey(false)
+            session.setWindowKey(true)
+        }
+        window.contentView?.addSubview(attach)
+        disengage()
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == channel, "the monitor is in")
+
+        attach.removeFromSuperview()
+        disengage()
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == nil)
+    }
 }
