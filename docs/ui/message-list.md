@@ -291,8 +291,9 @@ Akari's bar:
   of the German UI.
 - Clicking it jumps to the first unread message: the line goes to the top of the list, as far
   as the list scrolls. When that message isn't loaded, Akari first loads the messages around
-  the read position (not compared with 80 or more unread messages yet). The jump counts as
-  seeing the line, so the bar goes.
+  the read position (not compared with 80 or more unread messages yet); a channel never read
+  has none, and the jump goes to the first loaded unread message. The jump counts as seeing the
+  line, so the bar goes.
 - "Mark As Read" on its right marks the channel read like the channel's menu item, which ends
   the line and the bar; it doesn't jump.
 - Shift+Page Up does what a click on the bar does, from the list and the composer, whenever

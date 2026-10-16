@@ -82,10 +82,8 @@ public final class MessageListModel {
     public private(set) var atBottom = true
     /// At the present, not stale, and scrolled to its bottom: where the user reads new messages.
     public var atPresentBottom: Bool { atPresent && atBottom && !isStale }
-    /// The row the new messages line goes before: the first loaded message from someone else
-    /// that is newer than what the user had read when the list opened. Acks, scrolling and
-    /// reconnects keep it; a send, Escape and "Mark As Read" end it, and only a later message
-    /// starts a new one.
+    /// The row the new messages line goes before: the first loaded message from someone else past
+    /// the read position the list opened with, or the one a send, a mark as read or READY gave it.
     public private(set) var newMessagesLine: MessageId?
     /// Set once the view says the new messages line isn't on screen. It goes for good once the
     /// line has been on screen or jumped to, until a line for a later read position.
@@ -179,16 +177,20 @@ public final class MessageListModel {
         }
     }
 
-    /// The unread bar and Shift+Page Up: loads the messages around the read position when the
-    /// first unread message isn't loaded. Scrolling to the line is the view's part. Does nothing
-    /// without a line.
+    /// The unread bar and Shift+Page Up, when there is a line: loads the messages around the read
+    /// position if the first unread message isn't loaded. Scrolling to the line is the view's part.
     public func jumpToUnread() async {
         guard newMessagesLine != nil, let readUpTo else {
             return
         }
         seenLineFrom = readUpTo
         updateUnreadBar()
-        if !readPositionLoaded(readUpTo) {
+        // A channel never read has no position to load around; its line is among the loaded rows.
+        if readUpTo.rawValue != 0, !readPositionLoaded(readUpTo) {
+            // The running load jumps once its messages are in.
+            guard !activeLoads.values.contains(.around) else {
+                return
+            }
             await load(.around)
         }
         unreadJumps += 1

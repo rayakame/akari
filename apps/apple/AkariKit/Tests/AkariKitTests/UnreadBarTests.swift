@@ -202,6 +202,41 @@ struct UnreadBarTests {
         #expect(far.loading == nil)
     }
 
+    // Nothing read yet: there is no position to load around.
+    @Test
+    func aChannelNeverReadJumpsToItsFirstLoadedUnreadMessage() async {
+        shown([5, 6, 7, 8], readUpTo: nil)
+        let model = makeModel()
+        model.setNewMessagesLineOnScreen(false)
+        #expect(model.newMessagesLine == id(5))
+
+        await model.jumpToUnread()
+
+        #expect(store.log.actions.isEmpty)
+        #expect(model.unreadJumps == 1)
+        #expect(model.newMessagesLine == id(5))
+        #expect(model.unreadBar == nil)
+    }
+
+    @Test
+    func jumpingAgainWhileTheFirstUnreadLoadsStartsNoSecondLoad() async {
+        shown([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        account.windowAfterLoad.withLock { $0 = window([1, 2, 3, 4, 5, 6], latest: false) }
+        let model = makeModel()
+
+        async let first: Void = model.jumpToUnread()
+        await account.loadReplies.pulled(1)
+        await model.jumpToUnread()
+        #expect(model.unreadJumps == 0, "the first jump goes once its messages are in")
+        account.loadReplies.send(nil)
+        await first
+
+        #expect(store.log.actions == [.load(here, .around(messageId: id(2), limit: 50))])
+        #expect(model.unreadJumps == 1)
+        #expect(model.newMessagesLine == id(3))
+    }
+
     @Test
     func theBarsMarkAsReadMarksRead() throws {
         store.update { state in
