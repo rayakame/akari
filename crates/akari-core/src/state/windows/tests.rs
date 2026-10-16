@@ -94,6 +94,7 @@ fn describe(events: &[StoreEvent]) -> Vec<String> {
 struct Harness {
     windows: Windows,
     users: HashMap<UserId, Arc<User>>,
+    placings: u64,
 }
 
 impl Harness {
@@ -101,7 +102,19 @@ impl Harness {
         Self {
             windows: Windows::new(limits),
             users: no_users(),
+            placings: 0,
         }
+    }
+
+    // The store hands these out in the order the host asks.
+    fn next_placing(&mut self) -> u64 {
+        self.placings += 1;
+        self.placings
+    }
+
+    fn supersede(&mut self) {
+        let placing = self.next_placing();
+        self.windows.supersede_around(channel(CH), placing);
     }
 
     fn viewing(limits: WindowLimits) -> Self {
@@ -442,8 +455,15 @@ const LOADS: WindowLimits = WindowLimits {
 
 impl Harness {
     fn begin(&mut self, kind: LoadKind) -> Option<LoadTicket> {
+        let placing = self.next_placing();
+        self.begin_placed(kind, placing)
+    }
+
+    fn begin_placed(&mut self, kind: LoadKind, placing: u64) -> Option<LoadTicket> {
         let mut events = Vec::new();
-        let ticket = self.windows.begin_load(channel(CH), kind, &mut events);
+        let ticket = self
+            .windows
+            .begin_load(channel(CH), kind, placing, &mut events);
         assert!(describe(&events).is_empty(), "{:?}", describe(&events));
         ticket
     }
@@ -722,7 +742,7 @@ fn an_around_page_superseded_while_it_loaded_changes_nothing() {
     harness.live(wire(10));
     let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
 
-    harness.windows.supersede_around(channel(CH));
+    harness.supersede();
     let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
 
     assert_eq!(outcome, PageOutcome::Overtaken);
@@ -818,7 +838,7 @@ fn a_latest_page_still_applies_once_a_supersede_followed_the_around_load() {
     let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
     let latest = harness.begin(LoadKind::Latest).unwrap();
     let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
-    harness.windows.supersede_around(channel(CH));
+    harness.supersede();
 
     assert_eq!(
         harness.finish_with_outcome(latest, &[30, 31, 32], 3).0,
@@ -850,6 +870,44 @@ fn an_overtaken_latest_page_leaves_a_stale_window_detached() {
     assert!(!harness.window().latest);
     harness.live(wire(40));
     assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
+// A click on the bar, then Escape before the load for the click began on Akari's runtime.
+#[test]
+fn an_around_load_superseded_before_it_began_is_dropped() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    let clicked = harness.next_placing();
+    harness.supersede();
+
+    let around = harness
+        .begin_placed(LoadKind::Around(Snowflake::new(5)), clicked)
+        .unwrap();
+    let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [10]);
+}
+
+// The order holds across a replaced window: a supersede before the replace still counts.
+#[test]
+fn a_supersede_outlasts_the_window_it_was_made_for() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let clicked = harness.next_placing();
+    harness.supersede();
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(latest, &[30, 31, 32], 3);
+
+    let around = harness
+        .begin_placed(LoadKind::Around(Snowflake::new(5)), clicked)
+        .unwrap();
+
+    assert_eq!(
+        harness.finish_with_outcome(around, &[4, 5, 6], 3).0,
+        PageOutcome::Overtaken
+    );
+    assert_eq!(harness.ids(), [30, 31, 32]);
 }
 
 #[test]

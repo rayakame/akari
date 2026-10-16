@@ -18,10 +18,14 @@ final class FakeAccount: Account, @unchecked Sendable {
     // What a successful load reports, its outcome set as the core would; `nil` is a load with
     // nothing to load.
     let loadReport = Locked<LoadReport?>(pageReport)
-    // Like akari-core: latest and around loads and supersedes place a channel's window. An
-    // around page that something placed after is dropped, and so is a latest page that would
-    // replace the window when the newest placing is a later around load.
-    private let placings = Locked<[ChannelId: (newest: Int, around: Int)]>([:])
+    // Like akari-core: latest and around loads and supersedes place a channel's window, in the
+    // order of their placings. An around page that something placed after is dropped, and so is
+    // a latest page that would replace the window when the newest placing is a later around load.
+    private let placings = Locked<[ChannelId: (newest: UInt64, around: UInt64)]>([:])
+    private let reserved = Locked<UInt64>(0)
+    // While set, each load waits here before its body runs, as on Akari's runtime.
+    let holdLoadEntry = Locked(false)
+    let loadEntries = AsyncQueue<Void>()
     // Fails sends and retries.
     let sendError = Locked<RequestError?>(nil)
     // While set, each send waits for a reply: `nil` succeeds, an error fails it.
@@ -90,14 +94,17 @@ final class FakeAccount: Account, @unchecked Sendable {
         markedGuildsRead.withLock { $0.append(guildIds) }
     }
 
-    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
-        -> LoadReport?
+    override func loadMessages(channelId: ChannelId, load: MessageLoad, placing: UInt64?)
+        async throws -> LoadReport?
     {
         log.append(.load(channelId, load))
-        let placing: Int? =
+        if holdLoadEntry.current {
+            _ = await loadEntries.next()
+        }
+        let placing: UInt64? =
             switch load {
-            case .latest: place(channelId)
-            case .around: place(channelId, around: true)
+            case .latest: place(channelId, at: placing ?? reservePlacing())
+            case .around: place(channelId, at: placing ?? reservePlacing(), around: true)
             default: nil
             }
         let error = holdLoads.current ? await loadReplies.next() ?? nil : loadError.current
@@ -126,14 +133,21 @@ final class FakeAccount: Account, @unchecked Sendable {
 
     override func supersedeAroundLoads(channelId: ChannelId) {
         log.append(.supersede(channelId))
-        place(channelId)
+        place(channelId, at: reservePlacing())
     }
 
-    private func overtaken(_ load: MessageLoad, placing: Int, in channel: ChannelId) -> Bool {
+    override func reservePlacing() -> UInt64 {
+        reserved.withLock { reserved in
+            reserved += 1
+            return reserved
+        }
+    }
+
+    private func overtaken(_ load: MessageLoad, placing: UInt64, in channel: ChannelId) -> Bool {
         let placed = placings.current[channel, default: (0, 0)]
         switch load {
         case .around:
-            return placing != placed.newest
+            return placing < placed.newest
         case .latest:
             var replaces = false
             fakeStore.update { replaces = $0.windows[channel]?.latest == false }
@@ -144,15 +158,15 @@ final class FakeAccount: Account, @unchecked Sendable {
     }
 
     @discardableResult
-    private func place(_ channel: ChannelId, around: Bool = false) -> Int {
+    private func place(_ channel: ChannelId, at placing: UInt64, around: Bool = false) -> UInt64 {
         placings.withLock { placings in
             var placed = placings[channel, default: (0, 0)]
-            placed.newest += 1
+            placed.newest = max(placed.newest, placing)
             if around {
-                placed.around = placed.newest
+                placed.around = max(placed.around, placing)
             }
             placings[channel] = placed
-            return placed.newest
+            return placing
         }
     }
 

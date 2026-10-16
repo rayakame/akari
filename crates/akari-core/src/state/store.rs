@@ -65,6 +65,8 @@ struct Shared {
     inner: RwLock<Inner>,
     // Bumped by every write, so the disk cache skips snapshots while nothing changed.
     changes: AtomicU64,
+    // Hands out the order of loads and supersedes that place a window, without the lock.
+    placings: AtomicU64,
     #[cfg(test)]
     park: std::sync::Mutex<Option<Park>>,
     #[cfg(test)]
@@ -183,6 +185,7 @@ impl Store {
         Self {
             shared: Arc::new(Shared {
                 changes: AtomicU64::new(0),
+                placings: AtomicU64::new(0),
                 inner: RwLock::new(Inner {
                     state: State::with_limits(limits),
                     connection: ConnectionState::Offline,
@@ -404,10 +407,21 @@ impl Store {
         });
     }
 
-    pub(crate) fn begin_load(&self, channel: ChannelId, kind: LoadKind) -> Option<LoadTicket> {
+    pub(crate) fn next_placing(&self) -> u64 {
+        self.shared.placings.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    // `placing` from `next_placing` where the host asked for the load; `None` takes one now.
+    pub(crate) fn begin_load(
+        &self,
+        channel: ChannelId,
+        kind: LoadKind,
+        placing: Option<u64>,
+    ) -> Option<LoadTicket> {
+        let placing = placing.unwrap_or_else(|| self.next_placing());
         let mut ticket = None;
         self.write("load", |inner, events| {
-            ticket = inner.state.begin_load(channel, kind, events);
+            ticket = inner.state.begin_load(channel, kind, placing, events);
         });
         ticket
     }
@@ -425,7 +439,10 @@ impl Store {
     }
 
     pub(crate) fn supersede_around(&self, channel: ChannelId) {
-        self.write("load", |inner, _| inner.state.supersede_around(channel));
+        let placing = self.next_placing();
+        self.write("load", |inner, _| {
+            inner.state.supersede_around(channel, placing);
+        });
     }
 
     // Returns the channel's ack when its list shows unread messages; before the first READY, none.

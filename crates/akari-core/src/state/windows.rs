@@ -91,8 +91,8 @@ struct Window {
     held: Vec<Arc<Message>>,
     // Bumped whenever the messages are replaced, so a load for the old ones is dropped.
     generation: u64,
-    // Bumped by every Latest and Around load and by `supersede_around`: an Around page is
-    // dropped once a newer request placed the window.
+    // The newest placing, in the host's order, of a Latest or Around load or a supersede: an
+    // Around page placed before it is dropped. Kept over a replace, as the host's order is.
     placing: u64,
     // The newest Around load's placing: a Latest page from before it leaves it the window.
     around_placing: u64,
@@ -649,6 +649,7 @@ impl Windows {
         &mut self,
         channel: ChannelId,
         kind: LoadKind,
+        placing: u64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<LoadTicket> {
         if matches!(kind, LoadKind::Latest | LoadKind::Around(_)) {
@@ -674,10 +675,10 @@ impl Windows {
             window.holding += 1;
         }
         if matches!(kind, LoadKind::Latest | LoadKind::Around(_)) {
-            window.placing += 1;
+            window.placing = window.placing.max(placing);
         }
         if matches!(kind, LoadKind::Around(_)) {
-            window.around_placing = window.placing;
+            window.around_placing = window.around_placing.max(placing);
         }
         window.loading += 1;
         Some(LoadTicket {
@@ -685,7 +686,7 @@ impl Windows {
             kind,
             cursor,
             generation: window.generation,
-            placing: window.placing,
+            placing,
             holds,
         })
     }
@@ -722,7 +723,7 @@ impl Windows {
             Cursor::Latest | Cursor::Around(_) => false,
         };
         let overtaken =
-            matches!(ticket.kind, LoadKind::Around(_)) && ticket.placing != window.placing;
+            matches!(ticket.kind, LoadKind::Around(_)) && ticket.placing < window.placing;
         if moved || overtaken {
             window.forget_missed();
             window.release_or_drop_held(channel_id, window_limit, events);
@@ -831,6 +832,8 @@ impl Windows {
                 *window = Window {
                     generation,
                     outbox,
+                    placing: window.placing,
+                    around_placing: window.around_placing,
                     ..Window::default()
                 };
                 let mut added = Added::default();
@@ -864,10 +867,10 @@ impl Windows {
         PageOutcome::Applied
     }
 
-    // Escape or a mark as read at the present, where no Latest load runs to drop the page.
-    pub(crate) fn supersede_around(&mut self, channel: ChannelId) {
+    // Escape or a mark as read, where no Latest load runs to drop the page.
+    pub(crate) fn supersede_around(&mut self, channel: ChannelId, placing: u64) {
         if let Some(window) = self.windows.get_mut(&channel) {
-            window.placing += 1;
+            window.placing = window.placing.max(placing);
         }
     }
 

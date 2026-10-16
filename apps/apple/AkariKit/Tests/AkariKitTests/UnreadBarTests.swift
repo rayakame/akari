@@ -405,6 +405,27 @@ struct UnreadBarTests {
         #expect(model.unreadBar == nil)
     }
 
+    // The load begins on Akari's runtime; Escape can reach the core first.
+    @Test
+    func aSupersedeBeforeTheJumpsLoadRunsStillDropsItsPage() async {
+        shown([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoadEntry.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false))
+        let model = makeModel()
+        model.setNewMessagesLineOnScreen(false)
+        let jump = Task { await model.jumpToUnread() }
+        await account.loadEntries.pulled(1)
+
+        await model.escape()
+        account.loadEntries.send(())
+        await finished(jump)
+
+        #expect(loads == [aroundLoad])
+        #expect(ids(model) == [5, 6, 7, 8])
+        #expect(model.atPresent)
+        #expect(model.unreadJumps == 0)
+    }
+
     // The around page reached the list before its load returned, and the user clicked again.
     @Test
     func aSecondClickWhileTheJumpLoadsEndsAtTheLine() async {

@@ -222,8 +222,9 @@ impl Shared {
         channel: ChannelId,
         kind: LoadKind,
         limit: u8,
+        placing: Option<u64>,
     ) -> Result<Option<LoadReport>, RequestError> {
-        let Some(ticket) = self.store.begin_load(channel, kind) else {
+        let Some(ticket) = self.store.begin_load(channel, kind, placing) else {
             return Ok(None);
         };
         let started = Instant::now();
@@ -584,7 +585,7 @@ impl Shared {
     ) -> Result<MessageId, RequestError> {
         if detached {
             let (jumped, delivered) = tokio::join!(
-                self.load(channel, LoadKind::Latest, JUMP_LIMIT),
+                self.load(channel, LoadKind::Latest, JUMP_LIMIT, None),
                 self.deliver(channel, pending, content),
             );
             if let Err(err) = jumped {
@@ -672,7 +673,9 @@ impl Shared {
 
     async fn refresh_stale(self: &Arc<Self>) {
         for channel in self.store.stale_channels() {
-            let refreshed = self.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
+            let refreshed = self
+                .load(channel, LoadKind::Refresh, REFRESH_LIMIT, None)
+                .await;
             if refreshed.is_err() && self.rest.is_unauthorized() {
                 return;
             }
@@ -885,8 +888,35 @@ impl Account {
         channel: ChannelId,
         load: MessageLoad,
     ) -> Result<Option<LoadReport>, RequestError> {
+        self.load_placed(channel, load, None).await
+    }
+
+    /// Like [`Account::load_messages`], in the place `placing` holds among the channel's
+    /// `Latest` and `Around` loads and supersedes, wherever the load begins.
+    pub async fn load_messages_placed(
+        &self,
+        channel: ChannelId,
+        load: MessageLoad,
+        placing: u64,
+    ) -> Result<Option<LoadReport>, RequestError> {
+        self.load_placed(channel, load, Some(placing)).await
+    }
+
+    /// The next place among loads and supersedes, for [`Account::load_messages_placed`]. A host
+    /// takes it where the user acts, so a later supersede overtakes the load even if it comes
+    /// before the load begins.
+    pub fn reserve_placing(&self) -> u64 {
+        self.shared.store.next_placing()
+    }
+
+    async fn load_placed(
+        &self,
+        channel: ChannelId,
+        load: MessageLoad,
+        placing: Option<u64>,
+    ) -> Result<Option<LoadReport>, RequestError> {
         let (kind, limit) = load.parts();
-        let loaded = self.shared.load(channel, kind, limit).await;
+        let loaded = self.shared.load(channel, kind, limit, placing).await;
         // Cached messages left stale hold live ones back; before READY its refresh takes them.
         if loaded.is_err()
             && kind == LoadKind::Latest
@@ -895,7 +925,9 @@ impl Account {
         {
             let shared = self.shared.clone();
             self.shared.runtime.spawn(async move {
-                let _ = shared.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
+                let _ = shared
+                    .load(channel, LoadKind::Refresh, REFRESH_LIMIT, None)
+                    .await;
             });
         }
         loaded

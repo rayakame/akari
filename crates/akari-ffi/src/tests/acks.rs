@@ -79,7 +79,7 @@ async fn set_reading_crosses_and_acks() {
         .await;
     online
         .account
-        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 })
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
         .await
         .unwrap();
     assert!(unread(&online.account, GENERAL));

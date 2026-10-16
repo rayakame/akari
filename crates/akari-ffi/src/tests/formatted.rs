@@ -281,7 +281,7 @@ async fn loaded(messages: Vec<Value>, edit: impl FnOnce(&mut Value)) -> Loaded {
     let ws = gateway.serve_ready_with(edit).await;
     events_until(&subscription, online).await;
     account
-        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 })
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
         .await
         .unwrap();
     let store = account.store();

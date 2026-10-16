@@ -342,12 +342,15 @@ public final class MessageListModel {
             case .around:
                 .around(messageId: readUpTo ?? MessageId(rawValue: 0), limit: Self.pageSize)
             }
+        // Taken now, in the order the user acted: the load begins later, on Akari's runtime.
+        let placing = kind == .latest || kind == .around ? account.reservePlacing() : nil
         LaunchLog.mark("first message load started")
         let started = ContinuousClock.now
         let held = Set(rows.map(\.id))
         let oldest = rows.first?.id
         do {
-            let report = try await account.loadMessages(channelId: channelId, load: request)
+            let report = try await account.loadMessages(
+                channelId: channelId, load: request, placing: placing)
             LaunchLog.mark("first message load finished")
             if kind == .latest {
                 failedLoads = [:]

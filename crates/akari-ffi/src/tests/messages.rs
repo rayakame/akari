@@ -86,7 +86,7 @@ async fn loading_latest_fills_the_window() {
 
     online
         .account
-        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 })
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
         .await
         .unwrap();
 
@@ -131,7 +131,7 @@ async fn an_around_page_superseded_while_it_loads_is_dropped() {
     };
     let loading = {
         let account = online.account.clone();
-        tokio::spawn(async move { account.load_messages(GENERAL, around).await })
+        tokio::spawn(async move { account.load_messages(GENERAL, around, None).await })
     };
     while server
         .received_requests()
@@ -157,7 +157,7 @@ async fn an_around_page_superseded_while_it_loads_is_dropped() {
     );
     let applied = online
         .account
-        .load_messages(GENERAL, around)
+        .load_messages(GENERAL, around, None)
         .await
         .unwrap()
         .expect("a page came");
@@ -171,6 +171,48 @@ async fn an_around_page_superseded_while_it_loads_is_dropped() {
             .message_ids
             .len(),
         3
+    );
+    online.account.close();
+}
+
+// The host takes the jump's placing where the user clicked; Escape comes before the load runs.
+#[tokio::test]
+async fn an_around_page_superseded_before_its_load_ran_is_dropped() {
+    let server = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .and(query_param("around", "400000000000000011"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixture(include_str!(
+                "../../../akari-core/tests/fixtures/messages_page.json"
+            ))),
+        )
+        .mount(&server)
+        .await;
+    let online = online_with(&server).await;
+    let around = MessageLoad::Around {
+        message_id: MessageId::new(400_000_000_000_000_011),
+        limit: 50,
+    };
+
+    online.account.view_channel(GENERAL);
+    let clicked = online.account.reserve_placing();
+    online.account.supersede_around_loads(GENERAL);
+    let report = online
+        .account
+        .load_messages(GENERAL, around, Some(clicked))
+        .await
+        .unwrap()
+        .expect("a page came");
+
+    assert_eq!(report.outcome, PageOutcome::Overtaken);
+    assert!(
+        online
+            .account
+            .store()
+            .window(GENERAL)
+            .unwrap()
+            .message_ids
+            .is_empty()
     );
     online.account.close();
 }
@@ -352,7 +394,7 @@ async fn a_load_without_network_reports_the_kind() {
     events_until(&subscription, online).await;
 
     let err = account
-        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 })
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
         .await;
 
     assert_eq!(
@@ -382,7 +424,8 @@ async fn message_actions_work_without_a_tokio_context() {
 
     let (loaded, sent) = std::thread::spawn(move || {
         assert!(tokio::runtime::Handle::try_current().is_err());
-        let loaded = block_on(account.load_messages(GENERAL, MessageLoad::Latest { limit: 50 }));
+        let loaded =
+            block_on(account.load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None));
         let sent = block_on(account.send_message(GENERAL, "hello".to_owned()));
         (loaded, sent)
     })
@@ -514,13 +557,13 @@ async fn load_reports_cross_the_boundary() {
 
     let report = online
         .account
-        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 })
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
         .await
         .unwrap()
         .expect("a page was loaded");
     let nothing = online
         .account
-        .load_messages(GENERAL, MessageLoad::Newer { limit: 50 })
+        .load_messages(GENERAL, MessageLoad::Newer { limit: 50 }, None)
         .await
         .unwrap();
 

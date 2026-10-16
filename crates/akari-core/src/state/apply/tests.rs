@@ -892,7 +892,7 @@ fn load_page(
 ) -> Vec<String> {
     let mut events = Vec::new();
     let ticket = state
-        .begin_load(Snowflake::new(channel), kind, &mut events)
+        .begin_load(Snowflake::new(channel), kind, 1, &mut events)
         .unwrap();
     let page = ids
         .iter()
@@ -1071,7 +1071,12 @@ fn a_window_opened_before_the_first_ready_survives_it() {
     let mut state = State::new();
     state.view_channel(Snowflake::new(GENERAL), &mut Vec::new());
     let ticket = state
-        .begin_load(Snowflake::new(GENERAL), LoadKind::Latest, &mut Vec::new())
+        .begin_load(
+            Snowflake::new(GENERAL),
+            LoadKind::Latest,
+            1,
+            &mut Vec::new(),
+        )
         .unwrap();
     let page: Vec<model::Message> = [message(10, GENERAL), message(11, GENERAL)]
         .into_iter()

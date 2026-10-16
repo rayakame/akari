@@ -91,15 +91,24 @@ impl Account {
 
     /// Loads messages into the channel's window within Discord's rate limits. `Latest` and
     /// `Around` view the channel first; `Older` and `Newer` do nothing without a window.
+    /// `placing` from `reserve_placing`, taken where the user acted, orders a `Latest` or
+    /// `Around` load before later supersedes and loads; `None` takes its place when it begins.
     /// Returns where the load's time went, or `None` when there was nothing to load.
     pub async fn load_messages(
         &self,
         channel_id: ChannelId,
         load: MessageLoad,
+        placing: Option<u64>,
     ) -> Result<Option<LoadReport>, RequestError> {
         let core = self.core.clone();
         run(self.runtime, async move {
-            core.load_messages(channel_id, load.into()).await
+            match placing {
+                Some(placing) => {
+                    core.load_messages_placed(channel_id, load.into(), placing)
+                        .await
+                }
+                None => core.load_messages(channel_id, load.into()).await,
+            }
         })
         .await
         .map(|report| report.map(Into::into))
@@ -110,6 +119,12 @@ impl Account {
     /// window: Escape or a mark as read during a jump, where no `Latest` load overtakes them.
     pub fn supersede_around_loads(&self, channel_id: ChannelId) {
         self.core.supersede_around_loads(channel_id);
+    }
+
+    /// The next place among loads and supersedes, for `load_messages`; take it where the user
+    /// acts, so a supersede after it overtakes the load even before the load begins.
+    pub fn reserve_placing(&self) -> u64 {
+        self.core.reserve_placing()
     }
 
     /// Shows the message as pending at once and resolves with Discord's ID. On an error the

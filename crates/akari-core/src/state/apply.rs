@@ -1050,9 +1050,10 @@ impl State {
         &mut self,
         channel: ChannelId,
         kind: LoadKind,
+        placing: u64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<LoadTicket> {
-        self.windows.begin_load(channel, kind, events)
+        self.windows.begin_load(channel, kind, placing, events)
     }
 
     pub(crate) fn finish_load(
@@ -1079,8 +1080,8 @@ impl State {
         outcome
     }
 
-    pub(crate) fn supersede_around(&mut self, channel: ChannelId) {
-        self.windows.supersede_around(channel);
+    pub(crate) fn supersede_around(&mut self, channel: ChannelId, placing: u64) {
+        self.windows.supersede_around(channel, placing);
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {

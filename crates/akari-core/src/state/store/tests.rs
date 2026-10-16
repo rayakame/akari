@@ -779,7 +779,7 @@ fn report_write_lock_hold_times() {
     let fixture_page: Vec<model::Message> =
         serde_json::from_str(include_str!("../../../tests/fixtures/messages_page.json")).unwrap();
     let ticket = store
-        .begin_load(Snowflake::new(GENERAL), LoadKind::Older)
+        .begin_load(Snowflake::new(GENERAL), LoadKind::Older, None)
         .unwrap();
     store.finish_load(ticket, fixture_page, false);
     note("fixtures", &store);
@@ -815,7 +815,7 @@ fn report_write_lock_hold_times() {
     store.view_channel(channel);
     let mut template = template;
     template.channel_id = channel;
-    let ticket = store.begin_load(channel, LoadKind::Latest).unwrap();
+    let ticket = store.begin_load(channel, LoadKind::Latest, None).unwrap();
     store.finish_load(ticket, page(&template, 10_000, 100), false);
     store.apply(message_create(&template, 20_000));
     note(
@@ -1090,7 +1090,7 @@ fn the_first_ready_after_a_restore_reports_only_changes() {
 
 fn load_page(store: &Store, channel: u64, first: u64) {
     let ticket = store
-        .begin_load(Snowflake::new(channel), LoadKind::Latest)
+        .begin_load(Snowflake::new(channel), LoadKind::Latest, None)
         .unwrap();
     let mut template = message_template();
     template.channel_id = Snowflake::new(channel);
