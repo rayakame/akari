@@ -252,16 +252,19 @@ fn a_message_ack_from_elsewhere_while_reading_changes_nothing_more() {
 }
 
 #[test]
-fn reading_waits_for_ready() {
+fn a_ready_acks_nothing_for_the_channel_being_read() {
     let mut state = State::new();
-
     showing(&mut state, GENERAL, &[NEWEST]);
     let (ack, _) = reading(&mut state, Some(GENERAL));
     assert_eq!(ack, None);
-    state.apply(dispatch("READY", &ready_value()), &mut Vec::new());
 
-    assert_eq!(taken(&mut state), at(GENERAL, NEWEST));
-    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 0)));
+    state.apply(dispatch("READY", &ready_value()), &mut Vec::new());
+    assert_eq!(taken(&mut state), None);
+    assert!(badge(&state, GENERAL).unread);
+    apply(&mut state, "MESSAGE_CREATE", plain(NEWEST + 1, GENERAL));
+
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 1));
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 1), 0)));
 }
 
 // A new session's READY leaves the list stale until its refresh comes.

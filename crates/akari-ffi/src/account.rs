@@ -72,7 +72,8 @@ impl Account {
     /// The channel the user is reading at its newest messages, or `None`. While set, the
     /// channel is acked up to the newest message its list shows at the present, and again as
     /// that list grows, paced. Hosts set it only while the user is engaged with the channel at
-    /// the bottom of its list.
+    /// the bottom of its list. A dropped connection clears it: set it again once online and the
+    /// list is refreshed.
     pub fn set_reading(&self, channel_id: Option<ChannelId>) {
         self.core.set_reading(channel_id);
     }

@@ -474,8 +474,9 @@ async fn a_new_ready_lets_a_channel_be_acked_again() {
     );
 }
 
+// The host sets the channel again once it's online and its list is refreshed.
 #[tokio::test]
-async fn reading_before_ready_waits_for_it() {
+async fn ready_acks_nothing_for_a_channel_read_before_it() {
     let mut fake = FakeGateway::start().await;
     let server = MockServer::start().await;
     mock_acks(&server, 200).await;
@@ -486,18 +487,19 @@ async fn reading_before_ready_waits_for_it() {
         .load_messages(general(), MessageLoad::Latest { limit: 50 })
         .await
         .unwrap();
-
     account.set_reading(Some(general()));
-    assert_eq!(handed(&account), []);
+
     let _connection = online(&mut fake, &account).await;
     events_until(&subscription, "Online").await;
 
+    assert_eq!(handed(&account), []);
+    assert!(badge(&account, GENERAL).unread);
+    account.set_reading(Some(general()));
     assert_eq!(handed(&account), [paced(GENERAL, NEWEST)]);
-    assert_eq!(badge(&account, GENERAL), Badge::default());
 }
 
 #[tokio::test]
-async fn a_new_ready_acks_the_channel_being_read_once_its_list_is_refreshed() {
+async fn the_core_stops_reading_when_the_connection_drops() {
     let mut online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
     mock_page(
@@ -507,24 +509,44 @@ async fn a_new_ready_acks_the_channel_being_read_once_its_list_is_refreshed() {
     )
     .await;
     online.account.set_reading(Some(general()));
-    assert_eq!(handed(&online.account), []);
 
-    online.connection.send(json!({"op": 9, "d": false})).await;
-    let mut fresh = online.fake.accept().await;
-    assert_eq!(fresh.handshake(60_000).await["op"], 2);
-    fresh
-        .send(ready_payload(1, &online.fake, |ready| {
-            ready["guilds"][0]["channels"][1]["last_message_id"] = (NEWEST + 2).to_string().into();
-        }))
-        .await;
-    events_until(&online.subscription, "Online").await;
+    let mut fresh = new_session(&mut online, |ready| {
+        ready["guilds"][0]["channels"][1]["last_message_id"] = (NEWEST + 2).to_string().into();
+    })
+    .await;
     events_until(
         &online.subscription,
         &format!("MessagesRefreshed({GENERAL})"),
     )
     .await;
+    fresh.send(message(2, NEWEST + 3)).await;
+    sync(&mut fresh, &online.subscription, 3).await;
 
-    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 2)]);
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+    online.account.set_reading(Some(general()));
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 3)]);
+}
+
+#[tokio::test]
+async fn disconnecting_stops_reading() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    online.account.set_reading(Some(general()));
+
+    online.account.disconnect();
+    assert_eq!(online.connection.client_close_code().await, Some(4000));
+    online.account.connect().unwrap();
+    let mut resumed = online.fake.accept().await;
+    assert_eq!(resumed.handshake(60_000).await["op"], 6);
+    resumed.dispatch(2, "RESUMED").await;
+    events_until(&online.subscription, "Online").await;
+    resumed.send(message(3, NEWEST + 1)).await;
+    sync(&mut resumed, &online.subscription, 4).await;
+
+    assert_eq!(handed(&online.account), []);
+    online.account.set_reading(Some(general()));
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
 }
 
 #[tokio::test]

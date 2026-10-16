@@ -382,6 +382,7 @@ impl Shared {
         if matches!(err, RequestError::Unauthorized) {
             let error = Some(Arc::new(GatewayError::AuthenticationFailed));
             self.store.set_connection(ConnectionState::Closed { error });
+            self.store.stop_reading();
             self.gateway.close();
         }
     }
@@ -802,6 +803,7 @@ impl Account {
     pub fn disconnect(&self) {
         self.shared.gateway.disconnect();
         self.shared.store.set_connection(ConnectionState::Offline);
+        self.shared.store.stop_reading();
         if let Some(flusher) = &self.shared.flusher {
             flusher.flush_soon();
         }
@@ -831,7 +833,8 @@ impl Account {
     /// The channel the user is reading at its newest messages, or `None`. While set, the
     /// channel is acked up to the newest message its list shows at the present, and again as
     /// that list grows, paced. Hosts set it only while the user is engaged with the channel at
-    /// the bottom of its list.
+    /// the bottom of its list. A dropped connection clears it: set it again once online and the
+    /// list is refreshed.
     pub fn set_reading(&self, channel: Option<ChannelId>) {
         let ack = self.shared.store.set_reading(channel);
         self.shared.ack_reading(ack);
@@ -1020,6 +1023,7 @@ impl Drop for Finish {
         self.shared
             .store
             .set_connection(ConnectionState::Closed { error });
+        self.shared.store.stop_reading();
         // close() does nothing once the gateway has ended, so it runs on every path. After the
         // state, so it sees why the session ended.
         self.shared.close();
@@ -1055,11 +1059,10 @@ async fn pump(mut finish: Finish) {
                 match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
                     Ok(next) => {
                         shared.acks.forget_all();
-                        let ack = shared.store.replace(next);
+                        shared.store.replace(next);
                         shared
                             .acks
                             .reconcile(|channel| shared.store.read_state(channel));
-                        shared.ack_reading(ack);
                         let convert_ms = crate::millis(started.elapsed());
                         tracing::info!(convert_ms, "READY applied");
                         shared.forget_subscriptions();
@@ -1108,6 +1111,7 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
             ack
         }
         ConnectionEvent::Reconnecting { .. } => {
+            store.stop_reading();
             store.set_connection_if(ConnectionState::Connecting, connecting);
             None
         }

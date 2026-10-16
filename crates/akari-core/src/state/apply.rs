@@ -402,7 +402,7 @@ impl State {
         let old = (std::mem::replace(&mut self.entities, next), old);
         // READY's cursors are fresh.
         self.stale_cursors.clear();
-        self.read_again();
+        self.follow_ready();
         self.refresh_badges(wall_millis(), events);
         old
     }

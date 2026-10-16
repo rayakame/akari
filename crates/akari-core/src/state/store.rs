@@ -242,7 +242,8 @@ impl Store {
         match event {
             DispatchEvent::Ready(ready) => {
                 let next = self.prepare_ready(*ready);
-                self.replace(next)
+                self.replace(next);
+                None
             }
             DispatchEvent::GuildCreate(guild) => match *guild {
                 GatewayGuild::Available(guild) => {
@@ -319,16 +320,14 @@ impl Store {
         }
     }
 
-    pub(crate) fn replace(&self, next: PreparedReady) -> Option<Ack> {
-        let (old, ack) = self.write("READY", |inner, events| {
+    pub(crate) fn replace(&self, next: PreparedReady) {
+        let old = self.write("READY", |inner, events| {
             self.shared.preparing_ready.store(false, Ordering::SeqCst);
-            let old = inner
+            inner
                 .state
-                .swap(next.entities, next.derived, next.diff, events);
-            (old, inner.state.take_reading_ack())
+                .swap(next.entities, next.derived, next.diff, events)
         });
         drop(old);
-        ack
     }
 
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
@@ -379,11 +378,19 @@ impl Store {
         })
     }
 
-    // Returns the channel's ack when it was unread; before the first READY, none.
+    // Returns the channel's ack when its list shows unread messages; before the first READY, none.
     pub(crate) fn set_reading(&self, channel: Option<ChannelId>) -> Option<Ack> {
         self.write("reading", |inner, events| {
             inner.state.set_reading(channel, events)
         })
+    }
+
+    // A connection that dropped may come back in a new session: until the host says the user
+    // still reads the channel, nothing acks it.
+    pub(crate) fn stop_reading(&self) {
+        self.write("reading", |inner, events| {
+            inner.state.set_reading(None, events);
+        });
     }
 
     // `None` when the channel was read already.

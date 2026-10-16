@@ -254,14 +254,10 @@ impl State {
         }
     }
 
-    pub(super) fn read_again(&mut self) {
-        let Some((channel, _)) = self.reading else {
-            return;
-        };
-        let shown = self.windows.newest_at_present(channel);
-        self.reading = Some((channel, shown));
-        if let Some(ack) = shown.and_then(|newest| self.read_shown(channel, newest)) {
-            self.due = Some(ack);
+    // A READY reads nothing itself: the list it leaves is read once it grows.
+    pub(super) fn follow_ready(&mut self) {
+        if let Some((channel, _)) = self.reading {
+            self.reading = Some((channel, self.windows.newest_at_present(channel)));
         }
     }
 
