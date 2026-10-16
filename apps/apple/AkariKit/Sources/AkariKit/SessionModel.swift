@@ -25,8 +25,8 @@ public final class SessionModel {
     /// with `.task(id: messages.channelId) { await messages.open() }`.
     public private(set) var messages: MessageListModel?
     /// The channel the user is reading, as the core was told: the open channel while the
-    /// session is online, the app active, its window key and visible, the list at the present's
-    /// bottom and the user engaged.
+    /// session is online, the app active, its window key and visible, the list fresh at the
+    /// present's bottom and the user engaged.
     public private(set) var reading: ChannelId?
     /// What the connection bar says; `nil` while online.
     public var notice: ConnectionNotice? {

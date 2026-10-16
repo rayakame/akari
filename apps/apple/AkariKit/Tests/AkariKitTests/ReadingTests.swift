@@ -335,6 +335,29 @@ final class ReadingTests {
         session.close()
     }
 
+    // READY leaves the list stale; reading it then would ack messages the user hasn't seen.
+    @Test
+    func aStaleListIsntReadUntilItsRefreshed() {
+        store.update { $0.connection = .connecting }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.setAppActive(true)
+        session.setWindowKey(true)
+        session.setWindowVisible(true)
+
+        store.update { $0.windows[id(11)] = window([1, 2], stale: true) }
+        session.apply(
+            EventBatch([.ready, .messagesStale(channelId: general), .connection(state: .online)]))
+        #expect(session.messages?.isStale == true)
+        #expect(readings.isEmpty)
+
+        store.update { $0.windows[id(11)] = window([1, 2]) }
+        session.apply(EventBatch([.messagesRefreshed(channelId: general)]))
+        #expect(readings == [general])
+        session.close()
+    }
+
     @Test
     func aReplacedListNoLongerCounts() throws {
         let session = readingSession()

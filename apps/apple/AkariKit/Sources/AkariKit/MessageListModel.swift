@@ -80,8 +80,8 @@ public final class MessageListModel {
     public private(set) var revealedSpoilers: Set<SpoilerKey> = []
     /// Whether the view is scrolled to the bottom of its rows, as it reports; a list opens there.
     public private(set) var atBottom = true
-    /// At the present and scrolled to its bottom: where the user reads new messages.
-    public var atPresentBottom: Bool { atPresent && atBottom }
+    /// At the present, not stale, and scrolled to its bottom: where the user reads new messages.
+    public var atPresentBottom: Bool { atPresent && atBottom && !isStale }
     /// The row the new messages line goes before: the first loaded message from someone else
     /// that is newer than what the user had read when the list opened. Acks, scrolling and
     /// reconnects keep it; a send, Escape and "Mark As Read" end it, and only a later message
@@ -339,9 +339,9 @@ public final class MessageListModel {
     }
 
     private func reload(rereading changed: Set<MessageId>) {
-        let wasAtPresent = atPresent
+        let wasAtPresentBottom = atPresentBottom
         defer {
-            if atPresent != wasAtPresent {
+            if atPresentBottom != wasAtPresentBottom {
                 bottomChanged?(false)
             }
         }
