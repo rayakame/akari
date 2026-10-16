@@ -18,6 +18,7 @@ use super::windows::DEFAULT_LIMITS;
 use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits};
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
+use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 // Main-thread readers (SwiftUI, AppKit) wait at most this long for a write.
@@ -416,11 +417,15 @@ impl Store {
         ticket: LoadTicket,
         page: Vec<model::Message>,
         reached_end: bool,
-    ) -> Option<Ack> {
+    ) -> (PageOutcome, Option<Ack>) {
         self.write("load", |inner, events| {
-            inner.state.finish_load(ticket, page, reached_end, events);
-            inner.state.take_reading_ack()
+            let outcome = inner.state.finish_load(ticket, page, reached_end, events);
+            (outcome, inner.state.take_reading_ack())
         })
+    }
+
+    pub(crate) fn supersede_around(&self, channel: ChannelId) {
+        self.write("load", |inner, _| inner.state.supersede_around(channel));
     }
 
     // Returns the channel's ack when its list shows unread messages; before the first READY, none.

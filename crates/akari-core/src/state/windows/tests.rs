@@ -449,11 +449,25 @@ impl Harness {
     }
 
     fn finish(&mut self, ticket: LoadTicket, ids: &[u64], limit: usize) -> Vec<String> {
+        self.finish_with_outcome(ticket, ids, limit).1
+    }
+
+    fn finish_with_outcome(
+        &mut self,
+        ticket: LoadTicket,
+        ids: &[u64],
+        limit: usize,
+    ) -> (PageOutcome, Vec<String>) {
         let mut events = Vec::new();
         let page = ids.iter().map(|id| wire(*id)).collect();
-        self.windows
-            .finish_load(ticket, page, &self.users, ids.len() < limit, &mut events);
-        describe(&events)
+        let outcome =
+            self.windows
+                .finish_load(ticket, page, &self.users, ids.len() < limit, &mut events);
+        (outcome, describe(&events))
+    }
+
+    fn loading(&self) -> u32 {
+        self.windows.windows[&channel(CH)].loading
     }
 
     fn edited_finish(
@@ -681,6 +695,100 @@ fn around_replaces_the_window() {
     assert_eq!(events, ["Cleared(1)", "Loaded(4..6)"]);
     assert_eq!(harness.ids(), [4, 5, 6]);
     assert!(!harness.window().latest);
+}
+
+#[test]
+fn an_around_page_a_newer_latest_load_overtook_changes_nothing() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.live(wire(11));
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(latest, &[10, 11], 3);
+
+    let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [10, 11]);
+    assert!(harness.window().latest);
+    assert_eq!(harness.loading(), 0);
+    assert_eq!(harness.live(wire(12)), ["Inserted(12)"]);
+}
+
+#[test]
+fn an_around_page_superseded_while_it_loaded_changes_nothing() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+
+    harness.windows.supersede_around(channel(CH));
+    let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [10]);
+    assert!(harness.window().latest);
+    assert_eq!(harness.loading(), 0);
+}
+
+// Loads that continue the window don't place it.
+#[test]
+fn the_newest_around_page_applies() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+    let older = harness.begin(LoadKind::Older).unwrap();
+
+    let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
+
+    assert_eq!(outcome, PageOutcome::Applied);
+    assert_eq!(events, ["Cleared(1)", "Loaded(4..6)"]);
+    assert_eq!(harness.ids(), [4, 5, 6]);
+    assert_eq!(
+        harness.finish_with_outcome(older, &[7, 8, 9], 3).0,
+        PageOutcome::Outdated
+    );
+}
+
+#[test]
+fn of_two_around_loads_the_older_page_is_dropped() {
+    let mut first_lands = Harness::viewing(LOADS);
+    first_lands.live(wire(10));
+    let older = first_lands
+        .begin(LoadKind::Around(Snowflake::new(5)))
+        .unwrap();
+    let newer = first_lands
+        .begin(LoadKind::Around(Snowflake::new(7)))
+        .unwrap();
+    assert_eq!(
+        first_lands.finish_with_outcome(older, &[4, 5, 6], 3),
+        (PageOutcome::Overtaken, Vec::new())
+    );
+    assert_eq!(first_lands.ids(), [10]);
+    assert_eq!(
+        first_lands.finish_with_outcome(newer, &[6, 7, 8], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(first_lands.ids(), [6, 7, 8]);
+
+    let mut newer_lands = Harness::viewing(LOADS);
+    newer_lands.live(wire(10));
+    let older = newer_lands
+        .begin(LoadKind::Around(Snowflake::new(5)))
+        .unwrap();
+    let newer = newer_lands
+        .begin(LoadKind::Around(Snowflake::new(7)))
+        .unwrap();
+    assert_eq!(
+        newer_lands.finish_with_outcome(newer, &[6, 7, 8], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(
+        newer_lands.finish_with_outcome(older, &[4, 5, 6], 3),
+        (PageOutcome::Outdated, Vec::new())
+    );
+    assert_eq!(newer_lands.ids(), [6, 7, 8]);
 }
 
 #[test]

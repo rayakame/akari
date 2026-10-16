@@ -51,7 +51,8 @@ pub enum MessageLoad {
     Older { limit: u8 },
     /// After the window's last message, towards the present.
     Newer { limit: u8 },
-    /// Replaces the window with the messages around `id`.
+    /// Replaces the window with the messages around `id`, unless a newer `Latest` or `Around`
+    /// load, or [`Account::supersede_around_loads`], comes before the page.
     Around { id: MessageId, limit: u8 },
 }
 
@@ -294,7 +295,8 @@ impl Shared {
                 let storing = Instant::now();
                 {
                     let _gate = self.acks.gate();
-                    let ack = self.store.finish_load(ticket, messages, reached_end);
+                    let (outcome, ack) = self.store.finish_load(ticket, messages, reached_end);
+                    report.outcome = outcome;
                     report.store = storing.elapsed();
                     self.ack_reading(ack);
                 }
@@ -897,6 +899,12 @@ impl Account {
             });
         }
         loaded
+    }
+
+    /// Drops the pages of `Around` loads running for the channel, so they don't replace its
+    /// window: Escape or a mark as read during a jump, where no `Latest` load overtakes them.
+    pub fn supersede_around_loads(&self, channel: ChannelId) {
+        self.shared.store.supersede_around(channel);
     }
 
     /// Shows the message as pending at once and sends it. Resolves with Discord's ID; on an

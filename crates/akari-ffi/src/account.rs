@@ -106,6 +106,12 @@ impl Account {
         .map_err(Into::into)
     }
 
+    /// Drops the pages of `Around` loads running for the channel, so they don't replace its
+    /// window: Escape or a mark as read during a jump, where no `Latest` load overtakes them.
+    pub fn supersede_around_loads(&self, channel_id: ChannelId) {
+        self.core.supersede_around_loads(channel_id);
+    }
+
     /// Shows the message as pending at once and resolves with Discord's ID. On an error the
     /// message stays as failed until retried or discarded.
     pub async fn send_message(
@@ -178,7 +184,8 @@ pub enum MessageLoad {
     Older { limit: u8 },
     /// After the window's last message, towards the present.
     Newer { limit: u8 },
-    /// Replaces the window with the messages around `message_id`.
+    /// Replaces the window with the messages around `message_id`, unless a newer `Latest` or
+    /// `Around` load, or `Account::supersede_around_loads`, comes before the page.
     Around { message_id: MessageId, limit: u8 },
 }
 

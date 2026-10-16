@@ -5,6 +5,7 @@ use super::apply::wall_millis;
 use super::events::StoreEvent;
 use super::types::{Delivery, Message, User};
 use crate::gateway::MessageUpdate;
+use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, MessageId, UserId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,7 @@ pub(crate) struct LoadTicket {
     pub(crate) kind: LoadKind,
     pub(crate) cursor: Cursor,
     generation: u64,
+    placing: u64,
     holds: bool,
 }
 
@@ -89,6 +91,9 @@ struct Window {
     held: Vec<Arc<Message>>,
     // Bumped whenever the messages are replaced, so a load for the old ones is dropped.
     generation: u64,
+    // Bumped by every Latest and Around load and by `supersede_around`: an Around page is
+    // dropped once a newer request placed the window.
+    placing: u64,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
     loading: u32,
@@ -666,12 +671,16 @@ impl Windows {
         if holds {
             window.holding += 1;
         }
+        if matches!(kind, LoadKind::Latest | LoadKind::Around(_)) {
+            window.placing += 1;
+        }
         window.loading += 1;
         Some(LoadTicket {
             channel,
             kind,
             cursor,
             generation: window.generation,
+            placing: window.placing,
             holds,
         })
     }
@@ -683,7 +692,7 @@ impl Windows {
         users: &HashMap<UserId, Arc<User>>,
         reached_end: bool,
         events: &mut Vec<StoreEvent>,
-    ) {
+    ) -> PageOutcome {
         let window_limit = self.limits.messages;
         let generation = self.next_generation();
         let channel_id = ticket.channel;
@@ -692,7 +701,7 @@ impl Windows {
             .get_mut(&channel_id)
             .filter(|window| window.generation == ticket.generation)
         else {
-            return;
+            return PageOutcome::Outdated;
         };
         let was_stale = window.stale;
         if ticket.holds {
@@ -707,10 +716,16 @@ impl Windows {
             Cursor::After(last) => window.messages.last().map(|message| message.id) != Some(last),
             Cursor::Latest | Cursor::Around(_) => false,
         };
-        if moved {
+        let overtaken =
+            matches!(ticket.kind, LoadKind::Around(_)) && ticket.placing != window.placing;
+        if moved || overtaken {
             window.forget_missed();
             window.release_or_drop_held(channel_id, window_limit, events);
-            return;
+            return if moved {
+                PageOutcome::Outdated
+            } else {
+                PageOutcome::Overtaken
+            };
         }
         let mut page: Vec<Arc<Message>> = page
             .into_iter()
@@ -827,6 +842,14 @@ impl Windows {
         // A refresh that found nothing new sends no other event.
         if was_stale && !window.stale {
             events.push(StoreEvent::MessagesRefreshed { channel_id });
+        }
+        PageOutcome::Applied
+    }
+
+    // Escape or a mark as read at the present, where no Latest load runs to drop the page.
+    pub(crate) fn supersede_around(&mut self, channel: ChannelId) {
+        if let Some(window) = self.windows.get_mut(&channel) {
+            window.placing += 1;
         }
     }
 

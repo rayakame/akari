@@ -15,7 +15,7 @@ use super::support::{USER, block_on, refused_connection, token};
 use crate::account::{Account, MessageLoad};
 use crate::errors::{NetworkErrorKind, RequestError};
 use crate::login::CaptchaChallenge;
-use crate::records::{Delivery, Slowmode};
+use crate::records::{Delivery, PageOutcome, Slowmode};
 use crate::subscription::{StoreEvent, StoreSubscription};
 
 const MESSAGES: &str = "/api/v9/channels/300000000000000002/messages";
@@ -106,6 +106,71 @@ async fn loading_latest_fills_the_window() {
     assert_eq!(
         online.account.store().window(GENERAL).unwrap().message_ids,
         ids
+    );
+    online.account.close();
+}
+
+#[tokio::test]
+async fn an_around_page_superseded_while_it_loads_is_dropped() {
+    let server = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .and(query_param("around", "400000000000000011"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(fixture(include_str!(
+                    "../../../akari-core/tests/fixtures/messages_page.json"
+                )))
+                .set_delay(Duration::from_millis(300)),
+        )
+        .mount(&server)
+        .await;
+    let online = online_with(&server).await;
+    let around = MessageLoad::Around {
+        message_id: MessageId::new(400_000_000_000_000_011),
+        limit: 50,
+    };
+    let loading = {
+        let account = online.account.clone();
+        tokio::spawn(async move { account.load_messages(GENERAL, around).await })
+    };
+    while server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .is_empty()
+    {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    online.account.supersede_around_loads(GENERAL);
+    let dropped = loading.await.unwrap().unwrap().expect("a page came");
+
+    assert_eq!(dropped.outcome, PageOutcome::Overtaken);
+    assert!(
+        online
+            .account
+            .store()
+            .window(GENERAL)
+            .unwrap()
+            .message_ids
+            .is_empty()
+    );
+    let applied = online
+        .account
+        .load_messages(GENERAL, around)
+        .await
+        .unwrap()
+        .expect("a page came");
+    assert_eq!(applied.outcome, PageOutcome::Applied);
+    assert_eq!(
+        online
+            .account
+            .store()
+            .window(GENERAL)
+            .unwrap()
+            .message_ids
+            .len(),
+        3
     );
     online.account.close();
 }

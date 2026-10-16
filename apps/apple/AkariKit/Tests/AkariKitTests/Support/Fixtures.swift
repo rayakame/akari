@@ -98,7 +98,8 @@ func loadReport(
     parsed: UInt32 = 50
 ) -> LoadReport {
     LoadReport(
-        queued: 0, limited: 0.0004, headers: headers, newConnection: newConnection, body: 0.012,
+        outcome: .applied, queued: 0, limited: 0.0004, headers: headers,
+        newConnection: newConnection, body: 0.012,
         bytes: 48_213, decode: 0.0021, store: 0.0004, received: received, retries: 0,
         remaining: remaining, resetAfter: resetAfter, parse: parse, parsed: parsed
     )

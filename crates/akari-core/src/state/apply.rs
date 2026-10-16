@@ -21,6 +21,7 @@ use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
+use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[derive(Default, Clone)]
@@ -1060,7 +1061,7 @@ impl State {
         page: Vec<model::Message>,
         reached_end: bool,
         events: &mut Vec<StoreEvent>,
-    ) {
+    ) -> PageOutcome {
         let present =
             ticket.cursor == Cursor::Latest || (ticket.kind == LoadKind::Newer && reached_end);
         let newest = page
@@ -1068,12 +1069,18 @@ impl State {
             .map(|message| message.id)
             .max()
             .filter(|_| present);
-        self.windows
-            .finish_load(ticket, page, &self.entities.users, reached_end, events);
+        let outcome =
+            self.windows
+                .finish_load(ticket, page, &self.entities.users, reached_end, events);
         if let Some(newest) = newest {
             self.reach_present(ticket.channel, newest, events);
         }
         self.settle(wall_millis(), events);
+        outcome
+    }
+
+    pub(crate) fn supersede_around(&mut self, channel: ChannelId) {
+        self.windows.supersede_around(channel);
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {
