@@ -224,13 +224,14 @@ retry, or on its way), and sending it afterwards would undo that:
   means the channel was read or marked unread elsewhere meanwhile, and the ack is dropped. A
   position Akari estimated counts as none.
 - **Acks made while a READY is prepared** (it is converted off the store's lock, which takes
-  milliseconds for a large account) are the user's latest: they go out at once, and the swap
-  applies them on top of READY's read states, forward only, and builds their channels' badges
-  again, so a badge the user cleared stays cleared. One that reaches READY's newest message for
-  the channel clears its count. Otherwise READY's count stays, since a mention READY counts
-  past the ack is still unread, until the ack's echo brings Discord's count. One still pending
-  once READY is in, waiting for its turn or a retry, is dropped if READY's position is past
-  it; one at READY's position still goes, since it clears READY's count.
+  milliseconds for a large account) are the user's latest. The store takes them at once, so
+  their badges go, and the swap applies them on top of READY's read states, forward only, and
+  builds their channels' badges again, so a badge the user cleared stays cleared. One that
+  reaches READY's newest message for the channel clears its count. Otherwise READY's count
+  stays, since a mention READY counts past the ack is still unread, until the ack's echo brings
+  Discord's count. Their requests wait until READY is in, like the ones from before it: one
+  READY's position is past is dropped, any other goes (one at READY's position still clears
+  READY's count). Nothing goes out while READY is prepared.
 
 ### Refused acks
 
