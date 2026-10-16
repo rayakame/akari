@@ -1,5 +1,5 @@
 use wiremock::matchers::{method, path, path_regex};
-use wiremock::{Mock, MockServer, Request as Received, ResponseTemplate};
+use wiremock::{Mock, MockServer, Request as Received, Respond, ResponseTemplate};
 
 use super::*;
 use crate::account::acks::{AckTarget, Handed, Pace};
@@ -680,10 +680,7 @@ async fn a_mark_read_during_ready_preparation_is_sent() {
     let mut fresh = online.fake.accept().await;
     assert_eq!(fresh.handshake(60_000).await["op"], 2);
     fresh.send(ready_payload(1, &online.fake, |_| {})).await;
-    tokio::task::spawn_blocking(move || parked.recv_timeout(WAIT))
-        .await
-        .unwrap()
-        .expect("READY never reached its conversion");
+    wait_for(parked, "READY never reached its conversion").await;
     online.account.mark_read(general());
     release.send(()).unwrap();
     events_until(&online.subscription, "Online").await;
@@ -693,4 +690,124 @@ async fn a_mark_read_during_ready_preparation_is_sent() {
         sent(&online.server, 2).await,
         [Sent::Ack(GENERAL, NEWEST), Sent::Ack(GENERAL, NEWEST + 1)]
     );
+}
+
+fn read_state(account: &Account, channel: u64) -> Option<(u64, u32)> {
+    account
+        .store()
+        .read_state(id(channel))
+        .map(|state| (state.acked.map_or(0, |id| id.get()), state.mentions))
+}
+
+// Waits until the channel's read state is `expected`, or WAIT passed.
+async fn read_state_becomes(account: &Account, channel: u64, expected: (u64, u32)) {
+    let deadline = std::time::Instant::now() + WAIT;
+    while read_state(account, channel) != Some(expected) && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_refused_bulk_entry_shows_its_channel_unread_again() {
+    let online = acking(|_| {}).await;
+    Mock::given(method("POST"))
+        .and(path(BULK))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_json(json!({"message": "Invalid Form Body", "code": 50035})),
+        )
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    let ready = read_state(&online.account, GENERAL).unwrap();
+
+    online.account.mark_guilds_read(&[g1()]);
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+    assert_eq!(
+        sent(&online.server, 1).await,
+        [Sent::Bulk(vec![(GENERAL, NEWEST)])]
+    );
+    read_state_becomes(&online.account, GENERAL, ready).await;
+
+    assert_eq!(read_state(&online.account, GENERAL), Some(ready));
+    assert_eq!(
+        badge(&online.account, GENERAL),
+        Badge {
+            unread: true,
+            mentions: 2
+        }
+    );
+    assert_eq!(
+        online.account.store().guild_badge(g1()),
+        Badge {
+            unread: true,
+            mentions: 2
+        }
+    );
+}
+
+// Answers the first ack only once the test lets it, refusing it.
+struct HeldRefusal {
+    arrived: std::sync::mpsc::Sender<()>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl Respond for HeldRefusal {
+    fn respond(&self, _: &Received) -> ResponseTemplate {
+        let _ = self.arrived.send(());
+        let _ = self.release.lock().unwrap().recv_timeout(WAIT);
+        ResponseTemplate::new(403)
+            .set_body_json(json!({"message": "Missing Access", "code": 50001}))
+    }
+}
+
+async fn wait_for(signal: std::sync::mpsc::Receiver<()>, what: &'static str) {
+    tokio::task::spawn_blocking(move || signal.recv_timeout(WAIT))
+        .await
+        .unwrap()
+        .expect(what);
+}
+
+// The refusal undoes the store READY is replacing; READY's read state is what stays.
+#[tokio::test]
+async fn ready_wins_over_an_ack_refused_while_it_is_prepared() {
+    let mut online = acking(|_| {}).await;
+    let (arrived, on_arrival) = std::sync::mpsc::channel();
+    let (release, on_release) = std::sync::mpsc::channel();
+    Mock::given(method("POST"))
+        .and(path_regex(ACK_ROUTE))
+        .respond_with(HeldRefusal {
+            arrived,
+            release: std::sync::Mutex::new(on_release),
+        })
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    let ready = read_state(&online.account, GENERAL).unwrap();
+    online.account.mark_read(general());
+    wait_for(on_arrival, "the ack never arrived").await;
+    let (parked, release_ready) = online.account.store().park_next_conversion();
+    online.connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = online.fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh
+        .send(ready_payload(1, &online.fake, |ready| {
+            ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000001".into();
+            ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+        }))
+        .await;
+    wait_for(parked, "READY never reached its conversion").await;
+
+    release.send(()).unwrap();
+    read_state_becomes(&online.account, GENERAL, ready).await;
+    assert_eq!(read_state(&online.account, GENERAL), Some(ready), "undone");
+    release_ready.send(()).unwrap();
+    events_until(&online.subscription, "Online").await;
+
+    assert_eq!(
+        read_state(&online.account, GENERAL),
+        Some((400_000_000_000_000_001, 0))
+    );
+    assert!(badge(&online.account, GENERAL).unread);
 }

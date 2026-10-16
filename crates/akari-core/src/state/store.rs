@@ -422,6 +422,17 @@ impl Store {
         });
     }
 
+    pub(crate) fn undo_ack(
+        &self,
+        channel: ChannelId,
+        undo: Option<ReadState>,
+        after: Option<ReadState>,
+    ) -> bool {
+        self.write("undo", |inner, events| {
+            inner.state.undo_ack(channel, undo, after, events)
+        })
+    }
+
     // `None` when the channel was read already.
     pub(crate) fn mark_read(&self, channel: ChannelId) -> Option<Ack> {
         self.write("mark read", |inner, events| {

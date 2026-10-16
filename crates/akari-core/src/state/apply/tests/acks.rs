@@ -26,6 +26,7 @@ fn at(channel: u64, cursor: u64) -> Option<Ack> {
         cursor: Some(Snowflake::new(cursor)),
         now: false,
         before: None,
+        after: None,
     })
 }
 
@@ -35,6 +36,7 @@ fn at_now(channel: u64, cursor: u64) -> Option<Ack> {
         cursor: Some(Snowflake::new(cursor)),
         now: true,
         before: None,
+        after: None,
     })
 }
 
@@ -67,6 +69,7 @@ fn general_read() -> State {
 fn target(ack: Ack) -> Ack {
     Ack {
         before: None,
+        after: None,
         ..ack
     }
 }
@@ -175,6 +178,11 @@ fn an_ack_carries_the_read_state_from_before_it() {
 
     let read = state.set_reading(Some(id(GENERAL)), &mut Vec::new());
     assert_eq!(read.map(|ack| ack.before), Some(ready));
+    assert_eq!(
+        read.map(|ack| ack.after),
+        Some(state.read_state(id(GENERAL))),
+        "and the one it left"
+    );
     apply(&mut state, "MESSAGE_CREATE", message(NEWEST + 1, GENERAL));
     assert_eq!(
         state.take_reading_ack().map(|ack| ack.before),
@@ -190,6 +198,10 @@ fn an_ack_carries_the_read_state_from_before_it() {
     let ready = state.read_state(id(GENERAL));
     let marked = state.mark_read(id(GENERAL), &mut Vec::new());
     assert_eq!(marked.map(|ack| ack.before), Some(ready));
+    assert_eq!(
+        marked.map(|ack| ack.after),
+        Some(state.read_state(id(GENERAL)))
+    );
 
     let mut state = ready_where(thread_unread);
     let befores: Vec<_> = [GENERAL, THREAD]
@@ -199,6 +211,9 @@ fn an_ack_carries_the_read_state_from_before_it() {
     let acks = state.mark_guilds_read(&[Snowflake::new(G1)], wall_millis(), &mut Vec::new());
     let carried: Vec<_> = acks.iter().map(|ack| (ack.channel, ack.before)).collect();
     assert_eq!(carried, befores);
+    for ack in acks {
+        assert_eq!(ack.after, state.read_state(ack.channel));
+    }
 }
 
 #[test]
@@ -661,6 +676,7 @@ fn every_viewable_forum_goes_into_a_guilds_ack() {
                 cursor: None,
                 now: true,
                 before: None,
+                after: None,
             },
             at_now(MEDIA, BEFORE_JOIN).unwrap(),
         ]
@@ -700,4 +716,95 @@ fn marking_guilds_read_leaves_other_guilds_and_dms_alone() {
     assert!(acks.is_empty(), "{acks:?}");
     assert!(badge(&state, GENERAL).unread);
     assert!(state.unread(id(GROUP)));
+}
+
+fn undo(state: &mut State, ack: Ack) -> Vec<String> {
+    let mut events = Vec::new();
+    state.undo_ack(ack.channel, ack.before, ack.after, &mut events);
+    events.iter().map(describe).collect()
+}
+
+#[test]
+fn a_refused_ack_restores_the_channel() {
+    let mut state = ready_state();
+    let ready = state.read_state(id(GENERAL));
+    let ack = state.mark_read(id(GENERAL), &mut Vec::new()).unwrap();
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+
+    let events = undo(&mut state, ack);
+
+    assert_eq!(state.read_state(id(GENERAL)), ready);
+    assert_eq!(
+        badge(&state, GENERAL),
+        Badge {
+            unread: true,
+            mentions: 2
+        }
+    );
+    assert!(
+        events.contains(&format!("BadgeChanged({GENERAL})"))
+            && events.contains(&format!("GuildBadgeChanged({G1})")),
+        "{events:?}"
+    );
+
+    let mut state = ready_where(|ready| {
+        ready["read_state"]["entries"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        ready["guilds"][0]["channels"][1]["last_message_id"] = AFTER_JOIN.to_string().into();
+    });
+    let ack = state.mark_read(id(GENERAL), &mut Vec::new()).unwrap();
+    undo(&mut state, ack);
+    assert_eq!(state.read_state(id(GENERAL)), None, "no read state before");
+    assert!(badge(&state, GENERAL).unread);
+}
+
+#[test]
+fn a_refused_reading_ack_isnt_taken_again() {
+    let mut state = ready_state();
+    showing(&mut state, GENERAL, &[NEWEST]);
+    let ack = state
+        .set_reading(Some(id(GENERAL)), &mut Vec::new())
+        .unwrap();
+
+    undo(&mut state, ack);
+    apply(
+        &mut state,
+        "CHANNEL_UPDATE",
+        json!({"id": GENERAL.to_string(), "topic": "t"}),
+    );
+
+    assert_eq!(taken(&mut state), None);
+    assert!(badge(&state, GENERAL).unread);
+}
+
+#[test]
+fn a_refused_ack_after_a_newer_read_changes_nothing() {
+    let mut state = ready_state();
+    let ack = state.mark_read(id(GENERAL), &mut Vec::new()).unwrap();
+    apply(
+        &mut state,
+        "MESSAGE_ACK",
+        json!({"channel_id": GENERAL.to_string(), "message_id": (NEWEST - 1).to_string(),
+               "manual": true, "mention_count": 1, "version": 2}),
+    );
+    assert!(undo(&mut state, ack).is_empty(), "a MESSAGE_ACK");
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST - 1), 1)));
+
+    let mut state = ready_state();
+    let first = state.mark_read(id(GENERAL), &mut Vec::new()).unwrap();
+    apply(&mut state, "MESSAGE_CREATE", message(NEWEST + 1, GENERAL));
+    state.mark_read(id(GENERAL), &mut Vec::new()).unwrap();
+    assert!(undo(&mut state, first).is_empty(), "another local ack");
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 1), 0)));
+
+    let mut state = ready_state();
+    let ack = state.mark_read(id(GENERAL), &mut Vec::new()).unwrap();
+    let mut next = ready_value();
+    next["read_state"]["entries"][0]["last_message_id"] = (NEWEST - 2).to_string().into();
+    next["read_state"]["entries"][0]["mention_count"] = 0.into();
+    state.apply(dispatch("READY", &next), &mut Vec::new());
+    assert!(undo(&mut state, ack).is_empty(), "a READY");
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST - 2), 0)));
 }

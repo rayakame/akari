@@ -79,19 +79,24 @@ struct Retry {
     failures: u32,
 }
 
-// The store's read state before the first of the merged acks.
+// The store's read state before the first of the merged acks, and the one the newest left.
 #[derive(Debug, Clone, Copy)]
 struct Before {
     state: Option<ReadState>,
+    after: Option<ReadState>,
     // Taken before a READY that it hasn't been checked against yet.
     unchecked: bool,
+    // Taken over the store a READY is replacing, so READY's state is what an undo goes back to.
+    replaced: bool,
 }
 
 impl Before {
-    fn now(state: Option<ReadState>) -> Self {
+    fn now(state: Option<ReadState>, after: Option<ReadState>, replaced: bool) -> Self {
         Self {
             state,
+            after,
             unchecked: false,
+            replaced,
         }
     }
 
@@ -103,7 +108,9 @@ impl Before {
         } else {
             Self {
                 state: self.state,
+                after: later.after,
                 unchecked: self.unchecked || later.unchecked,
+                replaced: self.replaced || later.replaced,
             }
         }
     }
@@ -176,8 +183,15 @@ struct Flight {
     several: bool,
 }
 
-// What Discord refused: the channel, its read state before Akari's ack, and the ID sent.
-type Refusal = (ChannelId, Option<ReadState>, MessageId);
+// An ack Discord refused: the channel's read state before Akari's acks and the one the newest
+// of them left, and the ID sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Refusal {
+    pub(crate) channel: ChannelId,
+    pub(crate) undo: Option<ReadState>,
+    pub(crate) after: Option<ReadState>,
+    pub(crate) sent: MessageId,
+}
 
 // At most one pending target per channel.
 #[derive(Default)]
@@ -186,6 +200,8 @@ struct Queue {
     flight: Flight,
     // Per channel, the highest ID Discord took since it last set the position on its own.
     sent: HashMap<ChannelId, MessageId>,
+    // From `forget_all` to `reconcile`: the store is being replaced by READY's.
+    swapping: bool,
     orders: u64,
     closed: bool,
 }
@@ -201,6 +217,7 @@ impl Queue {
         channel: ChannelId,
         id: MessageId,
         before: Option<ReadState>,
+        after: Option<ReadState>,
         pace: Pace,
         now: Instant,
     ) {
@@ -208,6 +225,7 @@ impl Queue {
             return;
         }
         let order = self.order();
+        let before = Before::now(before, after, self.swapping);
         match self.wanted.entry(channel) {
             Entry::Vacant(entry) => {
                 let kind = match pace {
@@ -216,7 +234,7 @@ impl Queue {
                 };
                 entry.insert(Wanted {
                     id,
-                    before: Before::now(before),
+                    before,
                     kind,
                     since: now,
                     order,
@@ -225,7 +243,7 @@ impl Queue {
             }
             Entry::Occupied(mut entry) => {
                 let wanted = entry.get_mut();
-                wanted.before = wanted.before.then(Before::now(before));
+                wanted.before = wanted.before.then(before);
                 let advanced = id > wanted.id;
                 wanted.id = wanted.id.max(id);
                 wanted.kind = match (wanted.kind, pace) {
@@ -244,17 +262,18 @@ impl Queue {
         }
     }
 
-    fn want_bulk(&mut self, entries: Vec<(ChannelId, MessageId, Option<ReadState>)>, now: Instant) {
+    fn want_bulk(&mut self, entries: Vec<BulkEntry>, now: Instant) {
         if self.closed {
             return;
         }
-        for (channel, id, before) in entries {
+        for (channel, id, before, after) in entries {
             let order = self.order();
+            let before = Before::now(before, after, self.swapping);
             match self.wanted.entry(channel) {
                 Entry::Vacant(entry) => {
                     entry.insert(Wanted {
                         id,
-                        before: Before::now(before),
+                        before,
                         kind: Kind::Bulk {
                             at: now,
                             alone: false,
@@ -266,7 +285,7 @@ impl Queue {
                 }
                 Entry::Occupied(mut entry) => {
                     let wanted = entry.get_mut();
-                    wanted.before = wanted.before.then(Before::now(before));
+                    wanted.before = wanted.before.then(before);
                     wanted.id = wanted.id.max(id);
                     if !wanted.bulk() {
                         wanted.kind = Kind::Bulk {
@@ -397,7 +416,12 @@ impl Queue {
             } else if let Some(newer) = self.wanted.get_mut(&channel) {
                 newer.before = wanted.before.then(newer.before);
             } else {
-                refused.push((channel, wanted.before.state, wanted.id));
+                refused.push(Refusal {
+                    channel,
+                    undo: wanted.before.state,
+                    after: wanted.before.after,
+                    sent: wanted.id,
+                });
             }
         }
         refused
@@ -440,6 +464,7 @@ impl Queue {
 
     fn forget_all(&mut self) {
         self.sent.clear();
+        self.swapping = true;
         for wanted in self.wanted.values_mut() {
             wanted.before.unchecked = true;
         }
@@ -449,22 +474,30 @@ impl Queue {
     }
 
     // An ack taken before READY goes on only where READY has the position Akari acked over:
-    // anything else is a read or a mark as unread elsewhere, which it mustn't undo.
+    // anything else is a read or a mark as unread elsewhere, which it mustn't undo. Refused, an
+    // ack taken over the replaced store goes back to READY's state, unless Discord took one for
+    // its channel since, which READY doesn't know.
     fn reconcile(&mut self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
+        self.swapping = false;
+        let sent = &self.sent;
         let keep = |channel: &ChannelId, wanted: &mut Wanted| {
-            if !wanted.unchecked() {
-                return true;
+            let before = &mut wanted.before;
+            let replaced = std::mem::take(&mut before.replaced);
+            if before.unchecked {
+                before.unchecked = false;
+                if seen(ready(*channel)) != seen(before.state) {
+                    tracing::debug!(
+                        target: TARGET,
+                        channel_id = channel.get(),
+                        "pending ack dropped: Discord's position moved while Akari was away"
+                    );
+                    return false;
+                }
+                before.state = ready(*channel);
+            } else if replaced && !sent.contains_key(channel) {
+                before.state = ready(*channel);
             }
-            wanted.before.unchecked = false;
-            let kept = seen(ready(*channel)) == seen(wanted.before.state);
-            if !kept {
-                tracing::debug!(
-                    target: TARGET,
-                    channel_id = channel.get(),
-                    "pending ack dropped: Discord's position moved while Akari was away"
-                );
-            }
-            kept
+            true
         };
         self.wanted.retain(|channel, wanted| keep(channel, wanted));
         self.flight
@@ -490,12 +523,20 @@ impl Wants {
         self.queue.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn want(&self, channel: ChannelId, id: MessageId, before: Option<ReadState>, pace: Pace) {
-        self.lock().want(channel, id, before, pace, Instant::now());
+    fn want(
+        &self,
+        channel: ChannelId,
+        id: MessageId,
+        before: Option<ReadState>,
+        after: Option<ReadState>,
+        pace: Pace,
+    ) {
+        self.lock()
+            .want(channel, id, before, after, pace, Instant::now());
         self.changed.notify_one();
     }
 
-    fn want_bulk(&self, entries: Vec<(ChannelId, MessageId, Option<ReadState>)>) {
+    fn want_bulk(&self, entries: Vec<BulkEntry>) {
         self.lock().want_bulk(entries, Instant::now());
         self.changed.notify_one();
     }
@@ -562,7 +603,9 @@ pub(crate) enum Handed {
 }
 
 type Unauthorized = Box<dyn Fn() + Send + Sync>;
-type Refused = Box<dyn Fn(ChannelId, Option<ReadState>, MessageId) + Send + Sync>;
+type Refused = Box<dyn Fn(Refusal) + Send + Sync>;
+// The channel, the ID, and the store's read state before and after the local ack.
+type BulkEntry = (ChannelId, MessageId, Option<ReadState>, Option<ReadState>);
 
 // Closing or dropping it drops what's pending; a request already on its way isn't cancelled.
 pub(crate) struct AckSender {
@@ -580,7 +623,7 @@ impl AckSender {
         rest: Arc<AccountRest>,
         retry_delay: Duration,
         unauthorized: impl Fn() + Send + Sync + 'static,
-        refused: impl Fn(ChannelId, Option<ReadState>, MessageId) + Send + Sync + 'static,
+        refused: impl Fn(Refusal) + Send + Sync + 'static,
     ) -> Self {
         let wants = Arc::new(Wants::default());
         runtime.spawn(send(
@@ -603,7 +646,8 @@ impl AckSender {
         #[cfg(test)]
         self.hand(Handed::One(ack.channel, ack.into(), pace));
         if let Some(id) = self.resolve(ack) {
-            self.wants.want(ack.channel, id, ack.before, pace);
+            self.wants
+                .want(ack.channel, id, ack.before, ack.after, pace);
         }
     }
 
@@ -617,7 +661,7 @@ impl AckSender {
         ));
         let entries = acks
             .into_iter()
-            .filter_map(|ack| Some((ack.channel, self.resolve(ack)?, ack.before)))
+            .filter_map(|ack| Some((ack.channel, self.resolve(ack)?, ack.before, ack.after)))
             .collect();
         self.wants.want_bulk(entries);
     }
@@ -647,7 +691,8 @@ impl AckSender {
         self.wants.forget_all();
     }
 
-    // With READY's read states: drops what was pending at `forget_all` where Discord moved.
+    // With READY's read states as it delivered them: drops what was pending at `forget_all` where
+    // Discord moved. Refused, the rest goes back to READY's state.
     pub(crate) fn reconcile(&self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
         self.wants.reconcile(ready);
     }
@@ -717,8 +762,8 @@ async fn send(
             continue;
         }
         log(&request, Outcome::Refused(&err));
-        for (channel, undo, id) in wants.refuse() {
-            refused(channel, undo, id);
+        for refusal in wants.refuse() {
+            refused(refusal);
         }
     }
 }

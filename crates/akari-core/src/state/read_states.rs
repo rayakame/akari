@@ -29,6 +29,8 @@ pub(crate) struct Ack {
     pub(crate) now: bool,
     // The channel's read state before the store took this ack, to restore if Discord refuses it.
     pub(crate) before: Option<ReadState>,
+    // The one it left, which a refusal may undo only while the store still holds it.
+    pub(crate) after: Option<ReadState>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -183,6 +185,14 @@ impl ReadStates {
                 estimated: false,
             },
         )
+    }
+
+    // Back to a state from before Akari's ack; `None` when there was none.
+    pub(crate) fn restore(&mut self, channel: ChannelId, state: Option<ReadState>) {
+        match state {
+            Some(state) => self.channels.insert(channel, state),
+            None => self.channels.remove(&channel),
+        };
     }
 
     pub(crate) fn start(&mut self, channel: ChannelId, acked: Option<MessageId>) {

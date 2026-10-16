@@ -13,11 +13,11 @@ use crate::gateway::{
 use crate::model::{ChannelId, GuildId, MessageId, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
-    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, ReadState, Store, WindowLimits,
+    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits,
     message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
-use acks::{AckSender, Pace};
+use acks::{AckSender, Pace, Refusal};
 
 const REFRESH_LIMIT: u8 = 100;
 const JUMP_LIMIT: u8 = 50;
@@ -387,16 +387,29 @@ impl Shared {
         }
     }
 
-    // Discord refused the ack the store took at `sent`; `undo` is the channel's read state from
-    // before it.
-    fn ack_refused(&self, channel: ChannelId, undo: Option<ReadState>, sent: MessageId) {
-        tracing::debug!(
-            target: "akari_core::acks",
-            channel_id = channel.get(),
-            message_id = sent.get(),
-            undo_acked = undo.and_then(|state| state.acked).map(|id| id.get()),
-            "refused ack handed back"
-        );
+    // Discord refused an ack the store took: the channel shows what it did before, unless its
+    // read state changed since.
+    fn ack_refused(&self, refusal: Refusal) {
+        let channel_id = refusal.channel.get();
+        let message_id = refusal.sent.get();
+        if self
+            .store
+            .undo_ack(refusal.channel, refusal.undo, refusal.after)
+        {
+            tracing::warn!(
+                target: "akari_core::acks",
+                channel_id,
+                message_id,
+                "refused ack undone"
+            );
+        } else {
+            tracing::debug!(
+                target: "akari_core::acks",
+                channel_id,
+                message_id,
+                "refused ack left: the channel's read state changed since"
+            );
+        }
     }
 
     // While the user follows a channel, its acks go out paced, like the official client's.
@@ -743,9 +756,9 @@ impl Account {
             };
             let refused = {
                 let weak = weak.clone();
-                move |channel, undo, sent| {
+                move |refusal| {
                     if let Some(shared) = weak.upgrade() {
-                        shared.ack_refused(channel, undo, sent);
+                        shared.ack_refused(refusal);
                     }
                 }
             };

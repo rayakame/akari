@@ -1583,3 +1583,15 @@ fn reading_and_marking_guilds_read_during_ready_preparation_survive_the_swap() {
     assert_eq!(store.channel_badge(general()), Badge::default());
     assert_eq!(store.channel_badge(thread), Badge::default());
 }
+
+#[test]
+fn a_refused_ack_during_ready_preparation_isnt_replayed() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|_| {}));
+    let ack = store.mark_read(general()).unwrap();
+
+    assert!(store.undo_ack(ack.channel, ack.before, ack.after));
+    store.replace(prepared);
+
+    assert!(store.channel_badge(general()).unread);
+}

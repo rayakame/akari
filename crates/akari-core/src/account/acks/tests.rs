@@ -33,11 +33,16 @@ fn now(floor: Option<MessageId>) -> AckTarget {
 }
 
 fn ack(channel: ChannelId, target: AckTarget) -> Ack {
-    ack_after(channel, target, None)
+    ack_over(channel, target, None, None)
 }
 
-// An ack the store took over `before`.
-fn ack_after(channel: ChannelId, target: AckTarget, before: Option<ReadState>) -> Ack {
+// An ack the store took over `before`, leaving `after`.
+fn ack_over(
+    channel: ChannelId,
+    target: AckTarget,
+    before: Option<ReadState>,
+    after: Option<ReadState>,
+) -> Ack {
     let (cursor, now) = match target {
         AckTarget::Message(id) => (Some(id), false),
         AckTarget::Now { floor } => (floor, true),
@@ -47,6 +52,7 @@ fn ack_after(channel: ChannelId, target: AckTarget, before: Option<ReadState>) -
         cursor,
         now,
         before,
+        after,
     }
 }
 
@@ -78,9 +84,9 @@ async fn an_ack_waits_for_a_two_second_lull() {
     let taken = collect(&wants);
     let started = Instant::now();
 
-    wants.want(channel(1), message(1), None, Pace::Paced);
+    wants.want(channel(1), message(1), None, None, Pace::Paced);
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    wants.want(channel(1), message(2), None, Pace::Paced);
+    wants.want(channel(1), message(2), None, None, Pace::Paced);
     tokio::time::sleep(Duration::from_millis(1900)).await;
     assert!(
         taken.lock().unwrap().is_empty(),
@@ -103,10 +109,10 @@ async fn a_target_that_adds_nothing_doesnt_restart_the_lull() {
     let taken = collect(&wants);
     let started = Instant::now();
 
-    wants.want(channel(1), message(2), None, Pace::Paced);
+    wants.want(channel(1), message(2), None, None, Pace::Paced);
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    wants.want(channel(1), message(2), None, Pace::Paced);
-    wants.want(channel(1), message(1), None, Pace::Paced);
+    wants.want(channel(1), message(2), None, None, Pace::Paced);
+    wants.want(channel(1), message(1), None, None, Pace::Paced);
     tokio::time::sleep(Duration::from_secs(30)).await;
 
     let taken = taken.lock().unwrap();
@@ -128,7 +134,7 @@ async fn a_busy_channel_is_acked_at_least_every_ten_seconds() {
     let mut wanted = Vec::new();
 
     for n in 1..=25 {
-        wants.want(channel(1), message(n), None, Pace::Paced);
+        wants.want(channel(1), message(n), None, None, Pace::Paced);
         wanted.push((Instant::now(), message(n)));
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -162,11 +168,11 @@ async fn a_busy_channel_is_acked_at_least_every_ten_seconds() {
 #[tokio::test(start_paused = true)]
 async fn an_explicit_ack_goes_out_at_once() {
     let wants = Wants::default();
-    wants.want(channel(1), message(5), None, Pace::Paced);
+    wants.want(channel(1), message(5), None, None, Pace::Paced);
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let asked = Instant::now();
-    wants.want(channel(1), message(3), None, Pace::Explicit);
+    wants.want(channel(1), message(3), None, None, Pace::Explicit);
     let request = wants.next().await.unwrap();
 
     assert!(asked.elapsed() < Duration::from_millis(10));
@@ -185,10 +191,10 @@ async fn the_oldest_due_ack_goes_first() {
     let wants = Arc::new(Wants::default());
     let taken = collect(&wants);
 
-    wants.want(channel(1), message(1), None, Pace::Paced);
+    wants.want(channel(1), message(1), None, None, Pace::Paced);
     tokio::time::sleep(Duration::from_secs(1)).await;
-    wants.want(channel(2), message(2), None, Pace::Explicit);
-    wants.want_bulk(vec![(channel(3), message(3), None)]);
+    wants.want(channel(2), message(2), None, None, Pace::Explicit);
+    wants.want_bulk(vec![(channel(3), message(3), None, None)]);
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     let channels: Vec<Vec<ChannelId>> = taken
@@ -206,12 +212,12 @@ async fn the_oldest_due_ack_goes_first() {
 #[tokio::test(start_paused = true)]
 async fn a_bulk_takes_over_a_pending_ack_for_its_channel() {
     let wants = Wants::default();
-    wants.want(channel(1), message(7), None, Pace::Paced);
-    wants.want(channel(2), message(8), None, Pace::Paced);
+    wants.want(channel(1), message(7), None, None, Pace::Paced);
+    wants.want(channel(2), message(8), None, None, Pace::Paced);
 
     wants.want_bulk(vec![
-        (channel(1), message(5), None),
-        (channel(3), message(9), None),
+        (channel(1), message(5), None, None),
+        (channel(3), message(9), None, None),
     ]);
     let request = wants.next().await.unwrap();
 
@@ -231,6 +237,7 @@ fn an_ack_at_now_keeps_the_cursor_as_its_floor() {
         cursor,
         now,
         before: None,
+        after: None,
     };
 
     assert_eq!(
@@ -592,13 +599,13 @@ fn only_rate_limits_and_transient_errors_are_retried() {
 #[tokio::test(start_paused = true)]
 async fn a_retried_target_waits_for_its_backoff_with_a_newer_one() {
     let wants = Wants::default();
-    wants.want(channel(1), message(1), None, Pace::Explicit);
+    wants.want(channel(1), message(1), None, None, Pace::Explicit);
     wants.next().await.unwrap();
     let retry_at = Instant::now() + Duration::from_secs(2);
 
     wants.retry(retry_at);
-    wants.want(channel(1), message(2), None, Pace::Explicit);
-    wants.want(channel(2), message(3), None, Pace::Explicit);
+    wants.want(channel(1), message(2), None, None, Pace::Explicit);
+    wants.want(channel(2), message(3), None, None, Pace::Explicit);
 
     assert_eq!(
         single(&wants.next().await.unwrap()),
@@ -820,11 +827,11 @@ fn sender_on(rest: Arc<AccountRest>, first_retry: Duration) -> AckSender {
         rest,
         first_retry,
         || {},
-        |_, _, _| {},
+        |_| {},
     )
 }
 
-type HandedBack = Arc<Mutex<Vec<(ChannelId, Option<ReadState>, MessageId)>>>;
+type HandedBack = Arc<Mutex<Vec<Refusal>>>;
 
 fn sender_handing_back(server: &MockServer) -> (AckSender, HandedBack) {
     let handed_back = HandedBack::default();
@@ -834,9 +841,35 @@ fn sender_handing_back(server: &MockServer) -> (AckSender, HandedBack) {
         rest(server),
         Duration::from_millis(10),
         || {},
-        move |channel, undo, sent| into.lock().unwrap().push((channel, undo, sent)),
+        move |refusal| into.lock().unwrap().push(refusal),
     );
     (sender, handed_back)
+}
+
+// What was handed back, once there are at least `count` (or after 5 s).
+async fn handed_back(handed: &HandedBack, count: usize) -> Vec<Refusal> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let handed = handed.lock().unwrap().clone();
+        if handed.len() >= count || std::time::Instant::now() > deadline {
+            return handed;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+fn refusal(
+    channel: ChannelId,
+    undo: Option<ReadState>,
+    after: Option<ReadState>,
+    sent: MessageId,
+) -> Refusal {
+    Refusal {
+        channel,
+        undo,
+        after,
+        sent,
+    }
 }
 
 // Discord's time once an answer brought it.
@@ -1023,15 +1056,15 @@ async fn an_exhausted_bucket_doesnt_hold_other_acks() {
 async fn an_explicit_ack_doesnt_wait_for_its_channels_bulk_retry() {
     let wants = Wants::default();
     wants.want_bulk(vec![
-        (channel(1), message(1), None),
-        (channel(2), message(2), None),
+        (channel(1), message(1), None, None),
+        (channel(2), message(2), None, None),
     ]);
     wants.next().await.unwrap();
     let retry_at = Instant::now() + Duration::from_secs(60);
     wants.retry(retry_at);
 
     let asked = Instant::now();
-    wants.want(channel(1), message(3), None, Pace::Explicit);
+    wants.want(channel(1), message(3), None, None, Pace::Explicit);
     let escaped = wants.next().await.unwrap();
 
     assert!(
@@ -1120,19 +1153,30 @@ async fn a_refused_entry_is_handed_back_to_be_undone() {
         .respond_with(Refusing(vec![channel(2)]))
         .mount(&server)
         .await;
-    let (sender, handed_back) = sender_handing_back(&server);
+    let (sender, handed) = sender_handing_back(&server);
 
     sender.want_bulk(
         (1..=3)
-            .map(|n| ack_after(channel(n), at(message(n + 10)), read_at(n, 1)))
+            .map(|n| {
+                ack_over(
+                    channel(n),
+                    at(message(n + 10)),
+                    read_at(n, 1),
+                    read_at(n + 10, 0),
+                )
+            })
             .collect(),
     );
     received(&server, 4).await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     assert_eq!(
-        *handed_back.lock().unwrap(),
-        [(channel(2), read_at(2, 1), message(12))]
+        handed_back(&handed, 1).await,
+        [refusal(
+            channel(2),
+            read_at(2, 1),
+            read_at(12, 0),
+            message(12)
+        )]
     );
 }
 
@@ -1140,18 +1184,22 @@ async fn a_refused_entry_is_handed_back_to_be_undone() {
 async fn a_refused_channel_ack_is_handed_back_to_be_undone() {
     let server = MockServer::start().await;
     mock_acks(&server, refused()).await;
-    let (sender, handed_back) = sender_handing_back(&server);
+    let (sender, handed) = sender_handing_back(&server);
 
     sender.want(
-        ack_after(channel(1), at(message(5)), read_at(3, 2)),
+        ack_over(channel(1), at(message(5)), read_at(3, 2), read_at(5, 0)),
         Pace::Explicit,
     );
     received(&server, 1).await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     assert_eq!(
-        *handed_back.lock().unwrap(),
-        [(channel(1), read_at(3, 2), message(5))]
+        handed_back(&handed, 1).await,
+        [refusal(
+            channel(1),
+            read_at(3, 2),
+            read_at(5, 0),
+            message(5)
+        )]
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
@@ -1159,14 +1207,34 @@ async fn a_refused_channel_ack_is_handed_back_to_be_undone() {
 #[tokio::test(start_paused = true)]
 async fn a_refused_ack_leaves_its_undo_to_the_channels_newer_one() {
     let wants = Wants::default();
-    wants.want(channel(1), message(5), read_at(3, 2), Pace::Explicit);
+    wants.want(
+        channel(1),
+        message(5),
+        read_at(3, 2),
+        read_at(5, 0),
+        Pace::Explicit,
+    );
     wants.next().await.unwrap();
-    wants.want(channel(1), message(6), read_at(5, 0), Pace::Explicit);
+    wants.want(
+        channel(1),
+        message(6),
+        read_at(5, 0),
+        read_at(6, 0),
+        Pace::Explicit,
+    );
 
     assert_eq!(wants.refuse(), [], "the newer ack still goes out");
     let newer = wants.next().await.unwrap();
     assert_eq!(single(&newer), (channel(1), message(6)));
-    assert_eq!(wants.refuse(), [(channel(1), read_at(3, 2), message(6))]);
+    assert_eq!(
+        wants.refuse(),
+        [refusal(
+            channel(1),
+            read_at(3, 2),
+            read_at(6, 0),
+            message(6)
+        )]
+    );
 }
 
 // What's left to send, until nothing comes for a minute; each request goes through.
@@ -1183,13 +1251,13 @@ async fn drain(wants: &Wants) -> Vec<(ChannelId, MessageId)> {
 #[tokio::test(start_paused = true)]
 async fn a_manual_ack_elsewhere_drops_the_pending_ack() {
     let wants = Wants::default();
-    wants.want(channel(1), message(1), None, Pace::Explicit);
+    wants.want(channel(1), message(1), None, None, Pace::Explicit);
     wants.next().await.unwrap();
     wants.retry(Instant::now() + Duration::from_secs(2));
-    wants.want(channel(2), message(2), None, Pace::Paced);
-    wants.want(channel(3), message(3), None, Pace::Explicit);
+    wants.want(channel(2), message(2), None, None, Pace::Paced);
+    wants.want(channel(3), message(3), None, None, Pace::Explicit);
     wants.next().await.unwrap();
-    wants.want(channel(4), message(4), None, Pace::Paced);
+    wants.want(channel(4), message(4), None, None, Pace::Paced);
 
     for n in 1..=3 {
         wants.forget(channel(n));
@@ -1206,10 +1274,28 @@ async fn a_manual_ack_elsewhere_drops_the_pending_ack() {
 #[tokio::test(start_paused = true)]
 async fn merging_keeps_the_first_seen_and_undo() {
     let wants = Wants::default();
-    wants.want(channel(1), message(5), read_at(3, 2), Pace::Paced);
-    wants.want(channel(1), message(6), read_at(5, 0), Pace::Explicit);
+    wants.want(
+        channel(1),
+        message(5),
+        read_at(3, 2),
+        read_at(5, 0),
+        Pace::Paced,
+    );
+    wants.want(
+        channel(1),
+        message(6),
+        read_at(5, 0),
+        read_at(6, 0),
+        Pace::Explicit,
+    );
     wants.next().await.unwrap();
-    wants.want(channel(1), message(7), read_at(6, 0), Pace::Explicit);
+    wants.want(
+        channel(1),
+        message(7),
+        read_at(6, 0),
+        read_at(7, 0),
+        Pace::Explicit,
+    );
     wants.retry(Instant::now());
 
     wants.forget_all();
@@ -1220,20 +1306,29 @@ async fn merging_keeps_the_first_seen_and_undo() {
         .unwrap();
 
     assert_eq!(single(&request), (channel(1), message(7)));
-    assert_eq!(wants.refuse(), [(channel(1), read_at(3, 2), message(7))]);
+    assert_eq!(
+        wants.refuse(),
+        [refusal(
+            channel(1),
+            read_at(3, 2),
+            read_at(7, 0),
+            message(7)
+        )],
+        "the first undo, the newest after"
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn ready_checks_the_acks_from_before_it_and_no_later_ones() {
     let wants = Wants::default();
-    wants.want(channel(1), message(11), read_at(1, 1), Pace::Explicit);
+    wants.want(channel(1), message(11), read_at(1, 1), None, Pace::Explicit);
     wants.next().await.unwrap();
-    wants.want(channel(2), message(12), read_at(2, 1), Pace::Paced);
-    wants.want(channel(3), message(13), read_at(3, 1), Pace::Paced);
-    wants.want(channel(5), message(15), read_at(5, 1), Pace::Paced);
+    wants.want(channel(2), message(12), read_at(2, 1), None, Pace::Paced);
+    wants.want(channel(3), message(13), read_at(3, 1), None, Pace::Paced);
+    wants.want(channel(5), message(15), read_at(5, 1), None, Pace::Paced);
 
     wants.forget_all();
-    wants.want(channel(4), message(14), read_at(4, 1), Pace::Paced);
+    wants.want(channel(4), message(14), read_at(4, 1), None, Pace::Paced);
     wants.reconcile(|id| {
         if id == channel(2) {
             read_at(2, 3)
@@ -1254,13 +1349,13 @@ async fn ready_checks_the_acks_from_before_it_and_no_later_ones() {
 #[tokio::test(start_paused = true)]
 async fn an_ack_on_its_way_at_ready_doesnt_hold_back_the_next() {
     let wants = Wants::default();
-    wants.want(channel(1), message(11), read_at(1, 1), Pace::Explicit);
+    wants.want(channel(1), message(11), read_at(1, 1), None, Pace::Explicit);
     wants.next().await.unwrap();
 
     wants.forget_all();
     wants.sent();
     wants.reconcile(|_| read_at(1, 1));
-    wants.want(channel(1), message(11), read_at(1, 1), Pace::Explicit);
+    wants.want(channel(1), message(11), read_at(1, 1), None, Pace::Explicit);
 
     assert_eq!(drain(&wants).await, [(channel(1), message(11))]);
 }
@@ -1281,7 +1376,7 @@ fn an_estimated_position_is_none_of_discords() {
 #[tokio::test(start_paused = true)]
 async fn nothing_from_before_ready_goes_out_until_its_checked() {
     let wants = Wants::default();
-    wants.want(channel(1), message(1), read_at(1, 1), Pace::Explicit);
+    wants.want(channel(1), message(1), read_at(1, 1), None, Pace::Explicit);
 
     wants.forget_all();
     assert!(
@@ -1301,18 +1396,18 @@ async fn nothing_from_before_ready_goes_out_until_its_checked() {
 #[tokio::test(start_paused = true)]
 async fn an_ack_taken_while_ready_is_swapped_in_isnt_dropped_with_an_older_one() {
     let wants = Wants::default();
-    wants.want(channel(1), message(1), read_at(1, 1), Pace::Paced);
+    wants.want(channel(1), message(1), read_at(1, 1), None, Pace::Paced);
 
     wants.forget_all();
-    wants.want(channel(1), message(2), read_at(1, 1), Pace::Explicit);
+    wants.want(channel(1), message(2), read_at(1, 1), None, Pace::Explicit);
     wants.reconcile(|_| read_at(9, 0));
 
     assert_eq!(drain(&wants).await, [(channel(1), message(2))]);
 
-    wants.want(channel(2), message(3), read_at(2, 1), Pace::Explicit);
+    wants.want(channel(2), message(3), read_at(2, 1), None, Pace::Explicit);
     wants.next().await.unwrap();
     wants.forget_all();
-    wants.want(channel(2), message(4), read_at(2, 1), Pace::Explicit);
+    wants.want(channel(2), message(4), read_at(2, 1), None, Pace::Explicit);
     wants.retry(Instant::now());
     wants.reconcile(|_| read_at(9, 0));
 
@@ -1320,5 +1415,60 @@ async fn an_ack_taken_while_ready_is_swapped_in_isnt_dropped_with_an_older_one()
         drain(&wants).await,
         [(channel(2), message(4))],
         "one on its way came back into it"
+    );
+}
+
+// The store the acks were taken over is gone; undone, a channel goes back to READY's state, but
+// not past an ack Discord took since.
+#[tokio::test(start_paused = true)]
+async fn a_refused_ack_from_before_ready_goes_back_to_ready_s_read_state() {
+    let wants = Wants::default();
+    wants.want(
+        channel(1),
+        message(11),
+        read_at(1, 1),
+        read_at(11, 0),
+        Pace::Explicit,
+    );
+    wants.forget_all();
+    wants.want(
+        channel(2),
+        message(12),
+        read_at(2, 1),
+        read_at(12, 0),
+        Pace::Explicit,
+    );
+    wants.want(
+        channel(3),
+        message(13),
+        read_at(3, 1),
+        read_at(13, 0),
+        Pace::Explicit,
+    );
+    let first = wants.next().await.unwrap();
+    assert_eq!(single(&first), (channel(2), message(12)));
+    wants.sent();
+    wants.want(
+        channel(2),
+        message(14),
+        read_at(12, 0),
+        read_at(14, 0),
+        Pace::Explicit,
+    );
+    let ready = |id: ChannelId| read_at(id.get() - 300_000_000_000_000_000, 7);
+    wants.reconcile(ready);
+
+    let mut refused = Vec::new();
+    while let Ok(Some(_)) = timeout(Duration::from_secs(60), wants.next()).await {
+        refused.extend(wants.refuse());
+    }
+    refused.sort_unstable_by_key(|refusal| refusal.channel);
+    assert_eq!(
+        refused,
+        [
+            refusal(channel(1), read_at(1, 7), read_at(11, 0), message(11)),
+            refusal(channel(2), read_at(12, 0), read_at(14, 0), message(14)),
+            refusal(channel(3), read_at(3, 7), read_at(13, 0), message(13)),
+        ]
     );
 }

@@ -277,16 +277,36 @@ impl State {
             return None;
         }
         self.read_up_to(channel, Some(shown));
+        let after = self.entities.read_states.get(channel);
         Some(Ack {
             channel,
-            cursor: self
-                .entities
-                .read_states
-                .get(channel)
-                .and_then(|state| state.acked),
+            cursor: after.and_then(|state| state.acked),
             now: false,
             before,
+            after,
         })
+    }
+
+    // Discord refused Akari's ack. Only while the store still holds what that ack left: an ack
+    // from elsewhere, another local ack or a READY since is newer. A READY being prepared
+    // mustn't replay it either.
+    pub(crate) fn undo_ack(
+        &mut self,
+        channel: ChannelId,
+        undo: Option<ReadState>,
+        after: Option<ReadState>,
+        events: &mut Vec<StoreEvent>,
+    ) -> bool {
+        if self.entities.read_states.get(channel) != after {
+            return false;
+        }
+        self.entities.read_states.restore(channel, undo);
+        if let Some(journal) = &mut self.journal {
+            journal.retain(|(journaled, _)| *journaled != channel);
+        }
+        self.dirty.channel(channel);
+        self.refresh_badges(wall_millis(), events);
+        true
     }
 
     pub(crate) fn take_reading_ack(&mut self) -> Option<Ack> {
@@ -304,10 +324,11 @@ impl State {
 
     fn read_locally(&mut self, channel: ChannelId) -> Option<Ack> {
         let stored = self.entities.channels.get(&channel)?;
-        let ack = self.ack_of(stored);
+        let mut ack = self.ack_of(stored);
         if self.entities.needs_ack(stored) {
             self.read_up_to(channel, ack.cursor);
         }
+        ack.after = self.entities.read_states.get(channel);
         Some(ack)
     }
 
@@ -393,6 +414,7 @@ impl State {
                 )
                 || self.stale_cursors.contains(&channel.id),
             before: self.entities.read_states.get(channel.id),
+            after: None,
         }
     }
 
