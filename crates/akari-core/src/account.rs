@@ -1085,13 +1085,15 @@ async fn pump(mut finish: Finish) {
                     tokio::task::spawn_blocking(move || store.prepare(preparing, *ready)).await;
                 match prepared {
                     Ok(next) => {
-                        {
+                        let replaced = {
                             let _gate = shared.acks.gate();
-                            let delivered = shared.store.replace(next);
+                            let replaced = shared.store.replace(next);
                             shared
                                 .acks
-                                .reconcile(|channel| delivered.get(&channel).copied());
-                        }
+                                .reconcile(|channel| replaced.read_states.get(&channel).copied());
+                            replaced
+                        };
+                        drop(replaced);
                         let convert_ms = crate::millis(started.elapsed());
                         tracing::info!(convert_ms, "READY applied");
                         shared.forget_subscriptions();

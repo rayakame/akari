@@ -31,6 +31,13 @@ pub(crate) struct PreparedReady {
     preparing: Preparing,
 }
 
+// What a READY's swap leaves: its read states as it delivered them, before the local acks replayed
+// on top, and the state it replaced, for the caller to drop outside its locks.
+pub(crate) struct Replaced {
+    pub(crate) read_states: HashMap<ChannelId, ReadState>,
+    _old: (Entities, Derived),
+}
+
 // An open READY journal. Ends it if dropped before the swap, e.g. by a panic while converting.
 pub(crate) struct Preparing {
     store: Store,
@@ -350,8 +357,7 @@ impl Store {
         }
     }
 
-    // Returns the read states as READY delivered them, before the local acks replayed on top.
-    pub(crate) fn replace(&self, next: PreparedReady) -> HashMap<ChannelId, ReadState> {
+    pub(crate) fn replace(&self, next: PreparedReady) -> Replaced {
         let PreparedReady {
             entities,
             derived,
@@ -363,8 +369,10 @@ impl Store {
             inner.state.swap(entities, derived, diff, events)
         });
         preparing.swapped = true;
-        drop(old);
-        read_states
+        Replaced {
+            read_states,
+            _old: old,
+        }
     }
 
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
