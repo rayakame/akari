@@ -274,6 +274,17 @@ struct UnreadBarScreenTests {
         #expect(try !drawing.matches(try pixel(host, at: below), Palette.brand))
     }
 
+    // The bar's text as drawn: inside its padding and away from its rounded corners.
+    func barText(in host: NSView, table: MessageTableView) throws -> Data {
+        let scroll = try #require(table.enclosingScrollView)
+        let list = scroll.convert(scroll.bounds, to: host)
+        let top = host.isFlipped ? list.minY + 4 : list.maxY - 4 - 32
+        let rect = NSRect(x: list.minX + 24, y: top, width: list.width - 48, height: 32)
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: rect))
+        host.cacheDisplay(in: rect, to: rep)
+        return try #require(rep.tiffRepresentation)
+    }
+
     @Test
     func theBarIsAnnouncedOnceWhenItAppears() async throws {
         let session = screens.formattedSession(account)
@@ -282,15 +293,16 @@ struct UnreadBarScreenTests {
             rootView: SessionScreen(session: session).environment(\.announce, announced.add))
         let window = screens.shownWindow(host)
         defer { window.orderOut(nil) }
-        _ = try await shownWithItsBar(session, in: host)
+        let table = try await shownWithItsBar(session, in: host)
         let bar = try #require(session.messages?.unreadBar)
         #expect(announced.texts == [UnreadBar.text(bar)])
+        let drawn = try barText(in: host, table: table)
 
-        // A message arrives: the bar counts it, without a second announcement.
+        // A message arrives: once the bar shows the new count, still one announcement.
         account.formattedStore.add(1, to: channel)
         await session.messages?.jumpToPresent()
-        try await screens.waitUntil(host) { session.messages?.unreadBar?.count == bar.count + 1 }
-        try await Task.sleep(for: .milliseconds(100))
+        #expect(session.messages?.unreadBar?.count == bar.count + 1)
+        try await screens.waitUntil(host) { try barText(in: host, table: table) != drawn }
         #expect(announced.texts.count == 1)
     }
 
