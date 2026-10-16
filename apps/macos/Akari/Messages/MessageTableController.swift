@@ -1240,7 +1240,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         reportLine()
-        sticksToBottom = isPinned(to: heldPinBottom ?? tableView.contentHeight)
+        if let held = heldPinBottom {
+            // Follows the user down into rows that came, and up to where rows now end.
+            let bottom = min(
+                tableView.contentHeight,
+                max(held, clipView.bounds.maxY - scrollView.contentInsets.bottom))
+            heldPinBottom = bottom
+            sticksToBottom = isPinned(to: bottom)
+        } else {
+            sticksToBottom = isPinnedToBottom
+        }
         actions?.userScrolled(by: lastClipOrigin.y - origin.y, height: clipView.bounds.height)
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()

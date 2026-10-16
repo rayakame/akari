@@ -99,6 +99,33 @@ struct EngagementTests {
     }
 
     @Test
+    func rowsRemovedMidGestureKeepTheListPinned() throws {
+        list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        list.show(list.page + [tallMessage])
+        list.show(Array(list.page.dropLast(3)))
+        try scrollToBottom()
+        nudge(by: -3)
+
+        list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+
+        #expect(session.messages?.atBottom == true)
+        #expect(session.reading == channel)
+    }
+
+    @Test
+    func scrollingBackFromAnArrivalMidGestureUnpins() throws {
+        list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        list.show(list.page + [tallMessage])
+        try scrollToBottom()
+        nudge(by: 100)
+        #expect(session.messages?.atBottom == false)
+
+        list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+
+        #expect(list.clip.bounds.minY < (try #require(bottomClip)).originRange.upperBound)
+    }
+
+    @Test
     func movingTowardOlderMessagesMidGestureStillUnpins() throws {
         list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
         list.show(list.page + [tallMessage])
