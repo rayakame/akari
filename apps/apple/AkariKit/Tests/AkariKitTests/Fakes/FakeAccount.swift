@@ -18,9 +18,10 @@ final class FakeAccount: Account, @unchecked Sendable {
     // What a successful load reports, its outcome set as the core would; `nil` is a load with
     // nothing to load.
     let loadReport = Locked<LoadReport?>(pageReport)
-    // Like akari-core: latest and around loads and supersedes place a channel's window, and an
-    // around page that something placed after it is dropped.
-    private let placings = Locked<[ChannelId: Int]>([:])
+    // Like akari-core: latest and around loads and supersedes place a channel's window. An
+    // around page that something placed after is dropped, and so is a latest page that would
+    // replace the window when the newest placing is a later around load.
+    private let placings = Locked<[ChannelId: (newest: Int, around: Int)]>([:])
     // Fails sends and retries.
     let sendError = Locked<RequestError?>(nil)
     // While set, each send waits for a reply: `nil` succeeds, an error fails it.
@@ -95,7 +96,8 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.load(channelId, load))
         let placing: Int? =
             switch load {
-            case .latest, .around: place(channelId)
+            case .latest: place(channelId)
+            case .around: place(channelId, around: true)
             default: nil
             }
         let error = holdLoads.current ? await loadReplies.next() ?? nil : loadError.current
@@ -105,7 +107,7 @@ final class FakeAccount: Account, @unchecked Sendable {
         guard var report = loadReport.current else {
             return nil
         }
-        if case .around = load, placing != placings.current[channelId] {
+        if let placing, overtaken(load, placing: placing, in: channelId) {
             report.outcome = .overtaken
             return report
         }
@@ -127,11 +129,30 @@ final class FakeAccount: Account, @unchecked Sendable {
         place(channelId)
     }
 
+    private func overtaken(_ load: MessageLoad, placing: Int, in channel: ChannelId) -> Bool {
+        let placed = placings.current[channel, default: (0, 0)]
+        switch load {
+        case .around:
+            return placing != placed.newest
+        case .latest:
+            var replaces = false
+            fakeStore.update { replaces = $0.windows[channel]?.latest == false }
+            return replaces && placed.newest == placed.around && placed.around > placing
+        default:
+            return false
+        }
+    }
+
     @discardableResult
-    private func place(_ channel: ChannelId) -> Int {
+    private func place(_ channel: ChannelId, around: Bool = false) -> Int {
         placings.withLock { placings in
-            placings[channel, default: 0] += 1
-            return placings[channel, default: 0]
+            var placed = placings[channel, default: (0, 0)]
+            placed.newest += 1
+            if around {
+                placed.around = placed.newest
+            }
+            placings[channel] = placed
+            return placed.newest
         }
     }
 

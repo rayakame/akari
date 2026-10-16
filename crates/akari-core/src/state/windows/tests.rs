@@ -791,6 +791,67 @@ fn of_two_around_loads_the_older_page_is_dropped() {
     assert_eq!(newer_lands.ids(), [6, 7, 8]);
 }
 
+// The jump to the present, then a click on the unread bar: the channel's requests run in order,
+// so the latest page lands first.
+#[test]
+fn a_latest_page_a_newer_around_load_overtook_leaves_the_window_to_it() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+
+    let (outcome, events) = harness.finish_with_outcome(latest, &[30, 31, 32], 3);
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [19, 20, 21]);
+    assert_eq!(harness.loading(), 1);
+    assert_eq!(
+        harness.finish_with_outcome(around, &[4, 5, 6], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(harness.ids(), [4, 5, 6]);
+}
+
+// A send from older messages supersedes the jump, so the latest page still takes the window.
+#[test]
+fn a_latest_page_still_applies_once_a_supersede_followed_the_around_load() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+    harness.windows.supersede_around(channel(CH));
+
+    assert_eq!(
+        harness.finish_with_outcome(latest, &[30, 31, 32], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(harness.ids(), [30, 31, 32]);
+    assert!(harness.window().latest);
+    assert_ne!(
+        harness.finish_with_outcome(around, &[4, 5, 6], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(harness.ids(), [30, 31, 32]);
+}
+
+// Should the around load then fail, live messages aren't held back for a refresh that never comes.
+#[test]
+fn an_overtaken_latest_page_leaves_a_stale_window_detached() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.windows.mark_stale(&mut Vec::new());
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+
+    let (outcome, events) = harness.finish_with_outcome(latest, &[30, 31, 32], 3);
+    harness.windows.abort_load(around, &mut Vec::new());
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert_eq!(events, ["Stale(1)"]);
+    assert!(!harness.window().latest);
+    harness.live(wire(40));
+    assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
 #[test]
 fn aborting_a_load_stops_holding() {
     let mut harness = Harness::detached(LOADS, &[19, 20, 21]);

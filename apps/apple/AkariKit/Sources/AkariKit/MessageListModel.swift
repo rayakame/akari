@@ -192,8 +192,11 @@ public final class MessageListModel {
         }
         // A channel never read has no position to load around; its line is among the loaded rows.
         if readUpTo.rawValue != 0, !readPositionLoaded(readUpTo) {
-            // The running load jumps once its messages are in.
-            guard !activeLoads.values.contains(.around) else {
+            // The running load jumps once its messages are in, unless the jump to the present
+            // overtook it.
+            if let running = activeLoads.filter({ $0.value == .around }).keys.max(),
+                !activeLoads.contains(where: { $0.value == .latest && $0.key > running })
+            {
                 return
             }
             // A failed load, or a page the core dropped for a newer request, leaves the bar.

@@ -353,30 +353,54 @@ struct UnreadBarTests {
         session.close()
     }
 
-    // The jump to the present overtook the jump, and a second click came while it loaded.
+    // The channel's requests run in order: the latest page lands first, and the jump's after it.
     @Test
-    func anOvertakenJumpLeavesTheBarToClickAgain() async {
+    func theJumpToPresentThenTheBarEndsAtTheLine() async {
         inHistory([5, 6, 7, 8], readUpTo: 2)
         account.holdLoads.withLock { $0 = true }
         windows(around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [window([7, 8])])
         let model = makeModel()
-        let jump = await waitingJump(model)
+        model.setNewMessagesLineOnScreen(false)
         let present = Task { await model.jumpToPresent() }
+        await account.loadReplies.pulled(1)
+
+        let jump = Task { await model.jumpToUnread() }
         await account.loadReplies.pulled(2)
-        await model.jumpToUnread()
         account.loadReplies.send(nil)
-        await finished(jump)
         account.loadReplies.send(nil)
         await finished(present)
-        #expect(ids(model) == [7, 8])
-        #expect(model.unreadJumps == 0)
-        #expect(model.unreadBar != nil)
+        await finished(jump)
 
-        account.holdLoads.withLock { $0 = false }
-        await model.jumpToUnread()
+        #expect(loads == [latestLoad, aroundLoad])
+        #expect(ids(model) == [1, 2, 3, 4, 5, 6])
+        #expect(model.newMessagesLine == id(3))
+        #expect(model.unreadJumps == 1)
+        #expect(model.unreadBar == nil)
+    }
+
+    // The jump to the present overtook the jump, and a second click came while it loaded.
+    @Test
+    func aClickDuringTheJumpToPresentEndsAtTheLine() async {
+        inHistory([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [window([7, 8])])
+        let model = makeModel()
+        let first = await waitingJump(model)
+        let present = Task { await model.jumpToPresent() }
+        await account.loadReplies.pulled(2)
+
+        let second = Task { await model.jumpToUnread() }
+        await account.loadReplies.pulled(3)
+        for _ in 0..<3 {
+            account.loadReplies.send(nil)
+        }
+        await finished(first)
+        await finished(present)
+        await finished(second)
 
         #expect(loads == [aroundLoad, latestLoad, aroundLoad])
         #expect(ids(model) == [1, 2, 3, 4, 5, 6])
+        #expect(model.newMessagesLine == id(3))
         #expect(model.unreadJumps == 1)
         #expect(model.unreadBar == nil)
     }

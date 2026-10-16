@@ -94,6 +94,8 @@ struct Window {
     // Bumped by every Latest and Around load and by `supersede_around`: an Around page is
     // dropped once a newer request placed the window.
     placing: u64,
+    // The newest Around load's placing: a Latest page from before it leaves it the window.
+    around_placing: u64,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
     loading: u32,
@@ -674,6 +676,9 @@ impl Windows {
         if matches!(kind, LoadKind::Latest | LoadKind::Around(_)) {
             window.placing += 1;
         }
+        if matches!(kind, LoadKind::Around(_)) {
+            window.around_placing = window.placing;
+        }
         window.loading += 1;
         Some(LoadTicket {
             channel,
@@ -802,6 +807,19 @@ impl Windows {
             LoadKind::Refresh => {
                 window.latest = false;
                 events.push(StoreEvent::MessagesStale { channel_id });
+            }
+            // Replacing would change the generation and drop the newer Around page.
+            LoadKind::Latest
+                if window.around_placing > ticket.placing
+                    && window.placing == window.around_placing =>
+            {
+                // As for an aborted load: should the Around load fail, nothing would refresh it.
+                if window.holding == 0 && window.stale && window.latest {
+                    window.latest = false;
+                    events.push(StoreEvent::MessagesStale { channel_id });
+                }
+                window.release_or_drop_held(channel_id, window_limit, events);
+                return PageOutcome::Overtaken;
             }
             LoadKind::Latest | LoadKind::Around(_) => {
                 if !window.messages.is_empty() {
