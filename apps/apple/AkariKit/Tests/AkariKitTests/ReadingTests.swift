@@ -339,6 +339,8 @@ final class ReadingTests {
 
         session.suspend()
         #expect(session.reading == nil)
+        session.userInteracted()
+        #expect(session.reading == nil, "a click before the offline batch")
         session.apply(EventBatch([.connection(state: .offline)]))
         session.resume()
         session.apply(

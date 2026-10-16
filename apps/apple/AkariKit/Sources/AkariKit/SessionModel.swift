@@ -288,8 +288,12 @@ public final class SessionModel {
         readingInputChanged(lost: lost)
     }
 
-    /// A click or key press in the window; scroll-wheel events aren't one.
+    /// A click or key press in the window; scroll-wheel events aren't one. While suspended, a
+    /// click doesn't count: the next one after `resume()` does.
     public func userInteracted() {
+        guard !suspended else {
+            return
+        }
         engaged = true
         updateReading()
     }
@@ -523,7 +527,8 @@ public final class SessionModel {
         }
         // Not before READY: the core would ack inside READY's write, over Discord's position.
         let reads =
-            connection == .online && engaged && appActive && windowKey && windowVisible && !ended
+            connection == .online && !suspended && engaged && appActive && windowKey
+            && windowVisible && !ended
             && messages?.atPresentBottom == true
         let channel = reads ? messages?.channelId : nil
         if channel != nil {
