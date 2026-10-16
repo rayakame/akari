@@ -142,17 +142,41 @@ fn sent_as(request: &Received) -> Sent {
 async fn sent(server: &MockServer, count: usize) -> Vec<Sent> {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
-        let requests = server.received_requests().await.unwrap();
-        if requests.len() >= count || std::time::Instant::now() > deadline {
-            return requests.iter().map(sent_as).collect();
+        let acks = posted(server).await;
+        if acks.len() >= count || std::time::Instant::now() > deadline {
+            return acks.iter().map(sent_as).collect();
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
+// Acks only, without history loads.
+async fn posted(server: &MockServer) -> Vec<Received> {
+    let mut requests = server.received_requests().await.unwrap();
+    requests.retain(|request| request.method.as_str() == "POST");
+    requests
+}
+
+// The list of GENERAL, loaded at the present.
+async fn showing(online: &Online, ids: &[u64]) {
+    Mock::given(method("GET"))
+        .and(path(MESSAGES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(ids)))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    online
+        .account
+        .load_messages(general(), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn reading_an_unread_channel_acks_it() {
     let online = acking(|_| {}).await;
+    showing(&online, &[NEWEST]).await;
     let account = &online.account;
 
     account.set_reading(Some(general()));
@@ -165,16 +189,18 @@ async fn reading_an_unread_channel_acks_it() {
 #[tokio::test]
 async fn reading_a_read_channel_sends_nothing() {
     let online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
 
     online.account.set_reading(Some(general()));
 
     assert_eq!(handed(&online.account), []);
-    assert!(online.server.received_requests().await.unwrap().is_empty());
+    assert!(posted(&online.server).await.is_empty());
 }
 
 #[tokio::test]
 async fn a_message_arriving_while_reading_is_acked() {
     let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
     online.account.set_reading(Some(general()));
 
     online.connection.send(message(2, NEWEST + 1)).await;
@@ -197,6 +223,7 @@ async fn a_message_arriving_while_reading_is_acked() {
 #[tokio::test]
 async fn a_message_arriving_after_reading_stopped_isnt() {
     let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
     online.account.set_reading(Some(general()));
     online.account.set_reading(None);
 
@@ -210,6 +237,7 @@ async fn a_message_arriving_after_reading_stopped_isnt() {
 #[tokio::test]
 async fn switching_channels_stops_the_old_one() {
     let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
     online.account.set_reading(Some(general()));
     online.connection.send(message(2, NEWEST + 1)).await;
     sync(&mut online.connection, &online.subscription, 3).await;
@@ -272,7 +300,7 @@ async fn mark_read_on_a_read_channel_sends_nothing() {
 
     assert_eq!(handed(&online.account), []);
     assert_eq!(online.account.store().read_state(general()), before);
-    assert!(online.server.received_requests().await.unwrap().is_empty());
+    assert!(posted(&online.server).await.is_empty());
 }
 
 #[tokio::test]
@@ -368,12 +396,13 @@ async fn mark_guilds_read_on_a_read_guild_sends_nothing() {
     online.account.mark_guilds_read(&[g1()]);
 
     assert_eq!(handed(&online.account), []);
-    assert!(online.server.received_requests().await.unwrap().is_empty());
+    assert!(posted(&online.server).await.is_empty());
 }
 
 #[tokio::test]
 async fn a_message_ack_from_elsewhere_sends_nothing() {
     let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
     online.account.set_reading(Some(general()));
 
     online
@@ -450,8 +479,13 @@ async fn reading_before_ready_waits_for_it() {
     let mut fake = FakeGateway::start().await;
     let server = MockServer::start().await;
     mock_acks(&server, 200).await;
+    mock_page(&server, ("limit", "50"), page(&[NEWEST])).await;
     let account = start_with(&fake, &server);
     let subscription = account.store().subscribe();
+    account
+        .load_messages(general(), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap();
 
     account.set_reading(Some(general()));
     assert_eq!(handed(&account), []);
@@ -463,8 +497,15 @@ async fn reading_before_ready_waits_for_it() {
 }
 
 #[tokio::test]
-async fn a_new_ready_acks_the_channel_being_read() {
+async fn a_new_ready_acks_the_channel_being_read_once_its_list_is_refreshed() {
     let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    mock_page(
+        &online.server,
+        ("limit", "100"),
+        page(&[NEWEST, NEWEST + 1, NEWEST + 2]),
+    )
+    .await;
     online.account.set_reading(Some(general()));
     assert_eq!(handed(&online.account), []);
 
@@ -477,6 +518,11 @@ async fn a_new_ready_acks_the_channel_being_read() {
         }))
         .await;
     events_until(&online.subscription, "Online").await;
+    events_until(
+        &online.subscription,
+        &format!("MessagesRefreshed({GENERAL})"),
+    )
+    .await;
 
     assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 2)]);
 }
@@ -508,13 +554,15 @@ async fn a_401_on_an_ack_closes_the_account() {
 #[tokio::test]
 async fn closing_the_account_stops_the_sender() {
     let online = acking(thread_unread).await;
+    showing(&online, &[NEWEST]).await;
     online.account.set_reading(Some(general()));
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST)]);
 
     online.account.close();
     online.account.mark_read(id(THREAD));
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    assert!(online.server.received_requests().await.unwrap().is_empty());
+    assert!(posted(&online.server).await.is_empty());
 }
 
 // The first ack waits out a 1.5 s rate limit before it's tried again.

@@ -85,6 +85,11 @@ fn mark_read(state: &mut State, channel: u64) -> Option<Ack> {
     state.mark_read(id(channel), &mut Vec::new()).map(target)
 }
 
+// The channel's list, loaded at the present.
+fn showing(state: &mut State, channel: u64, ids: &[u64]) {
+    load_page(state, channel, LoadKind::Latest, ids, true);
+}
+
 fn channel_of(kind: u8, channel: u64, last: u64) -> Value {
     json!({
         "id": channel.to_string(), "type": kind, "guild_id": G1.to_string(), "name": "ideas",
@@ -95,6 +100,7 @@ fn channel_of(kind: u8, channel: u64, last: u64) -> Value {
 #[test]
 fn reading_an_unread_channel_acks_it_locally() {
     let mut state = ready_state();
+    showing(&mut state, GENERAL, &[NEWEST]);
     assert_eq!(
         badge(&state, GENERAL),
         Badge {
@@ -119,6 +125,7 @@ fn reading_an_unread_channel_acks_it_locally() {
 #[test]
 fn reading_a_read_channel_changes_nothing() {
     let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
 
     let (ack, events) = reading(&mut state, Some(GENERAL));
 
@@ -134,6 +141,7 @@ fn reading_a_channel_with_only_mentions_acks_it() {
         ready["read_state"]["entries"][0]["last_message_id"] = NEWEST.to_string().into();
     });
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 2)));
+    showing(&mut state, GENERAL, &[NEWEST]);
 
     let (ack, _) = reading(&mut state, Some(GENERAL));
 
@@ -144,6 +152,7 @@ fn reading_a_channel_with_only_mentions_acks_it() {
 #[test]
 fn a_message_arriving_while_reading_is_read_at_once() {
     let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
     reading(&mut state, Some(GENERAL));
 
     let events = apply(&mut state, "MESSAGE_CREATE", message(NEWEST + 1, GENERAL));
@@ -160,6 +169,7 @@ fn a_message_arriving_while_reading_is_read_at_once() {
 #[test]
 fn an_ack_carries_the_read_state_from_before_it() {
     let mut state = ready_state();
+    showing(&mut state, GENERAL, &[NEWEST]);
     let ready = state.read_state(id(GENERAL));
     assert_eq!(ready.map(|read| read.mentions), Some(2));
 
@@ -194,6 +204,7 @@ fn an_ack_carries_the_read_state_from_before_it() {
 #[test]
 fn the_users_own_message_while_reading_needs_no_ack() {
     let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
     reading(&mut state, Some(GENERAL));
     let mut own = plain(NEWEST + 1, GENERAL);
     own["author"]["id"] = ME.to_string().into();
@@ -207,6 +218,7 @@ fn the_users_own_message_while_reading_needs_no_ack() {
 #[test]
 fn a_message_arriving_after_reading_stopped_makes_the_channel_unread() {
     let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
     reading(&mut state, Some(GENERAL));
     reading(&mut state, None);
 
@@ -220,6 +232,7 @@ fn a_message_arriving_after_reading_stopped_makes_the_channel_unread() {
 #[test]
 fn a_message_ack_from_elsewhere_while_reading_changes_nothing_more() {
     let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
     reading(&mut state, Some(GENERAL));
 
     apply(
@@ -242,6 +255,7 @@ fn a_message_ack_from_elsewhere_while_reading_changes_nothing_more() {
 fn reading_waits_for_ready() {
     let mut state = State::new();
 
+    showing(&mut state, GENERAL, &[NEWEST]);
     let (ack, _) = reading(&mut state, Some(GENERAL));
     assert_eq!(ack, None);
     state.apply(dispatch("READY", &ready_value()), &mut Vec::new());
@@ -250,14 +264,25 @@ fn reading_waits_for_ready() {
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 0)));
 }
 
+// A new session's READY leaves the list stale until its refresh comes.
 #[test]
-fn every_ready_acks_the_channel_being_read() {
+fn a_ready_acks_the_channel_being_read_once_its_list_is_refreshed() {
     let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
     reading(&mut state, Some(GENERAL));
     let mut next = ready_value();
     next["guilds"][0]["channels"][1]["last_message_id"] = (NEWEST + 2).to_string().into();
 
     state.apply(dispatch("READY", &next), &mut Vec::new());
+    assert_eq!(taken(&mut state), None);
+    assert!(badge(&state, GENERAL).unread);
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Refresh,
+        &[NEWEST, NEWEST + 1, NEWEST + 2],
+        false,
+    );
 
     assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 2));
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 2), 0)));
@@ -415,19 +440,71 @@ fn forums_and_media_channels_are_acked_at_now() {
     assert_eq!(read_state(&state, FORUM), Some((Some(AFTER_JOIN + 1), 0)));
 }
 
+// Never past the rows the list shows, and never at "now", even with a stale cursor.
 #[test]
-fn a_stale_cursor_is_acked_at_now_above_the_cursor() {
+fn reading_acks_only_up_to_the_window() {
     let mut state = general_read();
+    showing(&mut state, GENERAL, &[NEWEST]);
     reading(&mut state, Some(GENERAL));
+    let mut merged = ready_value()["guilds"][0].clone();
+    merged["channels"][1]["last_message_id"] = (NEWEST + 8).to_string().into();
 
     apply(
         &mut state,
         "PASSIVE_UPDATE_V2",
         passive(GENERAL, NEWEST + 6),
     );
+    assert_eq!(taken(&mut state), None, "a passive update");
+    apply(&mut state, "GUILD_CREATE", merged);
+    assert_eq!(taken(&mut state), None, "a GUILD_CREATE merge");
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 0)));
+    assert!(badge(&state, GENERAL).unread);
 
-    assert_eq!(taken(&mut state), at_now(GENERAL, NEWEST + 6));
-    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 6), 0)));
+    apply(&mut state, "MESSAGE_CREATE", message(NEWEST + 7, GENERAL));
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 7));
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 7), 0)));
+    assert!(badge(&state, GENERAL).unread, "the cursor is further");
+    apply(&mut state, "MESSAGE_CREATE", plain(NEWEST + 9, GENERAL));
+
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 9));
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+}
+
+#[test]
+fn reading_a_channel_without_a_present_window_acks_nothing_until_it_loads() {
+    let mut state = ready_state();
+
+    let (ack, _) = reading(&mut state, Some(GENERAL));
+    assert_eq!(ack, None, "no list");
+    state.view_channel(id(GENERAL), &mut Vec::new());
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Around(Snowflake::new(NEWEST - 1)),
+        &[NEWEST - 1],
+        false,
+    );
+    assert_eq!(taken(&mut state), None, "a list away from the present");
+    assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST - 1), 2)));
+    showing(&mut state, GENERAL, &[NEWEST - 1, NEWEST]);
+
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST));
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+
+    let mut state = ready_state();
+    showing(&mut state, GENERAL, &[NEWEST - 1]);
+    state.apply(dispatch("READY", &ready_value()), &mut Vec::new());
+    let (ack, _) = reading(&mut state, Some(GENERAL));
+    assert_eq!(ack, None, "a stale list");
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Refresh,
+        &[NEWEST - 1, NEWEST],
+        true,
+    );
+
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST));
 }
 
 // From the disk cache, before the first READY.

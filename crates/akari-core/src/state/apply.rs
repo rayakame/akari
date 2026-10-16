@@ -21,9 +21,7 @@ use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
-use crate::model::{
-    self, ChannelId, GenericMarker, GuildId, MessageId, Permissions, Snowflake, Timestamp, UserId,
-};
+use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -312,8 +310,8 @@ pub(crate) struct State {
     restored: bool,
     windows: Windows,
     cooldowns: Cooldowns,
-    // The channel the user is reading, with its cursor as of the last write.
-    reading: Option<(ChannelId, Option<Snowflake<GenericMarker>>)>,
+    // The channel the user is reading, with the newest row its list showed after the last write.
+    reading: Option<(ChannelId, Option<MessageId>)>,
     // Its local ack from the latest write, for the account to send.
     due: Option<Ack>,
     // Channels whose cursor came from an unread update and may be behind Discord's.

@@ -5,12 +5,12 @@ use akari_core::model::ChannelId;
 use tokio::net::TcpStream;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::WebSocketStream;
-use wiremock::matchers::method;
+use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use super::fake::{FakeGateway, GENERAL, GUILD, events_until, online};
+use super::fake::{FakeGateway, GENERAL, GUILD, events_until, fixture, online};
 use super::support::{USER, token};
-use crate::account::Account;
+use crate::account::{Account, MessageLoad};
 
 struct Online {
     account: Arc<Account>,
@@ -68,6 +68,20 @@ async fn acks_reaching(server: &MockServer, suffix: &str) -> usize {
 #[tokio::test]
 async fn set_reading_crosses_and_acks() {
     let online = online_acking().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v9/channels/300000000000000002/messages"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixture(include_str!(
+                "../../../akari-core/tests/fixtures/messages_page.json"
+            ))),
+        )
+        .mount(&online.server)
+        .await;
+    online
+        .account
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap();
     assert!(unread(&online.account, GENERAL));
 
     online.account.set_reading(Some(GENERAL));

@@ -448,6 +448,15 @@ impl Windows {
         })
     }
 
+    // The newest row of a list at the present; `None` while it's away from it or stale.
+    pub(crate) fn newest_at_present(&self, channel: ChannelId) -> Option<MessageId> {
+        let window = self.windows.get(&channel)?;
+        if !window.latest || window.stale {
+            return None;
+        }
+        window.messages.last().map(|message| message.id)
+    }
+
     pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         let messages = &self.windows.get(&channel)?.messages;
         let index = Window::position(messages, id).ok()?;

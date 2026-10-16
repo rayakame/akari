@@ -222,40 +222,33 @@ impl State {
                     }))
     }
 
-    fn cursor(&self, channel: ChannelId) -> Option<Snowflake<GenericMarker>> {
-        self.entities
-            .channels
-            .get(&channel)
-            .and_then(|stored| stored.last_message_id)
-    }
-
     // Before the first READY the channel is only remembered.
     pub(crate) fn set_reading(
         &mut self,
         channel: Option<ChannelId>,
         events: &mut Vec<StoreEvent>,
     ) -> Option<Ack> {
-        self.reading = channel.map(|id| (id, self.cursor(id)));
-        let ack = channel
-            .filter(|_| self.ready)
-            .and_then(|id| self.ack_locally(id));
+        self.reading = channel.map(|id| (id, self.windows.newest_at_present(id)));
+        let ack = self
+            .reading
+            .and_then(|(id, shown)| self.read_shown(id, shown?));
         self.refresh_badges(wall_millis(), events);
         ack
     }
 
-    // Only a moved cursor reads the channel again: an ack from elsewhere (mark as unread) moves
-    // none, and acking it back would loop.
+    // Only the list growing at its present end reads the channel again. A cursor moved by
+    // anything else may be past what the list shows, and an ack from elsewhere moves no row.
     pub(super) fn follow_reading(&mut self) {
         let Some((channel, seen)) = self.reading else {
             return;
         };
-        let cursor = self.cursor(channel);
-        if cursor == seen {
+        let shown = self.windows.newest_at_present(channel);
+        if shown == seen {
             return;
         }
-        self.reading = Some((channel, cursor));
-        if self.ready
-            && let Some(ack) = self.ack_locally(channel)
+        self.reading = Some((channel, shown));
+        if let Some(newest) = shown.filter(|_| shown > seen)
+            && let Some(ack) = self.read_shown(channel, newest)
         {
             self.due = Some(ack);
         }
@@ -265,10 +258,39 @@ impl State {
         let Some((channel, _)) = self.reading else {
             return;
         };
-        self.reading = Some((channel, self.cursor(channel)));
-        if let Some(ack) = self.ack_locally(channel) {
+        let shown = self.windows.newest_at_present(channel);
+        self.reading = Some((channel, shown));
+        if let Some(ack) = shown.and_then(|newest| self.read_shown(channel, newest)) {
             self.due = Some(ack);
         }
+    }
+
+    // Up to the list's newest row, never further, so a channel whose cursor is past it stays
+    // unread. Always at a message: what the list shows is never behind Discord.
+    fn read_shown(&mut self, channel: ChannelId, shown: MessageId) -> Option<Ack> {
+        if !self.ready {
+            return None;
+        }
+        let stored = self.entities.channels.get(&channel)?;
+        let before = self.entities.read_states.get(channel);
+        if shown.get() <= self.entities.read_position(stored)
+            && before.is_none_or(|state| state.mentions == 0)
+        {
+            return None;
+        }
+        if self.entities.read_states.read(channel, Some(shown)) {
+            self.dirty.channel(channel);
+        }
+        Some(Ack {
+            channel,
+            cursor: self
+                .entities
+                .read_states
+                .get(channel)
+                .and_then(|state| state.acked),
+            now: false,
+            before,
+        })
     }
 
     pub(crate) fn take_reading_ack(&mut self) -> Option<Ack> {
