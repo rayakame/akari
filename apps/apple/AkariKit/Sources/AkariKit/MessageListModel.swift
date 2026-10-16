@@ -125,6 +125,10 @@ public final class MessageListModel {
     @ObservationIgnored private var scrolledUp = 0.0
     // The load ticket of the last latest or around load or supersede: only it places the list.
     @ObservationIgnored private var lastPlacing = 0
+    // A latest load a jump overtook, until a later page lands: should the jump not land, the
+    // list still has to reach the present.
+    @ObservationIgnored private var owedPresent: Int?
+    @ObservationIgnored private var landed = 0
 
     init(
         channelId: ChannelId, userId: UserId, account: Account, store: Store,
@@ -202,6 +206,10 @@ public final class MessageListModel {
             // A failed load, or a page the core dropped for a newer request, leaves the bar.
             let (ticket, outcome) = await load(.around)
             guard outcome == .applied, ticket == lastPlacing else {
+                // Unless a load placed the list since, nothing else takes it to the present.
+                if owedPresent != nil, activeLoads[lastPlacing] == nil {
+                    await load(.latest)
+                }
                 return
             }
         }
@@ -377,6 +385,9 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: report,
                 failure: nil, page: Set(page), read: read, started: started,
                 duration: started.duration(to: .now))
+            if kind == .latest || kind == .around {
+                notePlaced(ticket, kind: kind, outcome: report?.outcome)
+            }
             return (ticket, report?.outcome)
         } catch {
             let failure = error as? RequestError ?? .UnexpectedResponse
@@ -386,6 +397,20 @@ public final class MessageListModel {
                 failure: failure, read: .zero, started: started,
                 duration: started.duration(to: .now))
             return (ticket, nil)
+        }
+    }
+
+    private func notePlaced(_ ticket: Int, kind: Load, outcome: PageOutcome?) {
+        switch outcome {
+        case .applied?:
+            landed = max(landed, ticket)
+            if let owed = owedPresent, owed < ticket {
+                owedPresent = nil
+            }
+        case .overtaken? where kind == .latest && ticket > landed:
+            owedPresent = ticket
+        default:
+            break
         }
     }
 

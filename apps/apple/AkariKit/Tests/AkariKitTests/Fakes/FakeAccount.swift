@@ -155,7 +155,9 @@ final class FakeAccount: Account, @unchecked Sendable {
             return placing < placed.newest
         case .latest:
             var replaces = false
-            fakeStore.update { replaces = $0.windows[channel]?.latest == false }
+            fakeStore.update { state in
+                replaces = state.windows[channel].map { !$0.latest || $0.stale } ?? false
+            }
             return replaces && placed.newest == placed.around && placed.around > placing
         default:
             return false

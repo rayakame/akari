@@ -452,6 +452,101 @@ struct UnreadBarTests {
         #expect(model.unreadJumps == 0)
     }
 
+    // The jump to the present, then a bar click whose load fails: the latest page the jump
+    // overtook is still owed.
+    @Test
+    func aFailedJumpAfterTheJumpToPresentStillEndsAtThePresent() async {
+        inHistory([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [window([7, 8])])
+        let model = makeModel()
+        model.setNewMessagesLineOnScreen(false)
+        let present = Task { await model.jumpToPresent() }
+        await account.loadReplies.pulled(1)
+        let jump = Task { await model.jumpToUnread() }
+        await account.loadReplies.pulled(2)
+
+        account.loadReplies.send(nil)
+        await finished(present)
+        account.loadReplies.send(.Network(kind: .timeout))
+        await account.loadReplies.pulled(3)
+        account.loadReplies.send(nil)
+        await finished(jump)
+
+        #expect(loads == [latestLoad, aroundLoad, latestLoad])
+        #expect(ids(model) == [7, 8])
+        #expect(model.atPresent)
+        #expect(model.unreadJumps == 0)
+        #expect(model.unreadBar != nil, "the jump failed")
+    }
+
+    // The bar's "Mark As Read" supersedes the jump that overtook the jump to the present.
+    @Test
+    func markingReadAfterTheJumpToPresentAndTheBarEndsAtThePresent() async throws {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(10)], in: 1)
+        }
+        inHistory([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [window([7, 8])])
+        let session = SessionModel(
+            userId: id(1), account: account, memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(.guild(id(1)))
+        let model = try #require(session.messages)
+        model.setNewMessagesLineOnScreen(false)
+        let present = Task { await model.jumpToPresent() }
+        await account.loadReplies.pulled(1)
+        let jump = Task { await model.jumpToUnread() }
+        await account.loadReplies.pulled(2)
+
+        account.loadReplies.send(nil)
+        await finished(present)
+        session.markRead(channel: here)
+        account.loadReplies.send(nil)
+        await account.loadReplies.pulled(3)
+        account.loadReplies.send(nil)
+        await finished(jump)
+
+        #expect(loads == [latestLoad, aroundLoad, latestLoad])
+        #expect(ids(model) == [7, 8])
+        #expect(model.atPresent)
+        #expect(model.unreadJumps == 0)
+        session.close()
+    }
+
+    // A cached window opened stale, its refresh replaced by the jump, which then fails.
+    @Test
+    func aFailedJumpOnAStaleListStillRefreshesIt() async {
+        store.update { [here] state in
+            state.windows[here] = window([5, 6, 7, 8], stale: true)
+            state.readStates[here] = readState(2)
+        }
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [window([7, 8])])
+        let model = makeModel()
+        model.setNewMessagesLineOnScreen(false)
+        let open = Task { await model.open() }
+        await account.loadReplies.pulled(1)
+        let jump = Task { await model.jumpToUnread() }
+        await account.loadReplies.pulled(2)
+
+        account.loadReplies.send(nil)
+        await finished(open)
+        account.loadReplies.send(.Network(kind: .timeout))
+        await account.loadReplies.pulled(3)
+        account.loadReplies.send(nil)
+        await finished(jump)
+
+        #expect(loads == [latestLoad, aroundLoad, latestLoad])
+        #expect(ids(model) == [7, 8])
+        #expect(model.atPresent)
+        #expect(!model.isStale)
+        #expect(model.unreadBar != nil)
+    }
+
     // The around page reached the list before its load returned, and the user clicked again.
     @Test
     func aSecondClickWhileTheJumpLoadsEndsAtTheLine() async {
