@@ -5,8 +5,9 @@ dots and red counts Akari draws from them. The main reference is the
 [read state topic](https://docs.discord.food/topics/read-state); where it is silent, Akari
 follows the official desktop client as observed on 2026-10-14 (the UI side is in
 [server-list.md](../ui/server-list.md#what-makes-a-server-unread) and
-[channel-list.md](../ui/channel-list.md#what-makes-a-row-unread)). Akari doesn't acknowledge
-anything yet: it shows what the user read elsewhere, and its own messages.
+[channel-list.md](../ui/channel-list.md#what-makes-a-row-unread)). Akari shows what the user
+read elsewhere and acknowledges what the user reads in it
+([below](#how-akari-acks)).
 
 ## What Akari reads
 
@@ -21,7 +22,7 @@ anything yet: it shows what the user read elsewhere, and its own messages.
 Only channel read states (`read_state_type` 0) are kept. Identify doesn't ask for
 `NON_CHANNEL_READ_STATES`, so the others (guild events, the notification center, …) should
 not come; if they do, they are skipped. `last_pin_timestamp`, `last_viewed` and the flags
-aren't kept: Akari has no pins view, and sends no acks yet.
+aren't kept: Akari has no pins view, and `last_viewed` only goes out with its own acks.
 
 ## The unread rule
 
@@ -66,7 +67,7 @@ ordinary message there.
 
 What the official web client sends when the user reads, observed on 2026-10-15 in the
 browser's Network list (German UI, a second account, the main account posting from a phone).
-*Akari: sends none of this yet.*
+What Akari does with it is [below](#how-akari-acks).
 
 **One channel.** `POST /channels/{channel_id}/messages/{message_id}/ack`, answered 200, with
 the body
@@ -78,7 +79,7 @@ the body
 No `flags`, no `manual`. `last_viewed` is the number of days since the Discord epoch
 (2015-01-01 UTC). It was 4306 at 15:13 and at 19:58 UTC on 2026-10-15, so the client rounds up
 or to the nearest day (rounding down would give 4305). Which of the two is open until an ack
-before 12:00 UTC is seen, where they differ.
+before 12:00 UTC is seen, where they differ; Akari rounds up.
 
 **When it goes out:**
 
@@ -91,8 +92,8 @@ before 12:00 UTC is seen, where they differ.
 - Escape sends one plain ack with the same body, and nothing when the channel is read.
 - Posting in a forum sends one plain ack. The forum stays unread, also after a reload.
 
-**Many channels.** Shift+Escape (the server) and a server's or folder's "Mark As Read" send
-`POST /read-states/ack-bulk`, answered 204:
+**Many channels.** Shift+Escape (the server), a server's "Mark As Read" and a folder's "Mark
+Folder As Read" send `POST /read-states/ack-bulk`, answered 204:
 
 ```json
 {"read_states":[{"channel_id":"…","message_id":"…","read_state_type":0}]}
@@ -100,7 +101,9 @@ before 12:00 UTC is seen, where they differ.
 
 - The entries are the server's unread channels plus its forum channel(s). The forum was in
   every bulk, also when nothing had been posted there since the last one. Read channels and
-  threads the user hasn't joined (such as a new forum post) have no entry.
+  threads the user hasn't joined (such as a new forum post) have no entry. Only the server
+  item's bulks were itemized (3 entries, then 2 after one more message); the folder item's
+  wasn't.
 - Shift+Escape at Home sends nothing.
 - **Message IDs:** each channel's newest message ID. A forum's entry is a snowflake with only
   a timestamp (the low 22 bits are zero) for the moment of the click.
@@ -110,6 +113,68 @@ before 12:00 UTC is seen, where they differ.
   channels is **open**. [docs.discord.food](https://docs.discord.food/topics/read-state)
   documents no limit. One mark-as-read gave 254 MESSAGE_ACK events in another session, which
   points to chunks.
+
+## How Akari acks
+
+Akari acks what the user reads and marks channels and servers read, with the routes, body and
+message IDs above. The rules are in `crates/akari-core/src/account/acks.rs` (pacing and
+sending), `rest/clock.rs` (Discord's time) and `state/apply/reading.rs` (what to ack); how
+the requests share Discord's limits is in [rate-limits.md](rate-limits.md#acks).
+
+**When.** Only for the channel the host says the user is reading (`Account::set_reading`),
+never for one that merely receives messages, and never in answer to a MESSAGE_ACK from
+elsewhere. The macOS app sets it only while the session is online, the app is active, the
+window is key and visible, the list is at the present's bottom with its refresh after READY
+in, and the user is engaged: opening the channel, a click or a key press in the window engages;
+scrolling away from the bottom, the window losing key, the app going inactive or the window
+being minimized ends it, and coming back to the bottom or the window alone doesn't read
+([message-list.md](../ui/message-list.md#reading-the-signal-to-ack)). A list the session
+opened on its own (the open channel deleted or hidden, its server gone) isn't read until the
+user clicks. While a channel is read, the store marks it read at once, so its badge goes, and
+the ack follows: when it is unread or has mentions, and again for each message that moves its
+newest message. Before the first READY nothing is read; the channel is acked once READY is in.
+
+**Pacing.** Per channel an ack waits for a 2 s lull after the latest message read, the first
+one too, but goes out at the latest 10 s after the first one pending, so a busy channel still
+syncs to the user's other devices. Escape, the menus and the unread bar's button go out at
+once. Only one ack request is in flight at a time, the oldest due first. A channel is never
+acked backwards: what Discord already took isn't sent again, until another device marks the
+channel unread (a manual MESSAGE_ACK) or a READY comes, which forget what was sent.
+
+**Errors.** A 429 or a transient error (network, 502/504 after their retry) leaves the ack
+pending; it is retried after a wait that doubles from 2 s up to a minute (the 429's
+`retry_after` if longer), merged with newer targets, until it goes through. Another refusal
+drops the ack. A 401 ends the account like a rejected token, and what's pending is dropped.
+Nothing is rolled back.
+
+**The body.** A channel ack is `{"token":null,"last_viewed":N}` with `last_viewed` the days
+since the Discord epoch, rounded up (at Discord's time, below), and no `flags` or `manual`.
+The bulk is `{"read_states":[{channel_id, message_id, read_state_type: 0}]}`, in chunks of 50
+entries (an unconfirmed reading of the one 50-entry request seen), one request per chunk. A
+chunk takes whatever bulk entries are due together, so two bulks marked at once can share a
+request. The channels are those whose badge shows unread or mentions, with their joined,
+unarchived threads (never unjoined ones), plus every forum and media channel the user can
+view, read or not. With nothing unread there is no bulk, and no forum goes alone.
+
+**Which message ID.** The channel's newest message, as the official client sends. A "now"
+snowflake (a timestamp, the low 22 bits zero) goes instead for:
+
+- forum and media channels, as observed;
+- channels whose newest message came from a PASSIVE_UPDATE_V2 or CHANNEL_UNREAD_UPDATE, which
+  arrive once and may be behind Discord's (see [Large guilds](#large-guilds)). A READY or a
+  history page that reaches the present makes it ordinary again;
+- every channel before the first READY, whose newest messages come from the disk cache.
+
+"Now" is never below the channel's newest known message. It comes from Discord's clock: the
+`Date` header of the latest REST response plus the monotonic time since it arrived, never the
+Mac's clock, so a Mac running ahead can't ack messages that arrive a moment later. The
+header has whole seconds and is stamped before the answer travels, so the estimate runs up to
+about a second behind Discord, and behind after a sleep, never ahead. Without a sample, the
+newest message goes instead, and `last_viewed` falls back to the Mac's date.
+
+**Echoes.** Discord answers an ack with MESSAGE_ACK on the gateway, also to Akari's own. One
+at or behind the stored position changes nothing, so it can't clear a mention counted since
+([MESSAGE_ACK](#message_ack)).
 
 ## Mentions
 
@@ -211,9 +276,9 @@ names or message content.
 
 ## Open points
 
-- **Acks:** Akari doesn't acknowledge channels yet, nor mark them read; what the official
-  client does is [above](#acks-in-the-official-client). Open there: `last_viewed` rounding
-  and the size of a bulk.
+- **Acks:** what the official client does is [above](#acks-in-the-official-client), what Akari
+  does [here](#how-akari-acks). Open: `last_viewed` rounding (ceiling or nearest, apart only
+  before 12:00 UTC), whether 50 is a cap per request, and what a folder's bulk holds.
 - **Mentions in a voice channel's chat:** counted, but what the official client shows for
   them is **unverified**.
 - **Joining or leaving a thread elsewhere** (THREAD_MEMBER_UPDATE) isn't decoded; such a

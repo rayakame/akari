@@ -301,6 +301,25 @@ Akari's bar:
 - It looks like the jump bar: 32 tall, 16 from the sides and 4 from the top, corner radius 8,
   `brand` with white 14 medium text, over the messages and above the "Catching up…" capsule.
 
+### Reading: the signal to ack
+
+What the official client showed (Q12d-f above, 2026-10-15): after a break it acks only on a
+click or key press in the client; scrolling back down, focusing the browser or restoring the
+window isn't enough. Akari tells the core which channel the user reads
+([read-states.md](../protocol/read-states.md#how-akari-acks)) only while all of these hold:
+
+- the session is online, and the list's refresh after READY is in (the list isn't stale);
+- the app is active and the window is key and visible (not minimized or covered);
+- the list is at the present and scrolled to its bottom;
+- the user is engaged: opening the channel (also the one already open), reopening the last
+  place at launch, a click or a key press in the window. Scrolling away from the bottom, the
+  window losing key, the app going inactive or the window being hidden ends it, and
+  scroll-wheel events don't engage. It is stricter than the official client in one place: a
+  click while scrolled up reads nothing until the list is back at the bottom.
+
+A list the session opens on its own (the open channel deleted or hidden, its server gone)
+isn't read until the user clicks.
+
 ## Later
 
 - Emoji images, embeds and images.

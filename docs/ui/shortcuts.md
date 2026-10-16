@@ -28,14 +28,12 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   lists Shift+Up (Option+Up on macOS) for the same action. Akari follows the blog; the key
   does nothing until editing exists, and never beeps.
 - **Escape.** In Discord, Escape marks the open channel as read and cancels an edit or a
-  reply in progress. Akari has no edits or replies yet, so Escape marks the channel read and
-  jumps to the present: it loads the newest messages if the list shows older ones, and
+  reply in progress; it also jumps to the present from a list scrolled up, and with nothing
+  unread it sends nothing. Akari has no edits or replies yet, so Escape marks the channel read
+  and jumps to the present: it loads the newest messages if the list shows older ones, and
   scrolls to the bottom. It does this from the message list and from the composer, through
-  one action. Shift+Escape, from the same places, marks the open server read.
-- **Escape marks read.** In the web client, Escape jumps to the present and marks the channel
-  read, also when the list is scrolled up; with nothing unread it sends nothing.
-  Shift+Escape marks the whole server read, and does nothing at Home
-  ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
+  one action. Shift+Escape, from the same places, marks the open server read, and does nothing
+  at Home ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
 - **Shift+Page Up** is still **unverified**: Discord's shortcut list (Cmd+/) didn't open in
   the browser or the desktop app, and the Mac help article is images only. Community lists
   give the same keys. In Akari it jumps to the first unread message, as a click on the unread

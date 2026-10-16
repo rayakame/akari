@@ -100,8 +100,9 @@ rows the same, without the pill.*
 ### Context menu
 
 The first item of a channel row's menu is "Mark As Read" (observed 2026-10-15 in the German
-client as "Als gelesen markieren"; the English label is unconfirmed). It is disabled, not
-hidden, when the channel has nothing unread. *Akari: the same, for every channel row.*
+client as "Als gelesen markieren"; the English label is unconfirmed). The official client
+disables the DM row's item instead of hiding it when nothing is unread ([below](#home)); the channel
+row's was not observed. *Akari: disables both when nothing is unread.*
 
 ### In Akari
 

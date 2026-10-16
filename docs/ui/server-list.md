@@ -109,10 +109,11 @@ Observed in the official web client on 2026-10-15 (German UI):
   (selected) pill and a red badge; it goes when the user clicks back into the client.
 
 *Akari: the same menus, the read item first and disabled while the server, folder or DM
-shows neither the unread pill nor a badge. Opening a DM from the rail reads it, so its avatar
-goes; an open DM that turns unread while the user isn't reading it (another app in front, the
-list scrolled up) comes back with the tall pill and its badge
-([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).*
+shows neither the unread pill nor a badge. A folder's item stays enabled while any of its
+servers shows unread or mentions, also when the folder is expanded and its own tile shows
+neither. Opening a DM from the rail reads it, so its avatar goes; an open DM that turns unread
+while the user isn't reading it (another app in front, the list scrolled up) comes back with
+the tall pill and its badge ([read-states.md](../protocol/read-states.md#how-akari-acks)).*
 
 ## Initials
 

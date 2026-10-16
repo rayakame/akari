@@ -400,9 +400,8 @@ pub(crate) struct AckSender {
 }
 
 impl AckSender {
-    // `unauthorized` runs once if Discord answers an ack with 401; the sender has stopped then.
-    // A failed ack is retried after `retry_delay`, then after twice as long each time, up to a
-    // minute.
+    // `unauthorized` runs once on a 401, after which the sender has stopped.
+    // A failed ack is retried after `retry_delay`, doubling each time up to a minute.
     pub(crate) fn start(
         runtime: &tokio::runtime::Handle,
         rest: Arc<AccountRest>,
