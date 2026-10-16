@@ -127,9 +127,10 @@ final class ComposerTextView: NSTextView {
             onEditLastMessage?()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
-            // Shift+Escape and Cmd+. arrive as the same command.
+            // Shift+Escape and Cmd+. arrive as the same command; Cmd+. does nothing here, as in
+            // the official client.
             guard let event = currentEvent(), event.isEscapeKey else {
-                return false
+                return true
             }
             if event.modifierFlags.contains(.shift) {
                 onShiftEscape()

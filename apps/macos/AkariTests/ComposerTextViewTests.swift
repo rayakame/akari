@@ -109,18 +109,41 @@ final class ComposerTextViewTests {
         #expect(escapes == 0)
     }
 
+    // Cmd+. does nothing in the composer, as in the official client.
+    final class Recorder: NSResponder {
+        var cancels = 0
+
+        override func cancelOperation(_ sender: Any?) {
+            cancels += 1
+        }
+    }
+
+    // Passed on, the command would reach the responders past the composer.
+    func recorder() -> Recorder {
+        let recorder = Recorder()
+        recorder.nextResponder = textView.nextResponder
+        textView.nextResponder = recorder
+        return recorder
+    }
+
     @Test
     func cmdPeriodDoesntMarkRead() {
+        let recorder = recorder()
+        type("ab")
         event = periodKey(.command)
         textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
         #expect(escapes == 0)
+        #expect(recorder.cancels == 0)
+        #expect(textView.string == "ab")
     }
 
     @Test
     func cmdShiftPeriodDoesntMarkTheServerRead() {
+        let recorder = recorder()
         event = periodKey([.command, .shift])
         textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
         #expect(serverReads == 0)
+        #expect(recorder.cancels == 0)
     }
 
     // Shift+Fn+Up on a laptop; AppKit's key bindings make it a selection command.
