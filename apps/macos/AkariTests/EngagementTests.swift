@@ -84,6 +84,20 @@ struct EngagementTests {
         #expect(session.reading == channel)
     }
 
+    // The bottom held during the gesture goes with it.
+    @Test
+    func aGestureEndingAtTheNewBottomUnpinsAsBefore() throws {
+        list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        list.show(list.page + [tallMessage])
+        try scrollToBottom()
+        list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+
+        nudge(by: 40)
+
+        #expect(session.messages?.atBottom == false)
+        #expect(session.reading == nil)
+    }
+
     @Test
     func movingTowardOlderMessagesMidGestureStillUnpins() throws {
         list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)

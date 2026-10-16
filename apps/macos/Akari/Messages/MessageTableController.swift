@@ -1120,6 +1120,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard !isLiveScrolling else {
             return
         }
+        heldPinBottom = nil
         // Also the first page of an empty list, which isn't filled until it lands.
         if let held = heldState {
             show(held)
