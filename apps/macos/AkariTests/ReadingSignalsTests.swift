@@ -25,17 +25,34 @@ final class ReadingSignalsTests {
         session.open(.guild(CrowdedStore.guildIds[0]))
     }
 
-    func signals() -> ReadingSignals {
+    func signals(monitors: Bool = false) -> ReadingSignals {
         ReadingSignals(
             session: session, window: window, center: center, workspace: workspace,
             isActive: { [unowned self] in active }, isKey: { [unowned self] _ in key },
-            isVisible: { [unowned self] _ in visible })
+            isVisible: { [unowned self] _ in visible }, monitors: monitors)
     }
 
     func click(in window: NSWindow) throws -> NSEvent {
         try #require(
             NSEvent.mouseEvent(
                 with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 1))
+    }
+
+    func keyDown(in window: NSWindow) throws -> NSEvent {
+        try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "a",
+                charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0))
+    }
+
+    // A right click: a left one would make the window key and bring it on screen.
+    func rightClick(in window: NSWindow) throws -> NSEvent {
+        try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
                 pressure: 1))
     }
@@ -135,5 +152,38 @@ final class ReadingSignalsTests {
 
         signals.handle(try click(in: window))
         #expect(session.reading == channel)
+    }
+
+    // Events the app dispatches reach the monitor before any window.
+    @Test
+    func theMonitorSeesClicksAndKeysInTheSessionsWindowOnly() throws {
+        let signals = signals(monitors: true)
+        #expect(signals.isMonitoring)
+        let channel = try #require(session.messages?.channelId)
+        let other = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
+            backing: .buffered, defer: false)
+
+        leaveAndComeBack()
+        NSApp.sendEvent(try rightClick(in: other))
+        NSApp.sendEvent(try keyDown(in: other))
+        #expect(session.reading == nil)
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == channel)
+
+        leaveAndComeBack()
+        NSApp.sendEvent(try keyDown(in: window))
+        #expect(session.reading == channel)
+    }
+
+    @Test
+    func theMonitorGoesWithTheWindow() throws {
+        let signals = signals(monitors: true)
+        leaveAndComeBack()
+
+        center.post(name: NSWindow.willCloseNotification, object: window)
+        #expect(!signals.isMonitoring)
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == nil)
     }
 }

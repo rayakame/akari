@@ -46,6 +46,9 @@ final class ReadingSignals: NSObject {
         ] {
             center.addObserver(self, selector: #selector(changed), name: name, object: window)
         }
+        center.addObserver(
+            self, selector: #selector(windowWillClose), name: NSWindow.willCloseNotification,
+            object: window)
         workspace.addObserver(
             self, selector: #selector(sessionResigned),
             name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
@@ -67,6 +70,10 @@ final class ReadingSignals: NSObject {
         if let monitor {
             NSEvent.removeMonitor(monitor)
         }
+    }
+
+    var isMonitoring: Bool {
+        monitor != nil
     }
 
     static func engages(_ type: NSEvent.EventType) -> Bool {
@@ -98,6 +105,13 @@ final class ReadingSignals: NSObject {
     @objc private func sessionBecameActive() {
         sessionActive = true
         changed()
+    }
+
+    @objc private func windowWillClose() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
     }
 
     // Feeds the session while this view is in a window.
