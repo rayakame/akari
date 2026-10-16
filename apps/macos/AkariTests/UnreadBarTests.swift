@@ -200,6 +200,15 @@ struct UnreadBarTests {
 }
 
 @MainActor
+final class Announcements {
+    var texts: [String] = []
+
+    func add(_ text: String) {
+        texts.append(text)
+    }
+}
+
+@MainActor
 struct UnreadBarScreenTests {
     let screens = SessionScreenTests()
     let drawing = MessageTextDrawingTests()
@@ -263,6 +272,26 @@ struct UnreadBarScreenTests {
         #expect(session.messages?.unreadBar?.count == 35)
         let below = try point(16 + 4, 4 + 32 + 2, in: table)
         #expect(try !drawing.matches(try pixel(host, at: below), Palette.brand))
+    }
+
+    @Test
+    func theBarIsAnnouncedOnceWhenItAppears() async throws {
+        let session = screens.formattedSession(account)
+        let announced = Announcements()
+        let host = NSHostingView(
+            rootView: SessionScreen(session: session).environment(\.announce, announced.add))
+        let window = screens.shownWindow(host)
+        defer { window.orderOut(nil) }
+        _ = try await shownWithItsBar(session, in: host)
+        let bar = try #require(session.messages?.unreadBar)
+        #expect(announced.texts == [UnreadBar.text(bar)])
+
+        // A message arrives: the bar counts it, without a second announcement.
+        account.formattedStore.add(1, to: channel)
+        await session.messages?.jumpToPresent()
+        try await screens.waitUntil(host) { session.messages?.unreadBar?.count == bar.count + 1 }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(announced.texts.count == 1)
     }
 
     @Test
