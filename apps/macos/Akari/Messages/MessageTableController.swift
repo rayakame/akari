@@ -40,6 +40,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
     // Kept with the timeline: every scroll asks for it.
     private(set) var lineRow: Int?
+    // Measured inside SwiftUI's update or the table's layout, so it reaches the model on the next
+    // turn; the last measure of a turn wins.
+    private var measuredLine: (onScreen: Bool, line: MessageId)?
+    private(set) var lineReport: Task<Void, Never>?
     private let calendarSource: () -> Calendar
     private let localeSource: () -> Locale
     private var calendar: Calendar
@@ -464,15 +468,29 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // Where it's drawn, mid-row, and not under the strip over the list's bottom. Only where rows
     // have their final places: a line passing by mid-update would count as seen for good.
     private func reportLine() {
-        guard let row = lineRow, timeline.items.count == tableView.numberOfRows,
-            let window = tableView.window, onScreen(window)
+        guard let row = lineRow, case .newMessages(let line) = timeline.items[row],
+            timeline.items.count == tableView.numberOfRows, let window = tableView.window,
+            onScreen(window)
         else {
             return
         }
-        let line = tableView.rect(ofRow: row).midY
+        let y = tableView.rect(ofRow: row).midY
         let bounds = clipView.bounds
-        actions?.newMessagesLineOnScreen(
-            line >= bounds.minY && line <= bounds.maxY - scrollView.contentInsets.bottom)
+        let shown = y >= bounds.minY && y <= bounds.maxY - scrollView.contentInsets.bottom
+        measuredLine = (shown, line)
+        guard lineReport == nil else {
+            return
+        }
+        lineReport = Task { [weak self] in
+            guard let self else {
+                return
+            }
+            lineReport = nil
+            if let measured = measuredLine {
+                measuredLine = nil
+                actions?.newMessagesLineOnScreen(measured.onScreen, line: measured.line)
+            }
+        }
     }
 
     private var isPastTheTop: Bool {

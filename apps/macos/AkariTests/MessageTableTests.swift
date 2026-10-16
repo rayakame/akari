@@ -945,7 +945,7 @@ struct MessageTableTests {
             calls.append("unread")
         }
 
-        func newMessagesLineOnScreen(_ onScreen: Bool) {
+        func newMessagesLineOnScreen(_ onScreen: Bool, line: MessageId) {
             linesOnScreen.append(onScreen)
         }
 

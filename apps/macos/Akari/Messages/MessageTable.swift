@@ -161,7 +161,11 @@ final class MessageListBridge: MessageListActions {
         Task { await messages.jumpToUnread() }
     }
 
-    func newMessagesLineOnScreen(_ onScreen: Bool) {
+    func newMessagesLineOnScreen(_ onScreen: Bool, line: MessageId) {
+        // Measured a turn earlier: it would count for a line the model has moved since.
+        guard line == messages.newMessagesLine else {
+            return
+        }
         messages.setNewMessagesLineOnScreen(onScreen)
     }
 

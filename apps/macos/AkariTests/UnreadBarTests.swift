@@ -27,6 +27,24 @@ struct UnreadBarTests {
         }
     }
 
+    // The table hands what it measured to the model on the next turn.
+    func reported() async -> Bool? {
+        await list.controller.lineReport?.value
+        return actions.linesOnScreen.last
+    }
+
+    // A real list behind the app's bridge: the first channel's messages 1...40, read up to 5.
+    func bridged() throws -> (SessionModel, MessageListModel) {
+        let session = SessionScreenTests().formattedSession(
+            FormattedAccount(contents: ["test"], readUpTo: 5))
+        let messages = try #require(session.messages)
+        list.controller.actions = MessageListBridge(
+            messages: messages, link: MessageTableLink(),
+            links: LinkFollower(trusted: session.trustedLinks()), go: { _ in },
+            markServerRead: {})
+        return (session, messages)
+    }
+
     // How far the line's row starts below the top of what the list shows.
     func lineOffset() throws -> CGFloat {
         list.table.rect(ofRow: try #require(lineRow)).minY - list.clip.bounds.minY
@@ -43,22 +61,64 @@ struct UnreadBarTests {
     }
 
     @Test
-    func theTableSaysWhetherTheLineIsOnScreen() {
+    func theTableSaysWhetherTheLineIsOnScreen() async {
         list.show(MessageTableState(rows: list.page, newMessages: line))
-        #expect(actions.linesOnScreen.last == false, "above the view at the bottom")
+        #expect(await reported() == false, "above the view at the bottom")
 
         screen.shows = false
-        let reported = actions.linesOnScreen.count
+        let reports = actions.linesOnScreen.count
         list.scroll(toRowOf: 145)
-        #expect(actions.linesOnScreen.count == reported, "nothing from a hidden window")
+        _ = await reported()
+        #expect(actions.linesOnScreen.count == reports, "nothing from a hidden window")
 
         screen.shows = true
         NotificationCenter.default.post(
             name: NSWindow.didChangeOcclusionStateNotification, object: list.window)
-        #expect(actions.linesOnScreen.last == true)
+        #expect(await reported() == true)
 
         list.scroll(toRowOf: 151)
-        #expect(actions.linesOnScreen.last == false, "just above the view")
+        #expect(await reported() == false, "just above the view")
+    }
+
+    // SwiftUI's update calls show(); the model changes on the next turn, outside it.
+    @Test
+    func theLineReportLeavesTheUpdatePass() async throws {
+        let (session, messages) = try bridged()
+        let state = MessageTableState(rows: messages.rows, newMessages: messages.newMessagesLine)
+
+        list.controller.show(state)
+        #expect(messages.unreadBar == nil, "not inside the update")
+        list.window.layoutIfNeeded()
+        #expect(messages.unreadBar == nil, "nor inside the table's layout")
+
+        await list.controller.lineReport?.value
+        #expect(messages.unreadBar?.count == 35)
+        _ = session
+    }
+
+    @Test
+    func reportsInOneTurnReachTheModelOnce() async {
+        list.show(MessageTableState(rows: list.page, newMessages: line))
+        list.scroll(toRowOf: 145)
+
+        await list.controller.lineReport?.value
+        #expect(actions.linesOnScreen == [true])
+    }
+
+    // Measured a turn before it reaches the model, a report may be about a line the model has
+    // since moved.
+    @Test
+    func aReportAboutAnotherLineChangesNothing() throws {
+        let (session, messages) = try bridged()
+        let bridge = try #require(list.controller.actions)
+        let line = try #require(messages.newMessagesLine)
+
+        bridge.newMessagesLineOnScreen(false, line: MessageId(rawValue: line.rawValue - 1))
+        #expect(messages.unreadBar == nil)
+
+        bridge.newMessagesLineOnScreen(false, line: line)
+        #expect(messages.unreadBar != nil)
+        _ = session
     }
 
     @Test
@@ -85,7 +145,7 @@ struct UnreadBarTests {
     }
 
     @Test
-    func aJumpScrollsTheLineToTheTop() throws {
+    func aJumpScrollsTheLineToTheTop() async throws {
         list.show(MessageTableState(rows: list.page, newMessages: line))
         #expect(list.controller.isPinnedToBottom)
 
@@ -93,7 +153,7 @@ struct UnreadBarTests {
 
         #expect(abs(try lineOffset()) <= 0.5)
         #expect(actions.bottoms.last == false)
-        #expect(actions.linesOnScreen.last == true)
+        #expect(await reported() == true)
 
         // Where the reader is now, a message arriving below moves nothing.
         let arrived = list.page + [row(201, by: author(2), at: list.noon + 201 * 120)]
