@@ -16,7 +16,7 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Quick switcher | Cmd+K | Later |
 | Previous or next channel | Option+Up / Option+Down | Later |
 | Scroll the messages | Page Up / Page Down (**unverified**) | The list's native scrolling |
-| Jump to the oldest unread message | Shift+Page Up (Shift+Fn+Up on a Mac laptop) (**unverified**) | Later, with read state |
+| Jump to the oldest unread message | Shift+Page Up (Shift+Fn+Up on a Mac laptop) (**unverified**) | Done: jumps like a click on the unread bar (below) |
 | Focus the composer | Tab (**unverified**) | Later |
 
 Rows marked **unverified** come from community lists, not from Discord's own pages. Escape and
@@ -38,6 +38,9 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
 - **Shift+Page Up** is still **unverified**: Discord's shortcut list (Cmd+/) didn't open in
   the browser or the desktop app, and the Mac help article is images only. Community lists
-  give the same keys.
+  give the same keys. In Akari it jumps to the first unread message, as a click on the unread
+  bar does ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)), from
+  the message list, a message's selected text and the composer, whenever the list has a new
+  messages line, and does nothing otherwise. In the composer it never extends the selection.
 - **No shortcut for "jump to present"** is documented for the official client; its bar at
   the bottom of the list is clicked ([message-list.md](message-list.md#jump-to-present)).

@@ -14,6 +14,7 @@ struct MessageTableState: Equatable {
     var openedFrom = MessageListModel.Origin.network
     var revealedSpoilers: Set<SpoilerKey> = []
     var newMessages: MessageId?
+    var unreadJumps = 0
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -162,6 +163,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         heldState = nil
+        let wasFilled = filled
         let held = heldSince.map { $0.duration(to: .now) }
         heldSince = nil
         let started = ContinuousClock.now
@@ -181,6 +183,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             noteApply(started, inserting: changes.inserted, of: next, held: held)
         }
         reload(revealedNow)
+        // A new table for a model that jumped before doesn't jump again.
+        if wasFilled, state.unreadJumps != previous.unreadJumps {
+            scrollLineToTop()
+        }
+        reportLine()
         updateRelativeTimer()
         if previous.start != state.start {
             remeasureStart()
@@ -422,6 +429,42 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         } else if load {
             actions?.jumpToLatest()
         }
+    }
+
+    private var lineRow: Int? {
+        state.newMessages.flatMap { line in
+            timeline.items.firstIndex { $0.id == .newMessages(line) }
+        }
+    }
+
+    // Taken as the user's scroll: clipMoved leaves the reader's place alone for our own.
+    private func scrollLineToTop() {
+        guard let row = lineRow else {
+            return
+        }
+        let range = clipView.originRange
+        let y = min(max(tableView.rect(ofRow: row).minY, range.lowerBound), range.upperBound)
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: y))
+        scrollView.reflectScrolledClipView(clipView)
+        sticksToBottom = isPinnedToBottom
+        anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
+        askForMore()
+    }
+
+    // Where it's drawn, mid-row, and not under the strip over the list's bottom. Only where rows
+    // have their final places: a line passing by mid-update would count as seen for good.
+    private func reportLine() {
+        guard let row = lineRow, timeline.items.count == tableView.numberOfRows,
+            let window = tableView.window, onScreen(window)
+        else {
+            return
+        }
+        let line = tableView.rect(ofRow: row).midY
+        let bounds = clipView.bounds
+        actions?.newMessagesLineOnScreen(
+            line >= bounds.minY && line <= bounds.maxY - scrollView.contentInsets.bottom)
     }
 
     private var isPastTheTop: Bool {
@@ -923,6 +966,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     @objc private func windowShownOrHidden(_ notification: Notification) {
         if notification.object as? NSWindow === tableView.window {
             updateRelativeTimer()
+            reportLine()
         }
     }
 
@@ -992,6 +1036,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: Self.restingInset, right: 0)
         tableView.didLayout = { [weak self] in
             self?.settle()
+            self?.reportLine()
         }
         // The composer below grows and shrinks the list without a layout of the table.
         scrollView.postsFrameChangedNotifications = true
@@ -1003,6 +1048,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         tableView.onShiftEscape = { [weak self] in
             self?.actions?.markServerRead()
+        }
+        tableView.onShiftPageUp = { [weak self] in
+            self?.actions?.jumpToUnread()
         }
         tableView.pointerMoved = { [weak self] in
             self?.updateHover()
@@ -1177,6 +1225,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard ownChanges == 0, !tableView.isLayingOut, origin != lastClipOrigin else {
             return
         }
+        reportLine()
         sticksToBottom = isPinnedToBottom
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()
@@ -1290,6 +1339,7 @@ class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
     var onEscape: (() -> Void)?
     var onShiftEscape: (() -> Void)?
+    var onShiftPageUp: (() -> Void)?
     var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
     var pointerMoved: (() -> Void)?
     var windowChanged: (() -> Void)?
@@ -1307,6 +1357,22 @@ class MessageTableView: NSTableView {
         } else {
             onEscape?()
         }
+    }
+
+    // Page Up doesn't reach AppKit's key bindings in a table, so Shift+Page Up (Shift+Fn+Up on a
+    // laptop) is caught here.
+    override func keyDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection([.shift, .control, .option, .command])
+        if event.specialKey == .pageUp, flags == .shift {
+            onShiftPageUp?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    // Shift+Page Up's command, from a message's text.
+    override func pageUpAndModifySelection(_ sender: Any?) {
+        onShiftPageUp?()
     }
 
     override func viewDidMoveToWindow() {

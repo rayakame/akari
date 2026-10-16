@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 
 /// One spoiler of one message, revealed by a click.
@@ -18,6 +19,8 @@ public final class MessageListModel {
         case latest
         case older
         case newer
+        /// Around the read position, for the jump to the first unread message.
+        case around
     }
 
     /// Where a channel's first rows came from.
@@ -36,6 +39,24 @@ public final class MessageListModel {
         public init(id: MessageId, message: Message) {
             self.id = id
             self.message = message
+        }
+    }
+
+    /// Over the list's top while the new messages line hasn't been on screen.
+    public struct UnreadBar: Equatable, Sendable {
+        /// The loaded messages from others from the line on.
+        public let count: Int
+        /// More are unread than are loaded: the read position is older than the loaded messages,
+        /// or the list isn't at the present.
+        public let more: Bool
+        /// The first unread message's time, or the read position's when that isn't loaded.
+        public let since: Date
+
+        /// "3 new messages since 17:13", with `time` as the app shows message times.
+        public func text(time: String) -> String {
+            let number = count.formatted() + (more ? "+" : "")
+            let messages = count == 1 && !more ? "message" : "messages"
+            return "\(number) new \(messages) since \(time)"
         }
     }
 
@@ -66,6 +87,11 @@ public final class MessageListModel {
     /// reconnects keep it; a send, Escape and "Mark As Read" end it, and only a later message
     /// starts a new one.
     public private(set) var newMessagesLine: MessageId?
+    /// Set once the view says the new messages line isn't on screen. It goes for good once the
+    /// line has been on screen or jumped to, until a line for a later read position.
+    public private(set) var unreadBar: UnreadBar?
+    /// Counts the jumps to the first unread message; on each the view scrolls the line to its top.
+    public private(set) var unreadJumps = 0
 
     private static let pageSize: UInt8 = 50
 
@@ -77,6 +103,10 @@ public final class MessageListModel {
     @ObservationIgnored private var readUpTo: MessageId?
     // Whether `readUpTo` came from the store or a mark as read, not from the first rows shown.
     @ObservationIgnored private var readUpToKnown = false
+    // The read positions whose line the view said was out of sight, and on screen; the line of a
+    // later position starts unplaced.
+    @ObservationIgnored private var hiddenLineFrom: MessageId?
+    @ObservationIgnored private var seenLineFrom: MessageId?
     // Set once the session has had the core read the channel: a READY then brings our own ack.
     @ObservationIgnored var readHere = false
     // Mentions in this channel are named from its guild.
@@ -147,6 +177,36 @@ public final class MessageListModel {
         if !atPresent {
             await load(.latest)
         }
+    }
+
+    /// The unread bar and Shift+Page Up: loads the messages around the read position when the
+    /// first unread message isn't loaded. Scrolling to the line is the view's part. Does nothing
+    /// without a line.
+    public func jumpToUnread() async {
+        guard newMessagesLine != nil, let readUpTo else {
+            return
+        }
+        seenLineFrom = readUpTo
+        updateUnreadBar()
+        if !readPositionLoaded(readUpTo) {
+            await load(.around)
+        }
+        unreadJumps += 1
+    }
+
+    /// The view reports whether the new messages line is on screen.
+    public func setNewMessagesLineOnScreen(_ onScreen: Bool) {
+        guard newMessagesLine != nil, let readUpTo,
+            readUpTo != (onScreen ? seenLineFrom : hiddenLineFrom)
+        else {
+            return
+        }
+        if onScreen {
+            seenLineFrom = readUpTo
+        } else {
+            hiddenLineFrom = readUpTo
+        }
+        updateUnreadBar()
     }
 
     /// The view reports whether it's scrolled to the bottom.
@@ -240,6 +300,8 @@ public final class MessageListModel {
             case .latest: .latest(limit: Self.pageSize)
             case .older: .older(limit: Self.pageSize)
             case .newer: .newer(limit: Self.pageSize)
+            case .around:
+                .around(messageId: readUpTo ?? MessageId(rawValue: 0), limit: Self.pageSize)
             }
         LaunchLog.mark("first message load started")
         let started = ContinuousClock.now
@@ -335,6 +397,45 @@ public final class MessageListModel {
         if line != newMessagesLine {
             newMessagesLine = line
         }
+        updateUnreadBar()
+    }
+
+    private func updateUnreadBar() {
+        let bar = currentUnreadBar()
+        if bar != unreadBar {
+            unreadBar = bar
+        }
+    }
+
+    private func currentUnreadBar() -> UnreadBar? {
+        guard let line = newMessagesLine, let readUpTo, readUpTo == hiddenLineFrom,
+            readUpTo != seenLineFrom, let start = rows.firstIndex(where: { $0.id == line })
+        else {
+            return nil
+        }
+        let count = rows[start...].count { row in
+            row.message.author.id != userId && row.message.delivery == .sent
+        }
+        let loaded = readPositionLoaded(readUpTo)
+        // Nothing read yet has no time of its own.
+        let since =
+            loaded || readUpTo.rawValue == 0
+            ? rows[start].message.timestamp : Self.time(of: readUpTo)
+        return UnreadBar(count: count, more: !loaded || !atPresent, since: since)
+    }
+
+    // Then the line stands right before the first unread message.
+    private func readPositionLoaded(_ position: MessageId) -> Bool {
+        guard !reachedOldest else {
+            return true
+        }
+        let oldest = rows.first { $0.message.delivery == .sent }?.message.id
+        return oldest.map { $0 <= position } ?? false
+    }
+
+    // Discord's IDs carry their time: milliseconds since 2015, above the low 22 bits.
+    private static func time(of id: MessageId) -> Date {
+        Date(timeIntervalSince1970: Double((id.rawValue >> 22) + 1_420_070_400_000) / 1000)
     }
 
     private func reread(_ changed: Set<MessageId>) {

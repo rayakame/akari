@@ -112,6 +112,7 @@ struct SessionScreen: View {
             MessageArea(
                 messages: messages, name: name, links: links,
                 go: { [session] in session.go(to: $0) },
+                markRead: { [session] in session.markRead(channel: messages.channelId) },
                 markServerRead: { [session] in session.markServerRead() })
         }
         .background(ReadingSignals.Attach(session: session))

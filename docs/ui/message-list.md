@@ -275,7 +275,30 @@ Akari's line (acks: [read-states.md](../protocol/read-states.md#acks-in-the-offi
   above its first message, so under a group start it moves nothing; a follow-up under it keeps
   its group, and the row adds its 16.
 
-*The bar doesn't exist in Akari yet.*
+Akari's bar:
+
+- It follows the line: it shows while the list has a line that isn't on screen, above the
+  visible messages, below them, or before messages that aren't loaded, and that hasn't been on
+  screen before. Once the line has been on screen in a window that shows, the bar goes and
+  stays gone for that line; a line for a later read position can bring it back. No line, no
+  bar. A line on screen when the channel opens never brings it.
+- "{n} new messages since {time}", "1 new message since {time}" for one. n counts the loaded
+  messages from others from the line on. It reads "{n}+ new messages" when the read position is
+  older than every loaded message and the channel's first message isn't loaded, or when the
+  list doesn't reach the present. The time is the first unread message's, as message times are
+  shown, or the read position's when that message isn't loaded (a channel never read has none,
+  so the first loaded unread message's). **Unconfirmed:** the wording is the user's translation
+  of the German UI.
+- Clicking it jumps to the first unread message: the line goes to the top of the list, as far
+  as the list scrolls. When that message isn't loaded, Akari first loads the messages around
+  the read position (not compared with 80 or more unread messages yet). The jump counts as
+  seeing the line, so the bar goes.
+- "Mark As Read" on its right marks the channel read like the channel's menu item, which ends
+  the line and the bar; it doesn't jump.
+- Shift+Page Up does what a click on the bar does, from the list and the composer, whenever
+  there is a line, also after the bar has gone ([shortcuts.md](shortcuts.md)).
+- It looks like the jump bar: 32 tall, 16 from the sides and 4 from the top, corner radius 8,
+  `brand` with white 14 medium text, over the messages and above the "Catching up…" capsule.
 
 ## Later
 

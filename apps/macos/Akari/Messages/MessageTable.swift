@@ -34,6 +34,8 @@ struct MessageArea: View {
     let name: ChannelName
     let links: LinkFollower
     let go: (ChannelId) -> Void
+    // The open channel, as its menu would.
+    let markRead: () -> Void
     let markServerRead: () -> Void
     @State private var link = MessageTableLink()
 
@@ -45,11 +47,18 @@ struct MessageArea: View {
                 MessageTable(state: state, actions: bridge, link: link)
                     .id(messages.channelId)
                     .overlay(alignment: .top) {
-                        if StaleCapsule.isShown(
-                            atPresent: messages.atPresent, isStale: messages.isStale,
-                            hasRows: !messages.rows.isEmpty)
-                        {
-                            StaleCapsule()
+                        VStack(spacing: 0) {
+                            if let bar = messages.unreadBar {
+                                UnreadBar(
+                                    text: UnreadBar.text(bar), jump: { bridge.jumpToUnread() },
+                                    markRead: markRead)
+                            }
+                            if StaleCapsule.isShown(
+                                atPresent: messages.atPresent, isStale: messages.isStale,
+                                hasRows: !messages.rows.isEmpty)
+                            {
+                                StaleCapsule()
+                            }
                         }
                     }
                     .overlay(alignment: .bottom) {
@@ -71,6 +80,7 @@ struct MessageArea: View {
                     onSend: { link.controller?.jumpToPresent(load: false) },
                     onEscape: { bridge.escape() },
                     onShiftEscape: { bridge.markServerRead() },
+                    onShiftPageUp: { bridge.jumpToUnread() },
                     onAttach: { link.composer = $0 }
                 )
                 .id(messages.channelId)
@@ -86,7 +96,8 @@ struct MessageArea: View {
             failedLoads: messages.failedLoads, start: name.start,
             channelId: messages.channelId, lastLoad: messages.lastLoad,
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
-            revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine)
+            revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine,
+            unreadJumps: messages.unreadJumps)
     }
 }
 
@@ -144,6 +155,14 @@ final class MessageListBridge: MessageListActions {
 
     func markServerRead() {
         serverRead()
+    }
+
+    func jumpToUnread() {
+        Task { await messages.jumpToUnread() }
+    }
+
+    func newMessagesLineOnScreen(_ onScreen: Bool) {
+        messages.setNewMessagesLineOnScreen(onScreen)
     }
 
     func atBottomChanged(_ atBottom: Bool) {

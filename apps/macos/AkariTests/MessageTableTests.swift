@@ -55,9 +55,13 @@ struct MessageTableTests {
     let window: NSWindow
 
     init() {
+        self.init(onScreen: MessageTableController.isOnScreen)
+    }
+
+    init(onScreen: @escaping @MainActor (NSWindow) -> Bool) {
         controller = MessageTableController(
             tableView: table, calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) },
-            pointer: { [pointer] in pointer.location })
+            pointer: { [pointer] in pointer.location }, onScreen: onScreen)
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -913,6 +917,7 @@ struct MessageTableTests {
     final class RecordingActions: MessageListActions {
         var calls: [String] = []
         var bottoms: [Bool] = []
+        var linesOnScreen: [Bool] = []
 
         func retry(_ message: MessageId) {
             calls.append("retry \(message.rawValue)")
@@ -936,6 +941,14 @@ struct MessageTableTests {
 
         func markServerRead() {
             calls.append("server read")
+        }
+
+        func jumpToUnread() {
+            calls.append("unread")
+        }
+
+        func newMessagesLineOnScreen(_ onScreen: Bool) {
+            linesOnScreen.append(onScreen)
         }
 
         func atBottomChanged(_ atBottom: Bool) {

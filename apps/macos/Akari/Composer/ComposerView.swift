@@ -10,6 +10,7 @@ struct ComposerView: View {
     var onSend: () -> Void = {}
     var onEscape: () -> Void = {}
     var onShiftEscape: () -> Void = {}
+    var onShiftPageUp: () -> Void = {}
     var onAttach: (ComposerTextView) -> Void = { _ in }
     @State private var height: CGFloat = 56
 
@@ -21,7 +22,8 @@ struct ComposerView: View {
                 onSubmit: {
                     Task { await composer.submit(willSend: onSend) }
                 },
-                onEscape: onEscape, onShiftEscape: onShiftEscape, onAttach: onAttach
+                onEscape: onEscape, onShiftEscape: onShiftEscape, onShiftPageUp: onShiftPageUp,
+                onAttach: onAttach
             )
             // Room for the counter at the right edge.
             .padding(.trailing, composer.remaining == nil ? 0 : 48)
@@ -70,6 +72,7 @@ struct ComposerField: NSViewRepresentable {
     let onSubmit: () -> Void
     let onEscape: () -> Void
     var onShiftEscape: () -> Void = {}
+    var onShiftPageUp: () -> Void = {}
     var onAttach: (ComposerTextView) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
@@ -97,6 +100,7 @@ struct ComposerField: NSViewRepresentable {
         textView.onSubmit = onSubmit
         textView.onEscape = onEscape
         textView.onShiftEscape = onShiftEscape
+        textView.onShiftPageUp = onShiftPageUp
         context.coordinator.measure()
     }
 

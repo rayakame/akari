@@ -11,6 +11,7 @@ final class ComposerTextView: NSTextView {
     var onSubmit: () -> Void = {}
     var onEscape: () -> Void = {}
     var onShiftEscape: () -> Void = {}
+    var onShiftPageUp: () -> Void = {}
     var onEditLastMessage: (() -> Void)?
     var onWindow: () -> Void = {}
     var modifiers: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
@@ -132,6 +133,10 @@ final class ComposerTextView: NSTextView {
             } else {
                 onEscape()
             }
+            return true
+        case #selector(NSResponder.pageUpAndModifySelection(_:)):
+            // Shift+Page Up, or Shift+Fn+Up on a laptop.
+            onShiftPageUp()
             return true
         default:
             return false

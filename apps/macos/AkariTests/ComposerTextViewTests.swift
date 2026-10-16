@@ -15,6 +15,7 @@ final class ComposerTextViewTests {
     var escapes = 0
     var serverReads = 0
     var editLast = 0
+    var unreadJumps = 0
     var modifiers: NSEvent.ModifierFlags = []
 
     init() {
@@ -28,6 +29,7 @@ final class ComposerTextViewTests {
         textView.onEscape = { [unowned self] in escapes += 1 }
         textView.onShiftEscape = { [unowned self] in serverReads += 1 }
         textView.onEditLastMessage = { [unowned self] in editLast += 1 }
+        textView.onShiftPageUp = { [unowned self] in unreadJumps += 1 }
         textView.modifiers = { [unowned self] in modifiers }
         window.makeFirstResponder(textView)
     }
@@ -104,6 +106,18 @@ final class ComposerTextViewTests {
         textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
         #expect(serverReads == 1)
         #expect(escapes == 0)
+    }
+
+    // Shift+Fn+Up on a laptop; AppKit's key bindings make it a selection command.
+    @Test
+    func shiftPageUpJumpsToTheFirstUnreadInsteadOfSelecting() {
+        type("ab\ncd")
+        let selected = textView.selectedRange()
+
+        textView.doCommand(by: #selector(NSResponder.pageUpAndModifySelection(_:)))
+
+        #expect(unreadJumps == 1)
+        #expect(textView.selectedRange() == selected)
     }
 
     @Test

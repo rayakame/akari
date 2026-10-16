@@ -13,6 +13,10 @@ protocol MessageListActions: AnyObject {
     func escape()
     // Shift+Escape from the list and the composer.
     func markServerRead()
+    // Shift+Page Up from the list and the composer; the table scrolls once the model has jumped.
+    func jumpToUnread()
+    // Whether the new messages line is on screen; nothing while the window doesn't show.
+    func newMessagesLineOnScreen(_ onScreen: Bool)
     // The user scrolled away from the bottom, or the list is back there.
     func atBottomChanged(_ atBottom: Bool)
     func reveal(_ spoiler: SpoilerKey)
