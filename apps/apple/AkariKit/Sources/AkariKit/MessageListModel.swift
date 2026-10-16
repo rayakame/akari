@@ -128,6 +128,7 @@ public final class MessageListModel {
     // A latest load a jump overtook, until a later page lands: should the jump not land, the
     // list still has to reach the present.
     @ObservationIgnored private var owedPresent: Int?
+    @ObservationIgnored private var retired = false
     @ObservationIgnored private var landed = 0
 
     init(
@@ -209,7 +210,7 @@ public final class MessageListModel {
             let (ticket, outcome) = await load(.around)
             guard outcome == .applied, ticket == lastPlacing else {
                 // Unless a load placed the list since, nothing else takes it to the present.
-                if owedPresent != nil, activeLoads[lastPlacing] == nil {
+                if !retired, owedPresent != nil, activeLoads[lastPlacing] == nil {
                     await load(.latest)
                 }
                 return
@@ -218,6 +219,11 @@ public final class MessageListModel {
         seenLineFrom = self.readUpTo
         updateUnreadBar()
         unreadJumps += 1
+    }
+
+    /// The session shows another list now: loads still running end without starting more.
+    func retire() {
+        retired = true
     }
 
     /// The view reports whether the new messages line is on screen.

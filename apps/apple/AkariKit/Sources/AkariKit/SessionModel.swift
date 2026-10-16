@@ -23,7 +23,9 @@ public final class SessionModel {
     /// The open channel's messages. The session can replace it on its own, when the open channel
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
     /// with `.task(id: messages.channelId) { await messages.open() }`.
-    public private(set) var messages: MessageListModel?
+    public private(set) var messages: MessageListModel? {
+        didSet { oldValue?.retire() }
+    }
     /// The channel the user is reading: the open channel while the session is online, the app
     /// active, its window key and visible, the list fresh at the present's bottom and the user
     /// engaged. The core hears of a change the list reports on the next turn.

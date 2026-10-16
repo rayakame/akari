@@ -547,6 +547,51 @@ struct UnreadBarTests {
         #expect(model.unreadBar != nil)
     }
 
+    // The old list jumped to the present and clicked the bar; the user left and came back.
+    @Test
+    func aReplacedListOwesNoPresent() async throws {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(10), channel(11)], in: 1)
+        }
+        inHistory([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false))
+        let session = SessionModel(
+            userId: id(1), account: account, memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(channel: here)
+        let old = try #require(session.messages)
+        old.setNewMessagesLineOnScreen(false)
+        let present = Task { await old.jumpToPresent() }
+        await account.loadReplies.pulled(1)
+        let oldJump = Task { await old.jumpToUnread() }
+        await account.loadReplies.pulled(2)
+        account.loadReplies.send(nil)
+        await finished(present)
+
+        session.open(channel: id(11))
+        session.open(channel: here)
+        let model = try #require(session.messages)
+        #expect(model !== old)
+        await model.open()
+        model.setNewMessagesLineOnScreen(false)
+        let jump = Task { await model.jumpToUnread() }
+        await account.loadReplies.pulled(3)
+
+        account.loadReplies.send(nil)
+        await finished(oldJump)
+        #expect(loads == [latestLoad, aroundLoad, aroundLoad], "the old list loads nothing")
+        account.loadReplies.send(nil)
+        await finished(jump)
+
+        #expect(model.newMessagesLine == id(3))
+        #expect(model.unreadJumps == 1)
+        #expect(old.unreadJumps == 0)
+        session.close()
+    }
+
     // The bar clicked in this channel, then a switch away and back while the jump loads.
     @Test
     func aJumpFromAnEarlierListOfTheChannelDoesntLand() async {
