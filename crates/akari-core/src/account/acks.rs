@@ -495,9 +495,7 @@ impl Queue {
     }
 
     // An ack taken before READY goes on only where READY has the position Akari acked over:
-    // anything else is a read or a mark as unread elsewhere, which it mustn't undo. Refused, an
-    // ack taken over the replaced store goes back to READY's state, unless Discord took one for
-    // its channel since, which READY doesn't know.
+    // anything else is a read or a mark as unread elsewhere, which it mustn't undo.
     fn reconcile(&mut self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
         self.swapping = false;
         let sent = &self.sent;
@@ -516,6 +514,7 @@ impl Queue {
                 }
                 before.state = ready(*channel);
             } else if replaced && !sent.contains_key(channel) {
+                // READY's state lacks an ack Discord took since; then the one taken over stays.
                 before.state = ready(*channel);
             }
             true

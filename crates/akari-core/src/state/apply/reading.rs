@@ -263,8 +263,8 @@ impl State {
         }
     }
 
-    // Up to the list's newest row, never further, so a channel whose cursor is past it stays
-    // unread. Always at a message: what the list shows is never behind Discord.
+    // Up to the list's newest row and never further, so a channel whose cursor is past it stays
+    // unread; never at "now" either.
     fn read_shown(&mut self, channel: ChannelId, shown: MessageId) -> Option<Ack> {
         if !self.ready {
             return None;
@@ -287,9 +287,8 @@ impl State {
         })
     }
 
-    // Discord refused Akari's ack. Only while the store still holds what that ack left: an ack
-    // from elsewhere, another local ack or a READY since is newer. A READY being prepared
-    // mustn't replay it either.
+    // Only while the store holds what the refused ack left: an ack from elsewhere, another local
+    // ack or a READY since is newer. A READY being prepared mustn't replay it.
     pub(crate) fn undo_ack(
         &mut self,
         channel: ChannelId,
@@ -347,9 +346,8 @@ impl State {
         }
     }
 
-    // Local acks taken while the READY was prepared are newer than it, but only up to where
-    // they read: a mention READY counts past that, posted while Akari was away, stays. Their
-    // badges changed after the diff was made, so theirs are made again.
+    // Local acks taken while READY was prepared are newer, up to where they read: a mention READY
+    // counts past that stays. Their badges moved after the diff, so theirs are made again.
     pub(super) fn replay(
         &self,
         journal: &[(ChannelId, MessageId)],
