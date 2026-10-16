@@ -31,9 +31,18 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   reply in progress; it also jumps to the present from a list scrolled up, and with nothing
   unread it sends nothing. Akari has no edits or replies yet, so Escape marks the channel read
   and jumps to the present: it loads the newest messages if the list shows older ones, and
-  scrolls to the bottom. It does this from the message list and from the composer, through
-  one action. Shift+Escape, from the same places, marks the open server read, and does nothing
-  at Home ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
+  scrolls to the bottom; a jump to the first unread message that is still loading doesn't land
+  ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)). It does this
+  from the message list and from the composer, through one action. Shift+Escape, from the same
+  places, marks the open server read, and does nothing at Home
+  ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
+- **Only the Escape key.** macOS sends Cmd+. as the same cancel command as Escape; in Akari it
+  marks nothing read, and Cmd+Shift+. doesn't mark the server read. In the composer it does
+  nothing, as in the official client; in the message list and a message's text AppKit handles
+  it as usual.
+- **Escape with something open.** Once Akari has replies, edits and popups, Escape closes the
+  open one first and doesn't also mark the channel read, as in the official client
+  (**unverified**).
 - **Shift+Page Up** is still **unverified**: Discord's shortcut list (Cmd+/) didn't open in
   the browser or the desktop app, and the Mac help article is images only. Community lists
   give the same keys. In Akari it jumps to the first unread message, as a click on the unread

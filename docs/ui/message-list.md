@@ -7,12 +7,14 @@ client on 2026-10-10; colors in [theme.md](theme.md).
 ## Layout
 
 - Messages are listed oldest at the top, newest at the bottom. While the user is at the
-  bottom, new messages keep the list at the bottom; when they scrolled up, the list stays
-  where it is.
+  bottom (within 2 of it), new messages keep the list at the bottom; when they scrolled up,
+  the list stays where it is.
 - At its top and bottom the list bounces with the native macOS elastic overscroll, unlike the
   official client, whose Chromium list stops there. While the user scrolls, momentum and
   bounce included, the list never moves on its own, and a position past the bottom counts as
-  being at the bottom.
+  being at the bottom. A message that arrives during a gesture at the bottom keeps the list
+  there: it scrolls to the new bottom once the gesture ends, unless the user scrolled up in
+  the meantime.
 - Each message has 2 of vertical padding and 16 on the right. Its content starts 72 from the
   left: 16 margin, a 40 avatar column, 16 gap.
 - Text is 16 on a 22 line height. Sizes of every text style are in
@@ -190,7 +192,8 @@ block) that Akari leaves out.
   aren't loaded, as in the official client.
 - Clicking it, or pressing Escape ([shortcuts.md](shortcuts.md)), loads the newest messages
   and scrolls to the bottom. At the present, Escape only scrolls to the bottom. Either way,
-  Escape also marks the channel read.
+  Escape also marks the channel read. Both cancel a jump to the first unread message that is
+  still loading ([below](#the-new-messages-line-and-the-unread-bar)).
 - Sending a message also jumps to the present.
 - Akari's bar: 32 tall, 16 from the sides, corner radius 8, `brand` with white 14 medium text:
   "You're reading older messages" and "Jump to present".
@@ -293,13 +296,24 @@ Akari's bar:
   as the list scrolls. When that message isn't loaded, Akari first loads the messages around
   the read position (not compared with 80 or more unread messages yet); a channel never read
   has none, and the jump goes to the first loaded unread message. The jump counts as seeing the
-  line, so the bar goes.
+  line once those messages are in the list, so the bar goes then; if they can't be loaded, the
+  bar stays for another click.
+- The user's last request places the list. Escape, Shift+Escape, "Jump to present", "Mark As
+  Read" (the bar's, or the channel's, its server's or its folder's menu item), sending a
+  message and opening the channel again cancel a jump that is still loading, and the list goes
+  where that request takes it; the cancelled jump doesn't count as seeing the line. A second
+  click while the jump loads starts no second load; one after such a request starts a new jump.
+  A jump clicked while the list is still loading the present takes that load's place; if the
+  jump then fails or a mark as read cancels it, the list still goes to the present.
 - "Mark As Read" on its right marks the channel read like the channel's menu item, which ends
   the line and the bar; it doesn't jump.
 - Shift+Page Up does what a click on the bar does, from the list and the composer, whenever
   there is a line, also after the bar has gone ([shortcuts.md](shortcuts.md)).
 - It looks like the jump bar: 32 tall, 16 from the sides and 4 from the top, corner radius 8,
   `brand` with white 14 medium text, over the messages and above the "Catching up…" capsule.
+- When it appears while Akari is the active app, VoiceOver announces its text once; a new
+  count doesn't repeat it, and a bar that appears while another app is in front isn't
+  announced (it is still on screen for VoiceOver to read).
 
 ### Reading: the signal to ack
 
@@ -308,18 +322,32 @@ click or key press in the client; scrolling back down, focusing the browser or r
 window isn't enough. Akari tells the core which channel the user reads
 ([read-states.md](../protocol/read-states.md#how-akari-acks)) only while all of these hold:
 
-- the session is online, and the list's refresh after READY is in (the list isn't stale);
+- the session is online, and the list's refresh after READY is in (the list isn't stale).
+  The core stops reading whenever the connection drops, a resume included, and Akari sets the
+  channel again once both hold; the user stays engaged across the drop;
 - the app is active and the window is key and visible (not minimized or covered);
 - the list is at the present and scrolled to its bottom;
 - the user is engaged: opening the channel (also the one already open), reopening the last
-  place at launch, a click or a key press in the window. Scrolling away from the bottom, the
-  window losing key, the app going inactive or the window being hidden ends it, and
-  scroll-wheel events don't engage. It is stricter than the official client in one place: a
-  click while scrolled up reads nothing until the list is back at the bottom, but it
-  counts: once the list is there, reading starts without another click.
+  place at launch, a click or a key press in the window; scroll-wheel events don't engage.
+  Scrolling clearly away from the bottom ends it: the user's own scrolls toward older
+  messages, counted from the bottom, add up to more than 48 or a quarter of the list's visible
+  height, whichever is larger. That is looser than the 2 that keep the list at the bottom
+  ([Layout](#layout)): a shorter scroll or a trackpad's bounce only pauses reading until the
+  list is back at the bottom, and the list's own scrolls (the unread bar's jump, the jump to
+  the present, following new messages) never end it; after the bar's jump, the count starts
+  where the jump left the list. The window losing key, the app going inactive, the window
+  being hidden, the Mac going to sleep and fast user switching to another account end it too.
+  It is stricter than the official client in one place: a click while scrolled up reads
+  nothing until the list is back at the bottom, but it counts: once the list is there, reading
+  starts without another click.
 
 A list the session opens on its own (the open channel deleted or hidden, its server gone)
-isn't read until the user clicks.
+isn't read until the user clicks. After the Mac sleeps, reading resumes with the first click
+or key press after it wakes. Clicks and key presses count only in the session's window; when
+it closes, Akari stops watching for them, and watches again once it is back, key and visible.
+Akari tells the core only when the channel changes or the connection dropped, and what the
+list reports while it scrolls reaches the core on the next turn of the main loop, once, with
+the last value.
 
 ## Later
 

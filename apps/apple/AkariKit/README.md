@@ -101,7 +101,8 @@ The session replaces `messages` on its own when the open channel is deleted or t
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.
 The view calls it when the message area appears and whenever `messages.channelId` changes,
 which is what `.task(id:)` does. When the area reappears, the same channel is opened again;
-that only views its window again, or loads the latest page if the window is empty or stale:
+that views its window again, or loads the latest page if the window is empty or stale, and
+either way a jump to unread that an earlier list of the channel started doesn't land:
 
 ```swift
 MessageList(model: messages)

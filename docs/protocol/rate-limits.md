@@ -73,13 +73,20 @@ Acks go through `AccountRest` like every other request, with pacing of their own
 - **Route keys.** `POST channels/{}/messages/{}/ack` is keyed by its channel, like a send, so
   each channel's acks have their own lane and bucket. `POST read-states/ack-bulk` names no
   channel or guild and has one key for the account (top-level ID `0`).
-- **One request at a time.** All acks, single and bulk, go out one after another, the oldest
+- **One request at a time.** All acks, single and bulk, go out one after another, the earliest
   due first; never two in flight. Loads and sends have their own keys and don't wait for them.
+- **Acks never wait inside the request.** None of the waits and retries above applies to them:
+  a request that would have to wait for a bucket reset, a 429 pause or the global limit, or
+  that Discord answers with a 429, comes back to the ack queue at once with its wait, and the
+  queue sends it again when it is due (below). Meanwhile the acks due before it go out, so an
+  Escape doesn't wait behind a bulk that waits for its rate limit.
 - **Paced acks** (the user reads): a channel's ack waits for a 2 s lull after its latest
   target, but no longer than 10 s after its first pending one, so a busy channel is still
   acked at least every 10 s (the official client's cap isn't observed). **Explicit acks**
   (Escape, the menus) go at once, and take a pending paced target of the channel with them.
 - **One pending ack per channel.** A new target merges with a pending one; the newer ID wins.
+  A channel's own ack, paced or explicit, takes the channel's entry out of a bulk that waits
+  for a retry and goes on the channel's route.
 - **Bulks** go out in chunks of 50 entries (the most one official request was seen with), one
   request per chunk, in order. A chunk takes the bulk entries due together, so the entries of
   two bulks marked at once can share a request. A channel's pending single ack joins its
@@ -87,12 +94,17 @@ Acks go through `AccountRest` like every other request, with pacing of their own
 - **Never backwards.** An ack at or below what Discord took for the channel isn't sent; a bulk
   whose entries are all skipped sends nothing. A manual MESSAGE_ACK for the channel (marked as
   unread elsewhere) and every READY clear what Discord took, so the channel can be acked again.
-- **Errors.** An ack still rate limited after the waits and retries above, or failed with a
-  network error or 5xx (after the 502/504 retry above), stays pending: it's tried again after
-  2 s, then after twice as long each time up to a minute (or after the 429's `retry_after`
-  when that is longer), in due order with the other acks and merged with newer targets for its
-  channel, until it goes through. One Discord refuses otherwise is dropped. A 401 or `close()`
-  stops the acks, and what's pending is dropped. Nothing is rolled back.
+  The manual MESSAGE_ACK also drops what is still pending for the channel, and READY holds
+  back what was pending before it until it is checked against READY's read states
+  ([read-states.md](read-states.md#acks-from-elsewhere-and-ready)).
+- **Waits and errors.** An ack the limiter holds back waits in the queue until the limit
+  allows; that isn't a failure. A 429, a network error or a 5xx is one: the ack is tried again
+  after 2 s, then after twice as long after each further failure up to a minute, or after the
+  429's `retry_after` when that is longer, however long it is. Meanwhile it merges with newer
+  targets for its channel. Any other error refuses the ack: a chunk of several entries goes
+  again entry by entry, and a refused entry or channel ack is dropped and undone in the store
+  ([read-states.md](read-states.md#refused-acks)). A 401 or `close()` stops the acks, and
+  what's pending is dropped.
 
 ## Not implemented yet
 
