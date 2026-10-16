@@ -115,10 +115,11 @@ struct RailUnreadTests {
             size: NSSize(width: SidebarWidth.rail, height: 200))
 
         // The pills down the rail's left edge: Home's and the open DM's, both tall.
+        // Column 0 is the straight edge; at 1x any column further in is cut by the rounded corners.
         var pills: [CGFloat] = []
         var run = 0
         for y in 0...rail.rep.pixelsHigh {
-            if y < rail.rep.pixelsHigh, isBright(rail.pixel(Int(rail.scale), y)) {
+            if y < rail.rep.pixelsHigh, isBright(rail.pixel(0, y)) {
                 run += 1
             } else if run > 0 {
                 pills.append(CGFloat(run) / rail.scale)
