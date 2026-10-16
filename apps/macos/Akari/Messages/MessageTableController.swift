@@ -437,7 +437,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
     }
 
-    // Taken as the user's scroll: clipMoved leaves the reader's place alone for our own.
+    // Keeps the reader's place as clipMoved does after a user's scroll; it skips our own.
     private func scrollLineToTop() {
         guard let row = lineRow else {
             return
@@ -1227,6 +1227,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reportLine()
         sticksToBottom = isPinnedToBottom
+        actions?.userScrolled(by: lastClipOrigin.y - origin.y, height: clipView.bounds.height)
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()
     }

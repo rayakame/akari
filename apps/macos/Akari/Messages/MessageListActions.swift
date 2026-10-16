@@ -17,8 +17,10 @@ protocol MessageListActions: AnyObject {
     func jumpToUnread()
     // Whether the new messages line is on screen; nothing while the window doesn't show.
     func newMessagesLineOnScreen(_ onScreen: Bool)
-    // The user scrolled away from the bottom, or the list is back there.
+    // Whether the list is at its bottom, after the user's scrolls and the table's own.
     func atBottomChanged(_ atBottom: Bool)
+    // The user's scrolls only, positive toward older messages; after atBottomChanged for a move.
+    func userScrolled(by distance: CGFloat, height: CGFloat)
     func reveal(_ spoiler: SpoilerKey)
     // Wherever the channel is: another server's, or a conversation.
     func openChannel(_ id: ChannelId)

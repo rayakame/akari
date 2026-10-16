@@ -169,6 +169,10 @@ final class MessageListBridge: MessageListActions {
         messages.setAtBottom(atBottom)
     }
 
+    func userScrolled(by distance: CGFloat, height: CGFloat) {
+        messages.userScrolled(by: distance, height: height)
+    }
+
     func reveal(_ spoiler: SpoilerKey) {
         messages.reveal(spoiler)
     }

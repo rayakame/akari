@@ -92,6 +92,8 @@ public final class MessageListModel {
     public private(set) var unreadJumps = 0
 
     private static let pageSize: UInt8 = 50
+    // A trackpad's bounce or momentum at the bottom stays below it.
+    private static let scrollAwayDistance = 48.0
 
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
@@ -116,8 +118,11 @@ public final class MessageListModel {
     @ObservationIgnored private var pendingKeys: [MessageId: MessageId] = [:]
     @ObservationIgnored private var loads = 0
     @ObservationIgnored private var activeLoads: [Int: Load] = [:]
-    // For the session's reading signal; `true` when the user scrolled away from the bottom.
+    // For the session's reading signal; `true` when the user scrolled clearly away from the bottom.
     @ObservationIgnored var bottomChanged: ((_ scrolledAway: Bool) -> Void)?
+    // The user's own scrolls since the bottom, not the distance to it: a message arriving during
+    // a gesture moves the bottom away.
+    @ObservationIgnored private var scrolledUp = 0.0
 
     init(
         channelId: ChannelId, userId: UserId, account: Account, store: Store,
@@ -211,13 +216,31 @@ public final class MessageListModel {
         updateUnreadBar()
     }
 
-    /// The view reports whether it's scrolled to the bottom.
+    /// The view reports whether it's scrolled to the bottom, also after its own scrolls. Away
+    /// from it reading pauses, and the user stays engaged.
     public func setAtBottom(_ atBottom: Bool) {
         guard atBottom != self.atBottom else {
             return
         }
         self.atBottom = atBottom
-        bottomChanged?(!atBottom)
+        if atBottom {
+            scrolledUp = 0
+        }
+        bottomChanged?(false)
+    }
+
+    /// A scroll by the user, positive toward older messages, in a list `height` points high;
+    /// after `setAtBottom` for the same move. One clearly away from the bottom ends engagement.
+    public func userScrolled(by distance: Double, height: Double) {
+        guard !atBottom else {
+            return
+        }
+        let limit = max(Self.scrollAwayDistance, height / 4)
+        let wasAway = scrolledUp > limit
+        scrolledUp = max(0, scrolledUp + distance)
+        if !wasAway, scrolledUp > limit {
+            bottomChanged?(true)
+        }
     }
 
     public func reveal(_ key: SpoilerKey) {

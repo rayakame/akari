@@ -42,6 +42,12 @@ final class ReadingTests {
         return session
     }
 
+    // As the table reports a scroll by the user to older messages.
+    func scrollUp(_ list: MessageListModel) {
+        list.setAtBottom(false)
+        list.userScrolled(by: 400, height: 600)
+    }
+
     @Test
     func readingIsSetOnlyWhileEngagedActiveKeyVisibleAndAtTheBottom() throws {
         let session = makeSession()
@@ -58,7 +64,7 @@ final class ReadingTests {
             ("inactive", { session.setAppActive(false) }, { session.setAppActive(true) }),
             ("not key", { session.setWindowKey(false) }, { session.setWindowKey(true) }),
             ("hidden", { session.setWindowVisible(false) }, { session.setWindowVisible(true) }),
-            ("scrolled up", { list.setAtBottom(false) }, { list.setAtBottom(true) }),
+            ("scrolled up", { self.scrollUp(list) }, { list.setAtBottom(true) }),
         ]
         for (name, leave, comeBack) in breaks {
             leave()
@@ -189,10 +195,10 @@ final class ReadingTests {
     }
 
     @Test
-    func scrollingUpStopsReading() {
+    func scrollingUpStopsReading() throws {
         let session = readingSession()
 
-        session.messages?.setAtBottom(false)
+        scrollUp(try #require(session.messages))
 
         #expect(session.messages?.atPresentBottom == false)
         #expect(readings == [general, nil])
@@ -200,9 +206,9 @@ final class ReadingTests {
     }
 
     @Test
-    func scrollingBackDownDoesntReadUntilAClick() {
+    func scrollingBackDownDoesntReadUntilAClick() throws {
         let session = readingSession()
-        session.messages?.setAtBottom(false)
+        scrollUp(try #require(session.messages))
         session.messages?.setAtBottom(true)
         #expect(session.reading == nil)
 
@@ -214,15 +220,72 @@ final class ReadingTests {
 
     // Stricter than the official client, which acks on that click.
     @Test
-    func aClickWhileScrolledUpReadsOnceBackAtTheBottom() {
+    func aClickWhileScrolledUpReadsOnceBackAtTheBottom() throws {
         let session = readingSession()
-        session.messages?.setAtBottom(false)
+        scrollUp(try #require(session.messages))
         session.userInteracted()
         #expect(session.reading == nil)
 
         session.messages?.setAtBottom(true)
 
         #expect(readings == [general, nil, general])
+        session.close()
+    }
+
+    // The bar's jump to the first unread message: reading pauses and comes back at the bottom.
+    @Test
+    func theTablesOwnJumpKeepsEngagement() throws {
+        let session = readingSession()
+        let list = try #require(session.messages)
+
+        list.setAtBottom(false)
+        #expect(session.reading == nil)
+        list.userScrolled(by: -300, height: 600)
+        list.setAtBottom(true)
+
+        #expect(readings == [general, nil, general])
+        session.close()
+    }
+
+    // A trackpad's momentum or bounce, or a message arriving during a gesture.
+    @Test
+    func aSmallNudgeAtTheBottomKeepsEngagement() throws {
+        let session = readingSession()
+        let list = try #require(session.messages)
+
+        list.setAtBottom(false)
+        list.userScrolled(by: 60, height: 600)
+        list.userScrolled(by: -20, height: 600)
+        list.userScrolled(by: 60, height: 600)
+        list.setAtBottom(true)
+        #expect(readings == [general, nil, general])
+
+        list.setAtBottom(false)
+        list.userScrolled(by: 100, height: 600)
+        list.setAtBottom(true)
+        #expect(readings == [general, nil, general, nil, general], "counted from the bottom")
+        session.close()
+    }
+
+    @Test
+    func scrollingClearlyAwayDisengages() throws {
+        let session = readingSession()
+        let list = try #require(session.messages)
+
+        list.setAtBottom(false)
+        list.userScrolled(by: 100, height: 600)
+        list.userScrolled(by: 100, height: 600)
+        list.setAtBottom(true)
+        #expect(session.reading == nil)
+        session.userInteracted()
+        #expect(session.reading == general)
+
+        list.setAtBottom(false)
+        list.userScrolled(by: 50, height: 120)
+        list.setAtBottom(true)
+        #expect(session.reading == nil, "a short list")
+
+        #expect(readings == [general, nil, general, nil])
         session.close()
     }
 
@@ -420,7 +483,7 @@ final class ReadingTests {
         let old = try #require(session.messages)
         session.open(channel: random)
 
-        old.setAtBottom(false)
+        scrollUp(old)
 
         #expect(readings == [general, random])
         session.close()

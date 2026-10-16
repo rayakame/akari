@@ -1,0 +1,93 @@
+import AkariKit
+import AppKit
+import Testing
+
+@testable import Akari
+
+// The table's scrolls reach a real session through the app's bridge, as in the message area.
+@MainActor
+struct EngagementTests {
+    let list = MessageTableTests()
+    let session: SessionModel
+    let channel: ChannelId
+    let bridge: MessageListBridge
+
+    init() throws {
+        session = SessionModel(
+            userId: UserId(rawValue: 1), account: CrowdedAccount(),
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(.guild(CrowdedStore.guildIds[0]))
+        session.setAppActive(true)
+        session.setWindowKey(true)
+        session.setWindowVisible(true)
+        let messages = try #require(session.messages)
+        channel = messages.channelId
+        bridge = MessageListBridge(
+            messages: messages, link: MessageTableLink(),
+            links: LinkFollower(trusted: session.trustedLinks()), go: { _ in },
+            markServerRead: {})
+        list.controller.actions = bridge
+        list.show(list.page)
+        #expect(session.reading == channel)
+    }
+
+    var bottomClip: BottomClipView? { list.clip as? BottomClipView }
+
+    // A scroll by the user, positive toward older messages.
+    func nudge(by distance: CGFloat) {
+        list.clip.scroll(to: NSPoint(x: 0, y: list.clip.bounds.minY - distance))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        list.window.layoutIfNeeded()
+    }
+
+    func scrollToBottom() throws {
+        let bottom = try #require(bottomClip).originRange.upperBound
+        nudge(by: list.clip.bounds.minY - bottom)
+    }
+
+    @Test
+    func aTrackpadNudgeAtTheBottomReportsNoScrollAway() throws {
+        nudge(by: 40)
+        #expect(session.reading == nil, "off the bottom")
+        nudge(by: -10)
+        nudge(by: 40)
+        try scrollToBottom()
+        #expect(session.reading == channel, "still engaged")
+
+        list.scroll(toRowOf: 120)
+        try scrollToBottom()
+        #expect(session.reading == nil, "scrolled clearly away")
+        session.userInteracted()
+        #expect(session.reading == channel)
+    }
+
+    @Test
+    func aMessageArrivingMidGestureKeepsEngagement() throws {
+        list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
+        let tall = row(
+            201, by: author(2), at: list.noon + 201 * 120,
+            content: String(repeating: "words that wrap ", count: 80))
+        list.show(list.page + [tall])
+        nudge(by: 5)
+        list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
+        #expect(session.reading == nil, "the message is below the view")
+
+        try scrollToBottom()
+        #expect(session.reading == channel)
+    }
+
+    @Test
+    func theBarsJumpKeepsEngagement() {
+        let line = MessageId(rawValue: 150)
+        list.show(MessageTableState(rows: list.page, newMessages: line))
+        list.show(MessageTableState(rows: list.page, newMessages: line, unreadJumps: 1))
+        #expect(!list.visibleRows.contains(list.table.numberOfRows - 1))
+        #expect(session.reading == nil)
+
+        list.controller.jumpToPresent(load: false)
+
+        #expect(session.reading == channel)
+    }
+}

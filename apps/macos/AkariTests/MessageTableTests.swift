@@ -917,6 +917,7 @@ struct MessageTableTests {
     final class RecordingActions: MessageListActions {
         var calls: [String] = []
         var bottoms: [Bool] = []
+        var scrolls: [CGFloat] = []
         var linesOnScreen: [Bool] = []
 
         func retry(_ message: MessageId) {
@@ -953,6 +954,10 @@ struct MessageTableTests {
 
         func atBottomChanged(_ atBottom: Bool) {
             bottoms.append(atBottom)
+        }
+
+        func userScrolled(by distance: CGFloat, height: CGFloat) {
+            scrolls.append(distance)
         }
 
         func reveal(_ spoiler: SpoilerKey) {
