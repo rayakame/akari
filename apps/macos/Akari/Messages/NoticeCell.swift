@@ -71,7 +71,7 @@ final class NoticeCell: NSTableCellView {
         text.toolTip = fullDate
     }
 
-    private static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
+    static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
         followsLine ? lineTop : followsDay ? dayTop : top
     }
 

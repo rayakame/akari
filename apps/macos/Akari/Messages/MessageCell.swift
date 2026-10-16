@@ -100,9 +100,8 @@ final class MessageCell: NSTableCellView {
         groupTime: String, shortTime: String, fullDate: String
     ) {
         showsHeader = startsGroup
-        // The new messages line's row is the space above a group under it.
-        spacing =
-            startsGroup && !followsLine ? (followsDay ? Self.daySpacing : Self.groupSpacing) : 0
+        spacing = Self.spacing(
+            startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine)
         header.isHidden = !startsGroup
         avatar.isHidden = !startsGroup
         avatarBottom?.isActive = startsGroup
@@ -135,6 +134,15 @@ final class MessageCell: NSTableCellView {
             failed = line
         }
         failed?.isHidden = !isFailed
+    }
+
+    /// The space above the box: before a group, less under a day divider, none under the new
+    /// messages line, whose row is that space.
+    static func spacing(startsGroup: Bool, followsDay: Bool, followsLine: Bool) -> CGFloat {
+        guard startsGroup, !followsLine else {
+            return 0
+        }
+        return followsDay ? daySpacing : groupSpacing
     }
 
     /// The row height for `message` showing `body` at `width`, as Auto Layout would size the

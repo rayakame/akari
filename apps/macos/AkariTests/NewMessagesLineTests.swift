@@ -56,6 +56,38 @@ struct NewMessagesLineTests {
         list.expectTheSameViewsInPlace(above)
     }
 
+    // Scrolled up to the line: its message is the reader's top one, as when the line goes with
+    // a mark as read or moves with READY or an older page.
+    @Test(arguments: ["group", "notice", "day"])
+    func theLineAboveTheTopMessageMovesNoText(under kind: String) {
+        let rows = list.page.map { shown -> MessageListModel.Row in
+            let raw = shown.id.rawValue
+            let time = shown.message.timestamp
+            switch kind {
+            case "notice" where raw == 171:
+                return row(raw, by: author(2), at: time, kind: .userJoin)
+            case "day" where raw >= 171:
+                return row(raw, by: shown.message.author, at: time + 86_400)
+            default:
+                return shown
+            }
+        }
+        list.show(MessageTableState(rows: rows, newMessages: line(before: 171)))
+        list.scroll(toRowOf: 171)
+        var reading = list.visibleViews()
+        reading[171] = nil
+        #expect(reading.count > 3)
+
+        controller.show(MessageTableState(rows: rows))
+        list.expectTheSameViewsInPlace(reading)
+
+        list.window.layoutIfNeeded()
+        reading = list.visibleViews()
+        reading[171] = nil
+        controller.show(MessageTableState(rows: rows, newMessages: line(before: 171)))
+        list.expectTheSameViewsInPlace(reading)
+    }
+
     @Test
     func aNewMessageWithItsLineKeepsAPinnedListAtTheBottom() throws {
         let page = list.page

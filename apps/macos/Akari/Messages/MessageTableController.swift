@@ -469,7 +469,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             tableView.endUpdates()
             if !changes.reloaded.isEmpty {
                 tableView.reloadData(forRowIndexes: changes.reloaded, columnIndexes: [0])
+                // Outside an update the rows below keep their views' old places until a later
+                // layout; as in remeasureStart, inside one at zero duration they move at once.
+                NSAnimationContext.beginGrouping()
+                NSAnimationContext.current.duration = 0
+                tableView.beginUpdates()
                 tableView.noteHeightOfRows(withIndexesChanged: changes.reloaded)
+                tableView.endUpdates()
+                NSAnimationContext.endGrouping()
             }
         }
         if firstFill {
@@ -1187,9 +1194,27 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             guard case .message = timeline.items[row] else {
                 continue
             }
-            return (timeline.items[row].id, tableView.rect(ofRow: row).minY - top)
+            return (timeline.items[row].id, anchorTop(ofRow: row) - top)
         }
         return nil
+    }
+
+    // A message under the line has given its space above to the line's row; anchored where its
+    // row would start without the line, its text stays put when the line comes or goes.
+    private func anchorTop(ofRow row: Int) -> CGFloat {
+        let top = tableView.rect(ofRow: row).minY
+        guard followsLine(row), case .message(let item, let startsGroup) = timeline.items[row]
+        else {
+            return top
+        }
+        let afterDay = followsDay(row - 1)
+        if item.message.notice != nil {
+            return top + NoticeCell.textTop(followsDay: false, followsLine: true)
+                - NoticeCell.textTop(followsDay: afterDay, followsLine: false)
+        }
+        let spacing = MessageCell.spacing(
+            startsGroup: startsGroup, followsDay: afterDay, followsLine: false)
+        return top - spacing
     }
 
     private func restoreAnchor() {
@@ -1197,7 +1222,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         let range = clipView.originRange
-        let target = tableView.rect(ofRow: row).minY - anchor.offset
+        let target = anchorTop(ofRow: row) - anchor.offset
         let y = min(max(target, range.lowerBound), range.upperBound)
         guard abs(clipView.bounds.minY - y) > 0.5 else {
             return
