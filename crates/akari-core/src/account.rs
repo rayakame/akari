@@ -52,8 +52,8 @@ pub enum MessageLoad {
     Older { limit: u8 },
     /// After the window's last message, towards the present.
     Newer { limit: u8 },
-    /// Replaces the window with the messages around `id`, unless a newer `Latest` or `Around`
-    /// load, or [`Account::supersede_around_loads`], comes before the page.
+    /// Replaces the window with the messages around `id`, unless a later-placed `Latest` or
+    /// `Around` load, or [`Account::supersede_around_loads`], comes first.
     Around { id: MessageId, limit: u8 },
 }
 

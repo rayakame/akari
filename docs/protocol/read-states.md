@@ -140,13 +140,14 @@ deleted, since Discord keeps a deleted message as the channel's newest
 the channel's newest message when the page was asked for, the list's newest row when it is
 deleted at the present, and a message deleted while live messages were held back, once they
 show. So a channel whose newest message was deleted reads like any other, and a message that
-exists is never acked before the list shows it. When the host sets the channel, the store marks
-it read up to that message at once, so its badge goes, and the ack follows, if the message is
-past the read position or the channel has mentions. After that, only the list growing at its
-present end reads again: a live message, or a page that reaches the present. A newest message
-raised any other way (a GUILD_CREATE, an unread update) reads nothing until the list shows it,
-so a channel whose newest message is past its list stays unread. `set_reading(None)` stops
-reading and clears nothing.
+exists is never acked before the list shows it, except in a channel without Read Message
+History: its pages come back empty, so reading acks its newest message. When the host sets the
+channel, the store marks it read up to that message at once, so its badge goes, and the ack
+follows, if the message is past the read position or the channel has mentions. After that,
+only the list growing at its present end reads again: a live message, or a page that reaches
+the present. A newest message raised any other way (a GUILD_CREATE, an unread update) reads
+nothing until the list shows it, so a channel whose newest message is past its list stays
+unread. `set_reading(None)` stops reading and clears nothing.
 
 **Connection drops.** The core stops reading whenever the connection drops (every reconnect,
 a resume included), on `disconnect()` and when the account closes: the session that comes back
