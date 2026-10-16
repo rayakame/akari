@@ -104,6 +104,62 @@ final class ReadingTests {
         session.close()
     }
 
+    // The core forgets the channel whenever the connection drops, also before a resume.
+    @Test
+    func readingIsSetAgainAfterAReconnect() {
+        let session = readingSession()
+
+        session.apply(EventBatch([.connection(state: .connecting), .connection(state: .online)]))
+        #expect(readings == [general, general], "dropped and resumed within one batch")
+
+        session.apply(EventBatch([.connection(state: .connecting)]))
+        session.apply(EventBatch([.ready, .connection(state: .online)]))
+        #expect(readings == [general, general, nil, general])
+
+        store.update { $0.windows[id(11)] = window([1, 2], stale: true) }
+        session.apply(
+            EventBatch([
+                .connection(state: .connecting), .ready, .messagesStale(channelId: general),
+                .connection(state: .online),
+            ]))
+        #expect(session.reading == nil, "not before the list is refreshed")
+        store.update { $0.windows[id(11)] = window([1, 2]) }
+        session.apply(EventBatch([.messagesRefreshed(channelId: general)]))
+
+        #expect(readings == [general, general, nil, general, nil, general])
+        session.close()
+    }
+
+    // READY opens the remembered channel before its list has applied READY's stale mark.
+    @Test
+    func theChannelReadyReopensIsntReadBeforeItsRefreshed() {
+        store.update { state in
+            state.connection = .connecting
+            state.currentUser = nil
+        }
+        let memory = AccountMemory(defaults: MemoryDefaults())
+        memory.remember(.init(place: .guild(id(1)), channel: random), of: id(1))
+        let session = SessionModel(userId: id(1), account: account, memory: memory) { _ in }
+        session.start()
+        session.setAppActive(true)
+        session.setWindowKey(true)
+        session.setWindowVisible(true)
+
+        store.update { state in
+            state.currentUser = user(1)
+            state.windows[id(12)] = window([3], stale: true)
+        }
+        session.apply(
+            EventBatch([.ready, .messagesStale(channelId: random), .connection(state: .online)]))
+        #expect(session.messages?.channelId == random)
+        #expect(readings.isEmpty)
+
+        store.update { $0.windows[id(12)] = window([3]) }
+        session.apply(EventBatch([.messagesRefreshed(channelId: random)]))
+        #expect(readings == [random])
+        session.close()
+    }
+
     @Test
     func aListAwayFromThePresentIsntRead() {
         store.update { $0.windows[id(12)] = window([3], latest: false) }

@@ -59,7 +59,10 @@ public final class SessionModel {
     @ObservationIgnored private var windowVisible = false
     // The official client acks after a break only once the user clicks or types (D88).
     @ObservationIgnored private var engaged = false
-    @ObservationIgnored private var navigating = false
+    @ObservationIgnored private var holdingReading = false
+    // The core forgets the channel whenever the connection drops; a call that raced the drop
+    // may have set it again, so the next derivation is sent whatever it is.
+    @ObservationIgnored private var resendReading = false
 
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
     /// means the user has to log in again. The first READY reopens the place and channel
@@ -162,21 +165,18 @@ public final class SessionModel {
     /// the store doesn't have opens where the user is; one without a message list doesn't open.
     public func go(to channel: ChannelId) {
         // The place opens its own last or first channel on the way, which isn't being read.
-        navigating = true
-        defer {
-            navigating = false
-            updateReading()
-        }
-        if let found = store.channel(id: channel) {
-            guard found.opensMessageList else {
-                return
+        readingOnce {
+            if let found = store.channel(id: channel) {
+                guard found.opensMessageList else {
+                    return
+                }
+                let place: Place = found.guildId.map { .guild($0) } ?? .home
+                if place != self.place {
+                    open(place)
+                }
             }
-            let place: Place = found.guildId.map { .guild($0) } ?? .home
-            if place != self.place {
-                open(place)
-            }
+            open(channel: channel)
         }
-        open(channel: channel)
     }
 
     // Without engaging: only the user's choices and the launch do.
@@ -333,7 +333,14 @@ public final class SessionModel {
     }
 
     func apply(_ batch: EventBatch) {
-        defer { updateReading() }
+        if batch.ready || batch.leftOnline, reading != nil {
+            resendReading = true
+        }
+        // A list that hasn't applied the batch yet, e.g. READY's stale mark, isn't being read.
+        readingOnce { update(with: batch) }
+    }
+
+    private func update(with batch: EventBatch) {
         // Before anything here sets the channel as being read, which the core acks at once.
         if batch.ready {
             messages?.newSession()
@@ -485,6 +492,14 @@ public final class SessionModel {
         return list
     }
 
+    private func readingOnce(_ body: () -> Void) {
+        let held = holdingReading
+        holdingReading = true
+        body()
+        holdingReading = held
+        updateReading()
+    }
+
     private func readingInputChanged(lost: Bool) {
         if lost {
             engaged = false
@@ -493,7 +508,7 @@ public final class SessionModel {
     }
 
     private func updateReading() {
-        guard !navigating else {
+        guard !holdingReading else {
             return
         }
         // Not before READY: the core would ack inside READY's write, over Discord's position.
@@ -504,9 +519,10 @@ public final class SessionModel {
         if channel != nil {
             messages?.readHere = true
         }
-        guard channel != reading else {
+        guard channel != reading || resendReading else {
             return
         }
+        resendReading = false
         reading = channel
         account.setReading(channelId: channel)
     }
