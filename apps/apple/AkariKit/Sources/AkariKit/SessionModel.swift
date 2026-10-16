@@ -179,7 +179,7 @@ public final class SessionModel {
         open(channel: channel)
     }
 
-    // Without engaging: the session's own moves keep the engagement they find.
+    // Without engaging: only the user's choices and the launch do.
     private func enter(_ place: Place) {
         defer { updateReading() }
         guard place != self.place else {
@@ -351,9 +351,11 @@ public final class SessionModel {
         if batch.everythingChanged || batch.currentUserChanged {
             currentUser = store.currentUser()
         }
+        // A list the session replaces on its own isn't one the user chose to read.
         if case .guild(let id) = place, batch.ready || batch.guildListChanged,
             store.guild(id: id) == nil
         {
+            engaged = false
             enter(.home)
         }
         let open = messages?.channelId
@@ -363,6 +365,7 @@ public final class SessionModel {
         channels?.apply(batch)
         // Threads and DMs aren't in the channel list; they leave only when removed.
         if let open, batch.removedChannels.contains(open) || (wasListed && !isListed(open)) {
+            engaged = false
             if case .guild(let guildId) = place, let list = channels {
                 openListedChannel(in: list, guildId: guildId)
             } else {

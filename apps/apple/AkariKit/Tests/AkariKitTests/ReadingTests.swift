@@ -263,8 +263,9 @@ final class ReadingTests {
         session.close()
     }
 
+    // Only the user's choice reads a channel, not a list the session replaced on its own.
     @Test
-    func aListReplacedOnItsOwnKeepsTheEngagementItFound() {
+    func aListReplacedOnItsOwnIsntReadUntilAClick() {
         store.update { $0.list([channel(11), channel(12), channel(16)], in: 1) }
         let session = readingSession()
 
@@ -273,20 +274,64 @@ final class ReadingTests {
             state.channels[id(11)] = nil
         }
         session.apply(EventBatch([.channelRemoved(channelId: general, guildId: id(1))]))
-        #expect(session.reading == random, "engaged")
+        #expect(session.messages?.channelId == random)
+        #expect(session.reading == nil)
 
-        session.setWindowKey(false)
+        session.userInteracted()
+        #expect(readings == [general, nil, random])
+        session.close()
+    }
+
+    @Test
+    func theConversationShownForAGoneServerIsntReadUntilAClick() {
+        store.update { $0.talk(dm(20, with: 5), with: user(5)) }
+        let session = readingSession()
+        session.open(.home)
+        session.open(channel: id(20))
+        session.open(.guild(id(1)))
+        let before = readings.count
+
         store.update { state in
-            state.channelLists[id(1)] = [id(16)]
+            state.guildIds = []
+            state.guilds[id(1)] = nil
+        }
+        session.apply(EventBatch([.guildRemoved(guildId: id(1))]))
+        #expect(session.place == .home)
+        #expect(session.messages?.channelId == id(20))
+        #expect(session.reading == nil)
+
+        session.userInteracted()
+        #expect(Array(readings.dropFirst(before)) == [nil, id(20)])
+        session.close()
+    }
+
+    // The launch reopens the last channel as if the user had opened it.
+    @Test
+    func theChannelReopenedAtLaunchIsReadWithoutAClick() {
+        store.update { $0.connection = .connecting }
+        let memory = AccountMemory(defaults: MemoryDefaults())
+        memory.remember(.init(place: .guild(id(1)), channel: random), of: id(1))
+        let session = SessionModel(userId: id(1), account: account, memory: memory) { _ in }
+        session.start()
+        for shown in [false, true] {
+            session.setAppActive(shown)
+            session.setWindowKey(shown)
+            session.setWindowVisible(shown)
+        }
+        session.apply(EventBatch([.ready, .connection(state: .online)]))
+        #expect(session.messages?.channelId == random)
+        #expect(readings == [random])
+
+        store.update { state in
+            state.channelLists[id(1)] = [id(11)]
             state.channels[id(12)] = nil
         }
         session.apply(EventBatch([.channelRemoved(channelId: random, guildId: id(1))]))
-        #expect(session.messages?.channelId == id(16))
-        session.setWindowKey(true)
-        #expect(session.reading == nil, "not engaged")
+        #expect(session.messages?.channelId == general)
+        #expect(session.reading == nil, "replaced on its own")
 
         session.userInteracted()
-        #expect(readings == [general, random, nil, id(16)])
+        #expect(readings == [random, nil, general])
         session.close()
     }
 
