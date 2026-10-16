@@ -292,9 +292,12 @@ impl Shared {
                 unfinished.ticket = None;
                 let reached_end = received < usize::from(limit);
                 let storing = Instant::now();
-                let ack = self.store.finish_load(ticket, messages, reached_end);
-                report.store = storing.elapsed();
-                self.ack_reading(ack);
+                {
+                    let _gate = self.acks.gate();
+                    let ack = self.store.finish_load(ticket, messages, reached_end);
+                    report.store = storing.elapsed();
+                    self.ack_reading(ack);
+                }
                 (report.prepare, report.prepared) = prepared;
                 log_page(channel, ticket.kind, &report);
                 Ok(Some(report))
@@ -419,6 +422,7 @@ impl Shared {
         }
     }
 
+    // Without the gate: the pump forgets and swaps itself, so its own acks can't come between.
     fn dispatched(&self, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
         if let ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) = &event
             && ack.manual
@@ -849,12 +853,14 @@ impl Account {
     /// the bottom of its list. A dropped connection clears it: set it again once online and the
     /// list is refreshed.
     pub fn set_reading(&self, channel: Option<ChannelId>) {
+        let _gate = self.shared.acks.gate();
         let ack = self.shared.store.set_reading(channel);
         self.shared.ack_reading(ack);
     }
 
     /// Marks the channel read now (Escape, the context menu).
     pub fn mark_read(&self, channel: ChannelId) {
+        let _gate = self.shared.acks.gate();
         if let Some(ack) = self.shared.store.mark_read(channel) {
             self.shared.acks.want(ack, Pace::Explicit);
         }
@@ -863,6 +869,7 @@ impl Account {
     /// Marks these guilds read now with one bulk ack (Shift+Escape, a server's or a folder's
     /// context menu).
     pub fn mark_guilds_read(&self, guilds: &[GuildId]) {
+        let _gate = self.shared.acks.gate();
         let acks = self.shared.store.mark_guilds_read(guilds);
         if !acks.is_empty() {
             self.shared.acks.want_bulk(acks);
@@ -1070,14 +1077,23 @@ async fn pump(mut finish: Finish) {
                 let started = std::time::Instant::now();
                 // Before the conversion, whose local acks the swap keeps: those are the user's
                 // now, not ones READY may have overtaken.
-                shared.acks.forget_all();
+                let preparing = {
+                    let _gate = shared.acks.gate();
+                    shared.acks.forget_all();
+                    shared.store.begin_ready()
+                };
                 let store = shared.store.clone();
-                match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
+                let prepared =
+                    tokio::task::spawn_blocking(move || store.prepare(preparing, *ready)).await;
+                match prepared {
                     Ok(next) => {
-                        let delivered = shared.store.replace(next);
-                        shared
-                            .acks
-                            .reconcile(|channel| delivered.get(&channel).copied());
+                        {
+                            let _gate = shared.acks.gate();
+                            let delivered = shared.store.replace(next);
+                            shared
+                                .acks
+                                .reconcile(|channel| delivered.get(&channel).copied());
+                        }
                         let convert_ms = crate::millis(started.elapsed());
                         tracing::info!(convert_ms, "READY applied");
                         shared.forget_subscriptions();

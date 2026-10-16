@@ -31,8 +31,8 @@ pub(crate) struct PreparedReady {
     preparing: Preparing,
 }
 
-// Ends the READY's journal if it's dropped before its swap, e.g. by a panic while converting.
-struct Preparing {
+// An open READY journal. Ends it if dropped before the swap, e.g. by a panic while converting.
+pub(crate) struct Preparing {
     store: Store,
     swapped: bool,
 }
@@ -311,14 +311,22 @@ impl Store {
         });
     }
 
-    // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
-    // it. Only the pump changes entities, apart from local acks, which the swap replays.
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
+        self.prepare(self.begin_ready(), ready)
+    }
+
+    // From here until the swap, local acks also go into READY's journal.
+    pub(crate) fn begin_ready(&self) -> Preparing {
         self.write("READY", |inner, _| inner.state.begin_journal());
-        let preparing = Preparing {
+        Preparing {
             store: self.clone(),
             swapped: false,
-        };
+        }
+    }
+
+    // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
+    // it. Only the pump changes entities, apart from local acks, which the swap replays.
+    pub(crate) fn prepare(&self, preparing: Preparing, ready: Ready) -> PreparedReady {
         let mut entities = Entities::from_ready(ready);
         let read_states = entities.read_states.channels().clone();
         let derived = Derived::build(&entities, wall_millis());

@@ -811,3 +811,55 @@ async fn ready_wins_over_an_ack_refused_while_it_is_prepared() {
     );
     assert!(badge(&online.account, GENERAL).unread);
 }
+
+// The refusal of an ack taken while READY is prepared, taken from the queue before READY is
+// swapped in and handled after: READY's position must stay.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refusal_racing_ready_s_swap_never_rolls_it_back() {
+    let mut online = acking(|_| {}).await;
+    let (arrived, on_arrival) = std::sync::mpsc::channel();
+    let (release, on_release) = std::sync::mpsc::channel();
+    Mock::given(method("POST"))
+        .and(path_regex(ACK_ROUTE))
+        .respond_with(HeldRefusal {
+            arrived,
+            release: std::sync::Mutex::new(on_release),
+        })
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    let (parked, release_ready) = online.account.store().park_next_conversion();
+    online.connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = online.fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    // Read elsewhere up to the newest message while Akari was away.
+    fresh
+        .send(ready_payload(1, &online.fake, |ready| {
+            ready["read_state"]["entries"][0]["last_message_id"] = NEWEST.to_string().into();
+            ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+        }))
+        .await;
+    wait_for(parked, "READY never reached its conversion").await;
+    online.account.mark_read(general());
+    wait_for(on_arrival, "the ack never arrived").await;
+    let (taken, release_refusal, handled) = online.account.shared.acks.park_next_refusal();
+
+    release.send(()).unwrap();
+    wait_for(taken, "the refusal never came").await;
+    release_ready.send(()).unwrap();
+    let swapped_first = timeout(
+        Duration::from_millis(500),
+        events_until(&online.subscription, "Online"),
+    )
+    .await
+    .is_ok();
+    release_refusal.send(()).unwrap();
+    wait_for(handled, "the refusal was never handled").await;
+    if !swapped_first {
+        events_until(&online.subscription, "Online").await;
+    }
+
+    assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST, 0)));
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+}

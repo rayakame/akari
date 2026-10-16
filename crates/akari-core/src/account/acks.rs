@@ -536,11 +536,27 @@ impl Queue {
 struct Wants {
     queue: Mutex<Queue>,
     changed: Notify,
+    // See `AckSender::gate`.
+    gate: Mutex<()>,
+    #[cfg(test)]
+    park: Mutex<Option<RefusalPark>>,
 }
+
+// Signals the refusal was taken, waits for the release, then signals it was handled.
+#[cfg(test)]
+type RefusalPark = (
+    std::sync::mpsc::Sender<()>,
+    std::sync::mpsc::Receiver<()>,
+    std::sync::mpsc::Sender<()>,
+);
 
 impl Wants {
     fn lock(&self) -> MutexGuard<'_, Queue> {
         self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn gate(&self) -> MutexGuard<'_, ()> {
+        self.gate.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn want(
@@ -733,6 +749,33 @@ impl AckSender {
             .push(handed);
     }
 
+    // Taken before the store or the queue, around a local ack and its `want`, `forget_all` and
+    // READY's journal, READY's swap and `reconcile`, a refusal and its undo. Never across an await.
+    pub(crate) fn gate(&self) -> MutexGuard<'_, ()> {
+        self.wants.gate()
+    }
+
+    // The next refusal waits after it's taken from the queue until the test releases it. Blocks
+    // a runtime worker, so only for multi-threaded tests.
+    #[cfg(test)]
+    pub(crate) fn park_next_refusal(
+        &self,
+    ) -> (
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+        std::sync::mpsc::Receiver<()>,
+    ) {
+        let (taken, on_taken) = std::sync::mpsc::channel();
+        let (release, on_release) = std::sync::mpsc::channel();
+        let (handled, on_handled) = std::sync::mpsc::channel();
+        *self
+            .wants
+            .park
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some((taken, on_release, handled));
+        (on_taken, release, on_handled)
+    }
+
     #[cfg(test)]
     pub(crate) fn handed(&self) -> Vec<Handed> {
         self.handed
@@ -796,8 +839,25 @@ async fn send(
             continue;
         }
         log(&request, Outcome::Refused(&err));
-        for refusal in wants.refuse() {
+        let _gate = wants.gate();
+        let refusals = wants.refuse();
+        #[cfg(test)]
+        let park = wants
+            .park
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        #[cfg(test)]
+        if let Some((taken, release, _)) = &park {
+            let _ = taken.send(());
+            let _ = release.recv();
+        }
+        for refusal in refusals {
             refused(refusal);
+        }
+        #[cfg(test)]
+        if let Some((.., handled)) = park {
+            let _ = handled.send(());
         }
     }
 }
