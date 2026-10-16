@@ -227,17 +227,31 @@ public final class SessionModel {
             ?? false
     }
 
+    /// Also ends the new messages line of the open channel when it is in the server.
     public func markRead(guild: GuildId) {
         account.markGuildsRead(guildIds: [guild])
+        markedRead(guilds: [guild])
     }
 
     /// One bulk ack for all of the folder's servers.
     public func markRead(folder: ServerListModel.FolderItem) {
-        account.markGuildsRead(guildIds: folder.guilds.map(\.id))
+        let guilds = folder.guilds.map(\.id)
+        account.markGuildsRead(guildIds: guilds)
+        markedRead(guilds: guilds)
     }
 
+    /// Also ends the new messages line when it is the open channel.
     public func markRead(channel: ChannelId) {
         account.markRead(channelId: channel)
+        if channel == messages?.channelId {
+            messages?.endNewMessagesLine()
+        }
+    }
+
+    private func markedRead(guilds: [GuildId]) {
+        if case .guild(let open) = place, guilds.contains(open) {
+            messages?.endNewMessagesLine()
+        }
     }
 
     /// Shift+Escape: marks the open server read; does nothing at home.
@@ -451,7 +465,7 @@ public final class SessionModel {
 
     private func list(of channel: ChannelId) -> MessageListModel {
         let list = MessageListModel(
-            channelId: channel, account: account, store: store, drafts: drafts)
+            channelId: channel, userId: userId, account: account, store: store, drafts: drafts)
         list.bottomChanged = { [weak self, weak list] scrolledAway in
             guard let self, let list, list === self.messages else {
                 return

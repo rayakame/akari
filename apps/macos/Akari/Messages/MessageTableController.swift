@@ -13,6 +13,7 @@ struct MessageTableState: Equatable {
     var openedAt: ContinuousClock.Instant?
     var openedFrom = MessageListModel.Origin.network
     var revealedSpoilers: Set<SpoilerKey> = []
+    var newMessages: MessageId?
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -406,7 +407,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if !state.atPresent {
             edges.insert(.newer)
         }
-        return MessageTimeline(rows: state.rows, calendar: calendar, edges: edges)
+        return MessageTimeline(
+            rows: state.rows, calendar: calendar, edges: edges, newMessages: state.newMessages)
     }
 
     // A scroll before the newest page lands cancels following the bottom.
@@ -738,7 +740,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if let height = rowHeights[item.id] {
             return height
         }
-        let height = height(of: item, followsDay: followsDay(row), width: width)
+        let height = height(
+            of: item, followsDay: followsDay(row), followsLine: followsLine(row), width: width)
         rowHeights[item.id] = height
         return height
     }
@@ -752,9 +755,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return true
     }
 
-    private func height(of item: MessageTimeline.Item, followsDay: Bool, width: CGFloat)
-        -> CGFloat
-    {
+    private func followsLine(_ row: Int) -> Bool {
+        guard row > 0, case .newMessages = timeline.items[row - 1] else {
+            return false
+        }
+        return true
+    }
+
+    private func height(
+        of item: MessageTimeline.Item, followsDay: Bool, followsLine: Bool, width: CGFloat
+    ) -> CGFloat {
         switch item {
         case .edge(.beginning):
             return ChannelStartCell.height(state.start, width: width)
@@ -762,17 +772,20 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return placeholderHeight
         case .day:
             return DayDividerCell.height
+        case .newMessages:
+            return NewMessagesDivider.height
         case .message(let row, let startsGroup):
             let message = row.message
             if let notice = message.notice {
                 let time = MessageFormat.groupTime(
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(
-                    message, notice: notice, time: time, followsDay: followsDay, width: width)
+                    message, notice: notice, time: time, followsDay: followsDay,
+                    followsLine: followsLine, width: width)
             }
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                width: width)
+                followsLine: followsLine, width: width)
         }
     }
 
@@ -787,6 +800,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     func cell(forRow index: Int) -> NSTableCellView {
         let item = timeline.items[index]
         let followsDay = followsDay(index)
+        let followsLine = followsLine(index)
         switch item {
         case .edge(.beginning):
             let cell = reuse(ChannelStartCell.identifier) as? ChannelStartCell ?? ChannelStartCell()
@@ -801,6 +815,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell = reuse(DayDividerCell.identifier) as? DayDividerCell ?? DayDividerCell()
             cell.configure(MessageFormat.dayDivider(day, calendar: calendar, locale: locale))
             return cell
+        case .newMessages:
+            return reuse(NewMessagesDivider.identifier) as? NewMessagesDivider
+                ?? NewMessagesDivider()
         case .message(let row, let startsGroup):
             let message = row.message
             let groupTime = MessageFormat.groupTime(
@@ -811,7 +828,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
-                    fullDate: fullDate)
+                    followsLine: followsLine, fullDate: fullDate)
                 return cell
             }
             let cell =
@@ -823,7 +840,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                groupTime: groupTime,
+                followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)

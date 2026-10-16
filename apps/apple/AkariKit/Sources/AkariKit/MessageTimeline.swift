@@ -14,6 +14,8 @@ public struct MessageTimeline: Equatable, Sendable {
     public enum ItemId: Hashable, Sendable {
         case edge(Edge)
         case day(Date)
+        /// Keyed by the row it stands before.
+        case newMessages(MessageId)
         case message(MessageId)
     }
 
@@ -22,6 +24,9 @@ public struct MessageTimeline: Equatable, Sendable {
         case edge(Edge)
         /// Before a day's first message; the date is that day's start.
         case day(Date)
+        /// The new messages line, right before the row with this ID and after its day's divider.
+        /// It starts no group.
+        case newMessages(MessageId)
         /// `startsGroup` shows the avatar, the name and the time.
         case message(MessageListModel.Row, startsGroup: Bool)
 
@@ -29,6 +34,7 @@ public struct MessageTimeline: Equatable, Sendable {
             switch self {
             case .edge(let edge): .edge(edge)
             case .day(let start): .day(start)
+            case .newMessages(let id): .newMessages(id)
             case .message(let row, _): .message(row.id)
             }
         }
@@ -40,9 +46,11 @@ public struct MessageTimeline: Equatable, Sendable {
     public let items: [Item]
 
     /// `edges` wrap the rows: `.beginning` or `.older` first, `.newer` last. Without rows only
-    /// `.older` stays, for messages that aren't loaded yet.
+    /// `.older` stays, for messages that aren't loaded yet. The new messages line goes before the
+    /// row whose ID is `newMessages`, if it is shown.
     public init(
-        rows: [MessageListModel.Row], calendar: Calendar = .current, edges: Set<Edge> = []
+        rows: [MessageListModel.Row], calendar: Calendar = .current, edges: Set<Edge> = [],
+        newMessages: MessageId? = nil
     ) {
         var items: [Item] = []
         if rows.isEmpty {
@@ -63,6 +71,9 @@ public struct MessageTimeline: Equatable, Sendable {
             if newDay {
                 items.append(.day(start))
                 day = start
+            }
+            if row.id == newMessages {
+                items.append(.newMessages(row.id))
             }
             let startsGroup = newDay || Self.startsGroup(row.message, after: previous)
             items.append(.message(row, startsGroup: startsGroup))

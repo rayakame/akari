@@ -18,7 +18,7 @@ struct MessageListModelTests {
     }
 
     func makeModel() -> MessageListModel {
-        MessageListModel(channelId: here, account: account, store: store)
+        MessageListModel(channelId: here, userId: id(1), account: account, store: store)
     }
 
     func loaded() -> MessageListModel {

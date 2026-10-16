@@ -187,4 +187,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     override func unreadPrivateChannels() -> [ChannelId] {
         []
     }
+
+    override func readState(channelId: ChannelId) -> ReadState? {
+        nil
+    }
 }

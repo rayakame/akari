@@ -7,7 +7,7 @@ public struct TimelineChanges: Equatable, Sendable {
     /// Indexes in the new items; insert these after removing.
     public let inserted: IndexSet
     /// Indexes in the new items of kept items whose content changed, or that started or stopped
-    /// coming right after a day divider.
+    /// coming right after a day divider or the new messages line.
     public let reloaded: IndexSet
 
     public var isEmpty: Bool {
@@ -24,18 +24,22 @@ public struct TimelineChanges: Equatable, Sendable {
             }
         }
         let oldIndexes = Dictionary(old.enumerated().map { ($1.id, $0) }) { first, _ in first }
-        // A day divider's first message sits closer to it, so a message that starts or stops
-        // following one changes too.
-        func followsDay(_ items: [MessageTimeline.Item], _ index: Int) -> Bool {
-            guard index > 0, case .day = items[index - 1] else {
-                return false
+        // A message right below a day divider or the line sits closer to it, so one that starts
+        // or stops following either changes too.
+        func above(_ items: [MessageTimeline.Item], _ index: Int) -> Above {
+            guard index > 0 else {
+                return .other
             }
-            return true
+            switch items[index - 1] {
+            case .day: return .day
+            case .newMessages: return .newMessages
+            case .edge, .message: return .other
+            }
         }
         var reloaded = IndexSet()
         for (index, item) in new.enumerated() where !inserted.contains(index) {
             if let oldIndex = oldIndexes[item.id],
-                old[oldIndex] != item || followsDay(old, oldIndex) != followsDay(new, index)
+                old[oldIndex] != item || above(old, oldIndex) != above(new, index)
             {
                 reloaded.insert(index)
             }
@@ -44,4 +48,10 @@ public struct TimelineChanges: Equatable, Sendable {
         self.inserted = inserted
         self.reloaded = reloaded
     }
+}
+
+private enum Above {
+    case day
+    case newMessages
+    case other
 }

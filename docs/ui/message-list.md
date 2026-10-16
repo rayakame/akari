@@ -251,8 +251,26 @@ Observed in the official web client on 2026-10-15 (German UI).
   leaving the channel and coming back, and opening a channel with 80 or more unread messages
   and clicking the bar.
 
-*Akari: neither the line nor the bar exists yet; they come with acks
-([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).*
+Akari's line (acks: [read-states.md](../protocol/read-states.md#acks-in-the-official-client)):
+
+- It goes before the first loaded message from someone else that is newer than the channel's
+  read position when the list opened. Akari marks the channel the user reads read at once, so
+  the list keeps that position for as long as it's open. A channel without a read position counts as read up
+  to what the list first shows. The user's own messages never start the line.
+- While there is no line, the next message from someone else gets one, also while the user
+  reads at the bottom; later messages go below it. Acks, scrolling and reconnects keep it.
+  Sending a message, Escape, and "Mark As Read" of the channel or its server remove it, and
+  leaving the channel ends it. Its coming and going doesn't move the text the user reads.
+- If the first unread message isn't loaded, the line sits before the first one that is, and an
+  older page that brings earlier unread messages moves it up.
+- Before a day's first message both show: the day divider, then the line (unobserved).
+- A 1 pt `newMessages` line from 16 at the left to the tag, which ends 16 from the right:
+  "NEW" in bold `newMessagesText` on a 13 tall `newMessages` tag with corners of 3, centered on
+  the line. The row is 16 tall with the line in its middle and takes the 16 a group leaves
+  above its first message, so under a group start it moves nothing; a follow-up under it keeps
+  its group, and the row adds its 16.
+
+*The bar doesn't exist in Akari yet.*
 
 ## Later
 

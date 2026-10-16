@@ -30,7 +30,8 @@ func row(
 }
 
 extension MessageTimeline {
-    // "day" for a divider, "+id" for a group's first message, "id" for the rest.
+    // "day" for a divider, "new" for the new messages line, "+id" for a group's first message,
+    // "id" for the rest.
     var shape: [String] {
         items.map { item in
             switch item {
@@ -38,6 +39,7 @@ extension MessageTimeline {
             case .edge(.older): "older"
             case .edge(.newer): "newer"
             case .edge(.beginning): "beginning"
+            case .newMessages: "new"
             case .message(let row, let startsGroup):
                 startsGroup ? "+\(row.id.rawValue)" : "\(row.id.rawValue)"
             }

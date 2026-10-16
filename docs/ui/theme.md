@@ -48,6 +48,8 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `timestampBackground` | a timestamp's pill | `#97979f` at 12% | `#97979f` at 12% |
 | `mentionBadge` | the red count of unread mentions on servers, folders, channels and DMs | `#d22d39` | `#d22d39` |
 | `mentionBadgeText` | the count's text | `#ffffff` | `#ffffff` |
+| `newMessages` | the new messages line and its tag | `#d22d39` | `#d22d39` |
+| `newMessagesText` | the tag's "NEW" | `#ffffff` | `#ffffff` |
 | `folder` | a server folder without a color: its tile and, expanded, its column (Akari's value for the neutral gray observed on 2026-10-14) | `#97979f` at 16% | `#97979f` at 20% |
 | `startIcon` | the circle behind a channel's symbol at its start (dark measured on 2026-10-14 as `#242428` on `chat`; light **unverified**) | `#97979f` at 8% | `#97979f` at 10% |
 
@@ -75,7 +77,6 @@ Values Akari doesn't use yet:
 | Use | Dark | Light |
 |---|---|---|
 | Tooltips and menus | `#242429` | `#ffffff` |
-| Mention badges, the new-messages line | `#d22d39` | `#d22d39` |
 | Status: online, idle, do not disturb, offline | `#45a366`, `#ffc04e`, `#da3e44`, `#84858d` | same |
 
 ## Before the redesign

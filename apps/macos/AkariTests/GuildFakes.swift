@@ -110,4 +110,8 @@ nonisolated final class GuildStore: Store, @unchecked Sendable {
     override func unreadPrivateChannels() -> [ChannelId] {
         []
     }
+
+    override func readState(channelId: ChannelId) -> ReadState? {
+        nil
+    }
 }

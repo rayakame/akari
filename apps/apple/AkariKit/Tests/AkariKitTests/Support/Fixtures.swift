@@ -55,12 +55,12 @@ func group(_ raw: UInt64, name: String? = nil, with recipients: [UInt64]) -> Cha
 }
 
 func message(
-    _ raw: UInt64, in channelRaw: UInt64 = 10, content: String? = nil,
-    delivery: Delivery = .sent
+    _ raw: UInt64, in channelRaw: UInt64 = 10, by author: User = user(1),
+    content: String? = nil, delivery: Delivery = .sent
 ) -> Message {
     let content = content ?? "message \(raw)"
     return Message(
-        id: id(raw), channelId: id(channelRaw), kind: .default, author: user(1),
+        id: id(raw), channelId: id(channelRaw), kind: .default, author: author,
         fromWebhook: false, content: content,
         timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(raw)),
         editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],

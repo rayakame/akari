@@ -173,6 +173,10 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
     override func unreadPrivateChannels() -> [ChannelId] {
         unread
     }
+
+    override func readState(channelId: ChannelId) -> ReadState? {
+        nil
+    }
 }
 
 // Never delivers events; ends when the session closes it.

@@ -100,6 +100,7 @@ public final class ComposerModel {
     @ObservationIgnored private let drafts: Drafts
     @ObservationIgnored private var guildId: GuildId?
     @ObservationIgnored private var cooldownEnd: Task<Void, Never>?
+    @ObservationIgnored var onSend: (() -> Void)?
 
     init(channelId: ChannelId, account: Account, store: Store, drafts: Drafts) {
         self.channelId = channelId
@@ -141,6 +142,7 @@ public final class ComposerModel {
             return
         }
         draft = ""
+        onSend?()
         willSend()
         do {
             _ = try await account.deliverMessage(channelId: channelId, pendingId: pending)

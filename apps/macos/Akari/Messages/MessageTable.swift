@@ -86,7 +86,7 @@ struct MessageArea: View {
             failedLoads: messages.failedLoads, start: name.start,
             channelId: messages.channelId, lastLoad: messages.lastLoad,
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
-            revealedSpoilers: messages.revealedSpoilers)
+            revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine)
     }
 }
 

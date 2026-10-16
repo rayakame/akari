@@ -20,6 +20,8 @@ final class FakeAccount: Account, @unchecked Sendable {
     let readingCalls = Locked<[ChannelId?]>([])
     let markedRead = Locked<[ChannelId]>([])
     let markedGuildsRead = Locked<[[GuildId]]>([])
+    // The read state a mark as read leaves in the store, as akari-core's local ack would.
+    let readStateAfterMarkRead = Locked<ReadState?>(nil)
 
     init(store: FakeStore = FakeStore()) {
         fakeStore = store
@@ -64,6 +66,9 @@ final class FakeAccount: Account, @unchecked Sendable {
 
     override func markRead(channelId: ChannelId) {
         markedRead.withLock { $0.append(channelId) }
+        if let state = readStateAfterMarkRead.current {
+            fakeStore.update { $0.readStates[channelId] = state }
+        }
     }
 
     override func markGuildsRead(guildIds: [GuildId]) {

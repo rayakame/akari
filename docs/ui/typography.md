@@ -77,6 +77,7 @@ These keep the values Akari had; each needs an official screenshot that shows it
 | Channel topic in the header | 14 regular | the test channel has no topic |
 | Time beside a hovered follow-up message | 11 regular | nothing hovered |
 | APP tag after a bot's name | 10 semibold | no bot message |
+| NEW tag on the new messages line | 10 bold, the scale's smallest caps | seen, not measured yet |
 | Notes in the list (attachments, replies, "Not sent.", load errors) | 14 regular | not shown |
 | Small notes (edited mark, times of system messages, the composer's strip and counter, "Catching up…", DM member counts) | 12 regular | not shown |
 | Jump bar | 14 medium | not shown |

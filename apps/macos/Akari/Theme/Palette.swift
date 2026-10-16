@@ -52,6 +52,8 @@ enum Palette {
     static let folder = token("folder", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.20))
     static let mentionBadge = token("mentionBadge", dark: "#d22d39", light: "#d22d39")
     static let mentionBadgeText = token("mentionBadgeText", dark: "#ffffff", light: "#ffffff")
+    static let newMessages = token("newMessages", dark: "#d22d39", light: "#d22d39")
+    static let newMessagesText = token("newMessagesText", dark: "#ffffff", light: "#ffffff")
     static let startIcon = token(
         "startIcon", dark: "#97979f", light: "#97979f", alpha: (0.08, 0.10))
     static let avatars = ["#5865f2", "#3e8e7e", "#c06c2b", "#a352b5", "#c2445a", "#4f7fba"]
