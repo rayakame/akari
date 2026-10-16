@@ -312,9 +312,10 @@ struct UnreadBarTests {
 
         let escape = Task { await model.escape() }
         await account.loadReplies.pulled(2)
-        account.loadReplies.send(nil)
+        // One at a time: both loads write the store, from the global executor.
         account.loadReplies.send(nil)
         await finished(jump)
+        account.loadReplies.send(nil)
         await finished(escape)
 
         #expect(loads == [aroundLoad, latestLoad])
