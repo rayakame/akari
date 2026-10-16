@@ -292,9 +292,12 @@ public final class SessionModel {
         updateReading()
     }
 
-    /// Disconnects but keeps the session, e.g. before the Mac sleeps.
+    /// Disconnects but keeps the session, e.g. before the Mac sleeps. Reading resumes after the
+    /// next click or key press.
     public func suspend() {
         suspended = true
+        engaged = false
+        updateReading()
         account.disconnect()
     }
 

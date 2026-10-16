@@ -11,6 +11,7 @@ final class ReadingSignalsTests {
         contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
         backing: .buffered, defer: false)
     let center = NotificationCenter()
+    let workspace = NotificationCenter()
     var active = true
     var key = true
     var visible = true
@@ -26,7 +27,7 @@ final class ReadingSignalsTests {
 
     func signals() -> ReadingSignals {
         ReadingSignals(
-            session: session, window: window, center: center,
+            session: session, window: window, center: center, workspace: workspace,
             isActive: { [unowned self] in active }, isKey: { [unowned self] _ in key },
             isVisible: { [unowned self] _ in visible })
     }
@@ -118,6 +119,21 @@ final class ReadingSignalsTests {
 
         center.post(name: NSWindow.didResignKeyNotification, object: NSWindow())
 
+        #expect(session.reading == channel)
+    }
+
+    // Another user's session takes the screen, and the user comes back to theirs.
+    @Test
+    func fastUserSwitchingStopsReading() throws {
+        let signals = signals()
+        let channel = try #require(session.messages?.channelId)
+
+        workspace.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        #expect(session.reading == nil)
+        workspace.post(name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        #expect(session.reading == nil, "not before a click or a key")
+
+        signals.handle(try click(in: window))
         #expect(session.reading == channel)
     }
 }

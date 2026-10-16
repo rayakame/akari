@@ -15,10 +15,13 @@ final class ReadingSignals: NSObject {
     private let isActive: @MainActor () -> Bool
     private let isKey: @MainActor (NSWindow) -> Bool
     private let isVisible: @MainActor (NSWindow) -> Bool
+    // False while fast user switching shows another user's session.
+    private var sessionActive = true
     nonisolated(unsafe) private var monitor: Any?
 
     init(
         session: SessionModel, window: NSWindow, center: NotificationCenter = .default,
+        workspace: NotificationCenter = NSWorkspace.shared.notificationCenter,
         isActive: @escaping @MainActor () -> Bool = { NSApp.isActive },
         isKey: @escaping @MainActor (NSWindow) -> Bool = { $0.isKeyWindow },
         isVisible: @escaping @MainActor (NSWindow) -> Bool = MessageTableController.isOnScreen,
@@ -43,6 +46,12 @@ final class ReadingSignals: NSObject {
         ] {
             center.addObserver(self, selector: #selector(changed), name: name, object: window)
         }
+        workspace.addObserver(
+            self, selector: #selector(sessionResigned),
+            name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        workspace.addObserver(
+            self, selector: #selector(sessionBecameActive),
+            name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
         if monitors {
             monitor = NSEvent.addLocalMonitorForEvents(matching: Self.mask) { [weak self] event in
                 MainActor.assumeIsolated {
@@ -78,7 +87,17 @@ final class ReadingSignals: NSObject {
         }
         session.setAppActive(isActive())
         session.setWindowKey(isKey(window))
-        session.setWindowVisible(isVisible(window))
+        session.setWindowVisible(sessionActive && isVisible(window))
+    }
+
+    @objc private func sessionResigned() {
+        sessionActive = false
+        changed()
+    }
+
+    @objc private func sessionBecameActive() {
+        sessionActive = true
+        changed()
     }
 
     // Feeds the session while this view is in a window.

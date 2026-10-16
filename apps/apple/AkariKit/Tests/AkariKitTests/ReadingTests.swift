@@ -332,6 +332,24 @@ final class ReadingTests {
         session.close()
     }
 
+    // Before the Mac sleeps.
+    @Test
+    func suspendDisengages() {
+        let session = readingSession()
+
+        session.suspend()
+        #expect(session.reading == nil)
+        session.apply(EventBatch([.connection(state: .offline)]))
+        session.resume()
+        session.apply(
+            EventBatch([.connection(state: .connecting), .ready, .connection(state: .online)]))
+        #expect(session.reading == nil, "not before a click or a key")
+
+        session.userInteracted()
+        #expect(readings == [general, nil, general])
+        session.close()
+    }
+
     @Test
     func goingToTheBackgroundStopsReading() {
         let session = readingSession()
