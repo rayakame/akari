@@ -48,8 +48,13 @@ final class ReadingTests {
         list.userScrolled(by: 400, height: 600)
     }
 
+    // The list's reports reach the core a turn later.
+    func settle(_ session: SessionModel) async {
+        await finished(session.pendingReading)
+    }
+
     @Test
-    func readingIsSetOnlyWhileEngagedActiveKeyVisibleAndAtTheBottom() throws {
+    func readingIsSetOnlyWhileEngagedActiveKeyVisibleAndAtTheBottom() async throws {
         let session = makeSession()
         session.start()
         session.setAppActive(true)
@@ -68,8 +73,10 @@ final class ReadingTests {
         ]
         for (name, leave, comeBack) in breaks {
             leave()
+            await settle(session)
             #expect(session.reading == nil, "\(name)")
             comeBack()
+            await settle(session)
             #expect(session.reading == nil, "\(name), not engaged")
             session.userInteracted()
             #expect(session.reading == general, "\(name), engaged again")
@@ -195,10 +202,11 @@ final class ReadingTests {
     }
 
     @Test
-    func scrollingUpStopsReading() throws {
+    func scrollingUpStopsReading() async throws {
         let session = readingSession()
 
         scrollUp(try #require(session.messages))
+        await settle(session)
 
         #expect(session.messages?.atPresentBottom == false)
         #expect(readings == [general, nil])
@@ -206,10 +214,12 @@ final class ReadingTests {
     }
 
     @Test
-    func scrollingBackDownDoesntReadUntilAClick() throws {
+    func scrollingBackDownDoesntReadUntilAClick() async throws {
         let session = readingSession()
         scrollUp(try #require(session.messages))
+        await settle(session)
         session.messages?.setAtBottom(true)
+        await settle(session)
         #expect(session.reading == nil)
 
         session.userInteracted()
@@ -220,13 +230,14 @@ final class ReadingTests {
 
     // Stricter than the official client, which acks on that click.
     @Test
-    func aClickWhileScrolledUpReadsOnceBackAtTheBottom() throws {
+    func aClickWhileScrolledUpReadsOnceBackAtTheBottom() async throws {
         let session = readingSession()
         scrollUp(try #require(session.messages))
         session.userInteracted()
         #expect(session.reading == nil)
 
         session.messages?.setAtBottom(true)
+        await settle(session)
 
         #expect(readings == [general, nil, general])
         session.close()
@@ -234,14 +245,16 @@ final class ReadingTests {
 
     // The bar's jump to the first unread message: reading pauses and comes back at the bottom.
     @Test
-    func theTablesOwnJumpKeepsEngagement() throws {
+    func theTablesOwnJumpKeepsEngagement() async throws {
         let session = readingSession()
         let list = try #require(session.messages)
 
         list.setAtBottom(false)
+        await settle(session)
         #expect(session.reading == nil)
         list.userScrolled(by: -300, height: 600)
         list.setAtBottom(true)
+        await settle(session)
 
         #expect(readings == [general, nil, general])
         session.close()
@@ -249,33 +262,39 @@ final class ReadingTests {
 
     // A trackpad's momentum or bounce, or a message arriving during a gesture.
     @Test
-    func aSmallNudgeAtTheBottomKeepsEngagement() throws {
+    func aSmallNudgeAtTheBottomKeepsEngagement() async throws {
         let session = readingSession()
         let list = try #require(session.messages)
 
         list.setAtBottom(false)
+        await settle(session)
         list.userScrolled(by: 60, height: 600)
         list.userScrolled(by: -20, height: 600)
         list.userScrolled(by: 60, height: 600)
         list.setAtBottom(true)
+        await settle(session)
         #expect(readings == [general, nil, general])
 
         list.setAtBottom(false)
+        await settle(session)
         list.userScrolled(by: 100, height: 600)
         list.setAtBottom(true)
+        await settle(session)
         #expect(readings == [general, nil, general, nil, general], "counted from the bottom")
         session.close()
     }
 
     @Test
-    func scrollingClearlyAwayDisengages() throws {
+    func scrollingClearlyAwayDisengages() async throws {
         let session = readingSession()
         let list = try #require(session.messages)
 
         list.setAtBottom(false)
+        await settle(session)
         list.userScrolled(by: 100, height: 600)
         list.userScrolled(by: 100, height: 600)
         list.setAtBottom(true)
+        await settle(session)
         #expect(session.reading == nil)
         session.userInteracted()
         #expect(session.reading == general)
@@ -283,9 +302,33 @@ final class ReadingTests {
         list.setAtBottom(false)
         list.userScrolled(by: 50, height: 120)
         list.setAtBottom(true)
+        await settle(session)
         #expect(session.reading == nil, "a short list")
 
         #expect(readings == [general, nil, general, nil])
+        session.close()
+    }
+
+    // The table reports from inside AppKit's scroll callbacks.
+    @Test
+    func setReadingIsCalledOnlyOnChange() async throws {
+        let session = readingSession()
+        let list = try #require(session.messages)
+
+        for _ in 0..<5 {
+            list.setAtBottom(false)
+            list.setAtBottom(true)
+        }
+        list.setAtBottom(true)
+        #expect(session.reading == general)
+        await settle(session)
+        #expect(readings == [general], "the burst ended where it started")
+
+        list.setAtBottom(false)
+        #expect(session.reading == nil)
+        #expect(readings == [general], "not inside the callback")
+        await settle(session)
+        #expect(readings == [general, nil])
         session.close()
     }
 

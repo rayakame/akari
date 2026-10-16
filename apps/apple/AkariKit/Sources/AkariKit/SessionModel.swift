@@ -24,9 +24,9 @@ public final class SessionModel {
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
     /// with `.task(id: messages.channelId) { await messages.open() }`.
     public private(set) var messages: MessageListModel?
-    /// The channel the user is reading, as the core was told: the open channel while the
-    /// session is online, the app active, its window key and visible, the list fresh at the
-    /// present's bottom and the user engaged.
+    /// The channel the user is reading: the open channel while the session is online, the app
+    /// active, its window key and visible, the list fresh at the present's bottom and the user
+    /// engaged. The core hears of a change the list reports on the next turn.
     public private(set) var reading: ChannelId?
     /// What the connection bar says; `nil` while online.
     public var notice: ConnectionNotice? {
@@ -63,6 +63,10 @@ public final class SessionModel {
     // The core forgets the channel whenever the connection drops; a call that raced the drop
     // may have set it again, so the next derivation is sent whatever it is.
     @ObservationIgnored private var resendReading = false
+    @ObservationIgnored private var toldReading: ChannelId?
+    // The list reports from inside the table's scroll callbacks, too often for a call into the
+    // core each; it hears the last value.
+    @ObservationIgnored private(set) var pendingReading: Task<Void, Never>?
 
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
     /// means the user has to log in again. The first READY reopens the place and channel
@@ -333,7 +337,7 @@ public final class SessionModel {
     }
 
     func apply(_ batch: EventBatch) {
-        if batch.ready || batch.leftOnline, reading != nil {
+        if batch.ready || batch.leftOnline, toldReading != nil {
             resendReading = true
         }
         // A list that hasn't applied the batch yet, e.g. READY's stale mark, isn't being read.
@@ -487,7 +491,7 @@ public final class SessionModel {
             if scrolledAway {
                 engaged = false
             }
-            updateReading()
+            updateReading(later: true)
         }
         return list
     }
@@ -507,7 +511,7 @@ public final class SessionModel {
         updateReading()
     }
 
-    private func updateReading() {
+    private func updateReading(later: Bool = false) {
         guard !holdingReading else {
             return
         }
@@ -519,12 +523,31 @@ public final class SessionModel {
         if channel != nil {
             messages?.readHere = true
         }
-        guard channel != reading || resendReading else {
+        if channel != reading {
+            reading = channel
+        }
+        if !later {
+            pendingReading?.cancel()
+            pendingReading = nil
+            tellReading()
+        } else if pendingReading == nil {
+            pendingReading = Task { [weak self] in
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                pendingReading = nil
+                tellReading()
+            }
+        }
+    }
+
+    private func tellReading() {
+        guard reading != toldReading || resendReading else {
             return
         }
         resendReading = false
-        reading = channel
-        account.setReading(channelId: channel)
+        toldReading = reading
+        account.setReading(channelId: reading)
     }
 
     private static func showsUnread(_ badge: Badge) -> Bool {
