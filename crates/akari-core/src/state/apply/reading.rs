@@ -199,6 +199,29 @@ impl State {
         }
     }
 
+    // Discord sends these even from a large guild it sends no other messages of, so the messages
+    // before one may be missing.
+    pub(super) fn forced_through(&self, message: &model::Message) -> bool {
+        let Some(me) = self.entities.me() else {
+            return false;
+        };
+        message.mention_everyone
+            || message.mentions.iter().any(|user| user.id == me)
+            || (!message.mention_roles.is_empty()
+                && self
+                    .entities
+                    .channels
+                    .get(&message.channel_id)
+                    .and_then(|channel| channel.guild_id)
+                    .and_then(|guild| self.entities.members.get(&guild))
+                    .is_some_and(|member| {
+                        member
+                            .roles
+                            .iter()
+                            .any(|role| message.mention_roles.contains(role))
+                    }))
+    }
+
     fn cursor(&self, channel: ChannelId) -> Option<Snowflake<GenericMarker>> {
         self.entities
             .channels

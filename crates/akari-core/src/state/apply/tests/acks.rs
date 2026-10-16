@@ -338,6 +338,50 @@ fn a_load_at_the_present_clears_a_stale_cursor() {
 }
 
 #[test]
+fn a_message_without_a_mention_clears_a_stale_cursor() {
+    let mut state = general_read();
+    apply(
+        &mut state,
+        "PASSIVE_UPDATE_V2",
+        passive(GENERAL, NEWEST + 6),
+    );
+
+    apply(&mut state, "MESSAGE_CREATE", plain(NEWEST + 5, GENERAL));
+    assert_eq!(
+        mark_read(&mut state, GENERAL),
+        at_now(GENERAL, NEWEST + 6),
+        "an older message leaves the cursor"
+    );
+    apply(&mut state, "MESSAGE_CREATE", plain(NEWEST + 7, GENERAL));
+
+    assert_eq!(mark_read(&mut state, GENERAL), at(GENERAL, NEWEST + 7));
+}
+
+// In a large guild Discord doesn't send every message to, these come anyway.
+#[test]
+fn a_mentioning_message_keeps_a_stale_cursor() {
+    let mut everyone = plain(NEWEST + 8, GENERAL);
+    everyone["mention_everyone"] = true.into();
+    let mut role = plain(NEWEST + 9, GENERAL);
+    role["mention_roles"] = json!(["500000000000000002"]);
+    let mut state = general_read();
+    apply(
+        &mut state,
+        "PASSIVE_UPDATE_V2",
+        passive(GENERAL, NEWEST + 6),
+    );
+
+    for (mentioning, id) in [
+        (message(NEWEST + 7, GENERAL), NEWEST + 7),
+        (everyone, NEWEST + 8),
+        (role, NEWEST + 9),
+    ] {
+        apply(&mut state, "MESSAGE_CREATE", mentioning);
+        assert_eq!(mark_read(&mut state, GENERAL), at_now(GENERAL, id));
+    }
+}
+
+#[test]
 fn an_older_page_leaves_a_cursor_stale() {
     let mut state = general_read();
     load_page(&mut state, GENERAL, LoadKind::Latest, &[NEWEST + 5], false);

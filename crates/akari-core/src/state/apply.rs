@@ -581,8 +581,11 @@ impl State {
                     .map(MessageId::new);
                 self.read_message(&message);
                 self.dirty.channel(channel);
+                let forced = self.forced_through(&message);
                 self.windows.live(*message, &self.entities.users, events);
-                self.note_message(channel, id, events);
+                if self.note_message(channel, id, events) && !forced {
+                    self.stale_cursors.remove(&channel);
+                }
                 if Some(author) == self.entities.me() {
                     self.note_own_message(channel, nonce);
                 }
