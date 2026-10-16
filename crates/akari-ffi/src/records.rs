@@ -476,8 +476,8 @@ pub enum MessageType {
 pub enum PageOutcome {
     /// It went into the window.
     Applied,
-    /// Dropped: a newer `Latest` or `Around` load, or `Account::supersede_around_loads`, came
-    /// after this `Around` load began.
+    /// Dropped for a later-placed request: an `Around` page for a `Latest`, `Around` or
+    /// supersede; a `Latest` page that would replace the window for an `Around`.
     Overtaken,
     /// Dropped: the window was replaced, or the end the page continues from changed, meanwhile.
     Outdated,

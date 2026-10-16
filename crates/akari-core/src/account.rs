@@ -45,7 +45,8 @@ pub struct Account {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MessageLoad {
-    /// The newest messages: fills a window, refreshes a stale one, or jumps to the present.
+    /// The newest messages: fills a window, refreshes a stale one, or jumps to the present; not
+    /// when it would replace the window for a later-placed `Around` (`PageOutcome::Overtaken`).
     Latest { limit: u8 },
     /// Before the window's first message.
     Older { limit: u8 },
