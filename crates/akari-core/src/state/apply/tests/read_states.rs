@@ -623,7 +623,7 @@ fn an_echo_at_our_position_keeps_a_later_mention() {
 }
 
 #[test]
-fn an_ack_at_an_estimated_position_still_replaces_it() {
+fn an_estimated_position_takes_an_ack_at_it_but_not_one_behind() {
     let mut state = ready_state();
     apply(
         &mut state,
@@ -634,9 +634,17 @@ fn an_ack_at_an_estimated_position_still_replaces_it() {
         read_state(&state, GROUP),
         Some((Some(400_000_000_000_000_021), 1))
     );
+    let mut behind = ack(GROUP, 400_000_000_000_000_020);
+    behind["mention_count"] = 0.into();
     let mut real = ack(GROUP, 400_000_000_000_000_021);
     real["mention_count"] = 0.into();
 
+    apply(&mut state, "MESSAGE_ACK", behind);
+    assert_eq!(
+        read_state(&state, GROUP),
+        Some((Some(400_000_000_000_000_021), 1))
+    );
+    assert_eq!(estimated(&state, GROUP), Some(true));
     apply(&mut state, "MESSAGE_ACK", real);
 
     assert_eq!(

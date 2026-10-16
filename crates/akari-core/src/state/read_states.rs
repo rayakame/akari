@@ -123,9 +123,16 @@ impl ReadStates {
     pub(crate) fn ack(&mut self, ack: &MessageAck, newest: Option<u64>) -> bool {
         let position = ack.message_id.get();
         let known = self.get(ack.channel_id);
-        // An echo of an ack the store already took mustn't reset a mention counted since.
+        // An echo of an ack the store already took mustn't reset a mention counted since; a
+        // position the store estimated takes a real one at it.
         let behind = known.is_some_and(|state| {
-            !state.estimated && state.acked.is_some_and(|acked| acked.get() >= position)
+            state.acked.is_some_and(|acked| {
+                if state.estimated {
+                    acked.get() > position
+                } else {
+                    acked.get() >= position
+                }
+            })
         });
         if !ack.manual && behind {
             return false;
