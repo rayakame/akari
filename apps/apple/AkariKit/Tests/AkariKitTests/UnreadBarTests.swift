@@ -592,6 +592,42 @@ struct UnreadBarTests {
         session.close()
     }
 
+    // The bar clicked, then a switch to another channel before the jump's page came back.
+    @Test
+    func aChannelSwitchDropsARunningJump() async throws {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(10), channel(11)], in: 1)
+        }
+        shown([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false))
+        let session = SessionModel(
+            userId: id(1), account: account, memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(channel: here)
+        let old = try #require(session.messages)
+        let jump = await waitingJump(old)
+
+        session.open(channel: id(11))
+        account.loadReplies.send(nil)
+        await finished(jump)
+
+        #expect(loads == [aroundLoad])
+        #expect(store.log.actions.contains(.supersede(here)))
+        #expect(store.window(channelId: here)?.latest == true, "the jump's page didn't land")
+        #expect(old.unreadJumps == 0)
+        session.open(channel: here)
+        let model = try #require(session.messages)
+        await model.open()
+        model.setNewMessagesLineOnScreen(false)
+        #expect(ids(model) == [5, 6, 7, 8])
+        #expect(model.atPresent)
+        #expect(model.unreadBar != nil)
+        session.close()
+    }
+
     // The bar clicked in this channel, then a switch away and back while the jump loads.
     @Test
     func aJumpFromAnEarlierListOfTheChannelDoesntLand() async {

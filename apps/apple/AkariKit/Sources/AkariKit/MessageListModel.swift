@@ -194,8 +194,8 @@ public final class MessageListModel {
 
     /// The unread bar and Shift+Page Up, when there is a line: loads the messages around the read
     /// position if the first unread message isn't loaded; a failed load leaves the bar. Escape,
-    /// the jump to the present, marking read and sending meanwhile cancel the jump. Scrolling to
-    /// the line is the view's part.
+    /// the jump to the present, marking read, sending and a channel switch meanwhile cancel the
+    /// jump. Scrolling to the line is the view's part.
     public func jumpToUnread() async {
         guard newMessagesLine != nil, let readUpTo else {
             return
@@ -221,9 +221,12 @@ public final class MessageListModel {
         unreadJumps += 1
     }
 
-    /// The session shows another list now: loads still running end without starting more.
+    // A jump landing after the user left would reopen the channel in history, without its scroll.
     func retire() {
         retired = true
+        if activeLoads.values.contains(.around) {
+            account.supersedeAroundLoads(channelId: channelId)
+        }
     }
 
     /// The view reports whether the new messages line is on screen.
