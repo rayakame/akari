@@ -82,8 +82,9 @@ Acks go through `AccountRest` like every other request, with pacing of their own
 - **One pending ack per channel.** A new target merges with a pending one; the newer ID wins.
 - **Bulks** go out in chunks of 50 entries (the most one official request was seen with), one
   request per chunk, in order. A channel's pending single ack joins its entry in the bulk.
-- **Never backwards.** An ack at or below what Discord took for the channel this session isn't
-  sent; a bulk whose entries are all skipped sends nothing.
+- **Never backwards.** An ack at or below what Discord took for the channel isn't sent; a bulk
+  whose entries are all skipped sends nothing. A manual MESSAGE_ACK for the channel (marked as
+  unread elsewhere) and every READY clear what Discord took, so the channel can be acked again.
 - **Errors.** An ack still rate limited after the waits and retries above, or failed with a
   network error or 5xx (after the 502/504 retry above), stays pending: it's tried again after
   2 s, then after twice as long each time up to a minute (or after the 429's `retry_after`

@@ -390,6 +390,53 @@ async fn a_message_ack_from_elsewhere_sends_nothing() {
     assert_eq!(handed(&online.account), []);
 }
 
+// Marked as unread on another device after Akari acked it.
+#[tokio::test]
+async fn a_channel_marked_unread_elsewhere_is_acked_again() {
+    let mut online = acking(|_| {}).await;
+    online.account.mark_read(general());
+    sent(&online.server, 1).await;
+
+    online
+        .connection
+        .send(dispatch(
+            2,
+            "MESSAGE_ACK",
+            json!({"channel_id": GENERAL.to_string(), "message_id": (NEWEST - 1).to_string(),
+                   "manual": true, "mention_count": 0, "version": 5}),
+        ))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert!(badge(&online.account, GENERAL).unread);
+    online.account.mark_read(general());
+
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [Sent::Ack(GENERAL, NEWEST), Sent::Ack(GENERAL, NEWEST)]
+    );
+}
+
+// READY's read states are Discord's, e.g. after a mark as unread while Akari was offline.
+#[tokio::test]
+async fn a_new_ready_lets_a_channel_be_acked_again() {
+    let mut online = acking(|_| {}).await;
+    online.account.mark_read(general());
+    sent(&online.server, 1).await;
+
+    online.connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = online.fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh.send(ready_payload(1, &online.fake, |_| {})).await;
+    events_until(&online.subscription, "Online").await;
+    assert!(badge(&online.account, GENERAL).unread);
+    online.account.mark_read(general());
+
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [Sent::Ack(GENERAL, NEWEST), Sent::Ack(GENERAL, NEWEST)]
+    );
+}
+
 #[tokio::test]
 async fn reading_before_ready_waits_for_it() {
     let mut fake = FakeGateway::start().await;

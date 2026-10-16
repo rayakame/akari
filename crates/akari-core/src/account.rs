@@ -393,6 +393,17 @@ impl Shared {
         }
     }
 
+    fn dispatched(&self, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
+        if let ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) = &event
+            && ack.manual
+            && ack.ack_type == 0
+        {
+            self.acks.forget(ack.channel_id);
+        }
+        let ack = on_event(&self.store, event, connecting);
+        self.ack_reading(ack);
+    }
+
     fn view(self: &Arc<Self>, channel: ChannelId) {
         self.store.view_channel(channel);
         self.subscribe_guild_of(channel);
@@ -1026,6 +1037,7 @@ async fn pump(mut finish: Finish) {
                 let store = shared.store.clone();
                 match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
                     Ok(next) => {
+                        shared.acks.forget_all();
                         let ack = shared.store.replace(next);
                         shared.ack_reading(ack);
                         let convert_ms = crate::millis(started.elapsed());
@@ -1046,8 +1058,7 @@ async fn pump(mut finish: Finish) {
             }
             Ok(ConnectionEvent::Dispatch(DispatchEvent::Resumed)) => {
                 shared.forget_subscriptions();
-                on_event(
-                    &shared.store,
+                shared.dispatched(
                     ConnectionEvent::Dispatch(DispatchEvent::Resumed),
                     &connecting,
                 );
@@ -1056,10 +1067,7 @@ async fn pump(mut finish: Finish) {
                 let subscriptions = shared.clone();
                 tokio::spawn(async move { subscriptions.resubscribe().await });
             }
-            Ok(event) => {
-                let ack = on_event(&shared.store, event, &connecting);
-                shared.ack_reading(ack);
-            }
+            Ok(event) => shared.dispatched(event, &connecting),
             Err(GatewayError::Closed) => break None,
             Err(error) => break Some(Arc::new(error)),
         }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -146,6 +146,9 @@ struct Queue {
     wanted: HashMap<ChannelId, Wanted>,
     orders: u64,
     closed: bool,
+    // Channels whose position Discord set on its own, for the sender to forget.
+    forgotten: HashSet<ChannelId>,
+    forget_all: bool,
 }
 
 impl Queue {
@@ -334,6 +337,25 @@ impl Wants {
         self.lock().retry(request, at);
     }
 
+    fn forget(&self, channel: ChannelId) {
+        self.lock().forgotten.insert(channel);
+    }
+
+    fn forget_all(&self) {
+        self.lock().forget_all = true;
+    }
+
+    // Taken between requests, so a request on its way when Discord moved can't undo it.
+    fn take_forgotten(&self, sent: &mut HashMap<ChannelId, MessageId>) {
+        let mut queue = self.lock();
+        if std::mem::take(&mut queue.forget_all) {
+            sent.clear();
+        }
+        for channel in queue.forgotten.drain() {
+            sent.remove(&channel);
+        }
+    }
+
     fn close(&self) {
         self.lock().close();
         self.changed.notify_one();
@@ -415,6 +437,17 @@ impl AckSender {
         self.wants.want_bulk(entries);
     }
 
+    // Discord set the channel's position on its own, maybe behind what was sent (a mark as
+    // unread elsewhere): the next target goes out even if it isn't newer.
+    pub(crate) fn forget(&self, channel: ChannelId) {
+        self.wants.forget(channel);
+    }
+
+    // READY's read states are Discord's, whatever was sent before.
+    pub(crate) fn forget_all(&self) {
+        self.wants.forget_all();
+    }
+
     pub(crate) fn close(&self) {
         self.wants.close();
     }
@@ -448,9 +481,10 @@ async fn send(
     retry_delay: Duration,
     unauthorized: Box<dyn Fn() + Send + Sync>,
 ) {
-    // Per channel, the highest ID Discord took this session.
+    // Per channel, the highest ID Discord took since it last set the position on its own.
     let mut sent: HashMap<ChannelId, MessageId> = HashMap::new();
     while let Some(mut request) = wants.next().await {
+        wants.take_forgotten(&mut sent);
         let server_now = rest.server_now_millis();
         let mut entries: Vec<(ChannelId, MessageId)> = Vec::with_capacity(request.entries.len());
         request.entries.retain(|&(channel, target)| {
