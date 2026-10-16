@@ -1472,3 +1472,89 @@ async fn a_refused_ack_from_before_ready_goes_back_to_ready_s_read_state() {
         ]
     );
 }
+
+// Holds the first bulk until the test lets it go, then rate limits it for 30 s.
+struct GatedLimit {
+    arrived: std::sync::mpsc::Sender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+    first: std::sync::atomic::AtomicBool,
+}
+
+impl Respond for GatedLimit {
+    fn respond(&self, request: &Received) -> ResponseTemplate {
+        if request.url.path() != BULK {
+            return answered();
+        }
+        if !self.first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return ResponseTemplate::new(204);
+        }
+        let _ = self.arrived.send(());
+        let _ = self
+            .release
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(10));
+        ResponseTemplate::new(429).set_body_json(
+            json!({"message": "You are being rate limited.", "retry_after": 30.0, "global": false}),
+        )
+    }
+}
+
+#[tokio::test]
+async fn an_escape_during_a_bulks_flight_doesnt_wait_for_its_rate_limit() {
+    let server = MockServer::start().await;
+    let (arrived, on_arrival) = std::sync::mpsc::channel();
+    let (release, on_release) = std::sync::mpsc::channel();
+    Mock::given(method("POST"))
+        .respond_with(GatedLimit {
+            arrived,
+            release: Mutex::new(on_release),
+            first: std::sync::atomic::AtomicBool::new(true),
+        })
+        .mount(&server)
+        .await;
+    let sender = sender(&server);
+    sender.want_bulk(vec![
+        ack(channel(1), at(message(1))),
+        ack(channel(2), at(message(2))),
+    ]);
+    tokio::task::spawn_blocking(move || on_arrival.recv_timeout(Duration::from_secs(5)))
+        .await
+        .unwrap()
+        .expect("the bulk never arrived");
+
+    sender.want(ack(channel(1), at(message(3))), Pace::Explicit);
+    release.send(()).unwrap();
+    let released = std::time::Instant::now();
+    let requests = received(&server, 2).await;
+
+    assert_eq!(
+        acks(&requests),
+        [(0, 2), ack_of(channel(1), message(3))],
+        "the Escape waited for the bulk's 30 s"
+    );
+    assert!(released.elapsed() < Duration::from_secs(1));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reading_ack_doesnt_wait_for_its_channels_bulk_retry() {
+    let wants = Wants::default();
+    wants.want_bulk(vec![
+        (channel(1), message(1), None, None),
+        (channel(2), message(2), None, None),
+    ]);
+    wants.next().await.unwrap();
+    let retry_at = Instant::now() + Duration::from_secs(60);
+    wants.retry(retry_at);
+
+    let asked = Instant::now();
+    wants.want(channel(1), message(3), None, None, Pace::Paced);
+    let read = wants.next().await.unwrap();
+
+    assert!(asked.elapsed() <= CAP, "{:?}", asked.elapsed());
+    assert_eq!(single(&read), (channel(1), message(3)));
+    assert_eq!(read.pace, Pace::Paced);
+    let retried = wants.next().await.unwrap();
+    assert!(Instant::now() >= retry_at);
+    assert_eq!(retried.entries, [(channel(2), message(2))]);
+}

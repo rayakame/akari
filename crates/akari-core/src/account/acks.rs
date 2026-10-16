@@ -251,10 +251,13 @@ impl Queue {
                     (Kind::Paced { .. }, Pace::Explicit) => Kind::Explicit {
                         at: now.min(wanted.due()),
                     },
-                    // The bulk's route may be what's limited; the channel's own goes now.
-                    (Kind::Bulk { .. }, Pace::Explicit) if wanted.retry.is_some() => {
+                    // The bulk's route may be what's limited; the channel's own goes ahead of it.
+                    (Kind::Bulk { .. }, pace) if wanted.retry.is_some() => {
                         wanted.retry = None;
-                        Kind::Explicit { at: now }
+                        match pace {
+                            Pace::Paced => Kind::Paced { last: now },
+                            Pace::Explicit => Kind::Explicit { at: now },
+                        }
                     }
                     (kind, _) => kind,
                 };
@@ -438,7 +441,10 @@ impl Queue {
                 newer.id = newer.id.max(back.id);
                 newer.before = back.before.then(newer.before);
                 newer.since = newer.since.min(back.since);
-                newer.retry = back.retry.or(newer.retry);
+                // The bulk's route may be what's limited, not the channel's own.
+                if !back.bulk() || newer.bulk() {
+                    newer.retry = back.retry.or(newer.retry);
+                }
                 if let Kind::Bulk { alone, .. } = &mut newer.kind {
                     *alone |= back.alone();
                 }
