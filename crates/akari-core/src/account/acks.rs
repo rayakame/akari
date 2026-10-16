@@ -373,7 +373,7 @@ impl Queue {
     }
 
     // What READY may already have overtaken isn't remembered as Discord's.
-    fn sent(&mut self) {
+    fn confirmed(&mut self) {
         for (channel, wanted) in std::mem::take(&mut self.flight).entries {
             if !wanted.unchecked() {
                 self.sent.insert(channel, wanted.id);
@@ -562,8 +562,8 @@ impl Wants {
         self.changed.notify_one();
     }
 
-    fn sent(&self) {
-        self.lock().sent();
+    fn confirmed(&self) {
+        self.lock().confirmed();
     }
 
     fn retry(&self, at: Instant) {
@@ -764,7 +764,7 @@ async fn send(
         };
         let err = match result {
             Ok(()) => {
-                wants.sent();
+                wants.confirmed();
                 log(&request, Outcome::Sent);
                 continue;
             }

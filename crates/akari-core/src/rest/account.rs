@@ -202,7 +202,7 @@ struct BulkAckEntry {
 // Acks are retried by their sender, which mustn't be held up by one of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Waiting {
-    // Out rate limits up to MAX_RATE_LIMIT_WAIT, and before retrying a 429, 502 or 504.
+    // Waits out rate limits up to MAX_RATE_LIMIT_WAIT, and before retrying a 429, 502 or 504.
     Allowed,
     Never,
 }

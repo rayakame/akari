@@ -1242,7 +1242,7 @@ async fn drain(wants: &Wants) -> Vec<(ChannelId, MessageId)> {
     let mut sent = Vec::new();
     while let Ok(Some(request)) = timeout(Duration::from_secs(60), wants.next()).await {
         sent.extend(request.entries);
-        wants.sent();
+        wants.confirmed();
     }
     sent.sort_unstable();
     sent
@@ -1353,7 +1353,7 @@ async fn an_ack_on_its_way_at_ready_doesnt_hold_back_the_next() {
     wants.next().await.unwrap();
 
     wants.forget_all();
-    wants.sent();
+    wants.confirmed();
     wants.reconcile(|_| read_at(1, 1));
     wants.want(channel(1), message(11), read_at(1, 1), None, Pace::Explicit);
 
@@ -1447,7 +1447,7 @@ async fn a_refused_ack_from_before_ready_goes_back_to_ready_s_read_state() {
     );
     let first = wants.next().await.unwrap();
     assert_eq!(single(&first), (channel(2), message(12)));
-    wants.sent();
+    wants.confirmed();
     wants.want(
         channel(2),
         message(14),
