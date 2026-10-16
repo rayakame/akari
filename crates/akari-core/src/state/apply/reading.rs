@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use super::{Derived, Entities, ReadyDiff, State, wall_millis};
+use super::{Derived, Entities, Journal, ReadyDiff, State, wall_millis};
 use crate::gateway::{ChannelUnread, MessageAck};
 use crate::model::{
     self, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageType, Permissions,
@@ -305,7 +305,8 @@ impl State {
         }
         self.entities.read_states.restore(channel, undo);
         if let Some(journal) = &mut self.journal {
-            journal.retain(|(journaled, _)| *journaled != channel);
+            journal.acks.retain(|(journaled, _)| *journaled != channel);
+            journal.undone.insert(channel);
         }
         self.dirty.channel(channel);
         self.refresh_badges(wall_millis(), events);
@@ -346,7 +347,7 @@ impl State {
             .get(channel)
             .and_then(|state| state.acked);
         if let (Some(journal), Some(acked)) = (&mut self.journal, acked) {
-            journal.push((channel, acked));
+            journal.acks.push((channel, acked));
         }
     }
 
@@ -354,14 +355,19 @@ impl State {
     // counts past that stays. Their badges moved after the diff, so theirs are made again.
     pub(super) fn replay(
         &self,
-        journal: &[(ChannelId, MessageId)],
+        journal: &Journal,
         next: &mut Entities,
         derived: &mut Derived,
         diff: Option<&mut ReadyDiff>,
     ) -> HashMap<ChannelId, MessageId> {
-        let mut replayed = BTreeSet::new();
+        let mut replayed: BTreeSet<ChannelId> = journal
+            .undone
+            .iter()
+            .filter(|channel| next.channels.contains_key(channel))
+            .copied()
+            .collect();
         let mut recounts = HashMap::new();
-        for &(channel, acked) in journal {
+        for &(channel, acked) in &journal.acks {
             let Some(stored) = next.channels.get(&channel) else {
                 continue;
             };

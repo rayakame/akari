@@ -294,6 +294,15 @@ impl Derived {
     }
 }
 
+// What a READY's swap replays of the local acks taken while it was prepared.
+#[derive(Default)]
+#[cfg_attr(test, derive(PartialEq))]
+struct Journal {
+    acks: Vec<(ChannelId, MessageId)>,
+    // Undone since: nothing to replay, but their badges moved after the diff.
+    undone: BTreeSet<ChannelId>,
+}
+
 pub(crate) struct ReadyDiff {
     events: Vec<StoreEvent>,
     removed_channels: Vec<ChannelId>,
@@ -316,8 +325,8 @@ pub(crate) struct State {
     due: Option<Ack>,
     // Channels whose cursor came from an unread update and may be behind Discord's.
     stale_cursors: HashSet<ChannelId>,
-    // While a READY is prepared, the positions of Akari's local acks, which its swap replays.
-    journal: Option<Vec<(ChannelId, MessageId)>>,
+    // Open while a READY is prepared.
+    journal: Option<Journal>,
     // Replayed acks that kept READY's mention count: their echo brings Discord's.
     recounts: HashMap<ChannelId, MessageId>,
 }
@@ -382,7 +391,7 @@ impl State {
     }
 
     pub(crate) fn begin_journal(&mut self) {
-        self.journal = Some(Vec::new());
+        self.journal = Some(Journal::default());
     }
 
     pub(crate) fn end_journal(&mut self) {

@@ -1630,3 +1630,31 @@ fn the_echo_of_a_replayed_ack_sets_the_count_ready_kept() {
         "a later echo at the position is one again"
     );
 }
+
+// READY's diff was made while the channel showed read; the undo showed it unread since.
+#[test]
+fn an_ack_undone_while_ready_is_prepared_still_gets_its_badge_event() {
+    let store = ready_store();
+    let ack = store.mark_read(general()).unwrap();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000003".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+    }));
+    assert!(store.undo_ack(ack.channel, ack.before, ack.after));
+    assert!(store.channel_badge(general()).unread);
+    let subscription = store.subscribe();
+
+    store.replace(prepared);
+
+    assert_eq!(store.channel_badge(general()), Badge::default());
+    assert_eq!(
+        changes(&subscription),
+        [
+            format!(
+                "BadgeChanged {{ channel_id: Snowflake({GENERAL}), guild_id: Some(Snowflake({G1})) }}"
+            ),
+            format!("GuildBadgeChanged {{ guild_id: Snowflake({G1}) }}"),
+            "Ready".to_owned()
+        ]
+    );
+}
