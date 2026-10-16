@@ -237,6 +237,171 @@ struct UnreadBarTests {
         #expect(model.newMessagesLine == id(3))
     }
 
+    var aroundLoad: CallLog.Call { .load(here, .around(messageId: id(2), limit: 50)) }
+    var latestLoad: CallLog.Call { .load(here, .latest(limit: 50)) }
+    var loads: [CallLog.Call] {
+        store.log.actions.filter { if case .load = $0 { true } else { false } }
+    }
+
+    // Each load leaves its window, as the core would: the around page replaces the window when
+    // nothing replaced it first. `latest` gives one per latest load; `nil` leaves the store as it is.
+    func windows(around: MessageWindow, latest: [MessageWindow?]) {
+        let pages = Locked(latest)
+        account.windowAfter.withLock {
+            $0 = { load in
+                switch load {
+                case .around: return around
+                case .latest: return pages.withLock { $0.isEmpty ? nil : $0.removeFirst() }
+                default: return nil
+                }
+            }
+        }
+    }
+
+    func ids(_ model: MessageListModel) -> [UInt64] {
+        model.rows.map(\.id.rawValue)
+    }
+
+    // The first unread message isn't loaded; the jump's load waits for a reply.
+    func waitingJump(_ model: MessageListModel) async -> Task<Void, Never> {
+        model.setNewMessagesLineOnScreen(false)
+        #expect(model.unreadBar != nil)
+        let jump = Task { await model.jumpToUnread() }
+        await account.loadReplies.pulled(1)
+        return jump
+    }
+
+    @Test
+    func escapeSupersedesARunningAroundLoad() async {
+        shown([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [window([6, 7, 8])])
+        let model = makeModel()
+        let jump = await waitingJump(model)
+
+        await model.escape()
+        account.loadReplies.send(nil)
+        await account.loadReplies.pulled(2)
+
+        #expect(ids(model) == [5, 6, 7, 8], "the around page doesn't show")
+        #expect(model.atPresent)
+        account.loadReplies.send(nil)
+        await finished(jump)
+        #expect(store.log.actions == [aroundLoad, latestLoad])
+        #expect(ids(model) == [6, 7, 8])
+        #expect(model.atPresent)
+        #expect(model.unreadJumps == 0)
+        #expect(model.newMessagesLine == nil)
+        #expect(model.loading == nil)
+    }
+
+    // Away from the present, the latest load races the around one; the around page lands first,
+    // so the core drops the latest page.
+    @Test
+    func jumpToPresentSupersedesARunningAroundLoad() async {
+        store.update { [here] state in
+            state.windows[here] = window([5, 6, 7, 8], latest: false)
+            state.readStates[here] = readState(2)
+        }
+        account.holdLoads.withLock { $0 = true }
+        windows(
+            around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [nil, window([7, 8])])
+        let model = makeModel()
+        let jump = await waitingJump(model)
+
+        let present = Task { await model.jumpToPresent() }
+        await account.loadReplies.pulled(2)
+        account.loadReplies.send(nil)
+        await account.loadReplies.pulled(3)
+        #expect(ids(model) == [5, 6, 7, 8], "the around page doesn't show")
+        account.loadReplies.send(nil)
+        account.loadReplies.send(nil)
+        await finished(jump)
+        await finished(present)
+
+        #expect(store.log.actions == [aroundLoad, latestLoad, latestLoad])
+        #expect(ids(model) == [7, 8])
+        #expect(model.atPresent)
+        #expect(model.unreadJumps == 0)
+        #expect(model.loading == nil)
+    }
+
+    // The bar's "Mark As Read" while the jump loads.
+    @Test
+    func markingReadSupersedesARunningAroundLoad() async throws {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(10)], in: 1)
+        }
+        shown([5, 6, 7, 8], readUpTo: 2)
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [window([5, 6, 7, 8])])
+        let session = SessionModel(
+            userId: id(1), account: account, memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(.guild(id(1)))
+        let model = try #require(session.messages)
+        let jump = await waitingJump(model)
+
+        session.markRead(channel: here)
+        account.loadReplies.send(nil)
+        await account.loadReplies.pulled(2)
+        #expect(ids(model) == [5, 6, 7, 8])
+        account.loadReplies.send(nil)
+        await finished(jump)
+
+        #expect(loads == [aroundLoad, latestLoad])
+        #expect(ids(model) == [5, 6, 7, 8])
+        #expect(model.atPresent)
+        #expect(model.unreadJumps == 0)
+        #expect(model.unreadBar == nil)
+        session.close()
+    }
+
+    // After the jump to the present overtook it, Shift+Page Up wants the line again.
+    @Test
+    func jumpingAgainTakesBackAnOvertakenJump() async {
+        store.update { [here] state in
+            state.windows[here] = window([5, 6, 7, 8], latest: false)
+            state.readStates[here] = readState(2)
+        }
+        account.holdLoads.withLock { $0 = true }
+        windows(around: window([1, 2, 3, 4, 5, 6], latest: false), latest: [nil])
+        let model = makeModel()
+        let jump = await waitingJump(model)
+        let present = Task { await model.jumpToPresent() }
+        await account.loadReplies.pulled(2)
+
+        await model.jumpToUnread()
+        account.loadReplies.send(nil)
+        await finished(jump)
+        account.loadReplies.send(nil)
+        await finished(present)
+
+        #expect(store.log.actions == [aroundLoad, latestLoad])
+        #expect(ids(model) == [1, 2, 3, 4, 5, 6])
+        #expect(model.newMessagesLine == id(3))
+        #expect(model.unreadJumps == 1)
+        #expect(model.unreadBar == nil)
+    }
+
+    // A newer page replaced the window while it loaded, so the core dropped the around page.
+    @Test
+    func aJumpWhosePageTheCoreDroppedKeepsTheBar() async throws {
+        shown([5, 6, 7, 8], readUpTo: 2)
+        windows(around: window([5, 6, 7, 8]), latest: [])
+        let model = makeModel()
+        model.setNewMessagesLineOnScreen(false)
+        let bar = try #require(model.unreadBar)
+
+        await model.jumpToUnread()
+
+        #expect(store.log.actions == [aroundLoad])
+        #expect(model.unreadJumps == 0)
+        #expect(model.unreadBar == bar)
+    }
+
     @Test
     func aFailedAroundLoadKeepsTheBar() async throws {
         shown([5, 6, 7, 8], readUpTo: 2)
@@ -256,11 +421,7 @@ struct UnreadBarTests {
         account.windowAfterLoad.withLock { $0 = window([1, 2, 3, 4, 5, 6], latest: false) }
         await model.jumpToUnread()
 
-        #expect(
-            store.log.actions == [
-                .load(here, .around(messageId: id(2), limit: 50)),
-                .load(here, .around(messageId: id(2), limit: 50)),
-            ])
+        #expect(store.log.actions == [aroundLoad, aroundLoad])
         #expect(model.unreadJumps == 1)
         #expect(model.unreadBar == nil)
         #expect(model.failedLoads.isEmpty)

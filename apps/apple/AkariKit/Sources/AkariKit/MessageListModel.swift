@@ -123,6 +123,16 @@ public final class MessageListModel {
     // The user's own scrolls since the bottom, not the distance to it: a message arriving during
     // a gesture moves the bottom away.
     @ObservationIgnored private var scrolledUp = 0.0
+    // The last request that places the list: a jump that loads around the read position, or one
+    // that keeps the list where it is or takes it to the present.
+    @ObservationIgnored private var placement = Placement.stay
+    // Latest loads for jumps that a later request overtook once their page had replaced the window.
+    @ObservationIgnored private var owedPresents = 0
+
+    private enum Placement {
+        case aroundJump
+        case stay
+    }
 
     init(
         channelId: ChannelId, userId: UserId, account: Account, store: Store,
@@ -169,6 +179,7 @@ public final class MessageListModel {
     }
 
     public func jumpToPresent() async {
+        placement = .stay
         await load(.latest)
     }
 
@@ -183,23 +194,34 @@ public final class MessageListModel {
     }
 
     /// The unread bar and Shift+Page Up, when there is a line: loads the messages around the read
-    /// position if the first unread message isn't loaded; a failed load leaves the bar. Scrolling
-    /// to the line is the view's part.
+    /// position if the first unread message isn't loaded; a failed load leaves the bar. Escape,
+    /// the jump to the present, marking read and sending meanwhile cancel the jump. Scrolling to
+    /// the line is the view's part.
     public func jumpToUnread() async {
         guard newMessagesLine != nil, let readUpTo else {
             return
         }
         // A channel never read has no position to load around; its line is among the loaded rows.
         if readUpTo.rawValue != 0, !readPositionLoaded(readUpTo) {
-            // The running load jumps once its messages are in.
+            placement = .aroundJump
+            // The running load jumps once its messages are in, also one a request overtook.
             guard !activeLoads.values.contains(.around) else {
+                reload(rereading: [])
                 return
             }
-            guard await load(.around) else {
+            let landed = await load(.around)
+            guard placement == .aroundJump else {
+                await presentAfterOvertakenJump(landed: landed)
                 return
             }
+            // A failed load, or one the core dropped for a newer page, leaves the bar to click.
+            guard landed, let position = self.readUpTo, readPositionLoaded(position) else {
+                return
+            }
+        } else {
+            placement = .stay
         }
-        seenLineFrom = readUpTo
+        seenLineFrom = self.readUpTo
         updateUnreadBar()
         unreadJumps += 1
     }
@@ -252,6 +274,7 @@ public final class MessageListModel {
 
     // Marked read or a send: only a message newer than what is known now starts the next line.
     func endNewMessagesLine() {
+        placement = .stay
         let newest = rows.last { $0.message.delivery == .sent }?.message.id
         // Marking read acks up to the channel's newest message, also one not loaded here.
         let acked = store.readState(channelId: channelId)?.acked
@@ -370,6 +393,17 @@ public final class MessageListModel {
         }
     }
 
+    // The core takes the around page unless a newer page replaced the window first, so the
+    // present's page has to replace it again.
+    private func presentAfterOvertakenJump(landed: Bool) async {
+        if landed, store.window(channelId: channelId)?.latest == false {
+            owedPresents += 1
+            await load(.latest)
+            owedPresents -= 1
+        }
+        reload(rereading: [])
+    }
+
     private func reload(rereading changed: Set<MessageId>) {
         let wasAtPresentBottom = atPresentBottom
         defer {
@@ -387,7 +421,11 @@ public final class MessageListModel {
             placeNewMessagesLine()
             return
         }
-        let ids = window.messageIds + window.pendingIds
+        let keeps = keepsRows(over: window)
+        let sent =
+            keeps
+            ? rows.filter { $0.message.delivery == .sent }.map(\.message.id) : window.messageIds
+        let ids = sent + window.pendingIds
         var held = Dictionary(rows.map { ($0.message.id, $0.message) }) { first, _ in first }
         let unread = ids.filter { held[$0] == nil || changed.contains($0) }
         if !unread.isEmpty {
@@ -400,11 +438,20 @@ public final class MessageListModel {
         rows = ids.compactMap { id in
             held[id].map { Row(id: pendingKeys[id] ?? id, message: $0) }
         }
-        hasMessages = !window.messageIds.isEmpty
-        reachedOldest = window.oldest
-        atPresent = window.latest
-        isStale = window.stale
+        if !keeps {
+            hasMessages = !window.messageIds.isEmpty
+            reachedOldest = window.oldest
+            atPresent = window.latest
+            isStale = window.stale
+        }
         placeNewMessagesLine()
+    }
+
+    // An overtaken jump's page, or the older messages it would replace: the list shows what it
+    // showed until the present's page is in.
+    private func keepsRows(over window: MessageWindow) -> Bool {
+        placement == .stay && !window.latest
+            && (owedPresents > 0 || activeLoads.values.contains(.around))
     }
 
     // Without a read state the channel counts as read; `acked` is nil while nothing is.

@@ -10,6 +10,9 @@ final class FakeAccount: Account, @unchecked Sendable {
     let loadError = Locked<RequestError?>(nil)
     // The window a successful load leaves in the store, as akari-core's load would.
     let windowAfterLoad = Locked<MessageWindow?>(nil)
+    // Wins over `windowAfterLoad`: the window each load leaves; `nil` leaves the store as it is,
+    // as a load whose window was replaced meanwhile does.
+    let windowAfter = Locked<(@Sendable (MessageLoad) -> MessageWindow?)?>(nil)
     // What a successful load reports; `nil` is a load with nothing to load.
     let loadReport = Locked<LoadReport?>(nil)
     // Fails sends and retries.
@@ -88,7 +91,11 @@ final class FakeAccount: Account, @unchecked Sendable {
         if let error {
             throw error
         }
-        if let window = windowAfterLoad.current {
+        if let after = windowAfter.current {
+            if let window = after(load) {
+                fakeStore.update { $0.windows[channelId] = window }
+            }
+        } else if let window = windowAfterLoad.current {
             fakeStore.update { $0.windows[channelId] = window }
         }
         return loadReport.current
