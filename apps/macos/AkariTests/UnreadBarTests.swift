@@ -62,6 +62,29 @@ struct UnreadBarTests {
     }
 
     @Test
+    func theCachedLineRowFollowsTimelineChanges() {
+        list.show(MessageTableState(rows: list.page, newMessages: line))
+        #expect(list.controller.lineRow != nil)
+        #expect(list.controller.lineRow == lineRow)
+
+        // An older page above the line, then rows above it gone.
+        list.show(
+            MessageTableState(rows: list.messages(50, from: 51) + list.page, newMessages: line))
+        #expect(list.controller.lineRow == lineRow)
+        list.show(MessageTableState(rows: Array(list.page.dropFirst(30)), newMessages: line))
+        #expect(list.controller.lineRow == lineRow)
+
+        list.show(MessageTableState(rows: list.page, newMessages: MessageId(rawValue: 190)))
+        #expect(list.controller.lineRow == lineRow)
+        #expect(
+            list.controller.lineRow.map { list.controller.timeline.items[$0 + 1].id }
+                == .message(MessageId(rawValue: 190)))
+
+        list.show(MessageTableState(rows: list.page))
+        #expect(list.controller.lineRow == nil)
+    }
+
+    @Test
     func aJumpScrollsTheLineToTheTop() throws {
         list.show(MessageTableState(rows: list.page, newMessages: line))
         #expect(list.controller.isPinnedToBottom)

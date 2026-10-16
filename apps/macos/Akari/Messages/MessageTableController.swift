@@ -31,7 +31,15 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private static var created = 0
     // Tells tables apart in the scroll log, so a replaced scroll view shows.
     private let number: Int
-    private(set) var timeline: MessageTimeline
+    private(set) var timeline: MessageTimeline {
+        didSet {
+            lineRow = timeline.items.firstIndex {
+                if case .newMessages = $0 { true } else { false }
+            }
+        }
+    }
+    // Kept with the timeline: every scroll asks for it.
+    private(set) var lineRow: Int?
     private let calendarSource: () -> Calendar
     private let localeSource: () -> Locale
     private var calendar: Calendar
@@ -434,12 +442,6 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             scrollToBottom()
         } else if load {
             actions?.jumpToLatest()
-        }
-    }
-
-    private var lineRow: Int? {
-        state.newMessages.flatMap { line in
-            timeline.items.firstIndex { $0.id == .newMessages(line) }
         }
     }
 
