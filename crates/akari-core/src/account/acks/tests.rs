@@ -1399,21 +1399,21 @@ async fn an_ack_taken_while_ready_is_swapped_in_isnt_dropped_with_an_older_one()
     wants.want(channel(1), message(1), read_at(1, 1), None, Pace::Paced);
 
     wants.forget_all();
-    wants.want(channel(1), message(2), read_at(1, 1), None, Pace::Explicit);
+    wants.want(channel(1), message(10), read_at(1, 1), None, Pace::Explicit);
     wants.reconcile(|_| read_at(9, 0));
 
-    assert_eq!(drain(&wants).await, [(channel(1), message(2))]);
+    assert_eq!(drain(&wants).await, [(channel(1), message(10))]);
 
     wants.want(channel(2), message(3), read_at(2, 1), None, Pace::Explicit);
     wants.next().await.unwrap();
     wants.forget_all();
-    wants.want(channel(2), message(4), read_at(2, 1), None, Pace::Explicit);
+    wants.want(channel(2), message(12), read_at(2, 1), None, Pace::Explicit);
     wants.retry(Instant::now());
     wants.reconcile(|_| read_at(9, 0));
 
     assert_eq!(
         drain(&wants).await,
-        [(channel(2), message(4))],
+        [(channel(2), message(12))],
         "one on its way came back into it"
     );
 }

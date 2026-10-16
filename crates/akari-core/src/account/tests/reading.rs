@@ -676,6 +676,39 @@ async fn ready_keeps_a_pending_ack_whose_position_is_unchanged() {
     );
 }
 
+// Escape while a new session's READY is converted; another device read further meanwhile.
+#[tokio::test]
+async fn ready_drops_a_pending_ack_behind_its_position() {
+    let mut online = acking(|_| {}).await;
+    limit_the_first_ack(&online.server).await;
+    online.account.mark_read(general());
+    sent(&online.server, 1).await;
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    let (parked, release) = online.account.store().park_next_conversion();
+
+    online.connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = online.fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    let further = (NEWEST + 2).to_string();
+    fresh
+        .send(ready_payload(1, &online.fake, |ready| {
+            ready["guilds"][0]["channels"][1]["last_message_id"] = further.clone().into();
+            ready["read_state"]["entries"][0]["last_message_id"] = further.into();
+            ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+        }))
+        .await;
+    wait_for(parked, "READY never reached its conversion").await;
+    online.account.mark_read(general());
+    release.send(()).unwrap();
+    events_until(&online.subscription, "Online").await;
+
+    assert_eq!(pending(&online.account), 0, "nothing left to send");
+    assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST + 2, 0)));
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+    assert_eq!(sent(&online.server, 1).await, [Sent::Ack(GENERAL, NEWEST)]);
+}
+
 #[tokio::test]
 async fn a_manual_ack_elsewhere_stops_akaris_retry() {
     let mut online = acking(|_| {}).await;

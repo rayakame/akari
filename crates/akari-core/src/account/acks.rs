@@ -502,6 +502,15 @@ impl Queue {
         self.swapping = false;
         let sent = &self.sent;
         let keep = |channel: &ChannelId, wanted: &mut Wanted| {
+            // At READY's own position an ack still clears its mentions.
+            if seen(ready(*channel)).is_some_and(|position| wanted.id < position) {
+                tracing::debug!(
+                    target: TARGET,
+                    channel_id = channel.get(),
+                    "pending ack dropped: Discord's position is past it"
+                );
+                return false;
+            }
             let before = &mut wanted.before;
             let replaced = std::mem::take(&mut before.replaced);
             if before.unchecked {
