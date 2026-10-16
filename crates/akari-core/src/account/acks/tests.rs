@@ -1686,3 +1686,34 @@ async fn a_refused_ack_never_goes_back_below_ready() {
         )]
     );
 }
+
+// A dispatch's ack reached the queue before the host's ack the store took first.
+#[tokio::test(start_paused = true)]
+async fn acks_merged_out_of_store_order_can_still_be_undone() {
+    let wants = Wants::default();
+    wants.want(
+        channel(1),
+        message(7),
+        read_at(5, 0),
+        read_at(7, 0),
+        Pace::Paced,
+    );
+    wants.want(
+        channel(1),
+        message(5),
+        read_at(1, 2),
+        read_at(5, 0),
+        Pace::Explicit,
+    );
+
+    wants.next().await.unwrap();
+    assert_eq!(
+        wants.refuse(),
+        [refusal(
+            channel(1),
+            read_at(1, 2),
+            read_at(7, 0),
+            message(7)
+        )]
+    );
+}

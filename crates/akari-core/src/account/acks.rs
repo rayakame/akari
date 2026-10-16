@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -100,15 +101,15 @@ impl Before {
         }
     }
 
-    // `self` came first, over Discord's position; a later ack was taken over Akari's own. One
-    // still to be checked against READY doesn't hold back one taken since, the user's now.
+    // Acks only move forward: the chain's first read least far, its newest furthest, whatever the
+    // order they came in. One still to be checked against READY doesn't hold back one taken since.
     fn then(self, later: Self) -> Self {
         if self.unchecked && !later.unchecked {
             later
         } else {
             Self {
-                state: self.state,
-                after: later.after,
+                state: behind(self.state, later.state),
+                after: further(self.after, later.after),
                 unchecked: self.unchecked || later.unchecked,
                 replaced: self.replaced || later.replaced,
             }
@@ -873,6 +874,17 @@ async fn send(
             let _ = handled.send(());
         }
     }
+}
+
+// The one read less far; on a tie, the one with more mentions, from before more were read.
+fn behind(first: Option<ReadState>, then: Option<ReadState>) -> Option<ReadState> {
+    let key = |state: Option<ReadState>| {
+        (
+            state.and_then(|state| state.acked),
+            Reverse(state.map_or(0, |state| state.mentions)),
+        )
+    };
+    if key(then) < key(first) { then } else { first }
 }
 
 // The one read further; on a tie, `then`'s, Discord's newer count.
