@@ -10,7 +10,7 @@ use super::mutes::until;
 use crate::model::{ChannelId, MessageId};
 use crate::ms;
 use crate::rest::{AccountRest, RequestError, last_viewed};
-use crate::state::{Ack, wall_millis};
+use crate::state::{Ack, ReadState, wall_millis};
 
 const TARGET: &str = "akari_core::acks";
 // Like the official client: an ack about 2 s after the last message read.
@@ -68,7 +68,8 @@ impl Pace {
 enum Kind {
     Paced { last: Instant },
     Explicit { at: Instant },
-    Bulk { at: Instant },
+    // `alone`: from a refused bulk, so it goes in a request of its own.
+    Bulk { at: Instant, alone: bool },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -78,9 +79,11 @@ struct Retry {
     failures: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Wanted {
     id: MessageId,
+    // The store's read state before the first of the merged acks.
+    before: Option<ReadState>,
     kind: Kind,
     // When the channel's first pending target came.
     since: Instant,
@@ -92,13 +95,28 @@ impl Wanted {
     fn due(&self) -> Instant {
         let due = match self.kind {
             Kind::Paced { last } => (last + LULL).min(self.since + CAP),
-            Kind::Explicit { at } | Kind::Bulk { at } => at,
+            Kind::Explicit { at } | Kind::Bulk { at, .. } => at,
         };
         self.retry.map_or(due, |retry| due.max(retry.at))
     }
 
     fn bulk(&self) -> bool {
         matches!(self.kind, Kind::Bulk { .. })
+    }
+
+    fn alone(&self) -> bool {
+        matches!(self.kind, Kind::Bulk { alone: true, .. })
+    }
+
+    fn pace(&self) -> Pace {
+        match self.kind {
+            Kind::Paced { .. } => Pace::Paced,
+            Kind::Explicit { .. } | Kind::Bulk { .. } => Pace::Explicit,
+        }
+    }
+
+    fn failures(&self) -> u32 {
+        self.retry.map_or(0, |retry| retry.failures)
     }
 }
 
@@ -108,18 +126,7 @@ struct Request {
     bulk: bool,
     pace: Pace,
     waited: Duration,
-    since: Instant,
     failures: u32,
-}
-
-impl Request {
-    fn kind(&self) -> Kind {
-        match (self.bulk, self.pace) {
-            (true, _) => Kind::Bulk { at: self.since },
-            (false, Pace::Paced) => Kind::Paced { last: self.since },
-            (false, Pace::Explicit) => Kind::Explicit { at: self.since },
-        }
-    }
 }
 
 enum Next {
@@ -128,10 +135,24 @@ enum Next {
     Idle,
 }
 
+// The request on its way.
+#[derive(Default)]
+struct Flight {
+    entries: Vec<(ChannelId, Wanted)>,
+    // Discord may refuse a bulk for only some of its entries.
+    several: bool,
+}
+
+// What Discord refused: the channel, its read state before Akari's ack, and the ID sent.
+type Refusal = (ChannelId, Option<ReadState>, MessageId);
+
 // At most one pending target per channel.
 #[derive(Default)]
 struct Queue {
     wanted: HashMap<ChannelId, Wanted>,
+    flight: Flight,
+    // Per channel, the highest ID Discord took since it last set the position on its own.
+    sent: HashMap<ChannelId, MessageId>,
     orders: u64,
     closed: bool,
     // Channels whose position Discord set on its own, for the sender to forget.
@@ -145,7 +166,14 @@ impl Queue {
         self.orders
     }
 
-    fn want(&mut self, channel: ChannelId, id: MessageId, pace: Pace, now: Instant) {
+    fn want(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        before: Option<ReadState>,
+        pace: Pace,
+        now: Instant,
+    ) {
         if self.closed {
             return;
         }
@@ -158,6 +186,7 @@ impl Queue {
                 };
                 entry.insert(Wanted {
                     id,
+                    before,
                     kind,
                     since: now,
                     order,
@@ -184,17 +213,21 @@ impl Queue {
         }
     }
 
-    fn want_bulk(&mut self, entries: Vec<(ChannelId, MessageId)>, now: Instant) {
+    fn want_bulk(&mut self, entries: Vec<(ChannelId, MessageId, Option<ReadState>)>, now: Instant) {
         if self.closed {
             return;
         }
-        for (channel, id) in entries {
+        for (channel, id, before) in entries {
             let order = self.order();
             match self.wanted.entry(channel) {
                 Entry::Vacant(entry) => {
                     entry.insert(Wanted {
                         id,
-                        kind: Kind::Bulk { at: now },
+                        before,
+                        kind: Kind::Bulk {
+                            at: now,
+                            alone: false,
+                        },
                         since: now,
                         order,
                         retry: None,
@@ -204,7 +237,10 @@ impl Queue {
                     let wanted = entry.get_mut();
                     wanted.id = wanted.id.max(id);
                     if !wanted.bulk() {
-                        wanted.kind = Kind::Bulk { at: now };
+                        wanted.kind = Kind::Bulk {
+                            at: now,
+                            alone: false,
+                        };
                         wanted.order = order;
                     }
                 }
@@ -212,87 +248,146 @@ impl Queue {
         }
     }
 
-    // Oldest due first; a request takes the bulk entries due in a row, up to a chunk.
+    // Oldest due first; a request takes the bulk entries due in a row, up to a chunk. An entry
+    // at or below what Discord took is dropped.
     fn take(&mut self, now: Instant) -> Next {
-        let Some((&channel, head)) = self
-            .wanted
-            .iter()
-            .min_by_key(|(_, wanted)| (wanted.due(), wanted.order))
-        else {
-            return Next::Idle;
-        };
-        if head.due() > now {
-            return Next::At(head.due());
+        if std::mem::take(&mut self.forget_all) {
+            self.sent.clear();
         }
-        let channels = if head.bulk() {
-            let mut due: Vec<(Instant, u64, ChannelId, bool)> = self
+        for channel in self.forgotten.drain() {
+            self.sent.remove(&channel);
+        }
+        loop {
+            let Some((&channel, &head)) = self
                 .wanted
                 .iter()
-                .filter(|(_, wanted)| wanted.due() <= now)
-                .map(|(channel, wanted)| (wanted.due(), wanted.order, *channel, wanted.bulk()))
-                .collect();
-            due.sort_unstable();
-            due.into_iter()
-                .take_while(|(.., bulk)| *bulk)
-                .take(BULK_CHUNK)
-                .map(|(_, _, channel, _)| channel)
-                .collect()
-        } else {
-            vec![channel]
-        };
-        let mut request = Request {
-            entries: Vec::with_capacity(channels.len()),
-            bulk: head.bulk(),
-            pace: match head.kind {
-                Kind::Paced { .. } => Pace::Paced,
-                Kind::Explicit { .. } | Kind::Bulk { .. } => Pace::Explicit,
-            },
-            waited: Duration::ZERO,
-            since: head.since,
-            failures: 0,
-        };
-        for channel in channels {
-            if let Some(wanted) = self.wanted.remove(&channel) {
+                .min_by_key(|(_, wanted)| (wanted.due(), wanted.order))
+            else {
+                return Next::Idle;
+            };
+            if head.due() > now {
+                return Next::At(head.due());
+            }
+            let channels = if head.bulk() && !head.alone() {
+                let mut due: Vec<(Instant, u64, ChannelId, bool)> = self
+                    .wanted
+                    .iter()
+                    .filter(|(_, wanted)| wanted.due() <= now)
+                    .map(|(channel, wanted)| {
+                        let joins = wanted.bulk() && !wanted.alone();
+                        (wanted.due(), wanted.order, *channel, joins)
+                    })
+                    .collect();
+                due.sort_unstable();
+                due.into_iter()
+                    .take_while(|(.., joins)| *joins)
+                    .take(BULK_CHUNK)
+                    .map(|(_, _, channel, _)| channel)
+                    .collect()
+            } else {
+                vec![channel]
+            };
+            let mut request = Request {
+                entries: Vec::with_capacity(channels.len()),
+                bulk: head.bulk(),
+                pace: head.pace(),
+                waited: Duration::ZERO,
+                failures: 0,
+            };
+            let mut flight = Vec::with_capacity(channels.len());
+            for channel in channels {
+                let Some(wanted) = self.wanted.remove(&channel) else {
+                    continue;
+                };
+                if self
+                    .sent
+                    .get(&channel)
+                    .is_some_and(|last| wanted.id <= *last)
+                {
+                    continue;
+                }
                 request.waited = request
                     .waited
                     .max(now.saturating_duration_since(wanted.since));
-                request.since = request.since.min(wanted.since);
-                request.failures = request
-                    .failures
-                    .max(wanted.retry.map_or(0, |retry| retry.failures));
+                request.failures = request.failures.max(wanted.failures());
                 request.entries.push((channel, wanted.id));
+                flight.push((channel, wanted));
+            }
+            if !request.entries.is_empty() {
+                self.flight = Flight {
+                    several: flight.len() > 1,
+                    entries: flight,
+                };
+                return Next::Send(request);
             }
         }
-        Next::Send(request)
     }
 
-    // A failed request's targets wait until `at`, merged with what came for their channels since.
-    fn retry(&mut self, request: Request, at: Instant) {
+    fn sent(&mut self) {
+        for (channel, wanted) in std::mem::take(&mut self.flight).entries {
+            self.sent.insert(channel, wanted.id);
+        }
+    }
+
+    // The request's targets wait until `at`, merged with what came for their channels since.
+    fn retry(&mut self, at: Instant) {
+        let flight = std::mem::take(&mut self.flight);
         if self.closed {
             return;
         }
-        let kind = request.kind();
-        let retry = Retry {
-            at,
-            failures: request.failures.saturating_add(1),
-        };
-        for (channel, id) in request.entries {
-            let order = self.order();
-            match self.wanted.entry(channel) {
-                Entry::Vacant(entry) => {
-                    entry.insert(Wanted {
-                        id,
-                        kind,
-                        since: request.since,
-                        order,
-                        retry: Some(retry),
-                    });
-                }
-                Entry::Occupied(mut entry) => {
-                    let wanted = entry.get_mut();
-                    wanted.id = wanted.id.max(id);
-                    wanted.since = wanted.since.min(request.since);
-                    wanted.retry = Some(retry);
+        let failures = flight
+            .entries
+            .iter()
+            .map(|(_, wanted)| wanted.failures())
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        for (channel, mut wanted) in flight.entries {
+            wanted.retry = Some(Retry { at, failures });
+            self.requeue(channel, wanted);
+        }
+    }
+
+    // A bulk of several entries goes again entry by entry. A single one is handed back, unless
+    // a newer ack for the channel is pending: that one goes out and carries the undo.
+    fn refuse(&mut self, now: Instant) -> Vec<Refusal> {
+        let flight = std::mem::take(&mut self.flight);
+        if self.closed {
+            return Vec::new();
+        }
+        let mut refused = Vec::new();
+        for (channel, mut wanted) in flight.entries {
+            if flight.several {
+                wanted.kind = Kind::Bulk {
+                    at: now,
+                    alone: true,
+                };
+                wanted.retry = None;
+                self.requeue(channel, wanted);
+            } else if let Some(newer) = self.wanted.get_mut(&channel) {
+                newer.before = wanted.before;
+            } else {
+                refused.push((channel, wanted.before, wanted.id));
+            }
+        }
+        refused
+    }
+
+    // The first of the merged acks keeps its `before`: later ones were taken over Akari's own.
+    fn requeue(&mut self, channel: ChannelId, back: Wanted) {
+        let order = self.order();
+        match self.wanted.entry(channel) {
+            Entry::Vacant(entry) => {
+                entry.insert(Wanted { order, ..back });
+            }
+            Entry::Occupied(mut entry) => {
+                let newer = entry.get_mut();
+                newer.id = newer.id.max(back.id);
+                newer.before = back.before;
+                newer.since = newer.since.min(back.since);
+                newer.retry = back.retry.or(newer.retry);
+                if let Kind::Bulk { alone, .. } = &mut newer.kind {
+                    *alone |= back.alone();
                 }
             }
         }
@@ -301,6 +396,7 @@ impl Queue {
     fn close(&mut self) {
         self.closed = true;
         self.wanted = HashMap::new();
+        self.flight = Flight::default();
     }
 }
 
@@ -315,18 +411,26 @@ impl Wants {
         self.queue.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn want(&self, channel: ChannelId, id: MessageId, pace: Pace) {
-        self.lock().want(channel, id, pace, Instant::now());
+    fn want(&self, channel: ChannelId, id: MessageId, before: Option<ReadState>, pace: Pace) {
+        self.lock().want(channel, id, before, pace, Instant::now());
         self.changed.notify_one();
     }
 
-    fn want_bulk(&self, entries: Vec<(ChannelId, MessageId)>) {
+    fn want_bulk(&self, entries: Vec<(ChannelId, MessageId, Option<ReadState>)>) {
         self.lock().want_bulk(entries, Instant::now());
         self.changed.notify_one();
     }
 
-    fn retry(&self, request: Request, at: Instant) {
-        self.lock().retry(request, at);
+    fn sent(&self) {
+        self.lock().sent();
+    }
+
+    fn retry(&self, at: Instant) {
+        self.lock().retry(at);
+    }
+
+    fn refuse(&self) -> Vec<Refusal> {
+        self.lock().refuse(Instant::now())
     }
 
     fn forget(&self, channel: ChannelId) {
@@ -335,17 +439,6 @@ impl Wants {
 
     fn forget_all(&self) {
         self.lock().forget_all = true;
-    }
-
-    // Taken between requests, so a request on its way when Discord moved can't undo it.
-    fn take_forgotten(&self, sent: &mut HashMap<ChannelId, MessageId>) {
-        let mut queue = self.lock();
-        if std::mem::take(&mut queue.forget_all) {
-            sent.clear();
-        }
-        for channel in queue.forgotten.drain() {
-            sent.remove(&channel);
-        }
     }
 
     fn close(&self) {
@@ -384,6 +477,9 @@ pub(crate) enum Handed {
     Bulk(Vec<(ChannelId, AckTarget)>),
 }
 
+type Unauthorized = Box<dyn Fn() + Send + Sync>;
+type Refused = Box<dyn Fn(ChannelId, Option<ReadState>, MessageId) + Send + Sync>;
+
 // Closing or dropping it drops what's pending; a request already on its way isn't cancelled.
 pub(crate) struct AckSender {
     wants: Arc<Wants>,
@@ -393,7 +489,8 @@ pub(crate) struct AckSender {
 }
 
 impl AckSender {
-    // `unauthorized` runs once on a 401, after which the sender has stopped.
+    // `unauthorized` runs once on a 401, after which the sender has stopped. `refused` gets the
+    // channel, its read state before the ack and the ID Discord refused.
     // A failed ack is retried after `retry_delay`, doubling each time up to a minute, or after
     // a longer retry_after.
     pub(crate) fn start(
@@ -401,6 +498,7 @@ impl AckSender {
         rest: Arc<AccountRest>,
         retry_delay: Duration,
         unauthorized: impl Fn() + Send + Sync + 'static,
+        refused: impl Fn(ChannelId, Option<ReadState>, MessageId) + Send + Sync + 'static,
     ) -> Self {
         let wants = Arc::new(Wants::default());
         runtime.spawn(send(
@@ -408,6 +506,7 @@ impl AckSender {
             rest.clone(),
             retry_delay,
             Box::new(unauthorized),
+            Box::new(refused),
         ));
         Self {
             wants,
@@ -422,7 +521,7 @@ impl AckSender {
         #[cfg(test)]
         self.hand(Handed::One(ack.channel, ack.into(), pace));
         if let Some(id) = self.resolve(ack) {
-            self.wants.want(ack.channel, id, pace);
+            self.wants.want(ack.channel, id, ack.before, pace);
         }
     }
 
@@ -436,7 +535,7 @@ impl AckSender {
         ));
         let entries = acks
             .into_iter()
-            .filter_map(|ack| Some((ack.channel, self.resolve(ack)?)))
+            .filter_map(|ack| Some((ack.channel, self.resolve(ack)?, ack.before)))
             .collect();
         self.wants.want_bulk(entries);
     }
@@ -496,18 +595,10 @@ async fn send(
     wants: Arc<Wants>,
     rest: Arc<AccountRest>,
     retry_delay: Duration,
-    unauthorized: Box<dyn Fn() + Send + Sync>,
+    unauthorized: Unauthorized,
+    refused: Refused,
 ) {
-    // Per channel, the highest ID Discord took since it last set the position on its own.
-    let mut sent: HashMap<ChannelId, MessageId> = HashMap::new();
-    while let Some(mut request) = wants.next().await {
-        wants.take_forgotten(&mut sent);
-        request
-            .entries
-            .retain(|(channel, id)| sent.get(channel).is_none_or(|last| id > last));
-        if request.entries.is_empty() {
-            continue;
-        }
+    while let Some(request) = wants.next().await {
         let last_viewed = last_viewed(rest.server_now_millis().unwrap_or_else(wall_millis));
         let result = match request.entries[..] {
             [(channel, id)] if !request.bulk => rest.ack(channel, id, last_viewed).await,
@@ -515,27 +606,31 @@ async fn send(
         };
         let err = match result {
             Ok(()) => {
-                sent.extend(request.entries.iter().copied());
+                wants.sent();
                 log(&request, Outcome::Sent);
                 continue;
             }
             Err(err) => err,
         };
-        let failures = request.failures.saturating_add(1);
-        if let Some(wait) = retry_wait(&err, failures, retry_delay)
-            && let Some(at) = Instant::now().checked_add(wait)
-        {
-            log(&request, Outcome::Retrying(&err, wait));
-            wants.retry(request, at);
-            continue;
-        }
-        log(&request, Outcome::Dropped(&err));
         if matches!(err, RequestError::Unauthorized | RequestError::Closed) {
+            log(&request, Outcome::Dropped(&err));
             wants.close();
             if matches!(err, RequestError::Unauthorized) {
                 unauthorized();
             }
             return;
+        }
+        let failures = request.failures.saturating_add(1);
+        if let Some(wait) = retry_wait(&err, failures, retry_delay)
+            && let Some(at) = Instant::now().checked_add(wait)
+        {
+            log(&request, Outcome::Retrying(&err, wait));
+            wants.retry(at);
+            continue;
+        }
+        log(&request, Outcome::Refused(&err));
+        for (channel, undo, id) in wants.refuse() {
+            refused(channel, undo, id);
         }
     }
 }
@@ -560,12 +655,13 @@ fn retry_wait(err: &RequestError, failures: u32, first: Duration) -> Option<Dura
 enum Outcome<'a> {
     Sent,
     Retrying(&'a RequestError, Duration),
+    Refused(&'a RequestError),
     Dropped(&'a RequestError),
 }
 
 fn log(request: &Request, outcome: Outcome<'_>) {
     let (channel_id, message_id) = match request.entries[..] {
-        [(channel, id)] if !request.bulk => (Some(channel.get()), Some(id.get())),
+        [(channel, id)] => (Some(channel.get()), Some(id.get())),
         _ => (None, None),
     };
     let entries = request.bulk.then_some(request.entries.len());
@@ -592,6 +688,32 @@ fn log(request: &Request, outcome: Outcome<'_>) {
             error = err.kind(),
             "ack failed; retrying"
         ),
+        Outcome::Refused(err) => {
+            let (status, code) = match err {
+                RequestError::Discord { status, code, .. } => (Some(*status), Some(*code)),
+                _ => (None, None),
+            };
+            if request.entries.len() > 1 {
+                tracing::warn!(
+                    target: TARGET,
+                    entries,
+                    error = err.kind(),
+                    status,
+                    code,
+                    "ack bulk refused; sending its entries one by one"
+                );
+            } else {
+                tracing::warn!(
+                    target: TARGET,
+                    channel_id,
+                    message_id,
+                    error = err.kind(),
+                    status,
+                    code,
+                    "ack refused"
+                );
+            }
+        }
         Outcome::Dropped(RequestError::Closed) => tracing::debug!(
             target: TARGET,
             channel_id,

@@ -282,6 +282,7 @@ impl State {
                     ChannelType::GuildForum | ChannelType::GuildMedia
                 )
                 || self.stale_cursors.contains(&channel.id),
+            before: self.entities.read_states.get(channel.id),
         }
     }
 

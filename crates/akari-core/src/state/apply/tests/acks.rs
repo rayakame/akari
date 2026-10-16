@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{Ack, Badge, LoadKind};
+use crate::state::{Ack, Badge, LoadKind, ReadState};
 
 const FORUM: u64 = 300_000_000_000_000_030;
 const MEDIA: u64 = 300_000_000_000_000_032;
@@ -25,6 +25,7 @@ fn at(channel: u64, cursor: u64) -> Option<Ack> {
         channel: id(channel),
         cursor: Some(Snowflake::new(cursor)),
         now: false,
+        before: None,
     })
 }
 
@@ -33,6 +34,7 @@ fn at_now(channel: u64, cursor: u64) -> Option<Ack> {
         channel: id(channel),
         cursor: Some(Snowflake::new(cursor)),
         now: true,
+        before: None,
     })
 }
 
@@ -61,14 +63,26 @@ fn general_read() -> State {
     state
 }
 
+// The ack without the state from before it, which has tests of its own.
+fn target(ack: Ack) -> Ack {
+    Ack {
+        before: None,
+        ..ack
+    }
+}
+
+fn taken(state: &mut State) -> Option<Ack> {
+    state.take_reading_ack().map(target)
+}
+
 fn reading(state: &mut State, channel: Option<u64>) -> (Option<Ack>, Vec<String>) {
     let mut events = Vec::new();
-    let ack = state.set_reading(channel.map(id), &mut events);
+    let ack = state.set_reading(channel.map(id), &mut events).map(target);
     (ack, events.iter().map(describe).collect())
 }
 
 fn mark_read(state: &mut State, channel: u64) -> Option<Ack> {
-    state.mark_read(id(channel), &mut Vec::new())
+    state.mark_read(id(channel), &mut Vec::new()).map(target)
 }
 
 fn channel_of(kind: u8, channel: u64, last: u64) -> Value {
@@ -111,7 +125,7 @@ fn reading_a_read_channel_changes_nothing() {
     assert_eq!(ack, None);
     assert!(events.is_empty(), "{events:?}");
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 0)));
-    assert_eq!(state.take_reading_ack(), None);
+    assert_eq!(taken(&mut state), None);
 }
 
 #[test]
@@ -134,13 +148,47 @@ fn a_message_arriving_while_reading_is_read_at_once() {
 
     let events = apply(&mut state, "MESSAGE_CREATE", message(NEWEST + 1, GENERAL));
 
-    assert_eq!(state.take_reading_ack(), at(GENERAL, NEWEST + 1));
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 1));
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 1), 0)));
     assert_eq!(badge(&state, GENERAL), Badge::default());
     assert!(
         !events.contains(&format!("GuildBadgeChanged({G1})")),
         "{events:?}"
     );
+}
+
+#[test]
+fn an_ack_carries_the_read_state_from_before_it() {
+    let mut state = ready_state();
+    let ready = state.read_state(id(GENERAL));
+    assert_eq!(ready.map(|read| read.mentions), Some(2));
+
+    let read = state.set_reading(Some(id(GENERAL)), &mut Vec::new());
+    assert_eq!(read.map(|ack| ack.before), Some(ready));
+    apply(&mut state, "MESSAGE_CREATE", message(NEWEST + 1, GENERAL));
+    assert_eq!(
+        state.take_reading_ack().map(|ack| ack.before),
+        Some(Some(ReadState {
+            acked: Some(Snowflake::new(NEWEST)),
+            mentions: 1,
+            estimated: false
+        })),
+        "Akari's own position, with the new message's mention"
+    );
+
+    let mut state = ready_where(thread_unread);
+    let ready = state.read_state(id(GENERAL));
+    let marked = state.mark_read(id(GENERAL), &mut Vec::new());
+    assert_eq!(marked.map(|ack| ack.before), Some(ready));
+
+    let mut state = ready_where(thread_unread);
+    let befores: Vec<_> = [GENERAL, THREAD]
+        .into_iter()
+        .map(|channel| (id(channel), state.read_state(id(channel))))
+        .collect();
+    let acks = state.mark_guilds_read(&[Snowflake::new(G1)], wall_millis(), &mut Vec::new());
+    let carried: Vec<_> = acks.iter().map(|ack| (ack.channel, ack.before)).collect();
+    assert_eq!(carried, befores);
 }
 
 #[test]
@@ -152,7 +200,7 @@ fn the_users_own_message_while_reading_needs_no_ack() {
 
     apply(&mut state, "MESSAGE_CREATE", own);
 
-    assert_eq!(state.take_reading_ack(), None);
+    assert_eq!(taken(&mut state), None);
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 1), 0)));
 }
 
@@ -164,7 +212,7 @@ fn a_message_arriving_after_reading_stopped_makes_the_channel_unread() {
 
     apply(&mut state, "MESSAGE_CREATE", plain(NEWEST + 1, GENERAL));
 
-    assert_eq!(state.take_reading_ack(), None);
+    assert_eq!(taken(&mut state), None);
     assert!(badge(&state, GENERAL).unread);
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 0)));
 }
@@ -186,7 +234,7 @@ fn a_message_ack_from_elsewhere_while_reading_changes_nothing_more() {
         json!({"id": GENERAL.to_string(), "topic": "t"}),
     );
 
-    assert_eq!(state.take_reading_ack(), None);
+    assert_eq!(taken(&mut state), None);
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST - 1), 1)));
 }
 
@@ -198,7 +246,7 @@ fn reading_waits_for_ready() {
     assert_eq!(ack, None);
     state.apply(dispatch("READY", &ready_value()), &mut Vec::new());
 
-    assert_eq!(state.take_reading_ack(), at(GENERAL, NEWEST));
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST));
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 0)));
 }
 
@@ -211,7 +259,7 @@ fn every_ready_acks_the_channel_being_read() {
 
     state.apply(dispatch("READY", &next), &mut Vec::new());
 
-    assert_eq!(state.take_reading_ack(), at(GENERAL, NEWEST + 2));
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 2));
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 2), 0)));
 }
 
@@ -222,7 +270,7 @@ fn a_history_load_while_reading_is_read_at_once() {
 
     load_page(&mut state, GENERAL, LoadKind::Latest, &[NEWEST + 4], true);
 
-    assert_eq!(state.take_reading_ack(), at(GENERAL, NEWEST + 4));
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 4));
     assert_eq!(badge(&state, GENERAL), Badge::default());
 }
 
@@ -334,7 +382,7 @@ fn a_stale_cursor_is_acked_at_now_above_the_cursor() {
         passive(GENERAL, NEWEST + 6),
     );
 
-    assert_eq!(state.take_reading_ack(), at_now(GENERAL, NEWEST + 6));
+    assert_eq!(taken(&mut state), at_now(GENERAL, NEWEST + 6));
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST + 6), 0)));
 }
 
@@ -420,7 +468,10 @@ fn mark_guilds_read(state: &mut State, guilds: &[u64]) -> (Vec<Ack>, Vec<String>
     let mut events = Vec::new();
     let guilds: Vec<GuildId> = guilds.iter().map(|guild| Snowflake::new(*guild)).collect();
     let acks = state.mark_guilds_read(&guilds, wall_millis(), &mut events);
-    (acks, events.iter().map(describe).collect())
+    (
+        acks.into_iter().map(target).collect(),
+        events.iter().map(describe).collect(),
+    )
 }
 
 #[test]
@@ -484,7 +535,8 @@ fn every_viewable_forum_goes_into_a_guilds_ack() {
             Ack {
                 channel: id(FORUM),
                 cursor: None,
-                now: true
+                now: true,
+                before: None,
             },
             at_now(MEDIA, BEFORE_JOIN).unwrap(),
         ]

@@ -27,6 +27,8 @@ pub(crate) struct Ack {
     pub(crate) cursor: Option<MessageId>,
     // Discord's "now" instead, never below the cursor.
     pub(crate) now: bool,
+    // The channel's read state before the store took this ack, to restore if Discord refuses it.
+    pub(crate) before: Option<ReadState>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

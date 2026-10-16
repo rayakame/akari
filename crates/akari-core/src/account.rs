@@ -13,7 +13,7 @@ use crate::gateway::{
 use crate::model::{ChannelId, GuildId, MessageId, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
-    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits,
+    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, ReadState, Store, WindowLimits,
     message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
@@ -386,6 +386,18 @@ impl Shared {
         }
     }
 
+    // Discord refused the ack the store took at `sent`; `undo` is the channel's read state from
+    // before it.
+    fn ack_refused(&self, channel: ChannelId, undo: Option<ReadState>, sent: MessageId) {
+        tracing::debug!(
+            target: "akari_core::acks",
+            channel_id = channel.get(),
+            message_id = sent.get(),
+            undo_acked = undo.and_then(|state| state.acked).map(|id| id.get()),
+            "refused ack handed back"
+        );
+    }
+
     // While the user follows a channel, its acks go out paced, like the official client's.
     fn ack_reading(&self, ack: Option<Ack>) {
         if let Some(ack) = ack {
@@ -720,16 +732,26 @@ impl Account {
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
         let gateway = Gateway::start(client, token, timing)?;
         let shared = Arc::new_cyclic(|weak: &Weak<Shared>| {
-            let weak = weak.clone();
-            let unauthorized = move || {
-                if let Some(shared) = weak.upgrade() {
-                    shared.failed(&RequestError::Unauthorized);
+            let unauthorized = {
+                let weak = weak.clone();
+                move || {
+                    if let Some(shared) = weak.upgrade() {
+                        shared.failed(&RequestError::Unauthorized);
+                    }
+                }
+            };
+            let refused = {
+                let weak = weak.clone();
+                move |channel, undo, sent| {
+                    if let Some(shared) = weak.upgrade() {
+                        shared.ack_refused(channel, undo, sent);
+                    }
                 }
             };
             Shared {
                 gateway,
                 store,
-                acks: AckSender::start(&runtime, rest.clone(), ACK_RETRY, unauthorized),
+                acks: AckSender::start(&runtime, rest.clone(), ACK_RETRY, unauthorized, refused),
                 rest,
                 nonces: Nonces::default(),
                 status: Mutex::default(),
