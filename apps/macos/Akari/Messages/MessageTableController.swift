@@ -13,6 +13,8 @@ struct MessageTableState: Equatable {
     var openedAt: ContinuousClock.Instant?
     var openedFrom = MessageListModel.Origin.network
     var revealedSpoilers: Set<SpoilerKey> = []
+    var newMessages: MessageId?
+    var unreadJumps = 0
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -29,7 +31,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private static var created = 0
     // Tells tables apart in the scroll log, so a replaced scroll view shows.
     private let number: Int
-    private(set) var timeline: MessageTimeline
+    private(set) var timeline: MessageTimeline {
+        didSet {
+            lineRow = timeline.items.firstIndex {
+                if case .newMessages = $0 { true } else { false }
+            }
+        }
+    }
+    // Kept with the timeline: every scroll asks for it.
+    private(set) var lineRow: Int?
+    // Measured inside SwiftUI's update or the table's layout, so it reaches the model on the next
+    // turn; the last measure of a turn wins.
+    private var measuredLine: (onScreen: Bool, line: MessageId)?
+    private(set) var lineReport: Task<Void, Never>?
     private let calendarSource: () -> Calendar
     private let localeSource: () -> Locale
     private var calendar: Calendar
@@ -41,7 +55,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // Where the pointer is, in window coordinates; nil when hover shouldn't show.
     private let pointer: () -> NSPoint?
     private var filled = false
-    private var sticksToBottom = true
+    private var sticksToBottom = true {
+        didSet {
+            if !sticksToBottom {
+                heldPinBottom = nil
+            }
+            if sticksToBottom != oldValue {
+                actions?.atBottomChanged(sticksToBottom)
+            }
+        }
+    }
+    // Where the rows ended when pinning began waiting for a gesture to end: measured from it,
+    // rows arriving below don't unpin the list, only the user's own scroll to older ones does.
+    private var heldPinBottom: CGFloat?
     private var atPresent = true
     private var state = MessageTableState(rows: [])
     private var revealed: [MessageId: Set<UInt16>] = [:]
@@ -155,6 +181,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         heldState = nil
+        let wasFilled = filled
         let held = heldSince.map { $0.duration(to: .now) }
         heldSince = nil
         let started = ContinuousClock.now
@@ -174,6 +201,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             noteApply(started, inserting: changes.inserted, of: next, held: held)
         }
         reload(revealedNow)
+        // A new table for a model that jumped before doesn't jump again.
+        if wasFilled, state.unreadJumps != previous.unreadJumps {
+            scrollLineToTop()
+        }
+        reportLine()
         updateRelativeTimer()
         if previous.start != state.start {
             remeasureStart()
@@ -400,7 +432,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if !state.atPresent {
             edges.insert(.newer)
         }
-        return MessageTimeline(rows: state.rows, calendar: calendar, edges: edges)
+        return MessageTimeline(
+            rows: state.rows, calendar: calendar, edges: edges, newMessages: state.newMessages)
     }
 
     // A scroll before the newest page lands cancels following the bottom.
@@ -416,6 +449,50 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
     }
 
+    // Keeps the reader's place as clipMoved does after a user's scroll; it skips our own.
+    private func scrollLineToTop() {
+        guard let row = lineRow else {
+            return
+        }
+        let range = clipView.originRange
+        let y = min(max(tableView.rect(ofRow: row).minY, range.lowerBound), range.upperBound)
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: y))
+        scrollView.reflectScrolledClipView(clipView)
+        sticksToBottom = isPinnedToBottom
+        anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
+        askForMore()
+    }
+
+    // Where it's drawn, mid-row, and not under the strip over the list's bottom. Only where rows
+    // have their final places: a line passing by mid-update would count as seen for good.
+    private func reportLine() {
+        guard let row = lineRow, case .newMessages(let line) = timeline.items[row],
+            timeline.items.count == tableView.numberOfRows, let window = tableView.window,
+            onScreen(window)
+        else {
+            return
+        }
+        let y = tableView.rect(ofRow: row).midY
+        let bounds = clipView.bounds
+        let shown = y >= bounds.minY && y <= bounds.maxY - scrollView.contentInsets.bottom
+        measuredLine = (shown, line)
+        guard lineReport == nil else {
+            return
+        }
+        lineReport = Task { [weak self] in
+            guard let self else {
+                return
+            }
+            lineReport = nil
+            if let measured = measuredLine {
+                measuredLine = nil
+                actions?.newMessagesLineOnScreen(measured.onScreen, line: measured.line)
+            }
+        }
+    }
+
     private var isPastTheTop: Bool {
         clipView.bounds.minY < clipView.originRange.lowerBound - 0.5
     }
@@ -423,6 +500,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private func apply(_ next: MessageTimeline, _ changes: TimelineChanges) {
         let firstFill = !filled && !state.rows.isEmpty
         let pin = firstFill || pinsToBottom
+        let bottomBefore = tableView.contentHeight
         // Taken right before the update, live scroll or not: compensating for it moves nothing
         // the user sees, so it never fights a gesture.
         let place = pin ? nil : visibleAnchor(skipping: changes.removed)
@@ -461,7 +539,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             tableView.endUpdates()
             if !changes.reloaded.isEmpty {
                 tableView.reloadData(forRowIndexes: changes.reloaded, columnIndexes: [0])
+                // Outside an update the rows below keep their views' old places until a later
+                // layout; as in remeasureStart, inside one at zero duration they move at once.
+                NSAnimationContext.beginGrouping()
+                NSAnimationContext.current.duration = 0
+                tableView.beginUpdates()
                 tableView.noteHeightOfRows(withIndexesChanged: changes.reloaded)
+                tableView.endUpdates()
+                NSAnimationContext.endGrouping()
             }
         }
         if firstFill {
@@ -474,6 +559,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             // Pinning moves the content, so it waits until the user lets go.
             if !isLiveScrolling {
                 scrollToBottom()
+            } else if heldPinBottom == nil {
+                heldPinBottom = bottomBefore
             }
         } else if let place, let before {
             restoreAnchor()
@@ -712,7 +799,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     var isPinnedToBottom: Bool {
-        scrollView.contentView.bounds.maxY >= tableView.contentHeight - 2
+        isPinned(to: tableView.contentHeight)
+    }
+
+    private func isPinned(to bottom: CGFloat) -> Bool {
+        scrollView.contentView.bounds.maxY >= bottom - 2
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -732,7 +823,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if let height = rowHeights[item.id] {
             return height
         }
-        let height = height(of: item, followsDay: followsDay(row), width: width)
+        let height = height(
+            of: item, followsDay: followsDay(row), followsLine: followsLine(row), width: width)
         rowHeights[item.id] = height
         return height
     }
@@ -746,9 +838,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return true
     }
 
-    private func height(of item: MessageTimeline.Item, followsDay: Bool, width: CGFloat)
-        -> CGFloat
-    {
+    private func followsLine(_ row: Int) -> Bool {
+        guard row > 0, case .newMessages = timeline.items[row - 1] else {
+            return false
+        }
+        return true
+    }
+
+    private func height(
+        of item: MessageTimeline.Item, followsDay: Bool, followsLine: Bool, width: CGFloat
+    ) -> CGFloat {
         switch item {
         case .edge(.beginning):
             return ChannelStartCell.height(state.start, width: width)
@@ -756,17 +855,20 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return placeholderHeight
         case .day:
             return DayDividerCell.height
+        case .newMessages:
+            return NewMessagesDivider.height
         case .message(let row, let startsGroup):
             let message = row.message
             if let notice = message.notice {
                 let time = MessageFormat.groupTime(
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(
-                    message, notice: notice, time: time, followsDay: followsDay, width: width)
+                    message, notice: notice, time: time, followsDay: followsDay,
+                    followsLine: followsLine, width: width)
             }
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                width: width)
+                followsLine: followsLine, width: width)
         }
     }
 
@@ -781,6 +883,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     func cell(forRow index: Int) -> NSTableCellView {
         let item = timeline.items[index]
         let followsDay = followsDay(index)
+        let followsLine = followsLine(index)
         switch item {
         case .edge(.beginning):
             let cell = reuse(ChannelStartCell.identifier) as? ChannelStartCell ?? ChannelStartCell()
@@ -795,6 +898,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell = reuse(DayDividerCell.identifier) as? DayDividerCell ?? DayDividerCell()
             cell.configure(MessageFormat.dayDivider(day, calendar: calendar, locale: locale))
             return cell
+        case .newMessages:
+            return reuse(NewMessagesDivider.identifier) as? NewMessagesDivider
+                ?? NewMessagesDivider()
         case .message(let row, let startsGroup):
             let message = row.message
             let groupTime = MessageFormat.groupTime(
@@ -805,7 +911,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
-                    fullDate: fullDate)
+                    followsLine: followsLine, fullDate: fullDate)
                 return cell
             }
             let cell =
@@ -817,7 +923,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                groupTime: groupTime,
+                followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)
@@ -893,6 +999,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     @objc private func windowShownOrHidden(_ notification: Notification) {
         if notification.object as? NSWindow === tableView.window {
             updateRelativeTimer()
+            reportLine()
         }
     }
 
@@ -962,6 +1069,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: Self.restingInset, right: 0)
         tableView.didLayout = { [weak self] in
             self?.settle()
+            self?.reportLine()
         }
         // The composer below grows and shrinks the list without a layout of the table.
         scrollView.postsFrameChangedNotifications = true
@@ -970,6 +1078,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             object: scrollView)
         tableView.onEscape = { [weak self] in
             self?.actions?.escape()
+        }
+        tableView.onShiftEscape = { [weak self] in
+            self?.actions?.markServerRead()
+        }
+        tableView.onShiftPageUp = { [weak self] in
+            self?.actions?.jumpToUnread()
         }
         tableView.pointerMoved = { [weak self] in
             self?.updateHover()
@@ -1026,6 +1140,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard !isLiveScrolling else {
             return
         }
+        heldPinBottom = nil
         // Also the first page of an empty list, which isn't filled until it lands.
         if let held = heldState {
             show(held)
@@ -1144,7 +1259,18 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard ownChanges == 0, !tableView.isLayingOut, origin != lastClipOrigin else {
             return
         }
-        sticksToBottom = isPinnedToBottom
+        reportLine()
+        if let held = heldPinBottom {
+            // Follows the user down into rows that came, and up to where rows now end.
+            let bottom = min(
+                tableView.contentHeight,
+                max(held, clipView.bounds.maxY - scrollView.contentInsets.bottom))
+            heldPinBottom = bottom
+            sticksToBottom = isPinned(to: bottom)
+        } else {
+            sticksToBottom = isPinnedToBottom
+        }
+        actions?.userScrolled(by: lastClipOrigin.y - origin.y, height: clipView.bounds.height)
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()
     }
@@ -1161,9 +1287,27 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             guard case .message = timeline.items[row] else {
                 continue
             }
-            return (timeline.items[row].id, tableView.rect(ofRow: row).minY - top)
+            return (timeline.items[row].id, anchorTop(ofRow: row) - top)
         }
         return nil
+    }
+
+    // A message under the line has given its space above to the line's row; anchored where its
+    // row would start without the line, its text stays put when the line comes or goes.
+    private func anchorTop(ofRow row: Int) -> CGFloat {
+        let top = tableView.rect(ofRow: row).minY
+        guard followsLine(row), case .message(let item, let startsGroup) = timeline.items[row]
+        else {
+            return top
+        }
+        let afterDay = followsDay(row - 1)
+        if item.message.notice != nil {
+            return top + NoticeCell.textTop(followsDay: false, followsLine: true)
+                - NoticeCell.textTop(followsDay: afterDay, followsLine: false)
+        }
+        let spacing = MessageCell.spacing(
+            startsGroup: startsGroup, followsDay: afterDay, followsLine: false)
+        return top - spacing
     }
 
     private func restoreAnchor() {
@@ -1171,7 +1315,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         let range = clipView.originRange
-        let target = tableView.rect(ofRow: row).minY - anchor.offset
+        let target = anchorTop(ofRow: row) - anchor.offset
         let y = min(max(target, range.lowerBound), range.upperBound)
         guard abs(clipView.bounds.minY - y) > 0.5 else {
             return
@@ -1199,6 +1343,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func scrollToBottom() {
+        heldPinBottom = nil
         let bottom = clipView.originRange.upperBound
         guard tableView.numberOfRows > 0, clipView.bounds.minY != bottom else {
             return
@@ -1238,6 +1383,9 @@ final class BottomClipView: NSClipView {
 class MessageTableView: NSTableView {
     var didLayout: (() -> Void)?
     var onEscape: (() -> Void)?
+    var onShiftEscape: (() -> Void)?
+    var onShiftPageUp: (() -> Void)?
+    var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
     var pointerMoved: (() -> Void)?
     var windowChanged: (() -> Void)?
     private(set) var isLayingOut = false
@@ -1247,8 +1395,33 @@ class MessageTableView: NSTableView {
         numberOfRows > 0 ? rect(ofRow: numberOfRows - 1).maxY : 0
     }
 
+    // Shift+Escape and Cmd+. arrive as the same command.
     override func cancelOperation(_ sender: Any?) {
-        onEscape?()
+        guard let event = currentEvent(), event.isEscapeKey else {
+            super.cancelOperation(sender)
+            return
+        }
+        if event.modifierFlags.contains(.shift) {
+            onShiftEscape?()
+        } else {
+            onEscape?()
+        }
+    }
+
+    // Page Up doesn't reach AppKit's key bindings in a table, so Shift+Page Up (Shift+Fn+Up on a
+    // laptop) is caught here.
+    override func keyDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection([.shift, .control, .option, .command])
+        if event.specialKey == .pageUp, flags == .shift {
+            onShiftPageUp?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    // Shift+Page Up's command, from a message's text.
+    override func pageUpAndModifySelection(_ sender: Any?) {
+        onShiftPageUp?()
     }
 
     override func viewDidMoveToWindow() {
@@ -1288,5 +1461,13 @@ class MessageTableView: NSTableView {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         pointerMoved?()
+    }
+}
+
+extension NSEvent {
+    static let escapeKeyCode: UInt16 = 53
+
+    var isEscapeKey: Bool {
+        type == .keyDown && keyCode == Self.escapeKeyCode
     }
 }

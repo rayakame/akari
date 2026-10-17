@@ -33,14 +33,15 @@ struct SessionLayoutTests {
         let page = try #require(image.firstChange(at: pageX, below: headerMiddle))
         #expect(list == page, "the line is at \(list) px over the list, at \(page) over the page")
 
-        // The list's header has a title, left of where the line was found.
+        // A server's header has a title, left of where the line was found. At home the strip
+        // waits for the quick switcher's button.
         let title = (Int((SidebarWidth.rail + 17) * image.scale)..<Int(listX * image.scale))
             .filter { x in
                 !same(
                     image.pixel(x, Int(headerMiddle * image.scale)),
                     image.pixel(Int(listX * image.scale), Int(headerMiddle * image.scale)))
             }
-        #expect(!title.isEmpty, "the list's header shows no title")
+        #expect(title.isEmpty == atHome, "the title shows over \(title.count) px")
 
         // Up from just under both headers to where they end. Mid-column: with scroll bars always
         // shown, as on CI, the rows narrow and the selected row's rounded corner reaches listX.

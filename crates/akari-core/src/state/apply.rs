@@ -7,18 +7,21 @@ use super::badges::{Badge, Badges, Dirty};
 use super::events::StoreEvent;
 use super::order::{self, guild_order};
 use super::permissions::compute;
-use super::read_states::ReadStates;
+use super::read_states::{Ack, ReadStates};
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
     GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
 };
 use super::threads::ThreadIndex;
 use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
-use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows};
+use super::windows::{
+    CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows,
+};
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
     GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
 };
+use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[derive(Default, Clone)]
@@ -292,6 +295,15 @@ impl Derived {
     }
 }
 
+// What a READY's swap replays of the local acks taken while it was prepared.
+#[derive(Default)]
+#[cfg_attr(test, derive(PartialEq))]
+struct Journal {
+    acks: Vec<(ChannelId, MessageId)>,
+    // Undone since: nothing to replay, but their badges moved after the diff.
+    undone: BTreeSet<ChannelId>,
+}
+
 pub(crate) struct ReadyDiff {
     events: Vec<StoreEvent>,
     removed_channels: Vec<ChannelId>,
@@ -308,6 +320,16 @@ pub(crate) struct State {
     restored: bool,
     windows: Windows,
     cooldowns: Cooldowns,
+    // The channel the user is reading, with the newest row its list showed after the last write.
+    reading: Option<(ChannelId, Option<MessageId>)>,
+    // Its local ack from the latest write, for the account to send.
+    due: Option<Ack>,
+    // Channels whose cursor came from an unread update and may be behind Discord's.
+    stale_cursors: HashSet<ChannelId>,
+    // Open while a READY is prepared.
+    journal: Option<Journal>,
+    // Replayed acks that kept READY's mention count: their echo brings Discord's.
+    recounts: HashMap<ChannelId, MessageId>,
 }
 
 impl State {
@@ -326,6 +348,11 @@ impl State {
             restored: false,
             windows: Windows::new(limits),
             cooldowns: Cooldowns::default(),
+            reading: None,
+            due: None,
+            stale_cursors: HashSet::new(),
+            journal: None,
+            recounts: HashMap::new(),
         }
     }
 
@@ -364,14 +391,31 @@ impl State {
         })
     }
 
+    pub(crate) fn begin_journal(&mut self) {
+        self.journal = Some(Journal::default());
+    }
+
+    pub(crate) fn end_journal(&mut self) {
+        self.journal = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn journaling(&self) -> bool {
+        self.journal.is_some()
+    }
+
     // Returns the old state, so the caller can drop it after releasing the lock.
     pub(crate) fn swap(
         &mut self,
-        next: Entities,
-        derived: Derived,
-        diff: Option<ReadyDiff>,
+        mut next: Entities,
+        mut derived: Derived,
+        mut diff: Option<ReadyDiff>,
         events: &mut Vec<StoreEvent>,
     ) -> (Entities, Derived) {
+        self.recounts = match self.journal.take() {
+            Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
+            None => HashMap::new(),
+        };
         if let Some(diff) = diff {
             events.extend(diff.events);
             for channel in diff.removed_channels {
@@ -388,7 +432,12 @@ impl State {
             badges: std::mem::replace(&mut self.badges, derived.badges),
             threads: std::mem::replace(&mut self.threads, derived.threads),
         };
-        (std::mem::replace(&mut self.entities, next), old)
+        let old = (std::mem::replace(&mut self.entities, next), old);
+        // READY's cursors are fresh.
+        self.stale_cursors.clear();
+        self.follow_ready();
+        self.refresh_badges(wall_millis(), events);
+        old
     }
 
     pub(crate) fn me(&self) -> Option<UserId> {
@@ -399,14 +448,15 @@ impl State {
         self.ready
     }
 
-    // Only before the first READY: a READY that came first is fresher than any cache.
+    // Only before the first READY: a READY that came first is fresher than any cache, and one
+    // being prepared would be swapped in undiffed.
     pub(crate) fn restore(
         &mut self,
         cached: Entities,
         derived: Derived,
         events: &mut Vec<StoreEvent>,
     ) -> bool {
-        if self.ready || self.restored {
+        if self.ready || self.restored || self.journal.is_some() {
             return false;
         }
         self.entities = cached;
@@ -488,7 +538,13 @@ impl State {
 
     pub(crate) fn apply(&mut self, event: DispatchEvent, events: &mut Vec<StoreEvent>) {
         self.apply_event(event, events);
-        self.refresh_badges(wall_millis(), events);
+        self.settle(wall_millis(), events);
+    }
+
+    // The end of a write that can move a cursor: the channel being read stays read.
+    fn settle(&mut self, now_millis: i64, events: &mut Vec<StoreEvent>) {
+        self.follow_reading();
+        self.refresh_badges(now_millis, events);
     }
 
     fn refresh_badges(&mut self, now_millis: i64, events: &mut Vec<StoreEvent>) {
@@ -557,8 +613,11 @@ impl State {
                     .map(MessageId::new);
                 self.read_message(&message);
                 self.dirty.channel(channel);
+                let forced = self.forced_through(&message);
                 self.windows.live(*message, &self.entities.users, events);
-                self.note_message(channel, id, events);
+                if self.note_message(channel, id, events) && !forced {
+                    self.stale_cursors.remove(&channel);
+                }
                 if Some(author) == self.entities.me() {
                     self.note_own_message(channel, nonce);
                 }
@@ -670,13 +729,20 @@ impl State {
 
     // DM lists sort by the newest message; guild channels change silently, or every message
     // in a busy server would be an event.
-    fn note_message(&mut self, channel: ChannelId, id: MessageId, events: &mut Vec<StoreEvent>) {
+    fn note_message(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) -> bool {
         let Some(stored) = self.entities.channels.get_mut(&channel) else {
-            return;
+            return false;
         };
-        if Arc::make_mut(stored).note_message(id.cast()) && stored.guild_id.is_none() {
+        let moved = Arc::make_mut(stored).note_message(id.cast());
+        if moved && stored.guild_id.is_none() {
             events.push(StoreEvent::ChannelUpdated(stored.clone()));
         }
+        moved
     }
 
     // Discord enforces slowmode per user, so a message from another device starts it too.
@@ -766,7 +832,7 @@ impl State {
 
     pub(crate) fn add_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         self.tracking_server_list(events, |state, events| state.merge_guild(next, events));
-        self.refresh_badges(wall_millis(), events);
+        self.settle(wall_millis(), events);
     }
 
     fn merge_guild(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
@@ -984,9 +1050,17 @@ impl State {
         &mut self,
         channel: ChannelId,
         kind: LoadKind,
+        placing: u64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<LoadTicket> {
-        self.windows.begin_load(channel, kind, events)
+        let newest = self
+            .entities
+            .channels
+            .get(&channel)
+            .and_then(|stored| stored.last_message_id)
+            .map(|newest| newest.cast());
+        self.windows
+            .begin_load(channel, kind, placing, newest, events)
     }
 
     pub(crate) fn finish_load(
@@ -995,9 +1069,26 @@ impl State {
         page: Vec<model::Message>,
         reached_end: bool,
         events: &mut Vec<StoreEvent>,
-    ) {
-        self.windows
-            .finish_load(ticket, page, &self.entities.users, reached_end, events);
+    ) -> PageOutcome {
+        let present =
+            ticket.cursor == Cursor::Latest || (ticket.kind == LoadKind::Newer && reached_end);
+        let newest = page
+            .iter()
+            .map(|message| message.id)
+            .max()
+            .filter(|_| present);
+        let outcome =
+            self.windows
+                .finish_load(ticket, page, &self.entities.users, reached_end, events);
+        if let Some(newest) = newest {
+            self.reach_present(ticket.channel, newest, events);
+        }
+        self.settle(wall_millis(), events);
+        outcome
+    }
+
+    pub(crate) fn supersede_around(&mut self, channel: ChannelId, placing: u64) {
+        self.windows.supersede_around(channel, placing);
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {

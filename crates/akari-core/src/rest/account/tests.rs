@@ -520,3 +520,148 @@ async fn errors_never_contain_the_token() {
         assert!(!chain(&err).contains(TOKEN), "{}", chain(&err));
     }
 }
+
+#[test]
+fn last_viewed_rounds_up() {
+    let midnight = 1_792_022_400_000; // 2026-10-15T00:00:00.000Z
+
+    assert_eq!(last_viewed(midnight), 4305);
+    assert_eq!(last_viewed(midnight + 1), 4306);
+    assert_eq!(last_viewed(midnight + 86_400_000), 4306);
+}
+
+#[tokio::test]
+async fn the_date_header_is_read_as_discords_clock() {
+    let noon = 1_792_065_600_000; // 2026-10-15T12:00:00Z
+    let server = MockServer::start().await;
+    Mock::given(path(MESSAGES))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({"message": "Unknown Channel", "code": 10003}))
+                .insert_header("date", "Thu, 15 Oct 2026 12:00:00 GMT"),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path(MESSAGES))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([]))
+                .insert_header("date", "the middle of October"),
+        )
+        .mount(&server)
+        .await;
+    let rest = rest(&server).await;
+    let before = rest.server_now_millis();
+
+    let refused = rest.list_messages(channel(), Query::Latest, 3).await;
+    let first = rest.server_now_millis();
+    rest.list_messages(channel(), Query::Latest, 3)
+        .await
+        .unwrap();
+    let second = rest.server_now_millis();
+
+    assert!(refused.is_err());
+    assert_eq!(before, None);
+    let first = first.unwrap();
+    assert!((noon..noon + 5_000).contains(&first), "{first}");
+    let second = second.unwrap();
+    assert!(
+        (first..noon + 5_000).contains(&second),
+        "an unparsable Date is ignored: {second}"
+    );
+}
+
+const ACK: &str = "/api/v9/channels/300000000000000002/messages/400000000000000010/ack";
+
+fn message() -> MessageId {
+    Snowflake::new(400_000_000_000_000_010)
+}
+
+fn limited_for(result: &Result<(), Failure>) -> Option<Duration> {
+    match result {
+        Err(Failure::Request(RequestError::RateLimited { retry_after })) => *retry_after,
+        _ => None,
+    }
+}
+
+fn held_for(result: &Result<(), Failure>) -> Option<Duration> {
+    match result {
+        Err(Failure::Held(wait)) => Some(*wait),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn an_ack_hands_a_429_back_instead_of_retrying_it() {
+    let server = MockServer::start().await;
+    Mock::given(path(ACK))
+        .respond_with(rate_limited(Some(0.5)))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path(ACK))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token": null})))
+        .mount(&server)
+        .await;
+    let rest = rest(&server).await;
+
+    let first = rest.ack(channel(), message(), 4305).await;
+    let second = rest.ack(channel(), message(), 4305).await;
+
+    let short = |wait: Duration| wait > Duration::ZERO && wait <= Duration::from_millis(500);
+    assert!(limited_for(&first).is_some_and(short), "{first:?}");
+    assert!(held_for(&second).is_some_and(short), "{second:?}");
+    assert_eq!(requests(&server).await.len(), 1, "the 429 holds the route");
+}
+
+#[tokio::test]
+async fn an_ack_fails_at_once_instead_of_waiting_for_its_bucket() {
+    let server = MockServer::start().await;
+    Mock::given(path(ACK))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"token": null}))
+                .insert_header("x-ratelimit-remaining", "0")
+                .insert_header("x-ratelimit-reset-after", "5"),
+        )
+        .mount(&server)
+        .await;
+    let rest = rest(&server).await;
+
+    rest.ack(channel(), message(), 4305).await.unwrap();
+    let second = tokio::time::timeout(Duration::from_secs(1), rest.ack(channel(), message(), 4305))
+        .await
+        .expect("waited for the bucket");
+
+    assert!(
+        held_for(&second).is_some_and(|wait| wait > Duration::from_secs(3)),
+        "{second:?}"
+    );
+    assert_eq!(requests(&server).await.len(), 1);
+}
+
+#[tokio::test]
+async fn an_ack_hands_a_502_back_instead_of_retrying_it() {
+    let server = MockServer::start().await;
+    Mock::given(path(ACK))
+        .respond_with(ResponseTemplate::new(502))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(path(ACK))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token": null})))
+        .mount(&server)
+        .await;
+
+    let result = rest(&server).await.ack(channel(), message(), 4305).await;
+
+    assert!(
+        matches!(
+            result,
+            Err(Failure::Request(RequestError::ServerError { status: 502 }))
+        ),
+        "{result:?}"
+    );
+    assert_eq!(requests(&server).await.len(), 1);
+}

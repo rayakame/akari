@@ -91,6 +91,7 @@ nonisolated enum TypeScale {
     static let panelUsername = TextStyle(12)
     static let hoverTime = TextStyle(11)
     static let appTag = TextStyle(10, .semibold)
+    static let newTag = TextStyle(10, .bold)
     static let detail = TextStyle(14)
     static let small = TextStyle(12)
     static let jumpBar = TextStyle(14, .medium)

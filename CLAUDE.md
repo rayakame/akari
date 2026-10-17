@@ -36,16 +36,20 @@ sends), the state store (`akari_core::state`, which also keeps the user's settin
 folders and order, mutes and notification settings; and the read states, with unread dots
 and mention counts per channel and server) and `Account`, which keeps the store
 current from the gateway, ends timed mutes, loads message history and sends messages over
-rate-limited REST, applying the message length limit and slowmode;
+rate-limited REST, applying the message length limit and slowmode; it also acks what the user
+reads (paced per channel, one request at a time, "now" message IDs from Discord's clock, not the
+Mac's) and marks channels and servers read, in bulk chunks;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, and show where a channel's unread state and mentions come from. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
-and the message APIs, including the send rules and `end_session`, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+and the message APIs, including the send rules, the read calls and `end_session`, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
-login, session, server, channel, DM and message lists, and the composer) and the message
-timeline. `apps/macos` is the first app: the login screen and the main window with the server
+login, session, server, channel, DM and message lists, and the composer), the message
+timeline and the reading signal (what tells the core which channel the user reads). `apps/macos` is the first app: the login screen and the main window with the server
 rail (the user's order, with folders, unread pills and mention badges, and unread DMs under
-Home), the channel and DM lists (muted channels dimmed, unread rows bright with their counts), a
-message list that loads history in both directions, and the composer; it shows the
+Home), the channel and DM lists (muted channels dimmed, unread rows bright with the pill, channel
+rows with their counts), a
+message list that loads history in both directions, with the "new messages" line and the unread
+bar, the composer, and marking read with Escape, Shift+Escape and the context menus; it shows the
 connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
 messages, which the macOS app restores before the gateway connects. `akari-markdown` parses

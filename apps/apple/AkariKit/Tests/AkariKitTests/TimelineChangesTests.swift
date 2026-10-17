@@ -76,6 +76,23 @@ struct TimelineChangesTests {
         #expect(gone.reloaded == [try #require(alone.firstIndex { $0.id == message })])
     }
 
+    // The message under the line sits closer to it, as under a day divider.
+    @Test
+    func aMessageThatStartsOrStopsFollowingTheLineIsReloaded() {
+        let rows = [row(1, at: noon), row(2, by: user(2), at: noon + 60), row(3, at: noon + 120)]
+        let plain = MessageTimeline(rows: rows, calendar: berlin).items
+        let marked = MessageTimeline(rows: rows, calendar: berlin, newMessages: id(2)).items
+
+        let added = TimelineChanges(from: plain, to: marked)
+        let removed = TimelineChanges(from: marked, to: plain)
+
+        #expect(added.inserted == [2])
+        #expect(added.removed.isEmpty)
+        #expect(added.reloaded == [3])
+        #expect(removed.removed == [2])
+        #expect(removed.reloaded == [2])
+    }
+
     @Test
     func deletingAGroupsFirstMessageReloadsTheNextOne() {
         let both = [row(1, at: noon), row(2, at: noon + 60)]

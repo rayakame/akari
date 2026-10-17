@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cache::{CacheThread, DiskCache, Flusher};
@@ -13,9 +13,11 @@ use crate::gateway::{
 use crate::model::{ChannelId, GuildId, MessageId, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
-    ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits, message_length,
+    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits,
+    message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
+use acks::{AckSender, Pace, Refusal};
 
 const REFRESH_LIMIT: u8 = 100;
 const JUMP_LIMIT: u8 = 50;
@@ -25,6 +27,12 @@ const SERVER_ERROR_RETRY: Duration = if cfg!(test) {
     Duration::from_millis(10)
 } else {
     Duration::from_secs(1)
+};
+// A failed ack's first retry, short in tests too; later ones wait longer.
+const ACK_RETRY: Duration = if cfg!(test) {
+    Duration::from_millis(10)
+} else {
+    Duration::from_secs(2)
 };
 
 /// A logged-in account: its gateway connection and the [`Store`] that connection keeps
@@ -37,13 +45,15 @@ pub struct Account {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MessageLoad {
-    /// The newest messages: fills a window, refreshes a stale one, or jumps to the present.
+    /// The newest messages: fills a window, refreshes a stale one, or jumps to the present; not
+    /// when it would replace the window for a later-placed `Around` (`PageOutcome::Overtaken`).
     Latest { limit: u8 },
     /// Before the window's first message.
     Older { limit: u8 },
     /// After the window's last message, towards the present.
     Newer { limit: u8 },
-    /// Replaces the window with the messages around `id`.
+    /// Replaces the window with the messages around `id`, unless a later-placed `Latest` or
+    /// `Around` load, or [`Account::supersede_around_loads`], comes first.
     Around { id: MessageId, limit: u8 },
 }
 
@@ -95,7 +105,8 @@ impl MessageLoad {
 pub(crate) struct Shared {
     gateway: Gateway,
     store: Store,
-    rest: AccountRest,
+    rest: Arc<AccountRest>,
+    acks: AckSender,
     nonces: Nonces,
     status: Mutex<Status>,
     // What op 37 last asked for per guild in this session.
@@ -212,8 +223,9 @@ impl Shared {
         channel: ChannelId,
         kind: LoadKind,
         limit: u8,
+        placing: Option<u64>,
     ) -> Result<Option<LoadReport>, RequestError> {
-        let Some(ticket) = self.store.begin_load(channel, kind) else {
+        let Some(ticket) = self.store.begin_load(channel, kind, placing) else {
             return Ok(None);
         };
         let started = Instant::now();
@@ -283,8 +295,13 @@ impl Shared {
                 unfinished.ticket = None;
                 let reached_end = received < usize::from(limit);
                 let storing = Instant::now();
-                self.store.finish_load(ticket, messages, reached_end);
-                report.store = storing.elapsed();
+                {
+                    let _gate = self.acks.gate();
+                    let (outcome, ack) = self.store.finish_load(ticket, messages, reached_end);
+                    report.outcome = outcome;
+                    report.store = storing.elapsed();
+                    self.ack_reading(ack);
+                }
                 (report.prepare, report.prepared) = prepared;
                 log_page(channel, ticket.kind, &report);
                 Ok(Some(report))
@@ -372,8 +389,51 @@ impl Shared {
         if matches!(err, RequestError::Unauthorized) {
             let error = Some(Arc::new(GatewayError::AuthenticationFailed));
             self.store.set_connection(ConnectionState::Closed { error });
+            self.store.stop_reading();
             self.gateway.close();
         }
+    }
+
+    fn ack_refused(&self, refusal: Refusal) {
+        let channel_id = refusal.channel.get();
+        let message_id = refusal.sent.get();
+        if self
+            .store
+            .undo_ack(refusal.channel, refusal.undo, refusal.after)
+        {
+            tracing::warn!(
+                target: "akari_core::acks",
+                channel_id,
+                message_id,
+                "refused ack undone"
+            );
+        } else {
+            tracing::debug!(
+                target: "akari_core::acks",
+                channel_id,
+                message_id,
+                "refused ack left: the channel's read state changed since"
+            );
+        }
+    }
+
+    // While the user follows a channel, its acks go out paced, like the official client's.
+    fn ack_reading(&self, ack: Option<Ack>) {
+        if let Some(ack) = ack {
+            self.acks.want(ack, Pace::Paced);
+        }
+    }
+
+    // Without the gate: the pump forgets and swaps itself, so its own acks can't come between.
+    fn dispatched(&self, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
+        if let ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) = &event
+            && ack.manual
+            && ack.ack_type == 0
+        {
+            self.acks.forget(ack.channel_id);
+        }
+        let ack = on_event(&self.store, event, connecting);
+        self.ack_reading(ack);
     }
 
     fn view(self: &Arc<Self>, channel: ChannelId) {
@@ -526,7 +586,7 @@ impl Shared {
     ) -> Result<MessageId, RequestError> {
         if detached {
             let (jumped, delivered) = tokio::join!(
-                self.load(channel, LoadKind::Latest, JUMP_LIMIT),
+                self.load(channel, LoadKind::Latest, JUMP_LIMIT, None),
                 self.deliver(channel, pending, content),
             );
             if let Err(err) = jumped {
@@ -614,7 +674,9 @@ impl Shared {
 
     async fn refresh_stale(self: &Arc<Self>) {
         for channel in self.store.stale_channels() {
-            let refreshed = self.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
+            let refreshed = self
+                .load(channel, LoadKind::Refresh, REFRESH_LIMIT, None)
+                .await;
             if refreshed.is_err() && self.rest.is_unauthorized() {
                 return;
             }
@@ -624,6 +686,7 @@ impl Shared {
     fn close(&self) {
         self.gateway.close();
         self.rest.close();
+        self.acks.close();
         if let Some(flusher) = &self.flusher {
             if self.expired() {
                 flusher.delete();
@@ -662,7 +725,11 @@ impl Account {
         cache: Option<DiskCache>,
     ) -> Result<Self, GatewayError> {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
-        let rest = AccountRest::new(client.clone(), token.clone(), SERVER_ERROR_RETRY);
+        let rest = Arc::new(AccountRest::new(
+            client.clone(),
+            token.clone(),
+            SERVER_ERROR_RETRY,
+        ));
         let store = Store::new(limits);
         let thread = cache
             .as_ref()
@@ -685,19 +752,39 @@ impl Account {
             });
         }
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
-        let shared = Arc::new(Shared {
-            gateway: Gateway::start(client, token, timing)?,
-            store,
-            rest,
-            nonces: Nonces::default(),
-            status: Mutex::default(),
-            subscribed: Mutex::default(),
-            member_lists: AtomicBool::new(true),
-            delivering: Mutex::default(),
-            runtime: runtime.clone(),
-            flusher,
-            cache: thread,
-            preparer: RwLock::new(None),
+        let gateway = Gateway::start(client, token, timing)?;
+        let shared = Arc::new_cyclic(|weak: &Weak<Shared>| {
+            let unauthorized = {
+                let weak = weak.clone();
+                move || {
+                    if let Some(shared) = weak.upgrade() {
+                        shared.failed(&RequestError::Unauthorized);
+                    }
+                }
+            };
+            let refused = {
+                let weak = weak.clone();
+                move |refusal| {
+                    if let Some(shared) = weak.upgrade() {
+                        shared.ack_refused(refusal);
+                    }
+                }
+            };
+            Shared {
+                gateway,
+                store,
+                acks: AckSender::start(&runtime, rest.clone(), ACK_RETRY, unauthorized, refused),
+                rest,
+                nonces: Nonces::default(),
+                status: Mutex::default(),
+                subscribed: Mutex::default(),
+                member_lists: AtomicBool::new(true),
+                delivering: Mutex::default(),
+                runtime: runtime.clone(),
+                flusher,
+                cache: thread,
+                preparer: RwLock::new(None),
+            }
         });
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
@@ -737,6 +824,7 @@ impl Account {
     pub fn disconnect(&self) {
         self.shared.gateway.disconnect();
         self.shared.store.set_connection(ConnectionState::Offline);
+        self.shared.store.stop_reading();
         if let Some(flusher) = &self.shared.flusher {
             flusher.flush_soon();
         }
@@ -763,6 +851,35 @@ impl Account {
         self.shared.view(channel);
     }
 
+    /// The channel the user is reading at its newest messages, or `None`. While set, the
+    /// channel is acked up to the newest message its list shows at the present, and again as
+    /// that list grows, paced. Hosts set it only while the user is engaged with the channel at
+    /// the bottom of its list. A dropped connection clears it: set it again once online and the
+    /// list is refreshed.
+    pub fn set_reading(&self, channel: Option<ChannelId>) {
+        let _gate = self.shared.acks.gate();
+        let ack = self.shared.store.set_reading(channel);
+        self.shared.ack_reading(ack);
+    }
+
+    /// Marks the channel read now (Escape, the context menu).
+    pub fn mark_read(&self, channel: ChannelId) {
+        let _gate = self.shared.acks.gate();
+        if let Some(ack) = self.shared.store.mark_read(channel) {
+            self.shared.acks.want(ack, Pace::Explicit);
+        }
+    }
+
+    /// Marks these guilds read now with one bulk ack (Shift+Escape, a server's or a folder's
+    /// context menu).
+    pub fn mark_guilds_read(&self, guilds: &[GuildId]) {
+        let _gate = self.shared.acks.gate();
+        let acks = self.shared.store.mark_guilds_read(guilds);
+        if !acks.is_empty() {
+            self.shared.acks.want_bulk(acks);
+        }
+    }
+
     /// Loads messages into the channel's window within Discord's rate limits. `Latest` and
     /// `Around` view the channel first; `Older` and `Newer` continue a window and do nothing
     /// without one. A 401 closes the account like a rejected token.
@@ -772,8 +889,35 @@ impl Account {
         channel: ChannelId,
         load: MessageLoad,
     ) -> Result<Option<LoadReport>, RequestError> {
+        self.load_placed(channel, load, None).await
+    }
+
+    /// Like [`Account::load_messages`], in the place `placing` holds among the channel's
+    /// `Latest` and `Around` loads and supersedes, wherever the load begins.
+    pub async fn load_messages_placed(
+        &self,
+        channel: ChannelId,
+        load: MessageLoad,
+        placing: u64,
+    ) -> Result<Option<LoadReport>, RequestError> {
+        self.load_placed(channel, load, Some(placing)).await
+    }
+
+    /// The next place among loads and supersedes, for [`Account::load_messages_placed`]. A host
+    /// takes it where the user acts, so a later supersede overtakes the load even if it comes
+    /// before the load begins.
+    pub fn reserve_placing(&self) -> u64 {
+        self.shared.store.next_placing()
+    }
+
+    async fn load_placed(
+        &self,
+        channel: ChannelId,
+        load: MessageLoad,
+        placing: Option<u64>,
+    ) -> Result<Option<LoadReport>, RequestError> {
         let (kind, limit) = load.parts();
-        let loaded = self.shared.load(channel, kind, limit).await;
+        let loaded = self.shared.load(channel, kind, limit, placing).await;
         // Cached messages left stale hold live ones back; before READY its refresh takes them.
         if loaded.is_err()
             && kind == LoadKind::Latest
@@ -782,10 +926,18 @@ impl Account {
         {
             let shared = self.shared.clone();
             self.shared.runtime.spawn(async move {
-                let _ = shared.load(channel, LoadKind::Refresh, REFRESH_LIMIT).await;
+                let _ = shared
+                    .load(channel, LoadKind::Refresh, REFRESH_LIMIT, None)
+                    .await;
             });
         }
         loaded
+    }
+
+    /// Drops the pages of `Around` loads running for the channel, so they don't replace its
+    /// window: Escape or a mark as read during a jump, where no `Latest` load overtakes them.
+    pub fn supersede_around_loads(&self, channel: ChannelId) {
+        self.shared.store.supersede_around(channel);
     }
 
     /// Shows the message as pending at once and sends it. Resolves with Discord's ID; on an
@@ -930,6 +1082,7 @@ impl Drop for Finish {
         self.shared
             .store
             .set_connection(ConnectionState::Closed { error });
+        self.shared.store.stop_reading();
         // close() does nothing once the gateway has ended, so it runs on every path. After the
         // state, so it sees why the session ended.
         self.shared.close();
@@ -961,10 +1114,27 @@ async fn pump(mut finish: Finish) {
             // A large READY takes milliseconds to convert; that mustn't hold a runtime worker.
             Ok(ConnectionEvent::Dispatch(DispatchEvent::Ready(ready))) => {
                 let started = std::time::Instant::now();
+                // Before the conversion, whose local acks the swap keeps: those are the user's
+                // now, not ones READY may have overtaken.
+                let preparing = {
+                    let _gate = shared.acks.gate();
+                    shared.acks.forget_all();
+                    shared.store.begin_ready()
+                };
                 let store = shared.store.clone();
-                match tokio::task::spawn_blocking(move || store.prepare_ready(*ready)).await {
+                let prepared =
+                    tokio::task::spawn_blocking(move || store.prepare(preparing, *ready)).await;
+                match prepared {
                     Ok(next) => {
-                        shared.store.replace(next);
+                        let replaced = {
+                            let _gate = shared.acks.gate();
+                            let replaced = shared.store.replace(next);
+                            shared
+                                .acks
+                                .reconcile(|channel| replaced.read_states.get(&channel).copied());
+                            replaced
+                        };
+                        drop(replaced);
                         let convert_ms = crate::millis(started.elapsed());
                         tracing::info!(convert_ms, "READY applied");
                         shared.forget_subscriptions();
@@ -983,8 +1153,7 @@ async fn pump(mut finish: Finish) {
             }
             Ok(ConnectionEvent::Dispatch(DispatchEvent::Resumed)) => {
                 shared.forget_subscriptions();
-                on_event(
-                    &shared.store,
+                shared.dispatched(
                     ConnectionEvent::Dispatch(DispatchEvent::Resumed),
                     &connecting,
                 );
@@ -993,7 +1162,7 @@ async fn pump(mut finish: Finish) {
                 let subscriptions = shared.clone();
                 tokio::spawn(async move { subscriptions.resubscribe().await });
             }
-            Ok(event) => on_event(&shared.store, event, &connecting),
+            Ok(event) => shared.dispatched(event, &connecting),
             Err(GatewayError::Closed) => break None,
             Err(error) => break Some(Arc::new(error)),
         }
@@ -1003,23 +1172,27 @@ async fn pump(mut finish: Finish) {
 
 // Queued events mustn't make a disconnected account look connected. disconnect() idles the
 // gateway before it takes the store's lock, so `connecting` checked under that lock sees it.
-fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
+fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool) -> Option<Ack> {
     match event {
         ConnectionEvent::Dispatch(event) => {
             let ready = matches!(event, DispatchEvent::Ready(_) | DispatchEvent::Resumed);
-            store.apply(event);
+            let ack = store.apply(event);
             if ready {
                 store.set_connection_if(ConnectionState::Online, connecting);
             }
+            ack
         }
         ConnectionEvent::Reconnecting { .. } => {
+            store.stop_reading();
             store.set_connection_if(ConnectionState::Connecting, connecting);
+            None
         }
         #[cfg(feature = "capture")]
-        ConnectionEvent::CapturedReady(_) => {}
+        ConnectionEvent::CapturedReady(_) => None,
     }
 }
 
+mod acks;
 mod mutes;
 
 #[cfg(test)]

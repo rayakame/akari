@@ -42,7 +42,7 @@ fn rearms(event: &StoreEvent) -> bool {
     )
 }
 
-async fn until(deadline: Option<Instant>) {
+pub(super) async fn until(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => std::future::pending().await,

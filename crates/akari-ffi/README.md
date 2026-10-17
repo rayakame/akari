@@ -48,6 +48,19 @@ sent none is `estimated`, and its `acked` isn't a message the user read.
 for the rail. `BadgeChanged { channel_id, guild_id }` says to reread that channel's badge or
 read state, and `GuildBadgeChanged { guild_id }` that guild's badge and its folder's.
 
+Acks: `set_reading(channel_id)` names the channel the user is reading at its newest messages
+(or `None`), `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request
+(Escape, context menus). All three return at once, and the core sends the acks in the
+background. `mark_read` and `mark_guilds_read` clear the badges at once: the events fire before
+Discord answers. `set_reading(Some)` clears them only when the channel's list, at the present
+and not stale, shows messages past the read position (or the channel has mentions), and only
+up to the newest message it shows; it reads again as that list grows. `set_reading(None)`
+clears nothing. The core stops reading on its own when the connection drops, on `disconnect()`
+and when the account closes: set the channel again once the session is online and its list is
+refreshed. An ack Discord refuses can bring a channel's badge back (`BadgeChanged`). The host
+decides when the user is reading; the core never infers it
+([read-states.md](../../docs/protocol/read-states.md#how-akari-acks)).
+
 ## Formatted messages
 
 `Message.formatted` is the content as Discord formats it (`FormattedText`), flat so it maps
@@ -101,7 +114,7 @@ read.
   `StoreSubscription.next`) are polled directly.
 - Sync methods are cheap. A store read takes one read lock, and akari-core warns when a
   write holds the lock for more than 4 ms. `connect`, `disconnect`, `close` and
-  `view_channel` only signal.
+  `view_channel`, `set_reading`, `mark_read` and `mark_guilds_read` only signal.
 - The host's `TokenStore` runs on a blocking thread, never on the main thread or a runtime
   worker, so it may block or show a dialog.
 - Markdown is parsed on the runtime where it can be: each account registers its documents as
@@ -143,14 +156,30 @@ message over the limit with `RequestError::TooLong` before anything is queued, a
 refusal for length maps to the same error. No event reports a cooldown; re-read `slowmode` on
 the open channel's window events and after a send.
 
+## Jumps
+
+`Latest` and `Around` loads place a channel's list: at the present, or around a message. When
+such requests for one channel overlap, the one the host made last wins. `reserve_placing()`
+returns the next number in that order; a host takes it where the user acts and passes it to
+`load_messages(…, placing)`, since the load itself begins later, on Akari's runtime (`None`
+takes a number when the load begins). `supersede_around_loads(channel_id)` takes one without
+loading, for Escape, a mark as read, a send, leaving the channel or opening it again during a
+jump; both return at once. The core drops an `Around` page when a newer request came after it,
+and a `Latest` page that would replace the window while a newer `Around` load is the channel's
+last request (the page still raises the channel's newest message). `LoadReport.outcome` says what
+became of a page: `Applied`, `Overtaken` (a newer request came first) or `Outdated` (the window
+was replaced, or the end the page continues from changed, meanwhile). A jump has happened only
+once its page is `Applied`. The rules are in
+[messages.md](../../docs/protocol/messages.md#loading-history).
+
 ## Measuring loads
 
-`load_messages` returns a `LoadReport` (or `None` when there was nothing to load): the time
-behind earlier requests and waiting for rate limits, until the headers, for the body,
-decoding, parsing (`parse`, `parsed`: the page's new messages and, on a first page, the disk
-cache's) and storing, whether a new connection was opened, and Discord's rate-limit headers.
-Numbers only; the apps log them. `DiscordClient::warm_up()` opens a REST connection ahead of
-the first request (an unauthenticated `GET /gateway`) and returns at once.
+`load_messages` returns a `LoadReport` (or `None` when there was nothing to load): what became
+of the page (`outcome`, above), the time behind earlier requests and waiting for rate limits,
+until the headers, for the body, decoding, parsing (`parse`, `parsed`: the page's new messages
+and, on a first page, the disk cache's) and storing, whether a new connection was opened, and
+Discord's rate-limit headers. The apps log them. `DiscordClient::warm_up()` opens a REST
+connection ahead of the first request (an unauthenticated `GET /gateway`) and returns at once.
 
 ## The disk cache
 

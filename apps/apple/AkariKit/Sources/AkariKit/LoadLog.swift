@@ -77,6 +77,7 @@ public enum LoadLog {
             case .latest: "latest"
             case .older: "older"
             case .newer: "newer"
+            case .around: "around"
             }
         return "channel \(trace.channelId.rawValue) \(kind) page \(trace.sequence)"
     }

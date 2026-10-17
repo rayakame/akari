@@ -11,15 +11,16 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Send | Return | Done |
 | New line | Shift+Return | Done; Option+Return too |
 | Edit the last message | Up arrow in an empty composer | Reserved: the key is taken, editing comes later |
-| Mark the channel read, or cancel an edit or reply | Escape | Jumps to the present (below) |
-| Mark the server read | Shift+Escape (**unverified**) | Later, with read state |
+| Mark the channel read, or cancel an edit or reply | Escape | Marks the channel read and jumps to the present (below) |
+| Mark the server read | Shift+Escape | Done |
 | Quick switcher | Cmd+K | Later |
 | Previous or next channel | Option+Up / Option+Down | Later |
 | Scroll the messages | Page Up / Page Down (**unverified**) | The list's native scrolling |
-| Jump to the oldest unread message | Shift+Page Up (**unverified**) | Later, with read state |
+| Jump to the oldest unread message | Shift+Page Up (Shift+Fn+Up on a Mac laptop) (**unverified**) | Done: jumps like a click on the unread bar (below) |
 | Focus the composer | Tab (**unverified**) | Later |
 
-Rows marked **unverified** come from community lists, not from Discord's own pages.
+Rows marked **unverified** come from community lists, not from Discord's own pages. Escape and
+Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
 
 ## Notes
 
@@ -27,9 +28,26 @@ Rows marked **unverified** come from community lists, not from Discord's own pag
   lists Shift+Up (Option+Up on macOS) for the same action. Akari follows the blog; the key
   does nothing until editing exists, and never beeps.
 - **Escape.** In Discord, Escape marks the open channel as read and cancels an edit or a
-  reply in progress. Akari has no read state, edits or replies yet, so Escape jumps to the
-  present: it loads the newest messages if the list shows older ones, and scrolls to the
-  bottom. It does this from the message list and from the composer, through one action, so
-  the read-state milestone adds marking as read in one place.
+  reply in progress; it also jumps to the present from a list scrolled up, and with nothing
+  unread it sends nothing. Akari has no edits or replies yet, so Escape marks the channel read
+  and jumps to the present: it loads the newest messages if the list shows older ones, and
+  scrolls to the bottom; a jump to the first unread message that is still loading doesn't land
+  ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)). It does this
+  from the message list and from the composer, through one action. Shift+Escape, from the same
+  places, marks the open server read, and does nothing at Home
+  ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
+- **Only the Escape key.** macOS sends Cmd+. as the same cancel command as Escape; in Akari it
+  marks nothing read, and Cmd+Shift+. doesn't mark the server read. In the composer it does
+  nothing, as in the official client (**unverified**); in the message list and a message's
+  text AppKit handles it as usual.
+- **Escape with something open.** Once Akari has replies, edits and popups, Escape closes the
+  open one first and doesn't also mark the channel read, as in the official client
+  (**unverified**).
+- **Shift+Page Up** is still **unverified**: Discord's shortcut list (Cmd+/) didn't open in
+  the browser or the desktop app, and the Mac help article is images only. Community lists
+  give the same keys. In Akari it jumps to the first unread message, as a click on the unread
+  bar does ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)), from
+  the message list, a message's selected text and the composer, whenever the list has a new
+  messages line, and does nothing otherwise. In the composer it never extends the selection.
 - **No shortcut for "jump to present"** is documented for the official client; its bar at
   the bottom of the list is clicked ([message-list.md](message-list.md#jump-to-present)).

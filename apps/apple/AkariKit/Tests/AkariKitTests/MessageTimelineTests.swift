@@ -114,4 +114,26 @@ struct MessageTimelineTests {
             MessageTimeline(rows: rows, calendar: berlin, edges: [.beginning, .newer]).shape
                 == ["beginning", "day", "+1", "2", "newer"])
     }
+
+    @Test
+    func theLineGoesBeforeItsMessageAndStartsNoGroup() {
+        let rows = [row(1, at: noon), row(2, at: noon + 60), row(3, at: noon + 120)]
+
+        let shown = MessageTimeline(rows: rows, calendar: berlin, newMessages: id(2))
+
+        #expect(shown.shape == ["day", "+1", "new", "2", "3"])
+        #expect(shown.items[2].id == .newMessages(id(2)))
+        #expect(
+            MessageTimeline(rows: rows, calendar: berlin, newMessages: id(9)).shape
+                == ["day", "+1", "2", "3"])
+    }
+
+    @Test
+    func aDayDividerAndTheLineBothShow() {
+        let rows = [row(1, at: noon), row(2, at: noon + 86_400)]
+
+        let shown = MessageTimeline(rows: rows, calendar: berlin, newMessages: id(2))
+
+        #expect(shown.shape == ["day", "+1", "day", "new", "+2"])
+    }
 }

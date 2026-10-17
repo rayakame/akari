@@ -172,6 +172,41 @@ impl Badges {
         }
     }
 
+    // `diff`'s events for `channels` and their guilds, replacing the ones it gave them before
+    // they changed in `next`.
+    pub(crate) fn rediff(
+        &self,
+        next: &Self,
+        channels: &BTreeSet<ChannelId>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let guilds: BTreeSet<GuildId> = channels
+            .iter()
+            .flat_map(|channel| [self.channels.get(channel), next.channels.get(channel)])
+            .flatten()
+            .filter_map(|slot| slot.guild)
+            .collect();
+        events.retain(|event| match event {
+            StoreEvent::BadgeChanged { channel_id, .. } => !channels.contains(channel_id),
+            StoreEvent::GuildBadgeChanged { guild_id } => !guilds.contains(guild_id),
+            _ => true,
+        });
+        for channel in channels {
+            let (before, after) = (self.channels.get(channel), next.channels.get(channel));
+            if after.is_some() && shown(before) != shown(after) {
+                events.push(StoreEvent::BadgeChanged {
+                    channel_id: *channel,
+                    guild_id: after.or(before).and_then(|slot| slot.guild),
+                });
+            }
+        }
+        for guild in guilds {
+            if next.guilds.contains_key(&guild) && self.guild(guild) != next.guild(guild) {
+                events.push(StoreEvent::GuildBadgeChanged { guild_id: guild });
+            }
+        }
+    }
+
     pub(crate) fn update(
         &mut self,
         entities: &Entities,

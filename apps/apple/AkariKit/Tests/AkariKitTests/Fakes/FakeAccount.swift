@@ -1,6 +1,8 @@
 import AkariKit
 import Foundation
 
+private let pageReport = loadReport()
+
 final class FakeAccount: Account, @unchecked Sendable {
     let fakeStore: FakeStore
     let connectError = Locked<GatewayError?>(nil)
@@ -10,13 +12,35 @@ final class FakeAccount: Account, @unchecked Sendable {
     let loadError = Locked<RequestError?>(nil)
     // The window a successful load leaves in the store, as akari-core's load would.
     let windowAfterLoad = Locked<MessageWindow?>(nil)
-    // What a successful load reports; `nil` is a load with nothing to load.
-    let loadReport = Locked<LoadReport?>(nil)
+    // Wins over `windowAfterLoad`: the window each load leaves; `nil` drops the page, as the
+    // core does when the window was replaced meanwhile.
+    let windowAfter = Locked<(@Sendable (MessageLoad) -> MessageWindow?)?>(nil)
+    // What a successful load reports, its outcome set as the core would; `nil` is a load with
+    // nothing to load.
+    let loadReport = Locked<LoadReport?>(pageReport)
+    // Like akari-core: latest and around loads and supersedes place a channel's window, in the
+    // order of their placings. An around page that something placed after is dropped, and so is
+    // a latest page that would replace the window when the newest placing is a later around load.
+    private let placings = Locked<[ChannelId: (newest: UInt64, around: UInt64)]>([:])
+    private let reserved = Locked<UInt64>(0)
+    // Set: an around page counts as in the window before any later request, as when the core
+    // applied it before the list heard.
+    let aroundLandsFirst = Locked(false)
+    // While set, each load waits here before its body runs, as on Akari's runtime.
+    let holdLoadEntry = Locked(false)
+    let loadEntries = AsyncQueue<Void>()
     // Fails sends and retries.
     let sendError = Locked<RequestError?>(nil)
     // While set, each send waits for a reply: `nil` succeeds, an error fails it.
     let holdSends = Locked(false)
     let sendReplies = AsyncQueue<RequestError?>()
+    let readingCalls = Locked<[ChannelId?]>([])
+    let markedRead = Locked<[ChannelId]>([])
+    let markedGuildsRead = Locked<[[GuildId]]>([])
+    // The read state a mark as read leaves in the store, as akari-core's local ack would.
+    let readStateAfterMarkRead = Locked<ReadState?>(nil)
+    // The same for setting a channel as being read.
+    let readStateAfterReading = Locked<ReadState?>(nil)
 
     init(store: FakeStore = FakeStore()) {
         fakeStore = store
@@ -55,18 +79,102 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.view(channelId))
     }
 
-    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
-        -> LoadReport?
+    override func setReading(channelId: ChannelId?) {
+        readingCalls.withLock { $0.append(channelId) }
+        if let channelId, let state = readStateAfterReading.current {
+            fakeStore.update { $0.readStates[channelId] = state }
+        }
+    }
+
+    override func markRead(channelId: ChannelId) {
+        markedRead.withLock { $0.append(channelId) }
+        if let state = readStateAfterMarkRead.current {
+            fakeStore.update { $0.readStates[channelId] = state }
+        }
+    }
+
+    override func markGuildsRead(guildIds: [GuildId]) {
+        markedGuildsRead.withLock { $0.append(guildIds) }
+    }
+
+    override func loadMessages(channelId: ChannelId, load: MessageLoad, placing: UInt64?)
+        async throws -> LoadReport?
     {
         log.append(.load(channelId, load))
+        if holdLoadEntry.current {
+            _ = await loadEntries.next()
+        }
+        let placing: UInt64? =
+            switch load {
+            case .latest: place(channelId, at: placing ?? reservePlacing())
+            case .around: place(channelId, at: placing ?? reservePlacing(), around: true)
+            default: nil
+            }
         let error = holdLoads.current ? await loadReplies.next() ?? nil : loadError.current
         if let error {
             throw error
         }
-        if let window = windowAfterLoad.current {
+        guard var report = loadReport.current else {
+            return nil
+        }
+        let landedFirst: Bool =
+            if case .around = load { aroundLandsFirst.current } else { false }
+        if let placing, !landedFirst, overtaken(load, placing: placing, in: channelId) {
+            report.outcome = .overtaken
+            return report
+        }
+        report.outcome = .applied
+        if let after = windowAfter.current {
+            guard let window = after(load) else {
+                report.outcome = .outdated
+                return report
+            }
+            fakeStore.update { $0.windows[channelId] = window }
+        } else if let window = windowAfterLoad.current {
             fakeStore.update { $0.windows[channelId] = window }
         }
-        return loadReport.current
+        return report
+    }
+
+    override func supersedeAroundLoads(channelId: ChannelId) {
+        log.append(.supersede(channelId))
+        place(channelId, at: reservePlacing())
+    }
+
+    override func reservePlacing() -> UInt64 {
+        reserved.withLock { reserved in
+            reserved += 1
+            return reserved
+        }
+    }
+
+    private func overtaken(_ load: MessageLoad, placing: UInt64, in channel: ChannelId) -> Bool {
+        let placed = placings.current[channel, default: (0, 0)]
+        switch load {
+        case .around:
+            return placing < placed.newest
+        case .latest:
+            var replaces = false
+            fakeStore.update { state in
+                replaces = state.windows[channel].map { !$0.latest || $0.stale } ?? false
+            }
+            return replaces && placed.newest == placed.around && placed.around > placing
+        default:
+            return false
+        }
+    }
+
+    @discardableResult
+    private func place(_ channel: ChannelId, at placing: UInt64, around: Bool = false) -> UInt64 {
+        placings.withLock { placings in
+            var placed = placings[channel, default: (0, 0)]
+            placed.newest = max(placed.newest, placing)
+            if around {
+                placed.around = max(placed.around, placing)
+            }
+            placings[channel] = placed
+            return placing
+        }
     }
 
     // Refuses queueing, as the core does before anything is queued.

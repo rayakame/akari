@@ -35,7 +35,7 @@ pub(crate) fn ms(duration: std::time::Duration) -> f64 {
 pub use account::{Account, MessageLoad};
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{JsonError, JsonErrorKind, TransportError, TransportErrorKind};
-pub use load_report::LoadReport;
+pub use load_report::{LoadReport, PageOutcome};
 pub use prepare::MessagePreparer;
 pub use rest::RequestError;
 pub use secret::{Secret, Token};

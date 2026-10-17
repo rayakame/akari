@@ -40,7 +40,7 @@ impl<M> Snowflake<M> {
 }
 
 // The first second of 2015, from which snowflake timestamps count.
-const DISCORD_EPOCH: i64 = 1_420_070_400_000;
+pub(crate) const DISCORD_EPOCH: i64 = 1_420_070_400_000;
 const TIMESTAMP_SHIFT: u32 = 22;
 const SEQUENCE_MASK: u64 = (1 << TIMESTAMP_SHIFT) - 1;
 

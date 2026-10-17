@@ -23,7 +23,13 @@ public final class SessionModel {
     /// The open channel's messages. The session can replace it on its own, when the open channel
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
     /// with `.task(id: messages.channelId) { await messages.open() }`.
-    public private(set) var messages: MessageListModel?
+    public private(set) var messages: MessageListModel? {
+        didSet { oldValue?.retire() }
+    }
+    /// The channel the user is reading: the open channel while the session is online, the app
+    /// active, its window key and visible, the list fresh at the present's bottom and the user
+    /// engaged. The core hears of a change the list reports on the next turn.
+    public private(set) var reading: ChannelId?
     /// What the connection bar says; `nil` while online.
     public var notice: ConnectionNotice? {
         switch connection {
@@ -50,6 +56,21 @@ public final class SessionModel {
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
+    @ObservationIgnored private var appActive = false
+    @ObservationIgnored private var windowKey = false
+    @ObservationIgnored private var windowVisible = false
+    // The official client acks after a break only once the user clicks or types (D88).
+    @ObservationIgnored private var engaged = false
+    @ObservationIgnored private var holdingReading = false
+    // The core forgets the channel whenever the connection drops; a call that raced the drop
+    // may have set it again, so the next derivation is sent whatever it is.
+    @ObservationIgnored private var resendReading = false
+    @ObservationIgnored private var toldReading: ChannelId?
+    // On a 401 the core has stopped reading itself, and close() can come inside that batch.
+    @ObservationIgnored private var accountClosed = false
+    // The list reports from inside the table's scroll callbacks, too often for a call into the
+    // core each; it hears the last value.
+    @ObservationIgnored private(set) var pendingReading: Task<Void, Never>?
 
     /// `onClosed` runs once when the session ends without `close()`; `AuthenticationFailed`
     /// means the user has to log in again. The first READY reopens the place and channel
@@ -123,9 +144,11 @@ public final class SessionModel {
         // messages load while the gateway connects; READY then places it.
         if let channel = spotToRestore?.channel {
             openedChannels.insert(channel)
-            messages = MessageListModel(
-                channelId: channel, account: account, store: store, drafts: drafts)
+            messages = list(of: channel)
         }
+        // Reopening the last place counts as opening it, also when the cache or READY does.
+        engaged = true
+        updateReading()
     }
 
     /// The hosts the account trusts for masked links, kept with the rest of its memory.
@@ -136,6 +159,37 @@ public final class SessionModel {
     /// A guild opens the channel last opened there, else its first text channel; home opens
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
+        engaged = true
+        enter(place)
+    }
+
+    /// Opening a channel engages the user, also the one already open.
+    public func open(channel id: ChannelId) {
+        engaged = true
+        show(channel: id)
+    }
+
+    /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
+    /// the store doesn't have opens where the user is; one without a message list doesn't open.
+    public func go(to channel: ChannelId) {
+        // The place opens its own last or first channel on the way, which isn't being read.
+        readingOnce {
+            if let found = store.channel(id: channel) {
+                guard found.opensMessageList else {
+                    return
+                }
+                let place: Place = found.guildId.map { .guild($0) } ?? .home
+                if place != self.place {
+                    open(place)
+                }
+            }
+            open(channel: channel)
+        }
+    }
+
+    // Without engaging: only the user's choices and the launch do.
+    private func enter(_ place: Place) {
+        defer { updateReading() }
         guard place != self.place else {
             // The session starts at home, so choosing home before READY cancels a server restore.
             if case .guild = spotToRestore?.place {
@@ -154,7 +208,7 @@ public final class SessionModel {
             if let last = lastHomeChannel,
                 directMessages.conversations.contains(where: { $0.id == last })
             {
-                open(channel: last)
+                show(channel: last)
             } else {
                 messages = nil
             }
@@ -165,38 +219,93 @@ public final class SessionModel {
         openListedChannel(in: list, guildId: guildId)
     }
 
-    public func open(channel id: ChannelId) {
-        spotToRestore = nil
-        switch place {
-        case .guild(let guildId): lastChannels[guildId] = id
-        case .home: lastHomeChannel = id
+    /// Whether "Mark As Read" has something to mark: the server's badge shows unread or
+    /// mentions.
+    public func canMarkRead(guild: GuildId) -> Bool {
+        Self.showsUnread(servers.badge(of: guild))
+    }
+
+    public func canMarkRead(folder: ServerListModel.FolderItem) -> Bool {
+        Self.showsUnread(servers.badge(of: folder))
+    }
+
+    /// A channel of the open server, or a conversation.
+    public func canMarkRead(channel: ChannelId) -> Bool {
+        (channels?.badges[channel] ?? directMessages.badges[channel]).map(Self.showsUnread)
+            ?? false
+    }
+
+    /// Also ends the new messages line of the open channel when it is in the server.
+    public func markRead(guild: GuildId) {
+        account.markGuildsRead(guildIds: [guild])
+        markedRead(guilds: [guild])
+    }
+
+    /// One bulk ack for all of the folder's servers.
+    public func markRead(folder: ServerListModel.FolderItem) {
+        let guilds = folder.guilds.map(\.id)
+        account.markGuildsRead(guildIds: guilds)
+        markedRead(guilds: guilds)
+    }
+
+    /// Also ends the new messages line when it is the open channel.
+    public func markRead(channel: ChannelId) {
+        account.markRead(channelId: channel)
+        if channel == messages?.channelId {
+            messages?.endNewMessagesLine()
         }
-        defer { rememberSpot() }
-        guard messages?.channelId != id else {
+    }
+
+    private func markedRead(guilds: [GuildId]) {
+        if case .guild(let open) = place, guilds.contains(open) {
+            messages?.endNewMessagesLine()
+        }
+    }
+
+    /// Shift+Escape: marks the open server read; does nothing at home.
+    public func markServerRead() {
+        if case .guild(let guildId) = place {
+            markRead(guild: guildId)
+        }
+    }
+
+    /// What reading needs from the host: the app active, and its window key and visible (not
+    /// minimized or covered). Losing one ends the user's engagement until the next click or
+    /// key press.
+    public func setAppActive(_ active: Bool) {
+        let lost = appActive && !active
+        appActive = active
+        readingInputChanged(lost: lost)
+    }
+
+    public func setWindowKey(_ key: Bool) {
+        let lost = windowKey && !key
+        windowKey = key
+        readingInputChanged(lost: lost)
+    }
+
+    public func setWindowVisible(_ visible: Bool) {
+        let lost = windowVisible && !visible
+        windowVisible = visible
+        readingInputChanged(lost: lost)
+    }
+
+    /// A click or key press in the window; scroll-wheel events aren't one. While suspended, a
+    /// click doesn't count: the next one after `resume()` does.
+    public func userInteracted() {
+        guard !suspended else {
             return
         }
-        openedChannels.insert(id)
-        messages = MessageListModel(channelId: id, account: account, store: store, drafts: drafts)
+        engaged = true
+        updateReading()
     }
 
-    /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
-    /// the store doesn't have opens where the user is; one without a message list doesn't open.
-    public func go(to channel: ChannelId) {
-        if let found = store.channel(id: channel) {
-            guard found.opensMessageList else {
-                return
-            }
-            let place: Place = found.guildId.map { .guild($0) } ?? .home
-            if place != self.place {
-                open(place)
-            }
-        }
-        open(channel: channel)
-    }
-
-    /// Disconnects but keeps the session, e.g. before the Mac sleeps.
+    /// Disconnects but keeps the session, e.g. before the Mac sleeps. Reading resumes after the
+    /// next click or key press.
     public func suspend() {
         suspended = true
+        engaged = false
+        updateReading()
         account.disconnect()
     }
 
@@ -228,7 +337,9 @@ public final class SessionModel {
     /// Ends the session. Releasing the model without calling it ends the event loop too.
     public func close() {
         ended = true
+        updateReading()
         account.close()
+        accountClosed = true
         subscription?.close()
         loop.cancel()
         if case .closed = connection {
@@ -238,6 +349,18 @@ public final class SessionModel {
     }
 
     func apply(_ batch: EventBatch) {
+        if batch.ready || batch.leftOnline, toldReading != nil {
+            resendReading = true
+        }
+        // A list that hasn't applied the batch yet, e.g. READY's stale mark, isn't being read.
+        readingOnce { update(with: batch) }
+    }
+
+    private func update(with batch: EventBatch) {
+        // Before anything here sets the channel as being read, which the core acks at once.
+        if batch.ready {
+            messages?.newSession()
+        }
         if let state = batch.connection {
             if case .closed(let error) = state {
                 closed(error)
@@ -251,10 +374,12 @@ public final class SessionModel {
         if batch.everythingChanged || batch.currentUserChanged {
             currentUser = store.currentUser()
         }
+        // A list the session replaces on its own isn't one the user chose to read.
         if case .guild(let id) = place, batch.ready || batch.guildListChanged,
             store.guild(id: id) == nil
         {
-            open(.home)
+            engaged = false
+            enter(.home)
         }
         let open = messages?.channelId
         let wasListed = open.map(isListed) ?? false
@@ -263,6 +388,7 @@ public final class SessionModel {
         channels?.apply(batch)
         // Threads and DMs aren't in the channel list; they leave only when removed.
         if let open, batch.removedChannels.contains(open) || (wasListed && !isListed(open)) {
+            engaged = false
             if case .guild(let guildId) = place, let list = channels {
                 openListedChannel(in: list, guildId: guildId)
             } else {
@@ -320,13 +446,13 @@ public final class SessionModel {
             if let channel = spot.channel {
                 lastChannels[guildId] = channel
             }
-            open(.guild(guildId))
+            enter(.guild(guildId))
         case .home:
-            open(.home)
+            enter(.home)
             if let channel = spot.channel,
                 directMessages.conversations.contains(where: { $0.id == channel })
             {
-                open(channel: channel)
+                show(channel: channel)
             } else {
                 messages = nil
                 rememberSpot()
@@ -344,10 +470,101 @@ public final class SessionModel {
         }
         let first = list.channels.first(where: \.opensMessageList)
         if let channel = last ?? first {
-            open(channel: channel.id)
+            show(channel: channel.id)
         } else {
             messages = nil
         }
+    }
+
+    private func show(channel id: ChannelId) {
+        spotToRestore = nil
+        switch place {
+        case .guild(let guildId): lastChannels[guildId] = id
+        case .home: lastHomeChannel = id
+        }
+        defer {
+            rememberSpot()
+            updateReading()
+        }
+        guard messages?.channelId != id else {
+            return
+        }
+        openedChannels.insert(id)
+        messages = list(of: id)
+    }
+
+    private func list(of channel: ChannelId) -> MessageListModel {
+        let list = MessageListModel(
+            channelId: channel, userId: userId, account: account, store: store, drafts: drafts)
+        list.bottomChanged = { [weak self, weak list] scrolledAway in
+            guard let self, let list, list === self.messages else {
+                return
+            }
+            if scrolledAway {
+                engaged = false
+            }
+            updateReading(later: true)
+        }
+        return list
+    }
+
+    private func readingOnce(_ body: () -> Void) {
+        let held = holdingReading
+        holdingReading = true
+        body()
+        holdingReading = held
+        updateReading()
+    }
+
+    private func readingInputChanged(lost: Bool) {
+        if lost {
+            engaged = false
+        }
+        updateReading()
+    }
+
+    private func updateReading(later: Bool = false) {
+        guard !holdingReading else {
+            return
+        }
+        // Not before READY: the core would ack inside READY's write, over Discord's position.
+        let reads =
+            connection == .online && !suspended && engaged && appActive && windowKey
+            && windowVisible && !ended
+            && messages?.atPresentBottom == true
+        let channel = reads ? messages?.channelId : nil
+        if channel != nil {
+            messages?.readHere = true
+        }
+        if channel != reading {
+            reading = channel
+        }
+        if !later {
+            pendingReading?.cancel()
+            pendingReading = nil
+            tellReading()
+        } else if pendingReading == nil {
+            pendingReading = Task { [weak self] in
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                pendingReading = nil
+                tellReading()
+            }
+        }
+    }
+
+    private func tellReading() {
+        guard !accountClosed, reading != toldReading || resendReading else {
+            return
+        }
+        resendReading = false
+        toldReading = reading
+        account.setReading(channelId: reading)
+    }
+
+    private static func showsUnread(_ badge: Badge) -> Bool {
+        badge.unread || badge.mentions > 0
     }
 
     private func closed(_ error: GatewayError?) {
@@ -356,6 +573,7 @@ public final class SessionModel {
         }
         ended = true
         connection = .closed(error: error)
+        updateReading()
         onClosed(error)
     }
 }

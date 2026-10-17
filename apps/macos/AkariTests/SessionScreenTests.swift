@@ -205,6 +205,61 @@ struct SessionScreenTests {
     }
 
     @Test
+    func shiftEscapeInTheComposerMarksTheServerRead() async throws {
+        let account = GuildAccount()
+        let host = NSHostingView(
+            rootView: SessionScreen(session: session(account, defaults: MemoryDefaults())))
+        let window = shownWindow(host)
+        defer { window.orderOut(nil) }
+        var found: ComposerTextView?
+        try await waitUntil(host) {
+            found = views(ComposerTextView.self, in: host).first
+            return found != nil
+        }
+        let composer = try #require(found)
+
+        let shiftEscape = try #require(escapeKey(.shift))
+        composer.currentEvent = { shiftEscape }
+        composer.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(account.markedGuildsRead.withLock { $0 } == [[GuildId(rawValue: 1)]])
+        #expect(account.markedRead.withLock { $0 }.isEmpty)
+
+        let escape = try #require(escapeKey())
+        composer.currentEvent = { escape }
+        composer.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        try await waitUntil(host) { !account.markedRead.withLock { $0 }.isEmpty }
+        #expect(account.markedRead.withLock { $0 } == [ChannelId(rawValue: 11)])
+        #expect(account.markedGuildsRead.withLock { $0 }.count == 1)
+    }
+
+    // Cmd+. comes from the window as the same command; its mark as read would land first.
+    @Test
+    func escapeStillMarksRead() async throws {
+        let account = GuildAccount()
+        let host = NSHostingView(
+            rootView: SessionScreen(session: session(account, defaults: MemoryDefaults())))
+        let window = shownWindow(host)
+        defer { window.orderOut(nil) }
+        var found: MessageTableView?
+        try await waitUntil(host) {
+            found = views(MessageTableView.self, in: host).first
+            return found != nil
+        }
+        let table = try #require(found)
+        window.makeFirstResponder(table)
+
+        let period = try #require(periodKey(.command))
+        table.currentEvent = { period }
+        table.cancelOperation(nil)
+        let escape = try #require(escapeKey())
+        table.currentEvent = { escape }
+        table.interpretKeyEvents([escape])
+
+        try await waitUntil(host) { !account.markedRead.withLock { $0 }.isEmpty }
+        #expect(account.markedRead.withLock { $0 } == [ChannelId(rawValue: 11)])
+    }
+
+    @Test
     func anUnloadedChannelShowsPlaceholdersAndNoSpinner() async throws {
         let defaults = MemoryDefaults()
         let account = GuildAccount(holdsLoads: true)

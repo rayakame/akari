@@ -97,6 +97,39 @@ struct RailUnreadTests {
         #expect(session.messages?.channelId == serverChannel, "the server keeps its channel")
     }
 
+    // It turns unread while the user isn't reading it, e.g. with another app in front.
+    @Test
+    func anOpenDmThatTurnsUnreadShowsOnTheRailSelected() throws {
+        let open = CrowdedStore.dmIds[3]
+        let session = SessionModel(
+            userId: UserId(rawValue: 1), account: CrowdedAccount(unread: [open]),
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(channel: open)
+        #expect(session.directMessages.unread.map(\.id) == [open])
+        let rail = try Rendered(
+            ServerRail(session: session)
+                .frame(width: SidebarWidth.rail, height: 200)
+                .background(Color(nsColor: Palette.frame)),
+            size: NSSize(width: SidebarWidth.rail, height: 200))
+
+        // The pills down the rail's left edge: Home's and the open DM's, both tall.
+        // Column 0 is the straight edge; at 1x any column further in is cut by the rounded corners.
+        var pills: [CGFloat] = []
+        var run = 0
+        for y in 0...rail.rep.pixelsHigh {
+            if y < rail.rep.pixelsHigh, isBright(rail.pixel(0, y)) {
+                run += 1
+            } else if run > 0 {
+                pills.append(CGFloat(run) / rail.scale)
+                run = 0
+            }
+        }
+        #expect(pills.count == 2, "\(pills)")
+        #expect(pills.allSatisfy { abs($0 - 40) <= 1 }, "\(pills)")
+    }
+
     @Test
     func unreadDirectMessagesSitUnderHome() throws {
         let unread = [CrowdedStore.dmIds[3], CrowdedStore.dmIds[1]]
@@ -178,6 +211,50 @@ struct UnreadRowTests {
 
         #expect(count(plain, in: 180..<240, where: isRed) == 0)
         #expect(count(mentioned, in: 180..<240, where: isRed) > 0)
+    }
+
+    func conversation() throws -> DirectMessageListModel.Conversation {
+        let session = SessionModel(
+            userId: UserId(rawValue: 1), account: CrowdedAccount(),
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        return try #require(session.directMessages.conversations.first)
+    }
+
+    func directMessage(_ badge: Badge, selected: Bool = false) throws -> Rendered {
+        try render(
+            ConversationRow(conversation: conversation(), selected: selected, badge: badge) {})
+    }
+
+    // The count shows only on the DM's avatar on the rail, as in the official client.
+    @Test
+    func anUnreadDirectMessageRowLooksLikeAnUnreadChannelRow() throws {
+        let read = try directMessage(Badge(unread: false, mentions: 0))
+        let unread = try directMessage(Badge(unread: true, mentions: 2))
+
+        #expect(count(read, in: 60..<180, where: isBright) == 0, "the name is dim")
+        #expect(count(unread, in: 60..<180, where: isBright) > 0, "the name is bright")
+        #expect(count(read, in: 0..<4, where: isBright) == 0)
+        #expect(count(unread, in: 0..<4, where: isBright) > 0, "the pill")
+        #expect(count(unread, in: 180..<240, where: isRed) == 0, "no count")
+    }
+
+    @Test
+    func theOpenDirectMessageRowHasNoPill() throws {
+        let open = try directMessage(Badge(unread: true, mentions: 2), selected: true)
+
+        #expect(count(open, in: 0..<4, where: isBright) == 0)
+    }
+
+    @Test
+    func anUnreadDirectMessageRowStillReadsOutItsCount() throws {
+        let row = ConversationRow(
+            conversation: try conversation(), selected: false,
+            badge: Badge(unread: true, mentions: 2)
+        ) {}
+
+        #expect(row.spokenValue == "unread, 2 mentions")
     }
 }
 

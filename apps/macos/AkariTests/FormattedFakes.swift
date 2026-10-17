@@ -9,11 +9,11 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
 
     init(
         contents: [String], formattedEvery: Int = 3, slowmode: Slowmode? = nil,
-        mentioned: Bool = false
+        mentioned: Bool = false, readUpTo: UInt64? = nil
     ) {
         formattedStore = FormattedStore(
             contents: contents, formattedEvery: formattedEvery, slowmode: slowmode,
-            mentioned: mentioned)
+            mentioned: mentioned, readUpTo: readUpTo)
         super.init(noHandle: NoHandle())
     }
 
@@ -27,11 +27,16 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
 
     override func connect() throws {}
 
-    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
-        -> LoadReport?
+    override func loadMessages(channelId: ChannelId, load: MessageLoad, placing: UInt64?)
+        async throws -> LoadReport?
     { nil }
 
+    override func reservePlacing() -> UInt64 { 0 }
     override func viewChannel(channelId: ChannelId) {}
+    override func supersedeAroundLoads(channelId: ChannelId) {}
+    override func setReading(channelId: ChannelId?) {}
+    override func markRead(channelId: ChannelId) {}
+    override func markGuildsRead(guildIds: [GuildId]) {}
 }
 
 nonisolated final class FormattedStore: Store, @unchecked Sendable {
@@ -41,13 +46,19 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     private let formattedEvery: Int
     private let slowmode: Slowmode?
     private let mentioned: Bool
+    // The number of each channel's last read message; without it every channel is read.
+    private let readUpTo: UInt64?
     private let counts = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
 
-    init(contents: [String], formattedEvery: Int, slowmode: Slowmode?, mentioned: Bool) {
+    init(
+        contents: [String], formattedEvery: Int, slowmode: Slowmode?, mentioned: Bool,
+        readUpTo: UInt64?
+    ) {
         self.contents = contents
         self.formattedEvery = formattedEvery
         self.slowmode = slowmode
         self.mentioned = mentioned
+        self.readUpTo = readUpTo
         super.init(noHandle: NoHandle())
     }
 
@@ -183,5 +194,13 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
 
     override func unreadPrivateChannels() -> [ChannelId] {
         []
+    }
+
+    override func readState(channelId: ChannelId) -> ReadState? {
+        readUpTo.map { number in
+            ReadState(
+                acked: MessageId(rawValue: channelId.rawValue * 1000 + number), mentions: 0,
+                estimated: false)
+        }
     }
 }

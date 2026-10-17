@@ -27,8 +27,9 @@ correctness. A message in a page that fails to decode is skipped and logged by I
 
 `Account::load_messages(channel, load)` takes an intent instead of raw IDs, so a window
 can't get a hole. The limit is clamped to 1–100. It returns a `LoadReport` with where the
-load's time went (rate-limit waits, headers, body, decoding, the host's preparer, the store), or `None` when there
-was nothing to load.
+load's time went (rate-limit waits, headers, body, decoding, the host's preparer, the store)
+and what became of the page (`outcome`: `Applied`, `Overtaken` or `Outdated`, below), or
+`None` when there was nothing to load.
 
 Requests ask for compressed bodies with the official client's
 `Accept-Encoding: gzip, deflate, br, zstd`; a page of 50 messages is about 70 KB of JSON
@@ -36,17 +37,28 @@ before compression. The 4 MiB body limit applies to the decompressed body.
 
 | `MessageLoad` | Request | Window |
 |---|---|---|
-| `Latest` | no cursor | Views the channel. If the window is at the present, the page fills it from the old end; a stale window is refreshed (below); otherwise the window is replaced by the page (`MessagesCleared`, then `MessagesLoaded`): "jump to present" |
+| `Latest` | no cursor | Views the channel. If the window is at the present, the page fills it from the old end; a stale window is refreshed (below); otherwise the window is replaced by the page (`MessagesCleared`, then `MessagesLoaded`): "jump to present", unless a newer `Around` load overtook it (below) |
 | `Older` | `before` = the window's first message | Older history, `MessagesLoaded`. Past 200 messages the newest are trimmed and `latest` becomes false. Nothing to do without a window |
 | `Newer` | `after` = the window's last message | Newer history. Nothing to do without a window or if it is already at the present. A short page means the present is reached, which also ends a stale window's staleness |
-| `Around { id }` | `around` = `id` | Views the channel and replaces the window with the page |
+| `Around { id }` | `around` = `id` | Views the channel and replaces the window with the page, unless a newer request overtook it (below) |
 
 - A load that ends at the present (`Latest`, `Newer`, the stale refresh) holds live
   messages back while it runs, and adds them after the page. Otherwise a message that
   arrives during the request could land in the window before the messages it follows.
 - A load whose window was cleared, replaced or evicted while it ran is dropped: the page
   belongs to messages that are no longer there. So is an `Older` or `Newer` page whose
-  end of the window was trimmed or deleted meanwhile, since it would leave a gap.
+  end of the window was trimmed or deleted meanwhile, since it would leave a gap. Both are
+  `Outdated`.
+- **The last request places the window.** `Latest` and `Around` loads and
+  `Account::supersede_around_loads` (Escape, a mark as read, a send, leaving the channel or
+  opening it again during a jump) take a number in the order the host asked for them: from
+  `Account::reserve_placing`, passed to `load_messages_placed`, or, without one, when the load
+  begins. An `Around` page is dropped (`Overtaken`, or `Outdated` once the newer page has
+  replaced the window) when one of them came after it. A `Latest` page that would replace the
+  window is dropped while a newer `Around` load is the last request; it still raises the
+  channel's newest message, and a stale window it would have replaced stops being at the
+  present, as after a failed refresh, so live messages aren't held back should the `Around` load
+  fail.
 - A page is short if Discord sent fewer entries than the limit; messages skipped because
   they didn't decode still count.
 - Edits and deletes that arrive while a page is loading are applied to the page when it

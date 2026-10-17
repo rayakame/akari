@@ -21,8 +21,8 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
         GuildStore()
     }
 
-    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
-        -> LoadReport?
+    override func loadMessages(channelId: ChannelId, load: MessageLoad, placing: UInt64?)
+        async throws -> LoadReport?
     {
         loads.withLock { $0 += 1 }
         if holdsLoads {
@@ -31,7 +31,21 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
         return nil
     }
 
+    let markedRead = OSAllocatedUnfairLock<[ChannelId]>(initialState: [])
+    let markedGuildsRead = OSAllocatedUnfairLock<[[GuildId]]>(initialState: [])
+
+    override func reservePlacing() -> UInt64 { 0 }
     override func viewChannel(channelId: ChannelId) {}
+    override func supersedeAroundLoads(channelId: ChannelId) {}
+    override func setReading(channelId: ChannelId?) {}
+
+    override func markRead(channelId: ChannelId) {
+        markedRead.withLock { $0.append(channelId) }
+    }
+
+    override func markGuildsRead(guildIds: [GuildId]) {
+        markedGuildsRead.withLock { $0.append(guildIds) }
+    }
 }
 
 // One server with one text channel, and no messages.
@@ -97,5 +111,9 @@ nonisolated final class GuildStore: Store, @unchecked Sendable {
 
     override func unreadPrivateChannels() -> [ChannelId] {
         []
+    }
+
+    override func readState(channelId: ChannelId) -> ReadState? {
+        nil
     }
 }

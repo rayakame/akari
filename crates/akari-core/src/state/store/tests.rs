@@ -779,7 +779,7 @@ fn report_write_lock_hold_times() {
     let fixture_page: Vec<model::Message> =
         serde_json::from_str(include_str!("../../../tests/fixtures/messages_page.json")).unwrap();
     let ticket = store
-        .begin_load(Snowflake::new(GENERAL), LoadKind::Older)
+        .begin_load(Snowflake::new(GENERAL), LoadKind::Older, None)
         .unwrap();
     store.finish_load(ticket, fixture_page, false);
     note("fixtures", &store);
@@ -815,7 +815,7 @@ fn report_write_lock_hold_times() {
     store.view_channel(channel);
     let mut template = template;
     template.channel_id = channel;
-    let ticket = store.begin_load(channel, LoadKind::Latest).unwrap();
+    let ticket = store.begin_load(channel, LoadKind::Latest, None).unwrap();
     store.finish_load(ticket, page(&template, 10_000, 100), false);
     store.apply(message_create(&template, 20_000));
     note(
@@ -1090,7 +1090,7 @@ fn the_first_ready_after_a_restore_reports_only_changes() {
 
 fn load_page(store: &Store, channel: u64, first: u64) {
     let ticket = store
-        .begin_load(Snowflake::new(channel), LoadKind::Latest)
+        .begin_load(Snowflake::new(channel), LoadKind::Latest, None)
         .unwrap();
     let mut template = message_template();
     template.channel_id = Snowflake::new(channel);
@@ -1343,6 +1343,51 @@ fn a_mute_ending_restores_the_guilds_dot() {
 }
 
 #[test]
+fn marking_a_guild_read_is_one_change_batch() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_of(&[1], |data| {
+        data["notification_settings"]["flags"] = 0.into();
+        data["guilds"][0] = generated_guild(1, 60, 2, 0);
+        for (n, channel) in data["guilds"][0]["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            channel["last_message_id"] = (1_300_000_000_000_000_000 + n as u64).to_string().into();
+        }
+    }));
+    let guild = Snowflake::new(1);
+    let unread: Vec<ChannelId> = store
+        .guild_channels(guild)
+        .iter()
+        .filter(|channel| store.channel_badge(channel.id).unread)
+        .map(|channel| channel.id)
+        .collect();
+    assert!(unread.len() > 50, "{}", unread.len());
+    let subscription = store.subscribe();
+    store.record_holds();
+
+    let acks = store.mark_guilds_read(&[guild]);
+
+    assert_eq!(acks.len(), unread.len());
+    assert_eq!(store.guild_badge(guild), Badge::default());
+    let writes: Vec<&str> = store.take_holds().iter().map(|(event, _)| *event).collect();
+    assert_eq!(writes, ["mark read"]);
+    let events = changes(&subscription);
+    let guild_events = events
+        .iter()
+        .filter(|event| event.starts_with("GuildBadgeChanged"))
+        .count();
+    let channel_events = events
+        .iter()
+        .filter(|event| event.starts_with("BadgeChanged"))
+        .count();
+    assert_eq!(guild_events, 1, "{events:?}");
+    assert_eq!(channel_events, unread.len());
+}
+
+#[test]
 fn badge_batches_read_in_the_order_given() {
     let store = ready_store();
     let unread = Badge {
@@ -1409,5 +1454,207 @@ fn a_notification_flags_change_builds_badges_off_the_lock() {
             .iter()
             .any(|event| event.contains("GuildBadgeChanged")),
         "{events:?}"
+    );
+}
+
+fn ready_where(edit: impl FnOnce(&mut Value)) -> Ready {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    edit(&mut data);
+    match dispatch("READY", &data) {
+        DispatchEvent::Ready(ready) => *ready,
+        other => panic!("not a READY: {other:?}"),
+    }
+}
+
+fn general() -> ChannelId {
+    Snowflake::new(GENERAL)
+}
+
+#[test]
+fn a_mark_read_during_ready_preparation_survives_the_swap() {
+    let store = ready_store();
+    assert!(store.channel_badge(general()).unread);
+    let prepared = store.prepare_ready(ready_where(|_| {}));
+    assert!(store.mark_read(general()).is_some());
+    let subscription = store.subscribe();
+
+    store.replace(prepared);
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(
+        (read.acked, read.mentions),
+        (Some(Snowflake::new(400_000_000_000_000_003)), 0)
+    );
+    assert_eq!(store.channel_badge(general()), Badge::default());
+    assert_eq!(store.guild_badge(Snowflake::new(G1)), Badge::default());
+    assert_eq!(changes(&subscription), ["Ready"]);
+
+    // READY reads the channel already; the diff made before the mark read says so.
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000003".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+    }));
+    store.mark_read(general());
+    let subscription = store.subscribe();
+
+    store.replace(prepared);
+
+    assert_eq!(store.channel_badge(general()), Badge::default());
+    assert_eq!(changes(&subscription), ["Ready"], "a stale badge event");
+}
+
+// A mention posted while Akari was away, past what the user marked read, stays.
+#[test]
+fn a_mark_read_during_ready_preparation_leaves_later_messages_unread() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["guilds"][0]["channels"][1]["last_message_id"] = "400000000000000009".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 3.into();
+    }));
+    store.mark_read(general());
+
+    store.replace(prepared);
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(
+        (read.acked, read.mentions),
+        (Some(Snowflake::new(400_000_000_000_000_003)), 3)
+    );
+    assert!(store.channel_badge(general()).unread);
+}
+
+#[test]
+fn a_mark_read_behind_ready_changes_nothing() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["guilds"][0]["channels"][1]["last_message_id"] = "400000000000000009".into();
+        ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000005".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 1.into();
+    }));
+    store.mark_read(general());
+
+    store.replace(prepared);
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(
+        (read.acked, read.mentions),
+        (Some(Snowflake::new(400_000_000_000_000_005)), 1)
+    );
+}
+
+#[test]
+fn an_abandoned_preparation_drops_its_journal() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|_| {}));
+    store.mark_read(general());
+    assert!(store.journaling());
+    drop(prepared);
+
+    assert!(!store.journaling());
+    store.apply(ready());
+    assert!(store.channel_badge(general()).unread);
+
+    let store = Store::new(DEFAULT_LIMITS);
+    drop(store.prepare_ready(ready_where(|_| {})));
+    assert!(
+        store.restore(cached(ready_of(&[1], |_| {}))),
+        "still counted as preparing a READY"
+    );
+}
+
+#[test]
+fn reading_and_marking_guilds_read_during_ready_preparation_survive_the_swap() {
+    let thread = Snowflake::new(300_000_000_000_000_020);
+    let thread_unread = |ready: &mut Value| {
+        ready["read_state"]["entries"][1]["last_message_id"] = "400000000000000029".into();
+    };
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(thread_unread))));
+    load_page(&store, GENERAL, 400_000_000_000_000_003);
+    let prepared = store.prepare_ready(ready_where(thread_unread));
+
+    assert!(store.set_reading(Some(general())).is_some());
+    assert!(!store.mark_guilds_read(&[Snowflake::new(G1)]).is_empty());
+    store.replace(prepared);
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(read.acked, Some(Snowflake::new(400_000_000_000_000_005)));
+    assert_eq!(store.channel_badge(general()), Badge::default());
+    assert_eq!(store.channel_badge(thread), Badge::default());
+}
+
+#[test]
+fn a_refused_ack_during_ready_preparation_isnt_replayed() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|_| {}));
+    let ack = store.mark_read(general()).unwrap();
+
+    assert!(store.undo_ack(ack.channel, ack.before, ack.after));
+    store.replace(prepared);
+
+    assert!(store.channel_badge(general()).unread);
+}
+
+// The replay kept READY's count, past what the user read; Discord's echo of the ack has the real one.
+#[test]
+fn the_echo_of_a_replayed_ack_sets_the_count_ready_kept() {
+    let store = ready_store();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["guilds"][0]["channels"][1]["last_message_id"] = "400000000000000009".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 3.into();
+    }));
+    store.mark_read(general());
+    store.replace(prepared);
+    assert_eq!(store.read_state(general()).unwrap().mentions, 3);
+    let echo = |count: u32| {
+        dispatch(
+            "MESSAGE_ACK",
+            &json!({"channel_id": GENERAL.to_string(), "message_id": "400000000000000003",
+                    "mention_count": count, "version": 7}),
+        )
+    };
+
+    store.apply(echo(0));
+
+    let read = store.read_state(general()).unwrap();
+    assert_eq!(
+        (read.acked, read.mentions),
+        (Some(Snowflake::new(400_000_000_000_000_003)), 0)
+    );
+    assert_eq!(store.channel_badge(general()).mentions, 0);
+    store.apply(echo(2));
+    assert_eq!(
+        store.read_state(general()).unwrap().mentions,
+        0,
+        "a later echo at the position is one again"
+    );
+}
+
+// READY's diff was made while the channel showed read; the undo showed it unread since.
+#[test]
+fn an_ack_undone_while_ready_is_prepared_still_gets_its_badge_event() {
+    let store = ready_store();
+    let ack = store.mark_read(general()).unwrap();
+    let prepared = store.prepare_ready(ready_where(|ready| {
+        ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000003".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+    }));
+    assert!(store.undo_ack(ack.channel, ack.before, ack.after));
+    assert!(store.channel_badge(general()).unread);
+    let subscription = store.subscribe();
+
+    store.replace(prepared);
+
+    assert_eq!(store.channel_badge(general()), Badge::default());
+    assert_eq!(
+        changes(&subscription),
+        [
+            format!(
+                "BadgeChanged {{ channel_id: Snowflake({GENERAL}), guild_id: Some(Snowflake({G1})) }}"
+            ),
+            format!("GuildBadgeChanged {{ guild_id: Snowflake({G1}) }}"),
+            "Ready".to_owned()
+        ]
     );
 }

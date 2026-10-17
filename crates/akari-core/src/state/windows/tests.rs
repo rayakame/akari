@@ -94,6 +94,7 @@ fn describe(events: &[StoreEvent]) -> Vec<String> {
 struct Harness {
     windows: Windows,
     users: HashMap<UserId, Arc<User>>,
+    placings: u64,
 }
 
 impl Harness {
@@ -101,7 +102,19 @@ impl Harness {
         Self {
             windows: Windows::new(limits),
             users: no_users(),
+            placings: 0,
         }
+    }
+
+    // The store hands these out in the order the host asks.
+    fn next_placing(&mut self) -> u64 {
+        self.placings += 1;
+        self.placings
+    }
+
+    fn supersede(&mut self) {
+        let placing = self.next_placing();
+        self.windows.supersede_around(channel(CH), placing);
     }
 
     fn viewing(limits: WindowLimits) -> Self {
@@ -442,18 +455,39 @@ const LOADS: WindowLimits = WindowLimits {
 
 impl Harness {
     fn begin(&mut self, kind: LoadKind) -> Option<LoadTicket> {
+        let placing = self.next_placing();
+        self.begin_placed(kind, placing)
+    }
+
+    fn begin_placed(&mut self, kind: LoadKind, placing: u64) -> Option<LoadTicket> {
         let mut events = Vec::new();
-        let ticket = self.windows.begin_load(channel(CH), kind, &mut events);
+        let ticket = self
+            .windows
+            .begin_load(channel(CH), kind, placing, None, &mut events);
         assert!(describe(&events).is_empty(), "{:?}", describe(&events));
         ticket
     }
 
     fn finish(&mut self, ticket: LoadTicket, ids: &[u64], limit: usize) -> Vec<String> {
+        self.finish_with_outcome(ticket, ids, limit).1
+    }
+
+    fn finish_with_outcome(
+        &mut self,
+        ticket: LoadTicket,
+        ids: &[u64],
+        limit: usize,
+    ) -> (PageOutcome, Vec<String>) {
         let mut events = Vec::new();
         let page = ids.iter().map(|id| wire(*id)).collect();
-        self.windows
-            .finish_load(ticket, page, &self.users, ids.len() < limit, &mut events);
-        describe(&events)
+        let outcome =
+            self.windows
+                .finish_load(ticket, page, &self.users, ids.len() < limit, &mut events);
+        (outcome, describe(&events))
+    }
+
+    fn loading(&self) -> u32 {
+        self.windows.windows[&channel(CH)].loading
     }
 
     fn edited_finish(
@@ -681,6 +715,199 @@ fn around_replaces_the_window() {
     assert_eq!(events, ["Cleared(1)", "Loaded(4..6)"]);
     assert_eq!(harness.ids(), [4, 5, 6]);
     assert!(!harness.window().latest);
+}
+
+#[test]
+fn an_around_page_a_newer_latest_load_overtook_changes_nothing() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.live(wire(11));
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(latest, &[10, 11], 3);
+
+    let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [10, 11]);
+    assert!(harness.window().latest);
+    assert_eq!(harness.loading(), 0);
+    assert_eq!(harness.live(wire(12)), ["Inserted(12)"]);
+}
+
+#[test]
+fn an_around_page_superseded_while_it_loaded_changes_nothing() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+
+    harness.supersede();
+    let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [10]);
+    assert!(harness.window().latest);
+    assert_eq!(harness.loading(), 0);
+}
+
+// Loads that continue the window don't place it.
+#[test]
+fn the_newest_around_page_applies() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+    let older = harness.begin(LoadKind::Older).unwrap();
+
+    let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
+
+    assert_eq!(outcome, PageOutcome::Applied);
+    assert_eq!(events, ["Cleared(1)", "Loaded(4..6)"]);
+    assert_eq!(harness.ids(), [4, 5, 6]);
+    assert_eq!(
+        harness.finish_with_outcome(older, &[7, 8, 9], 3).0,
+        PageOutcome::Outdated
+    );
+}
+
+#[test]
+fn of_two_around_loads_the_older_page_is_dropped() {
+    let mut first_lands = Harness::viewing(LOADS);
+    first_lands.live(wire(10));
+    let older = first_lands
+        .begin(LoadKind::Around(Snowflake::new(5)))
+        .unwrap();
+    let newer = first_lands
+        .begin(LoadKind::Around(Snowflake::new(7)))
+        .unwrap();
+    assert_eq!(
+        first_lands.finish_with_outcome(older, &[4, 5, 6], 3),
+        (PageOutcome::Overtaken, Vec::new())
+    );
+    assert_eq!(first_lands.ids(), [10]);
+    assert_eq!(
+        first_lands.finish_with_outcome(newer, &[6, 7, 8], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(first_lands.ids(), [6, 7, 8]);
+
+    let mut newer_lands = Harness::viewing(LOADS);
+    newer_lands.live(wire(10));
+    let older = newer_lands
+        .begin(LoadKind::Around(Snowflake::new(5)))
+        .unwrap();
+    let newer = newer_lands
+        .begin(LoadKind::Around(Snowflake::new(7)))
+        .unwrap();
+    assert_eq!(
+        newer_lands.finish_with_outcome(newer, &[6, 7, 8], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(
+        newer_lands.finish_with_outcome(older, &[4, 5, 6], 3),
+        (PageOutcome::Outdated, Vec::new())
+    );
+    assert_eq!(newer_lands.ids(), [6, 7, 8]);
+}
+
+// The jump to the present, then a click on the unread bar: the channel's requests run in order,
+// so the latest page lands first.
+#[test]
+fn a_latest_page_a_newer_around_load_overtook_leaves_the_window_to_it() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+
+    let (outcome, events) = harness.finish_with_outcome(latest, &[30, 31, 32], 3);
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [19, 20, 21]);
+    assert_eq!(harness.loading(), 1);
+    assert_eq!(
+        harness.finish_with_outcome(around, &[4, 5, 6], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(harness.ids(), [4, 5, 6]);
+}
+
+// A send from older messages supersedes the jump, so the latest page still takes the window.
+#[test]
+fn a_latest_page_still_applies_once_a_supersede_followed_the_around_load() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+    harness.supersede();
+
+    assert_eq!(
+        harness.finish_with_outcome(latest, &[30, 31, 32], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(harness.ids(), [30, 31, 32]);
+    assert!(harness.window().latest);
+    assert_ne!(
+        harness.finish_with_outcome(around, &[4, 5, 6], 3).0,
+        PageOutcome::Applied
+    );
+    assert_eq!(harness.ids(), [30, 31, 32]);
+}
+
+// Should the around load then fail, live messages aren't held back for a refresh that never comes.
+#[test]
+fn an_overtaken_latest_page_leaves_a_stale_window_detached() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    harness.windows.mark_stale(&mut Vec::new());
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    let around = harness.begin(LoadKind::Around(Snowflake::new(5))).unwrap();
+
+    let (outcome, events) = harness.finish_with_outcome(latest, &[30, 31, 32], 3);
+    harness.windows.abort_load(around, &mut Vec::new());
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert_eq!(events, ["Stale(1)"]);
+    assert!(!harness.window().latest);
+    harness.live(wire(40));
+    assert!(harness.windows.held(channel(CH)).is_empty());
+}
+
+// A click on the bar, then Escape before the load for the click began on Akari's runtime.
+#[test]
+fn an_around_load_superseded_before_it_began_is_dropped() {
+    let mut harness = Harness::viewing(LOADS);
+    harness.live(wire(10));
+    let clicked = harness.next_placing();
+    harness.supersede();
+
+    let around = harness
+        .begin_placed(LoadKind::Around(Snowflake::new(5)), clicked)
+        .unwrap();
+    let (outcome, events) = harness.finish_with_outcome(around, &[4, 5, 6], 3);
+
+    assert_eq!(outcome, PageOutcome::Overtaken);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(harness.ids(), [10]);
+}
+
+// The order holds across a replaced window: a supersede before the replace still counts.
+#[test]
+fn a_supersede_outlasts_the_window_it_was_made_for() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let clicked = harness.next_placing();
+    harness.supersede();
+    let latest = harness.begin(LoadKind::Latest).unwrap();
+    harness.finish(latest, &[30, 31, 32], 3);
+
+    let around = harness
+        .begin_placed(LoadKind::Around(Snowflake::new(5)), clicked)
+        .unwrap();
+
+    assert_eq!(
+        harness.finish_with_outcome(around, &[4, 5, 6], 3).0,
+        PageOutcome::Overtaken
+    );
+    assert_eq!(harness.ids(), [30, 31, 32]);
 }
 
 #[test]

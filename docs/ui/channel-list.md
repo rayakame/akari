@@ -12,8 +12,8 @@ look and behave.
 
 The server's name at the top of the column, in semibold `textStrong`, 48 tall like the channel
 header next to it. Text sizes of the whole column are in [typography.md](typography.md).
-Discord opens a server menu from it; Akari only shows the name for now. At home the same
-header says "Direct Messages" (see [Home](#home)).
+Discord opens a server menu from it; Akari only shows the name for now. At home the header
+holds Discord's "Find or start a conversation" button (see [Home](#home)).
 
 The header stays in place; only the list under it scrolls, so no row ever slides under the
 title bar.
@@ -84,18 +84,24 @@ Observed in the official desktop client on 2026-10-14:
   channel the user didn't pick shows unread only when it has mentions.
 - **Server Guide resource channels** never look unread and never show a count, in any server
   (from the official client's code; observed 2026-10-15 on a channel Discord reports unread
-  with a mention). **Unverified:** whether the official client lists them; the docs say it
-  doesn't, Akari does.
+  with a mention). The official client does list them in the normal channel list (observed
+  2026-10-15); only the badge is left out. Akari lists them too.
 
 *Akari: an unread row has the bright name and the 4 × 8 pill on the column's left edge (not
-while selected), and a row with mentions the red badge at its right end, as on the rail; DM
-rows the same, without the pill.*
+while selected), and a row with mentions the red badge at its right end, as on the rail.*
 
 - Icons by kind: text, voice, announcement, stage, forum, media, rules and thread. Each has a
   private variant (with a lock) and an NSFW variant (with a warning mark).
 - Voice channels list the people connected to them underneath.
 - Clicking a text or announcement channel opens its messages. Clicking a voice channel joins
   it.
+
+### Context menu
+
+The first item of a channel row's menu is "Mark As Read" (observed 2026-10-15 in the German
+client as "Als gelesen markieren"; the English label is unconfirmed). The official client
+disables the DM row's item instead of hiding it when nothing is unread ([below](#home)); the channel
+row's was not observed. *Akari: disables both when nothing is unread.*
 
 ### In Akari
 
@@ -118,17 +124,23 @@ rows the same, without the pill.*
 At home the column holds the DM list instead of a server's channels.
 
 - At the top, in a header as tall as a server's, Discord has a "Find or start a conversation"
-  button that opens the quick switcher. *Akari: the header says "Direct Messages" until the
-  quick switcher exists; then it can become that button.* The line under it runs on under the
-  channel header, as with a server.
+  button that opens the quick switcher. *Akari: the header stays empty until the quick switcher
+  exists.* The line under it runs on under the channel header, as with a server.
 - Above the list, Discord has entries for Friends, Nitro and the Shop. *Akari: left out.*
-- A "Direct Messages" label, 24 tall, with a + button for a new DM on its right. *Akari: left
-  out while the header above says the same; it comes back with the + button or when the
-  header becomes the switcher button.* The rows start 8 below the header line.
+- A "Direct Messages" label in a category's style (small, `channelDefault`, not the server
+  header's `textStrong`), 24 tall, with a + button for a new DM on its right (observed
+  2026-10-17). *Akari: the label without the + button until new DMs can be created; it starts
+  8 below the header line and stays in place while the rows, 2 below it, scroll.*
 - One row per conversation: the avatar, the name, and for a group the number of members on a
   second line ("3 Members"). **Unverified**: the exact wording of the member line.
+- An unread row looks like an unread channel row: the bright name and the pill on the column's
+  left edge. **No count in the list:** a DM's mention count shows only on its avatar on the
+  rail (observed 2026-10-17). *Akari: the same; VoiceOver still reads the count with the row.*
 - A conversation's name is the other person's display name. A group shows its own name, or
   the members' names separated by commas when it has none.
+- The first item of a row's context menu is "Mark As Read" (German: "Als gelesen markieren";
+  the English label is unconfirmed). With nothing unread it is disabled, not hidden (observed
+  2026-10-15). *Akari: the same.*
 
 ### DM order
 

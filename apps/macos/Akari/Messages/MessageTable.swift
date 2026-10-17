@@ -34,20 +34,31 @@ struct MessageArea: View {
     let name: ChannelName
     let links: LinkFollower
     let go: (ChannelId) -> Void
+    // The open channel, as its menu would.
+    let markRead: () -> Void
+    let markServerRead: () -> Void
     @State private var link = MessageTableLink()
 
     var body: some View {
-        let bridge = MessageListBridge(messages: messages, link: link, links: links, go: go)
+        let bridge = MessageListBridge(
+            messages: messages, link: link, links: links, go: go, markServerRead: markServerRead)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
                     .id(messages.channelId)
                     .overlay(alignment: .top) {
-                        if StaleCapsule.isShown(
-                            atPresent: messages.atPresent, isStale: messages.isStale,
-                            hasRows: !messages.rows.isEmpty)
-                        {
-                            StaleCapsule()
+                        VStack(spacing: 0) {
+                            if let bar = messages.unreadBar {
+                                UnreadBar(
+                                    text: UnreadBar.text(bar), jump: { bridge.jumpToUnread() },
+                                    markRead: markRead)
+                            }
+                            if StaleCapsule.isShown(
+                                atPresent: messages.atPresent, isStale: messages.isStale,
+                                hasRows: !messages.rows.isEmpty)
+                            {
+                                StaleCapsule()
+                            }
                         }
                     }
                     .overlay(alignment: .bottom) {
@@ -56,7 +67,7 @@ struct MessageArea: View {
                                 atPresent: messages.atPresent, isStale: messages.isStale,
                                 hasRows: !messages.rows.isEmpty)
                             {
-                                JumpBar(text: text) { bridge.escape() }
+                                JumpBar(text: text) { bridge.jumpToPresent() }
                             }
                             // Above the composer, as in the official client: send errors on
                             // the left, slowmode on the right, over the list's last pixels.
@@ -68,6 +79,8 @@ struct MessageArea: View {
                     areaHeight: geometry.size.height,
                     onSend: { link.controller?.jumpToPresent(load: false) },
                     onEscape: { bridge.escape() },
+                    onShiftEscape: { bridge.markServerRead() },
+                    onShiftPageUp: { bridge.jumpToUnread() },
                     onAttach: { link.composer = $0 }
                 )
                 .id(messages.channelId)
@@ -83,7 +96,8 @@ struct MessageArea: View {
             failedLoads: messages.failedLoads, start: name.start,
             channelId: messages.channelId, lastLoad: messages.lastLoad,
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
-            revealedSpoilers: messages.revealedSpoilers)
+            revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine,
+            unreadJumps: messages.unreadJumps)
     }
 }
 
@@ -92,15 +106,17 @@ final class MessageListBridge: MessageListActions {
     let link: MessageTableLink
     let links: LinkFollower
     let go: (ChannelId) -> Void
+    let serverRead: () -> Void
 
     init(
         messages: MessageListModel, link: MessageTableLink, links: LinkFollower,
-        go: @escaping (ChannelId) -> Void
+        go: @escaping (ChannelId) -> Void, markServerRead: @escaping () -> Void
     ) {
         self.messages = messages
         self.link = link
         self.links = links
         self.go = go
+        serverRead = markServerRead
     }
 
     func retry(_ message: MessageId) {
@@ -126,8 +142,39 @@ final class MessageListBridge: MessageListActions {
     }
 
     func escape() {
+        Task { await messages.escape() }
+        link.controller?.jumpToPresent(load: false)
+        link.composer?.takeFocus()
+    }
+
+    // The jump bar's button jumps like Escape but leaves marking read to reading.
+    func jumpToPresent() {
         link.controller?.jumpToPresent(load: true)
         link.composer?.takeFocus()
+    }
+
+    func markServerRead() {
+        serverRead()
+    }
+
+    func jumpToUnread() {
+        Task { await messages.jumpToUnread() }
+    }
+
+    func newMessagesLineOnScreen(_ onScreen: Bool, line: MessageId) {
+        // Measured a turn earlier: it would count for a line the model has moved since.
+        guard line == messages.newMessagesLine else {
+            return
+        }
+        messages.setNewMessagesLineOnScreen(onScreen)
+    }
+
+    func atBottomChanged(_ atBottom: Bool) {
+        messages.setAtBottom(atBottom)
+    }
+
+    func userScrolled(by distance: CGFloat, height: CGFloat) {
+        messages.userScrolled(by: distance, height: height)
     }
 
     func reveal(_ spoiler: SpoilerKey) {

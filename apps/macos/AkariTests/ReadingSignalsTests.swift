@@ -1,0 +1,232 @@
+import AkariKit
+import AppKit
+import Testing
+
+@testable import Akari
+
+@MainActor
+final class ReadingSignalsTests {
+    let session: SessionModel
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+        backing: .buffered, defer: false)
+    let center = NotificationCenter()
+    let workspace = NotificationCenter()
+    var active = true
+    var key = true
+    var visible = true
+
+    init() {
+        session = SessionModel(
+            userId: UserId(rawValue: 1), account: CrowdedAccount(),
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(.guild(CrowdedStore.guildIds[0]))
+    }
+
+    func signals(monitors: Bool = false) -> ReadingSignals {
+        ReadingSignals(
+            session: session, window: window, center: center, workspace: workspace,
+            isActive: { [unowned self] in active }, isKey: { [unowned self] _ in key },
+            isVisible: { [unowned self] _ in visible }, monitors: monitors)
+    }
+
+    func click(in window: NSWindow) throws -> NSEvent {
+        try #require(
+            NSEvent.mouseEvent(
+                with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 1))
+    }
+
+    func keyDown(in window: NSWindow) throws -> NSEvent {
+        try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "a",
+                charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0))
+    }
+
+    // A right click: a left one would make the window key and bring it on screen.
+    func rightClick(in window: NSWindow) throws -> NSEvent {
+        try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 1))
+    }
+
+    // The window goes behind another app's and comes back.
+    func leaveAndComeBack() {
+        (active, key) = (false, false)
+        center.post(name: NSApplication.didResignActiveNotification, object: nil)
+        center.post(name: NSWindow.didResignKeyNotification, object: window)
+        (active, key) = (true, true)
+        center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        center.post(name: NSWindow.didBecomeKeyNotification, object: window)
+    }
+
+    @Test
+    func aScrollWheelEventDoesntEngageWhileAMouseDownDoes() throws {
+        let signals = signals()
+        let channel = try #require(session.messages?.channelId)
+        #expect(session.reading == channel)
+        leaveAndComeBack()
+        #expect(session.reading == nil)
+
+        let wheel = try #require(
+            CGEvent(
+                scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -40,
+                wheel2: 0, wheel3: 0
+            ).flatMap(NSEvent.init(cgEvent:)))
+        signals.handle(wheel)
+        #expect(session.reading == nil)
+        #expect(!ReadingSignals.engages(wheel.type))
+
+        signals.handle(try click(in: window))
+        #expect(session.reading == channel)
+    }
+
+    @Test
+    func aKeyPressEngagesButNotOneInAnotherWindow() throws {
+        let signals = signals()
+        let channel = try #require(session.messages?.channelId)
+        leaveAndComeBack()
+        let other = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
+            backing: .buffered, defer: false)
+
+        signals.handle(try click(in: other))
+        #expect(session.reading == nil)
+
+        let key = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "a",
+                charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0))
+        signals.handle(key)
+        #expect(session.reading == channel)
+    }
+
+    @Test
+    func aMinimizedOrCoveredWindowStopsReading() throws {
+        let signals = signals()
+        let channel = try #require(session.messages?.channelId)
+
+        visible = false
+        center.post(name: NSWindow.didMiniaturizeNotification, object: window)
+        #expect(session.reading == nil)
+        visible = true
+        center.post(name: NSWindow.didDeminiaturizeNotification, object: window)
+        #expect(session.reading == nil)
+        signals.handle(try click(in: window))
+        #expect(session.reading == channel)
+
+        visible = false
+        center.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        #expect(session.reading == nil)
+    }
+
+    @Test
+    func anotherWindowsNotificationsChangeNothing() throws {
+        _ = signals()
+        let channel = try #require(session.messages?.channelId)
+        key = false
+
+        center.post(name: NSWindow.didResignKeyNotification, object: NSWindow())
+
+        #expect(session.reading == channel)
+    }
+
+    // Another user's session takes the screen, and the user comes back to theirs.
+    @Test
+    func fastUserSwitchingStopsReading() throws {
+        let signals = signals()
+        let channel = try #require(session.messages?.channelId)
+
+        workspace.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        #expect(session.reading == nil)
+        workspace.post(name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        #expect(session.reading == nil, "not before a click or a key")
+
+        signals.handle(try click(in: window))
+        #expect(session.reading == channel)
+    }
+
+    // Events the app dispatches reach the monitor before any window.
+    @Test
+    func theMonitorSeesClicksAndKeysInTheSessionsWindowOnly() throws {
+        let signals = signals(monitors: true)
+        #expect(signals.isMonitoring)
+        let channel = try #require(session.messages?.channelId)
+        let other = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
+            backing: .buffered, defer: false)
+
+        leaveAndComeBack()
+        NSApp.sendEvent(try rightClick(in: other))
+        NSApp.sendEvent(try keyDown(in: other))
+        #expect(session.reading == nil)
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == channel)
+
+        leaveAndComeBack()
+        NSApp.sendEvent(try keyDown(in: window))
+        #expect(session.reading == channel)
+    }
+
+    @Test
+    func theMonitorGoesWithTheWindow() throws {
+        let signals = signals(monitors: true)
+        leaveAndComeBack()
+
+        center.post(name: NSWindow.willCloseNotification, object: window)
+        #expect(!signals.isMonitoring)
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == nil)
+    }
+
+    // SwiftUI can keep the session's view while its window is closed and opened again.
+    @Test
+    func theMonitorComesBackWithTheWindow() throws {
+        let signals = signals(monitors: true)
+        let channel = try #require(session.messages?.channelId)
+
+        (key, visible) = (false, false)
+        center.post(name: NSWindow.willCloseNotification, object: window)
+        center.post(name: NSWindow.didResignKeyNotification, object: window)
+        #expect(!signals.isMonitoring)
+        (key, visible) = (true, true)
+        center.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        center.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        #expect(signals.isMonitoring)
+
+        #expect(session.reading == nil)
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == channel)
+    }
+
+    // The test host is never active, so the session's inputs are set by hand.
+    @Test
+    func theMonitorGoesWhenTheViewLeavesItsWindow() throws {
+        let channel = try #require(session.messages?.channelId)
+        let attach = ReadingSignals.AttachView(session: session)
+        let disengage = { [session] in
+            session.setAppActive(true)
+            session.setWindowVisible(true)
+            session.setWindowKey(true)
+            session.setWindowKey(false)
+            session.setWindowKey(true)
+        }
+        window.contentView?.addSubview(attach)
+        disengage()
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == channel, "the monitor is in")
+
+        attach.removeFromSuperview()
+        disengage()
+        NSApp.sendEvent(try rightClick(in: window))
+        #expect(session.reading == nil)
+    }
+}

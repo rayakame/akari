@@ -22,11 +22,16 @@ nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
 
     override func connect() throws {}
 
-    override func loadMessages(channelId: ChannelId, load: MessageLoad) async throws
-        -> LoadReport?
+    override func loadMessages(channelId: ChannelId, load: MessageLoad, placing: UInt64?)
+        async throws -> LoadReport?
     { nil }
 
+    override func reservePlacing() -> UInt64 { 0 }
     override func viewChannel(channelId: ChannelId) {}
+    override func supersedeAroundLoads(channelId: ChannelId) {}
+    override func setReading(channelId: ChannelId?) {}
+    override func markRead(channelId: ChannelId) {}
+    override func markGuildsRead(guildIds: [GuildId]) {}
 }
 
 nonisolated final class CrowdedStore: Store, @unchecked Sendable {
@@ -169,6 +174,10 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
 
     override func unreadPrivateChannels() -> [ChannelId] {
         unread
+    }
+
+    override func readState(channelId: ChannelId) -> ReadState? {
+        nil
     }
 }
 

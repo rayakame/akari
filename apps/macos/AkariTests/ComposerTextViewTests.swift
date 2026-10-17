@@ -13,8 +13,10 @@ final class ComposerTextViewTests {
     let window: NSWindow
     var submits = 0
     var escapes = 0
+    var serverReads = 0
     var editLast = 0
-    var modifiers: NSEvent.ModifierFlags = []
+    var unreadJumps = 0
+    var event: NSEvent?
 
     init() {
         (scrollView, textView) = ComposerTextView.scrollable()
@@ -25,8 +27,10 @@ final class ComposerTextViewTests {
         window.contentView?.addSubview(scrollView)
         textView.onSubmit = { [unowned self] in submits += 1 }
         textView.onEscape = { [unowned self] in escapes += 1 }
+        textView.onShiftEscape = { [unowned self] in serverReads += 1 }
         textView.onEditLastMessage = { [unowned self] in editLast += 1 }
-        textView.modifiers = { [unowned self] in modifiers }
+        textView.onShiftPageUp = { [unowned self] in unreadJumps += 1 }
+        textView.currentEvent = { [unowned self] in event }
         window.makeFirstResponder(textView)
     }
 
@@ -41,7 +45,7 @@ final class ComposerTextViewTests {
         #expect(submits == 1)
         #expect(textView.string == "a")
 
-        modifiers = .shift
+        event = keyDown("\r", keyCode: 36, modifiers: .shift)
         textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
         #expect(submits == 1)
         #expect(textView.string == "a\n")
@@ -89,9 +93,69 @@ final class ComposerTextViewTests {
     @Test
     func escapeJumpsInsteadOfCompleting() {
         type("ab")
+        event = escapeKey()
         textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
         #expect(escapes == 1)
+        #expect(serverReads == 0)
         #expect(textView.string == "ab")
+    }
+
+    // AppKit's key bindings give Shift+Escape the same command as Escape.
+    @Test
+    func shiftEscapeMarksTheServerReadInstead() {
+        event = escapeKey(.shift)
+        textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(serverReads == 1)
+        #expect(escapes == 0)
+    }
+
+    // Cmd+. does nothing in the composer, as in the official client.
+    final class Recorder: NSResponder {
+        var cancels = 0
+
+        override func cancelOperation(_ sender: Any?) {
+            cancels += 1
+        }
+    }
+
+    // Passed on, the command would reach the responders past the composer.
+    func recorder() -> Recorder {
+        let recorder = Recorder()
+        recorder.nextResponder = textView.nextResponder
+        textView.nextResponder = recorder
+        return recorder
+    }
+
+    @Test
+    func cmdPeriodDoesntMarkRead() {
+        let recorder = recorder()
+        type("ab")
+        event = periodKey(.command)
+        textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(escapes == 0)
+        #expect(recorder.cancels == 0)
+        #expect(textView.string == "ab")
+    }
+
+    @Test
+    func cmdShiftPeriodDoesntMarkTheServerRead() {
+        let recorder = recorder()
+        event = periodKey([.command, .shift])
+        textView.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        #expect(serverReads == 0)
+        #expect(recorder.cancels == 0)
+    }
+
+    // Shift+Fn+Up on a laptop; AppKit's key bindings make it a selection command.
+    @Test
+    func shiftPageUpJumpsToTheFirstUnreadInsteadOfSelecting() {
+        type("ab\ncd")
+        let selected = textView.selectedRange()
+
+        textView.doCommand(by: #selector(NSResponder.pageUpAndModifySelection(_:)))
+
+        #expect(unreadJumps == 1)
+        #expect(textView.selectedRange() == selected)
     }
 
     @Test

@@ -55,9 +55,13 @@ struct MessageTableTests {
     let window: NSWindow
 
     init() {
+        self.init(onScreen: MessageTableController.isOnScreen)
+    }
+
+    init(onScreen: @escaping @MainActor (NSWindow) -> Bool) {
         controller = MessageTableController(
             tableView: table, calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) },
-            pointer: { [pointer] in pointer.location })
+            pointer: { [pointer] in pointer.location }, onScreen: onScreen)
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -653,11 +657,8 @@ struct MessageTableTests {
         window.makeFirstResponder(text)
         text.setSelectedRange(NSRange(location: 0, length: 3))
 
-        let escape = try #require(
-            NSEvent.keyEvent(
-                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
-                charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        let escape = try #require(escapeKey())
+        table.currentEvent = { escape }
         text.keyDown(with: escape)
 
         #expect(actions.calls.filter { !$0.hasPrefix("more") } == ["escape"])
@@ -912,6 +913,9 @@ struct MessageTableTests {
 
     final class RecordingActions: MessageListActions {
         var calls: [String] = []
+        var bottoms: [Bool] = []
+        var scrolls: [CGFloat] = []
+        var linesOnScreen: [Bool] = []
 
         func retry(_ message: MessageId) {
             calls.append("retry \(message.rawValue)")
@@ -931,6 +935,26 @@ struct MessageTableTests {
 
         func escape() {
             calls.append("escape")
+        }
+
+        func markServerRead() {
+            calls.append("server read")
+        }
+
+        func jumpToUnread() {
+            calls.append("unread")
+        }
+
+        func newMessagesLineOnScreen(_ onScreen: Bool, line: MessageId) {
+            linesOnScreen.append(onScreen)
+        }
+
+        func atBottomChanged(_ atBottom: Bool) {
+            bottoms.append(atBottom)
+        }
+
+        func userScrolled(by distance: CGFloat, height: CGFloat) {
+            scrolls.append(distance)
         }
 
         func reveal(_ spoiler: SpoilerKey) {
@@ -1500,14 +1524,99 @@ struct MessageTableTests {
     }
 
     @Test
-    func escapeInTheListJumpsToThePresent() {
+    func escapeInTheListJumpsToThePresent() throws {
         let actions = RecordingActions()
         controller.actions = actions
         show(page)
+        let escape = try #require(escapeKey())
+        table.currentEvent = { escape }
 
         table.cancelOperation(nil)
 
         #expect(actions.calls == ["escape"])
+    }
+
+    @Test
+    func shiftEscapeInTheListMarksTheServerRead() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        let escape = try #require(escapeKey(.shift))
+        table.currentEvent = { escape }
+
+        table.cancelOperation(nil)
+
+        #expect(actions.calls == ["server read"])
+    }
+
+    // In the list and from a message's text.
+    @Test
+    func cmdPeriodDoesntMarkRead() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        let period = try #require(periodKey(.command))
+        table.currentEvent = { period }
+
+        table.cancelOperation(nil)
+        try #require(messageText(in: try cell(of: 200))).cancelOperation(nil)
+
+        #expect(actions.calls.filter { !$0.hasPrefix("more") }.isEmpty)
+    }
+
+    @Test
+    func cmdShiftPeriodDoesntMarkTheServerRead() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        let period = try #require(periodKey([.command, .shift]))
+        table.currentEvent = { period }
+
+        table.cancelOperation(nil)
+        try #require(messageText(in: try cell(of: 200))).cancelOperation(nil)
+
+        #expect(actions.calls.filter { !$0.hasPrefix("more") }.isEmpty)
+    }
+
+    @Test
+    func theTableReportsWhetherItIsAtTheBottom() throws {
+        let actions = RecordingActions()
+        controller.actions = actions
+        show(page)
+        #expect(actions.bottoms.isEmpty, "a list opens at the bottom")
+
+        scroll(toRowOf: 120)
+        #expect(actions.bottoms == [false])
+
+        let bottomClip = try #require(clip as? BottomClipView)
+        clip.scroll(to: NSPoint(x: 0, y: bottomClip.originRange.upperBound))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+        #expect(actions.bottoms == [false, true])
+
+        scroll(toRowOf: 150)
+        controller.jumpToPresent(load: true)
+        #expect(actions.bottoms == [false, true, false, true])
+    }
+
+    // The bar's jump, a jump to the present and pinning; only the user's scrolls are reported.
+    @Test
+    func theTablesOwnScrollsReportNoUserScroll() {
+        let actions = RecordingActions()
+        controller.actions = actions
+        let line = MessageId(rawValue: 150)
+        show(MessageTableState(rows: page, newMessages: line))
+        show(MessageTableState(rows: page, newMessages: line, unreadJumps: 1))
+        controller.jumpToPresent(load: false)
+        show(
+            MessageTableState(rows: page + messages(1, from: 201), newMessages: line, unreadJumps: 1))
+        #expect(actions.bottoms == [false, true])
+        #expect(actions.scrolls.isEmpty)
+
+        scroll(toRowOf: 120)
+
+        #expect(actions.scrolls.count == 1)
+        #expect(actions.scrolls.allSatisfy { $0 > 0 }, "toward older messages")
     }
 
     @Test

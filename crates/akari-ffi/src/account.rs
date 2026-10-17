@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use akari_core::model::{ChannelId, MessageId};
+use akari_core::model::{ChannelId, GuildId, MessageId};
 use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
@@ -69,21 +69,62 @@ impl Account {
         self.core.view_channel(channel_id);
     }
 
+    /// The channel the user is reading at its newest messages, or `None`. While set, the
+    /// channel is acked up to the newest message its list shows at the present, and again as
+    /// that list grows, paced. Hosts set it only while the user is engaged with the channel at
+    /// the bottom of its list. A dropped connection clears it: set it again once online and the
+    /// list is refreshed.
+    pub fn set_reading(&self, channel_id: Option<ChannelId>) {
+        self.core.set_reading(channel_id);
+    }
+
+    /// Marks the channel read now (Escape, the context menu).
+    pub fn mark_read(&self, channel_id: ChannelId) {
+        self.core.mark_read(channel_id);
+    }
+
+    /// Marks these guilds read now with one bulk ack (Shift+Escape, a server's or a folder's
+    /// context menu).
+    pub fn mark_guilds_read(&self, guild_ids: Vec<GuildId>) {
+        self.core.mark_guilds_read(&guild_ids);
+    }
+
     /// Loads messages into the channel's window within Discord's rate limits. `Latest` and
     /// `Around` view the channel first; `Older` and `Newer` do nothing without a window.
+    /// `placing` from `reserve_placing`, taken where the user acted, orders a `Latest` or
+    /// `Around` load before later supersedes and loads; `None` takes its place when it begins.
     /// Returns where the load's time went, or `None` when there was nothing to load.
     pub async fn load_messages(
         &self,
         channel_id: ChannelId,
         load: MessageLoad,
+        placing: Option<u64>,
     ) -> Result<Option<LoadReport>, RequestError> {
         let core = self.core.clone();
         run(self.runtime, async move {
-            core.load_messages(channel_id, load.into()).await
+            match placing {
+                Some(placing) => {
+                    core.load_messages_placed(channel_id, load.into(), placing)
+                        .await
+                }
+                None => core.load_messages(channel_id, load.into()).await,
+            }
         })
         .await
         .map(|report| report.map(Into::into))
         .map_err(Into::into)
+    }
+
+    /// Drops the pages of `Around` loads running for the channel, so they don't replace its
+    /// window: Escape or a mark as read during a jump, where no `Latest` load overtakes them.
+    pub fn supersede_around_loads(&self, channel_id: ChannelId) {
+        self.core.supersede_around_loads(channel_id);
+    }
+
+    /// The next place among loads and supersedes, for `load_messages`; take it where the user
+    /// acts, so a supersede after it overtakes the load even before the load begins.
+    pub fn reserve_placing(&self) -> u64 {
+        self.core.reserve_placing()
     }
 
     /// Shows the message as pending at once and resolves with Discord's ID. On an error the
@@ -152,13 +193,15 @@ impl Account {
 /// Which messages `Account::load_messages` loads. `limit` is clamped to 1–100.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum MessageLoad {
-    /// The newest messages: fills a window, refreshes a stale one, or jumps to the present.
+    /// The newest messages: fills a window, refreshes a stale one, or jumps to the present; not
+    /// when it would replace the window for a later-placed `Around` (`PageOutcome::Overtaken`).
     Latest { limit: u8 },
     /// Before the window's first message.
     Older { limit: u8 },
     /// After the window's last message, towards the present.
     Newer { limit: u8 },
-    /// Replaces the window with the messages around `message_id`.
+    /// Replaces the window with the messages around `message_id`, unless a later-placed `Latest`
+    /// or `Around` load, or `Account::supersede_around_loads`, comes first.
     Around { message_id: MessageId, limit: u8 },
 }
 

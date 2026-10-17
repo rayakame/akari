@@ -19,6 +19,20 @@ pub struct ReadState {
     pub estimated: bool,
 }
 
+// A channel the store just marked read, for the account to tell Discord.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Ack {
+    pub(crate) channel: ChannelId,
+    // The channel's newest message, or a forum's newest post.
+    pub(crate) cursor: Option<MessageId>,
+    // Discord's "now" instead, never below the cursor.
+    pub(crate) now: bool,
+    // The channel's read state before the store took this ack, to restore if Discord refuses it.
+    pub(crate) before: Option<ReadState>,
+    // The one it left, which a refusal may undo only while the store still holds it.
+    pub(crate) after: Option<ReadState>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ReadStates {
     channels: HashMap<ChannelId, ReadState>,
@@ -110,11 +124,22 @@ impl ReadStates {
         self.ignored.remove(&user);
     }
 
-    pub(crate) fn ack(&mut self, ack: &MessageAck, newest: Option<u64>) -> bool {
+    // With `recount`, an ack at the stored position sets the count: a replay kept READY's there.
+    pub(crate) fn ack(&mut self, ack: &MessageAck, newest: Option<u64>, recount: bool) -> bool {
         let position = ack.message_id.get();
         let known = self.get(ack.channel_id);
-        let acked = known.and_then(|state| state.acked);
-        if !ack.manual && acked.is_some_and(|acked| acked.get() > position) {
+        // An echo of an ack the store already took mustn't reset a mention counted since; a
+        // position the store estimated takes a real one at it.
+        let behind = known.is_some_and(|state| {
+            state.acked.is_some_and(|acked| {
+                if state.estimated || recount {
+                    acked.get() > position
+                } else {
+                    acked.get() >= position
+                }
+            })
+        });
+        if !ack.manual && behind {
             return false;
         }
         let mentions = match ack.mention_count {
@@ -148,6 +173,27 @@ impl ReadStates {
                 estimated: false,
             },
         )
+    }
+
+    // Akari's own ack: up to `cursor` (never back), without mentions.
+    pub(crate) fn read(&mut self, channel: ChannelId, cursor: Option<MessageId>) -> bool {
+        let acked = self.get(channel).and_then(|state| state.acked).max(cursor);
+        self.put(
+            channel,
+            ReadState {
+                acked,
+                mentions: 0,
+                estimated: false,
+            },
+        )
+    }
+
+    // Back to a state from before Akari's ack; `None` when there was none.
+    pub(crate) fn restore(&mut self, channel: ChannelId, state: Option<ReadState>) {
+        match state {
+            Some(state) => self.channels.insert(channel, state),
+            None => self.channels.remove(&channel),
+        };
     }
 
     pub(crate) fn start(&mut self, channel: ChannelId, acked: Option<MessageId>) {

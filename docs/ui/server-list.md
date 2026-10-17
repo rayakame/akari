@@ -96,6 +96,25 @@ Observed in the official desktop client on 2026-10-14:
 - **Deleting messages lowers nothing:** the badge stays when a mentioning message is deleted,
   and the pill when the only unread message is, until the channels are read.
 
+## Context menus and unread DMs
+
+Observed in the official web client on 2026-10-15 (German UI):
+
+- A server icon's menu starts with "Mark As Read", a folder's with "Mark Folder As Read"
+  (German: "Ordner als gelesen markieren"). The English labels are unconfirmed.
+- A DM row's "Mark As Read" is disabled, not hidden, when the DM has nothing unread; the DM
+  list is in [channel-list.md](channel-list.md#home).
+- Clicking an unread DM's avatar on the rail opens the DM and removes the avatar at once. With
+  that DM open and another app focused, a new DM message brings the avatar back with the tall
+  (selected) pill and a red badge; it goes when the user clicks back into the client.
+
+*Akari: the same menus, the read item first and disabled while the server, folder or DM
+shows neither the unread pill nor a badge. A folder's item stays enabled while any of its
+servers shows unread or mentions, also when the folder is expanded and its own tile shows
+neither. Opening a DM from the rail reads it, so its avatar goes; an open DM that turns unread
+while the user isn't reading it (another app in front, the list scrolled up) comes back with
+the tall pill and its badge ([read-states.md](../protocol/read-states.md#how-akari-acks)).*
+
 ## Initials
 
 A server without an icon shows letters made from its name:

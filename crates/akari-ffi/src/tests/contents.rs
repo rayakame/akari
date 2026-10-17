@@ -115,7 +115,7 @@ fn three() -> Value {
 
 async fn load(account: &Account) -> crate::records::LoadReport {
     account
-        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 })
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
         .await
         .unwrap()
         .expect("a page was loaded")

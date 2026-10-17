@@ -315,6 +315,12 @@ final class MessageTextView: NSTextView {
     override func cancelOperation(_ sender: Any?) {
         nextResponder?.tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: sender)
     }
+
+    // Shift+Page Up would extend the selection; the list jumps to the first unread message.
+    override func pageUpAndModifySelection(_ sender: Any?) {
+        nextResponder?.tryToPerform(
+            #selector(NSResponder.pageUpAndModifySelection(_:)), with: sender)
+    }
 }
 
 // A link in a message as assistive apps see it; pressing it is a click.

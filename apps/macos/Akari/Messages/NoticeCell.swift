@@ -9,6 +9,8 @@ final class NoticeCell: NSTableCellView {
     private static let top: CGFloat = 18
     // 10 less right after a day divider, as a message's (MessageCell).
     private static let dayTop: CGFloat = 8
+    // Under the new messages line, whose row is the 16 above a group.
+    private static let lineTop: CGFloat = 2
     private var textTop: NSLayoutConstraint?
     private static let bottom: CGFloat = 2
     private static let leading: CGFloat = 72
@@ -42,18 +44,19 @@ final class NoticeCell: NSTableCellView {
     /// The row height for a notice at `width`, as Auto Layout would size the cell.
     static func height(
         _ message: Message, notice: String, time: String, followsDay: Bool = false,
-        width: CGFloat
+        followsLine: Bool = false, width: CGFloat
     ) -> CGFloat {
         sizing.configure(message, notice: notice, time: time, fullDate: "")
         sizing.text.preferredMaxLayoutWidth = width - leading - trailing
-        return (followsDay ? dayTop : top) + sizing.text.intrinsicContentSize.height + bottom
+        return textTop(followsDay: followsDay, followsLine: followsLine)
+            + sizing.text.intrinsicContentSize.height + bottom
     }
 
     func configure(
         _ message: Message, notice: String, time: String, followsDay: Bool = false,
-        fullDate: String
+        followsLine: Bool = false, fullDate: String
     ) {
-        textTop?.constant = followsDay ? Self.dayTop : Self.top
+        textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
         icon.image = NSImage(
             systemSymbolName: Self.symbol(message.kind), accessibilityDescription: nil)
         let line = NSMutableAttributedString(
@@ -66,6 +69,10 @@ final class NoticeCell: NSTableCellView {
                 ]))
         text.attributedStringValue = line
         text.toolTip = fullDate
+    }
+
+    static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
+        followsLine ? lineTop : followsDay ? dayTop : top
     }
 
     private static func symbol(_ kind: MessageType) -> String {

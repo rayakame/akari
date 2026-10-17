@@ -1,9 +1,10 @@
 use std::time::Duration;
 
-/// Where one history load's time went. Numbers only.
+/// Where one history load's time went, and what became of its page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct LoadReport {
+    pub outcome: PageOutcome,
     /// Behind earlier requests on the same channel (they run one at a time) or a warm-up.
     pub queued: Duration,
     /// Waiting for Discord's limits: a bucket reset, a 429 pause or the global limit.
@@ -30,4 +31,18 @@ pub struct LoadReport {
     pub prepare: Duration,
     /// Messages the preparer reported as prepared.
     pub prepared: u32,
+}
+
+/// What became of a history load's page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum PageOutcome {
+    /// It went into the window.
+    #[default]
+    Applied,
+    /// Dropped for a later-placed request: an `Around` page for a `Latest`, `Around` or
+    /// supersede; a `Latest` page that would replace the window for an `Around`.
+    Overtaken,
+    /// Dropped: the window was replaced, or the end the page continues from changed, meanwhile.
+    Outdated,
 }

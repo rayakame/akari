@@ -18,7 +18,7 @@ struct MessageListModelTests {
     }
 
     func makeModel() -> MessageListModel {
-        MessageListModel(channelId: here, account: account, store: store)
+        MessageListModel(channelId: here, userId: id(1), account: account, store: store)
     }
 
     func loaded() -> MessageListModel {
@@ -42,13 +42,13 @@ struct MessageListModelTests {
     }
 
     @Test
-    func openOnlyViewsAFilledWindow() async {
+    func openViewsAFilledWindowWithoutLoadingIt() async {
         shown(window([1, 2]))
         let model = loaded()
 
         await model.open()
 
-        #expect(store.log.actions == [.view(here)])
+        #expect(store.log.actions == [.supersede(here), .view(here)])
     }
 
     @Test
@@ -406,6 +406,7 @@ struct MessageListModelTests {
     @Test
     func aLoadWithNothingToLoadHasNoReport() async {
         shown(window([3, 4, 5]))
+        account.loadReport.withLock { $0 = nil }
         let model = loaded()
 
         await model.loadOlder()

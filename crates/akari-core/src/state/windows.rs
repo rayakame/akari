@@ -5,6 +5,7 @@ use super::apply::wall_millis;
 use super::events::StoreEvent;
 use super::types::{Delivery, Message, User};
 use crate::gateway::MessageUpdate;
+use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, MessageId, UserId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +51,10 @@ pub(crate) struct LoadTicket {
     pub(crate) kind: LoadKind,
     pub(crate) cursor: Cursor,
     generation: u64,
+    placing: u64,
     holds: bool,
+    // The channel's newest message when the load began.
+    newest: Option<MessageId>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +93,15 @@ struct Window {
     held: Vec<Arc<Message>>,
     // Bumped whenever the messages are replaced, so a load for the old ones is dropped.
     generation: u64,
+    // The newest placing, in the host's order, of a Latest or Around load or a supersede: an
+    // Around page placed before it is dropped. Kept over a replace, as the host's order is.
+    placing: u64,
+    // The newest Around load's placing: a Latest page from before it leaves it the window.
+    around_placing: u64,
+    // At the present, a message up to this one that isn't among `messages` was deleted.
+    present_through: Option<MessageId>,
+    // The newest held message that was deleted: `present_through` once the held ones are rows.
+    held_deleted: Option<MessageId>,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
     loading: u32,
@@ -132,6 +145,7 @@ impl Window {
             self.release_held(channel_id, limit, events);
         } else if !self.holds_live() {
             self.held.clear();
+            self.held_deleted = None;
         }
     }
 
@@ -178,6 +192,7 @@ impl Window {
             .filter(|message| newest.is_none_or(|newest| message.id > newest))
             .collect();
         self.merge(channel_id, held, End::Newer, false, limit, events);
+        self.present_through = self.present_through.max(self.held_deleted.take());
     }
 
     // The page is the channel's newest; within its range it is the truth.
@@ -448,6 +463,20 @@ impl Windows {
         })
     }
 
+    // The newest row of a list at the present, or a deleted message past it, which Discord keeps
+    // as the channel's newest; `None` while the list is away from the present or stale.
+    pub(crate) fn newest_at_present(&self, channel: ChannelId) -> Option<MessageId> {
+        let window = self.windows.get(&channel)?;
+        if !window.latest || window.stale {
+            return None;
+        }
+        window
+            .messages
+            .last()
+            .map(|message| message.id)
+            .max(window.present_through)
+    }
+
     pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         let messages = &self.windows.get(&channel)?.messages;
         let index = Window::position(messages, id).ok()?;
@@ -633,6 +662,8 @@ impl Windows {
         &mut self,
         channel: ChannelId,
         kind: LoadKind,
+        placing: u64,
+        newest: Option<MessageId>,
         events: &mut Vec<StoreEvent>,
     ) -> Option<LoadTicket> {
         if matches!(kind, LoadKind::Latest | LoadKind::Around(_)) {
@@ -657,13 +688,21 @@ impl Windows {
         if holds {
             window.holding += 1;
         }
+        if matches!(kind, LoadKind::Latest | LoadKind::Around(_)) {
+            window.placing = window.placing.max(placing);
+        }
+        if matches!(kind, LoadKind::Around(_)) {
+            window.around_placing = window.around_placing.max(placing);
+        }
         window.loading += 1;
         Some(LoadTicket {
             channel,
             kind,
             cursor,
             generation: window.generation,
+            placing,
             holds,
+            newest,
         })
     }
 
@@ -674,16 +713,22 @@ impl Windows {
         users: &HashMap<UserId, Arc<User>>,
         reached_end: bool,
         events: &mut Vec<StoreEvent>,
-    ) {
+    ) -> PageOutcome {
         let window_limit = self.limits.messages;
         let generation = self.next_generation();
         let channel_id = ticket.channel;
+        // Asked for after the load began: what it lacks up to the channel's newest was deleted.
+        let through = page
+            .iter()
+            .map(|message| message.id)
+            .max()
+            .max(ticket.newest);
         let Some(window) = self
             .windows
             .get_mut(&channel_id)
             .filter(|window| window.generation == ticket.generation)
         else {
-            return;
+            return PageOutcome::Outdated;
         };
         let was_stale = window.stale;
         if ticket.holds {
@@ -698,10 +743,16 @@ impl Windows {
             Cursor::After(last) => window.messages.last().map(|message| message.id) != Some(last),
             Cursor::Latest | Cursor::Around(_) => false,
         };
-        if moved {
+        let overtaken =
+            matches!(ticket.kind, LoadKind::Around(_)) && ticket.placing < window.placing;
+        if moved || overtaken {
             window.forget_missed();
             window.release_or_drop_held(channel_id, window_limit, events);
-            return;
+            return if moved {
+                PageOutcome::Outdated
+            } else {
+                PageOutcome::Overtaken
+            };
         }
         let mut page: Vec<Arc<Message>> = page
             .into_iter()
@@ -756,6 +807,9 @@ impl Windows {
                 );
                 // Older parts of a stale window aren't re-checked, like the official client.
                 window.stale &= !reached_end;
+                if reached_end {
+                    window.present_through = window.present_through.max(through);
+                }
             }
             LoadKind::Latest if window.appends_live() => {
                 window.merge(
@@ -766,11 +820,13 @@ impl Windows {
                     window_limit,
                     events,
                 );
+                window.present_through = window.present_through.max(through);
             }
             LoadKind::Refresh if !window.stale => {}
             LoadKind::Latest | LoadKind::Refresh if window.stale && window.reaches(&page) => {
                 let first = page.first().map(|message| message.id);
                 window.reconcile(channel_id, page, reached_end, window_limit, events);
+                window.present_through = window.present_through.max(through);
                 if window.from_disk {
                     window.drop_before(first, channel_id, events);
                 }
@@ -779,16 +835,32 @@ impl Windows {
                 window.latest = false;
                 events.push(StoreEvent::MessagesStale { channel_id });
             }
+            // Replacing would change the generation and drop the newer Around page.
+            LoadKind::Latest
+                if window.around_placing > ticket.placing
+                    && window.placing == window.around_placing =>
+            {
+                // As for an aborted load: should the Around load fail, nothing would refresh it.
+                if window.holding == 0 && window.stale && window.latest {
+                    window.latest = false;
+                    events.push(StoreEvent::MessagesStale { channel_id });
+                }
+                window.release_or_drop_held(channel_id, window_limit, events);
+                return PageOutcome::Overtaken;
+            }
             LoadKind::Latest | LoadKind::Around(_) => {
                 if !window.messages.is_empty() {
                     events.push(StoreEvent::MessagesCleared { channel_id });
                 }
                 let at_present = ticket.kind == LoadKind::Latest;
                 let held = std::mem::take(&mut window.held);
+                let held_deleted = window.held_deleted;
                 let outbox = std::mem::take(&mut window.outbox);
                 *window = Window {
                     generation,
                     outbox,
+                    placing: window.placing,
+                    around_placing: window.around_placing,
                     ..Window::default()
                 };
                 let mut added = Added::default();
@@ -798,6 +870,7 @@ impl Windows {
                 window.messages = page;
                 window.oldest = at_present && reached_end;
                 window.latest = at_present;
+                window.present_through = through.max(held_deleted).filter(|_| at_present);
                 if at_present {
                     let newest = window.messages.last().map(|message| message.id);
                     for message in held
@@ -818,6 +891,14 @@ impl Windows {
         // A refresh that found nothing new sends no other event.
         if was_stale && !window.stale {
             events.push(StoreEvent::MessagesRefreshed { channel_id });
+        }
+        PageOutcome::Applied
+    }
+
+    // Escape or a mark as read, where no Latest load runs to drop the page.
+    pub(crate) fn supersede_around(&mut self, channel: ChannelId, placing: u64) {
+        if let Some(window) = self.windows.get_mut(&channel) {
+            window.placing = window.placing.max(placing);
         }
     }
 
@@ -917,12 +998,16 @@ impl Windows {
         }
         if let Ok(index) = Window::position(&window.messages, id) {
             window.messages.remove(index);
+            if index == window.messages.len() && window.latest && !window.stale {
+                window.present_through = window.present_through.max(Some(id));
+            }
             events.push(StoreEvent::MessageDeleted {
                 channel_id,
                 message_id: id,
             });
         } else if let Ok(index) = Window::position(&window.held, id) {
             window.held.remove(index);
+            window.held_deleted = window.held_deleted.max(Some(id));
         }
     }
 

@@ -7,12 +7,14 @@ client on 2026-10-10; colors in [theme.md](theme.md).
 ## Layout
 
 - Messages are listed oldest at the top, newest at the bottom. While the user is at the
-  bottom, new messages keep the list at the bottom; when they scrolled up, the list stays
-  where it is.
+  bottom (within 2 of it), new messages keep the list at the bottom; when they scrolled up,
+  the list stays where it is.
 - At its top and bottom the list bounces with the native macOS elastic overscroll, unlike the
   official client, whose Chromium list stops there. While the user scrolls, momentum and
   bounce included, the list never moves on its own, and a position past the bottom counts as
-  being at the bottom.
+  being at the bottom. A message that arrives during a gesture at the bottom keeps the list
+  there: it scrolls to the new bottom once the gesture ends, unless the user scrolled up in
+  the meantime.
 - Each message has 2 of vertical padding and 16 on the right. Its content starts 72 from the
   left: 16 margin, a 40 avatar column, 16 gap.
 - Text is 16 on a 22 line height. Sizes of every text style are in
@@ -189,7 +191,9 @@ block) that Akari leaves out.
   with a down arrow. It doesn't show after a short scroll up, only when the newest messages
   aren't loaded, as in the official client.
 - Clicking it, or pressing Escape ([shortcuts.md](shortcuts.md)), loads the newest messages
-  and scrolls to the bottom. At the present, Escape only scrolls to the bottom.
+  and scrolls to the bottom. At the present, Escape only scrolls to the bottom. Either way,
+  Escape also marks the channel read. Both cancel a jump to the first unread message that is
+  still loading ([below](#the-new-messages-line-and-the-unread-bar)).
 - Sending a message also jumps to the present.
 - Akari's bar: 32 tall, 16 from the sides, corner radius 8, `brand` with white 14 medium text:
   "You're reading older messages" and "Jump to present".
@@ -230,10 +234,124 @@ bar says "Some messages may be missing" instead.
   that grows or shrinks with them doesn't move the text being read. Akari stops counting while
   the window is hidden or minimized and catches up when it shows again.
 
+## The new messages line and the unread bar
+
+Observed in the official web client on 2026-10-15 (German UI).
+
+- **An unread channel opens at the bottom**, at the present, not at the first unread message.
+- **The line:** a red (`#d22d39`) line with a "NEW" tag at its right end, in the gap above the
+  first unread message. It is a line of its own between two messages, not part of either.
+- **It also appears while the user reads.** At the bottom, the first of several new messages
+  gets the line above it. The ack that follows doesn't remove it. It goes as soon as the user
+  sends a message.
+- **The bar:** a blue bar at the top of the list, "1 new message since 17:13" (the German UI
+  said it in German; the English wording is a translation), with a "Mark As Read" button on
+  its right. It showed while the list was scrolled up and the new message was below the
+  view. With three unread messages all visible there was no bar.
+- **Escape while scrolled up** jumps to the bottom and marks the channel read
+  ([shortcuts.md](shortcuts.md)).
+- **Not observed yet:** the line next to a day divider, the line after Escape or after
+  leaving the channel and coming back, and opening a channel with 80 or more unread messages
+  and clicking the bar.
+
+Akari's line (acks: [read-states.md](../protocol/read-states.md#acks-in-the-official-client)):
+
+- It goes before the first loaded message from someone else that is newer than the channel's
+  read position when the list opened. Akari marks the channel the user reads read at once, so
+  the list keeps that position for as long as it's open. A channel without a read position
+  counts as read up to what the list first shows. The user's own messages never start the line.
+- Until Akari has read the channel, a new session's READY moves the position forward to
+  Discord's, never back. That covers a list opened from the disk cache at launch after the user
+  read on another device while Akari was closed. Akari sets no channel as being read until the
+  session is online, so READY's positions aren't Akari's own acks; once Akari has read the
+  channel, a later READY moves nothing.
+- While there is no line, the next message from someone else gets one, also while the user
+  reads at the bottom; later messages go below it. Acks, scrolling and reconnects keep it.
+  Sending a message, Escape, and "Mark As Read" of the channel or its server remove it, and
+  leaving the channel ends it. Its coming and going doesn't move the text the user reads.
+- If the first unread message isn't loaded, the line sits before the first one that is, and an
+  older page that brings earlier unread messages moves it up.
+- Before a day's first message both show: the day divider, then the line (unobserved).
+- A 1 pt `newMessages` line from 16 at the left to the tag, which ends 16 from the right:
+  "NEW" in bold `newMessagesText` on a 13 tall `newMessages` tag with corners of 3, centered on
+  the line. The row is 16 tall with the line in its middle and takes the 16 a group leaves
+  above its first message, so under a group start it moves nothing; a follow-up under it keeps
+  its group, and the row adds its 16.
+
+Akari's bar:
+
+- It follows the line: it shows while the list has a line that isn't on screen, above the
+  visible messages, below them, or before messages that aren't loaded, and that hasn't been on
+  screen before. Once the line has been on screen in a window that shows, the bar goes and
+  stays gone for that line; a line for a later read position can bring it back. No line, no
+  bar. A line on screen when the channel opens never brings it.
+- "{n} new messages since {time}", "1 new message since {time}" for one. n counts the loaded
+  messages from others from the line on. It reads "{n}+ new messages" when the read position is
+  older than every loaded message and the channel's first message isn't loaded, or when the
+  list doesn't reach the present. The time is the first unread message's, as message times are
+  shown, or the read position's when that message isn't loaded (a channel never read has none,
+  so the first loaded unread message's). **Unconfirmed:** the wording is the user's translation
+  of the German UI.
+- Clicking it jumps to the first unread message: the line goes to the top of the list, as far
+  as the list scrolls. When that message isn't loaded, Akari first loads the messages around
+  the read position (not compared with 80 or more unread messages yet); a channel never read
+  has none, and the jump goes to the first loaded unread message. The jump counts as seeing the
+  line once those messages are in the list, so the bar goes then; if they can't be loaded, the
+  bar stays for another click.
+- The user's last request places the list. Escape, Shift+Escape, "Jump to present", "Mark As
+  Read" (the bar's, or the channel's, its server's or its folder's menu item), sending a
+  message and switching to another channel cancel a jump that is still loading, and the list
+  goes where that request takes it; back in the channel after a switch, it opens at the present
+  with the bar. The cancelled jump doesn't count as seeing the line. A second click while the
+  jump loads starts no second load; one after such a request starts a new jump.
+  A jump clicked while the list is still loading the present takes that load's place; if the
+  jump then fails or a mark as read cancels it, the list still goes to the present.
+- "Mark As Read" on its right marks the channel read like the channel's menu item, which ends
+  the line and the bar; it doesn't jump.
+- Shift+Page Up does what a click on the bar does, from the list and the composer, whenever
+  there is a line, also after the bar has gone ([shortcuts.md](shortcuts.md)).
+- It looks like the jump bar: 32 tall, 16 from the sides and 4 from the top, corner radius 8,
+  `brand` with white 14 medium text, over the messages and above the "Catching up…" capsule.
+- When it appears while Akari is the active app, VoiceOver announces its text once; a new
+  count doesn't repeat it, and a bar that appears while another app is in front isn't
+  announced (it is still on screen for VoiceOver to read).
+
+### Reading: the signal to ack
+
+What the official client showed (Q12d-f above, 2026-10-15): after a break it acks only on a
+click or key press in the client; scrolling back down, focusing the browser or restoring the
+window isn't enough. Akari tells the core which channel the user reads
+([read-states.md](../protocol/read-states.md#how-akari-acks)) only while all of these hold:
+
+- the session is online, and the list's refresh after READY is in (the list isn't stale).
+  The core stops reading whenever the connection drops, a resume included, and Akari sets the
+  channel again once both hold; the user stays engaged across the drop;
+- the app is active and the window is key and visible (not minimized or covered);
+- the list is at the present and scrolled to its bottom;
+- the user is engaged: opening the channel (also the one already open), reopening the last
+  place at launch, a click or a key press in the window; scroll-wheel events don't engage.
+  Scrolling clearly away from the bottom ends it: the user's own scrolls toward older
+  messages, counted from the bottom, add up to more than 48 or a quarter of the list's visible
+  height, whichever is larger. That is looser than the 2 that keep the list at the bottom
+  ([Layout](#layout)): a shorter scroll or a trackpad's bounce only pauses reading until the
+  list is back at the bottom, and the list's own scrolls (the unread bar's jump, the jump to
+  the present, following new messages) never end it; the jump's own move doesn't count toward
+  it. The window losing key, the app going inactive, the window being hidden, the Mac going to
+  sleep and fast user switching to another account end it too.
+  It is stricter than the official client in one place: a click while scrolled up reads
+  nothing until the list is back at the bottom, but it counts: once the list is there, reading
+  starts without another click.
+
+A list the session opens on its own (the open channel deleted or hidden, its server gone)
+isn't read until the user clicks. After the Mac sleeps, reading resumes with the first click
+or key press after it wakes. Clicks and key presses count only in the session's window; when
+it closes, Akari stops watching for them, and watches again once it is back, key and visible.
+Akari tells the core only when the channel changes or the connection dropped, and what the
+list reports while it scrolls reaches the core on the next turn of the main loop, once, with
+the last value.
+
 ## Later
 
-- A red (`#d22d39`) "new messages" line with a "NEW" tag at its right end, at the first unread
-  message.
 - Emoji images, embeds and images.
 - Components V2 layouts ([messages.md](../protocol/messages.md#components-v2)). Until Akari
   renders them, such a message shows one muted placeholder line where its content would be.

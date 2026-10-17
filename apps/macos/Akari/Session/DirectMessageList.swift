@@ -6,7 +6,17 @@ struct DirectMessageList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ListHeader(title: "Direct Messages")
+            // Empty until the quick switcher exists: Discord's "Find or start a conversation".
+            Color.clear.frame(height: ChannelHeader.height + 1)
+            Text("Direct Messages")
+                .font(TypeScale.category.font)
+                .foregroundStyle(Color(nsColor: Palette.channelDefault))
+                .lineLimit(1)
+                .padding(.leading, 16)
+                .padding(.trailing, 8)
+                .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24, alignment: .leading)
+                .padding(.top, 8)
+                .accessibilityAddTraits(.isHeader)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(session.directMessages.conversations) { conversation in
@@ -17,9 +27,12 @@ struct DirectMessageList: View {
                         ) {
                             session.open(channel: conversation.id)
                         }
+                        .markReadMenu(enabled: session.canMarkRead(channel: conversation.id)) {
+                            session.markRead(channel: conversation.id)
+                        }
                     }
                 }
-                .padding(.top, 8)
+                .padding(.top, 2)
                 .padding(.bottom, 72)
             }
         }
@@ -32,7 +45,7 @@ extension DirectMessageList {
     }
 }
 
-private struct ConversationRow: View {
+struct ConversationRow: View {
     let conversation: DirectMessageListModel.Conversation
     let selected: Bool
     var badge = Badge(unread: false, mentions: 0)
@@ -60,9 +73,6 @@ private struct ConversationRow: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if badge.mentions > 0 {
-                    MentionBadge(count: badge.mentions)
-                }
             }
             .padding(.horizontal, 8)
             .frame(height: 42)
@@ -76,8 +86,18 @@ private struct ConversationRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .accessibilityValue(MentionBadge.accessibilityValue(badge))
+        .accessibilityValue(spokenValue)
         .padding(.horizontal, 8)
+        .overlay(alignment: .leading) {
+            if badge.unread && !selected {
+                UnreadPill()
+            }
+        }
+    }
+
+    // The mention count shows only on the rail, so VoiceOver reads it here.
+    var spokenValue: String {
+        MentionBadge.accessibilityValue(badge)
     }
 
     // As a channel row's name.

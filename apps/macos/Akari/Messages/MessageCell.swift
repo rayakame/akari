@@ -72,11 +72,11 @@ final class MessageCell: NSTableCellView {
 
     func configure(
         _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
-        groupTime: String, shortTime: String, fullDate: String
+        followsLine: Bool = false, groupTime: String, shortTime: String, fullDate: String
     ) {
         configureAllButTheBody(
-            message, startsGroup: startsGroup, followsDay: followsDay, groupTime: groupTime,
-            shortTime: shortTime, fullDate: fullDate)
+            message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
+            groupTime: groupTime, shortTime: shortTime, fullDate: fullDate)
         let same = self.message?.id == message.id
         self.message = message
         mentioned = message.mentionsMe
@@ -96,11 +96,12 @@ final class MessageCell: NSTableCellView {
 
     // The sizing cell measures the body instead of laying it out in its text view.
     private func configureAllButTheBody(
-        _ message: Message, startsGroup: Bool, followsDay: Bool, groupTime: String,
-        shortTime: String, fullDate: String
+        _ message: Message, startsGroup: Bool, followsDay: Bool, followsLine: Bool,
+        groupTime: String, shortTime: String, fullDate: String
     ) {
         showsHeader = startsGroup
-        spacing = startsGroup ? (followsDay ? Self.daySpacing : Self.groupSpacing) : 0
+        spacing = Self.spacing(
+            startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine)
         header.isHidden = !startsGroup
         avatar.isHidden = !startsGroup
         avatarBottom?.isActive = startsGroup
@@ -135,15 +136,24 @@ final class MessageCell: NSTableCellView {
         failed?.isHidden = !isFailed
     }
 
+    /// The space above the box: before a group, less under a day divider, none under the new
+    /// messages line, whose row is that space.
+    static func spacing(startsGroup: Bool, followsDay: Bool, followsLine: Bool) -> CGFloat {
+        guard startsGroup, !followsLine else {
+            return 0
+        }
+        return followsDay ? daySpacing : groupSpacing
+    }
+
     /// The row height for `message` showing `body` at `width`, as Auto Layout would size the
     /// cell.
     static func height(
         _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
-        width: CGFloat
+        followsLine: Bool = false, width: CGFloat
     ) -> CGFloat {
         sizing.configureAllButTheBody(
-            message, startsGroup: startsGroup, followsDay: followsDay, groupTime: "",
-            shortTime: "", fullDate: "")
+            message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
+            groupTime: "", shortTime: "", fullDate: "")
         let textWidth = width - textLeading - textTrailing
         let body = message.content.isEmpty ? 0 : TextMeasurer.shared.height(body, width: textWidth)
         return sizing.height(width: width, body: body)

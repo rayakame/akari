@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 
 /// One spoiler of one message, revealed by a click.
@@ -18,6 +19,8 @@ public final class MessageListModel {
         case latest
         case older
         case newer
+        /// Around the read position, for the jump to the first unread message.
+        case around
     }
 
     /// Where a channel's first rows came from.
@@ -39,6 +42,24 @@ public final class MessageListModel {
         }
     }
 
+    /// Over the list's top while the new messages line hasn't been on screen.
+    public struct UnreadBar: Equatable, Sendable {
+        /// The loaded messages from others from the line on.
+        public let count: Int
+        /// More are unread than are loaded: the read position is older than the loaded messages,
+        /// or the list isn't at the present.
+        public let more: Bool
+        /// The first unread message's time, or the read position's when that isn't loaded.
+        public let since: Date
+
+        /// "3 new messages since 17:13", with `time` as the app shows message times.
+        public func text(time: String) -> String {
+            let number = count.formatted() + (more ? "+" : "")
+            let messages = count == 1 && !more ? "message" : "messages"
+            return "\(number) new \(messages) since \(time)"
+        }
+    }
+
     public let channelId: ChannelId
     /// Oldest first, then our pending and failed messages.
     public private(set) var rows: [Row] = []
@@ -57,11 +78,37 @@ public final class MessageListModel {
     public private(set) var openedFrom = Origin.network
     /// Revealed for as long as the model lives: through rereads and loads, not a channel switch.
     public private(set) var revealedSpoilers: Set<SpoilerKey> = []
+    /// Whether the view is scrolled to the bottom of its rows, as it reports; a list opens there.
+    public private(set) var atBottom = true
+    /// At the present, not stale, and scrolled to its bottom: where the user reads new messages.
+    public var atPresentBottom: Bool { atPresent && atBottom && !isStale }
+    /// The row the new messages line goes before: the first loaded message from someone else past
+    /// the read position the list opened with, or the one a send, a mark as read or READY gave it.
+    public private(set) var newMessagesLine: MessageId?
+    /// Set once the view says the new messages line isn't on screen. It goes for good once the
+    /// line has been on screen or jumped to, until a line for a later read position.
+    public private(set) var unreadBar: UnreadBar?
+    /// Counts the jumps to the first unread message; on each the view scrolls the line to its top.
+    public private(set) var unreadJumps = 0
 
     private static let pageSize: UInt8 = 50
+    // A trackpad's bounce or momentum at the bottom stays below it.
+    private static let scrollAwayDistance = 48.0
 
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let store: Store
+    @ObservationIgnored private let userId: UserId
+    // Taken when the list opens: the core acks the open channel at once, which would leave
+    // nothing new to mark.
+    @ObservationIgnored private var readUpTo: MessageId?
+    // Whether `readUpTo` came from the store or a mark as read, not from the first rows shown.
+    @ObservationIgnored private var readUpToKnown = false
+    // The read positions whose line the view said was out of sight, and on screen; the line of a
+    // later position starts unplaced.
+    @ObservationIgnored private var hiddenLineFrom: MessageId?
+    @ObservationIgnored private var seenLineFrom: MessageId?
+    // Set once the session has had the core read the channel: a READY then brings our own ack.
+    @ObservationIgnored var readHere = false
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
     @ObservationIgnored private var hasMessages = false
@@ -71,23 +118,45 @@ public final class MessageListModel {
     @ObservationIgnored private var pendingKeys: [MessageId: MessageId] = [:]
     @ObservationIgnored private var loads = 0
     @ObservationIgnored private var activeLoads: [Int: Load] = [:]
+    // For the session's reading signal; `true` when the user scrolled clearly away from the bottom.
+    @ObservationIgnored var bottomChanged: ((_ scrolledAway: Bool) -> Void)?
+    // The user's own scrolls since the bottom, not the distance to it: a message arriving during
+    // a gesture moves the bottom away.
+    @ObservationIgnored private var scrolledUp = 0.0
+    // The load ticket of the last latest or around load or supersede: only it places the list.
+    @ObservationIgnored private var lastPlacing = 0
+    // A latest load a jump overtook, until a later page lands: should the jump not land, the
+    // list still has to reach the present.
+    @ObservationIgnored private var owedPresent: Int?
+    @ObservationIgnored private var retired = false
+    @ObservationIgnored private var landed = 0
 
-    init(channelId: ChannelId, account: Account, store: Store, drafts: Drafts = Drafts()) {
+    init(
+        channelId: ChannelId, userId: UserId, account: Account, store: Store,
+        drafts: Drafts = Drafts()
+    ) {
         self.channelId = channelId
+        self.userId = userId
         self.account = account
         self.store = store
         guildId = store.channel(id: channelId)?.guildId
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
+        readStoredPosition()
         reload(rereading: [])
         if hasMessages {
             openedFrom = .window
         }
+        composer.onSend = { [weak self] in
+            self?.endNewMessagesLine()
+        }
     }
 
-    /// Views the channel; loads the latest page when it has no messages or is stale.
+    /// Views the channel; loads the latest page when it has no messages or is stale. A jump to
+    /// unread an earlier list of the channel started doesn't land.
     public func open() async {
         if hasMessages && !isStale {
+            account.supersedeAroundLoads(channelId: channelId)
             account.viewChannel(channelId: channelId)
         } else {
             await load(.latest)
@@ -112,11 +181,139 @@ public final class MessageListModel {
         await load(.latest)
     }
 
+    /// Escape: marks the channel read, ends the new messages line, and loads the present when
+    /// the list shows older messages. Scrolling to the bottom is the view's part.
+    public func escape() async {
+        account.markRead(channelId: channelId)
+        endNewMessagesLine()
+        // The core may hold a jump's page the list hasn't shown yet.
+        if !atPresent || store.window(channelId: channelId)?.latest == false {
+            await load(.latest)
+        }
+    }
+
+    /// The unread bar and Shift+Page Up, when there is a line: loads the messages around the read
+    /// position if the first unread message isn't loaded; a failed load leaves the bar. Escape,
+    /// the jump to the present, marking read, sending and a channel switch meanwhile cancel the
+    /// jump. Scrolling to the line is the view's part.
+    public func jumpToUnread() async {
+        guard newMessagesLine != nil, let readUpTo else {
+            return
+        }
+        // A channel never read has no position to load around; its line is among the loaded rows.
+        if readUpTo.rawValue != 0, !readPositionLoaded(readUpTo) {
+            // The running load jumps once its messages are in, if nothing placed the list since.
+            guard activeLoads[lastPlacing] != .around else {
+                return
+            }
+            // A failed load, or a page the core dropped for a newer request, leaves the bar.
+            let (ticket, outcome) = await load(.around)
+            guard outcome == .applied, ticket == lastPlacing else {
+                // Unless a load placed the list since, nothing else takes it to the present.
+                if !retired, owedPresent != nil, activeLoads[lastPlacing] == nil {
+                    await load(.latest)
+                }
+                return
+            }
+        }
+        seenLineFrom = self.readUpTo
+        updateUnreadBar()
+        unreadJumps += 1
+    }
+
+    // A jump landing after the user left would reopen the channel in history, without its scroll.
+    func retire() {
+        retired = true
+        if activeLoads.values.contains(.around) {
+            account.supersedeAroundLoads(channelId: channelId)
+        }
+    }
+
+    /// The view reports whether the new messages line is on screen.
+    public func setNewMessagesLineOnScreen(_ onScreen: Bool) {
+        guard newMessagesLine != nil, let readUpTo,
+            readUpTo != (onScreen ? seenLineFrom : hiddenLineFrom)
+        else {
+            return
+        }
+        if onScreen {
+            seenLineFrom = readUpTo
+        } else {
+            hiddenLineFrom = readUpTo
+        }
+        updateUnreadBar()
+    }
+
+    /// The view reports whether it's scrolled to the bottom, also after its own scrolls. Away
+    /// from it reading pauses, and the user stays engaged.
+    public func setAtBottom(_ atBottom: Bool) {
+        guard atBottom != self.atBottom else {
+            return
+        }
+        self.atBottom = atBottom
+        if atBottom {
+            scrolledUp = 0
+        }
+        bottomChanged?(false)
+    }
+
+    /// A scroll by the user, positive toward older messages, in a list `height` points high;
+    /// after `setAtBottom` for the same move. One clearly away from the bottom ends engagement.
+    public func userScrolled(by distance: Double, height: Double) {
+        guard !atBottom else {
+            return
+        }
+        let limit = max(Self.scrollAwayDistance, height / 4)
+        let wasAway = scrolledUp > limit
+        scrolledUp = max(0, scrolledUp + distance)
+        if !wasAway, scrolledUp > limit {
+            bottomChanged?(true)
+        }
+    }
+
     public func reveal(_ key: SpoilerKey) {
         revealedSpoilers.insert(key)
     }
 
+    // Marked read or a send: only a message newer than what is known now starts the next line.
+    func endNewMessagesLine() {
+        // A latest load would overtake a running jump too, but at the present none runs.
+        if activeLoads.values.contains(.around) {
+            account.supersedeAroundLoads(channelId: channelId)
+            loads += 1
+            lastPlacing = loads
+        }
+        let newest = rows.last { $0.message.delivery == .sent }?.message.id
+        // Marking read acks up to the channel's newest message, also one not loaded here.
+        let acked = store.readState(channelId: channelId)?.acked
+        if let position = [readUpTo, newest, acked].compactMap({ $0 }).max() {
+            readUpTo = position
+            readUpToKnown = true
+        }
+        placeNewMessagesLine()
+    }
+
+    // READY's position is Discord's, newer when the user read on another device meanwhile.
+    func newSession() {
+        guard !readHere, let state = store.readState(channelId: channelId) else {
+            return
+        }
+        let position = state.acked ?? MessageId(rawValue: 0)
+        if let readUpTo, readUpTo >= position {
+            return
+        }
+        readUpTo = position
+        readUpToKnown = true
+        placeNewMessagesLine()
+    }
+
     func apply(_ batch: EventBatch) {
+        // A cache restored after the list opened still has the read position from before this
+        // session's acks, which only start with READY.
+        if batch.restored, !readUpToKnown {
+            readStoredPosition()
+            placeNewMessagesLine()
+        }
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages
@@ -147,7 +344,9 @@ public final class MessageListModel {
             || batch.channelsChanged[guildId] != nil
     }
 
-    private func load(_ kind: Load) async {
+    // The outcome is `nil` when it failed or there was nothing to load.
+    @discardableResult
+    private func load(_ kind: Load) async -> (ticket: Int, outcome: PageOutcome?) {
         loads += 1
         let ticket = loads
         activeLoads[ticket] = kind
@@ -162,13 +361,22 @@ public final class MessageListModel {
             case .latest: .latest(limit: Self.pageSize)
             case .older: .older(limit: Self.pageSize)
             case .newer: .newer(limit: Self.pageSize)
+            case .around:
+                .around(messageId: readUpTo ?? MessageId(rawValue: 0), limit: Self.pageSize)
             }
+        // Taken now, in the order the user acted: the load begins later, on Akari's runtime.
+        var placing: UInt64?
+        if kind == .latest || kind == .around {
+            placing = account.reservePlacing()
+            lastPlacing = ticket
+        }
         LaunchLog.mark("first message load started")
         let started = ContinuousClock.now
         let held = Set(rows.map(\.id))
         let oldest = rows.first?.id
         do {
-            let report = try await account.loadMessages(channelId: channelId, load: request)
+            let report = try await account.loadMessages(
+                channelId: channelId, load: request, placing: placing)
             LaunchLog.mark("first message load finished")
             if kind == .latest {
                 failedLoads = [:]
@@ -188,6 +396,10 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: report,
                 failure: nil, page: Set(page), read: read, started: started,
                 duration: started.duration(to: .now))
+            if kind == .latest || kind == .around {
+                notePlaced(ticket, kind: kind, outcome: report?.outcome)
+            }
+            return (ticket, report?.outcome)
         } catch {
             let failure = error as? RequestError ?? .UnexpectedResponse
             failedLoads[kind] = failure
@@ -195,10 +407,31 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: nil,
                 failure: failure, read: .zero, started: started,
                 duration: started.duration(to: .now))
+            return (ticket, nil)
+        }
+    }
+
+    private func notePlaced(_ ticket: Int, kind: Load, outcome: PageOutcome?) {
+        switch outcome {
+        case .applied?:
+            landed = max(landed, ticket)
+            if let owed = owedPresent, owed < ticket {
+                owedPresent = nil
+            }
+        case .overtaken? where kind == .latest && ticket > landed:
+            owedPresent = ticket
+        default:
+            break
         }
     }
 
     private func reload(rereading changed: Set<MessageId>) {
+        let wasAtPresentBottom = atPresentBottom
+        defer {
+            if atPresentBottom != wasAtPresentBottom {
+                bottomChanged?(false)
+            }
+        }
         guard let window = store.window(channelId: channelId) else {
             rows = []
             pendingKeys = [:]
@@ -206,6 +439,7 @@ public final class MessageListModel {
             reachedOldest = false
             atPresent = true
             isStale = false
+            placeNewMessagesLine()
             return
         }
         let ids = window.messageIds + window.pendingIds
@@ -225,6 +459,70 @@ public final class MessageListModel {
         reachedOldest = window.oldest
         atPresent = window.latest
         isStale = window.stale
+        placeNewMessagesLine()
+    }
+
+    // Without a read state the channel counts as read; `acked` is nil while nothing is.
+    private func readStoredPosition() {
+        guard let state = store.readState(channelId: channelId) else {
+            return
+        }
+        readUpTo = state.acked ?? MessageId(rawValue: 0)
+        readUpToKnown = true
+    }
+
+    private func placeNewMessagesLine() {
+        if readUpTo == nil {
+            readUpTo = rows.last { $0.message.delivery == .sent }?.message.id
+        }
+        let line = readUpTo.flatMap { readUpTo in
+            rows.first { row in
+                row.message.id > readUpTo && row.message.author.id != userId
+                    && row.message.delivery == .sent
+            }?.id
+        }
+        if line != newMessagesLine {
+            newMessagesLine = line
+        }
+        updateUnreadBar()
+    }
+
+    private func updateUnreadBar() {
+        let bar = currentUnreadBar()
+        if bar != unreadBar {
+            unreadBar = bar
+        }
+    }
+
+    private func currentUnreadBar() -> UnreadBar? {
+        guard let line = newMessagesLine, let readUpTo, readUpTo == hiddenLineFrom,
+            readUpTo != seenLineFrom, let start = rows.firstIndex(where: { $0.id == line })
+        else {
+            return nil
+        }
+        let count = rows[start...].count { row in
+            row.message.author.id != userId && row.message.delivery == .sent
+        }
+        let loaded = readPositionLoaded(readUpTo)
+        // Nothing read yet has no time of its own.
+        let since =
+            loaded || readUpTo.rawValue == 0
+            ? rows[start].message.timestamp : Self.time(of: readUpTo)
+        return UnreadBar(count: count, more: !loaded || !atPresent, since: since)
+    }
+
+    // Then the line stands right before the first unread message.
+    private func readPositionLoaded(_ position: MessageId) -> Bool {
+        guard !reachedOldest else {
+            return true
+        }
+        let oldest = rows.first { $0.message.delivery == .sent }?.message.id
+        return oldest.map { $0 <= position } ?? false
+    }
+
+    // Discord's IDs carry their time: milliseconds since 2015, above the low 22 bits.
+    private static func time(of id: MessageId) -> Date {
+        Date(timeIntervalSince1970: Double((id.rawValue >> 22) + 1_420_070_400_000) / 1000)
     }
 
     private func reread(_ changed: Set<MessageId>) {

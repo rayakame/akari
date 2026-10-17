@@ -64,16 +64,18 @@ public final class ServerListModel {
         badges[guild] ?? Badge(unread: false, mentions: 0)
     }
 
-    /// A collapsed folder's tile shows its servers' badges added up; an expanded one's shows
-    /// nothing, since its servers show their own.
-    public func tileBadge(of folder: FolderItem) -> Badge {
-        guard !isExpanded(folder: folder.id) else {
-            return Badge(unread: false, mentions: 0)
-        }
+    /// The folder's servers' badges added up, collapsed or not.
+    public func badge(of folder: FolderItem) -> Badge {
         let badges = folder.guilds.map { badge(of: $0.id) }
         return Badge(
             unread: badges.contains(where: \.unread),
             mentions: badges.reduce(0) { $0 &+ $1.mentions })
+    }
+
+    /// A collapsed folder's tile shows its servers' badges added up; an expanded one's shows
+    /// nothing, since its servers show their own.
+    public func tileBadge(of folder: FolderItem) -> Badge {
+        isExpanded(folder: folder.id) ? Badge(unread: false, mentions: 0) : badge(of: folder)
     }
 
     func reload() {

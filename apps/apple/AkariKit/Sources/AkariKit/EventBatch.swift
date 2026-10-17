@@ -3,6 +3,8 @@ struct EventBatch {
     var ready = false
     var restored = false
     var connection: ConnectionState?
+    // Any state but online, even when the batch ends online again: the connection dropped.
+    var leftOnline = false
     var currentUserChanged = false
     var usersChanged: Set<UserId> = []
     var guildsChanged: Set<GuildId> = []
@@ -29,6 +31,9 @@ struct EventBatch {
             switch event {
             case .connection(let state):
                 connection = state
+                if state != .online {
+                    leftOnline = true
+                }
             case .ready:
                 ready = true
             case .restored:

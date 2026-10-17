@@ -4,17 +4,21 @@ use std::time::{Duration, Instant};
 use reqwest::Method as HttpMethod;
 use serde::Serialize;
 
+use super::clock::ServerClock;
 use super::error::RestError;
 use super::ratelimit::{Method, Permit, RateLimiter, ResponseLimits, RouteKey};
 use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
 use crate::lenient::parse_list;
-use crate::model::{self, ChannelId, MessageId};
+use crate::model::{self, ChannelId, DISCORD_EPOCH, MessageId};
 use crate::state::limit_in;
 use crate::{DiscordClient, LoadReport, Token};
 
 const MESSAGES: &str = "channels/{}/messages";
+const ACK: &str = "channels/{}/messages/{}/ack";
+const ACK_BULK: &str = "read-states/ack-bulk";
+const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
 const RATE_LIMIT_RETRIES: u32 = 3;
 // Longer waits, such as slowmode, fail so the UI can say so instead of showing a pending message.
@@ -77,6 +81,36 @@ impl RequestError {
             Self::TooLong { .. } => "too_long",
             Self::InvalidRequest => "invalid_request",
             Self::Closed => "closed",
+        }
+    }
+}
+
+// A request that failed, or that the rate limiter held back without asking Discord.
+#[derive(Debug)]
+pub(crate) enum Failure {
+    Held(Duration),
+    Request(RequestError),
+}
+
+impl From<RequestError> for Failure {
+    fn from(err: RequestError) -> Self {
+        Self::Request(err)
+    }
+}
+
+impl From<RestError> for Failure {
+    fn from(err: RestError) -> Self {
+        Self::Request(err.into())
+    }
+}
+
+impl From<Failure> for RequestError {
+    fn from(failure: Failure) -> Self {
+        match failure {
+            Failure::Held(wait) => Self::RateLimited {
+                retry_after: Some(wait),
+            },
+            Failure::Request(err) => err,
         }
     }
 }
@@ -146,6 +180,33 @@ impl CreateMessage {
     }
 }
 
+#[derive(Serialize)]
+struct Ack {
+    // Not the account's token: an old ack token, which the official client sends as null.
+    token: Option<String>,
+    last_viewed: u32,
+}
+
+#[derive(Serialize)]
+struct BulkAck {
+    read_states: Vec<BulkAckEntry>,
+}
+
+#[derive(Serialize)]
+struct BulkAckEntry {
+    channel_id: String,
+    message_id: String,
+    read_state_type: u8,
+}
+
+// Acks are retried by their sender, which mustn't be held up by one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Waiting {
+    // Waits out rate limits up to MAX_RATE_LIMIT_WAIT, and before retrying a 429, 502 or 504.
+    Allowed,
+    Never,
+}
+
 #[derive(Debug)]
 pub(crate) struct Page {
     pub(crate) messages: Vec<model::Message>,
@@ -163,6 +224,7 @@ pub(crate) struct AccountRest {
     client: DiscordClient,
     token: Token,
     limiter: RateLimiter,
+    clock: ServerClock,
     retry_delay: Duration,
     unauthorized: AtomicBool,
     closed: AtomicBool,
@@ -174,6 +236,7 @@ impl AccountRest {
             client,
             token,
             limiter: RateLimiter::new(MAX_RATE_LIMIT_WAIT),
+            clock: ServerClock::default(),
             retry_delay,
             unauthorized: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -214,8 +277,11 @@ impl AccountRest {
         let path = format!("channels/{}/messages?limit={limit}{cursor}", channel.get());
         let route = RouteKey::new(Method::Get, MESSAGES, channel.get());
         let Exchange { body, mut report } = self
-            .send(route, || self.request(HttpMethod::GET, &path))
-            .await?;
+            .send(route, Waiting::Allowed, || {
+                self.request(HttpMethod::GET, &path)
+            })
+            .await
+            .map_err(RequestError::from)?;
         let decoding = Instant::now();
         let (mut messages, received): (Vec<model::Message>, usize) =
             parse_list(&body).map_err(|_| RequestError::UnexpectedResponse)?;
@@ -239,11 +305,54 @@ impl AccountRest {
         let path = format!("channels/{}/messages", channel.get());
         let route = RouteKey::new(Method::Post, MESSAGES, channel.get());
         let Exchange { body, .. } = self
-            .send(route, || {
+            .send(route, Waiting::Allowed, || {
                 Ok(self.request(HttpMethod::POST, &path)?.json(message))
             })
-            .await?;
+            .await
+            .map_err(RequestError::from)?;
         serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
+    }
+
+    pub(crate) async fn ack(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        last_viewed: u32,
+    ) -> Result<(), Failure> {
+        let path = format!("channels/{}/messages/{}/ack", channel.get(), message.get());
+        let route = RouteKey::new(Method::Post, ACK, channel.get());
+        let body = Ack {
+            token: None,
+            last_viewed,
+        };
+        self.send(route, Waiting::Never, || {
+            Ok(self.request(HttpMethod::POST, &path)?.json(&body))
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn ack_bulk(&self, entries: &[(ChannelId, MessageId)]) -> Result<(), Failure> {
+        let body = BulkAck {
+            read_states: entries
+                .iter()
+                .map(|(channel, message)| BulkAckEntry {
+                    channel_id: channel.get().to_string(),
+                    message_id: message.get().to_string(),
+                    read_state_type: 0,
+                })
+                .collect(),
+        };
+        let route = RouteKey::new(Method::Post, ACK_BULK, 0);
+        self.send(route, Waiting::Never, || {
+            Ok(self.request(HttpMethod::POST, ACK_BULK)?.json(&body))
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub(crate) fn server_now_millis(&self) -> Option<i64> {
+        self.clock.now_millis()
     }
 
     fn request(
@@ -261,8 +370,10 @@ impl AccountRest {
     async fn send(
         &self,
         route: RouteKey,
+        waiting: Waiting,
         build: impl Fn() -> Result<reqwest::RequestBuilder, RequestError>,
-    ) -> Result<Exchange, RequestError> {
+    ) -> Result<Exchange, Failure> {
+        let waits = waiting == Waiting::Allowed;
         let mut rate_limited = 0;
         let mut server_errors = 0;
         let mut permit: Option<Permit<'_>> = None;
@@ -275,15 +386,16 @@ impl AccountRest {
             let request = build()?;
             let permit = match &permit {
                 Some(held) => {
-                    report.limited += held.renew().await.map_err(too_long)?;
+                    report.limited += held.renew().await.map_err(Failure::Held)?;
                     held
                 }
                 None => {
-                    let acquired = self
-                        .limiter
-                        .acquire(route.clone())
-                        .await
-                        .map_err(too_long)?;
+                    let acquired = if waits {
+                        self.limiter.acquire(route.clone()).await
+                    } else {
+                        self.limiter.acquire_now(route.clone()).await
+                    }
+                    .map_err(Failure::Held)?;
                     report.queued = behind_warm_up + acquired.queued;
                     report.limited = acquired.limited;
                     permit.insert(acquired)
@@ -297,6 +409,7 @@ impl AccountRest {
                 body,
                 timing,
             } = self.client.rest().send_raw(request).await?;
+            self.clock.observe(&headers, timing.headers_at);
             let limits = ResponseLimits::from_response(status, &headers, &body);
             permit.finish(&limits, timing.headers_at);
             report.headers += timing.headers;
@@ -309,18 +422,22 @@ impl AccountRest {
                 401 => {
                     // 401s count toward Cloudflare's ban on invalid requests.
                     self.unauthorized.store(true, Ordering::Release);
-                    return Err(RequestError::Unauthorized);
+                    return Err(RequestError::Unauthorized.into());
                 }
-                429 if limits.retry_after.is_some() && rate_limited < RATE_LIMIT_RETRIES => {
+                429 if waits
+                    && limits.retry_after.is_some()
+                    && rate_limited < RATE_LIMIT_RETRIES =>
+                {
                     rate_limited += 1;
                     report.retries += 1;
                 }
                 429 => {
                     return Err(RequestError::RateLimited {
                         retry_after: limits.retry_after,
-                    });
+                    }
+                    .into());
                 }
-                502 | 504 if server_errors == 0 => {
+                502 | 504 if waits && server_errors == 0 => {
                     server_errors += 1;
                     report.retries += 1;
                     tokio::time::sleep(self.retry_delay).await;
@@ -331,10 +448,10 @@ impl AccountRest {
     }
 }
 
-fn too_long(wait: Duration) -> RequestError {
-    RequestError::RateLimited {
-        retry_after: Some(wait),
-    }
+// An ack's `last_viewed`: days since the Discord epoch, rounded up like the official client.
+pub(crate) fn last_viewed(unix_millis: i64) -> u32 {
+    let since_epoch = u64::try_from(unix_millis.saturating_sub(DISCORD_EPOCH)).unwrap_or(0);
+    u32::try_from(since_epoch.div_ceil(DAY_MILLIS)).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]

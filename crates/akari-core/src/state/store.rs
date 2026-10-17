@@ -1,4 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -8,7 +9,7 @@ use super::apply::{Derived, Entities, ReadyDiff, State, wall_millis};
 use super::badges::{Badge, Badges};
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
-use super::read_states::ReadState;
+use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
@@ -17,6 +18,7 @@ use super::windows::DEFAULT_LIMITS;
 use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits};
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
+use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 // Main-thread readers (SwiftUI, AppKit) wait at most this long for a write.
@@ -26,6 +28,30 @@ pub(crate) struct PreparedReady {
     entities: Entities,
     derived: Derived,
     diff: Option<ReadyDiff>,
+    read_states: HashMap<ChannelId, ReadState>,
+    preparing: Preparing,
+}
+
+// What a READY's swap leaves: its read states as it delivered them, before the local acks replayed
+// on top, and the state it replaced, for the caller to drop outside its locks.
+pub(crate) struct Replaced {
+    pub(crate) read_states: HashMap<ChannelId, ReadState>,
+    _old: (Entities, Derived),
+}
+
+// An open READY journal. Ends it if dropped before the swap, e.g. by a panic while converting.
+pub(crate) struct Preparing {
+    store: Store,
+    swapped: bool,
+}
+
+impl Drop for Preparing {
+    fn drop(&mut self) {
+        if !self.swapped {
+            self.store
+                .write("READY", |inner, _| inner.state.end_journal());
+        }
+    }
 }
 
 /// An account's state, kept current by its gateway connection. Cheap to clone. Reads
@@ -39,8 +65,8 @@ struct Shared {
     inner: RwLock<Inner>,
     // Bumped by every write, so the disk cache skips snapshots while nothing changed.
     changes: AtomicU64,
-    // A READY between its diff and its swap; a restore then would go undiffed.
-    preparing_ready: AtomicBool,
+    // Hands out the order of loads and supersedes that place a window, without the lock.
+    placings: AtomicU64,
     #[cfg(test)]
     park: std::sync::Mutex<Option<Park>>,
     #[cfg(test)]
@@ -159,7 +185,7 @@ impl Store {
         Self {
             shared: Arc::new(Shared {
                 changes: AtomicU64::new(0),
-                preparing_ready: AtomicBool::new(false),
+                placings: AtomicU64::new(0),
                 inner: RwLock::new(Inner {
                     state: State::with_limits(limits),
                     connection: ConnectionState::Offline,
@@ -237,11 +263,13 @@ impl Store {
         value
     }
 
-    pub(crate) fn apply(&self, event: DispatchEvent) {
+    // Returns the ack of the channel being read, when the event left it unread.
+    pub(crate) fn apply(&self, event: DispatchEvent) -> Option<Ack> {
         match event {
             DispatchEvent::Ready(ready) => {
                 let next = self.prepare_ready(*ready);
                 self.replace(next);
+                None
             }
             DispatchEvent::GuildCreate(guild) => match *guild {
                 GatewayGuild::Available(guild) => {
@@ -252,21 +280,27 @@ impl Store {
                     self.park();
                     self.write("GUILD_CREATE", |inner, events| {
                         inner.state.add_guild(next, events);
-                    });
+                        inner.state.take_reading_ack()
+                    })
                 }
                 unavailable => {
                     let event = DispatchEvent::GuildCreate(Box::new(unavailable));
                     self.write("GUILD_CREATE", |inner, events| {
                         inner.state.apply(event, events);
-                    });
+                        inner.state.take_reading_ack()
+                    })
                 }
             },
             DispatchEvent::NotificationSettingsUpdate(settings) => {
                 self.set_notification_flags(settings.flags);
+                None
             }
             event => {
                 let name = event.name();
-                self.write(name, |inner, events| inner.state.apply(event, events));
+                self.write(name, |inner, events| {
+                    inner.state.apply(event, events);
+                    inner.state.take_reading_ack()
+                })
             }
         }
     }
@@ -288,11 +322,24 @@ impl Store {
         });
     }
 
-    // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
-    // it. Only the pump changes entities, so the diff still holds at the swap.
     pub(crate) fn prepare_ready(&self, ready: Ready) -> PreparedReady {
-        self.shared.preparing_ready.store(true, Ordering::SeqCst);
+        self.prepare(self.begin_ready(), ready)
+    }
+
+    // From here until the swap, local acks also go into READY's journal.
+    pub(crate) fn begin_ready(&self) -> Preparing {
+        self.write("READY", |inner, _| inner.state.begin_journal());
+        Preparing {
+            store: self.clone(),
+            swapped: false,
+        }
+    }
+
+    // Converting and diffing a large READY takes milliseconds, so readers mustn't wait for
+    // it. Only the pump changes entities, apart from local acks, which the swap replays.
+    pub(crate) fn prepare(&self, preparing: Preparing, ready: Ready) -> PreparedReady {
         let mut entities = Entities::from_ready(ready);
+        let read_states = entities.read_states.channels().clone();
         let derived = Derived::build(&entities, wall_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
@@ -309,17 +356,27 @@ impl Store {
             entities,
             derived,
             diff,
+            read_states,
+            preparing,
         }
     }
 
-    pub(crate) fn replace(&self, next: PreparedReady) {
+    pub(crate) fn replace(&self, next: PreparedReady) -> Replaced {
+        let PreparedReady {
+            entities,
+            derived,
+            diff,
+            read_states,
+            mut preparing,
+        } = next;
         let old = self.write("READY", |inner, events| {
-            self.shared.preparing_ready.store(false, Ordering::SeqCst);
-            inner
-                .state
-                .swap(next.entities, next.derived, next.diff, events)
+            inner.state.swap(entities, derived, diff, events)
         });
-        drop(old);
+        preparing.swapped = true;
+        Replaced {
+            read_states,
+            _old: old,
+        }
     }
 
     pub(crate) fn set_connection(&self, connection: ConnectionState) {
@@ -350,10 +407,21 @@ impl Store {
         });
     }
 
-    pub(crate) fn begin_load(&self, channel: ChannelId, kind: LoadKind) -> Option<LoadTicket> {
+    pub(crate) fn next_placing(&self) -> u64 {
+        self.shared.placings.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    // `placing` from `next_placing` where the host asked for the load; `None` takes one now.
+    pub(crate) fn begin_load(
+        &self,
+        channel: ChannelId,
+        kind: LoadKind,
+        placing: Option<u64>,
+    ) -> Option<LoadTicket> {
+        let placing = placing.unwrap_or_else(|| self.next_placing());
         let mut ticket = None;
         self.write("load", |inner, events| {
-            ticket = inner.state.begin_load(channel, kind, events);
+            ticket = inner.state.begin_load(channel, kind, placing, events);
         });
         ticket
     }
@@ -363,17 +431,65 @@ impl Store {
         ticket: LoadTicket,
         page: Vec<model::Message>,
         reached_end: bool,
-    ) {
+    ) -> (PageOutcome, Option<Ack>) {
         self.write("load", |inner, events| {
-            inner.state.finish_load(ticket, page, reached_end, events);
+            let outcome = inner.state.finish_load(ticket, page, reached_end, events);
+            (outcome, inner.state.take_reading_ack())
+        })
+    }
+
+    pub(crate) fn supersede_around(&self, channel: ChannelId) {
+        let placing = self.next_placing();
+        self.write("load", |inner, _| {
+            inner.state.supersede_around(channel, placing);
         });
+    }
+
+    // Returns the channel's ack when its list shows unread messages; before the first READY, none.
+    pub(crate) fn set_reading(&self, channel: Option<ChannelId>) -> Option<Ack> {
+        self.write("reading", |inner, events| {
+            inner.state.set_reading(channel, events)
+        })
+    }
+
+    // A connection that dropped may come back in a new session: until the host says the user
+    // still reads the channel, nothing acks it.
+    pub(crate) fn stop_reading(&self) {
+        self.write("reading", |inner, events| {
+            inner.state.set_reading(None, events);
+        });
+    }
+
+    pub(crate) fn undo_ack(
+        &self,
+        channel: ChannelId,
+        undo: Option<ReadState>,
+        after: Option<ReadState>,
+    ) -> bool {
+        self.write("undo", |inner, events| {
+            inner.state.undo_ack(channel, undo, after, events)
+        })
+    }
+
+    // `None` when the channel was read already.
+    pub(crate) fn mark_read(&self, channel: ChannelId) -> Option<Ack> {
+        self.write("mark read", |inner, events| {
+            inner.state.mark_read(channel, events)
+        })
+    }
+
+    // Empty when nothing but forums would be acked.
+    pub(crate) fn mark_guilds_read(&self, guilds: &[GuildId]) -> Vec<Ack> {
+        let now = now_millis();
+        self.write("mark read", |inner, events| {
+            inner.state.mark_guilds_read(guilds, now, events)
+        })
     }
 
     pub(crate) fn restore(&self, cached: Entities) -> bool {
         let derived = Derived::build(&cached, wall_millis());
         let restored = self.write("restore", |inner, events| {
-            !self.shared.preparing_ready.load(Ordering::SeqCst)
-                && inner.state.restore(cached, derived, events)
+            inner.state.restore(cached, derived, events)
         });
         if !restored {
             tracing::info!(target: "akari_core::cache", reason = "ready_first", "cache not used");
@@ -775,6 +891,11 @@ impl Store {
             .lock()
             .ok()
             .and_then(|thread| *thread)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn journaling(&self) -> bool {
+        self.read(|inner| inner.state.journaling())
     }
 
     #[cfg(test)]

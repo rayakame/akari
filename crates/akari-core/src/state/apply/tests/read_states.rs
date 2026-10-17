@@ -598,6 +598,63 @@ fn an_older_ack_is_ignored_unless_manual() {
 }
 
 #[test]
+fn an_echo_at_our_position_keeps_a_later_mention() {
+    let mut state = general_read();
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(400_000_000_000_000_004, GENERAL),
+    );
+    assert_eq!(mentions(&state, GENERAL), 1);
+    let mut echo = ack(GENERAL, 400_000_000_000_000_003);
+    echo["mention_count"] = 0.into();
+
+    apply(&mut state, "MESSAGE_ACK", echo);
+    apply(
+        &mut state,
+        "MESSAGE_ACK",
+        ack(GENERAL, 400_000_000_000_000_002),
+    );
+
+    assert_eq!(
+        read_state(&state, GENERAL),
+        Some((Some(400_000_000_000_000_003), 1))
+    );
+}
+
+#[test]
+fn an_estimated_position_takes_an_ack_at_it_but_not_one_behind() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        dm_plain(400_000_000_000_000_022, GROUP),
+    );
+    assert_eq!(
+        read_state(&state, GROUP),
+        Some((Some(400_000_000_000_000_021), 1))
+    );
+    let mut behind = ack(GROUP, 400_000_000_000_000_020);
+    behind["mention_count"] = 0.into();
+    let mut real = ack(GROUP, 400_000_000_000_000_021);
+    real["mention_count"] = 0.into();
+
+    apply(&mut state, "MESSAGE_ACK", behind);
+    assert_eq!(
+        read_state(&state, GROUP),
+        Some((Some(400_000_000_000_000_021), 1))
+    );
+    assert_eq!(estimated(&state, GROUP), Some(true));
+    apply(&mut state, "MESSAGE_ACK", real);
+
+    assert_eq!(
+        read_state(&state, GROUP),
+        Some((Some(400_000_000_000_000_021), 0))
+    );
+    assert_eq!(estimated(&state, GROUP), Some(false));
+}
+
+#[test]
 fn an_ack_without_a_count_clears_mentions_once_it_reaches_the_newest_message() {
     let mut state = ready_state();
 
@@ -723,6 +780,109 @@ fn an_older_passive_update_changes_nothing() {
         read_state(&state, GENERAL),
         Some((Some(400_000_000_000_000_002), 2))
     );
+}
+
+#[test]
+fn a_history_load_at_the_present_raises_the_cursor() {
+    let mut state = general_read();
+
+    let events = load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Latest,
+        &[400_000_000_000_000_007, 400_000_000_000_000_009],
+        false,
+    );
+    assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_009));
+    assert!(unread(&state, GENERAL));
+    assert!(
+        events.contains(&format!("BadgeChanged({GENERAL})")),
+        "{events:?}"
+    );
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Older,
+        &[400_000_000_000_000_004, 400_000_000_000_000_005],
+        false,
+    );
+
+    assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_009));
+}
+
+#[test]
+fn only_pages_that_reach_the_present_raise_the_cursor() {
+    let mut state = general_read();
+
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Around(Snowflake::new(400_000_000_000_000_013)),
+        &[
+            400_000_000_000_000_012,
+            400_000_000_000_000_013,
+            400_000_000_000_000_014,
+        ],
+        false,
+    );
+    assert_eq!(
+        last_message(&state, GENERAL),
+        Some(400_000_000_000_000_003),
+        "around"
+    );
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Older,
+        &[400_000_000_000_000_010, 400_000_000_000_000_011],
+        false,
+    );
+    assert_eq!(
+        last_message(&state, GENERAL),
+        Some(400_000_000_000_000_003),
+        "older"
+    );
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Newer,
+        &[400_000_000_000_000_015],
+        false,
+    );
+    assert_eq!(
+        last_message(&state, GENERAL),
+        Some(400_000_000_000_000_003),
+        "newer, more to come"
+    );
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Newer,
+        &[400_000_000_000_000_016, 400_000_000_000_000_017],
+        true,
+    );
+
+    assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_017));
+}
+
+#[test]
+fn a_history_load_never_moves_the_cursor_back() {
+    let mut state = general_read();
+    apply(
+        &mut state,
+        "PASSIVE_UPDATE_V2",
+        passive(G1, GENERAL, 400_000_000_000_000_012),
+    );
+
+    load_page(
+        &mut state,
+        GENERAL,
+        LoadKind::Latest,
+        &[400_000_000_000_000_004],
+        true,
+    );
+
+    assert_eq!(last_message(&state, GENERAL), Some(400_000_000_000_000_012));
 }
 
 #[test]

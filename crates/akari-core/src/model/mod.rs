@@ -21,6 +21,7 @@ pub use message::{
     ReactionCountDetails, StickerFormatType, StickerItem,
 };
 pub use permissions::Permissions;
+pub(crate) use snowflake::DISCORD_EPOCH;
 pub use snowflake::{
     AttachmentMarker, ChannelMarker, EmojiMarker, GenericMarker, GuildMarker, MessageMarker,
     RoleMarker, SkuMarker, Snowflake, StickerMarker, UserMarker, WebhookMarker,
