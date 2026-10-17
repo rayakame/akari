@@ -338,6 +338,51 @@ struct ChannelListModelTests {
     }
 
     @Test
+    func theKeptRowsBadgeFollowsItsThread() {
+        let model = threaded { $0.channelBadges = [id(31): badge(mentions: 1)] }
+        model.setOpen(id(31))
+        store.update { state in
+            state.channelLists[id(1)] = [id(10), id(11), id(32), id(12)]
+            state.channelBadges = [:]
+        }
+
+        model.apply(
+            EventBatch([
+                .badgeChanged(channelId: id(31), guildId: id(1)),
+                .threadListingChanged(guildId: id(1), threadId: id(31)),
+            ]))
+
+        #expect(model.badge(of: id(31)) == noBadge)
+    }
+
+    @Test
+    func theKeptThreadIsFoundById() {
+        let model = threaded { $0.channels[id(33)] = thread(33, in: 11) }
+        model.setOpen(id(33))
+
+        #expect(model.channel(id(33))?.id == id(33))
+        #expect(model.channel(id(12))?.id == id(12))
+        model.setOpen(id(12))
+        #expect(model.channel(id(33)) == nil)
+    }
+
+    @Test
+    func aNewSessionRereadsTheKeptThread() {
+        let model = threaded()
+        model.setOpen(id(31))
+        var renamed = thread(31, in: 11)
+        renamed.name = "renamed"
+        store.update { state in
+            state.channelLists[id(1)] = [id(10), id(11), id(32), id(12)]
+            state.channels[id(31)] = renamed
+        }
+
+        model.apply(EventBatch([.ready]))
+
+        #expect(model.channel(id(31))?.name == "renamed")
+    }
+
+    @Test
     func aThreadsMuteChangeRereadsMuted() {
         let model = threaded()
         store.update { $0.mutedChannels = [id(32)] }

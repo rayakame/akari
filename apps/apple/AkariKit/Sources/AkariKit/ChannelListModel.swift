@@ -49,8 +49,13 @@ public final class ChannelListModel {
         }
     }
 
-    /// The channel open full width, so an open thread keeps its row in `shown(open:)`.
-    public func setOpen(_ channel: ChannelId?) {
+    /// A listed channel, or the open thread while it keeps its row.
+    public func channel(_ id: ChannelId) -> Channel? {
+        channels.first { $0.id == id } ?? openThread.flatMap { $0.id == id ? $0 : nil }
+    }
+
+    // The channel open full width, so an open thread keeps its row in `shown(open:)`.
+    func setOpen(_ channel: ChannelId?) {
         guard channel != openThread?.id else {
             return
         }
@@ -109,7 +114,11 @@ public final class ChannelListModel {
             readSettings()
         }
         if let changed = batch.badgesChanged[guildId] {
-            readBadges(channels.map(\.id).filter(changed.contains))
+            var rows = channels.map(\.id)
+            if let kept = openThread?.id, !rows.contains(kept) {
+                rows.append(kept)
+            }
+            readBadges(rows.filter(changed.contains))
         }
     }
 
@@ -140,7 +149,8 @@ public final class ChannelListModel {
             }
         }
         if let kept = openThread, changed?.contains(kept.id) != false {
-            openThread = held[kept.id] ?? store.channels(ids: [kept.id]).first ?? kept
+            openThread =
+                channels.first { $0.id == kept.id } ?? store.channels(ids: [kept.id]).first ?? kept
         }
     }
 

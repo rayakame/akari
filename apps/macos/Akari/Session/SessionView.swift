@@ -127,7 +127,7 @@ struct SessionView<MessageArea: View>: View {
         guard let id = session.messages?.channelId else {
             return nil
         }
-        return session.channels?.channels.first { $0.id == id } ?? conversation?.channel
+        return session.channels?.channel(id) ?? conversation?.channel
     }
 
     private var openName: String {
