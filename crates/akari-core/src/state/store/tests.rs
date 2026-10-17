@@ -675,6 +675,162 @@ fn channel_list_of_an_unknown_guild_is_empty() {
     assert!(store.channel_list(Snowflake::new(G3)).is_empty());
 }
 
+const MINUTE: i64 = 60_000;
+
+fn snowflake_at(unix_millis: i64) -> String {
+    Snowflake::<model::GenericMarker>::from_unix_millis(unix_millis, 0)
+        .get()
+        .to_string()
+}
+
+// A joined thread in GENERAL whose newest message is `minutes_ago`, hidden after an hour.
+fn thread_in_general(id: u64, minutes_ago: i64) -> Value {
+    json!({
+        "id": id.to_string(), "type": 11, "name": format!("t{id}"),
+        "guild_id": G1.to_string(), "parent_id": GENERAL.to_string(),
+        "owner_id": "100000000000000002",
+        "last_message_id": snowflake_at(wall_millis() - minutes_ago * MINUTE),
+        "message_count": 1, "member_count": 1, "rate_limit_per_user": 0, "flags": 0,
+        "thread_metadata": {"archived": false, "auto_archive_duration": 60,
+                            "archive_timestamp": "2024-03-01T08:30:00.250000+00:00", "locked": false},
+        "member": {"flags": 1, "muted": false, "mute_config": null}
+    })
+}
+
+fn read_up_to_its_newest(data: &mut Value, thread: &Value) {
+    data["read_state"]["entries"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id": thread["id"], "last_message_id": thread["last_message_id"], "mention_count": 0}));
+}
+
+// READY as a member whose guild has `threads` (replacing the fixture's), each read.
+fn ready_with_threads(
+    general_overwrites: Value,
+    threads: Vec<Value>,
+    edit: impl FnOnce(&mut Value),
+) -> DispatchEvent {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    let guild = &mut data["guilds"][0];
+    guild["properties"]["owner_id"] = "100000000000000099".into();
+    for channel in guild["channels"].as_array_mut().unwrap() {
+        if channel["id"].as_str().and_then(|id| id.parse().ok()) == Some(GENERAL) {
+            channel["permission_overwrites"] = general_overwrites.clone();
+        }
+    }
+    data["merged_members"][0][0]["roles"] = json!([]);
+    for thread in &threads {
+        read_up_to_its_newest(&mut data, thread);
+    }
+    data["guilds"][0]["threads"] = Value::Array(threads);
+    edit(&mut data);
+    dispatch("READY", &data)
+}
+
+#[test]
+fn threads_follow_their_parent_newest_first() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_threads(
+        json!([]),
+        vec![
+            thread_in_general(300_000_000_000_000_022, 5),
+            thread_in_general(300_000_000_000_000_025, 50),
+            thread_in_general(300_000_000_000_000_020, 1),
+        ],
+        |_| {},
+    ));
+
+    assert_eq!(
+        ids(&store.channel_list(Snowflake::new(G1))),
+        [
+            VOICE,
+            CATEGORY,
+            GENERAL,
+            300_000_000_000_000_025,
+            300_000_000_000_000_022,
+            300_000_000_000_000_020
+        ]
+    );
+}
+
+#[test]
+fn a_parent_without_view_channel_hides_its_threads() {
+    let deny_view = json!([{
+        "id": G1.to_string(), "type": 0, "allow": "0",
+        "deny": Permissions::VIEW_CHANNEL.0.to_string(),
+    }]);
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_threads(
+        deny_view,
+        vec![thread_in_general(300_000_000_000_000_022, 5)],
+        |_| {},
+    ));
+
+    assert_eq!(ids(&store.channel_list(Snowflake::new(G1))), [VOICE]);
+}
+
+#[test]
+fn a_muted_parent_and_hide_muted_channels_dont_change_what_is_listed() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_threads(
+        json!([]),
+        vec![thread_in_general(300_000_000_000_000_022, 5)],
+        |data| {
+            let settings = &mut data["user_guild_settings"]["entries"][0];
+            settings["hide_muted_channels"] = true.into();
+            for channel in settings["channel_overrides"].as_array_mut().unwrap() {
+                channel["muted"] = true.into();
+                channel["mute_config"] = Value::Null;
+            }
+        },
+    ));
+    assert!(store.channel_muted(Snowflake::new(GENERAL)));
+    assert!(store.channel_muted(Snowflake::new(CATEGORY)));
+
+    assert_eq!(
+        ids(&store.channel_list(Snowflake::new(G1))),
+        [VOICE, CATEGORY, GENERAL, 300_000_000_000_000_022]
+    );
+}
+
+#[test]
+fn unjoined_archived_and_read_threads_past_their_window_are_never_listed() {
+    let mut archived = thread_in_general(300_000_000_000_000_022, 5);
+    archived["thread_metadata"]["archived"] = true.into();
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_threads(
+        json!([]),
+        vec![archived, thread_in_general(300_000_000_000_000_023, 61)],
+        |_| {},
+    ));
+    let mut unjoined = thread_in_general(300_000_000_000_000_024, 5);
+    unjoined.as_object_mut().unwrap().remove("member");
+    store.apply(dispatch("THREAD_CREATE", &unjoined));
+
+    assert_eq!(
+        ids(&store.channel_list(Snowflake::new(G1))),
+        [VOICE, CATEGORY, GENERAL]
+    );
+}
+
+#[test]
+fn a_private_thread_is_listed_only_when_joined() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_threads(json!([]), Vec::new(), |_| {}));
+    let mut joined = thread_in_general(300_000_000_000_000_022, 5);
+    joined["type"] = 12.into();
+    let mut unjoined = thread_in_general(300_000_000_000_000_023, 5);
+    unjoined["type"] = 12.into();
+    unjoined.as_object_mut().unwrap().remove("member");
+    store.apply(dispatch("THREAD_CREATE", &joined));
+    store.apply(dispatch("THREAD_CREATE", &unjoined));
+
+    assert_eq!(
+        ids(&store.channel_list(Snowflake::new(G1))),
+        [VOICE, CATEGORY, GENERAL, 300_000_000_000_000_022]
+    );
+}
+
 #[test]
 fn guild_list_reads_join_dates_from_the_current_member() {
     let store = ready_store();

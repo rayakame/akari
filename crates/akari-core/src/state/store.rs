@@ -828,7 +828,10 @@ impl Store {
 
     /// A guild's channel list as Discord shows it: [`display_order`], only channels the
     /// user can view, the categories holding them, and empty categories the user can
-    /// view. Threads are left out.
+    /// view. Each channel is followed by its listed threads, newest created first: those the
+    /// user joined that aren't archived and are inside their inactivity window
+    /// ([`Channel::window_end`]), unread, or with mentions. The parent's mute and "hide muted
+    /// channels" don't change which threads are listed.
     ///
     /// [`display_order`]: super::display_order
     pub fn channel_list(&self, guild: GuildId) -> Vec<Arc<Channel>> {
@@ -836,11 +839,18 @@ impl Store {
         self.read(|inner| {
             let state = &inner.state;
             let ordered = order::display_order(&state.guild_channels(guild));
-            order::visible_channels(ordered, |channel| {
+            let visible = order::visible_channels(ordered, |channel| {
                 state
                     .permissions(channel.id, now)
                     .is_some_and(|permissions| permissions.contains(Permissions::VIEW_CHANNEL))
-            })
+            });
+            let mut list = Vec::with_capacity(visible.len());
+            for channel in visible {
+                let threads = state.listed_threads(channel.id);
+                list.push(channel);
+                list.extend(threads);
+            }
+            list
         })
     }
 

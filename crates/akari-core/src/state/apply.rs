@@ -1390,9 +1390,20 @@ impl State {
             .min()
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn listed(&self, channel: ChannelId) -> bool {
         self.badges.listed(channel)
+    }
+
+    // Newest created first.
+    pub(crate) fn listed_threads(&self, parent: ChannelId) -> Vec<Arc<Channel>> {
+        let mut threads: Vec<Arc<Channel>> = self
+            .threads
+            .of(parent)
+            .filter(|thread| self.listed(*thread))
+            .filter_map(|thread| self.entities.channels.get(&thread).cloned())
+            .collect();
+        threads.reverse();
+        threads
     }
 
     pub(crate) fn next_window_end(&self, after: Timestamp) -> Option<Timestamp> {
