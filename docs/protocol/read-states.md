@@ -305,7 +305,7 @@ over the DMs; none computes permissions.
   nothing.
 - **A guild** sums its text, announcement, forum, media, voice and stage channels and its
   listed threads ([Threads](#threads)); a thread's mentions count even before the members
-  event says the mention added the user to it. Its dot needs one of them unread, a channel not
+  event says the mention added the user to it, and an archived thread adds nothing. Its dot needs one of them unread, a channel not
   under a muted category or muted channel (a thread's parent doesn't matter), and the guild
   itself unmuted; its count adds up all their mentions, muted or not. With "hide muted
   channels", muted channels and muted threads don't count at all. A folder's badge is its guilds' sum, added up by the host.

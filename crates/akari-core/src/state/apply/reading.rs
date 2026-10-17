@@ -32,9 +32,8 @@ impl Entities {
         }
     }
 
-    // Without a read state, a thread is unread from its start, as the official client shows one
-    // the user was mentioned into, and in a guild channel what was posted before the user joined
-    // is read. DMs, and guilds whose join is unknown, are read until a message arrives.
+    // Without a read state a thread is unread from its start (as the official client shows one),
+    // a guild channel read up to the join, and a DM read until a message arrives.
     fn start_position(&self, channel: &Channel) -> Option<u64> {
         if channel.is_thread() {
             return Some(channel.id.get());

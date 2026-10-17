@@ -406,13 +406,15 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
     // The guild counts the threads its list shows, whatever their parent's mute.
     let counted = !hidden && (kind != Kind::Thread || listed);
     let parent_muted = kind != Kind::Thread && under_muted_parent(entities, channel, now);
+    let archived = channel.thread.as_deref().is_some_and(|info| info.archived);
     Some(Slot {
         badge: Badge { unread, mentions },
         read_state,
         guild: Some(guild),
         dot: counted && unread && !parent_muted,
-        // A mention adds the user to a thread before the members event says so.
-        mentions: if hidden { 0 } else { mentions },
+        // A mention adds the user to a thread before the members event lists it; a closed
+        // thread has no row to find it in.
+        mentions: if hidden || archived { 0 } else { mentions },
         listed,
     })
 }

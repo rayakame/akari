@@ -329,6 +329,28 @@ fn the_thread_level_changes_no_badge() {
 }
 
 #[test]
+fn an_archived_threads_mentions_leave_the_guild_badge() {
+    let mut state = ready_where(|ready| {
+        thread_unread(ready);
+        ready["read_state"]["entries"][1]["mention_count"] = 1.into();
+    });
+    assert_eq!(guild_badge(&state, G1), badge(true, 1));
+
+    apply(
+        &mut state,
+        "THREAD_UPDATE",
+        json!({
+            "id": THREAD.to_string(), "guild_id": G1.to_string(), "type": 11,
+            "thread_metadata": {"archived": true, "auto_archive_duration": 1440,
+                                "archive_timestamp": "2026-10-08T12:00:00.000000+00:00", "locked": false}
+        }),
+    );
+
+    assert!(!state.listed(Snowflake::new(THREAD)));
+    assert_eq!(guild_badge(&state, G1), badge(false, 0));
+}
+
+#[test]
 fn an_archived_thread_doesnt_count() {
     let mut state = ready_where(|ready| {
         read_general(ready);

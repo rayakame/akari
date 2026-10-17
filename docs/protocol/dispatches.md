@@ -118,9 +118,10 @@ The store keeps the joined threads from READY and whatever THREAD_CREATE brings.
 ([read-states.md](read-states.md#threads)). It changes live:
 - READY's and GUILD_CREATE's threads are joined, with their `member`'s mute and level, or a
   default membership without one.
-- THREAD_CREATE with `member` joins. Discord sends it also when the user is added to a
-  thread, for example by a mention: the official client lists that thread at once (observed
-  2026-10-17). Without `member`, a known thread keeps its membership.
+- THREAD_CREATE with `member` joins; the docs say Discord sends it also when the user is
+  added to a thread. A mention that added the user listed the thread at once in the official
+  client (observed 2026-10-17; which event brought it wasn't captured). Without `member`, a
+  known thread keeps its membership.
 - THREAD_MEMBER_UPDATE replaces the membership. THREAD_MEMBERS_UPDATE joins when it adds the
   user and leaves when it removes them; everything else in it is ignored. THREAD_MEMBER_LIST_UPDATE
   (op 37's member lists) never changes membership.
@@ -137,7 +138,8 @@ it is inside its "Hide After Inactivity" window, unread, or has a mention. The w
 forum posts (channel flag `PINNED`, 1 << 1) have none. The official client keeps an unread
 thread past its window (observed 2026-10-17: a thread with an unread mention and one with a
 plain unread message stayed listed past their hour, also after a reload, and went once read).
-The guild's badge counts exactly the listed threads. Neither the parent's mute nor "hide muted
+The guild's badge counts exactly the listed threads, and a direct mention in a thread the user
+hasn't joined until the members event lists it. Neither the parent's mute nor "hide muted
 channels" changes what's listed; which listed threads a list shows under a collapsed category
 or a muted parent is the apps' rule ([channel-list.md](../ui/channel-list.md#threads)).
 

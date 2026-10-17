@@ -5,9 +5,8 @@ use tokio::time::Instant;
 use crate::model::Timestamp;
 use crate::state::{Store, StoreEvent, Subscription, wall_millis};
 
-// Discord doesn't say when a timed mute ends or a thread's inactivity hides it, so lists learn
-// it from here: the guild's settings change when its mute, or one of its channels' or threads',
-// runs out, and a read thread leaves its list when its window ends.
+// Discord doesn't say when a timed mute ends or an inactive thread leaves the list, so lists
+// learn both from here.
 pub(crate) async fn run_deadlines(store: Store, changes: Subscription) {
     let clock = Clock::start();
     let mut checked = clock.now();
@@ -31,9 +30,8 @@ pub(crate) async fn run_deadlines(store: Store, changes: Subscription) {
     }
 }
 
-// New settings can move the next mute end; a thread joined, read or written in can bring a
-// window end. A reconnect can follow a sleep of the computer, during which the monotonic clock
-// behind the deadline stood still.
+// Settings and threads can move the next end; a reconnect can follow a sleep, during which the
+// monotonic clock behind the deadline stood still.
 fn rearms(event: &StoreEvent) -> bool {
     matches!(
         event,
