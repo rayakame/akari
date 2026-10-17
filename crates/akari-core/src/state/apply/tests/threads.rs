@@ -261,6 +261,18 @@ fn a_thread_without_a_read_state_is_unread_from_its_start() {
     assert!(state.read_state(Snowflake::new(CREATED)).is_none());
 }
 
+// A forum post's starter message has the post's own ID.
+#[test]
+fn a_forum_post_with_only_its_starter_is_unread() {
+    let mut state = ready_state();
+    let mut post = created();
+    post["last_message_id"] = CREATED.to_string().into();
+
+    apply(&mut state, "THREAD_CREATE", post);
+
+    assert!(state.unread(Snowflake::new(CREATED)));
+}
+
 #[test]
 fn a_thread_we_are_mentioned_into_is_unread_from_its_start() {
     let mut state = ready_state();
@@ -274,7 +286,7 @@ fn a_thread_we_are_mentioned_into_is_unread_from_its_start() {
     );
 
     let read = state.read_state(Snowflake::new(CREATED)).expect("started");
-    assert_eq!(read.acked.map(|id| id.get()), Some(CREATED));
+    assert_eq!(read.acked.map(|id| id.get()), Some(CREATED - 1));
     assert_eq!(read.mentions, 1);
     assert!(state.unread(Snowflake::new(CREATED)));
 }

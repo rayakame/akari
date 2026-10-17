@@ -38,15 +38,16 @@ A channel without a read state:
 - **A DM or group DM** is read until its next message, which starts its read state at the
   message before it, also when the DM's CHANNEL_CREATE already named that message.
 - **A guild whose join time is unknown** is treated like a DM.
-- **A thread** is unread from its start: its read position is the thread's own ID, so every
-  message in it is unread and the new messages line sits above its first message. The official
+- **A thread** is unread from its start: its read position is one before the thread's own ID,
+  so every message in it is unread, a forum post's starter message (which has the post's ID)
+  included, and the new messages line sits above its first message. The official
   client did so for a thread the user was mentioned into (observed 2026-10-17: the line above
   the thread's first message, not above the mention). A joined thread from READY without a read
   state is taken the same way (**unverified**).
 
 A read state the store starts this way (for a DM's first message, or a guild channel's or a
-thread's first mention) is marked `estimated`: its `acked` is the join, the thread's ID or the
-message before, not a message the user read. An ack or the user's own message replaces it with a real one.
+thread's first mention) is marked `estimated`: its `acked` is the join, the position before the
+thread or the message before, not a message the user read. An ack or the user's own message replaces it with a real one.
 
 The newest message only moves forward: from MESSAGE_CREATE, CHANNEL_CREATE, CHANNEL_UPDATE
 and GUILD_CREATE (an older or missing `last_message_id` changes nothing), from the unread

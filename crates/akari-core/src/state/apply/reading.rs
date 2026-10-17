@@ -32,11 +32,11 @@ impl Entities {
         }
     }
 
-    // Without a read state a thread is unread from its start (as the official client shows one),
-    // a guild channel read up to the join, and a DM read until a message arrives.
+    // Without a read state a thread is unread from its start, including a forum post's starter,
+    // which has the post's ID; a guild channel is read up to the join, a DM until a message.
     fn start_position(&self, channel: &Channel) -> Option<u64> {
         if channel.is_thread() {
-            return Some(channel.id.get());
+            return Some(channel.id.get().saturating_sub(1));
         }
         let joined = self.members.get(&channel.guild_id?)?.joined_at?;
         Some(Snowflake::<GenericMarker>::from_unix_millis(joined.unix_millis(), 0).get())
