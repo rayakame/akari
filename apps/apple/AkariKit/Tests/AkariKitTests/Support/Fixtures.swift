@@ -27,6 +27,14 @@ func channel(
     )
 }
 
+func thread(_ raw: UInt64, in parent: UInt64, guild: UInt64 = 1) -> Channel {
+    var thread = channel(raw, guild: guild, kind: .publicThread, parent: parent)
+    thread.thread = ThreadInfo(
+        joined: true, archived: false, locked: false, private: false, messageCount: nil,
+        ownerId: nil)
+    return thread
+}
+
 func settings(
     muted: Bool = false, suppressEveryone: Bool = false, hideMutedChannels: Bool = false
 ) -> GuildSettings {

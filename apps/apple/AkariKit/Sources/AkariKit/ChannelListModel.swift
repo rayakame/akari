@@ -13,6 +13,8 @@ public final class ChannelListModel {
     public private(set) var hidesMuted = false
     /// What each channel's row shows; channels without one show nothing.
     public private(set) var badges: [ChannelId: Badge] = [:]
+    // The thread open full width, which keeps a row while the core doesn't list it.
+    private var openThread: Channel?
 
     @ObservationIgnored private let store: Store
 
@@ -23,15 +25,55 @@ public final class ChannelListModel {
         readSettings()
     }
 
-    /// The list as shown: without muted channels when the user hides them, except `open`.
-    /// Categories stay.
+    /// The list as shown, as the official client shows it:
+    /// - the open thread (see `setOpen(_:)`) keeps a row at the top of its parent's threads
+    ///   while it isn't listed;
+    /// - a muted channel that isn't open shows only its unread and mentioned threads;
+    /// - with "hide muted channels", muted channels and threads are left out, except `open` and
+    ///   a channel with threads that show. Categories stay.
     public func shown(open: ChannelId?) -> [Channel] {
-        guard hidesMuted else {
-            return channels
+        var list = channels
+        if let kept = openThread, kept.id == open, !list.contains(where: { $0.id == kept.id }),
+            let parent = list.firstIndex(where: { $0.id == kept.parentId })
+        {
+            list.insert(kept, at: parent + 1)
         }
-        return channels.filter { channel in
-            channel.kind == .guildCategory || channel.id == open || !muted.contains(channel.id)
+        let threads = Set(
+            list.filter { $0.isThread && showsThread($0, open: open) }.compactMap(\.parentId))
+        return list.filter { channel in
+            if channel.isThread {
+                return showsThread(channel, open: open)
+            }
+            return !hidesMuted || channel.kind == .guildCategory || channel.id == open
+                || !muted.contains(channel.id) || threads.contains(channel.id)
         }
+    }
+
+    /// The channel open full width, so an open thread keeps its row in `shown(open:)`.
+    public func setOpen(_ channel: ChannelId?) {
+        guard channel != openThread?.id else {
+            return
+        }
+        openThread = channel.flatMap { id in
+            channels.first { $0.id == id } ?? store.channels(ids: [id]).first
+        }.flatMap { $0.isThread ? $0 : nil }
+    }
+
+    private func showsThread(_ thread: Channel, open: ChannelId?) -> Bool {
+        if thread.id == open {
+            return true
+        }
+        if hidesMuted && muted.contains(thread.id) {
+            return false
+        }
+        guard let parent = thread.parentId, parent != open, muted.contains(parent) else {
+            return true
+        }
+        return Self.isPending(badge(of: thread.id))
+    }
+
+    private static func isPending(_ badge: Badge) -> Bool {
+        badge.unread || badge.mentions > 0
     }
 
     public func badge(of channel: ChannelId) -> Badge {
@@ -39,9 +81,13 @@ public final class ChannelListModel {
     }
 
     /// Whether a channel stays in view under its collapsed category: the open one, one with
-    /// mentions, and an unread one unless its category is muted.
+    /// mentions, and an unread one unless its category is muted. A thread stays when it's
+    /// unread too, muted category or not, and keeps its channel with it.
     public func staysWhenCollapsed(_ channel: Channel, open: ChannelId?) -> Bool {
         let badge = badge(of: channel.id)
+        if channel.isThread {
+            return channel.id == open || Self.isPending(badge)
+        }
         return channel.id == open || badge.mentions > 0
             || (badge.unread && !(channel.parentId.map(muted.contains) ?? false))
     }
@@ -85,6 +131,16 @@ public final class ChannelListModel {
         readBadges(changed == nil ? channels.map(\.id) : unread.filter { !known.contains($0) })
         if changed != nil, channels.map(\.id) != listed {
             muted = Set(store.mutedChannels(ids: channels.map(\.id)))
+        } else if changed != nil {
+            // A thread's own mute comes with its channel update.
+            let threads = unread.filter { held[$0]?.isThread == true }
+            if !threads.isEmpty {
+                muted.subtract(threads)
+                muted.formUnion(store.mutedChannels(ids: threads))
+            }
+        }
+        if let kept = openThread, changed?.contains(kept.id) != false {
+            openThread = held[kept.id] ?? store.channels(ids: [kept.id]).first ?? kept
         }
     }
 
