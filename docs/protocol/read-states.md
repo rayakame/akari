@@ -77,9 +77,9 @@ the body
 ```
 
 No `flags`, no `manual`. `last_viewed` is the number of days since the Discord epoch
-(2015-01-01 UTC). It was 4306 at 15:13 and at 19:58 UTC on 2026-10-15, so the client rounds up
-or to the nearest day (rounding down would give 4305). Which of the two is open until an ack
-before 12:00 UTC is seen, where they differ; Akari rounds up.
+(2015-01-01 UTC), rounded up. It was 4306 at 15:13 and at 19:58 UTC on 2026-10-15 (4305.63
+and 4305.83 days), and 4308 at 11:36 UTC on 2026-10-17 (4307.48 days), where rounding to the
+nearest day would give 4307. Akari rounds up too.
 
 **When it goes out:**
 
@@ -354,8 +354,8 @@ names or message content.
 ## Open points
 
 - **Acks:** what the official client does is [above](#acks-in-the-official-client), what Akari
-  does [here](#how-akari-acks). Open: `last_viewed` rounding (ceiling or nearest, apart only
-  before 12:00 UTC), whether 50 is a cap per request, and what a folder's bulk holds.
+  does [here](#how-akari-acks). Open: whether 50 is a cap per request, and what a folder's
+  bulk holds.
 - **Mentions in a voice channel's chat:** counted, but what the official client shows for
   them is **unverified**.
 - **Joining or leaving a thread elsewhere** (THREAD_MEMBER_UPDATE) isn't decoded; such a

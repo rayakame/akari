@@ -45,6 +45,10 @@ before compression. The 4 MiB body limit applies to the decompressed body.
 - A load that ends at the present (`Latest`, `Newer`, the stale refresh) holds live
   messages back while it runs, and adds them after the page. Otherwise a message that
   arrives during the request could land in the window before the messages it follows.
+  At most the newest 200 are held. When more arrive and the page doesn't cover the dropped
+  ones, the window keeps only the held messages, as if they had been added live past the
+  limit (`MessagesTrimmed`, or `MessagesCleared` if all of them were deleted since); the
+  dropped ones load again as older history.
 - A load whose window was cleared, replaced or evicted while it ran is dropped: the page
   belongs to messages that are no longer there. So is an `Older` or `Newer` page whose
   end of the window was trimmed or deleted meanwhile, since it would leave a gap. Both are

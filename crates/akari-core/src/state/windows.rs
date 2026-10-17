@@ -102,6 +102,8 @@ struct Window {
     present_through: Option<MessageId>,
     // The newest held message that was deleted: `present_through` once the held ones are rows.
     held_deleted: Option<MessageId>,
+    // The newest held message dropped for the limit; rows before it can't join the held ones.
+    held_dropped: Option<MessageId>,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
     loading: u32,
@@ -146,6 +148,7 @@ impl Window {
         } else if !self.holds_live() {
             self.held.clear();
             self.held_deleted = None;
+            self.held_dropped = None;
         }
     }
 
@@ -191,7 +194,16 @@ impl Window {
             .into_iter()
             .filter(|message| newest.is_none_or(|newest| message.id > newest))
             .collect();
-        self.merge(channel_id, held, End::Newer, false, limit, events);
+        let dropped = self
+            .held_dropped
+            .take()
+            .filter(|dropped| newest < Some(*dropped));
+        self.merge(channel_id, held, End::Newer, false, usize::MAX, events);
+        // Appended live, the held messages would have trimmed every row before the dropped ones.
+        if let Some(dropped) = dropped {
+            self.drop_older(|id| id <= dropped, channel_id, events);
+        }
+        self.trim(channel_id, limit, End::Older, events);
         self.present_through = self.present_through.max(self.held_deleted.take());
     }
 
@@ -254,7 +266,9 @@ impl Window {
             Err(_) if self.holds_live() => {
                 upsert(&mut self.held, message);
                 let excess = self.held.len().saturating_sub(limit);
-                self.held.drain(..excess);
+                if let Some(dropped) = self.held.drain(..excess).next_back() {
+                    self.held_dropped = self.held_dropped.max(Some(dropped.id));
+                }
             }
             Err(index) if self.appends_live() => {
                 self.messages.insert(index, message.clone());
@@ -273,26 +287,35 @@ impl Window {
         channel_id: ChannelId,
         events: &mut Vec<StoreEvent>,
     ) {
-        let Some(first) = first else {
-            return;
-        };
-        let older = self
+        if let Some(first) = first {
+            self.drop_older(|id| id < first, channel_id, events);
+        }
+    }
+
+    fn drop_older(
+        &mut self,
+        older: impl Fn(MessageId) -> bool,
+        channel_id: ChannelId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let count = self
             .messages
             .iter()
-            .take_while(|message| message.id < first)
+            .take_while(|message| older(message.id))
             .count();
-        if older == 0 {
+        if count == 0 {
             return;
         }
-        self.messages.drain(..older);
+        self.messages.drain(..count);
         self.oldest = false;
-        if let Some((first, last)) = self.range() {
-            events.push(StoreEvent::MessagesTrimmed {
+        events.push(match self.range() {
+            Some((first, last)) => StoreEvent::MessagesTrimmed {
                 channel_id,
                 first,
                 last,
-            });
-        }
+            },
+            None => StoreEvent::MessagesCleared { channel_id },
+        });
     }
 
     fn reaches(&self, page: &[Arc<Message>]) -> bool {
@@ -855,6 +878,12 @@ impl Windows {
                 let at_present = ticket.kind == LoadKind::Latest;
                 let held = std::mem::take(&mut window.held);
                 let held_deleted = window.held_deleted;
+                // As for a release: the page can't join held messages past a dropped one.
+                let past_dropped =
+                    at_present && page.last().map(|message| message.id) < window.held_dropped;
+                if past_dropped {
+                    page.clear();
+                }
                 let outbox = std::mem::take(&mut window.outbox);
                 *window = Window {
                     generation,
@@ -868,7 +897,7 @@ impl Windows {
                     added.add(message.id);
                 }
                 window.messages = page;
-                window.oldest = at_present && reached_end;
+                window.oldest = at_present && reached_end && !past_dropped;
                 window.latest = at_present;
                 window.present_through = through.max(held_deleted).filter(|_| at_present);
                 if at_present {
