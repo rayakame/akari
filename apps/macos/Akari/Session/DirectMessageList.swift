@@ -6,7 +6,17 @@ struct DirectMessageList: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ListHeader(title: "Direct Messages")
+            // Empty until the quick switcher exists: Discord's "Find or start a conversation".
+            Color.clear.frame(height: ChannelHeader.height + 1)
+            Text("Direct Messages")
+                .font(TypeScale.category.font)
+                .foregroundStyle(Color(nsColor: Palette.channelDefault))
+                .lineLimit(1)
+                .padding(.leading, 16)
+                .padding(.trailing, 8)
+                .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24, alignment: .leading)
+                .padding(.top, 8)
+                .accessibilityAddTraits(.isHeader)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(session.directMessages.conversations) { conversation in
@@ -22,7 +32,7 @@ struct DirectMessageList: View {
                         }
                     }
                 }
-                .padding(.top, 8)
+                .padding(.top, 2)
                 .padding(.bottom, 72)
             }
         }

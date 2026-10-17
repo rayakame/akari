@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Above the channel or DM list, as tall as the channel header so one line runs under both.
+// Above a server's channel list, as tall as the channel header so one line runs under both.
 struct ListHeader: View {
     let title: String
 

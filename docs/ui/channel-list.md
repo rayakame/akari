@@ -12,8 +12,8 @@ look and behave.
 
 The server's name at the top of the column, in semibold `textStrong`, 48 tall like the channel
 header next to it. Text sizes of the whole column are in [typography.md](typography.md).
-Discord opens a server menu from it; Akari only shows the name for now. At home the same
-header says "Direct Messages" (see [Home](#home)).
+Discord opens a server menu from it; Akari only shows the name for now. At home the header
+holds Discord's "Find or start a conversation" button (see [Home](#home)).
 
 The header stays in place; only the list under it scrolls, so no row ever slides under the
 title bar.
@@ -124,13 +124,13 @@ row's was not observed. *Akari: disables both when nothing is unread.*
 At home the column holds the DM list instead of a server's channels.
 
 - At the top, in a header as tall as a server's, Discord has a "Find or start a conversation"
-  button that opens the quick switcher. *Akari: the header says "Direct Messages" until the
-  quick switcher exists; then it can become that button.* The line under it runs on under the
-  channel header, as with a server.
+  button that opens the quick switcher. *Akari: the header stays empty until the quick switcher
+  exists.* The line under it runs on under the channel header, as with a server.
 - Above the list, Discord has entries for Friends, Nitro and the Shop. *Akari: left out.*
-- A "Direct Messages" label, 24 tall, with a + button for a new DM on its right. *Akari: left
-  out while the header above says the same; it comes back with the + button or when the
-  header becomes the switcher button.* The rows start 8 below the header line.
+- A "Direct Messages" label in a category's style (small, `channelDefault`, not the server
+  header's `textStrong`), 24 tall, with a + button for a new DM on its right (observed
+  2026-10-17). *Akari: the label without the + button until new DMs can be created; it starts
+  8 below the header line and stays in place while the rows, 2 below it, scroll.*
 - One row per conversation: the avatar, the name, and for a group the number of members on a
   second line ("3 Members"). **Unverified**: the exact wording of the member line.
 - An unread row looks like an unread channel row: the bright name and the pill on the column's
