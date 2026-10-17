@@ -28,6 +28,8 @@ pub use snowflake::{
     RoleMarker, SkuMarker, Snowflake, StickerMarker, UserMarker, WebhookMarker,
 };
 pub use timestamp::Timestamp;
+#[cfg(test)]
+pub(crate) use timestamp::iso;
 pub use user::{
     AvatarDecorationData, CurrentUser, PremiumType, PrimaryGuild, RelationshipType, User,
 };

@@ -53,6 +53,13 @@ pub enum StoreEvent {
     GuildBadgeChanged {
         guild_id: GuildId,
     },
+    /// The thread joined or left its guild's [`channel_list`](super::Store::channel_list) while
+    /// it didn't change itself: its inactivity window ended, it was read past it, or a message
+    /// came after it.
+    ThreadListingChanged {
+        guild_id: GuildId,
+        thread_id: ChannelId,
+    },
     /// A channel, category, thread, DM or group DM appeared.
     ChannelAdded(Arc<Channel>),
     ChannelUpdated(Arc<Channel>),

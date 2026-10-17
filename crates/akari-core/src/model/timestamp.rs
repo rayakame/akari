@@ -58,6 +58,22 @@ impl Visitor<'_> for TimestampVisitor {
     }
 }
 
+/// RFC 3339 with milliseconds, as Discord writes it, for building test payloads.
+#[cfg(test)]
+pub(crate) fn iso(unix_millis: i64) -> String {
+    let time = Timestamp::from_unix_millis(unix_millis).0;
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}000+00:00",
+        time.year(),
+        u8::from(time.month()),
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second(),
+        time.millisecond()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,6 +83,13 @@ mod tests {
         let timestamp = Timestamp::from_unix_millis(1_700_000_000_123);
 
         assert_eq!(timestamp.unix_millis(), 1_700_000_000_123);
+    }
+
+    #[test]
+    fn iso_writes_what_the_parser_reads() {
+        let written: Timestamp = serde_json::from_value(iso(1_791_461_700_250).into()).unwrap();
+
+        assert_eq!(written.unix_millis(), 1_791_461_700_250);
     }
 
     #[test]

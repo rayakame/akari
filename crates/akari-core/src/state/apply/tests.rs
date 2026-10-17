@@ -79,6 +79,9 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::GuildBadgeChanged { guild_id } => {
             format!("GuildBadgeChanged({})", guild_id.get())
         }
+        StoreEvent::ThreadListingChanged { thread_id, .. } => {
+            format!("ThreadListingChanged({})", thread_id.get())
+        }
         other => format!("{other:?}"),
     }
 }

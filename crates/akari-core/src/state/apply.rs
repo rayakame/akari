@@ -1390,6 +1390,54 @@ impl State {
             .min()
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(crate) fn listed(&self, channel: ChannelId) -> bool {
+        self.badges.listed(channel)
+    }
+
+    pub(crate) fn next_window_end(&self, after: Timestamp) -> Option<Timestamp> {
+        self.joined_threads()
+            .filter_map(|thread| thread.window_end())
+            .filter(|end| *end > after)
+            .min()
+    }
+
+    pub(crate) fn windows_ending(&self, after: Timestamp, until: Timestamp) -> Vec<ChannelId> {
+        self.joined_threads()
+            .filter(|thread| {
+                thread
+                    .window_end()
+                    .is_some_and(|end| end > after && end <= until)
+            })
+            .map(|thread| thread.id)
+            .collect()
+    }
+
+    // Their badges are computed again at `now_millis`, which moves them out of the list.
+    pub(crate) fn end_windows(
+        &mut self,
+        threads: &[ChannelId],
+        now_millis: i64,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        for thread in threads {
+            self.dirty.channel(*thread);
+        }
+        self.refresh_badges(now_millis, events);
+    }
+
+    fn joined_threads(&self) -> impl Iterator<Item = &Arc<Channel>> + '_ {
+        self.threads
+            .all()
+            .filter_map(|id| self.entities.channels.get(&id))
+            .filter(|thread| {
+                thread
+                    .thread
+                    .as_deref()
+                    .is_some_and(|info| info.joined() && !info.archived)
+            })
+    }
+
     pub(crate) fn mutes_ending(&self, after: Timestamp, until: Timestamp) -> Vec<Option<GuildId>> {
         let ended: BTreeSet<Option<GuildId>> = self
             .entities

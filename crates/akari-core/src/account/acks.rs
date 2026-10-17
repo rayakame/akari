@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
-use super::mutes::until;
+use super::deadlines::until;
 use crate::model::{ChannelId, MessageId};
 use crate::ms;
 use crate::rest::{AccountRest, Failure, RequestError, last_viewed};

@@ -509,16 +509,30 @@ impl Store {
         });
     }
 
-    pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
-        self.read(|inner| inner.state.next_mute_end(after))
+    // The next mute end or thread window end after `after`.
+    pub(crate) fn next_deadline(&self, after: Timestamp) -> Option<Timestamp> {
+        self.read(|inner| {
+            let mutes = inner.state.next_mute_end(after);
+            mutes
+                .into_iter()
+                .chain(inner.state.next_window_end(after))
+                .min()
+        })
     }
 
-    // Reports the guilds whose mute, or a channel's, ended within `after..=until`.
-    pub(crate) fn end_mutes(&self, after: Timestamp, until: Timestamp) {
+    // Reports the guilds whose mute, or a channel's, ended within `after..=until`, and the
+    // threads whose window did.
+    pub(crate) fn end_deadlines(&self, after: Timestamp, until: Timestamp) {
         let ended = self.read(|inner| inner.state.mutes_ending(after, until));
         if !ended.is_empty() {
             self.write("mutes", |inner, events| {
                 inner.state.end_mutes(&ended, until.unix_millis(), events);
+            });
+        }
+        let ended = self.read(|inner| inner.state.windows_ending(after, until));
+        if !ended.is_empty() {
+            self.write("windows", |inner, events| {
+                inner.state.end_windows(&ended, until.unix_millis(), events);
             });
         }
     }

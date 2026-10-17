@@ -278,3 +278,136 @@ fn a_thread_we_are_mentioned_into_is_unread_from_its_start() {
     assert_eq!(read.mentions, 1);
     assert!(state.unread(Snowflake::new(CREATED)));
 }
+
+const MINUTE: i64 = 60_000;
+
+fn snowflake_at(unix_millis: i64) -> u64 {
+    Snowflake::<model::GenericMarker>::from_unix_millis(unix_millis, 0).get()
+}
+
+fn listed(state: &State, thread: u64) -> bool {
+    state.listed(Snowflake::new(thread))
+}
+
+// READY's thread with its newest message `minutes_ago`, read up to it, hidden after an hour.
+fn ready_thread(minutes_ago: i64, edit: impl FnOnce(&mut Value)) -> State {
+    let last = snowflake_at(wall_millis() - minutes_ago * MINUTE);
+    ready_where(|ready| {
+        let thread = &mut ready["guilds"][0]["threads"][0];
+        thread["last_message_id"] = last.to_string().into();
+        thread["thread_metadata"]["auto_archive_duration"] = 60.into();
+        ready["read_state"]["entries"][1]["last_message_id"] = last.to_string().into();
+        edit(ready);
+    })
+}
+
+fn listing_events(events: &[String]) -> Vec<&String> {
+    events
+        .iter()
+        .filter(|event| event.starts_with("ThreadListingChanged"))
+        .collect()
+}
+
+#[test]
+fn a_thread_inside_its_window_is_listed() {
+    let state = ready_thread(30, |_| {});
+
+    assert!(listed(&state, THREAD));
+}
+
+#[test]
+fn a_read_thread_past_its_window_isnt() {
+    let state = ready_thread(61, |_| {});
+
+    assert!(!listed(&state, THREAD));
+}
+
+#[test]
+fn an_unread_thread_stays_listed_past_its_window() {
+    let state = ready_thread(120, |ready| {
+        let older = snowflake_at(wall_millis() - 130 * MINUTE);
+        ready["read_state"]["entries"][1]["last_message_id"] = older.to_string().into();
+    });
+
+    assert!(listed(&state, THREAD));
+}
+
+#[test]
+fn a_mentioned_thread_stays_listed_past_its_window() {
+    let state = ready_thread(120, |ready| {
+        ready["read_state"]["entries"][1]["mention_count"] = 1.into();
+    });
+
+    assert!(listed(&state, THREAD));
+}
+
+#[test]
+fn reading_a_thread_past_its_window_unlists_it() {
+    let last = snowflake_at(wall_millis() - 120 * MINUTE);
+    let mut state = ready_thread(120, |ready| {
+        let older = snowflake_at(wall_millis() - 130 * MINUTE);
+        ready["read_state"]["entries"][1]["last_message_id"] = older.to_string().into();
+    });
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_ACK",
+        json!({"channel_id": THREAD.to_string(), "message_id": last.to_string(), "version": 2}),
+    );
+
+    assert!(!listed(&state, THREAD));
+    assert_eq!(
+        listing_events(&events),
+        [&format!("ThreadListingChanged({THREAD})")]
+    );
+}
+
+#[test]
+fn a_message_past_the_window_lists_it_again() {
+    let mut state = ready_thread(120, |_| {});
+    assert!(!listed(&state, THREAD));
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        plain(snowflake_at(wall_millis()), THREAD),
+    );
+
+    assert!(listed(&state, THREAD));
+    assert_eq!(
+        listing_events(&events),
+        [&format!("ThreadListingChanged({THREAD})")]
+    );
+}
+
+#[test]
+fn an_own_message_past_the_window_lists_it_again() {
+    let mut state = ready_thread(120, |_| {});
+    let mut own = plain(snowflake_at(wall_millis()), THREAD);
+    own["author"]["id"] = ME.to_string().into();
+
+    let events = apply(&mut state, "MESSAGE_CREATE", own);
+
+    assert!(!state.unread(Snowflake::new(THREAD)));
+    assert!(listed(&state, THREAD));
+    assert_eq!(listing_events(&events).len(), 1, "{events:?}");
+}
+
+#[test]
+fn a_pinned_post_has_no_window() {
+    let state = ready_thread(10_000, |ready| {
+        ready["guilds"][0]["threads"][0]["flags"] = 2.into();
+    });
+
+    assert!(listed(&state, THREAD));
+}
+
+#[test]
+fn the_window_counts_from_the_later_of_message_and_archive_timestamp() {
+    let state = ready_thread(120, |ready| {
+        ready["guilds"][0]["threads"][0]["thread_metadata"]["archive_timestamp"] =
+            model::iso(wall_millis() - 30 * MINUTE).into();
+    });
+
+    assert!(listed(&state, THREAD));
+}

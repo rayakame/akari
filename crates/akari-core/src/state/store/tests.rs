@@ -1334,7 +1334,7 @@ fn a_mute_ending_restores_the_guilds_dot() {
     let guild = Snowflake::new(200_000_000_000_000_001);
     assert!(!store.guild_badge(guild).unread);
 
-    store.end_mutes(
+    store.end_deadlines(
         Timestamp::from_unix_millis(1_899_999_999_000),
         Timestamp::from_unix_millis(1_900_000_000_000),
     );

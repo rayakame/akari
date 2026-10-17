@@ -125,7 +125,26 @@ pub struct Channel {
     pub spam: bool,
 }
 
+// A forum post pinned to the top of its forum.
+const PINNED: u64 = 1 << 1;
+
 impl Channel {
+    /// When a thread's "Hide After Inactivity" window ends: `auto_archive_duration` minutes after
+    /// its newest message or its archive timestamp, whichever is later. `None` for pinned forum
+    /// posts, which have none, and for channels that aren't threads.
+    pub fn window_end(&self) -> Option<Timestamp> {
+        let info = self.thread.as_deref()?;
+        if self.flags & PINNED != 0 {
+            return None;
+        }
+        let newest = self.last_message_id.map_or(0, Snowflake::unix_millis);
+        let start = newest.max(info.archive_timestamp.unix_millis());
+        let minutes = i64::from(info.auto_archive_duration);
+        Some(Timestamp::from_unix_millis(
+            start.saturating_add(minutes * 60_000),
+        ))
+    }
+
     /// Announcement, public and private threads.
     pub fn is_thread(&self) -> bool {
         matches!(
