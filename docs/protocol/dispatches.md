@@ -63,9 +63,11 @@ Two details:
 | GUILD_ROLE_CREATE, GUILD_ROLE_UPDATE | `GuildRoleEvent` | The role is added or replaced: `GuildUpdated` |
 | GUILD_ROLE_DELETE | `GuildRoleDelete` | `GuildUpdated` |
 | GUILD_MEMBER_UPDATE | `GuildMemberUpdate` | Only for the current user: `CurrentMemberUpdated`. Users also get it for friends and DM partners; those are skipped |
-| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer. A thread in a forum or media channel also raises its parent's `last_message_id` to the thread's ID, without an event: a new post is the forum's newest "message" |
+| CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. A thread with the user's `member` is joined ([Threads](#threads)). DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer. A thread in a forum or media channel also raises its parent's `last_message_id` to the thread's ID, without an event: a new post is the forum's newest "message" |
 | CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it |
 | CHANNEL_DELETE, THREAD_DELETE | `ChannelDelete` | `ChannelRemoved`, also for the threads of a deleted channel. CHANNEL_DELETE "will be partial" for private channels and THREAD_DELETE has only `id`, `guild_id`, `parent_id` and `type`, so only those are read |
+| THREAD_MEMBER_UPDATE | `ThreadMemberUpdate` | The user's own thread member: the thread's membership, mute and level are replaced, `ChannelUpdated` ([Threads](#threads)) |
+| THREAD_MEMBERS_UPDATE | `ThreadMembersUpdate` | The user's ID in `added_members` joins the thread, in `removed_member_ids` leaves it: `ChannelUpdated`. Other members and `member_count` are ignored |
 | MESSAGE_CREATE | `Message` | Counts toward the channel's read state first: a message of the current user reads the channel up to it (not a poll result), and others can raise its mention count ([read-states.md](read-states.md)). Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
@@ -110,14 +112,51 @@ captures READY.
 User accounts "are only synced threads they have been added to"
 ([gateway guild](https://docs.discord.food/gateway/gateway-events#gateway-guild-object)).
 The store keeps the joined threads from READY and whatever THREAD_CREATE brings.
-`ThreadInfo::joined` is true for READY's and GUILD_CREATE's threads, and for a THREAD_CREATE
-that carries the user's thread `member`; only joined threads count toward their guild's badge.
-Leaving or joining a thread elsewhere (THREAD_MEMBER_UPDATE) isn't decoded yet. The full
-thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
+
+**Membership.** `ThreadInfo::member` is the user's membership: its mute (`muted`,
+`mute_config.end_time`) and its notification level from the member's `flags`
+([read-states.md](read-states.md#threads)). It changes live:
+- READY's and GUILD_CREATE's threads are joined, with their `member`'s mute and level, or a
+  default membership without one.
+- THREAD_CREATE with `member` joins. Discord sends it also when the user is added to a
+  thread, for example by a mention: the official client lists that thread at once (observed
+  2026-10-17). Without `member`, a known thread keeps its membership.
+- THREAD_MEMBER_UPDATE replaces the membership. THREAD_MEMBERS_UPDATE joins when it adds the
+  user and leaves when it removes them; everything else in it is ignored. THREAD_MEMBER_LIST_UPDATE
+  (op 37's member lists) never changes membership.
+- Updates for a thread the store doesn't know are skipped.
+
+Members decode leniently: a field in another shape falls back to its default, and a broken
+entry in `added_members` is skipped, so payload drift doesn't drop the dispatch.
+
+**What the channel list shows.** `Store::channel_list` puts a thread right after its parent,
+newest created first, when the user joined it, it isn't archived, its parent is viewable, and
+it is inside its "Hide After Inactivity" window, unread, or has a mention. The window ends
+`auto_archive_duration` minutes after the later of its newest message and its
+`archive_timestamp` (the [threads](https://docs.discord.food/topics/threads) topic); pinned
+forum posts (channel flag `PINNED`, 1 << 1) have none. The official client keeps an unread
+thread past its window (observed 2026-10-17: a thread with an unread mention and one with a
+plain unread message stayed listed past their hour, also after a reload, and went once read).
+The guild's badge counts exactly the listed threads. Neither the parent's mute nor "hide muted
+channels" changes what's listed; which listed threads a list shows under a collapsed category
+or a muted parent is the apps' rule ([channel-list.md](../ui/channel-list.md#threads)).
+
+The account's deadline task wakes at the earliest window end, as it does for the mute ends.
+`ThreadListingChanged { guild_id, thread_id }` reports a thread whose listing changed while the
+thread itself didn't: its window ended, it was read past it, or a message came after it.
+
+**Joining and leaving** (observed 2026-10-17; not sent by Akari yet):
+`POST /channels/{thread}/thread-members/@me?location=…` joins (the docs say PUT; the official
+client sends POST) and `DELETE` on the same path leaves, without a body, answered 204.
+`location` names where the user chose it: `Sidebar Overflow` (the "…" of a thread beside its
+parent), `Toolbar Overflow` (the "…" of a thread opened full width), `Context Menu` (a thread
+row's menu, leave only).
+
+The full thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
 `threads: true`. Akari's guild subscriptions ask for it, but THREAD_LIST_SYNC isn't decoded
-yet, so the store ignores it. Losing access to a channel doesn't
-send THREAD_DELETE for its threads ([threads](https://docs.discord.food/topics/threads));
-they stay in the store until the next session.
+yet, so the store ignores it. Losing access to a channel doesn't send THREAD_DELETE for its
+threads ([threads](https://docs.discord.food/topics/threads)); they stay in the store, no longer
+listed, until the next session.
 
 ## Large guilds
 
@@ -244,8 +283,8 @@ so they live in the core.
   Until then the most recently joined guild comes first, where the official client puts a
   newly joined server, then guilds without a known join date, by ID. **Unverified**: where
   the official client puts guilds missing from the user's saved order.
-- **`Store::channel_list`**: `display_order` without threads, keeping only channels with
-  `VIEW_CHANNEL`. A category shows when it holds at least one visible channel; an empty
+- **`Store::channel_list`**: `display_order`, keeping only channels with `VIEW_CHANNEL`,
+  each followed by its listed threads ([Threads](#threads)). A category shows when it holds at least one visible channel; an empty
   category shows when the user can view it, because servers use empty categories as
   dividers. A channel whose permissions can't be computed (for example without the
   current user's member) is hidden. **Unverified**: the category rule; to be compared with
