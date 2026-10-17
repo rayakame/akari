@@ -474,7 +474,7 @@ public final class SessionModel {
         let last = lastChannels[guildId].flatMap { last in
             list.channels.first { $0.id == last && $0.opensMessageList }
         }
-        let first = list.channels.first(where: \.opensMessageList)
+        let first = list.channels.first { $0.opensMessageList && !$0.isThread }
         if let channel = last ?? first {
             show(channel: channel.id)
         } else {
