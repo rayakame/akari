@@ -656,7 +656,7 @@ impl State {
                 self.entities.read_states.update_relationship(update);
             }
             E::RelationshipRemove(removed) => self.entities.read_states.unrelate(removed.id),
-            E::Resumed | E::Other(_) => {}
+            E::ThreadMemberUpdate(_) | E::ThreadMembersUpdate(_) | E::Resumed | E::Other(_) => {}
         }
     }
 

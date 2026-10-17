@@ -4,7 +4,7 @@ use serde_json::value::RawValue;
 
 use super::dispatch::{
     ChannelDelete, GuildDelete, GuildRoleDelete, GuildRoleEvent, MessageDelete, MessageDeleteBulk,
-    ReadySupplemental,
+    ReadySupplemental, ThreadMemberUpdate, ThreadMembersUpdate,
 };
 use super::guild::GatewayGuild;
 use super::hello::Hello;
@@ -14,7 +14,7 @@ use super::ready::Ready;
 use super::relationship::{Relationship, RelationshipRemove, RelationshipUpdate};
 use super::settings::{NotificationSettings, SettingsProtoUpdate, UserGuildSettings};
 use crate::JsonError;
-use crate::model::{Channel, GenericMarker, Message, Snowflake};
+use crate::model::{Channel, GenericMarker, GuildId, Message, Snowflake};
 
 /// A message received from the gateway.
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +57,8 @@ pub enum DispatchEvent {
     ThreadCreate(Box<Channel>),
     ThreadUpdate(Box<ChannelUpdate>),
     ThreadDelete(ChannelDelete),
+    ThreadMemberUpdate(Box<ThreadMemberUpdate>),
+    ThreadMembersUpdate(Box<ThreadMembersUpdate>),
     MessageCreate(Box<Message>),
     MessageUpdate(Box<MessageUpdate>),
     MessageDelete(MessageDelete),
@@ -96,6 +98,8 @@ impl DispatchEvent {
             Self::ThreadCreate(_) => "THREAD_CREATE",
             Self::ThreadUpdate(_) => "THREAD_UPDATE",
             Self::ThreadDelete(_) => "THREAD_DELETE",
+            Self::ThreadMemberUpdate(_) => "THREAD_MEMBER_UPDATE",
+            Self::ThreadMembersUpdate(_) => "THREAD_MEMBERS_UPDATE",
             Self::MessageCreate(_) => "MESSAGE_CREATE",
             Self::MessageUpdate(_) => "MESSAGE_UPDATE",
             Self::MessageDelete(_) => "MESSAGE_DELETE",
@@ -214,6 +218,12 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
         "THREAD_CREATE" => parse(json).map(|thread| E::ThreadCreate(Box::new(thread))),
         "THREAD_UPDATE" => parse(json).map(|update| E::ThreadUpdate(Box::new(update))),
         "THREAD_DELETE" => parse(json).map(E::ThreadDelete),
+        "THREAD_MEMBER_UPDATE" => {
+            thread_member_update(json).map(|update| E::ThreadMemberUpdate(Box::new(update)))
+        }
+        "THREAD_MEMBERS_UPDATE" => {
+            parse(json).map(|update| E::ThreadMembersUpdate(Box::new(update)))
+        }
         "MESSAGE_CREATE" => parse(json).map(|message| E::MessageCreate(Box::new(message))),
         "MESSAGE_UPDATE" => parse(json).map(|update| E::MessageUpdate(Box::new(update))),
         "MESSAGE_DELETE" => parse(json).map(E::MessageDelete),
@@ -256,6 +266,18 @@ fn guild_of(name: &str, json: &str) -> Option<u64> {
         _ => parse::<Guild>(json).ok()?.guild_id,
     };
     id.map(Snowflake::get)
+}
+
+// Two passes instead of `flatten`, whose buffering the member's lenient fields can't read.
+fn thread_member_update(json: &str) -> Result<ThreadMemberUpdate, serde_json::Error> {
+    #[derive(Deserialize)]
+    struct Guild {
+        guild_id: Option<GuildId>,
+    }
+    Ok(ThreadMemberUpdate {
+        guild_id: parse::<Guild>(json)?.guild_id,
+        member: parse(json)?,
+    })
 }
 
 fn parse<T: DeserializeOwned>(json: &str) -> Result<T, serde_json::Error> {

@@ -66,12 +66,31 @@ pub struct PermissionOverwrite {
     pub deny: Permissions,
 }
 
-/// The current user's membership of a thread.
+/// A thread member: the current user's on a thread's `member` and in THREAD_MEMBER_UPDATE,
+/// anyone's in THREAD_MEMBERS_UPDATE. Every field falls back to its default.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ThreadMember {
-    pub join_timestamp: Timestamp,
-    #[serde(default)]
+    /// The thread; some payloads leave it out on a thread's own `member`.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub id: Option<Snowflake<ChannelMarker>>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub user_id: Option<Snowflake<UserMarker>>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub join_timestamp: Option<Timestamp>,
+    /// `HAS_INTERACTED` 1, `ALL_MESSAGES` 2, `ONLY_MENTIONS` 4, `NO_MESSAGES` 8.
+    #[serde(default, deserialize_with = "default_on_error")]
     pub flags: u64,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub muted: bool,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub mute_config: Option<ThreadMuteConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct ThreadMuteConfig {
+    /// `None` for a mute without an end.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub end_time: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

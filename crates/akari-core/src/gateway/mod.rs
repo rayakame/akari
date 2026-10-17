@@ -21,7 +21,7 @@ pub(crate) use connection::fake;
 pub use connection::{ConnectionEvent, DisconnectReason, Gateway, GatewayError, SendError};
 pub use dispatch::{
     ChannelDelete, GuildDelete, GuildRoleDelete, GuildRoleEvent, MessageDelete, MessageDeleteBulk,
-    ReadySupplemental, SupplementalGuild,
+    ReadySupplemental, SupplementalGuild, ThreadMemberUpdate, ThreadMembersUpdate,
 };
 pub use guild::{AvailableGuild, GatewayGuild, UnavailableGuild};
 pub use hello::Hello;
