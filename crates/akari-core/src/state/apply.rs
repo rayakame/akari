@@ -38,6 +38,8 @@ pub(crate) struct Entities {
     pub(crate) channels: HashMap<ChannelId, Arc<Channel>>,
     pub(crate) settings: UserSettings,
     pub(crate) read_states: ReadStates,
+    // Threads READY or GUILD_CREATE listed without the user's member, joined with a default one.
+    pub(crate) memberless: HashSet<ChannelId>,
 }
 
 impl Entities {
@@ -136,8 +138,11 @@ impl Entities {
         // User accounts are only sent the threads they joined.
         for thread in threads {
             let mut thread = Channel::from_wire(thread, Some(id));
-            if let Some(info) = thread.thread.as_deref_mut() {
-                info.member.get_or_insert_default();
+            if let Some(info) = thread.thread.as_deref_mut()
+                && info.member.is_none()
+            {
+                info.member = Some(ThreadMembership::default());
+                self.memberless.insert(thread.id);
             }
             self.insert_channel(thread);
         }
@@ -338,6 +343,8 @@ pub(crate) struct State {
     journal: Option<Journal>,
     // Replayed acks that kept READY's mention count: their echo brings Discord's.
     recounts: HashMap<ChannelId, MessageId>,
+    // The memberships of joined threads in guilds that are down, for their GUILD_CREATE.
+    outage_members: HashMap<ChannelId, (GuildId, ThreadMembership)>,
 }
 
 impl State {
@@ -361,11 +368,13 @@ impl State {
             stale_cursors: HashSet::new(),
             journal: None,
             recounts: HashMap::new(),
+            outage_members: HashMap::new(),
         }
     }
 
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_folders(&mut next);
+        self.keep_memberships(&mut next);
         let derived = Derived::build(&next, wall_millis());
         let diff = self.ready_diff(&next, &derived);
         self.swap(next, derived, diff, events);
@@ -375,6 +384,23 @@ impl State {
     pub(crate) fn keep_folders(&self, next: &mut Entities) {
         if std::mem::take(&mut next.settings.unreadable_folders) {
             next.settings.folders = self.entities.settings.folders.clone();
+        }
+    }
+
+    // A payload without the user's member says nothing about its mute or level.
+    pub(crate) fn keep_memberships(&self, next: &mut Entities) {
+        for id in std::mem::take(&mut next.memberless) {
+            let known = self
+                .entities
+                .channels
+                .get(&id)
+                .and_then(|known| known.thread.as_deref()?.member)
+                .or_else(|| self.outage_members.get(&id).map(|(_, member)| *member));
+            if let (Some(member), Some(channel)) = (known, next.channels.get_mut(&id))
+                && let Some(info) = Arc::make_mut(channel).thread.as_deref_mut()
+            {
+                info.member = Some(member);
+            }
         }
     }
 
@@ -436,6 +462,7 @@ impl State {
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
+        self.keep_outage_members(&next);
         let old = Derived {
             badges: std::mem::replace(&mut self.badges, derived.badges),
             threads: std::mem::replace(&mut self.threads, derived.threads),
@@ -919,9 +946,11 @@ impl State {
     }
 
     fn merge_guild(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
+        self.keep_memberships(&mut next);
         let Some((&id, after)) = next.guilds.iter().next() else {
             return;
         };
+        self.outage_members.retain(|_, (guild, _)| *guild != id);
         for (channel, merged) in &mut next.channels {
             if let Some(last) = self
                 .entities
@@ -1000,6 +1029,8 @@ impl State {
             for channel in channels {
                 self.entities.read_states.forget(channel);
             }
+            self.outage_members
+                .retain(|_, (guild, _)| *guild != delete.id);
             self.remove_guild_data(delete.id);
             self.entities.unavailable.remove(&delete.id);
             events.push(StoreEvent::GuildRemoved {
@@ -1015,8 +1046,34 @@ impl State {
 
     fn guild_down(&mut self, id: GuildId, events: &mut Vec<StoreEvent>) {
         if self.entities.unavailable.insert(id) {
+            self.stash_members(id);
             self.remove_guild_data(id);
             events.push(StoreEvent::GuildUnavailable { guild_id: id });
+        }
+    }
+
+    fn stash_members(&mut self, guild: GuildId) {
+        for channel in self.entities.channels.values() {
+            if channel.guild_id == Some(guild)
+                && let Some(member) = channel.thread.as_deref().and_then(|info| info.member)
+            {
+                self.outage_members.insert(channel.id, (guild, member));
+            }
+        }
+    }
+
+    // Before the swap: a guild READY lists as down keeps its threads' memberships until it's back.
+    fn keep_outage_members(&mut self, next: &Entities) {
+        self.outage_members
+            .retain(|_, (guild, _)| next.unavailable.contains(guild));
+        let down: Vec<GuildId> = next
+            .unavailable
+            .iter()
+            .filter(|guild| self.entities.guilds.contains_key(guild))
+            .copied()
+            .collect();
+        for guild in down {
+            self.stash_members(guild);
         }
     }
 

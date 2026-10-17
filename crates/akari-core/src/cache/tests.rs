@@ -200,6 +200,7 @@ pub(crate) fn entities() -> Entities {
         .into(),
         settings: Default::default(),
         read_states: Default::default(),
+        memberless: Default::default(),
     }
 }
 
@@ -835,6 +836,7 @@ fn rebuilt(entities: &Entities) -> Entities {
             ..entities.settings.clone()
         },
         read_states: entities.read_states.clone(),
+        memberless: entities.memberless.clone(),
     }
 }
 

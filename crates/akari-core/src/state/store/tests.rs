@@ -743,6 +743,22 @@ fn muted_channels_includes_muted_threads() {
 }
 
 #[test]
+fn a_ready_without_the_member_keeps_a_threads_own_mute() {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    data["guilds"][0]["threads"][0]["member"]["muted"] = true.into();
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(dispatch("READY", &data));
+    data["guilds"][0]["threads"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("member");
+
+    store.apply(dispatch("READY", &data));
+
+    assert!(store.channel_muted(Snowflake::new(300_000_000_000_000_020)));
+}
+
+#[test]
 fn threads_follow_their_parent_newest_first() {
     let store = Store::new(DEFAULT_LIMITS);
     store.apply(ready_with_threads(

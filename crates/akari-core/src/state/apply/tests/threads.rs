@@ -423,3 +423,75 @@ fn the_window_counts_from_the_later_of_message_and_archive_timestamp() {
 
     assert!(listed(&state, THREAD));
 }
+
+fn muted_member() -> Option<ThreadMembership> {
+    Some(ThreadMembership {
+        muted: true,
+        ..ThreadMembership::default()
+    })
+}
+
+fn ready_with_a_muted_thread() -> State {
+    ready_where(|ready| {
+        ready["guilds"][0]["threads"][0]["member"]["muted"] = true.into();
+    })
+}
+
+// READY's guild as GUILD_CREATE sends it, its thread without the user's member.
+fn guild_create_without_members() -> Value {
+    let mut guild = ready_value()["guilds"][0].clone();
+    guild["threads"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("member");
+    guild
+}
+
+#[test]
+fn a_guild_create_after_an_outage_keeps_a_threads_own_mute() {
+    let mut state = ready_with_a_muted_thread();
+    apply(
+        &mut state,
+        "GUILD_DELETE",
+        json!({"id": G1.to_string(), "unavailable": true}),
+    );
+
+    apply(&mut state, "GUILD_CREATE", guild_create_without_members());
+
+    assert_eq!(membership(&state, THREAD), muted_member());
+}
+
+#[test]
+fn a_repeated_guild_create_keeps_a_threads_own_mute() {
+    let mut state = ready_with_a_muted_thread();
+
+    apply(&mut state, "GUILD_CREATE", guild_create_without_members());
+
+    assert_eq!(membership(&state, THREAD), muted_member());
+}
+
+#[test]
+fn a_ready_without_the_member_keeps_a_threads_own_mute() {
+    let mut state = ready_with_a_muted_thread();
+    let mut ready = ready_value();
+    ready["guilds"][0]["threads"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("member");
+
+    apply(&mut state, "READY", ready);
+
+    assert_eq!(membership(&state, THREAD), muted_member());
+}
+
+#[test]
+fn a_guild_down_at_ready_keeps_its_threads_mutes_for_its_return() {
+    let mut state = ready_with_a_muted_thread();
+    let mut ready = ready_value();
+    ready["guilds"][0] = json!({"id": G1.to_string(), "unavailable": true});
+    apply(&mut state, "READY", ready);
+
+    apply(&mut state, "GUILD_CREATE", guild_create_without_members());
+
+    assert_eq!(membership(&state, THREAD), muted_member());
+}

@@ -340,6 +340,7 @@ impl Store {
     pub(crate) fn prepare(&self, preparing: Preparing, ready: Ready) -> PreparedReady {
         let mut entities = Entities::from_ready(ready);
         let read_states = entities.read_states.channels().clone();
+        self.read(|inner| inner.state.keep_memberships(&mut entities));
         let derived = Derived::build(&entities, wall_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
