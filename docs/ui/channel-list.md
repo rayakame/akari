@@ -88,8 +88,7 @@ Observed in the official desktop client on 2026-10-14:
   2026-10-15); only the badge is left out. Akari lists them too.
 
 *Akari: an unread row has the bright name and the 4 × 8 pill on the column's left edge (not
-while selected), and a row with mentions the red badge at its right end, as on the rail; DM
-rows the same, without the pill.*
+while selected), and a row with mentions the red badge at its right end, as on the rail.*
 
 - Icons by kind: text, voice, announcement, stage, forum, media, rules and thread. Each has a
   private variant (with a lock) and an NSFW variant (with a warning mark).
@@ -134,6 +133,9 @@ At home the column holds the DM list instead of a server's channels.
   header becomes the switcher button.* The rows start 8 below the header line.
 - One row per conversation: the avatar, the name, and for a group the number of members on a
   second line ("3 Members"). **Unverified**: the exact wording of the member line.
+- An unread row looks like an unread channel row: the bright name and the pill on the column's
+  left edge. **No count in the list:** a DM's mention count shows only on its avatar on the
+  rail (observed 2026-10-17). *Akari: the same; VoiceOver still reads the count with the row.*
 - A conversation's name is the other person's display name. A group shows its own name, or
   the members' names separated by commas when it has none.
 - The first item of a row's context menu is "Mark As Read" (German: "Als gelesen markieren";

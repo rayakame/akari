@@ -46,7 +46,8 @@ XCFramework and generated bindings, with a Keychain token store, the view models
 login, session, server, channel, DM and message lists, and the composer), the message
 timeline and the reading signal (what tells the core which channel the user reads). `apps/macos` is the first app: the login screen and the main window with the server
 rail (the user's order, with folders, unread pills and mention badges, and unread DMs under
-Home), the channel and DM lists (muted channels dimmed, unread rows bright with their counts), a
+Home), the channel and DM lists (muted channels dimmed, unread rows bright with the pill, channel
+rows with their counts), a
 message list that loads history in both directions, with the "new messages" line and the unread
 bar, the composer, and marking read with Escape, Shift+Escape and the context menus; it shows the
 connection state and reconnects. akari-core also has the SQLite disk

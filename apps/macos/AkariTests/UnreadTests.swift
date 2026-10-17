@@ -212,6 +212,50 @@ struct UnreadRowTests {
         #expect(count(plain, in: 180..<240, where: isRed) == 0)
         #expect(count(mentioned, in: 180..<240, where: isRed) > 0)
     }
+
+    func conversation() throws -> DirectMessageListModel.Conversation {
+        let session = SessionModel(
+            userId: UserId(rawValue: 1), account: CrowdedAccount(),
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        return try #require(session.directMessages.conversations.first)
+    }
+
+    func directMessage(_ badge: Badge, selected: Bool = false) throws -> Rendered {
+        try render(
+            ConversationRow(conversation: conversation(), selected: selected, badge: badge) {})
+    }
+
+    // The count shows only on the DM's avatar on the rail, as in the official client.
+    @Test
+    func anUnreadDirectMessageRowLooksLikeAnUnreadChannelRow() throws {
+        let read = try directMessage(Badge(unread: false, mentions: 0))
+        let unread = try directMessage(Badge(unread: true, mentions: 2))
+
+        #expect(count(read, in: 60..<180, where: isBright) == 0, "the name is dim")
+        #expect(count(unread, in: 60..<180, where: isBright) > 0, "the name is bright")
+        #expect(count(read, in: 0..<4, where: isBright) == 0)
+        #expect(count(unread, in: 0..<4, where: isBright) > 0, "the pill")
+        #expect(count(unread, in: 180..<240, where: isRed) == 0, "no count")
+    }
+
+    @Test
+    func theOpenDirectMessageRowHasNoPill() throws {
+        let open = try directMessage(Badge(unread: true, mentions: 2), selected: true)
+
+        #expect(count(open, in: 0..<4, where: isBright) == 0)
+    }
+
+    @Test
+    func anUnreadDirectMessageRowStillReadsOutItsCount() throws {
+        let row = ConversationRow(
+            conversation: try conversation(), selected: false,
+            badge: Badge(unread: true, mentions: 2)
+        ) {}
+
+        #expect(row.spokenValue == "unread, 2 mentions")
+    }
 }
 
 @MainActor

@@ -35,7 +35,7 @@ extension DirectMessageList {
     }
 }
 
-private struct ConversationRow: View {
+struct ConversationRow: View {
     let conversation: DirectMessageListModel.Conversation
     let selected: Bool
     var badge = Badge(unread: false, mentions: 0)
@@ -63,9 +63,6 @@ private struct ConversationRow: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if badge.mentions > 0 {
-                    MentionBadge(count: badge.mentions)
-                }
             }
             .padding(.horizontal, 8)
             .frame(height: 42)
@@ -79,8 +76,18 @@ private struct ConversationRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .accessibilityValue(MentionBadge.accessibilityValue(badge))
+        .accessibilityValue(spokenValue)
         .padding(.horizontal, 8)
+        .overlay(alignment: .leading) {
+            if badge.unread && !selected {
+                UnreadPill()
+            }
+        }
+    }
+
+    // The mention count shows only on the rail, so VoiceOver reads it here.
+    var spokenValue: String {
+        MentionBadge.accessibilityValue(badge)
     }
 
     // As a channel row's name.
