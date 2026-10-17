@@ -47,6 +47,14 @@ struct EventBatchTests {
     }
 
     @Test
+    func threadListingChangedRereadsTheList() {
+        let batch = EventBatch([.threadListingChanged(guildId: id(1), threadId: id(14))])
+
+        #expect(batch.channelsChanged == [id(1): [id(14)]])
+        #expect(batch.removedChannels.isEmpty)
+    }
+
+    @Test
     func badgeEventsAreCollectedPerGuild() {
         let batch = EventBatch([
             .badgeChanged(channelId: id(10), guildId: id(1)),

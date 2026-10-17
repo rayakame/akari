@@ -10,6 +10,7 @@ mod login;
 mod messages;
 mod settings;
 mod support;
+mod threads;
 
 // akari-core's fake gateway helpers, shared instead of copied.
 #[allow(dead_code)]

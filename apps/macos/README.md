@@ -9,10 +9,11 @@ new-location confirmation) and the main window: a centered title naming the serv
 (drawn by `TitleBar` over the native title bar, whose own title stays set but hidden), the
 server rail (the user's order, with folders, unread pills and mention badges, and the DMs
 with mentions under Home), a server's channel list (muted channels dimmed, "hide muted
-channels" followed, unread rows bright with their counts, and a collapsed category keeping
-its unread and mentioned channels), the DM list at home, the channel header, the user panel, the message list with formatted
-messages, and the composer. Images, attachments, reactions, replies, threads, voice,
-notifications and settings come later.
+channels" followed, unread rows bright with their counts, a collapsed category keeping
+its unread and mentioned channels, and joined threads under their parent, hung from a spine
+with branches), the DM list at home, the channel header, the user panel, the message list with formatted
+messages, and the composer. Images, attachments, reactions, replies, the thread view beyond
+its messages, voice, notifications and settings come later.
 
 ## Messages and the composer
 

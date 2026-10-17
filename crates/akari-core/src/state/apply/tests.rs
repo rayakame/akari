@@ -79,6 +79,9 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::GuildBadgeChanged { guild_id } => {
             format!("GuildBadgeChanged({})", guild_id.get())
         }
+        StoreEvent::ThreadListingChanged { thread_id, .. } => {
+            format!("ThreadListingChanged({})", thread_id.get())
+        }
         other => format!("{other:?}"),
     }
 }
@@ -1093,3 +1096,4 @@ fn a_window_opened_before_the_first_ready_survives_it() {
 mod acks;
 mod badges;
 mod read_states;
+mod threads;

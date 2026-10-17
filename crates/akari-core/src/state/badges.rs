@@ -54,6 +54,8 @@ struct Slot {
     guild: Option<GuildId>,
     dot: bool,
     mentions: u32,
+    // A thread its guild's channel list shows.
+    listed: bool,
 }
 
 fn shown(slot: Option<&Slot>) -> (Badge, Option<ReadState>) {
@@ -146,6 +148,10 @@ impl Badges {
             .map_or_else(Badge::default, |sum| sum.badge())
     }
 
+    pub(crate) fn listed(&self, channel: ChannelId) -> bool {
+        self.channels.get(&channel).is_some_and(|slot| slot.listed)
+    }
+
     /// Events for every badge that differs in `next`, a later session's.
     pub(crate) fn diff(&self, next: &Self, events: &mut Vec<StoreEvent>) {
         let channels: BTreeSet<ChannelId> = self
@@ -163,6 +169,7 @@ impl Badges {
                     guild_id: after.or(before).and_then(|slot| slot.guild),
                 });
             }
+            push_listing(channel, before, after, events);
         }
         let guilds: BTreeSet<GuildId> = next.guilds.keys().copied().collect();
         for guild in guilds {
@@ -187,7 +194,11 @@ impl Badges {
             .filter_map(|slot| slot.guild)
             .collect();
         events.retain(|event| match event {
-            StoreEvent::BadgeChanged { channel_id, .. } => !channels.contains(channel_id),
+            StoreEvent::BadgeChanged { channel_id, .. }
+            | StoreEvent::ThreadListingChanged {
+                thread_id: channel_id,
+                ..
+            } => !channels.contains(channel_id),
             StoreEvent::GuildBadgeChanged { guild_id } => !guilds.contains(guild_id),
             _ => true,
         });
@@ -199,6 +210,7 @@ impl Badges {
                     guild_id: after.or(before).and_then(|slot| slot.guild),
                 });
             }
+            push_listing(*channel, before, after, events);
         }
         for guild in guilds {
             if next.guilds.contains_key(&guild) && self.guild(guild) != next.guild(guild) {
@@ -270,6 +282,7 @@ impl Badges {
                     guild_id: new.or(old).and_then(|slot| slot.guild),
                 });
             }
+            push_listing(channel, old.as_ref(), new.as_ref(), events);
         }
         for (guild, before) in before {
             if self.guilds.contains_key(&guild) && self.guild(guild) != before {
@@ -300,6 +313,24 @@ impl Badges {
     }
 }
 
+// A thread that appears or goes has its own channel event.
+fn push_listing(
+    channel: ChannelId,
+    before: Option<&Slot>,
+    after: Option<&Slot>,
+    events: &mut Vec<StoreEvent>,
+) {
+    if let (Some(before), Some(after)) = (before, after)
+        && before.listed != after.listed
+        && let Some(guild_id) = after.guild
+    {
+        events.push(StoreEvent::ThreadListingChanged {
+            guild_id,
+            thread_id: channel,
+        });
+    }
+}
+
 fn guild_muted(entities: &Entities, guild: GuildId, now: Timestamp) -> bool {
     entities
         .settings
@@ -324,6 +355,7 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
             guild: None,
             dot: false,
             mentions: 0,
+            listed: false,
         });
     };
     let hidden = Slot {
@@ -332,6 +364,7 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
         guild: Some(guild),
         dot: false,
         mentions: 0,
+        listed: false,
     };
     let visible = entities
         .permissions(channel.id, now_millis)
@@ -350,6 +383,15 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
             .is_none_or(|last| last.unix_millis() < now_millis - WEEK_MILLIS);
     let mentions = if stale { 0 } else { mentions };
     let unpicked = opt_in && kind != Kind::Thread && mentions == 0 && !opted_in(entities, channel);
+    // Unread or mentioned threads stay listed past their window, as in the official client.
+    let listed = kind == Kind::Thread
+        && channel
+            .thread
+            .as_deref()
+            .is_some_and(|info| info.joined() && !info.archived)
+        && (channel.window_end().is_none_or(|end| now < end)
+            || entities.unread(channel)
+            || mentions > 0);
     let unread = kind != Kind::Voice
         && !muted
         && !stale
@@ -361,19 +403,19 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
         .guild(Some(guild))
         .is_some_and(|settings| settings.hide_muted_channels);
     let hidden = muted && hides_muted;
-    let counted = !hidden
-        && (kind != Kind::Thread
-            || channel
-                .thread
-                .as_deref()
-                .is_some_and(|info| info.joined && !info.archived));
+    // The guild counts the threads its list shows, whatever their parent's mute.
+    let counted = !hidden && (kind != Kind::Thread || listed);
+    let parent_muted = kind != Kind::Thread && under_muted_parent(entities, channel, now);
+    let archived = channel.thread.as_deref().is_some_and(|info| info.archived);
     Some(Slot {
         badge: Badge { unread, mentions },
         read_state,
         guild: Some(guild),
-        dot: counted && unread && !under_muted_parent(entities, channel, now),
-        // A mention adds the user to a thread, which Akari only learns at the next READY.
-        mentions: if hidden { 0 } else { mentions },
+        dot: counted && unread && !parent_muted,
+        // A mention adds the user to a thread before the members event lists it; a closed
+        // thread has no row to find it in.
+        mentions: if hidden || archived { 0 } else { mentions },
+        listed,
     })
 }
 

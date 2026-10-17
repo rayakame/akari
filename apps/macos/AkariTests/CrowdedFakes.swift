@@ -110,13 +110,13 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
             return Channel(
                 id: id, kind: .guildText, guildId: GuildId(rawValue: 1), parentId: nil,
                 name: "channel-\(id.rawValue)", position: Int32(id.rawValue), topic: nil,
-                nsfw: false, rateLimitPerUser: 0, recipientIds: [])
+                nsfw: false, rateLimitPerUser: 0, recipientIds: [], thread: nil)
         }
         if Self.dmIds.contains(id) {
             return Channel(
                 id: id, kind: .dm, guildId: nil, parentId: nil, name: nil, position: 0,
                 topic: nil, nsfw: false, rateLimitPerUser: 0,
-                recipientIds: [UserId(rawValue: id.rawValue + 2000)])
+                recipientIds: [UserId(rawValue: id.rawValue + 2000)], thread: nil)
         }
         return nil
     }

@@ -1146,6 +1146,107 @@ fn thread_create_and_update_decode() {
 }
 
 #[test]
+fn thread_member_update_decodes() {
+    let DispatchEvent::ThreadMemberUpdate(update) = dispatch(
+        "THREAD_MEMBER_UPDATE",
+        include_str!("fixtures/thread_member_update.json"),
+    ) else {
+        panic!("expected THREAD_MEMBER_UPDATE");
+    };
+
+    assert_eq!(
+        update.guild_id,
+        Some(Snowflake::new(200_000_000_000_000_001))
+    );
+    let member = update.member;
+    assert_eq!(member.id, Some(Snowflake::new(300_000_000_000_000_021)));
+    assert_eq!(
+        member.user_id,
+        Some(Snowflake::new(100_000_000_000_000_001))
+    );
+    assert_eq!(member.flags, 5);
+    assert!(member.muted);
+    assert_eq!(
+        member
+            .mute_config
+            .and_then(|mute| mute.end_time)
+            .map(Timestamp::unix_millis),
+        Some(1_791_461_700_000)
+    );
+}
+
+#[test]
+fn thread_members_update_decodes() {
+    let DispatchEvent::ThreadMembersUpdate(update) = dispatch(
+        "THREAD_MEMBERS_UPDATE",
+        include_str!("fixtures/thread_members_update.json"),
+    ) else {
+        panic!("expected THREAD_MEMBERS_UPDATE");
+    };
+
+    assert_eq!(update.id, Snowflake::new(300_000_000_000_000_021));
+    assert_eq!(
+        update.guild_id,
+        Some(Snowflake::new(200_000_000_000_000_001))
+    );
+    assert_eq!(update.member_count, Some(3));
+    assert_eq!(update.added_members.len(), 1);
+    assert_eq!(
+        update.added_members[0].user_id,
+        Some(Snowflake::new(100_000_000_000_000_001))
+    );
+    assert_eq!(update.added_members[0].flags, 2);
+    assert!(update.added_members[0].mute_config.is_none());
+    assert_eq!(
+        update.removed_member_ids,
+        [Snowflake::new(100_000_000_000_000_002)]
+    );
+}
+
+#[test]
+fn a_thread_member_in_another_shape_still_decodes() {
+    let drifted = edited(include_str!("fixtures/thread_create.json"), |value| {
+        value["member"] = serde_json::json!({
+            "id": "300000000000000021", "user_id": "100000000000000001",
+            "muted": null, "mute_config": "bad", "flags": 1
+        });
+    });
+    let DispatchEvent::ThreadCreate(thread) = dispatch("THREAD_CREATE", &drifted) else {
+        panic!("expected THREAD_CREATE");
+    };
+
+    let member = thread.member.expect("the member is kept");
+    assert!(!member.muted);
+    assert!(member.mute_config.is_none());
+    assert!(member.join_timestamp.is_none());
+    assert_eq!(member.flags, 1);
+}
+
+#[test]
+fn a_members_update_with_unknown_fields_decodes() {
+    let drifted = edited(
+        include_str!("fixtures/thread_members_update.json"),
+        |value| {
+            let good = value["added_members"][0].clone();
+            value["added_members"] = serde_json::json!(["bad", good]);
+            value["removed_member_ids"] = Value::Null;
+            value["member_ids_preview"] = serde_json::json!({"changed": "shape"});
+        },
+    );
+    let DispatchEvent::ThreadMembersUpdate(update) = dispatch("THREAD_MEMBERS_UPDATE", &drifted)
+    else {
+        panic!("expected THREAD_MEMBERS_UPDATE");
+    };
+
+    assert_eq!(update.added_members.len(), 1);
+    assert_eq!(
+        update.added_members[0].user_id,
+        Some(Snowflake::new(100_000_000_000_000_001))
+    );
+    assert!(update.removed_member_ids.is_empty());
+}
+
+#[test]
 fn thread_delete_decodes_its_four_fields() {
     let event = dispatch(
         "THREAD_DELETE",

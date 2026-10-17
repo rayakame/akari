@@ -789,7 +789,7 @@ impl Account {
         // Built before the task starts, so it runs even if the task is never polled.
         let finish = Finish::new(shared.clone());
         runtime.spawn(pump(finish));
-        runtime.spawn(mutes::end_mutes(
+        runtime.spawn(deadlines::run_deadlines(
             shared.store.clone(),
             shared.store.subscribe(),
         ));
@@ -1193,7 +1193,7 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
 }
 
 mod acks;
-mod mutes;
+mod deadlines;
 
 #[cfg(test)]
 mod tests;

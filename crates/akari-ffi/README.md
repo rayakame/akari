@@ -30,7 +30,8 @@ Kotlin (Android, later). This crate holds bindings only: logic belongs in `akari
 list with every folder's guilds in its place. `guild_settings(guild_id)` (`None`: the DM
 settings) says whether the guild is muted now, when that ends, and its suppress and "hide
 muted channels" settings. `muted_channels(ids)` returns the channels among `ids` that their
-own settings mute now, in one read; a muted category or guild doesn't mute its channels.
+own settings mute now, in one read, and the threads muted by the user's membership; a muted
+category or guild doesn't mute its channels, nor a muted channel its threads.
 `ServerListChanged` says to read `server_list` again, `GuildSettingsChanged` to reread a
 guild's settings and mutes; it also comes when a timed mute ends. Category collapse isn't
 here: Discord's clients don't sync it, so each app keeps its own.
@@ -47,6 +48,17 @@ sent none is `estimated`, and its `acked` isn't a message the user read.
 `unread_private_channels()` lists the DMs and group DMs with mentions, newest message first,
 for the rail. `BadgeChanged { channel_id, guild_id }` says to reread that channel's badge or
 read state, and `GuildBadgeChanged { guild_id }` that guild's badge and its folder's.
+
+## Threads
+
+`channel_list(guild_id)` puts each channel's listed threads right after it, newest created
+first: those the user joined that aren't archived and are inside their "Hide After Inactivity"
+window, unread, or with a mention. A thread's `Channel` carries `thread: ThreadInfo` (joined,
+archived, locked, private, its message count and owner). `ThreadListingChanged { guild_id,
+thread_id }` says to read the list again when a thread left or rejoined it without changing
+itself (its window ended, it was read past it, a message came after it); joining, leaving and
+closing come as `ChannelUpdated`. Which listed threads a list hides (under a collapsed
+category, a muted parent, "hide muted channels") is the host's rule.
 
 Acks: `set_reading(channel_id)` names the channel the user is reading at its newest messages
 (or `None`), `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request

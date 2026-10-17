@@ -19,12 +19,17 @@ public final class SessionModel {
     public let collapsed: CollapsedCategories
     public private(set) var place: Place = .home
     /// The open guild's channels; `nil` at home.
-    public private(set) var channels: ChannelListModel?
+    public private(set) var channels: ChannelListModel? {
+        didSet { channels?.setOpen(messages?.channelId) }
+    }
     /// The open channel's messages. The session can replace it on its own, when the open channel
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
     /// with `.task(id: messages.channelId) { await messages.open() }`.
     public private(set) var messages: MessageListModel? {
-        didSet { oldValue?.retire() }
+        didSet {
+            oldValue?.retire()
+            channels?.setOpen(messages?.channelId)
+        }
     }
     /// The channel the user is reading: the open channel while the session is online, the app
     /// active, its window key and visible, the list fresh at the present's bottom and the user
@@ -382,12 +387,13 @@ public final class SessionModel {
             enter(.home)
         }
         let open = messages?.channelId
-        let wasListed = open.map(isListed) ?? false
+        // An open thread stays open when it stops being listed, as in the official client.
+        let wasListed = open.flatMap(listed).map { !$0.isThread } ?? false
         servers.apply(batch)
         directMessages.apply(batch)
         channels?.apply(batch)
-        // Threads and DMs aren't in the channel list; they leave only when removed.
-        if let open, batch.removedChannels.contains(open) || (wasListed && !isListed(open)) {
+        // DMs and threads the list doesn't show leave only when removed.
+        if let open, batch.removedChannels.contains(open) || (wasListed && listed(open) == nil) {
             engaged = false
             if case .guild(let guildId) = place, let list = channels {
                 openListedChannel(in: list, guildId: guildId)
@@ -431,8 +437,8 @@ public final class SessionModel {
         }
     }
 
-    private func isListed(_ channel: ChannelId) -> Bool {
-        channels?.channels.contains { $0.id == channel } == true
+    private func listed(_ channel: ChannelId) -> Channel? {
+        channels?.channels.first { $0.id == channel }
     }
 
     private func restore(_ spot: AccountMemory.Spot) {
@@ -468,7 +474,7 @@ public final class SessionModel {
         let last = lastChannels[guildId].flatMap { last in
             list.channels.first { $0.id == last && $0.opensMessageList }
         }
-        let first = list.channels.first(where: \.opensMessageList)
+        let first = list.channels.first { $0.opensMessageList && !$0.isThread }
         if let channel = last ?? first {
             show(channel: channel.id)
         } else {

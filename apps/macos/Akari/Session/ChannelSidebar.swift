@@ -13,13 +13,11 @@ struct ChannelSidebar: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     let open = session.messages?.channelId
-                    ForEach(
-                        collapsed.visible(list.shown(open: open), in: list.guildId) {
-                            list.staysWhenCollapsed($0, open: open)
-                        },
-                        id: \.id
-                    ) {
-                        channel in
+                    let rows = collapsed.visible(list.shown(open: open), in: list.guildId) {
+                        list.staysWhenCollapsed($0, open: open)
+                    }
+                    let lastThreads = Self.lastThreads(in: rows)
+                    ForEach(rows, id: \.id) { channel in
                         let muted = list.muted.contains(channel.id)
                         if channel.kind == .guildCategory {
                             CategoryRow(
@@ -28,6 +26,17 @@ struct ChannelSidebar: View {
                                 muted: muted
                             ) {
                                 collapsed.toggle(channel.id, in: list.guildId)
+                            }
+                        } else if channel.isThread {
+                            ThreadRow(
+                                channel: channel, last: lastThreads.contains(channel.id),
+                                selected: channel.id == open, muted: muted,
+                                badge: list.badge(of: channel.id)
+                            ) {
+                                session.open(channel: channel.id)
+                            }
+                            .markReadMenu(enabled: session.canMarkRead(channel: channel.id)) {
+                                session.markRead(channel: channel.id)
                             }
                         } else {
                             ChannelRow(
@@ -45,6 +54,18 @@ struct ChannelSidebar: View {
                 .padding(.bottom, 72)
             }
         }
+    }
+
+    /// The threads whose spine ends at their branch: each parent's last listed thread.
+    static func lastThreads(in rows: [Channel]) -> Set<ChannelId> {
+        var last: Set<ChannelId> = []
+        for (index, row) in rows.enumerated() where row.isThread {
+            let next = rows.indices.contains(index + 1) ? rows[index + 1] : nil
+            if next?.isThread != true || next?.parentId != row.parentId {
+                last.insert(row.id)
+            }
+        }
+        return last
     }
 }
 
@@ -151,6 +172,96 @@ struct ChannelRow: View {
         } else {
             .clear
         }
+    }
+}
+
+/// A thread under its parent channel: no symbol, hung from a spine under the parent's symbol.
+struct ThreadRow: View {
+    /// Under the center of the parent row's symbol: the row's inset 8, its padding 8, half of 20.
+    nonisolated static let spine: CGFloat = 26
+    /// Where the branch ends and the row itself begins.
+    nonisolated static let branchEnd: CGFloat = 36
+
+    let channel: Channel
+    /// The parent's last thread, whose spine ends at its branch.
+    let last: Bool
+    let selected: Bool
+    let muted: Bool
+    var badge = Badge(unread: false, mentions: 0)
+    let open: () -> Void
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Text(channel.name ?? "")
+                    .font(TypeScale.channelName.weight(weight).font)
+                    .foregroundStyle(
+                        Color(
+                            nsColor: selected || hovered || badge.unread
+                                ? Palette.interactiveTextActive : Palette.channelDefault)
+                    )
+                    .lineLimit(1)
+                    .opacity(muted && !selected ? 0.5 : 1)
+                Spacer(minLength: 0)
+                if badge.mentions > 0 {
+                    MentionBadge(count: badge.mentions)
+                }
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(background)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .accessibilityLabel("\(channel.name ?? ""), thread")
+        .accessibilityValue(MentionBadge.accessibilityValue(badge))
+        .padding(.leading, Self.branchEnd)
+        .padding(.trailing, 8)
+        .background {
+            Spine(last: last)
+                .stroke(Color(nsColor: Palette.channelDefault), lineWidth: 1)
+        }
+        .overlay(alignment: .leading) {
+            if badge.unread && !selected {
+                UnreadPill()
+            }
+        }
+    }
+
+    private var weight: TextStyle.Weight {
+        selected && colorScheme == .light ? .semibold : .medium
+    }
+
+    private var background: Color {
+        if selected {
+            Color(nsColor: Palette.selectedBackground)
+        } else if hovered {
+            Color(nsColor: Palette.hoverBackground)
+        } else {
+            .clear
+        }
+    }
+}
+
+// Runs on through the 2 between rows, so the spines of a parent's threads join up.
+nonisolated private struct Spine: Shape {
+    let last: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let middle = rect.midY
+        path.move(to: CGPoint(x: ThreadRow.spine, y: rect.minY - 2))
+        path.addLine(to: CGPoint(x: ThreadRow.spine, y: last ? middle : rect.maxY))
+        path.move(to: CGPoint(x: ThreadRow.spine, y: middle))
+        path.addLine(to: CGPoint(x: ThreadRow.branchEnd - 2, y: middle))
+        return path
     }
 }
 

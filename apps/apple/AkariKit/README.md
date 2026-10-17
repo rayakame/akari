@@ -69,9 +69,13 @@ screen, so views render from them without calling into Rust.
   `tileBadge(of:)` adds up a collapsed folder's, while an expanded one shows nothing),
   `DirectMessageListModel` (the DM list, the latest conversation first, with each one's
   recipients, name and `Badge`; `unread` holds the conversations with mentions, newest first,
-  for the rail's icons under Home), `ChannelListModel` (the open guild's channels, their
-  badges, which of them their own settings mute, `shown(open:)`, which leaves muted channels
-  out when the user hides them, except the open one, and `staysWhenCollapsed(_:open:)`) and
+  for the rail's icons under Home), `ChannelListModel` (the open guild's channels with their
+  listed threads after each parent, their badges, which of them their own settings mute, and
+  `shown(open:)`, which shows them as the official client does: the thread open full width
+  (`setOpen(_:)`, called by the session) keeps a row at the top of its parent's threads while
+  it isn't listed; a muted channel that isn't open shows only its unread and mentioned threads;
+  with "hide muted channels" muted channels and threads are left out, except the open one and
+  a channel with threads that show; and `staysWhenCollapsed(_:open:)`) and
   `MessageListModel` (the open channel's messages and loads; `failedLoads` keeps each kind of
   load's last failure; `lastLoad` is the last load's `LoadTrace` with akari-core's
   `LoadReport` and the model's read time, and `openedAt`/`openedFrom` say when the channel
@@ -93,12 +97,15 @@ screen, so views render from them without calling into Rust.
 - `CollapsedCategories` (`session.collapsed`) keeps the collapsed categories per guild across
   launches; `visible(_:in:keeps:)` leaves out a collapsed category's channels except those the
   channel list keeps: the open channel, channels with mentions, and unread channels unless the
-  category is muted (then only mentions stay, as in Discord). Discord's clients don't sync
+  category is muted (then only mentions stay, as in Discord); unread and mentioned threads
+  stay, muted category or not, with their channel. Discord's clients don't sync
   collapse, so it stays Akari's own (per guild, shared by the accounts on this Mac), and Akari
   never collapses a category on its own.
 
 The session replaces `messages` on its own when the open channel is deleted or the user can
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.
+An open thread that stops being listed (left, closed, or read past its window) stays open,
+as in the official client; only its deletion closes it.
 A list the session replaces, also on a channel switch, starts no more loads, and a jump to
 unread it is still loading doesn't land. The view calls `open()` when the message area appears
 and whenever `messages.channelId` changes, which is what `.task(id:)` does. When the area

@@ -125,7 +125,26 @@ pub struct Channel {
     pub spam: bool,
 }
 
+// A forum post pinned to the top of its forum.
+const PINNED: u64 = 1 << 1;
+
 impl Channel {
+    /// When a thread's "Hide After Inactivity" window ends: `auto_archive_duration` minutes after
+    /// its newest message or its archive timestamp, whichever is later. `None` for pinned forum
+    /// posts, which have none, and for channels that aren't threads.
+    pub fn window_end(&self) -> Option<Timestamp> {
+        let info = self.thread.as_deref()?;
+        if self.flags & PINNED != 0 {
+            return None;
+        }
+        let newest = self.last_message_id.map_or(0, Snowflake::unix_millis);
+        let start = newest.max(info.archive_timestamp.unix_millis());
+        let minutes = i64::from(info.auto_archive_duration);
+        Some(Timestamp::from_unix_millis(
+            start.saturating_add(minutes * 60_000),
+        ))
+    }
+
     /// Announcement, public and private threads.
     pub fn is_thread(&self) -> bool {
         matches!(
@@ -148,8 +167,8 @@ pub struct PermissionOverwrite {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ThreadInfo {
-    /// The user joined the thread. Only joined threads count toward their guild's badge.
-    pub joined: bool,
+    /// The current user's membership; `None` while the user hasn't joined the thread.
+    pub member: Option<ThreadMembership>,
     pub archived: bool,
     pub locked: bool,
     /// Minutes of inactivity before the thread is archived.
@@ -158,6 +177,31 @@ pub struct ThreadInfo {
     pub create_timestamp: Option<Timestamp>,
     pub message_count: Option<u32>,
     pub member_count: Option<u32>,
+}
+
+impl ThreadInfo {
+    /// Only joined threads are listed and count toward their guild's badge.
+    pub fn joined(&self) -> bool {
+        self.member.is_some()
+    }
+}
+
+/// The current user's membership of a thread.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ThreadMembership {
+    /// Muted by its own settings; see [`muted_now`](Self::muted_now).
+    pub muted: bool,
+    /// `None` for a mute without an end.
+    pub mute_ends: Option<Timestamp>,
+    /// The thread's own notification level; `None` follows its channel. No badge depends on it.
+    pub level: Option<NotificationLevel>,
+}
+
+impl ThreadMembership {
+    pub fn muted_now(&self, now: Timestamp) -> bool {
+        self.muted && self.mute_ends.is_none_or(|end| end > now)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

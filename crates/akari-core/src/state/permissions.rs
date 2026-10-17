@@ -99,7 +99,9 @@ mod tests {
 
     use super::*;
     use crate::model::{ChannelType, OverwriteType, Snowflake, Timestamp};
-    use crate::state::types::{Channel, Guild, Member, PermissionOverwrite, Role, ThreadInfo};
+    use crate::state::types::{
+        Channel, Guild, Member, PermissionOverwrite, Role, ThreadInfo, ThreadMembership,
+    };
 
     const GUILD: u64 = 1;
     const USER: u64 = 10;
@@ -200,7 +202,7 @@ mod tests {
             kind: ChannelType::PublicThread,
             parent_id: Some(Snowflake::new(100)),
             thread: Some(Box::new(ThreadInfo {
-                joined: true,
+                member: Some(ThreadMembership::default()),
                 archived: false,
                 locked: false,
                 auto_archive_duration: 60,

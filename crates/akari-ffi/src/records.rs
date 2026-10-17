@@ -180,6 +180,24 @@ pub struct Channel {
     pub rate_limit_per_user: u32,
     /// DM and group DM recipients without the current user; see `Store::user`.
     pub recipient_ids: Vec<UserId>,
+    /// Set for threads.
+    pub thread: Option<ThreadInfo>,
+}
+
+/// A thread's state.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ThreadInfo {
+    /// The user is a member; only joined threads are listed.
+    pub joined: bool,
+    /// Closed: it can be opened, and sending reopens it.
+    pub archived: bool,
+    /// Only moderators can send.
+    pub locked: bool,
+    /// Only its members and moderators see it.
+    pub private: bool,
+    pub message_count: Option<u32>,
+    /// Who started it.
+    pub owner_id: Option<UserId>,
 }
 
 impl From<&state::Channel> for Channel {
@@ -195,6 +213,14 @@ impl From<&state::Channel> for Channel {
             nsfw: channel.nsfw,
             rate_limit_per_user: channel.rate_limit_per_user,
             recipient_ids: channel.recipients.to_vec(),
+            thread: channel.thread.as_deref().map(|info| ThreadInfo {
+                joined: info.joined(),
+                archived: info.archived,
+                locked: info.locked,
+                private: channel.kind == ChannelType::PrivateThread,
+                message_count: info.message_count,
+                owner_id: channel.owner_id,
+            }),
         }
     }
 }

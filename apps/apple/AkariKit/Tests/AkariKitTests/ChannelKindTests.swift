@@ -13,4 +13,12 @@ struct ChannelKindTests {
     func onlyTextLikeChannelsOpenAMessageList(kind: ChannelType, opens: Bool) {
         #expect(channel(1, kind: kind).opensMessageList == opens)
     }
+
+    @Test(arguments: [
+        (ChannelType.newsThread, true), (.publicThread, true), (.privateThread, true),
+        (.guildText, false), (.guildForum, false), (.dm, false), (.unknown(19), false),
+    ])
+    func announcementPublicAndPrivateThreadsAreThreads(kind: ChannelType, isThread: Bool) {
+        #expect(channel(1, kind: kind).isThread == isThread)
+    }
 }

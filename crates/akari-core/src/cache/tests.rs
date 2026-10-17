@@ -16,7 +16,7 @@ use crate::state::{
     Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
     EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
     Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
-    Sticker, ThreadInfo, Unreads, User, UserSettings,
+    Sticker, ThreadInfo, ThreadMembership, Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -168,7 +168,7 @@ pub(crate) fn thread(id: u64, guild: u64, parent: u64) -> Channel {
         parent_id: Some(Snowflake::new(parent)),
         owner_id: Some(Snowflake::new(ME)),
         thread: Some(Box::new(ThreadInfo {
-            joined: true,
+            member: Some(ThreadMembership::default()),
             archived: false,
             locked: true,
             auto_archive_duration: 1440,
@@ -442,6 +442,37 @@ fn every_state_type_round_trips_through_its_row() {
     };
     assert_eq!(window.skipped, 0);
     assert_eq!(window.value, vec![Arc::new(expected)]);
+}
+
+#[test]
+fn a_threads_membership_round_trips() {
+    let dir = TempDir::new();
+    let mut cache = open(&dir);
+    let mut muted = thread(12, 100, 10);
+    if let Some(info) = muted.thread.as_deref_mut() {
+        info.member = Some(ThreadMembership {
+            muted: true,
+            mute_ends: Some(time(1_700_000_000_123_456_000)),
+            level: Some(NotificationLevel::OnlyMentions),
+        });
+    }
+    let mut unjoined = thread(14, 100, 10);
+    if let Some(info) = unjoined.thread.as_deref_mut() {
+        info.member = None;
+    }
+    cache
+        .write(|writer| {
+            writer.put_channel(&muted)?;
+            writer.put_channel(&unjoined)
+        })
+        .unwrap();
+    drop(cache);
+
+    let read = open(&dir).read_entities().unwrap();
+
+    assert_eq!(read.skipped, 0);
+    assert_eq!(*read.value.channels[&Snowflake::new(12)], muted);
+    assert_eq!(*read.value.channels[&Snowflake::new(14)], unjoined);
 }
 
 #[test]

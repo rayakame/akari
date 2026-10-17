@@ -11,7 +11,7 @@ use crate::state::badges::Dirty;
 use crate::state::events::StoreEvent;
 use crate::state::read_states::{Ack, ReadState};
 use crate::state::settings::NotificationLevel;
-use crate::state::types::Channel;
+use crate::state::types::{Channel, ThreadInfo};
 
 const MENTION_ON_ALL_MESSAGES: u64 = 1 << 5;
 
@@ -27,14 +27,17 @@ impl Entities {
         match self.read_states.get(channel.id) {
             Some(state) => state.acked.map_or(0, Snowflake::get),
             None => self
-                .joined_position(channel)
+                .start_position(channel)
                 .unwrap_or_else(|| channel.last_message_id.map_or(0, Snowflake::get)),
         }
     }
 
-    // Without a read state, what was posted before the user joined is read. DMs, and guilds
-    // whose join is unknown, are read until a message arrives.
-    fn joined_position(&self, channel: &Channel) -> Option<u64> {
+    // Without a read state a thread is unread from its start (as the official client shows one),
+    // a guild channel read up to the join, and a DM read until a message arrives.
+    fn start_position(&self, channel: &Channel) -> Option<u64> {
+        if channel.is_thread() {
+            return Some(channel.id.get());
+        }
         let joined = self.members.get(&channel.guild_id?)?.joined_at?;
         Some(Snowflake::<GenericMarker>::from_unix_millis(joined.unix_millis(), 0).get())
     }
@@ -66,7 +69,7 @@ impl State {
         let Some(channel) = self.entities.channels.get(&message.channel_id).cloned() else {
             return;
         };
-        let joined = self.entities.joined_position(&channel);
+        let joined = self.entities.start_position(&channel);
         let mut position = self.entities.read_position(&channel);
         let unstarted = joined.is_none() && self.entities.read_states.get(channel.id).is_none();
         // The CHANNEL_CREATE of a DM opened by this message can already name it as the newest.
@@ -119,7 +122,7 @@ impl State {
                 && (mentions_me || !self.channel_muted_at(channel.id, now));
         };
         // Only a direct mention adds the user to a thread; nothing reaches one they haven't joined.
-        let member = channel.thread.as_deref().is_none_or(|info| info.joined);
+        let member = channel.thread.as_deref().is_none_or(ThreadInfo::joined);
         let counts = mentions_me
             || (member
                 && (self.mentions_through_everyone_or_roles(guild, message)
@@ -439,8 +442,8 @@ impl State {
         ack
     }
 
-    // As the official client's bulk: what the badges show, never unjoined threads, and every
-    // forum the user can view, read or not.
+    // As the official client's bulk: what the badges show, listed threads only (never unjoined
+    // ones), and every forum the user can view, read or not.
     pub(crate) fn mark_guilds_read(
         &mut self,
         guilds: &[GuildId],
@@ -469,12 +472,9 @@ impl State {
                 }
                 continue;
             }
-            let joined = channel
-                .thread
-                .as_deref()
-                .is_none_or(|info| info.joined && !info.archived);
+            let listed = !channel.is_thread() || self.badges.listed(channel.id);
             let badge = self.badges.channel(channel.id);
-            if joined && (badge.unread || badge.mentions > 0) {
+            if listed && (badge.unread || badge.mentions > 0) {
                 shown.push(channel.id);
             }
         }

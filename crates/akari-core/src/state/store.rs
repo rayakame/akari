@@ -509,16 +509,30 @@ impl Store {
         });
     }
 
-    pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
-        self.read(|inner| inner.state.next_mute_end(after))
+    // The next mute end or thread window end after `after`.
+    pub(crate) fn next_deadline(&self, after: Timestamp) -> Option<Timestamp> {
+        self.read(|inner| {
+            let mutes = inner.state.next_mute_end(after);
+            mutes
+                .into_iter()
+                .chain(inner.state.next_window_end(after))
+                .min()
+        })
     }
 
-    // Reports the guilds whose mute, or a channel's, ended within `after..=until`.
-    pub(crate) fn end_mutes(&self, after: Timestamp, until: Timestamp) {
+    // Reports the guilds whose mute, or a channel's, ended within `after..=until`, and the
+    // threads whose window did.
+    pub(crate) fn end_deadlines(&self, after: Timestamp, until: Timestamp) {
         let ended = self.read(|inner| inner.state.mutes_ending(after, until));
         if !ended.is_empty() {
             self.write("mutes", |inner, events| {
                 inner.state.end_mutes(&ended, until.unix_millis(), events);
+            });
+        }
+        let ended = self.read(|inner| inner.state.windows_ending(after, until));
+        if !ended.is_empty() {
+            self.write("windows", |inner, events| {
+                inner.state.end_windows(&ended, until.unix_millis(), events);
             });
         }
     }
@@ -691,8 +705,9 @@ impl Store {
         self.read(|inner| inner.state.guild_settings(guild))
     }
 
-    /// Muted now by its own settings. Neither a muted category nor a muted guild makes its
-    /// channels muted; see [`guild_settings`](Self::guild_settings).
+    /// Muted now by its own settings, for a thread by its own membership. Neither a muted
+    /// category nor a muted guild makes its channels muted, nor a muted channel its threads;
+    /// see [`guild_settings`](Self::guild_settings).
     pub fn channel_muted(&self, channel: ChannelId) -> bool {
         let now = Timestamp::from_unix_millis(wall_millis());
         self.read(|inner| inner.state.channel_muted_at(channel, now))
@@ -782,7 +797,7 @@ impl Store {
         self.read(|inner| ids.iter().map(|id| inner.state.guild_badge(*id)).collect())
     }
 
-    /// The sum over the guild's channels and joined threads that count for it. `unread` is
+    /// The sum over the guild's channels and listed threads that count for it. `unread` is
     /// false while the guild is muted; its mentions stay.
     pub fn guild_badge(&self, guild: GuildId) -> Badge {
         self.read(|inner| inner.state.guild_badge(guild))
@@ -814,7 +829,10 @@ impl Store {
 
     /// A guild's channel list as Discord shows it: [`display_order`], only channels the
     /// user can view, the categories holding them, and empty categories the user can
-    /// view. Threads are left out.
+    /// view. Each channel is followed by its listed threads, newest created first: those the
+    /// user joined that aren't archived and are inside their inactivity window
+    /// ([`Channel::window_end`]), unread, or with mentions. The parent's mute and "hide muted
+    /// channels" don't change which threads are listed.
     ///
     /// [`display_order`]: super::display_order
     pub fn channel_list(&self, guild: GuildId) -> Vec<Arc<Channel>> {
@@ -822,11 +840,18 @@ impl Store {
         self.read(|inner| {
             let state = &inner.state;
             let ordered = order::display_order(&state.guild_channels(guild));
-            order::visible_channels(ordered, |channel| {
+            let visible = order::visible_channels(ordered, |channel| {
                 state
                     .permissions(channel.id, now)
                     .is_some_and(|permissions| permissions.contains(Permissions::VIEW_CHANNEL))
-            })
+            });
+            let mut list = Vec::with_capacity(visible.len());
+            for channel in visible {
+                let threads = state.listed_threads(channel.id);
+                list.push(channel);
+                list.extend(threads);
+            }
+            list
         })
     }
 

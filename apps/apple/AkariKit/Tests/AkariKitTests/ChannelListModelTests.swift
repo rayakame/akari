@@ -208,4 +208,188 @@ struct ChannelListModelTests {
     func aMutedCollapsedCategoryShowsOnlyMentions() {
         #expect(collapsedCategory(muted: true) == [id(10), id(12), id(15)])
     }
+
+    // A category, a channel with two threads (the newest first, as the core lists them), and
+    // another channel.
+    func threaded(_ change: (inout FakeStore.State) -> Void = { _ in }) -> ChannelListModel {
+        store.update { state in
+            state.list(
+                [
+                    channel(10, kind: .guildCategory), channel(11, parent: 10),
+                    thread(32, in: 11), thread(31, in: 11), channel(12, parent: 10),
+                ], in: 1)
+            change(&state)
+        }
+        let model = ChannelListModel(guildId: id(1), store: store)
+        store.log.forget()
+        return model
+    }
+
+    func collapsedRows(_ model: ChannelListModel, open: ChannelId? = nil) -> [ChannelId] {
+        let collapsed = CollapsedCategories(defaults: MemoryDefaults())
+        collapsed.toggle(id(10), in: id(1))
+        return collapsed.visible(model.shown(open: open), in: id(1)) {
+            model.staysWhenCollapsed($0, open: open)
+        }.map(\.id)
+    }
+
+    @Test
+    func threadsFollowTheirParentNewestFirst() {
+        let model = threaded()
+
+        #expect(model.shown(open: nil).map(\.id) == [id(10), id(11), id(32), id(31), id(12)])
+    }
+
+    @Test
+    func aCollapsedCategoryKeepsUnreadThreadsWithTheirParent() {
+        let model = threaded { $0.channelBadges = [id(32): badge()] }
+
+        #expect(collapsedRows(model) == [id(10), id(11), id(32)])
+    }
+
+    @Test
+    func aCollapsedMutedCategoryKeepsUnreadThreadsNotOnlyMentioned() {
+        let model = threaded { state in
+            state.channelBadges = [id(32): badge(), id(12): badge()]
+            state.mutedChannels = [id(10)]
+        }
+
+        #expect(collapsedRows(model) == [id(10), id(11), id(32)])
+    }
+
+    @Test
+    func aMutedParentHidesItsReadThreadsUntilItIsOpen() {
+        let model = threaded { state in
+            state.channelBadges = [id(32): badge()]
+            state.mutedChannels = [id(11)]
+        }
+
+        #expect(model.shown(open: nil).map(\.id) == [id(10), id(11), id(32), id(12)])
+        #expect(
+            model.shown(open: id(11)).map(\.id) == [id(10), id(11), id(32), id(31), id(12)])
+        #expect(
+            model.shown(open: id(31)).map(\.id) == [id(10), id(11), id(32), id(31), id(12)],
+            "the open thread always shows")
+    }
+
+    @Test
+    func hideMutedChannelsKeepsAParentWithUnreadThreads() {
+        let model = threaded { state in
+            state.channelBadges = [id(32): badge()]
+            state.mutedChannels = [id(11), id(12)]
+            state.guildSettings[id(1)] = settings(hideMutedChannels: true)
+        }
+
+        #expect(model.shown(open: nil).map(\.id) == [id(10), id(11), id(32)])
+        store.update { $0.channelBadges = [:] }
+        model.apply(EventBatch([.badgeChanged(channelId: id(32), guildId: id(1))]))
+        #expect(model.shown(open: nil).map(\.id) == [id(10)])
+    }
+
+    @Test
+    func aMutedThreadUnderHideMutedIsHidden() {
+        let model = threaded { state in
+            state.channelBadges = [id(32): badge(unread: false, mentions: 1)]
+            state.mutedChannels = [id(32)]
+            state.guildSettings[id(1)] = settings(hideMutedChannels: true)
+        }
+
+        #expect(model.shown(open: nil).map(\.id) == [id(10), id(11), id(31), id(12)])
+        #expect(
+            model.shown(open: id(32)).map(\.id) == [id(10), id(11), id(32), id(31), id(12)])
+    }
+
+    @Test
+    func theOpenThreadsRowMovesToTheTopWhenItStopsBeingListed() {
+        let model = threaded()
+        model.setOpen(id(31))
+        store.update { state in
+            state.channelLists[id(1)] = [id(10), id(11), id(32), id(12)]
+        }
+
+        model.apply(EventBatch([.threadListingChanged(guildId: id(1), threadId: id(31))]))
+
+        #expect(model.channels.map(\.id) == [id(10), id(11), id(32), id(12)])
+        #expect(model.shown(open: id(31)).map(\.id) == [id(10), id(11), id(31), id(32), id(12)])
+    }
+
+    @Test
+    func theKeptRowGoesWhenTheUserOpensSomethingElse() {
+        let model = threaded()
+        model.setOpen(id(31))
+        store.update { $0.channelLists[id(1)] = [id(10), id(11), id(32), id(12)] }
+        model.apply(EventBatch([.threadListingChanged(guildId: id(1), threadId: id(31))]))
+
+        model.setOpen(id(12))
+
+        #expect(model.shown(open: id(12)).map(\.id) == [id(10), id(11), id(32), id(12)])
+    }
+
+    @Test
+    func anUnlistedThreadOpenFullWidthGetsTheTopRow() {
+        let model = threaded { $0.channels[id(33)] = thread(33, in: 11) }
+
+        model.setOpen(id(33))
+
+        #expect(store.reads == [.channels([id(33)])])
+        #expect(
+            model.shown(open: id(33)).map(\.id)
+                == [id(10), id(11), id(33), id(32), id(31), id(12)])
+    }
+
+    @Test
+    func theKeptRowsBadgeFollowsItsThread() {
+        let model = threaded { $0.channelBadges = [id(31): badge(mentions: 1)] }
+        model.setOpen(id(31))
+        store.update { state in
+            state.channelLists[id(1)] = [id(10), id(11), id(32), id(12)]
+            state.channelBadges = [:]
+        }
+
+        model.apply(
+            EventBatch([
+                .badgeChanged(channelId: id(31), guildId: id(1)),
+                .threadListingChanged(guildId: id(1), threadId: id(31)),
+            ]))
+
+        #expect(model.badge(of: id(31)) == noBadge)
+    }
+
+    @Test
+    func theKeptThreadIsFoundById() {
+        let model = threaded { $0.channels[id(33)] = thread(33, in: 11) }
+        model.setOpen(id(33))
+
+        #expect(model.channel(id(33))?.id == id(33))
+        #expect(model.channel(id(12))?.id == id(12))
+        model.setOpen(id(12))
+        #expect(model.channel(id(33)) == nil)
+    }
+
+    @Test
+    func aNewSessionRereadsTheKeptThread() {
+        let model = threaded()
+        model.setOpen(id(31))
+        var renamed = thread(31, in: 11)
+        renamed.name = "renamed"
+        store.update { state in
+            state.channelLists[id(1)] = [id(10), id(11), id(32), id(12)]
+            state.channels[id(31)] = renamed
+        }
+
+        model.apply(EventBatch([.ready]))
+
+        #expect(model.channel(id(31))?.name == "renamed")
+    }
+
+    @Test
+    func aThreadsMuteChangeRereadsMuted() {
+        let model = threaded()
+        store.update { $0.mutedChannels = [id(32)] }
+
+        model.apply(EventBatch([.channelUpdated(channelId: id(32), guildId: id(1))]))
+
+        #expect(model.muted == [id(32)])
+        #expect(store.reads.contains(.mutedChannels([id(32)])))
+    }
 }
