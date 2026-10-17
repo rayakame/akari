@@ -209,23 +209,59 @@ fn an_unjoined_threads_messages_give_the_server_no_dot() {
     assert_eq!(guild_badge(&state, G1), badge(false, 0));
 }
 
-// Being mentioned adds the user to a thread, which Akari doesn't hear about until READY.
+// Being mentioned adds the user to the thread; the members event that says so lists it.
 #[test]
-fn a_ping_in_an_unjoined_thread_reaches_the_server_badge() {
+fn a_ping_in_an_unjoined_thread_reaches_the_server_badge_once_it_joins_the_user() {
     let mut state = ready_where(read_general);
     let mut thread = fixture(include_str!(
         "../../../../tests/fixtures/thread_create.json"
     ));
     thread.as_object_mut().unwrap().remove("member");
     apply(&mut state, "THREAD_CREATE", thread);
-
     apply(
         &mut state,
         "MESSAGE_CREATE",
         message(AFTER_JOIN + 8, 300_000_000_000_000_021),
     );
+    assert_eq!(guild_badge(&state, G1), badge(false, 0), "no row yet");
 
-    assert_eq!(guild_badge(&state, G1), badge(false, 1));
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        json!({
+            "id": "300000000000000021", "guild_id": G1.to_string(), "member_count": 2,
+            "added_members": [{"id": "300000000000000021", "user_id": ME.to_string(), "flags": 1}]
+        }),
+    );
+
+    assert!(state.listed(Snowflake::new(300_000_000_000_000_021)));
+    assert_eq!(guild_badge(&state, G1), badge(true, 1));
+}
+
+#[test]
+fn leaving_a_thread_takes_its_mentions_off_the_server_badge() {
+    let mut state = ready_where(|ready| {
+        read_general(ready);
+        ready["read_state"]["entries"][1]["mention_count"] = 3.into();
+    });
+    assert_eq!(guild_badge(&state, G1), badge(false, 3));
+
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        json!({
+            "id": THREAD.to_string(), "guild_id": G1.to_string(), "member_count": 2,
+            "removed_member_ids": [ME.to_string()]
+        }),
+    );
+
+    assert_eq!(guild_badge(&state, G1), badge(false, 0));
+    assert!(
+        state
+            .mark_guilds_read(&[Snowflake::new(G1)], wall_millis(), &mut Vec::new())
+            .is_empty(),
+        "nothing left to mark"
+    );
 }
 
 fn thread_unread(ready: &mut Value) {

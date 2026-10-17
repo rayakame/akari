@@ -138,8 +138,9 @@ it is inside its "Hide After Inactivity" window, unread, or has a mention. The w
 forum posts (channel flag `PINNED`, 1 << 1) have none. The official client keeps an unread
 thread past its window (observed 2026-10-17: a thread with an unread mention and one with a
 plain unread message stayed listed past their hour, also after a reload, and went once read).
-The guild's badge counts exactly the listed threads, and a direct mention in a thread the user
-hasn't joined until the members event lists it. Neither the parent's mute nor "hide muted
+The guild's badge counts exactly the listed threads, so every dot and count has a row to clear
+it from: a mention that adds the user to a thread counts once the members event lists the
+thread, and leaving one takes its mentions off the badge. Neither the parent's mute nor "hide muted
 channels" changes what's listed; which listed threads a list shows under a collapsed category
 or a muted parent is the apps' rule ([channel-list.md](../ui/channel-list.md#threads)).
 
