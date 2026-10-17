@@ -5,29 +5,6 @@ import Testing
 
 @testable import Akari
 
-private func isRed(_ color: NSColor?) -> Bool {
-    guard let color else {
-        return false
-    }
-    return color.redComponent > 0.6 && color.greenComponent < 0.35 && color.blueComponent < 0.35
-}
-
-private func isBright(_ color: NSColor?) -> Bool {
-    guard let color else {
-        return false
-    }
-    return min(color.redComponent, color.greenComponent, color.blueComponent) > 0.85
-}
-
-private func count(_ rendered: Rendered, in xs: Range<CGFloat>, where test: (NSColor?) -> Bool)
-    -> Int
-{
-    let columns = Int(xs.lowerBound * rendered.scale)..<Int(xs.upperBound * rendered.scale)
-    return columns.reduce(0) { total, x in
-        total + (0..<rendered.rep.pixelsHigh).filter { test(rendered.pixel(x, $0)) }.count
-    }
-}
-
 @MainActor
 struct MentionBadgeTests {
     @Test
