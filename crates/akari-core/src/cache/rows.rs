@@ -14,7 +14,7 @@ use crate::state::{
     Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
     EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
     Message, MessageReference, NotificationLevel, PermissionOverwrite, ReadState,
-    ReferencedMessage, Role, Sticker, ThreadInfo, Unreads, User,
+    ReferencedMessage, Role, Sticker, ThreadInfo, ThreadMembership, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -364,7 +364,7 @@ impl From<&Channel> for ChannelRow {
             icon: hash(channel.icon.as_ref()),
             owner_id: id(channel.owner_id),
             thread: channel.thread.as_deref().map(|thread| ThreadRow {
-                joined: thread.joined,
+                joined: thread.joined(),
                 archived: thread.archived,
                 locked: thread.locked,
                 auto_archive_duration: thread.auto_archive_duration,
@@ -408,7 +408,7 @@ impl ChannelRow {
             owner_id: snowflake(self.owner_id),
             thread: self.thread.map(|thread| {
                 Box::new(ThreadInfo {
-                    joined: thread.joined,
+                    member: thread.joined.then(ThreadMembership::default),
                     archived: thread.archived,
                     locked: thread.locked,
                     auto_archive_duration: thread.auto_archive_duration,

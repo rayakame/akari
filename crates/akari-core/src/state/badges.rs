@@ -366,7 +366,7 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
             || channel
                 .thread
                 .as_deref()
-                .is_some_and(|info| info.joined && !info.archived));
+                .is_some_and(|info| info.joined() && !info.archived));
     Some(Slot {
         badge: Badge { unread, mentions },
         read_state,

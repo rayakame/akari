@@ -13,13 +13,14 @@ use super::settings::{
     GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
 };
 use super::threads::ThreadIndex;
-use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
+use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, ThreadMembership, User};
 use super::windows::{
     CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows,
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
-    GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
+    GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, ThreadMemberUpdate,
+    ThreadMembersUpdate, UserUpdate,
 };
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
@@ -136,7 +137,7 @@ impl Entities {
         for thread in threads {
             let mut thread = Channel::from_wire(thread, Some(id));
             if let Some(info) = thread.thread.as_deref_mut() {
-                info.joined = true;
+                info.member.get_or_insert_default();
             }
             self.insert_channel(thread);
         }
@@ -656,7 +657,9 @@ impl State {
                 self.entities.read_states.update_relationship(update);
             }
             E::RelationshipRemove(removed) => self.entities.read_states.unrelate(removed.id),
-            E::ThreadMemberUpdate(_) | E::ThreadMembersUpdate(_) | E::Resumed | E::Other(_) => {}
+            E::ThreadMemberUpdate(update) => self.thread_member_update(*update, events),
+            E::ThreadMembersUpdate(update) => self.thread_members_update(*update, events),
+            E::Resumed | E::Other(_) => {}
         }
     }
 
@@ -707,8 +710,11 @@ impl State {
             if let Some(last) = known.last_message_id {
                 channel.note_message(last);
             }
-            if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread) {
-                info.joined |= before.joined;
+            // An absent member isn't a leave: only a members update or READY says so.
+            if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread)
+                && info.member.is_none()
+            {
+                info.member = before.member;
             }
         }
         let channel = Arc::new(channel);
@@ -792,6 +798,76 @@ impl State {
             self.entities.channels.insert(next.id, next.clone());
             events.push(StoreEvent::ChannelUpdated(next));
         }
+    }
+
+    fn thread_member_update(&mut self, update: ThreadMemberUpdate, events: &mut Vec<StoreEvent>) {
+        let member = update.member;
+        let Some(thread) = member.id else {
+            tracing::debug!("skipping a thread member update without its thread");
+            return;
+        };
+        if member
+            .user_id
+            .is_some_and(|user| Some(user) != self.entities.me())
+        {
+            return;
+        }
+        self.set_membership(thread, Some(ThreadMembership::from_wire(member)), events);
+    }
+
+    // Only the current user's membership is kept; others joining or leaving change nothing.
+    fn thread_members_update(&mut self, update: ThreadMembersUpdate, events: &mut Vec<StoreEvent>) {
+        let Some(me) = self.entities.me() else {
+            return;
+        };
+        let member = if let Some(added) = update
+            .added_members
+            .into_iter()
+            .find(|member| member.user_id == Some(me))
+        {
+            Some(ThreadMembership::from_wire(added))
+        } else if update.removed_member_ids.contains(&me) {
+            None
+        } else {
+            return;
+        };
+        self.set_membership(update.id, member, events);
+    }
+
+    fn set_membership(
+        &mut self,
+        thread: ChannelId,
+        member: Option<ThreadMembership>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let Some(known) = self
+            .entities
+            .channels
+            .get(&thread)
+            .filter(|known| known.thread.is_some())
+            .cloned()
+        else {
+            tracing::debug!(
+                channel_id = thread.get(),
+                "skipping a membership change for an unknown thread"
+            );
+            return;
+        };
+        if known
+            .thread
+            .as_deref()
+            .is_some_and(|info| info.member == member)
+        {
+            return;
+        }
+        let mut next = (*known).clone();
+        if let Some(info) = next.thread.as_deref_mut() {
+            info.member = member;
+        }
+        let next = Arc::new(next);
+        self.dirty.channel(thread);
+        self.entities.channels.insert(thread, next.clone());
+        events.push(StoreEvent::ChannelUpdated(next));
     }
 
     fn channel_delete(&mut self, delete: ChannelDelete, events: &mut Vec<StoreEvent>) {

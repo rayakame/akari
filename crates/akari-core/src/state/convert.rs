@@ -4,7 +4,7 @@ use super::settings::NotificationLevel;
 use super::types::{
     Attachment, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
     EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
-    PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, User,
+    PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, ThreadMembership, User,
 };
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
@@ -186,13 +186,13 @@ impl Channel {
         } else {
             channel.recipient_ids.into_boxed_slice()
         };
-        let joined = channel.member.is_some();
+        let member = channel.member.map(ThreadMembership::from_wire);
         let thread = channel.thread_metadata.map(|metadata| {
             Box::new(thread_info(
                 metadata,
                 channel.message_count,
                 channel.member_count,
-                joined,
+                member,
             ))
         });
         Self {
@@ -278,8 +278,8 @@ impl Channel {
         };
         if let Some(metadata) = update.thread_metadata {
             let (messages, members) = counts(next.thread.as_deref());
-            let joined = next.thread.as_deref().is_some_and(|info| info.joined);
-            next.thread = Some(Box::new(thread_info(metadata, messages, members, joined)));
+            let member = next.thread.as_deref().and_then(|info| info.member);
+            next.thread = Some(Box::new(thread_info(metadata, messages, members, member)));
         } else if let Some(info) = next.thread.as_deref_mut() {
             (info.message_count, info.member_count) = counts(Some(info));
         }
@@ -291,10 +291,10 @@ fn thread_info(
     metadata: model::ThreadMetadata,
     message_count: Option<u32>,
     member_count: Option<u32>,
-    joined: bool,
+    member: Option<ThreadMembership>,
 ) -> ThreadInfo {
     ThreadInfo {
-        joined,
+        member,
         archived: metadata.archived,
         locked: metadata.locked,
         auto_archive_duration: metadata.auto_archive_duration,
@@ -302,6 +302,30 @@ fn thread_info(
         create_timestamp: metadata.create_timestamp,
         message_count,
         member_count,
+    }
+}
+
+// A thread member's flags: `HAS_INTERACTED` (1) isn't a level.
+const ALL_MESSAGES: u64 = 1 << 1;
+const ONLY_MENTIONS: u64 = 1 << 2;
+const NO_MESSAGES: u64 = 1 << 3;
+
+impl ThreadMembership {
+    pub(crate) fn from_wire(member: model::ThreadMember) -> Self {
+        let level = if member.flags & NO_MESSAGES != 0 {
+            Some(NotificationLevel::Nothing)
+        } else if member.flags & ONLY_MENTIONS != 0 {
+            Some(NotificationLevel::OnlyMentions)
+        } else if member.flags & ALL_MESSAGES != 0 {
+            Some(NotificationLevel::AllMessages)
+        } else {
+            None
+        };
+        Self {
+            muted: member.muted,
+            mute_ends: member.mute_config.and_then(|mute| mute.end_time),
+            level,
+        }
     }
 }
 

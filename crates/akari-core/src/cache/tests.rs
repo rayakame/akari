@@ -16,7 +16,7 @@ use crate::state::{
     Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
     EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
     Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
-    Sticker, ThreadInfo, Unreads, User, UserSettings,
+    Sticker, ThreadInfo, ThreadMembership, Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -168,7 +168,7 @@ pub(crate) fn thread(id: u64, guild: u64, parent: u64) -> Channel {
         parent_id: Some(Snowflake::new(parent)),
         owner_id: Some(Snowflake::new(ME)),
         thread: Some(Box::new(ThreadInfo {
-            joined: true,
+            member: Some(ThreadMembership::default()),
             archived: false,
             locked: true,
             auto_archive_duration: 1440,
