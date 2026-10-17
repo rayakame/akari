@@ -105,8 +105,9 @@ pub enum StoreEvent {
     MessagesRefreshed {
         channel_id: ChannelId,
     },
-    /// The window's messages were dropped: the channel was viewed least recently, or a jump
-    /// to the present or to a message replaced them.
+    /// The window's messages were dropped: the channel was viewed least recently, a jump to
+    /// the present or to a message replaced them, or newer messages trimmed them all and were
+    /// deleted since.
     MessagesCleared {
         channel_id: ChannelId,
     },

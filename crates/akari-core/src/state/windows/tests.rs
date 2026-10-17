@@ -1546,3 +1546,100 @@ fn windows_still_loading_or_never_filled_are_not_written() {
     let _older = harness.begin(LoadKind::Older).unwrap();
     assert!(harness.windows.cache_windows(5).is_empty());
 }
+
+// More live messages than the limit arrive during the load, so the oldest held ones are dropped;
+// a delete then leaves fewer held messages than the limit, which the trim alone doesn't cover.
+#[test]
+fn held_messages_past_the_limit_replace_the_rows_after_a_catch_up() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let ticket = harness.begin(LoadKind::Newer).unwrap();
+    for id in 30..37 {
+        harness.live(wire(id));
+    }
+    harness.delete(33);
+
+    let events = harness.finish(ticket, &[22, 23], 3);
+
+    assert_eq!(
+        events,
+        ["Loaded(22..23)", "Loaded(32..36)", "Trimmed(32..36)"]
+    );
+    assert_eq!(harness.ids(), [32, 34, 35, 36]);
+    let window = harness.window();
+    assert!(window.latest && !window.oldest);
+}
+
+#[test]
+fn held_messages_past_the_limit_replace_the_rows_after_a_refresh() {
+    let mut harness = Harness::viewing(LOADS);
+    for id in 10..13 {
+        harness.live(wire(id));
+    }
+    harness.windows.mark_stale(&mut Vec::new());
+    let ticket = harness.begin(LoadKind::Refresh).unwrap();
+    for id in 13..20 {
+        harness.live(wire(id));
+    }
+    harness.delete(17);
+
+    let events = harness.finish(ticket, &[11, 12], 3);
+
+    assert_eq!(
+        events,
+        ["Loaded(15..19)", "Trimmed(15..19)", "Refreshed(1)"]
+    );
+    assert_eq!(harness.ids(), [15, 16, 18, 19]);
+    let window = harness.window();
+    assert!(window.latest && !window.oldest && !window.stale);
+}
+
+#[test]
+fn held_messages_past_the_limit_replace_the_page_after_a_jump_to_the_present() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let ticket = harness.begin(LoadKind::Latest).unwrap();
+    for id in 30..37 {
+        harness.live(wire(id));
+    }
+    harness.delete(33);
+
+    let events = harness.finish(ticket, &[28, 29], 3);
+
+    assert_eq!(events, ["Cleared(1)", "Loaded(32..36)"]);
+    assert_eq!(harness.ids(), [32, 34, 35, 36]);
+    let window = harness.window();
+    assert!(window.latest && !window.oldest);
+}
+
+#[test]
+fn held_messages_past_the_limit_that_were_all_deleted_clear_the_rows() {
+    let mut harness = Harness::detached(LOADS, &[19, 20, 21]);
+    let ticket = harness.begin(LoadKind::Newer).unwrap();
+    for id in 30..37 {
+        harness.live(wire(id));
+    }
+    for id in 32..37 {
+        harness.delete(id);
+    }
+
+    let events = harness.finish(ticket, &[22, 23], 3);
+
+    assert_eq!(events, ["Loaded(22..23)", "Cleared(1)"]);
+    assert!(harness.ids().is_empty());
+    let window = harness.window();
+    assert!(window.latest && !window.oldest);
+}
+
+#[test]
+fn held_messages_dropped_within_the_page_keep_the_rows() {
+    let mut harness = Harness::detached(LOADS, &[20, 21]);
+    let ticket = harness.begin(LoadKind::Newer).unwrap();
+    for id in 22..28 {
+        harness.live(wire(id));
+    }
+    harness.delete(25);
+
+    harness.finish(ticket, &[22, 23, 24, 26, 27], 10);
+
+    assert_eq!(harness.ids(), [22, 23, 24, 26, 27]);
+    assert!(harness.window().latest);
+}
