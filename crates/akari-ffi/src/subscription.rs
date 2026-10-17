@@ -123,6 +123,12 @@ pub enum StoreEvent {
     GuildBadgeChanged {
         guild_id: GuildId,
     },
+    /// A thread joined or left its guild's `channel_list` without changing itself, e.g. its
+    /// inactivity window ended; read the list again.
+    ThreadListingChanged {
+        guild_id: GuildId,
+        thread_id: ChannelId,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -211,6 +217,13 @@ impl StoreEvent {
                 guild_id,
             },
             E::GuildBadgeChanged { guild_id } => Self::GuildBadgeChanged { guild_id },
+            E::ThreadListingChanged {
+                guild_id,
+                thread_id,
+            } => Self::ThreadListingChanged {
+                guild_id,
+                thread_id,
+            },
             E::ChannelAdded(channel) => Self::ChannelAdded {
                 channel_id: channel.id,
                 guild_id: channel.guild_id,

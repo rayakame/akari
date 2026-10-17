@@ -212,7 +212,7 @@ struct MutedRowTests {
     let general = Channel(
         id: ChannelId(rawValue: 11), kind: .guildText, guildId: GuildId(rawValue: 1),
         parentId: nil, name: "general", position: 0, topic: nil, nsfw: false,
-        rateLimitPerUser: 0, recipientIds: [])
+        rateLimitPerUser: 0, recipientIds: [], thread: nil)
 
     @Test
     func aMutedChannelRowIsDimmed() throws {

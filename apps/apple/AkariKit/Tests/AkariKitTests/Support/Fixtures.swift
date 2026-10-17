@@ -23,7 +23,7 @@ func channel(
     Channel(
         id: id(raw), kind: kind, guildId: guild.map(id), parentId: parent.map(id),
         name: name ?? (guild == nil ? nil : "channel-\(raw)"), position: 0, topic: nil,
-        nsfw: false, rateLimitPerUser: 0, recipientIds: []
+        nsfw: false, rateLimitPerUser: 0, recipientIds: [], thread: nil
     )
 }
 
@@ -43,14 +43,14 @@ func folder(_ raw: Int64, _ guilds: [UInt64], name: String? = nil) -> ServerList
 func dm(_ raw: UInt64, with recipient: UInt64) -> Channel {
     Channel(
         id: id(raw), kind: .dm, guildId: nil, parentId: nil, name: nil, position: 0, topic: nil,
-        nsfw: false, rateLimitPerUser: 0, recipientIds: [id(recipient)]
+        nsfw: false, rateLimitPerUser: 0, recipientIds: [id(recipient)], thread: nil
     )
 }
 
 func group(_ raw: UInt64, name: String? = nil, with recipients: [UInt64]) -> Channel {
     Channel(
         id: id(raw), kind: .groupDm, guildId: nil, parentId: nil, name: name, position: 0,
-        topic: nil, nsfw: false, rateLimitPerUser: 0, recipientIds: recipients.map(id)
+        topic: nil, nsfw: false, rateLimitPerUser: 0, recipientIds: recipients.map(id), thread: nil
     )
 }
 

@@ -180,7 +180,7 @@ struct UnreadRowTests {
     let general = Channel(
         id: ChannelId(rawValue: 11), kind: .guildText, guildId: GuildId(rawValue: 1),
         parentId: nil, name: "general", position: 0, topic: nil, nsfw: false,
-        rateLimitPerUser: 0, recipientIds: [])
+        rateLimitPerUser: 0, recipientIds: [], thread: nil)
 
     func render<Row: View>(_ row: Row) throws -> Rendered {
         try Rendered(
@@ -274,7 +274,7 @@ struct MutedBadgeTests {
     let general = Channel(
         id: ChannelId(rawValue: 11), kind: .guildText, guildId: GuildId(rawValue: 1),
         parentId: nil, name: "general", position: 0, topic: nil, nsfw: false,
-        rateLimitPerUser: 0, recipientIds: [])
+        rateLimitPerUser: 0, recipientIds: [], thread: nil)
 
     // The reddest pixel in the row's right end, where the count sits.
     func reddest(muted: Bool) throws -> CGFloat {

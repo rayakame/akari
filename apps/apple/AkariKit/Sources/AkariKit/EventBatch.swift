@@ -59,6 +59,8 @@ struct EventBatch {
                 guildBadgesChanged.insert(guild)
             case .channelAdded(let channel, let guild), .channelUpdated(let channel, let guild):
                 channelsChanged[guild, default: []].insert(channel)
+            case .threadListingChanged(let guild, let thread):
+                channelsChanged[guild, default: []].insert(thread)
             case .channelRemoved(let channel, let guild):
                 channelsChanged[guild, default: []].insert(channel)
                 removedChannels.insert(channel)

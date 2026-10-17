@@ -79,8 +79,9 @@ impl Store {
         GuildSettings::new(&settings, self.core.guild_muted(guild_id))
     }
 
-    /// Of `ids`, the channels muted now by their own settings, in the order given. A muted
-    /// category or guild doesn't mute its channels.
+    /// Of `ids`, the channels muted now by their own settings, in the order given; a thread by
+    /// its own membership. A muted category or guild doesn't mute its channels, nor a muted
+    /// channel its threads.
     pub fn muted_channels(&self, ids: Vec<ChannelId>) -> Vec<ChannelId> {
         self.core.muted_channels(&ids)
     }
@@ -145,7 +146,8 @@ impl Store {
         self.core.unavailable_guilds()
     }
 
-    /// The guild's channel list as Discord shows it, categories included.
+    /// The guild's channel list as Discord shows it, categories included, each channel followed
+    /// by its listed threads, newest first.
     pub fn channel_list(&self, guild_id: GuildId) -> Vec<ChannelId> {
         self.core
             .channel_list(guild_id)
