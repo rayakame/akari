@@ -51,10 +51,11 @@ every other target builds rusqlite's bundled copy.
   files already written. A field added later reads old rows through its default.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
-- **Version:** `PRAGMA user_version`, 3 since the read states and threads' `joined` (older
-  files are deleted once, so the first launch after that update starts empty; a version 2 file
-  would restore without read states, and every channel since the join would look unread until
-  READY). A file with any other version is
+- **Version:** `PRAGMA user_version`, 4 since a thread's row holds the user's membership (its
+  mute and level) instead of `joined`; 3 brought the read states. Older files are deleted once,
+  so the first launch after such an update starts empty: a version 3 file would restore every
+  joined thread as unjoined and leave it out of the channel list until READY, and a version 2
+  file would restore without read states. A file with any other version is
   deleted and started empty, never migrated. The cache refills from Discord, so a migration
   would only add risk.
 

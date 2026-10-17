@@ -445,6 +445,37 @@ fn every_state_type_round_trips_through_its_row() {
 }
 
 #[test]
+fn a_threads_membership_round_trips() {
+    let dir = TempDir::new();
+    let mut cache = open(&dir);
+    let mut muted = thread(12, 100, 10);
+    if let Some(info) = muted.thread.as_deref_mut() {
+        info.member = Some(ThreadMembership {
+            muted: true,
+            mute_ends: Some(time(1_700_000_000_123_456_000)),
+            level: Some(NotificationLevel::OnlyMentions),
+        });
+    }
+    let mut unjoined = thread(14, 100, 10);
+    if let Some(info) = unjoined.thread.as_deref_mut() {
+        info.member = None;
+    }
+    cache
+        .write(|writer| {
+            writer.put_channel(&muted)?;
+            writer.put_channel(&unjoined)
+        })
+        .unwrap();
+    drop(cache);
+
+    let read = open(&dir).read_entities().unwrap();
+
+    assert_eq!(read.skipped, 0);
+    assert_eq!(*read.value.channels[&Snowflake::new(12)], muted);
+    assert_eq!(*read.value.channels[&Snowflake::new(14)], unjoined);
+}
+
+#[test]
 fn a_window_reads_oldest_first_and_shares_its_authors() {
     let dir = TempDir::new();
     let mut cache = open(&dir);
