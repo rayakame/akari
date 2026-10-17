@@ -228,6 +228,106 @@ fn a_ping_in_an_unjoined_thread_reaches_the_server_badge() {
     assert_eq!(guild_badge(&state, G1), badge(false, 1));
 }
 
+fn thread_unread(ready: &mut Value) {
+    read_general(ready);
+    ready["read_state"]["entries"][1]["last_message_id"] = "400000000000000029".into();
+}
+
+fn mute_thread(ready: &mut Value) {
+    let member = &mut ready["guilds"][0]["threads"][0]["member"];
+    member["muted"] = true.into();
+    member["mute_config"] = Value::Null;
+}
+
+fn mute_general(ready: &mut Value) {
+    general_override(ready)["mute_config"] = Value::Null;
+}
+
+fn hide_muted(ready: &mut Value, hide: bool) {
+    ready["user_guild_settings"]["entries"][0]["hide_muted_channels"] = hide.into();
+}
+
+#[test]
+fn a_mention_past_the_window_keeps_the_guild_badge() {
+    let state = ready_where(|ready| {
+        read_general(ready);
+        ready["read_state"]["entries"][1]["mention_count"] = 1.into();
+    });
+
+    assert!(state.listed(Snowflake::new(THREAD)), "past its window");
+    assert_eq!(guild_badge(&state, G1), badge(false, 1));
+}
+
+#[test]
+fn a_muted_thread_adds_no_dot_but_its_mentions() {
+    let state = ready_where(|ready| {
+        thread_unread(ready);
+        ready["read_state"]["entries"][1]["mention_count"] = 1.into();
+        mute_thread(ready);
+        hide_muted(ready, false);
+    });
+
+    assert_eq!(channel_badge(&state, THREAD), badge(false, 1));
+    assert_eq!(guild_badge(&state, G1), badge(false, 1));
+}
+
+#[test]
+fn a_muted_channel_leaves_its_threads_alone() {
+    let state = ready_where(|ready| {
+        thread_unread(ready);
+        mute_general(ready);
+        hide_muted(ready, false);
+    });
+
+    assert_eq!(channel_badge(&state, THREAD), badge(true, 0));
+    assert_eq!(guild_badge(&state, G1), badge(true, 0));
+}
+
+#[test]
+fn a_muted_category_leaves_its_threads_alone() {
+    let state = ready_where(|ready| {
+        thread_unread(ready);
+        ready["user_guild_settings"]["entries"][0]["channel_overrides"][0]["muted"] = true.into();
+    });
+
+    assert_eq!(channel_badge(&state, THREAD), badge(true, 0));
+    assert_eq!(guild_badge(&state, G1), badge(true, 0));
+}
+
+#[test]
+fn a_thread_under_a_parent_hidden_as_muted_still_counts() {
+    let state = ready_where(|ready| {
+        thread_unread(ready);
+        ready["read_state"]["entries"][1]["mention_count"] = 1.into();
+        mute_general(ready);
+        hide_muted(ready, true);
+    });
+
+    assert_eq!(guild_badge(&state, G1), badge(true, 1));
+}
+
+#[test]
+fn a_muted_thread_under_hide_muted_adds_nothing() {
+    let state = ready_where(|ready| {
+        thread_unread(ready);
+        ready["read_state"]["entries"][1]["mention_count"] = 1.into();
+        mute_thread(ready);
+        hide_muted(ready, true);
+    });
+
+    assert_eq!(guild_badge(&state, G1), badge(false, 0));
+}
+
+#[test]
+fn the_thread_level_changes_no_badge() {
+    let state = ready_where(|ready| {
+        thread_unread(ready);
+        ready["guilds"][0]["threads"][0]["member"]["flags"] = (1 | 4).into();
+    });
+
+    assert_eq!(channel_badge(&state, THREAD), badge(true, 0));
+}
+
 #[test]
 fn an_archived_thread_doesnt_count() {
     let mut state = ready_where(|ready| {

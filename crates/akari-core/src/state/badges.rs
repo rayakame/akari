@@ -403,18 +403,15 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
         .guild(Some(guild))
         .is_some_and(|settings| settings.hide_muted_channels);
     let hidden = muted && hides_muted;
-    let counted = !hidden
-        && (kind != Kind::Thread
-            || channel
-                .thread
-                .as_deref()
-                .is_some_and(|info| info.joined() && !info.archived));
+    // The guild counts the threads its list shows, whatever their parent's mute.
+    let counted = !hidden && (kind != Kind::Thread || listed);
+    let parent_muted = kind != Kind::Thread && under_muted_parent(entities, channel, now);
     Some(Slot {
         badge: Badge { unread, mentions },
         read_state,
         guild: Some(guild),
-        dot: counted && unread && !under_muted_parent(entities, channel, now),
-        // A mention adds the user to a thread, which Akari only learns at the next READY.
+        dot: counted && unread && !parent_muted,
+        // A mention adds the user to a thread before the members event says so.
         mentions: if hidden { 0 } else { mentions },
         listed,
     })

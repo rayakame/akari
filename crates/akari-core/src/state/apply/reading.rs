@@ -443,8 +443,8 @@ impl State {
         ack
     }
 
-    // As the official client's bulk: what the badges show, never unjoined threads, and every
-    // forum the user can view, read or not.
+    // As the official client's bulk: what the badges show, listed threads only (never unjoined
+    // ones), and every forum the user can view, read or not.
     pub(crate) fn mark_guilds_read(
         &mut self,
         guilds: &[GuildId],
@@ -473,12 +473,9 @@ impl State {
                 }
                 continue;
             }
-            let joined = channel
-                .thread
-                .as_deref()
-                .is_none_or(|info| info.joined() && !info.archived);
+            let listed = !channel.is_thread() || self.badges.listed(channel.id);
             let badge = self.badges.channel(channel.id);
-            if joined && (badge.unread || badge.mentions > 0) {
+            if listed && (badge.unread || badge.mentions > 0) {
                 shown.push(channel.id);
             }
         }

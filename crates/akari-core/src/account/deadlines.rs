@@ -272,6 +272,35 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_thread_mute_ends_on_its_own() {
+        let mut ready: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/ready.json")).unwrap();
+        let data = &mut ready["d"];
+        let member = &mut data["guilds"][0]["threads"][0]["member"];
+        member["muted"] = true.into();
+        member["mute_config"] = serde_json::json!({
+            "selected_time_window": 900, "end_time": crate::model::iso(wall() + 10_000)
+        });
+        data["read_state"]["entries"][1]["last_message_id"] = "400000000000000029".into();
+        let store = Store::new(DEFAULT_LIMITS);
+        store.apply(dispatch("READY", data));
+        let thread = Snowflake::new(THREAD);
+        assert!(!store.channel_badge(thread).unread, "muted");
+        let observer = store.subscribe();
+        let _timer = start(&store);
+        settle().await;
+
+        tokio::time::advance(Duration::from_secs(9)).await;
+        settle().await;
+        assert_eq!(deadline_events(&observer).await.0, 0);
+
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        assert_eq!(deadline_events(&observer).await.0, 1);
+        assert!(store.channel_badge(thread).unread, "the badge is back");
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_thread_added_later_arms_the_timer() {
         let store = Store::new(DEFAULT_LIMITS);
         let mut ready: serde_json::Value =

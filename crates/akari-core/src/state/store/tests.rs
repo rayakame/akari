@@ -728,6 +728,21 @@ fn ready_with_threads(
 }
 
 #[test]
+fn muted_channels_includes_muted_threads() {
+    let mut data = fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone();
+    data["guilds"][0]["threads"][0]["member"]["muted"] = true.into();
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(dispatch("READY", &data));
+    let thread = Snowflake::new(300_000_000_000_000_020);
+
+    assert!(store.channel_muted(thread));
+    assert_eq!(
+        store.muted_channels(&[thread, Snowflake::new(GENERAL)]),
+        [thread]
+    );
+}
+
+#[test]
 fn threads_follow_their_parent_newest_first() {
     let store = Store::new(DEFAULT_LIMITS);
     store.apply(ready_with_threads(

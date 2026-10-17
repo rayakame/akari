@@ -705,8 +705,9 @@ impl Store {
         self.read(|inner| inner.state.guild_settings(guild))
     }
 
-    /// Muted now by its own settings. Neither a muted category nor a muted guild makes its
-    /// channels muted; see [`guild_settings`](Self::guild_settings).
+    /// Muted now by its own settings, for a thread by its own membership. Neither a muted
+    /// category nor a muted guild makes its channels muted, nor a muted channel its threads;
+    /// see [`guild_settings`](Self::guild_settings).
     pub fn channel_muted(&self, channel: ChannelId) -> bool {
         let now = Timestamp::from_unix_millis(wall_millis());
         self.read(|inner| inner.state.channel_muted_at(channel, now))
@@ -796,7 +797,7 @@ impl Store {
         self.read(|inner| ids.iter().map(|id| inner.state.guild_badge(*id)).collect())
     }
 
-    /// The sum over the guild's channels and joined threads that count for it. `unread` is
+    /// The sum over the guild's channels and listed threads that count for it. `unread` is
     /// false while the guild is muted; its mentions stay.
     pub fn guild_badge(&self, guild: GuildId) -> Badge {
         self.read(|inner| inner.state.guild_badge(guild))

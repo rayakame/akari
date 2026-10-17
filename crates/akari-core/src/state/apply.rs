@@ -152,14 +152,21 @@ impl Entities {
         self.guilds.insert(id, Arc::new(guild));
     }
 
+    // A thread's own mute is on its member; neither a muted channel nor a muted category mutes it.
     pub(crate) fn channel_muted_at(&self, channel: ChannelId, now: Timestamp) -> bool {
         let Some(stored) = self.channels.get(&channel) else {
             return false;
         };
-        self.settings
-            .guild(stored.guild_id)
-            .and_then(|settings| settings.channels.get(&channel))
-            .is_some_and(|own| own.muted_now(now))
+        stored
+            .thread
+            .as_deref()
+            .and_then(|info| info.member)
+            .is_some_and(|member| member.muted_now(now))
+            || self
+                .settings
+                .guild(stored.guild_id)
+                .and_then(|settings| settings.channels.get(&channel))
+                .is_some_and(|own| own.muted_now(now))
     }
 
     // A thread inherits from its channel, which inherits from its category.
@@ -1382,12 +1389,19 @@ impl State {
     }
 
     pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
-        self.entities
-            .settings
-            .mute_ends()
+        self.mute_ends()
             .map(|(_, end)| end)
             .filter(|end| *end > after)
             .min()
+    }
+
+    // The settings' timed mutes and the threads' own.
+    fn mute_ends(&self) -> impl Iterator<Item = (Option<GuildId>, Timestamp)> + '_ {
+        let threads = self.joined_threads().filter_map(|thread| {
+            let member = thread.thread.as_deref()?.member?;
+            Some((thread.guild_id, member.mute_ends.filter(|_| member.muted)?))
+        });
+        self.entities.settings.mute_ends().chain(threads)
     }
 
     pub(crate) fn listed(&self, channel: ChannelId) -> bool {
@@ -1451,8 +1465,6 @@ impl State {
 
     pub(crate) fn mutes_ending(&self, after: Timestamp, until: Timestamp) -> Vec<Option<GuildId>> {
         let ended: BTreeSet<Option<GuildId>> = self
-            .entities
-            .settings
             .mute_ends()
             .filter(|(_, end)| *end > after && *end <= until)
             .map(|(guild, _)| guild)
