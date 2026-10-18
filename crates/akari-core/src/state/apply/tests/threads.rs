@@ -495,3 +495,71 @@ fn a_guild_down_at_ready_keeps_its_threads_mutes_for_its_return() {
 
     assert_eq!(membership(&state, THREAD), muted_member());
 }
+
+#[test]
+fn a_join_for_a_thread_the_store_doesnt_know_waits_for_it() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        members_update(CREATED, vec![member(ME, 1 | 4)], &[]),
+    );
+    assert!(state.channel(Snowflake::new(CREATED)).is_none());
+
+    apply(&mut state, "THREAD_CREATE", created_unjoined());
+
+    assert_eq!(
+        membership(&state, CREATED),
+        Some(ThreadMembership {
+            level: Some(NotificationLevel::OnlyMentions),
+            ..ThreadMembership::default()
+        })
+    );
+}
+
+#[test]
+fn a_leave_cancels_a_join_that_waits() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        members_update(CREATED, vec![member(ME, 1)], &[]),
+    );
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        members_update(CREATED, Vec::new(), &[ME]),
+    );
+
+    apply(&mut state, "THREAD_CREATE", created_unjoined());
+
+    assert!(!joined(&state, CREATED));
+}
+
+// The mention that adds the user can come before the thread does, in either order with the join.
+#[test]
+fn a_mention_before_the_thread_arrives_still_counts() {
+    let mut state = ready_where(|ready| {
+        ready["read_state"]["entries"][0]["last_message_id"] = "400000000000000003".into();
+        ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+    });
+    let mention = AFTER_JOIN + 5;
+    apply(&mut state, "MESSAGE_CREATE", message(mention, CREATED));
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        members_update(CREATED, vec![member(ME, 1)], &[]),
+    );
+    let mut thread = created_unjoined();
+    thread["last_message_id"] = mention.to_string().into();
+
+    apply(&mut state, "THREAD_CREATE", thread);
+
+    let read = state.read_state(Snowflake::new(CREATED)).expect("counted");
+    assert_eq!(
+        (read.acked.map(|id| id.get()), read.mentions),
+        (Some(CREATED - 1), 1)
+    );
+    assert!(state.listed(Snowflake::new(CREATED)));
+    assert_eq!(state.guild_badge(Snowflake::new(G1)).mentions, 1);
+}

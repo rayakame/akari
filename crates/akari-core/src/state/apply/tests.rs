@@ -545,10 +545,12 @@ fn updates_for_unknown_entities_change_nothing() {
         ),
         ("CHANNEL_CREATE", foreign_channel),
         ("GUILD_MEMBER_UPDATE", other_member),
-        (
-            "MESSAGE_CREATE",
-            message(400_000_000_000_000_090, 300_000_000_000_000_099),
-        ),
+        // Plain: a mention there is kept for a thread that may still arrive.
+        ("MESSAGE_CREATE", {
+            let mut plain = message(400_000_000_000_000_090, 300_000_000_000_000_099);
+            plain["mentions"] = json!([]);
+            plain
+        }),
         (
             "GUILD_ROLE_DELETE",
             json!({"guild_id": G1.to_string(), "role_id": "500000000000000099"}),

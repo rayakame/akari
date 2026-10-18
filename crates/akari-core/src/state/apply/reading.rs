@@ -67,6 +67,7 @@ impl State {
     // Runs before the message raises the channel's newest message, which a DM's start needs.
     pub(super) fn read_message(&mut self, message: &model::Message) {
         let Some(channel) = self.entities.channels.get(&message.channel_id).cloned() else {
+            self.note_unknown_mention(message);
             return;
         };
         let joined = self.entities.start_position(&channel);
@@ -101,6 +102,29 @@ impl State {
         if self.counts_as_mention(&channel, message, wall_millis()) {
             self.entities.read_states.mention(channel.id, start);
         }
+    }
+
+    // A mention that adds the user to a thread the store doesn't have yet: its THREAD_CREATE
+    // can come later, and the count must be there when it does.
+    fn note_unknown_mention(&mut self, message: &model::Message) {
+        let (Some(me), Some(guild)) = (self.entities.me(), message.guild_id) else {
+            return;
+        };
+        if !self.entities.guilds.contains_key(&guild)
+            || message.author.id == me
+            || !message.mentions.iter().any(|user| user.id == me)
+            || self.entities.read_states.ignores(message.author.id)
+            || !self
+                .entities
+                .read_states
+                .first_sight(message.channel_id, message.id)
+        {
+            return;
+        }
+        let start = Snowflake::new(message.channel_id.get().saturating_sub(1));
+        self.entities
+            .read_states
+            .mention(message.channel_id, Some(start));
     }
 
     fn counts_as_mention(

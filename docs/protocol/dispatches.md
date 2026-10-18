@@ -125,7 +125,11 @@ The store keeps the joined threads from READY and whatever THREAD_CREATE brings.
 - THREAD_MEMBER_UPDATE replaces the membership. THREAD_MEMBERS_UPDATE joins when it adds the
   user and leaves when it removes them; everything else in it is ignored. THREAD_MEMBER_LIST_UPDATE
   (op 37's member lists) never changes membership.
-- Updates for a thread the store doesn't know are skipped.
+- A join or leave for a thread the store doesn't know yet is kept until the thread arrives
+  (THREAD_CREATE or GUILD_CREATE), and a direct mention of the user there is counted for it
+  then, so the mention that adds the user isn't lost whichever comes first. READY drops what
+  is still waiting. No request fetches such a thread: the official client made none (observed
+  2026-10-17).
 
 Members decode leniently: a field in another shape falls back to its default, and a broken
 entry in `added_members` is skipped, so payload drift doesn't drop the dispatch.

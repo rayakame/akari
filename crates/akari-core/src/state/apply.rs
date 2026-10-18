@@ -345,6 +345,8 @@ pub(crate) struct State {
     recounts: HashMap<ChannelId, MessageId>,
     // The memberships of joined threads in guilds that are down, for their GUILD_CREATE.
     outage_members: HashMap<ChannelId, (GuildId, ThreadMembership)>,
+    // Joins for threads the store doesn't have yet, for the THREAD_CREATE that brings them.
+    pending_joins: HashMap<ChannelId, ThreadMembership>,
 }
 
 impl State {
@@ -369,6 +371,7 @@ impl State {
             journal: None,
             recounts: HashMap::new(),
             outage_members: HashMap::new(),
+            pending_joins: HashMap::new(),
         }
     }
 
@@ -395,7 +398,8 @@ impl State {
                 .channels
                 .get(&id)
                 .and_then(|known| known.thread.as_deref()?.member)
-                .or_else(|| self.outage_members.get(&id).map(|(_, member)| *member));
+                .or_else(|| self.outage_members.get(&id).map(|(_, member)| *member))
+                .or_else(|| self.pending_joins.get(&id).copied());
             if let (Some(member), Some(channel)) = (known, next.channels.get_mut(&id))
                 && let Some(info) = Arc::make_mut(channel).thread.as_deref_mut()
             {
@@ -463,6 +467,7 @@ impl State {
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
         self.keep_outage_members(&next);
+        self.pending_joins.clear();
         let old = Derived {
             badges: std::mem::replace(&mut self.badges, derived.badges),
             threads: std::mem::replace(&mut self.threads, derived.threads),
@@ -751,6 +756,17 @@ impl State {
                 info.member = before.member;
             }
         }
+        let waiting = self.pending_joins.remove(&channel.id);
+        if let Some(info) = channel.thread.as_deref_mut()
+            && info.member.is_none()
+            && waiting.is_some()
+        {
+            tracing::debug!(
+                channel_id = channel.id.get(),
+                "a kept join reached its thread"
+            );
+            info.member = waiting;
+        }
         let channel = Arc::new(channel);
         self.mark_channel(&channel);
         self.threads.add(&channel);
@@ -881,10 +897,17 @@ impl State {
             .filter(|known| known.thread.is_some())
             .cloned()
         else {
-            tracing::debug!(
-                channel_id = thread.get(),
-                "skipping a membership change for an unknown thread"
-            );
+            // Discord sends the thread with THREAD_CREATE, which can come after the join.
+            if !self.entities.channels.contains_key(&thread) {
+                tracing::debug!(
+                    channel_id = thread.get(),
+                    "keeping a membership change until its thread arrives"
+                );
+                match member {
+                    Some(member) => self.pending_joins.insert(thread, member),
+                    None => self.pending_joins.remove(&thread),
+                };
+            }
             return;
         };
         if known
@@ -951,6 +974,9 @@ impl State {
             return;
         };
         self.outage_members.retain(|_, (guild, _)| *guild != id);
+        for channel in next.channels.keys() {
+            self.pending_joins.remove(channel);
+        }
         for (channel, merged) in &mut next.channels {
             if let Some(last) = self
                 .entities
