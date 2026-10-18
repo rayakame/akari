@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::gateway::{GatewayEvent, decode};
 use crate::model::{self, Permissions, Snowflake};
+use crate::state::wall_millis;
 
 const G1: u64 = 200_000_000_000_000_001;
 const G3: u64 = 200_000_000_000_000_003;

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::badges::{Badge, Badges, Dirty};
+use super::clock::Clock;
 use super::events::StoreEvent;
 use super::order::{self, guild_order};
 use super::permissions::compute;
@@ -347,15 +348,16 @@ pub(crate) struct State {
     outage_members: HashMap<ChannelId, (GuildId, ThreadMembership)>,
     // Joins for threads the store doesn't have yet, for the THREAD_CREATE that brings them.
     pending_joins: HashMap<ChannelId, ThreadMembership>,
+    clock: Arc<Clock>,
 }
 
 impl State {
     #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self::with_limits(super::windows::DEFAULT_LIMITS)
+        Self::with_limits(super::windows::DEFAULT_LIMITS, Arc::new(Clock::new()))
     }
 
-    pub(crate) fn with_limits(limits: WindowLimits) -> Self {
+    pub(crate) fn with_limits(limits: WindowLimits, clock: Arc<Clock>) -> Self {
         Self {
             entities: Entities::default(),
             badges: Badges::default(),
@@ -372,13 +374,19 @@ impl State {
             recounts: HashMap::new(),
             outage_members: HashMap::new(),
             pending_joins: HashMap::new(),
+            clock,
         }
+    }
+
+    // The store's clock, which the deadline task reads too.
+    pub(crate) fn now_millis(&self) -> i64 {
+        self.clock.now_millis()
     }
 
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_folders(&mut next);
         self.keep_memberships(&mut next);
-        let derived = Derived::build(&next, wall_millis());
+        let derived = Derived::build(&next, self.now_millis());
         let diff = self.ready_diff(&next, &derived);
         self.swap(next, derived, diff, events);
     }
@@ -476,7 +484,7 @@ impl State {
         // READY's cursors are fresh.
         self.stale_cursors.clear();
         self.follow_ready();
-        self.refresh_badges(wall_millis(), events);
+        self.refresh_badges(self.now_millis(), events);
         old
     }
 
@@ -578,7 +586,7 @@ impl State {
 
     pub(crate) fn apply(&mut self, event: DispatchEvent, events: &mut Vec<StoreEvent>) {
         self.apply_event(event, events);
-        self.settle(wall_millis(), events);
+        self.settle(self.now_millis(), events);
     }
 
     // The end of a write that can move a cursor: the channel being read stays read.
@@ -803,7 +811,7 @@ impl State {
 
     // Discord enforces slowmode per user, so a message from another device starts it too.
     fn note_own_message(&mut self, channel: ChannelId, nonce: Option<MessageId>) {
-        if let Some(interval) = self.cooldown_interval(channel, wall_millis()) {
+        if let Some(interval) = self.cooldown_interval(channel, self.now_millis()) {
             self.cooldowns
                 .seen(channel, nonce, Instant::now(), interval);
         }
@@ -965,7 +973,7 @@ impl State {
 
     pub(crate) fn add_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         self.tracking_server_list(events, |state, events| state.merge_guild(next, events));
-        self.settle(wall_millis(), events);
+        self.settle(self.now_millis(), events);
     }
 
     fn merge_guild(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
@@ -1249,7 +1257,7 @@ impl State {
         if let Some(newest) = newest {
             self.reach_present(ticket.channel, newest, events);
         }
-        self.settle(wall_millis(), events);
+        self.settle(self.now_millis(), events);
         outcome
     }
 
@@ -1434,7 +1442,7 @@ impl State {
             }
             None => {
                 self.dirty.all();
-                self.refresh_badges(wall_millis(), events);
+                self.refresh_badges(self.now_millis(), events);
             }
         }
     }

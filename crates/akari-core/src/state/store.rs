@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
 use tokio::sync::{Mutex, mpsc};
 
-use super::apply::{Derived, Entities, ReadyDiff, State, wall_millis};
+use super::apply::{Derived, Entities, ReadyDiff, State};
 use super::badges::{Badge, Badges};
+use super::clock::Clock;
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
 use super::read_states::{Ack, ReadState};
@@ -63,6 +64,8 @@ pub struct Store {
 
 struct Shared {
     inner: RwLock<Inner>,
+    // What the badges and the deadlines call now.
+    clock: Arc<Clock>,
     // Bumped by every write, so the disk cache skips snapshots while nothing changed.
     changes: AtomicU64,
     // Hands out the order of loads and supersedes that place a window, without the lock.
@@ -172,22 +175,16 @@ fn same(a: &ConnectionState, b: &ConnectionState) -> bool {
     )
 }
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
-}
-
 impl Store {
     pub(crate) fn new(limits: WindowLimits) -> Self {
+        let clock = Arc::new(Clock::new());
         Self {
             shared: Arc::new(Shared {
                 changes: AtomicU64::new(0),
                 placings: AtomicU64::new(0),
+                clock: clock.clone(),
                 inner: RwLock::new(Inner {
-                    state: State::with_limits(limits),
+                    state: State::with_limits(limits, clock),
                     connection: ConnectionState::Offline,
                     subscribers: Vec::new(),
                     finished: false,
@@ -204,6 +201,15 @@ impl Store {
                 holds: std::sync::Mutex::new(None),
             }),
         }
+    }
+
+    // Never steps back, so a window or mute that ended stays ended.
+    pub(crate) fn now(&self) -> Timestamp {
+        Timestamp::from_unix_millis(self.now_millis())
+    }
+
+    fn now_millis(&self) -> i64 {
+        self.shared.clock.now_millis()
     }
 
     fn read<T>(&self, read: impl FnOnce(&Inner) -> T) -> T {
@@ -312,7 +318,7 @@ impl Store {
         let Some(next) = self.read(|inner| inner.state.with_notification_flags(flags)) else {
             return;
         };
-        let badges = Badges::build(&next, wall_millis());
+        let badges = Badges::build(&next, self.now_millis());
         drop(next);
         self.write("NOTIFICATION_SETTINGS_UPDATE", |inner, events| {
             let current = self.shared.changes.load(Ordering::SeqCst) == start;
@@ -341,7 +347,7 @@ impl Store {
         let mut entities = Entities::from_ready(ready);
         let read_states = entities.read_states.channels().clone();
         self.read(|inner| inner.state.keep_memberships(&mut entities));
-        let derived = Derived::build(&entities, wall_millis());
+        let derived = Derived::build(&entities, self.now_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
             inner.state.ready_diff(&entities, &derived)
@@ -481,14 +487,14 @@ impl Store {
 
     // Empty when nothing but forums would be acked.
     pub(crate) fn mark_guilds_read(&self, guilds: &[GuildId]) -> Vec<Ack> {
-        let now = now_millis();
+        let now = self.now_millis();
         self.write("mark read", |inner, events| {
             inner.state.mark_guilds_read(guilds, now, events)
         })
     }
 
     pub(crate) fn restore(&self, cached: Entities) -> bool {
-        let derived = Derived::build(&cached, wall_millis());
+        let derived = Derived::build(&cached, self.now_millis());
         let restored = self.write("restore", |inner, events| {
             inner.state.restore(cached, derived, events)
         });
@@ -563,7 +569,7 @@ impl Store {
     }
 
     pub(crate) fn queue_message(&self, channel: ChannelId, message: Arc<Message>) {
-        let now = now_millis();
+        let now = self.now_millis();
         self.write("send", |inner, events| {
             inner.state.queue(channel, message, now, events)
         });
@@ -592,7 +598,7 @@ impl Store {
         pending: MessageId,
     ) -> Option<Arc<Message>> {
         let mut message = None;
-        let now = now_millis();
+        let now = self.now_millis();
         self.write("send", |inner, events| {
             message = inner.state.retry(channel, pending, now, events);
         });
@@ -612,7 +618,7 @@ impl Store {
     }
 
     pub(crate) fn hold_cooldown(&self, channel: ChannelId, wait: Duration) {
-        let now = now_millis();
+        let now = self.now_millis();
         self.write("send", |inner, _| {
             inner.state.hold_cooldown(channel, wait, now);
         });
@@ -710,13 +716,13 @@ impl Store {
     /// category nor a muted guild makes its channels muted, nor a muted channel its threads;
     /// see [`guild_settings`](Self::guild_settings).
     pub fn channel_muted(&self, channel: ChannelId) -> bool {
-        let now = Timestamp::from_unix_millis(wall_millis());
+        let now = self.now();
         self.read(|inner| inner.state.channel_muted_at(channel, now))
     }
 
     /// Of `ids`, the channels muted now by their own settings, in the order given.
     pub fn muted_channels(&self, ids: &[ChannelId]) -> Vec<ChannelId> {
-        let now = Timestamp::from_unix_millis(wall_millis());
+        let now = self.now();
         self.read(|inner| {
             ids.iter()
                 .copied()
@@ -727,7 +733,7 @@ impl Store {
 
     /// Whether the guild (`None`: DMs) is muted now. Its channels aren't muted by it.
     pub fn guild_muted(&self, guild: Option<GuildId>) -> bool {
-        let now = Timestamp::from_unix_millis(wall_millis());
+        let now = self.now();
         self.read(|inner| inner.state.guild_settings(guild).muted_now(now))
     }
 
@@ -837,7 +843,7 @@ impl Store {
     ///
     /// [`display_order`]: super::display_order
     pub fn channel_list(&self, guild: GuildId) -> Vec<Arc<Channel>> {
-        let now = now_millis();
+        let now = self.now_millis();
         self.read(|inner| {
             let state = &inner.state;
             let ordered = order::display_order(&state.guild_channels(guild));
@@ -881,7 +887,7 @@ impl Store {
     /// `SEND_MESSAGES` means the user may send there. `None` for DMs and for channels,
     /// guilds or memberships the store doesn't know.
     pub fn permissions(&self, channel: ChannelId) -> Option<Permissions> {
-        let now = now_millis();
+        let now = self.now_millis();
         self.read(|inner| inner.state.permissions(channel, now))
     }
 
@@ -893,7 +899,7 @@ impl Store {
     /// The channel's slowmode as it applies to the current user; `None` without slowmode, in
     /// DMs and group DMs, and for unknown channels.
     pub fn slowmode(&self, channel: ChannelId) -> Option<Slowmode> {
-        let now = now_millis();
+        let now = self.now_millis();
         self.read(|inner| {
             inner
                 .state

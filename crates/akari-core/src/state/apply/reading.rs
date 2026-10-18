@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use super::{Derived, Entities, Journal, ReadyDiff, State, wall_millis};
+use super::{Derived, Entities, Journal, ReadyDiff, State};
 use crate::gateway::{ChannelUnread, MessageAck};
 use crate::model::{
     self, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageType, Permissions,
@@ -99,7 +99,7 @@ impl State {
         if unstarted {
             self.entities.read_states.start(channel.id, start);
         }
-        if self.counts_as_mention(&channel, message, wall_millis()) {
+        if self.counts_as_mention(&channel, message, self.now_millis()) {
             self.entities.read_states.mention(channel.id, start);
         }
     }
@@ -265,7 +265,7 @@ impl State {
         let ack = self
             .reading
             .and_then(|(id, shown)| self.read_shown(id, shown?));
-        self.refresh_badges(wall_millis(), events);
+        self.refresh_badges(self.now_millis(), events);
         ack
     }
 
@@ -336,7 +336,7 @@ impl State {
             journal.undone.insert(channel);
         }
         self.dirty.channel(channel);
-        self.refresh_badges(wall_millis(), events);
+        self.refresh_badges(self.now_millis(), events);
         true
     }
 
@@ -431,7 +431,7 @@ impl State {
         }
         derived
             .badges
-            .update(next, dirty, wall_millis(), &mut Vec::new());
+            .update(next, dirty, self.now_millis(), &mut Vec::new());
         if let Some(diff) = diff {
             self.badges
                 .rediff(&derived.badges, &replayed, &mut diff.events);
@@ -462,7 +462,7 @@ impl State {
         events: &mut Vec<StoreEvent>,
     ) -> Option<Ack> {
         let ack = self.ack_locally(channel);
-        self.refresh_badges(wall_millis(), events);
+        self.refresh_badges(self.now_millis(), events);
         ack
     }
 

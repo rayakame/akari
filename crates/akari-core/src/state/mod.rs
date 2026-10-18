@@ -2,6 +2,7 @@
 
 pub(crate) mod apply;
 mod badges;
+mod clock;
 mod convert;
 mod events;
 mod order;

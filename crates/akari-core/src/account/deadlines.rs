@@ -3,17 +3,16 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 use crate::model::Timestamp;
-use crate::state::{Store, StoreEvent, Subscription, wall_millis};
+use crate::state::{Store, StoreEvent, Subscription};
 
 // Discord doesn't say when a timed mute ends or an inactive thread leaves the list, so lists
 // learn both from here.
 pub(crate) async fn run_deadlines(store: Store, changes: Subscription) {
-    let clock = Clock::start();
-    let mut checked = clock.now();
+    let mut checked = store.now();
     loop {
         let deadline = store
             .next_deadline(checked)
-            .map(|end| clock.instant_at(end));
+            .map(|end| instant_at(&store, end));
         loop {
             tokio::select! {
                 event = changes.next() => match event {
@@ -24,7 +23,7 @@ pub(crate) async fn run_deadlines(store: Store, changes: Subscription) {
                 () = until(deadline) => break,
             }
         }
-        let now = clock.now();
+        let now = store.now();
         store.end_deadlines(checked, now);
         checked = now;
     }
@@ -53,30 +52,9 @@ pub(super) async fn until(deadline: Option<Instant>) {
     }
 }
 
-// The wall clock as of the start, moved on by tokio's clock (which tests pause), unless the
-// wall clock is ahead.
-struct Clock {
-    wall: i64,
-    started: Instant,
-}
-
-impl Clock {
-    fn start() -> Self {
-        Self {
-            wall: wall_millis(),
-            started: Instant::now(),
-        }
-    }
-
-    fn now(&self) -> Timestamp {
-        let elapsed = i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        Timestamp::from_unix_millis(wall_millis().max(self.wall.saturating_add(elapsed)))
-    }
-
-    fn instant_at(&self, end: Timestamp) -> Instant {
-        let ahead = end.unix_millis().saturating_sub(self.now().unix_millis());
-        Instant::now() + Duration::from_millis(u64::try_from(ahead).unwrap_or(0))
-    }
+fn instant_at(store: &Store, end: Timestamp) -> Instant {
+    let ahead = end.unix_millis().saturating_sub(store.now().unix_millis());
+    Instant::now() + Duration::from_millis(u64::try_from(ahead).unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -222,6 +200,30 @@ mod tests {
         tokio::time::advance(Duration::from_secs(600)).await;
         settle().await;
         assert_eq!(deadline_events(&observer).await.1, 0, "only once");
+    }
+
+    // The store's writes and the deadlines read one clock, so a write after the end, at a wall
+    // clock behind tokio's, doesn't list the thread again.
+    #[tokio::test(start_paused = true)]
+    async fn a_write_after_a_window_end_keeps_the_thread_unlisted() {
+        let store = Store::new(DEFAULT_LIMITS);
+        store.apply(ready_with_thread_ending(wall() + 60_000));
+        let observer = store.subscribe();
+        let _timer = start(&store);
+        settle().await;
+        tokio::time::advance(Duration::from_secs(61)).await;
+        settle().await;
+        assert_eq!(deadline_events(&observer).await.1, 1);
+
+        store.apply(dispatch(
+            "THREAD_UPDATE",
+            &serde_json::json!({"id": THREAD.to_string(), "name": "renamed"}),
+        ));
+        settle().await;
+
+        assert_eq!(deadline_events(&observer).await.1, 0);
+        let listed = store.channel_list(Snowflake::new(G1));
+        assert!(listed.iter().all(|channel| channel.id.get() != THREAD));
     }
 
     #[tokio::test(start_paused = true)]
