@@ -249,7 +249,7 @@ struct ThreadRow: View {
         .padding(.trailing, 8)
         .background {
             Spine(first: first, last: last)
-                .stroke(Color(nsColor: Palette.channelDefault), lineWidth: 1)
+                .fill(Color(nsColor: Palette.threadSpine))
         }
         .overlay(alignment: .leading) {
             if badge.unread && !selected {
@@ -273,19 +273,58 @@ struct ThreadRow: View {
     }
 }
 
-// Runs on through the 2 between rows, so the spines of a parent's threads join up; the first
-// starts at the bottom of the parent's 20 symbol, 6 above the parent row's end.
+// Discord's geometry, as one filled outline so rows join without a seam: 2 wide, a round cap on
+// the first row's top and the branch's end, 2-point fillets at a joint, a bend into the last.
 nonisolated private struct Spine: Shape {
+    static let width: CGFloat = 2
+    static let reach: CGFloat = 8
+    static let fillet: CGFloat = 2
+    static let bend: CGFloat = 4
+
     let first: Bool
     let last: Bool
 
     func path(in rect: CGRect) -> Path {
-        var path = Path()
+        let half = Self.width / 2
+        let x = ThreadRow.spine
         let middle = rect.midY
-        path.move(to: CGPoint(x: ThreadRow.spine, y: rect.minY - (first ? 8 : 2)))
-        path.addLine(to: CGPoint(x: ThreadRow.spine, y: last ? middle : rect.maxY))
-        path.move(to: CGPoint(x: ThreadRow.spine, y: middle))
-        path.addLine(to: CGPoint(x: ThreadRow.branchEnd - 2, y: middle))
+        let end = x + Self.reach
+        // A later row starts in the 2 between rows, where the row above ends.
+        let top = rect.minY - (first ? 0 : 2)
+        var path = Path()
+        path.move(to: CGPoint(x: x - half, y: top))
+        if first {
+            path.addArc(
+                tangent1End: CGPoint(x: x - half, y: top - half),
+                tangent2End: CGPoint(x: x, y: top - half), radius: half)
+            path.addArc(
+                tangent1End: CGPoint(x: x + half, y: top - half),
+                tangent2End: CGPoint(x: x + half, y: top), radius: half)
+        } else {
+            path.addLine(to: CGPoint(x: x + half, y: top))
+        }
+        let inner = last ? Self.bend - half : Self.fillet
+        path.addArc(
+            tangent1End: CGPoint(x: x + half, y: middle - half),
+            tangent2End: CGPoint(x: end, y: middle - half), radius: inner)
+        path.addArc(
+            tangent1End: CGPoint(x: end + half, y: middle - half),
+            tangent2End: CGPoint(x: end + half, y: middle), radius: half)
+        path.addArc(
+            tangent1End: CGPoint(x: end + half, y: middle + half),
+            tangent2End: CGPoint(x: end, y: middle + half), radius: half)
+        if last {
+            path.addArc(
+                tangent1End: CGPoint(x: x - half, y: middle + half),
+                tangent2End: CGPoint(x: x - half, y: top), radius: Self.bend + half)
+        } else {
+            path.addArc(
+                tangent1End: CGPoint(x: x + half, y: middle + half),
+                tangent2End: CGPoint(x: x + half, y: rect.maxY), radius: Self.fillet)
+            path.addLine(to: CGPoint(x: x + half, y: rect.maxY))
+            path.addLine(to: CGPoint(x: x - half, y: rect.maxY))
+        }
+        path.closeSubpath()
         return path
     }
 }

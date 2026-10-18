@@ -136,8 +136,8 @@ Observed in the official web client on 2026-10-17, with the second account and a
 - **Order:** newest created first. New messages don't move a thread.
 - **Look:**
   - no icon, only the name, in rows as tall as channel rows;
-  - joined to the parent by a vertical line with a short branch to each row (├, and └ for the
-    last);
+  - joined to the parent by a vertical line, the spine, with a short branch to each row (├,
+    and └ for the last); its geometry, measured at 2x on 2026-10-18, is [below](#the-spine);
   - read in gray; unread in white with the pill on the column's left edge; mentions with the red
     badge at the right; muted dimmed like a muted channel; selected with the channel rows'
     selected background.
@@ -162,10 +162,27 @@ Observed in the official web client on 2026-10-17, with the second account and a
   Mute Thread ›, Notification Settings › | Copy Thread ID. *Akari: Mark As Read; Leave Thread
   comes with joining and leaving; the other items later.*
 
-*Akari: the spine runs 26 from the column's edge, from the bottom of the parent's icon down
-through the 2 between rows; each branch runs to 34, the row's background starts at 36 and the
-name at 44, under the parent's name. These offsets are Akari's own until compared side by side
-with the official client.*
+### The spine
+
+Measured side by side at 2x in the dark theme (Discord on the #121214 sidebar), in points from
+the column's left edge; Akari draws the same:
+
+- **Width and color:** 2 wide, opaque `#474850` (`threadSpine`; the light theme's `#aaabb3`
+  keeps the same 2.06:1 contrast on its sidebar, **unverified** against Discord's light theme).
+- **Where:** centered 26 from the edge, under the center of the parent's symbol.
+- **Top:** at the first thread row's top edge, with a round cap reaching 1 into the 2 between
+  rows, 8.5 below the ink of the parent's # (the parent row ends 1 above it).
+- **Between rows:** each row's piece runs to the row's bottom and the next starts 2 above its
+  top, so consecutive pieces meet without a seam or overlap.
+- **Branch:** 2 thick at the row's vertical center, with a round cap; its right end, cap
+  included, is 9 right of the spine's center (35 from the edge). The row's background starts at
+  36, the name at 44 (19 right of the spine's center), under the parent's name.
+- **Joint (middle rows):** fillets of 2 radius above and below where the branch leaves the
+  spine, so it reads as a smooth T.
+- **Last row:** no spine below the branch; the spine bends into it with a radius of 4 at its
+  center line (5 outside, 3 inside), starting 4 above the row's center.
+
+*Akari draws each row's piece as one filled outline, so the anti-aliased edges never add up.*
 
 ## Home
 

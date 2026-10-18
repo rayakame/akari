@@ -38,11 +38,11 @@ struct ThreadRowTests {
     }
 
     // Pixels other than the background in the box a channel row's 20 symbol takes, leaving out
-    // the spine's column and the branch's row.
+    // the spine's column and the branch's row with their joint.
     func symbolPixels(_ image: Rendered) -> Int {
         var count = 0
-        for x in stride(from: 16.0, to: 36.0, by: 1) where abs(x - ThreadRow.spine) > 1.5 {
-            for y in stride(from: 6.0, to: 26.0, by: 1) where abs(y - 16) > 1.5 {
+        for x in stride(from: 16.0, to: 36.0, by: 1) where abs(x - ThreadRow.spine) > 3.5 {
+            for y in stride(from: 6.0, to: 26.0, by: 1) where abs(y - 16) > 3.5 {
                 count += drawn(image, x, y) ? 1 : 0
             }
         }
@@ -77,14 +77,73 @@ struct ThreadRowTests {
             size: NSSize(width: 240, height: 66))
     }
 
+    // As in Discord: the parent row ends at 32, the thread's at 34; only the round cap reaches up.
     @Test
-    func theFirstThreadsSpineStartsUnderItsParentsIcon() throws {
+    func theFirstThreadsSpineStartsAtItsRowWithARoundCap() throws {
         let image = try underParent(first: true)
 
-        #expect(drawn(image, ThreadRow.spine, 27), "right under the 20 icon, centered in 32")
-        #expect(drawn(image, ThreadRow.spine, 31))
-        #expect(drawn(image, ThreadRow.spine, 33), "and on through the gap")
-        #expect(!drawn(try underParent(first: false), ThreadRow.spine, 27))
+        #expect(!drawn(image, ThreadRow.spine, 28), "nothing under the parent's symbol")
+        #expect(!drawn(image, ThreadRow.spine, 32.25))
+        #expect(drawn(image, ThreadRow.spine, 33.75), "the cap")
+        #expect(drawn(image, ThreadRow.spine, 36))
+        #expect(drawn(try underParent(first: false), ThreadRow.spine, 32.25), "a later thread joins")
+    }
+
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theSpineIsTwoPointsWideInItsOwnColor(_ appearance: NSAppearance.Name) throws {
+        let image = try Rendered(
+            ThreadRow(channel: thread, first: false, last: false, selected: false, muted: false) {}
+                .frame(width: 240, height: 32).background(Color(nsColor: Palette.frame))
+                .ignoresSafeArea(),
+            appearance: appearance, size: NSSize(width: 240, height: 32))
+        let reference = try Rendered(
+            Color(nsColor: Palette.threadSpine).frame(width: 20, height: 20).ignoresSafeArea(),
+            appearance: appearance, size: NSSize(width: 20, height: 20))
+        let spine = try #require(reference.color(10, 10))
+
+        #expect(drawn(image, ThreadRow.spine - 0.5, 8))
+        #expect(drawn(image, ThreadRow.spine + 0.5, 8))
+        #expect(!drawn(image, ThreadRow.spine - 1.5, 8))
+        #expect(!drawn(image, ThreadRow.spine + 1.5, 8))
+        let color = try #require(image.color(ThreadRow.spine - 0.5, 8))
+        #expect(abs(color.redComponent - spine.redComponent) < 2 / 255, "\(color) against \(spine)")
+        #expect(abs(color.blueComponent - spine.blueComponent) < 2 / 255)
+        #expect(!same(color, image.color(4, 8)), "not the sidebar")
+    }
+
+    @Test
+    func theBranchReachesNinePointsRightOfTheSpineAndIsTwoThick() throws {
+        let image = try row()
+
+        #expect(drawn(image, ThreadRow.spine + 8.5, 16), "the round cap")
+        #expect(!drawn(image, ThreadRow.spine + 9.5, 16))
+        #expect(drawn(image, ThreadRow.spine + 4.5, 15.5))
+        #expect(drawn(image, ThreadRow.spine + 4.5, 16.5))
+        #expect(!drawn(image, ThreadRow.spine + 4.5, 14.5))
+        #expect(!drawn(image, ThreadRow.spine + 4.5, 17.5))
+    }
+
+    @Test
+    func aMiddleJointHasFilletsAboveAndBelow() throws {
+        let image = try row()
+
+        #expect(drawn(image, ThreadRow.spine + 1.5, 14.5), "the fillet above")
+        #expect(drawn(image, ThreadRow.spine + 1.5, 17.5), "the fillet below")
+        #expect(!drawn(image, ThreadRow.spine + 2.5, 13.5), "a 2 point fillet, no more")
+        #expect(!drawn(image, ThreadRow.spine + 2.5, 18.5))
+    }
+
+    @Test
+    func theLastThreadsSpineBendsIntoItsBranch() throws {
+        let last = try row(last: true)
+        let middle = try row()
+
+        #expect(drawn(last, ThreadRow.spine - 0.5, 9.5), "straight above the bend")
+        #expect(!drawn(last, ThreadRow.spine - 0.5, 15.5), "the bend leaves the line")
+        #expect(drawn(middle, ThreadRow.spine - 0.5, 15.5))
+        #expect(drawn(last, ThreadRow.spine + 1.5, 15.5), "on the curve")
+        #expect(!drawn(last, ThreadRow.spine, 20), "nothing below the branch")
+        #expect(drawn(middle, ThreadRow.spine, 20))
     }
 
     @Test
