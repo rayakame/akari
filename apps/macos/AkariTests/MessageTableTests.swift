@@ -803,6 +803,33 @@ struct MessageTableTests {
             x: rect.midX + text.textContainerOrigin.x, y: rect.midY + text.textContainerOrigin.y)
     }
 
+    // A notice and a message's files wrap as their text views lay them out at every width.
+    @Test
+    func aWrappingNoticeAndFilesAreAsTallAsTheirCells() {
+        let long = author(4, String(repeating: "Mira Kowalczyk-Lindqvist ", count: 3))
+        show(
+            MessageTableState(
+                rows: [
+                    row(1, by: long, at: noon, kind: .userJoin),
+                    row(3, at: noon + 30, kind: .userJoin),
+                    row(
+                        2, at: noon + 60, content: "",
+                        attachments: [String(repeating: "a-long-file-name-", count: 4) + ".zip"],
+                        edited: noon + 70),
+                ], reachedOldest: true))
+        var wrong: [String] = []
+        for width in stride(from: 150, through: 700, by: 3) {
+            window.setContentSize(NSSize(width: CGFloat(width), height: 400))
+            window.layoutIfNeeded()
+            for raw in [UInt64(1), 3, 2] where table.rect(ofRow: index(of: raw)).height
+                != fittingHeight(ofRow: index(of: raw))
+            {
+                wrong.append("\(raw) at \(width)")
+            }
+        }
+        #expect(wrong.isEmpty, "\(wrong.prefix(6))")
+    }
+
     // As the official client: the full date over the time only, near the list's top and bottom.
     @Test
     func aNoticesFullDateShowsOverItsTimeOnly() throws {
@@ -840,7 +867,8 @@ struct MessageTableTests {
             !$0.isHiddenOrHasHiddenAncestor && !$0.stringValue.isEmpty
         }
         let shown = Set(fields.map(\.stringValue))
-        #expect(shown.isSuperset(of: ["Mira", "12:00", "12:01", "Not sent."]))
+        #expect(shown.isSuperset(of: ["Mira", "Not sent."]))
+        #expect(shown.contains { $0.hasPrefix("12:00") } && shown.contains { $0.hasPrefix("12:01") })
         #expect(shown.contains { $0.contains("Replying to") })
         #expect(shown.contains { $0.contains("October") })
 

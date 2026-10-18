@@ -15,6 +15,8 @@ final class NoticeCell: NSTableCellView {
     private static let bottom: CGFloat = 2
     private static let leading: CGFloat = 72
     private static let trailing: CGFloat = 16
+    // Measures as the cell's own text view lays out; string drawing breaks the line differently.
+    private static let sizing = MessageTextView()
 
     init() {
         super.init(frame: .zero)
@@ -45,9 +47,10 @@ final class NoticeCell: NSTableCellView {
         _ message: Message, notice: String, time: String, followsDay: Bool = false,
         followsLine: Bool = false, width: CGFloat
     ) -> CGFloat {
-        textTop(followsDay: followsDay, followsLine: followsLine)
-            + TextMeasurer.shared.height(line(notice, time: time), width: width - leading - trailing)
-            + bottom
+        sizing.show(line(notice, time: time))
+        sizing.setFrameSize(NSSize(width: width - leading - trailing, height: sizing.frame.height))
+        return textTop(followsDay: followsDay, followsLine: followsLine)
+            + sizing.intrinsicContentSize.height + bottom
     }
 
     func configure(

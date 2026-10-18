@@ -172,7 +172,7 @@ final class MessageCell: NSTableCellView {
                     : view === content
                         ? body
                         : view === extras
-                            ? TextMeasurer.shared.height(extras.attributedString(), width: textWidth)
+                            ? extrasHeight(width: textWidth)
                             : view === failed
                                 ? FailedLine.height : view.intrinsicContentSize.height
             }
@@ -184,6 +184,12 @@ final class MessageCell: NSTableCellView {
         }
         let replyHeight = reply.isHidden ? 0 : reply.intrinsicContentSize.height + Self.spacing
         return max(height, top + replyHeight + Self.avatarSize + Self.avatarBottomInset)
+    }
+
+    // As the files' text view lays them out; string drawing breaks their lines differently.
+    private func extrasHeight(width: CGFloat) -> CGFloat {
+        extras.setFrameSize(NSSize(width: width, height: extras.frame.height))
+        return extras.intrinsicContentSize.height
     }
 
     /// The message's own area, which hover and the mention highlight cover.
