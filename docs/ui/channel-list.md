@@ -161,7 +161,7 @@ Observed in the official web client on 2026-10-17, with the second account and a
   Mute Thread ›, Notification Settings › | Copy Thread ID. *Akari: Mark As Read; Leave Thread
   comes with joining and leaving; the other items later.*
 
-*Akari: the spine runs 26 from the column's edge, under the center of the parent's icon, and on
+*Akari: the spine runs 26 from the column's edge, from the bottom of the parent's icon down
 through the 2 between rows; each branch runs to 34, the row's background starts at 36 and the
 name at 44, under the parent's name. These offsets are Akari's own until compared side by side
 with the official client.*

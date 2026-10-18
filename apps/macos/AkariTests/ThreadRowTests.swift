@@ -27,7 +27,10 @@ struct ThreadRowTests {
         last: Bool = false, muted: Bool = false, badge: Badge = Badge(unread: false, mentions: 0)
     ) throws -> Rendered {
         try render(
-            ThreadRow(channel: thread, last: last, selected: false, muted: muted, badge: badge) {})
+            ThreadRow(
+                channel: thread, first: false, last: last, selected: false, muted: muted,
+                badge: badge
+            ) {})
     }
 
     func drawn(_ image: Rendered, _ x: CGFloat, _ y: CGFloat) -> Bool {
@@ -54,6 +57,52 @@ struct ThreadRowTests {
         #expect(drawn(image, ThreadRow.spine, 30), "and on to the next thread")
         #expect(drawn(image, ThreadRow.spine + 5, 16), "the branch")
         #expect(!drawn(image, ThreadRow.spine - 6, 16))
+    }
+
+    // The parent row and its first thread, 2 apart as in the sidebar.
+    func underParent(first: Bool) throws -> Rendered {
+        let parent = Channel(
+            id: ChannelId(rawValue: 11), kind: .guildText, guildId: GuildId(rawValue: 1),
+            parentId: nil, name: "general", position: 0, topic: nil, nsfw: false,
+            rateLimitPerUser: 0, recipientIds: [], thread: nil)
+        return try Rendered(
+            VStack(spacing: 2) {
+                ChannelRow(channel: parent, selected: false, muted: false) {}
+                ThreadRow(
+                    channel: thread, first: first, last: true, selected: false, muted: false
+                ) {}
+            }
+            .frame(width: 240, height: 66).background(Color(nsColor: Palette.frame))
+            .ignoresSafeArea(),
+            size: NSSize(width: 240, height: 66))
+    }
+
+    @Test
+    func theFirstThreadsSpineStartsUnderItsParentsIcon() throws {
+        let image = try underParent(first: true)
+
+        #expect(drawn(image, ThreadRow.spine, 27), "right under the 20 icon, centered in 32")
+        #expect(drawn(image, ThreadRow.spine, 31))
+        #expect(drawn(image, ThreadRow.spine, 33), "and on through the gap")
+        #expect(!drawn(try underParent(first: false), ThreadRow.spine, 27))
+    }
+
+    @Test
+    func theFirstThreadUnderEachParentStartsItsSpine() {
+        func channel(_ raw: UInt64, _ kind: ChannelType, parent: UInt64?) -> Channel {
+            Channel(
+                id: ChannelId(rawValue: raw), kind: kind, guildId: GuildId(rawValue: 1),
+                parentId: parent.map(ChannelId.init(rawValue:)), name: "\(raw)", position: 0,
+                topic: nil, nsfw: false, rateLimitPerUser: 0, recipientIds: [], thread: nil)
+        }
+        let rows = [
+            channel(11, .guildText, parent: nil), channel(32, .publicThread, parent: 11),
+            channel(31, .publicThread, parent: 11), channel(12, .guildText, parent: nil),
+            channel(41, .privateThread, parent: 12),
+        ]
+        let first = ChannelSidebar.firstThreads(in: rows)
+
+        #expect(first == [ChannelId(rawValue: 32), ChannelId(rawValue: 41)])
     }
 
     @Test

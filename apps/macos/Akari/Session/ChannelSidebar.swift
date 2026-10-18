@@ -16,6 +16,7 @@ struct ChannelSidebar: View {
                     let rows = collapsed.visible(list.shown(open: open), in: list.guildId) {
                         list.staysWhenCollapsed($0, open: open)
                     }
+                    let firstThreads = Self.firstThreads(in: rows)
                     let lastThreads = Self.lastThreads(in: rows)
                     ForEach(rows, id: \.id) { channel in
                         let muted = list.muted.contains(channel.id)
@@ -29,7 +30,8 @@ struct ChannelSidebar: View {
                             }
                         } else if channel.isThread {
                             ThreadRow(
-                                channel: channel, last: lastThreads.contains(channel.id),
+                                channel: channel, first: firstThreads.contains(channel.id),
+                                last: lastThreads.contains(channel.id),
                                 selected: channel.id == open, muted: muted,
                                 badge: list.badge(of: channel.id)
                             ) {
@@ -54,6 +56,18 @@ struct ChannelSidebar: View {
                 .padding(.bottom, 72)
             }
         }
+    }
+
+    /// The threads whose spine starts under their parent's symbol: each parent's first one.
+    static func firstThreads(in rows: [Channel]) -> Set<ChannelId> {
+        var first: Set<ChannelId> = []
+        for (index, row) in rows.enumerated() where row.isThread {
+            let previous = index > 0 ? rows[index - 1] : nil
+            if previous?.isThread != true || previous?.parentId != row.parentId {
+                first.insert(row.id)
+            }
+        }
+        return first
     }
 
     /// The threads whose spine ends at their branch: each parent's last listed thread.
@@ -183,6 +197,8 @@ struct ThreadRow: View {
     nonisolated static let branchEnd: CGFloat = 36
 
     let channel: Channel
+    /// The parent's first thread, whose spine starts under the parent's symbol.
+    let first: Bool
     /// The parent's last thread, whose spine ends at its branch.
     let last: Bool
     let selected: Bool
@@ -225,7 +241,7 @@ struct ThreadRow: View {
         .padding(.leading, Self.branchEnd)
         .padding(.trailing, 8)
         .background {
-            Spine(last: last)
+            Spine(first: first, last: last)
                 .stroke(Color(nsColor: Palette.channelDefault), lineWidth: 1)
         }
         .overlay(alignment: .leading) {
@@ -250,14 +266,16 @@ struct ThreadRow: View {
     }
 }
 
-// Runs on through the 2 between rows, so the spines of a parent's threads join up.
+// Runs on through the 2 between rows, so the spines of a parent's threads join up; the first
+// starts at the bottom of the parent's 20 symbol, 6 above the parent row's end.
 nonisolated private struct Spine: Shape {
+    let first: Bool
     let last: Bool
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
         let middle = rect.midY
-        path.move(to: CGPoint(x: ThreadRow.spine, y: rect.minY - 2))
+        path.move(to: CGPoint(x: ThreadRow.spine, y: rect.minY - (first ? 8 : 2)))
         path.addLine(to: CGPoint(x: ThreadRow.spine, y: last ? middle : rect.maxY))
         path.move(to: CGPoint(x: ThreadRow.spine, y: middle))
         path.addLine(to: CGPoint(x: ThreadRow.branchEnd - 2, y: middle))
