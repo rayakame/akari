@@ -33,7 +33,8 @@ struct ChannelSidebar: View {
                                 channel: channel, first: firstThreads.contains(channel.id),
                                 last: lastThreads.contains(channel.id),
                                 selected: channel.id == open, muted: muted,
-                                badge: list.badge(of: channel.id)
+                                badge: list.badge(of: channel.id),
+                                parentName: channel.parentId.flatMap { list.channel($0)?.name }
                             ) {
                                 session.open(channel: channel.id)
                             }
@@ -165,7 +166,7 @@ struct ChannelRow: View {
             channel.opensMessageList
                 ? channel.topic ?? "" : ChannelSymbols.unsupported(channel.kind)
         )
-        .accessibilityValue(MentionBadge.accessibilityValue(badge))
+        .accessibilityValue(MentionBadge.accessibilityValue(badge, muted: muted))
         .padding(.horizontal, 8)
         .overlay(alignment: .leading) {
             if badge.unread && !selected {
@@ -204,9 +205,15 @@ struct ThreadRow: View {
     let selected: Bool
     let muted: Bool
     var badge = Badge(unread: false, mentions: 0)
+    var parentName: String?
     let open: () -> Void
     @State private var hovered = false
     @Environment(\.colorScheme) private var colorScheme
+
+    /// What VoiceOver calls the row: the thread and the channel it belongs to.
+    static func spokenName(name: String, parent: String?) -> String {
+        parent.map { "\(name), thread in \($0)" } ?? "\(name), thread"
+    }
 
     var body: some View {
         Button(action: open) {
@@ -236,8 +243,8 @@ struct ThreadRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .accessibilityLabel("\(channel.name ?? ""), thread")
-        .accessibilityValue(MentionBadge.accessibilityValue(badge))
+        .accessibilityLabel(Self.spokenName(name: channel.name ?? "", parent: parentName))
+        .accessibilityValue(MentionBadge.accessibilityValue(badge, muted: muted))
         .padding(.leading, Self.branchEnd)
         .padding(.trailing, 8)
         .background {

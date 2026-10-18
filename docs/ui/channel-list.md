@@ -117,7 +117,8 @@ row's was not observed. *Akari: disables both when nothing is unread.*
   tooltip says the kind isn't supported yet.
 - Muted rows and categories are drawn at half opacity, except a row's mention count, which
   stays full red. A muted channel that is selected keeps full opacity. VoiceOver reads a row's
-  unread state and count after its name ("unread, 2 mentions").
+  mute, unread state and count after its name ("muted, unread, 2 mentions"), and a thread row as
+  "name, thread in channel".
 - "Hide muted channels" (a server setting) leaves channels muted by their own settings out of
   the list, except the open one and one with unread or mentioned threads
   ([Threads](#threads)). **Unverified:** what the official client does with a muted category

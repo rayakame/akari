@@ -158,6 +158,27 @@ struct ThreadRowTests {
     }
 
     @Test
+    func aThreadRowNamesItsParentAndItsMute() {
+        #expect(
+            ThreadRow.spokenName(name: "release checklist", parent: "general")
+                == "release checklist, thread in general")
+        #expect(ThreadRow.spokenName(name: "t1", parent: nil) == "t1, thread")
+        #expect(
+            MentionBadge.accessibilityValue(Badge(unread: false, mentions: 1), muted: true)
+                == "muted, 1 mention")
+    }
+
+    @Test
+    func aMutedChannelRowSaysSo() {
+        #expect(
+            MentionBadge.accessibilityValue(Badge(unread: true, mentions: 0), muted: true)
+                == "muted, unread")
+        #expect(
+            MentionBadge.accessibilityValue(Badge(unread: true, mentions: 0), muted: false)
+                == "unread")
+    }
+
+    @Test
     func theLastThreadUnderEachParentEndsItsSpine() {
         func channel(_ raw: UInt64, _ kind: ChannelType, parent: UInt64?) -> Channel {
             Channel(
