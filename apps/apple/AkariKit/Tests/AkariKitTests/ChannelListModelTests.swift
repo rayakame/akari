@@ -331,7 +331,8 @@ struct ChannelListModelTests {
 
         model.setOpen(id(33))
 
-        #expect(store.reads == [.channels([id(33)])])
+        #expect(
+            store.reads == [.channels([id(33)]), .channelBadges([id(33)]), .mutedChannels([id(33)])])
         #expect(
             model.shown(open: id(33)).map(\.id)
                 == [id(10), id(11), id(33), id(32), id(31), id(12)])
@@ -380,6 +381,30 @@ struct ChannelListModelTests {
         model.apply(EventBatch([.ready]))
 
         #expect(model.channel(id(31))?.name == "renamed")
+    }
+
+    @Test
+    func anUnlistedOpenThreadKnowsItsMute() {
+        let model = threaded { state in
+            state.channels[id(33)] = thread(33, in: 11)
+            state.mutedChannels = [id(33)]
+        }
+
+        model.setOpen(id(33))
+        #expect(model.muted.contains(id(33)))
+        model.apply(EventBatch([.guildSettingsChanged(guildId: id(1))]))
+        #expect(model.muted.contains(id(33)), "the settings reread keeps it")
+    }
+
+    @Test
+    func theKeptRowKeepsItsMute() {
+        let model = threaded { $0.mutedChannels = [id(31)] }
+        model.setOpen(id(31))
+        store.update { $0.channelLists[id(1)] = [id(10), id(11), id(32), id(12)] }
+
+        model.apply(EventBatch([.threadListingChanged(guildId: id(1), threadId: id(31))]))
+
+        #expect(model.muted.contains(id(31)))
     }
 
     @Test

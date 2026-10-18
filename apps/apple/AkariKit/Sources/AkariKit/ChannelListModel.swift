@@ -62,6 +62,20 @@ public final class ChannelListModel {
         openThread = channel.flatMap { id in
             channels.first { $0.id == id } ?? store.channels(ids: [id]).first
         }.flatMap { $0.isThread ? $0 : nil }
+        if let kept = openThread?.id, !channels.contains(where: { $0.id == kept }) {
+            readBadges([kept])
+            muted.remove(kept)
+            muted.formUnion(store.mutedChannels(ids: [kept]))
+        }
+    }
+
+    // The listed channels and the kept open thread: every row that can show.
+    private var rowIds: [ChannelId] {
+        var ids = channels.map(\.id)
+        if let kept = openThread?.id, !ids.contains(kept) {
+            ids.append(kept)
+        }
+        return ids
     }
 
     private func showsThread(_ thread: Channel, open: ChannelId?) -> Bool {
@@ -114,11 +128,7 @@ public final class ChannelListModel {
             readSettings()
         }
         if let changed = batch.badgesChanged[guildId] {
-            var rows = channels.map(\.id)
-            if let kept = openThread?.id, !rows.contains(kept) {
-                rows.append(kept)
-            }
-            readBadges(rows.filter(changed.contains))
+            readBadges(rowIds.filter(changed.contains))
         }
     }
 
@@ -139,7 +149,7 @@ public final class ChannelListModel {
         let known = Set(listed)
         readBadges(changed == nil ? channels.map(\.id) : unread.filter { !known.contains($0) })
         if changed != nil, channels.map(\.id) != listed {
-            muted = Set(store.mutedChannels(ids: channels.map(\.id)))
+            muted = Set(store.mutedChannels(ids: rowIds))
         } else if changed != nil {
             // A thread's own mute comes with its channel update.
             let threads = unread.filter { held[$0]?.isThread == true }
@@ -164,7 +174,7 @@ public final class ChannelListModel {
     }
 
     private func readSettings() {
-        muted = Set(store.mutedChannels(ids: channels.map(\.id)))
+        muted = Set(store.mutedChannels(ids: rowIds))
         hidesMuted = store.guildSettings(guildId: guildId).hideMutedChannels
     }
 }
