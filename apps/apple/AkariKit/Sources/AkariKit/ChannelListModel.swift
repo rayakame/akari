@@ -147,7 +147,7 @@ public final class ChannelListModel {
         let listed = channels.map(\.id)
         channels = ids.compactMap { held[$0] }
         let known = Set(listed)
-        readBadges(changed == nil ? channels.map(\.id) : unread.filter { !known.contains($0) })
+        readBadges(changed == nil ? rowIds : unread.filter { !known.contains($0) })
         if changed != nil, channels.map(\.id) != listed {
             muted = Set(store.mutedChannels(ids: rowIds))
         } else if changed != nil {

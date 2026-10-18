@@ -384,6 +384,21 @@ struct ChannelListModelTests {
     }
 
     @Test
+    func aNewSessionRereadsTheKeptRowsBadge() {
+        let model = threaded { state in
+            state.channels[id(33)] = thread(33, in: 11)
+            state.channelBadges = [id(33): badge(mentions: 2)]
+        }
+        model.setOpen(id(33))
+        #expect(model.badge(of: id(33)) == badge(mentions: 2))
+        store.update { $0.channelBadges = [:] }
+
+        model.apply(EventBatch([.ready]))
+
+        #expect(model.badge(of: id(33)) == noBadge)
+    }
+
+    @Test
     func anUnlistedOpenThreadKnowsItsMute() {
         let model = threaded { state in
             state.channels[id(33)] = thread(33, in: 11)
