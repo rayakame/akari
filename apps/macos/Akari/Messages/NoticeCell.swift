@@ -5,7 +5,7 @@ final class NoticeCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("notice")
 
     private let icon = NSImageView()
-    private let text = CellText.label(wrapping: true)
+    private let text = MessageTextView()
     private static let top: CGFloat = 18
     // 10 less right after a day divider, as a message's (MessageCell).
     private static let dayTop: CGFloat = 8
@@ -15,7 +15,6 @@ final class NoticeCell: NSTableCellView {
     private static let bottom: CGFloat = 2
     private static let leading: CGFloat = 72
     private static let trailing: CGFloat = 16
-    private static let sizing = NoticeCell()
 
     init() {
         super.init(frame: .zero)
@@ -46,10 +45,9 @@ final class NoticeCell: NSTableCellView {
         _ message: Message, notice: String, time: String, followsDay: Bool = false,
         followsLine: Bool = false, width: CGFloat
     ) -> CGFloat {
-        sizing.configure(message, notice: notice, time: time, fullDate: "")
-        sizing.text.preferredMaxLayoutWidth = width - leading - trailing
-        return textTop(followsDay: followsDay, followsLine: followsLine)
-            + sizing.text.intrinsicContentSize.height + bottom
+        textTop(followsDay: followsDay, followsLine: followsLine)
+            + TextMeasurer.shared.height(line(notice, time: time), width: width - leading - trailing)
+            + bottom
     }
 
     func configure(
@@ -59,6 +57,11 @@ final class NoticeCell: NSTableCellView {
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
         icon.image = NSImage(
             systemSymbolName: Self.symbol(message.kind), accessibilityDescription: nil)
+        text.show(Self.line(notice, time: time))
+        text.toolTip = fullDate
+    }
+
+    private static func line(_ notice: String, time: String) -> NSAttributedString {
         let line = NSMutableAttributedString(
             attributedString: CellText.body(notice, color: Palette.textMuted))
         line.append(
@@ -67,8 +70,7 @@ final class NoticeCell: NSTableCellView {
                 attributes: [
                     .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
                 ]))
-        text.attributedStringValue = line
-        text.toolTip = fullDate
+        return line
     }
 
     static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
