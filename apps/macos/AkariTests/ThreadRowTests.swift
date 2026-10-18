@@ -173,6 +173,27 @@ struct ThreadRowTests {
         #expect(drawn(image, ThreadRow.spine + 5, 16))
     }
 
+    // Discord's # is about 17 tall; every kind keeps one size.
+    @Test
+    func aChannelSymbolIsSeventeenPointsTall() throws {
+        let general = Channel(
+            id: ChannelId(rawValue: 11), kind: .guildText, guildId: GuildId(rawValue: 1),
+            parentId: nil, name: "general", position: 0, topic: nil, nsfw: false,
+            rateLimitPerUser: 0, recipientIds: [], thread: nil)
+        let image = try Rendered(
+            ChannelSymbol(channel: general).frame(width: 40, height: 40)
+                .background(Color(nsColor: Palette.frame)).ignoresSafeArea(),
+            size: NSSize(width: 40, height: 40))
+        let rows = (0..<image.rep.pixelsHigh).filter { y in
+            (0..<image.rep.pixelsWide).contains { x in
+                !same(image.pixel(x, y), image.pixel(0, 0))
+            }
+        }
+        let height = CGFloat((rows.last ?? 0) - (rows.first ?? 0) + 1) / image.scale
+
+        #expect((16.5...18).contains(height), "\(height) points")
+    }
+
     @Test
     func aThreadRowDrawsNoSymbol() throws {
         let channelRow = try render(

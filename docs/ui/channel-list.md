@@ -110,7 +110,12 @@ row's was not observed. *Akari: disables both when nothing is unread.*
 
 ### In Akari
 
-- Icons are SF Symbols. NSFW channels get a small warning badge on their symbol. The private
+- Icons are SF Symbols at 18 points in the 20 box: Discord's # is ink 17 by 17 with strokes 1.5
+  thick (measured at 2x on 2026-10-18); SF's `number` at 18 is 16 by 17, a little lighter (its
+  strokes about 12% heavier than at 16, Discord's about 19%). Medium weight would be about a
+  third heavier, so the symbols keep the regular weight. Every kind takes the same size; the
+  widest (forum 25.5, group 24, media 22) reach past the 20 box without moving the name.
+  NSFW channels get a small warning badge on their symbol. The private
   variant needs the channel's permission overwrites, which the app doesn't receive yet; rules
   channels need the server's rules channel ID, which it doesn't receive either.
 - Voice, stage, forum, media and directory channels are listed but don't open anything; their
