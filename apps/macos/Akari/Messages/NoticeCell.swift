@@ -57,19 +57,27 @@ final class NoticeCell: NSTableCellView {
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
         icon.image = NSImage(
             systemSymbolName: Self.symbol(message.kind), accessibilityDescription: nil)
-        text.show(Self.line(notice, time: time))
-        text.toolTip = fullDate
+        text.show(Self.line(notice, time: time, fullDate: fullDate))
     }
 
-    private static func line(_ notice: String, time: String) -> NSAttributedString {
+    // The full date shows over the time only, as Discord's; TextKit keeps its rect in step.
+    private static func line(_ notice: String, time: String, fullDate: String? = nil)
+        -> NSAttributedString
+    {
         let line = NSMutableAttributedString(
             attributedString: CellText.body(notice, color: Palette.textMuted))
         line.append(
             NSAttributedString(
-                string: "  \(time)",
-                attributes: [
-                    .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
-                ]))
+                string: "  ",
+                attributes: [.font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted]
+            ))
+        var timeAttributes: [NSAttributedString.Key: Any] = [
+            .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
+        ]
+        if let fullDate, !fullDate.isEmpty {
+            timeAttributes[.toolTip] = fullDate
+        }
+        line.append(NSAttributedString(string: time, attributes: timeAttributes))
         return line
     }
 

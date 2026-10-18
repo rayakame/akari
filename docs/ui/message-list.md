@@ -124,7 +124,7 @@ thread, a renamed channel, and so on) show as one line:
 
 - a muted icon in the avatar column;
 - a sentence naming who did what, in `textMuted`;
-- the time.
+- the time; hovering it, and only it, shows the full date and time, as Discord does.
 
 They never join a group and always end one. Akari writes these sentences in its own words; it
 doesn't reuse Discord's texts, such as its random welcome lines.

@@ -772,6 +772,57 @@ struct MessageTableTests {
         }
     }
 
+    // What the text view's tooltip says at a point, as AppKit asks it while the pointer rests.
+    func toolTip(of text: NSTextView, at point: NSPoint) -> String? {
+        guard let layoutManager = text.layoutManager, let container = text.textContainer else {
+            return nil
+        }
+        let inContainer = NSPoint(
+            x: point.x - text.textContainerOrigin.x, y: point.y - text.textContainerOrigin.y)
+        var fraction: CGFloat = 0
+        let glyph = layoutManager.glyphIndex(
+            for: inContainer, in: container, fractionOfDistanceThroughGlyph: &fraction)
+        let rect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        guard rect.contains(inContainer) else {
+            return nil
+        }
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        return text.textStorage?.attribute(.toolTip, at: index, effectiveRange: nil) as? String
+    }
+
+    // The middle of the glyphs of `part` in the text view, in its own coordinates.
+    func middle(of part: String, in text: NSTextView) throws -> NSPoint {
+        let range = (text.string as NSString).range(of: part, options: .backwards)
+        try #require(range.location != NSNotFound, "\(part) in \(text.string)")
+        let layoutManager = try #require(text.layoutManager)
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(
+            forGlyphRange: glyphs, in: try #require(text.textContainer))
+        return NSPoint(
+            x: rect.midX + text.textContainerOrigin.x, y: rect.midY + text.textContainerOrigin.y)
+    }
+
+    // As the official client: the full date over the time only, near the list's top and bottom.
+    @Test
+    func aNoticesFullDateShowsOverItsTimeOnly() throws {
+        let rows = [row(1, at: noon, kind: .userJoin)] + messages(30, from: 2, longText: true)
+            + [row(40, at: noon + 4000, kind: .userJoin)]
+        show(MessageTableState(rows: rows, reachedOldest: true))
+        for raw in [UInt64(1), 40] {
+            clip.scroll(
+                to: NSPoint(x: 0, y: table.rect(ofRow: index(of: raw)).minY - (raw == 1 ? 0 : 300)))
+            window.layoutIfNeeded()
+            let notice = try #require(messageText(in: try cell(of: raw)))
+            let time = try #require(notice.string.components(separatedBy: "  ").last)
+
+            #expect(notice.toolTip == nil, "no tooltip over the whole line")
+            let date = toolTip(of: notice, at: try middle(of: time, in: notice))
+            #expect(date?.isEmpty == false, "\(raw)")
+            #expect(toolTip(of: notice, at: try middle(of: "joined", in: notice)) == nil)
+        }
+    }
+
     // Discord lets none of these be selected.
     @Test
     func namesTimesAndDividersArentSelectable() throws {
