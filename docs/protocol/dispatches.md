@@ -149,6 +149,10 @@ channels" changes what's listed; which listed threads a list shows under a colla
 or a muted parent is the apps' rule ([channel-list.md](../ui/channel-list.md#threads)).
 
 The account's deadline task wakes at the earliest window end, as it does for the mute ends.
+The badge index keeps the threads' window and mute ends in order, so finding the next one or
+those that passed scans no thread, and a write that brings an end before the ones ahead wakes
+the task; a burst of events (a READY's diff, a server marked read) costs it one recomputation.
+Badge time and the deadlines read one clock, which never steps back when the wall clock does.
 `ThreadListingChanged { guild_id, thread_id }` reports a thread whose listing changed while the
 thread itself didn't: its window ended, it was read past it, or a message came after it.
 

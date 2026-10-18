@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ops::Bound;
 
 use super::apply::Entities;
 use super::events::StoreEvent;
@@ -56,6 +57,9 @@ struct Slot {
     mentions: u32,
     // A thread its guild's channel list shows.
     listed: bool,
+    // A joined, open thread's inactivity window end, and its own timed mute's end.
+    window_end: Option<Timestamp>,
+    mute_end: Option<Timestamp>,
 }
 
 fn shown(slot: Option<&Slot>) -> (Badge, Option<ReadState>) {
@@ -112,6 +116,11 @@ impl Dirty {
 pub(crate) struct Badges {
     channels: HashMap<ChannelId, Slot>,
     guilds: HashMap<GuildId, Sum>,
+    // The slots' ends in order, so the deadline task finds the next ones without a scan.
+    window_ends: BTreeSet<(Timestamp, ChannelId)>,
+    mute_ends: BTreeSet<(Timestamp, ChannelId)>,
+    // An update brought an end before every other one ahead, which the task may sleep past.
+    sooner: bool,
 }
 
 impl Badges {
@@ -126,6 +135,7 @@ impl Badges {
                 .keys()
                 .map(|guild| (*guild, Sum::default()))
                 .collect(),
+            ..Self::default()
         };
         for guild in entities.guilds.keys() {
             badges.set_muted(*guild, guild_muted(entities, *guild, now));
@@ -150,6 +160,32 @@ impl Badges {
 
     pub(crate) fn listed(&self, channel: ChannelId) -> bool {
         self.channels.get(&channel).is_some_and(|slot| slot.listed)
+    }
+
+    pub(crate) fn next_window_end(&self, after: Timestamp) -> Option<Timestamp> {
+        first_after(&self.window_ends, after)
+    }
+
+    pub(crate) fn windows_ending(&self, after: Timestamp, until: Timestamp) -> Vec<ChannelId> {
+        ending(&self.window_ends, after, until).collect()
+    }
+
+    pub(crate) fn next_thread_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
+        first_after(&self.mute_ends, after)
+    }
+
+    // The guilds of the threads whose own mute ended within `after..=until`.
+    pub(crate) fn thread_mutes_ending(
+        &self,
+        after: Timestamp,
+        until: Timestamp,
+    ) -> impl Iterator<Item = Option<GuildId>> + '_ {
+        ending(&self.mute_ends, after, until)
+            .map(|thread| self.channels.get(&thread).and_then(|slot| slot.guild))
+    }
+
+    pub(crate) fn take_sooner(&mut self) -> bool {
+        std::mem::take(&mut self.sooner)
     }
 
     /// Events for every badge that differs in `next`, a later session's.
@@ -271,10 +307,14 @@ impl Badges {
                 }
             }
             if let Some(old) = old {
-                self.subtract(&old);
+                self.subtract(channel, &old);
             }
             if let Some(new) = new {
                 self.add(channel, new);
+                let ends = |slot: Option<&Slot>| slot.map(|slot| (slot.window_end, slot.mute_end));
+                if ends(old.as_ref()) != ends(Some(&new)) {
+                    self.note_sooner(new, now);
+                }
             }
             if new.is_some() && shown(old.as_ref()) != shown(new.as_ref()) {
                 events.push(StoreEvent::BadgeChanged {
@@ -302,15 +342,59 @@ impl Badges {
             sum.dots += u32::from(slot.dot);
             sum.mentions = sum.mentions.saturating_add(slot.mentions);
         }
+        if let Some(end) = slot.window_end {
+            self.window_ends.insert((end, channel));
+        }
+        if let Some(end) = slot.mute_end {
+            self.mute_ends.insert((end, channel));
+        }
         self.channels.insert(channel, slot);
     }
 
-    fn subtract(&mut self, slot: &Slot) {
+    fn subtract(&mut self, channel: ChannelId, slot: &Slot) {
         if let Some(sum) = slot.guild.and_then(|guild| self.guilds.get_mut(&guild)) {
             sum.dots = sum.dots.saturating_sub(u32::from(slot.dot));
             sum.mentions = sum.mentions.saturating_sub(slot.mentions);
         }
+        if let Some(end) = slot.window_end {
+            self.window_ends.remove(&(end, channel));
+        }
+        if let Some(end) = slot.mute_end {
+            self.mute_ends.remove(&(end, channel));
+        }
     }
+
+    // After `slot` is added: whether one of its ends is now the first ahead.
+    fn note_sooner(&mut self, slot: Slot, now: Timestamp) {
+        let first = |end: Option<Timestamp>, ends: &BTreeSet<(Timestamp, ChannelId)>| {
+            end.is_some_and(|end| end > now && first_after(ends, now) == Some(end))
+        };
+        if first(slot.window_end, &self.window_ends) || first(slot.mute_end, &self.mute_ends) {
+            self.sooner = true;
+        }
+    }
+}
+
+fn first_after(ends: &BTreeSet<(Timestamp, ChannelId)>, after: Timestamp) -> Option<Timestamp> {
+    ends.range((
+        Bound::Excluded((after, ChannelId::new(u64::MAX))),
+        Bound::Unbounded,
+    ))
+    .next()
+    .map(|(end, _)| *end)
+}
+
+fn ending(
+    ends: &BTreeSet<(Timestamp, ChannelId)>,
+    after: Timestamp,
+    until: Timestamp,
+) -> impl Iterator<Item = ChannelId> + '_ {
+    let last = ChannelId::new(u64::MAX);
+    ends.range((
+        Bound::Excluded((after, last)),
+        Bound::Included((until, last)),
+    ))
+    .map(|(_, channel)| *channel)
 }
 
 // A thread that appears or goes has its own channel event.
@@ -356,6 +440,8 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
             dot: false,
             mentions: 0,
             listed: false,
+            window_end: None,
+            mute_end: None,
         });
     };
     let hidden = Slot {
@@ -365,6 +451,8 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
         dot: false,
         mentions: 0,
         listed: false,
+        window_end: None,
+        mute_end: None,
     };
     let visible = entities
         .permissions(channel.id, now_millis)
@@ -414,6 +502,17 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
         // A thread's mentions need a row to clear them from, so they wait for the join.
         mentions: if counted { mentions } else { 0 },
         listed,
+        window_end: channel
+            .thread
+            .as_deref()
+            .filter(|info| info.joined() && !info.archived)
+            .and_then(|_| channel.window_end()),
+        mute_end: channel
+            .thread
+            .as_deref()
+            .and_then(|info| info.member)
+            .filter(|member| member.muted)
+            .and_then(|member| member.mute_ends),
     })
 }
 

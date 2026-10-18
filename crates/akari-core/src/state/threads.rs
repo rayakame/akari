@@ -40,8 +40,4 @@ impl ThreadIndex {
     pub(crate) fn of(&self, channel: ChannelId) -> impl Iterator<Item = ChannelId> + '_ {
         self.0.get(&channel).into_iter().flatten().copied()
     }
-
-    pub(crate) fn all(&self) -> impl Iterator<Item = ChannelId> + '_ {
-        self.0.values().flatten().copied()
-    }
 }

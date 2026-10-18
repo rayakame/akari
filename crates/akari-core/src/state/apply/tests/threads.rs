@@ -563,3 +563,24 @@ fn a_mention_before_the_thread_arrives_still_counts() {
     assert!(state.listed(Snowflake::new(CREATED)));
     assert_eq!(state.guild_badge(Snowflake::new(G1)).mentions, 1);
 }
+
+#[test]
+fn the_next_window_end_follows_the_threads() {
+    let mut state = ready_thread(30, |_| {});
+    let now = Timestamp::from_unix_millis(wall_millis());
+    let end = state.next_window_end(now).expect("the thread's");
+    assert!((end.unix_millis() - (wall_millis() + 30 * MINUTE)).abs() < 2_000);
+
+    let mut own = plain(snowflake_at(wall_millis()), THREAD);
+    own["author"]["id"] = ME.to_string().into();
+    apply(&mut state, "MESSAGE_CREATE", own);
+    let moved = state.next_window_end(now).expect("moved");
+    assert!(moved.unix_millis() - end.unix_millis() > 29 * MINUTE);
+
+    apply(
+        &mut state,
+        "THREAD_DELETE",
+        json!({"id": THREAD.to_string(), "guild_id": G1.to_string(), "parent_id": GENERAL.to_string(), "type": 11}),
+    );
+    assert_eq!(state.next_window_end(now), None);
+}

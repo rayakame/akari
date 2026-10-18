@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, Notify, mpsc};
 
 use super::apply::{Derived, Entities, ReadyDiff, State};
 use super::badges::{Badge, Badges};
@@ -21,6 +21,22 @@ use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
+
+#[cfg(test)]
+thread_local! {
+    static DEADLINE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How often the deadline task read its next deadline on this thread.
+#[cfg(test)]
+pub(crate) fn deadline_reads() -> usize {
+    DEADLINE_READS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn deadline_reads_reset() {
+    DEADLINE_READS.with(|reads| reads.set(0));
+}
 
 // Main-thread readers (SwiftUI, AppKit) wait at most this long for a write.
 const LONG_HOLD: Duration = Duration::from_millis(4);
@@ -66,6 +82,8 @@ struct Shared {
     inner: RwLock<Inner>,
     // What the badges and the deadlines call now.
     clock: Arc<Clock>,
+    // A write brought a deadline sooner than the ones the deadline task knew.
+    sooner: Notify,
     // Bumped by every write, so the disk cache skips snapshots while nothing changed.
     changes: AtomicU64,
     // Hands out the order of loads and supersedes that place a window, without the lock.
@@ -127,7 +145,6 @@ impl Subscription {
         batch
     }
 
-    #[cfg(test)]
     pub(crate) fn buffered(&self) -> usize {
         self.buffered.load(Ordering::Relaxed)
     }
@@ -183,6 +200,7 @@ impl Store {
                 changes: AtomicU64::new(0),
                 placings: AtomicU64::new(0),
                 clock: clock.clone(),
+                sooner: Notify::new(),
                 inner: RwLock::new(Inner {
                     state: State::with_limits(limits, clock),
                     connection: ConnectionState::Offline,
@@ -241,6 +259,7 @@ impl Store {
         #[cfg(test)]
         super::badges::hooks::writing(true);
         let value = write(&mut inner, &mut events);
+        let sooner = inner.state.take_sooner_deadline();
         #[cfg(test)]
         super::badges::hooks::writing(false);
         self.shared.changes.fetch_add(1, Ordering::Relaxed);
@@ -249,6 +268,9 @@ impl Store {
         self.slow_down();
         let held = taken.elapsed();
         drop(inner);
+        if sooner {
+            self.shared.sooner.notify_one();
+        }
         #[cfg(test)]
         if let Ok(mut holds) = self.shared.holds.lock()
             && let Some(holds) = holds.as_mut()
@@ -516,8 +538,15 @@ impl Store {
         });
     }
 
+    // Waits until a write brings a deadline before the ones ahead; a write before the call counts.
+    pub(crate) async fn deadline_sooner(&self) {
+        self.shared.sooner.notified().await;
+    }
+
     // The next mute end or thread window end after `after`.
     pub(crate) fn next_deadline(&self, after: Timestamp) -> Option<Timestamp> {
+        #[cfg(test)]
+        DEADLINE_READS.with(|reads| reads.set(reads.get() + 1));
         self.read(|inner| {
             let mutes = inner.state.next_mute_end(after);
             mutes

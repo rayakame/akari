@@ -17,9 +17,15 @@ pub(crate) async fn run_deadlines(store: Store, changes: Subscription) {
             tokio::select! {
                 event = changes.next() => match event {
                     None => return,
-                    Some(event) if rearms(&event) => break,
+                    Some(event) if rearms(&event) => {
+                        if !drain(&changes).await {
+                            return;
+                        }
+                        break;
+                    }
                     Some(_) => {}
                 },
+                () = store.deadline_sooner() => break,
                 () = until(deadline) => break,
             }
         }
@@ -29,20 +35,26 @@ pub(crate) async fn run_deadlines(store: Store, changes: Subscription) {
     }
 }
 
-// Settings and threads can move the next end; a reconnect can follow a sleep, during which the
-// monotonic clock behind the deadline stood still.
+// Threads report their ends through `deadline_sooner`. A reconnect can follow a sleep, during
+// which the monotonic clock behind the deadline stood still.
 fn rearms(event: &StoreEvent) -> bool {
     matches!(
         event,
         StoreEvent::GuildSettingsChanged { .. }
-            | StoreEvent::ChannelAdded(_)
-            | StoreEvent::ChannelUpdated(_)
-            | StoreEvent::BadgeChanged { .. }
-            | StoreEvent::ThreadListingChanged { .. }
             | StoreEvent::Ready
             | StoreEvent::Restored
             | StoreEvent::Connection(_)
     )
+}
+
+// The events of a burst behind the one that rearms need no recomputation of their own.
+async fn drain(changes: &Subscription) -> bool {
+    for _ in 0..changes.buffered() {
+        if changes.next().await.is_none() {
+            return false;
+        }
+    }
+    true
 }
 
 pub(super) async fn until(deadline: Option<Instant>) {
@@ -224,6 +236,63 @@ mod tests {
         assert_eq!(deadline_events(&observer).await.1, 0);
         let listed = store.channel_list(Snowflake::new(G1));
         assert!(listed.iter().all(|channel| channel.id.get() != THREAD));
+    }
+
+    // A message in a thread past its window changes it silently; the store wakes the timer.
+    #[tokio::test(start_paused = true)]
+    async fn a_message_after_the_window_arms_the_timer_without_an_event() {
+        let store = Store::new(DEFAULT_LIMITS);
+        store.apply(ready_with_thread_ending(wall() - 60_000));
+        let _timer = start(&store);
+        settle().await;
+        let mut message: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/message_create.json")).unwrap();
+        let id = snowflake_at(wall());
+        message["id"] = id.clone().into();
+        message["channel_id"] = THREAD.to_string().into();
+        message["mentions"] = serde_json::json!([]);
+        store.apply(dispatch("MESSAGE_CREATE", &message));
+        store.apply(dispatch(
+            "MESSAGE_ACK",
+            &serde_json::json!({"channel_id": THREAD.to_string(), "message_id": id, "version": 3}),
+        ));
+        let observer = store.subscribe();
+        settle().await;
+
+        tokio::time::advance(Duration::from_secs(59 * 60)).await;
+        settle().await;
+        assert_eq!(deadline_events(&observer).await.1, 0);
+
+        tokio::time::advance(Duration::from_secs(2 * 60)).await;
+        settle().await;
+        assert_eq!(deadline_events(&observer).await.1, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_burst_of_events_recomputes_the_deadline_at_most_once() {
+        let store = Store::new(DEFAULT_LIMITS);
+        store.apply(ready_with_thread_ending(wall() + 60 * MINUTE));
+        let _timer = start(&store);
+        settle().await;
+        crate::state::deadline_reads_reset();
+
+        for n in 0..50 {
+            store.apply(dispatch(
+                "MESSAGE_ACK",
+                &serde_json::json!({
+                    "channel_id": GENERAL.to_string(),
+                    "message_id": snowflake_at(wall() - 1_000 + n), "version": 4 + n
+                }),
+            ));
+            store.apply(settings(false, None, Vec::new()));
+        }
+        settle().await;
+
+        assert!(
+            crate::state::deadline_reads() <= 2,
+            "{} recomputations",
+            crate::state::deadline_reads()
+        );
     }
 
     #[tokio::test(start_paused = true)]

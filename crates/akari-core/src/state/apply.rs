@@ -1480,19 +1480,13 @@ impl State {
     }
 
     pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
-        self.mute_ends()
+        self.entities
+            .settings
+            .mute_ends()
             .map(|(_, end)| end)
             .filter(|end| *end > after)
+            .chain(self.badges.next_thread_mute_end(after))
             .min()
-    }
-
-    // The settings' timed mutes and the threads' own.
-    fn mute_ends(&self) -> impl Iterator<Item = (Option<GuildId>, Timestamp)> + '_ {
-        let threads = self.joined_threads().filter_map(|thread| {
-            let member = thread.thread.as_deref()?.member?;
-            Some((thread.guild_id, member.mute_ends.filter(|_| member.muted)?))
-        });
-        self.entities.settings.mute_ends().chain(threads)
     }
 
     pub(crate) fn listed(&self, channel: ChannelId) -> bool {
@@ -1512,21 +1506,16 @@ impl State {
     }
 
     pub(crate) fn next_window_end(&self, after: Timestamp) -> Option<Timestamp> {
-        self.joined_threads()
-            .filter_map(|thread| thread.window_end())
-            .filter(|end| *end > after)
-            .min()
+        self.badges.next_window_end(after)
     }
 
     pub(crate) fn windows_ending(&self, after: Timestamp, until: Timestamp) -> Vec<ChannelId> {
-        self.joined_threads()
-            .filter(|thread| {
-                thread
-                    .window_end()
-                    .is_some_and(|end| end > after && end <= until)
-            })
-            .map(|thread| thread.id)
-            .collect()
+        self.badges.windows_ending(after, until)
+    }
+
+    // Whether a write since the last call brought a deadline before the ones ahead.
+    pub(crate) fn take_sooner_deadline(&mut self) -> bool {
+        self.badges.take_sooner()
     }
 
     // Their badges are computed again at `now_millis`, which moves them out of the list.
@@ -1542,23 +1531,14 @@ impl State {
         self.refresh_badges(now_millis, events);
     }
 
-    fn joined_threads(&self) -> impl Iterator<Item = &Arc<Channel>> + '_ {
-        self.threads
-            .all()
-            .filter_map(|id| self.entities.channels.get(&id))
-            .filter(|thread| {
-                thread
-                    .thread
-                    .as_deref()
-                    .is_some_and(|info| info.joined() && !info.archived)
-            })
-    }
-
     pub(crate) fn mutes_ending(&self, after: Timestamp, until: Timestamp) -> Vec<Option<GuildId>> {
         let ended: BTreeSet<Option<GuildId>> = self
+            .entities
+            .settings
             .mute_ends()
             .filter(|(_, end)| *end > after && *end <= until)
             .map(|(guild, _)| guild)
+            .chain(self.badges.thread_mutes_ending(after, until))
             .collect();
         ended.into_iter().collect()
     }
