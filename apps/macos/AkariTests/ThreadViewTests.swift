@@ -252,3 +252,24 @@ struct ThreadHeaderTests {
         #expect(plain == given)
     }
 }
+
+@MainActor
+struct LockedBannerTests {
+    // Q38's wording, a gray bar at the top of the list.
+    @Test
+    func aLockedThreadShowsTheBannerAndDisablesTheComposer() throws {
+        #expect(
+            LockedBanner.text == "This thread has been locked. Only moderators can send messages.")
+        let image = try Rendered(
+            LockedBanner().frame(width: 600).background(Color(nsColor: Palette.chat))
+                .ignoresSafeArea(),
+            size: NSSize(width: 600, height: 60))
+
+        // Inside its left padding, at its middle: the banner's gray, not the chat's.
+        let fill = image.color(16 + 4, LockedBanner.margin + LockedBanner.height / 2)
+        let outside = image.color(4, LockedBanner.margin + LockedBanner.height / 2)
+        #expect(!same(fill, outside))
+        #expect(same(image.color(4, 2), outside))
+        #expect(isBright(fill) == false)
+    }
+}

@@ -28,7 +28,7 @@ struct ComposerFormatTests {
     let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
     let mira = ChannelName(kind: .direct(author(7, "Mira")), name: "Mira")
     let group = ChannelName(kind: .group, name: "Weekend plans")
-    let thread = ChannelName(kind: .guildChannel(.publicThread), name: "release-notes")
+    let thread = ChannelName(kind: .thread(owner: nil), name: "release-notes")
     let unknown = ChannelName(kind: .direct(nil), name: "")
 
     // The official client's wording.
@@ -37,8 +37,25 @@ struct ComposerFormatTests {
         #expect(general.placeholder == "Message #general")
         #expect(mira.placeholder == "Message @Mira")
         #expect(group.placeholder == "Message Weekend plans")
-        #expect(thread.placeholder == "Message #release-notes")
+        #expect(thread.placeholder == "Message \"release-notes\"")
         #expect(unknown.placeholder == "Message")
+    }
+
+    // Q38: Message "t1".
+    @Test
+    func aThreadsPlaceholderQuotesItsName() {
+        #expect(ChannelName(kind: .thread(owner: "Ray"), name: "t1").placeholder == "Message \"t1\"")
+    }
+
+    // The official client's text, for channels and locked threads alike (Q38).
+    @Test
+    func aDeniedComposerSaysYouDoNotHavePermission() {
+        #expect(
+            ComposerView.prompt(denied: true, otherwise: "Message #general")
+                == "You do not have permission to send messages in this channel.")
+        #expect(
+            ComposerView.prompt(denied: false, otherwise: "Message #general")
+                == "Message #general")
     }
 
     @Test

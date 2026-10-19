@@ -48,6 +48,9 @@ struct MessageArea: View {
                     .id(messages.channelId)
                     .overlay(alignment: .top) {
                         VStack(spacing: 0) {
+                            if messages.composer.locked {
+                                LockedBanner()
+                            }
                             if let bar = messages.unreadBar {
                                 UnreadBar(
                                     text: UnreadBar.text(bar), jump: { bridge.jumpToUnread() },

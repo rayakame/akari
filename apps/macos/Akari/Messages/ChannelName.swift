@@ -19,7 +19,8 @@ struct ChannelName: Equatable {
             return "Message"
         }
         return switch kind {
-        case .guildChannel, .thread: "Message #\(name)"
+        case .guildChannel: "Message #\(name)"
+        case .thread: "Message \"\(name)\""
         case .direct: "Message @\(name)"
         case .group: "Message \(name)"
         }

@@ -28,9 +28,7 @@ struct ComposerView: View {
             // Room for the counter at the right edge.
             .padding(.trailing, composer.remaining == nil ? 0 : 48)
             if composer.draft.isEmpty {
-                Text(
-                    denied ? "You can't send messages in this channel." : placeholder
-                )
+                Text(Self.prompt(denied: denied, otherwise: placeholder))
                 .font(TypeScale.body.font)
                 .foregroundStyle(Color(nsColor: Palette.textMuted))
                 .lineLimit(1)
@@ -50,6 +48,11 @@ struct ComposerView: View {
     // Before the store knows the channel the user can already type.
     private var denied: Bool {
         composer.canSend == false
+    }
+
+    // What the empty composer says.
+    static func prompt(denied: Bool, otherwise placeholder: String) -> String {
+        denied ? "You do not have permission to send messages in this channel." : placeholder
     }
 
     @ViewBuilder private var counter: some View {
