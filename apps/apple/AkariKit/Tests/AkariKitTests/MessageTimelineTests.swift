@@ -50,6 +50,23 @@ struct MessageTimelineTests {
         #expect(shown.shape == ["day", "+1", "+2", "+3", "+4", "5", "+6", "+7"])
     }
 
+    // D124, image 2: Ray's 17:22 message with a thread starts a group 6 minutes after his 17:16.
+    @Test
+    func aMessageWithAThreadStartsAGroup() {
+        let shown = timeline(row(1, at: noon), row(2, at: noon + 360, hasThread: true))
+
+        #expect(shown.shape == ["day", "+1", "+2"])
+    }
+
+    // The thread's box (PR C) sits between them (B10, inferred; TB4 checks it).
+    @Test
+    func theMessageAfterAThreadStartsAGroup() {
+        let shown = timeline(
+            row(1, at: noon, hasThread: true), row(2, at: noon + 60), row(3, at: noon + 120))
+
+        #expect(shown.shape == ["day", "+1", "+2", "3"])
+    }
+
     @Test
     func aNewDayGetsADividerAndStartsAGroup() {
         let shown = timeline(
