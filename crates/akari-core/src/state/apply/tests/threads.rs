@@ -608,6 +608,99 @@ fn a_waiting_join_keeps_its_time_through_a_member_without_one() {
     assert_eq!(joined_at_of(&state, CREATED), at(MEMBER_JOINED));
 }
 
+// READY's thread, its member muted and without a join time.
+fn ready_thread_without_join_time(ready: &mut Value) {
+    let member = &mut ready["guilds"][0]["threads"][0]["member"];
+    member.as_object_mut().unwrap().remove("join_timestamp");
+    member["muted"] = true.into();
+}
+
+fn created_without_join_time() -> Value {
+    let mut thread = created();
+    thread["member"] = muted_without_join_time();
+    thread
+}
+
+#[test]
+fn a_ready_member_without_a_join_time_keeps_the_stored_one() {
+    let mut state = ready_state();
+    let mut ready = ready_value();
+    ready_thread_without_join_time(&mut ready);
+
+    apply(&mut state, "READY", ready);
+
+    assert!(membership(&state, THREAD).is_some_and(|member| member.muted));
+    assert_eq!(joined_at_of(&state, THREAD), at(1_709_281_800_250));
+}
+
+#[test]
+fn a_guild_create_member_without_a_join_time_keeps_the_stored_one() {
+    let mut state = ready_state();
+    let mut ready = ready_value();
+    ready_thread_without_join_time(&mut ready);
+
+    apply(&mut state, "GUILD_CREATE", ready["guilds"][0].clone());
+
+    assert!(membership(&state, THREAD).is_some_and(|member| member.muted));
+    assert_eq!(joined_at_of(&state, THREAD), at(1_709_281_800_250));
+}
+
+#[test]
+fn a_thread_create_member_without_a_join_time_keeps_the_stored_one() {
+    let mut state = ready_state();
+    apply(&mut state, "THREAD_CREATE", created());
+
+    apply(&mut state, "THREAD_CREATE", created_without_join_time());
+
+    assert!(membership(&state, CREATED).is_some_and(|member| member.muted));
+    assert_eq!(joined_at_of(&state, CREATED), at(CREATE_JOINED));
+}
+
+#[test]
+fn a_thread_create_member_without_a_join_time_takes_the_waiting_joins() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        members_update(CREATED, vec![member(ME, 1)], &[]),
+    );
+
+    apply(&mut state, "THREAD_CREATE", created_without_join_time());
+
+    assert!(membership(&state, CREATED).is_some_and(|member| member.muted));
+    assert_eq!(joined_at_of(&state, CREATED), at(MEMBER_JOINED));
+}
+
+#[test]
+fn a_thread_update_member_without_a_join_time_keeps_the_stored_one() {
+    let mut state = ready_state();
+    apply(&mut state, "THREAD_CREATE", created());
+
+    apply(&mut state, "THREAD_UPDATE", created_without_join_time());
+
+    assert_eq!(joined_at_of(&state, CREATED), at(CREATE_JOINED));
+}
+
+#[test]
+fn only_a_leave_clears_the_join_time() {
+    let mut state = ready_state();
+    apply(&mut state, "THREAD_CREATE", created());
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        members_update(CREATED, vec![], &[ME]),
+    );
+
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        members_update(CREATED, vec![without_join_time(member(ME, 1))], &[]),
+    );
+
+    assert!(membership(&state, CREATED).is_some());
+    assert_eq!(joined_at_of(&state, CREATED), None);
+}
+
 #[test]
 fn a_leave_cancels_a_join_that_waits() {
     let mut state = ready_state();

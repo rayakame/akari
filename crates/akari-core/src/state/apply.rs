@@ -399,22 +399,40 @@ impl State {
         }
     }
 
-    // A payload without the user's member says nothing about its mute or level.
+    // A payload without the user's member says nothing about its mute or level, and one
+    // without the join time nothing about when the user joined.
     pub(crate) fn keep_memberships(&self, next: &mut Entities) {
-        for id in std::mem::take(&mut next.memberless) {
-            let known = self
-                .entities
-                .channels
-                .get(&id)
-                .and_then(|known| known.thread.as_deref()?.member)
-                .or_else(|| self.outage_members.get(&id).map(|(_, member)| *member))
-                .or_else(|| self.pending_joins.get(&id).copied());
-            if let (Some(member), Some(channel)) = (known, next.channels.get_mut(&id))
-                && let Some(info) = Arc::make_mut(channel).thread.as_deref_mut()
-            {
-                info.member = Some(member);
+        let memberless = std::mem::take(&mut next.memberless);
+        for (id, channel) in &mut next.channels {
+            let Some(member) = channel.thread.as_deref().and_then(|info| info.member) else {
+                continue;
+            };
+            let whole = memberless.contains(id);
+            if !whole && member.joined_at.is_some() {
+                continue;
+            }
+            let Some(known) = self.stored_member(*id) else {
+                continue;
+            };
+            if let Some(info) = Arc::make_mut(channel).thread.as_deref_mut() {
+                info.member = Some(if whole {
+                    known
+                } else {
+                    with_join_time(member, Some(known))
+                });
             }
         }
+    }
+
+    // The membership the store has for a thread: its own, one kept through an outage, or a
+    // join waiting for its thread.
+    fn stored_member(&self, thread: ChannelId) -> Option<ThreadMembership> {
+        self.entities
+            .channels
+            .get(&thread)
+            .and_then(|known| known.thread.as_deref()?.member)
+            .or_else(|| self.outage_members.get(&thread).map(|(_, member)| *member))
+            .or_else(|| self.pending_joins.get(&thread).copied())
     }
 
     // `None` before the first READY or a restore, which leave nothing to diff against.
@@ -766,16 +784,17 @@ impl State {
                 info.member = before.member;
             }
         }
+        let stored = self.stored_member(channel.id);
         let waiting = self.pending_joins.remove(&channel.id);
-        if let Some(info) = channel.thread.as_deref_mut()
-            && info.member.is_none()
-            && waiting.is_some()
-        {
-            tracing::debug!(
-                channel_id = channel.id.get(),
-                "a kept join reached its thread"
-            );
-            info.member = waiting;
+        if let Some(info) = channel.thread.as_deref_mut() {
+            if info.member.is_none() && waiting.is_some() {
+                tracing::debug!(
+                    channel_id = channel.id.get(),
+                    "a kept join reached its thread"
+                );
+                info.member = waiting;
+            }
+            info.member = info.member.map(|member| with_join_time(member, stored));
         }
         let channel = Arc::new(channel);
         self.mark_channel(&channel);
@@ -919,19 +938,8 @@ impl State {
         member: Option<ThreadMembership>,
         events: &mut Vec<StoreEvent>,
     ) {
-        let stored = self
-            .entities
-            .channels
-            .get(&thread)
-            .and_then(|known| known.thread.as_deref()?.member)
-            .or_else(|| self.pending_joins.get(&thread).copied());
-        // A member without its join time keeps the stored one, which orders the list.
-        let member = member.map(|member| ThreadMembership {
-            joined_at: member
-                .joined_at
-                .or(stored.and_then(|stored| stored.joined_at)),
-            ..member
-        });
+        let stored = self.stored_member(thread);
+        let member = member.map(|member| with_join_time(member, stored));
         let Some(known) = self
             .entities
             .channels
@@ -1674,3 +1682,14 @@ mod reading;
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+// A member without its join time keeps the stored one, which orders the list; only a leave
+// clears it.
+fn with_join_time(member: ThreadMembership, stored: Option<ThreadMembership>) -> ThreadMembership {
+    ThreadMembership {
+        joined_at: member
+            .joined_at
+            .or(stored.and_then(|stored| stored.joined_at)),
+        ..member
+    }
+}
