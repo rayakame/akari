@@ -107,6 +107,17 @@ struct StarterMessageTests {
         #expect(makeModel().threadOwner == "Ray from READY")
     }
 
+    // `user(id:)` holds DM recipients only; the user may not have posted in their own thread.
+    @Test
+    func theUsersOwnThreadIsNamedFromTheCurrentUser() {
+        store.update { state in
+            state.channels[id(20)]?.thread?.ownerId = id(1)
+            state.currentUser = user(1, name: "Me")
+        }
+
+        #expect(makeModel().threadOwner == "Me")
+    }
+
     @Test
     func aThreadWithoutAKnownOwnerHasNoName() {
         store.update { state in
@@ -165,5 +176,59 @@ struct StarterTimelineTests {
             rows: [starter(.unavailable), row(32, by: ray, at: noon + 60)], calendar: berlin)
 
         #expect(shown.shape == ["day", "+31", "+32"])
+    }
+}
+
+// "started a thread" lines in channel 10 for thread 21: the name opens the thread only while the
+// store has it, since an unknown thread would open without its name, start or composer.
+@MainActor @Suite(.timeLimit(.minutes(1)))
+struct ThreadLineTests {
+    let store = FakeStore()
+    let account: FakeAccount
+
+    init() {
+        account = FakeAccount(store: store)
+        store.update { state in
+            state.channels[id(10)] = channel(10, guild: 1)
+            state.permissions[id(10)] = [.viewChannel, .sendMessages]
+            state.show(
+                message(
+                    41, by: user(2, name: "Ray"), content: "t2", kind: .threadCreated,
+                    reference: MessageReference(messageId: nil, channelId: id(21), guildId: id(1))))
+            state.windows[id(10)] = window([41])
+        }
+    }
+
+    func makeModel() -> MessageListModel {
+        MessageListModel(channelId: id(10), userId: id(1), account: account, store: store)
+    }
+
+    func thread(of model: MessageListModel) -> Message.NoticePart? {
+        model.rows.first?.noticeParts?.first { if case .thread = $0 { true } else { false } }
+    }
+
+    @Test
+    func aLineForAThreadTheStoreKnowsLinksIt() {
+        store.update { $0.channels[id(21)] = AkariKitTests.thread(21, in: 10) }
+
+        #expect(thread(of: makeModel()) == .thread(name: "t2", id: id(21)))
+    }
+
+    @Test
+    func aLineForAThreadTheStoreDoesntKnowDoesntLinkIt() {
+        let model = makeModel()
+
+        #expect(thread(of: model) == .thread(name: "t2", id: nil))
+        #expect(model.rows.first?.notice == "Ray started a thread: t2. See all threads.")
+    }
+
+    @Test
+    func aThreadArrivingLinksItsLine() {
+        let model = makeModel()
+        store.update { $0.channels[id(21)] = AkariKitTests.thread(21, in: 10) }
+
+        model.apply(EventBatch([.channelAdded(channelId: id(21), guildId: id(1))]))
+
+        #expect(thread(of: model) == .thread(name: "t2", id: id(21)))
     }
 }

@@ -51,11 +51,17 @@ public final class MessageListModel {
         public let message: Message
         /// Set for a thread's first message that points at its parent's.
         public let starter: Starter?
+        /// Whether the store has the thread a "started a thread" message names; one it doesn't
+        /// have would open without its name, start or composer.
+        public let threadKnown: Bool
 
-        public init(id: MessageId, message: Message, starter: Starter? = nil) {
+        public init(
+            id: MessageId, message: Message, starter: Starter? = nil, threadKnown: Bool = true
+        ) {
             self.id = id
             self.message = message
             self.starter = starter
+            self.threadKnown = threadKnown
         }
 
         /// What the row draws: a loaded starter draws the message the thread started from.
@@ -68,9 +74,17 @@ public final class MessageListModel {
             starter == .unavailable ? Self.unavailableStarter : shown.notice
         }
 
-        /// `notice` in parts.
+        /// `notice` in parts; a thread the store doesn't have isn't linked.
         public var noticeParts: [Message.NoticePart]? {
-            starter == .unavailable ? [.text(Self.unavailableStarter)] : shown.noticeParts
+            if starter == .unavailable {
+                return [.text(Self.unavailableStarter)]
+            }
+            return shown.noticeParts?.map { part in
+                if case .thread(let name, _) = part, !threadKnown {
+                    return .thread(name: name, id: nil)
+                }
+                return part
+            }
         }
     }
 
@@ -355,7 +369,9 @@ public final class MessageListModel {
             placeNewMessagesLine()
         }
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
-        if batch.everythingChanged || ownerId.map(batch.usersChanged.contains) == true {
+        if batch.everythingChanged || batch.currentUserChanged
+            || ownerId.map(batch.usersChanged.contains) == true
+        {
             readOwner()
         }
         let updated = batch.updatedMessages[channelId] ?? []
@@ -486,19 +502,17 @@ public final class MessageListModel {
             return
         }
         let ids = window.messageIds + window.pendingIds
-        var held = Dictionary(rows.map { ($0.message.id, ($0.message, $0.starter)) }) { first, _ in
-            first
-        }
+        var held = Dictionary(rows.map { ($0.message.id, $0) }) { first, _ in first }
         let unread = ids.filter { held[$0] == nil || changed.contains($0) }
         if !unread.isEmpty {
             for message in store.messages(channelId: channelId, ids: unread) {
-                held[message.id] = (message, starter(of: message))
+                held[message.id] = row(message.id, message)
             }
         }
         let shown = Set(ids)
         pendingKeys = pendingKeys.filter { shown.contains($0.key) }
         rows = ids.compactMap { id in
-            held[id].map { Row(id: pendingKeys[id] ?? id, message: $0.0, starter: $0.1) }
+            held[id].map { row(pendingKeys[id] ?? id, $0.message, from: $0) }
         }
         nameOwner()
         hasMessages = !window.messageIds.isEmpty
@@ -580,13 +594,22 @@ public final class MessageListModel {
             store.messages(channelId: channelId, ids: ids).map { ($0.id, $0) }
         ) { first, _ in first }
         rows = rows.map { row in
-            fresh[row.message.id].map { Row(id: row.id, message: $0, starter: starter(of: $0)) }
-                ?? row
+            fresh[row.message.id].map { self.row(row.id, $0) } ?? row
         }
         nameOwner()
     }
 
-    // A thread's first message, when it started from one in the parent, draws that one.
+    private func row(_ id: MessageId, _ message: Message) -> Row {
+        let thread = message.kind == .threadCreated ? message.reference?.channelId : nil
+        return Row(
+            id: id, message: message, starter: starter(of: message),
+            threadKnown: thread.map { store.channel(id: $0) != nil } ?? true)
+    }
+
+    private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
+        Row(id: id, message: message, starter: held.starter, threadKnown: held.threadKnown)
+    }
+
     private func starter(of message: Message) -> Row.Starter? {
         guard message.kind == .threadStarterMessage else {
             return nil
@@ -598,8 +621,12 @@ public final class MessageListModel {
         }
     }
 
+    // The store's users are DM recipients; the user may not have posted in their own thread.
     private func readOwner() {
-        storedOwner = ownerId.flatMap { store.user(id: $0)?.displayName }
+        storedOwner = ownerId.flatMap { owner in
+            owner == userId
+                ? store.currentUser()?.displayName : store.user(id: owner)?.displayName
+        }
         nameOwner()
     }
 
