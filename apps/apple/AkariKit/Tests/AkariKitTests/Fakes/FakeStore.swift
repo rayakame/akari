@@ -25,6 +25,7 @@ final class FakeStore: Store, @unchecked Sendable {
         var guildBadges: [GuildId: Badge] = [:]
         var readStates: [ChannelId: ReadState] = [:]
         var unreadPrivateChannels: [ChannelId] = []
+        var starters: [ChannelId: StarterMessage] = [:]
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -154,6 +155,10 @@ final class FakeStore: Store, @unchecked Sendable {
         read(.messages(channelId, ids)) { state in
             ids.compactMap { state.messages[$0] }.filter { $0.channelId == channelId }
         }
+    }
+
+    override func starterMessage(threadId: ChannelId) -> StarterMessage? {
+        read(.starterMessage(threadId)) { $0.starters[threadId] }
     }
 
     override func messageLengthLimit() -> UInt32 {

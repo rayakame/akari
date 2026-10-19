@@ -61,10 +61,18 @@ public struct MessageTimeline: Equatable, Sendable {
         if let top = [Edge.beginning, .older].first(where: edges.contains) {
             items.append(.edge(top))
         }
-        var previous: Message?
+        var previous: MessageListModel.Row?
         var day: Date?
+        var line: MessageId?
         for row in rows {
-            let start = calendar.startOfDay(for: row.message.timestamp)
+            if row.id == newMessages {
+                line = row.id
+            }
+            // A starter still being fetched has no row yet; the line goes before the next one.
+            if row.starter == .loading {
+                continue
+            }
+            let start = calendar.startOfDay(for: row.shown.timestamp)
             // Only forward, so a message stamped earlier than the one before (a skewed clock)
             // can't repeat a divider's key.
             let newDay = day.map { start > $0 } ?? true
@@ -72,12 +80,13 @@ public struct MessageTimeline: Equatable, Sendable {
                 items.append(.day(start))
                 day = start
             }
-            if row.id == newMessages {
-                items.append(.newMessages(row.id))
+            if let placed = line {
+                items.append(.newMessages(placed))
+                line = nil
             }
-            let startsGroup = newDay || Self.startsGroup(row.message, after: previous)
+            let startsGroup = newDay || Self.startsGroup(row, after: previous)
             items.append(.message(row, startsGroup: startsGroup))
-            previous = row.message
+            previous = row
         }
         if edges.contains(.newer) {
             items.append(.edge(.newer))
@@ -85,13 +94,21 @@ public struct MessageTimeline: Equatable, Sendable {
         self.items = items
     }
 
-    private static func startsGroup(_ message: Message, after previous: Message?) -> Bool {
-        guard let previous else {
+    private static func startsGroup(
+        _ row: MessageListModel.Row, after previousRow: MessageListModel.Row?
+    ) -> Bool {
+        guard let previousRow else {
             return true
         }
-        if message.notice != nil || previous.notice != nil {
+        if row.notice != nil || previousRow.notice != nil {
             return true
         }
+        // A thread's starter is a group of its own, whatever comes after it.
+        if row.starter != nil || previousRow.starter != nil {
+            return true
+        }
+        let message = row.shown
+        let previous = previousRow.shown
         if message.author.id != previous.author.id {
             return true
         }

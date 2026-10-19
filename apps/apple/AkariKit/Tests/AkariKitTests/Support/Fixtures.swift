@@ -64,16 +64,17 @@ func group(_ raw: UInt64, name: String? = nil, with recipients: [UInt64]) -> Cha
 
 func message(
     _ raw: UInt64, in channelRaw: UInt64 = 10, by author: User = user(1),
-    content: String? = nil, delivery: Delivery = .sent
+    content: String? = nil, delivery: Delivery = .sent, kind: MessageType = .default
 ) -> Message {
     let content = content ?? "message \(raw)"
     return Message(
-        id: id(raw), channelId: id(channelRaw), kind: .default, author: author,
+        id: id(raw), channelId: id(channelRaw), kind: kind, author: author,
         fromWebhook: false, content: content,
         timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(raw)),
         editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
         embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery,
-        formatted: formattedText(content: content), mentionsMe: false, reference: nil, hasThread: false
+        formatted: formattedText(content: content), mentionsMe: false, reference: nil,
+        hasThread: false
     )
 }
 

@@ -415,6 +415,25 @@ final class SessionModelTests {
     }
 
     @Test
+    func theParentInTheHeaderOpensIt() {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(11), thread(31, in: 11)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(31))
+
+        session.openParent()
+
+        #expect(session.messages?.channelId == id(11))
+        session.openParent()
+        #expect(session.messages?.channelId == id(11))
+        session.close()
+    }
+
+    @Test
     func aRemovedOpenThreadCloses() async {
         store.update { state in
             state.add(guild(1))

@@ -36,6 +36,7 @@ final class CallLog: Sendable {
         case permissions(ChannelId)
         case window(ChannelId)
         case messages(ChannelId, [MessageId])
+        case starterMessage(ChannelId)
         case messageLengthLimit
         case slowmode(ChannelId)
         case channelBadges([ChannelId])

@@ -32,13 +32,40 @@ public final class MessageListModel {
     }
 
     public struct Row: Identifiable, Equatable, Sendable {
+        /// A thread's first message when it started from a message in its parent channel.
+        public enum Starter: Equatable, Sendable {
+            /// Being fetched; the row isn't shown yet.
+            case loading
+            /// The parent channel's message the thread started from.
+            case loaded(Message)
+            /// Deleted, or the user can't read it.
+            case unavailable
+        }
+
+        public static let unavailableStarter =
+            "Sorry, we couldn't load the first message in this thread"
+
         /// Stable for the row's life: a sent message keeps its pending ID as its key.
         public let id: MessageId
+        /// As the store holds it.
         public let message: Message
+        /// Set for a thread's first message that points at its parent's.
+        public let starter: Starter?
 
-        public init(id: MessageId, message: Message) {
+        public init(id: MessageId, message: Message, starter: Starter? = nil) {
             self.id = id
             self.message = message
+            self.starter = starter
+        }
+
+        /// What the row draws: a loaded starter draws the message the thread started from.
+        public var shown: Message {
+            if case .loaded(let original) = starter { original } else { message }
+        }
+
+        /// What the row says when it draws as a system message.
+        public var notice: String? {
+            starter == .unavailable ? Self.unavailableStarter : shown.notice
         }
     }
 
@@ -90,6 +117,8 @@ public final class MessageListModel {
     public private(set) var unreadBar: UnreadBar?
     /// Counts the jumps to the first unread message; on each the view scrolls the line to its top.
     public private(set) var unreadJumps = 0
+    /// Who started the thread, by name, if the store or the loaded messages know them.
+    public private(set) var threadOwner: String?
 
     private static let pageSize: UInt8 = 50
     // A trackpad's bounce or momentum at the bottom stays below it.
@@ -111,6 +140,9 @@ public final class MessageListModel {
     @ObservationIgnored var readHere = false
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
+    @ObservationIgnored private let ownerId: UserId?
+    // The store's name for the owner, read at the start and after READY.
+    @ObservationIgnored private var storedOwner: String?
     @ObservationIgnored private var hasMessages = false
     // Rows the cache showed while the first page loaded; that page didn't bring them.
     @ObservationIgnored private var fromDisk: Set<MessageId> = []
@@ -139,10 +171,13 @@ public final class MessageListModel {
         self.userId = userId
         self.account = account
         self.store = store
-        guildId = store.channel(id: channelId)?.guildId
+        let channel = store.channel(id: channelId)
+        guildId = channel?.guildId
+        ownerId = channel?.thread?.ownerId
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
         readStoredPosition()
+        readOwner()
         reload(rereading: [])
         if hasMessages {
             openedFrom = .window
@@ -315,6 +350,9 @@ public final class MessageListModel {
             placeNewMessagesLine()
         }
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
+        if batch.everythingChanged || ownerId.map(batch.usersChanged.contains) == true {
+            readOwner()
+        }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages
         if batch.windowsChanged.contains(channelId) {
@@ -443,18 +481,21 @@ public final class MessageListModel {
             return
         }
         let ids = window.messageIds + window.pendingIds
-        var held = Dictionary(rows.map { ($0.message.id, $0.message) }) { first, _ in first }
+        var held = Dictionary(rows.map { ($0.message.id, ($0.message, $0.starter)) }) { first, _ in
+            first
+        }
         let unread = ids.filter { held[$0] == nil || changed.contains($0) }
         if !unread.isEmpty {
             for message in store.messages(channelId: channelId, ids: unread) {
-                held[message.id] = message
+                held[message.id] = (message, starter(of: message))
             }
         }
         let shown = Set(ids)
         pendingKeys = pendingKeys.filter { shown.contains($0.key) }
         rows = ids.compactMap { id in
-            held[id].map { Row(id: pendingKeys[id] ?? id, message: $0) }
+            held[id].map { Row(id: pendingKeys[id] ?? id, message: $0.0, starter: $0.1) }
         }
+        nameOwner()
         hasMessages = !window.messageIds.isEmpty
         reachedOldest = window.oldest
         atPresent = window.latest
@@ -534,7 +575,36 @@ public final class MessageListModel {
             store.messages(channelId: channelId, ids: ids).map { ($0.id, $0) }
         ) { first, _ in first }
         rows = rows.map { row in
-            fresh[row.message.id].map { Row(id: row.id, message: $0) } ?? row
+            fresh[row.message.id].map { Row(id: row.id, message: $0, starter: starter(of: $0)) }
+                ?? row
         }
+        nameOwner()
+    }
+
+    // A thread's first message, when it started from one in the parent, draws that one.
+    private func starter(of message: Message) -> Row.Starter? {
+        guard message.kind == .threadStarterMessage else {
+            return nil
+        }
+        return switch store.starterMessage(threadId: channelId) {
+        case .loaded(let original)?: .loaded(original)
+        case .loading?: .loading
+        case .unavailable?, nil: .unavailable
+        }
+    }
+
+    private func readOwner() {
+        storedOwner = ownerId.flatMap { store.user(id: $0)?.displayName }
+        nameOwner()
+    }
+
+    private func nameOwner() {
+        guard let ownerId else {
+            return
+        }
+        threadOwner =
+            storedOwner
+            ?? rows.lazy.flatMap { [$0.shown, $0.message] }
+            .first { $0.author.id == ownerId }?.author.displayName
     }
 }

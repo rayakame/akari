@@ -192,6 +192,16 @@ public final class SessionModel {
         }
     }
 
+    /// The thread header's link: opens the open thread's channel.
+    public func openParent() {
+        guard let open = messages?.channelId,
+            let thread = channels?.channel(open), thread.isThread, let parent = thread.parentId
+        else {
+            return
+        }
+        go(to: parent)
+    }
+
     // Without engaging: only the user's choices and the launch do.
     private func enter(_ place: Place) {
         defer { updateReading() }
