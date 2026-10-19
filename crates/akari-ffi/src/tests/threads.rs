@@ -1,10 +1,17 @@
-use akari_core::model::{ChannelId, UserId};
-use serde_json::{Value, json};
+use std::sync::Arc;
 
-use super::fake::{CATEGORY, FakeGateway, GENERAL, GUILD, VOICE, events_until, online};
+use akari_core::model::{ChannelId, MessageId, UserId};
+use serde_json::{Value, json};
+use tokio::net::TcpStream;
+use tokio_tungstenite::WebSocketStream;
+use wiremock::matchers::path;
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+use super::fake::{CATEGORY, FakeGateway, GENERAL, GUILD, VOICE, events_until, fixture, online};
 use super::gateway::send;
 use super::support::{USER, token};
-use crate::records::ThreadInfo;
+use crate::account::{Account, MessageLoad};
+use crate::records::{MessageReference, StarterMessage, ThreadInfo};
 use crate::subscription::StoreEvent;
 
 // READY's thread in GENERAL, its last message 400000000000000030.
@@ -113,4 +120,119 @@ async fn muted_channels_covers_threads() {
         [THREAD]
     );
     account.close();
+}
+
+const HAS_THREAD: u64 = 1 << 5;
+
+fn page_message(id: u64, channel: ChannelId) -> Value {
+    let mut message = fixture(include_str!(
+        "../../../akari-core/tests/fixtures/message_create.json"
+    ));
+    message["id"] = id.to_string().into();
+    message["channel_id"] = channel.get().to_string().into();
+    message.as_object_mut().unwrap().remove("nonce");
+    message
+}
+
+struct Loaded {
+    account: Arc<Account>,
+    _server: MockServer,
+    _ws: WebSocketStream<TcpStream>,
+}
+
+// `newest_first`: the channel's only page.
+async fn loaded(channel: ChannelId, newest_first: Vec<Value>) -> Loaded {
+    let server = MockServer::start().await;
+    Mock::given(path(format!("/api/v9/channels/{}/messages", channel.get())))
+        .respond_with(ResponseTemplate::new(200).set_body_json(Value::Array(newest_first)))
+        .mount(&server)
+        .await;
+    let gateway = FakeGateway::start().await;
+    let account = gateway
+        .client_with_api(&format!("{}/api/v9/", server.uri()))
+        .account(token("t"), USER)
+        .unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    account
+        .load_messages(channel, MessageLoad::Latest { limit: 50 }, None)
+        .await
+        .unwrap();
+    Loaded {
+        account,
+        _server: server,
+        _ws: ws,
+    }
+}
+
+#[tokio::test]
+async fn a_message_carries_its_reference_and_thread_flag() {
+    let mut line = page_message(400_000_000_000_000_040, GENERAL);
+    line["type"] = 18.into();
+    line["content"] = "t1".into();
+    line["message_reference"] = json!({
+        "channel_id": THREAD.get().to_string(), "guild_id": GUILD.get().to_string()
+    });
+    let mut started = page_message(400_000_000_000_000_041, GENERAL);
+    started["flags"] = HAS_THREAD.into();
+    let plain = page_message(400_000_000_000_000_042, GENERAL);
+    let loaded = loaded(GENERAL, vec![plain, started, line]).await;
+    let store = loaded.account.store();
+
+    let messages = store.messages(GENERAL, store.window(GENERAL).unwrap().message_ids);
+
+    assert_eq!(
+        messages[0].reference,
+        Some(MessageReference {
+            message_id: None,
+            channel_id: Some(THREAD),
+            guild_id: Some(GUILD),
+        })
+    );
+    assert_eq!(
+        messages.iter().map(|m| m.has_thread).collect::<Vec<_>>(),
+        [false, true, false]
+    );
+    assert_eq!(messages[2].reference, None);
+    loaded.account.close();
+}
+
+#[tokio::test]
+async fn the_starter_read_gives_the_parent_message() {
+    let mut original = page_message(THREAD.get(), GENERAL);
+    original["content"] = "the **original**".into();
+    let mut starter = page_message(400_000_000_000_000_031, THREAD);
+    starter["type"] = 21.into();
+    starter["content"] = "".into();
+    starter["message_reference"] = json!({
+        "message_id": THREAD.get().to_string(), "channel_id": GENERAL.get().to_string(),
+        "guild_id": GUILD.get().to_string()
+    });
+    starter["referenced_message"] = original;
+    let loaded = loaded(
+        THREAD,
+        vec![page_message(400_000_000_000_000_032, THREAD), starter],
+    )
+    .await;
+
+    let Some(StarterMessage::Loaded { message }) = loaded.account.store().starter_message(THREAD)
+    else {
+        panic!("expected the original message");
+    };
+
+    assert_eq!(message.id, MessageId::new(THREAD.get()));
+    assert_eq!(message.channel_id, GENERAL);
+    assert_eq!(message.content, "the **original**");
+    assert!(!message.formatted.blocks.is_empty());
+    loaded.account.close();
+}
+
+#[tokio::test]
+async fn a_thread_without_a_starter_reads_none() {
+    let loaded = loaded(THREAD, vec![page_message(400_000_000_000_000_032, THREAD)]).await;
+
+    assert_eq!(loaded.account.store().starter_message(THREAD), None);
+    loaded.account.close();
 }

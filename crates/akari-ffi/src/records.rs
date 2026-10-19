@@ -248,7 +248,36 @@ pub struct Message {
     pub formatted: FormattedText,
     /// Mentions the current user, by ID, @everyone or @here, or a role of theirs.
     pub mentions_me: bool,
+    /// What a reply, pin, crosspost, forward or thread notice points at; a "started a thread"
+    /// message's `channel_id` is its thread.
+    pub reference: Option<MessageReference>,
+    /// A thread was started from this message.
+    pub has_thread: bool,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct MessageReference {
+    pub message_id: Option<MessageId>,
+    pub channel_id: Option<ChannelId>,
+    pub guild_id: Option<GuildId>,
+}
+
+/// A thread's first message when it started from a message in its parent channel.
+// Copied across once per read; UniFFI can't lower a boxed record.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum StarterMessage {
+    /// The parent channel's message the thread started from.
+    Loaded { message: Message },
+    /// Akari is fetching it; nothing to show yet. `MessageUpdated` for the thread's first
+    /// message says when to read it again.
+    Loading,
+    /// Deleted, or the user can't read it.
+    Unavailable,
+}
+
+// Discord's message flag.
+const HAS_THREAD: u64 = 1 << 5;
 
 impl Message {
     pub(crate) fn new(
@@ -278,6 +307,15 @@ impl Message {
             delivery: message.delivery.into(),
             formatted,
             mentions_me,
+            reference: message
+                .reference
+                .as_deref()
+                .map(|reference| MessageReference {
+                    message_id: reference.message_id,
+                    channel_id: reference.channel_id,
+                    guild_id: reference.guild_id,
+                }),
+            has_thread: message.flags & HAS_THREAD != 0,
         }
     }
 }

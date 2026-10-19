@@ -38,7 +38,7 @@ func row(
         author: user, fromWebhook: false, content: content, timestamp: time,
         editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
         embedCount: embedCount, stickerNames: stickers, componentsV2: componentsV2,
-        delivery: delivery, formatted: formattedText(content: content), mentionsMe: false)
+        delivery: delivery, formatted: formattedText(content: content), mentionsMe: false, reference: nil, hasThread: false)
     return MessageListModel.Row(id: MessageId(rawValue: key ?? raw), message: message)
 }
 

@@ -73,7 +73,7 @@ func message(
         timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(raw)),
         editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
         embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery,
-        formatted: formattedText(content: content), mentionsMe: false
+        formatted: formattedText(content: content), mentionsMe: false, reference: nil, hasThread: false
     )
 }
 
