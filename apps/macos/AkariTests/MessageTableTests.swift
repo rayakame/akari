@@ -841,7 +841,7 @@ struct MessageTableTests {
                 to: NSPoint(x: 0, y: table.rect(ofRow: index(of: raw)).minY - (raw == 1 ? 0 : 300)))
             window.layoutIfNeeded()
             let notice = try #require(messageText(in: try cell(of: raw)))
-            let time = try #require(notice.string.components(separatedBy: "  ").last)
+            let time = try #require(notice.string.components(separatedBy: ". ").last)
 
             #expect(notice.toolTip == nil, "no tooltip over the whole line")
             let date = toolTip(of: notice, at: try middle(of: time, in: notice))
