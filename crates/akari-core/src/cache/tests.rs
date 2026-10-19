@@ -455,7 +455,7 @@ fn a_threads_membership_round_trips() {
             muted: true,
             mute_ends: Some(time(1_700_000_000_123_456_000)),
             level: Some(NotificationLevel::OnlyMentions),
-            joined_at: None,
+            joined_at: Some(time(1_699_000_000_654_321_000)),
         });
     }
     let mut unjoined = thread(14, 100, 10);
@@ -624,8 +624,29 @@ fn the_settings_tables_exist() {
 }
 
 #[test]
+fn a_schema_4_file_is_upgraded_and_keeps_its_rows() {
+    let dir = TempDir::new();
+    let mut cache = open(&dir);
+    write_entities(&mut cache, &entities());
+    drop(cache);
+    raw(&dir.file(ME))
+        .pragma_update(None, "user_version", 4)
+        .unwrap();
+
+    let opened = Cache::open_or_rebuild(&dir.file(ME), UserId::new(ME)).unwrap();
+
+    assert_eq!(opened.discarded, None);
+    assert!(opened.cache.read_entities().unwrap().value == entities());
+    drop(opened);
+    let version: i32 = raw(&dir.file(ME))
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, schema::CURRENT);
+}
+
+#[test]
 fn any_other_schema_version_is_discarded() {
-    for version in [schema::CURRENT - 1, schema::CURRENT + 1, 0] {
+    for version in [3, schema::CURRENT + 1, 0] {
         let dir = TempDir::new();
         let mut cache = open(&dir);
         write_entities(&mut cache, &entities());

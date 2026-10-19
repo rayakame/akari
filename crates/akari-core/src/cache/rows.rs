@@ -296,6 +296,8 @@ struct ThreadMemberRow {
     mute_ends: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     level: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    joined_at: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -380,6 +382,7 @@ impl From<&Channel> for ChannelRow {
                     muted: member.muted,
                     mute_ends: member.mute_ends.map(nanos),
                     level: member.level.map(level_code),
+                    joined_at: member.joined_at.map(nanos),
                 }),
                 archived: thread.archived,
                 locked: thread.locked,
@@ -428,7 +431,7 @@ impl ChannelRow {
                         muted: member.muted,
                         mute_ends: member.mute_ends.map(timestamp),
                         level: member.level.map(level),
-                        joined_at: None,
+                        joined_at: member.joined_at.map(timestamp),
                     }),
                     archived: thread.archived,
                     locked: thread.locked,
