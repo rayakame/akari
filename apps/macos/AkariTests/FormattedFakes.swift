@@ -137,7 +137,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         return Channel(
             id: id, kind: .guildText, guildId: GuildId(rawValue: 1), parentId: nil,
             name: "channel-\(id.rawValue)", position: Int32(id.rawValue), topic: nil,
-            nsfw: false, rateLimitPerUser: 0, recipientIds: [])
+            nsfw: false, rateLimitPerUser: 0, recipientIds: [], thread: nil)
     }
 
     override func channels(ids: [ChannelId]) -> [Channel] {

@@ -5,7 +5,7 @@ final class NoticeCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("notice")
 
     private let icon = NSImageView()
-    private let text = CellText.label(wrapping: true)
+    private let text = MessageTextView()
     private static let top: CGFloat = 18
     // 10 less right after a day divider, as a message's (MessageCell).
     private static let dayTop: CGFloat = 8
@@ -15,7 +15,8 @@ final class NoticeCell: NSTableCellView {
     private static let bottom: CGFloat = 2
     private static let leading: CGFloat = 72
     private static let trailing: CGFloat = 16
-    private static let sizing = NoticeCell()
+    // Measures as the cell's own text view lays out; string drawing breaks the line differently.
+    private static let sizing = MessageTextView()
 
     init() {
         super.init(frame: .zero)
@@ -46,10 +47,10 @@ final class NoticeCell: NSTableCellView {
         _ message: Message, notice: String, time: String, followsDay: Bool = false,
         followsLine: Bool = false, width: CGFloat
     ) -> CGFloat {
-        sizing.configure(message, notice: notice, time: time, fullDate: "")
-        sizing.text.preferredMaxLayoutWidth = width - leading - trailing
+        sizing.show(line(notice, time: time))
+        sizing.setFrameSize(NSSize(width: width - leading - trailing, height: sizing.frame.height))
         return textTop(followsDay: followsDay, followsLine: followsLine)
-            + sizing.text.intrinsicContentSize.height + bottom
+            + sizing.intrinsicContentSize.height + bottom
     }
 
     func configure(
@@ -59,16 +60,28 @@ final class NoticeCell: NSTableCellView {
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
         icon.image = NSImage(
             systemSymbolName: Self.symbol(message.kind), accessibilityDescription: nil)
+        text.show(Self.line(notice, time: time, fullDate: fullDate))
+    }
+
+    // The full date shows over the time only, as Discord's; TextKit keeps its rect in step.
+    private static func line(_ notice: String, time: String, fullDate: String? = nil)
+        -> NSAttributedString
+    {
         let line = NSMutableAttributedString(
             attributedString: CellText.body(notice, color: Palette.textMuted))
         line.append(
             NSAttributedString(
-                string: "  \(time)",
-                attributes: [
-                    .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
-                ]))
-        text.attributedStringValue = line
-        text.toolTip = fullDate
+                string: "  ",
+                attributes: [.font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted]
+            ))
+        var timeAttributes: [NSAttributedString.Key: Any] = [
+            .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
+        ]
+        if let fullDate, !fullDate.isEmpty {
+            timeAttributes[.toolTip] = fullDate
+        }
+        line.append(NSAttributedString(string: time, attributes: timeAttributes))
+        return line
     }
 
     static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {

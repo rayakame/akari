@@ -1,7 +1,9 @@
 use serde::Deserialize;
 
 use crate::lenient::{skip_invalid, skip_invalid_in_each};
-use crate::model::{Channel, ChannelId, GuildId, GuildMember, MessageId, Role, RoleId};
+use crate::model::{
+    Channel, ChannelId, GuildId, GuildMember, MessageId, Role, RoleId, ThreadMember, UserId,
+};
 
 /// READY_SUPPLEMENTAL: what READY leaves out, sent right after it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -49,6 +51,36 @@ pub struct ChannelDelete {
     pub id: ChannelId,
     pub guild_id: Option<GuildId>,
     pub parent_id: Option<ChannelId>,
+}
+
+/// THREAD_MEMBER_UPDATE: the current user's member of a thread changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadMemberUpdate {
+    pub guild_id: Option<GuildId>,
+    pub member: ThreadMember,
+}
+
+/// THREAD_MEMBERS_UPDATE: members were added to or removed from a thread.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ThreadMembersUpdate {
+    /// The thread.
+    pub id: ChannelId,
+    pub guild_id: Option<GuildId>,
+    pub member_count: Option<u32>,
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub added_members: Vec<ThreadMember>,
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub removed_member_ids: Vec<UserId>,
+}
+
+/// THREAD_LIST_SYNC: the active threads of some of a guild's channels, sent when the user
+/// subscribes to them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ThreadListSync {
+    pub guild_id: Option<GuildId>,
+    /// The current user's members of the synced threads it joined.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub members: Vec<ThreadMember>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

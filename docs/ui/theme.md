@@ -28,6 +28,7 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `textLink` | links | `#4d96ee` | `#006dd4` |
 | `textError` | errors next to form fields | `#f87e7a` | `#b92733` |
 | `channelDefault` | channel and category names | `#81828a` | `#666770` |
+| `threadSpine` | the line joining threads to their channel | `#474850` | `#aaabb3` |
 | `interactiveText` | icons and buttons at rest | `#abacb2` | `#595a63` |
 | `interactiveTextActive` | hovered and selected names | `#fbfbfb` | `#28282d` |
 | `hoverBackground` | hovered rows and messages, the background of server initials | `#97979f` at 12% | `#97979f` at 12% |

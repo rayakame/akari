@@ -22,7 +22,7 @@ final class MessageCell: NSTableCellView {
     private let header = HeaderRow()
     private let hoverTime = CellText.label()
     private let content = MessageTextView()
-    private let extras = CellText.label(wrapping: true)
+    private let extras = MessageTextView()
     // Built for the first failed message: its buttons cost a layout pass each.
     private var failed: FailedLine?
     var onRetry: () -> Void = {}
@@ -121,7 +121,7 @@ final class MessageCell: NSTableCellView {
             lines.append(CellText.editedMark())
         }
         content.isHidden = message.content.isEmpty
-        extras.attributedStringValue = lines
+        extras.show(lines)
         extras.isHidden = lines.length == 0
         let isFailed = message.delivery == .failed
         if isFailed && failed == nil {
@@ -162,7 +162,6 @@ final class MessageCell: NSTableCellView {
     // The constraints of build() in arithmetic; the stack leaves hidden views out.
     private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
-        extras.preferredMaxLayoutWidth = textWidth
         let shown = ([reply, header, content, extras] + [failed].compactMap { $0 }).filter {
             !$0.isHidden
         }
@@ -171,7 +170,11 @@ final class MessageCell: NSTableCellView {
                 view === header
                     ? self.header.height
                     : view === content
-                        ? body : view === failed ? FailedLine.height : view.intrinsicContentSize.height
+                        ? body
+                        : view === extras
+                            ? extrasHeight(width: textWidth)
+                            : view === failed
+                                ? FailedLine.height : view.intrinsicContentSize.height
             }
             .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
         let top = showsHeader ? spacing + Self.groupInset : Self.continuationTop
@@ -181,6 +184,12 @@ final class MessageCell: NSTableCellView {
         }
         let replyHeight = reply.isHidden ? 0 : reply.intrinsicContentSize.height + Self.spacing
         return max(height, top + replyHeight + Self.avatarSize + Self.avatarBottomInset)
+    }
+
+    // As the files' text view lays them out; string drawing breaks their lines differently.
+    private func extrasHeight(width: CGFloat) -> CGFloat {
+        extras.setFrameSize(NSSize(width: width, height: extras.frame.height))
+        return extras.intrinsicContentSize.height
     }
 
     /// The message's own area, which hover and the mention highlight cover.
@@ -220,10 +229,7 @@ final class MessageCell: NSTableCellView {
         hoverTime.font = TypeScale.hoverTime.nsFont
         hoverTime.textColor = Palette.chatTextMuted
         hoverTime.alignment = .right
-        extras.isSelectable = true
-        // Without it, the field editor drops the attributed string's font on a click.
-        extras.allowsEditingTextAttributes = true
-        extras.font = TypeScale.body.nsFont
+        extras.messageMenu = content.messageMenu
 
         stack.orientation = .vertical
         stack.alignment = .leading

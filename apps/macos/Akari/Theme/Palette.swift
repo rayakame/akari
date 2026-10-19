@@ -18,6 +18,8 @@ enum Palette {
     static let textLink = token("textLink", dark: "#4d96ee", light: "#006dd4")
     static let textError = token("textError", dark: "#f87e7a", light: "#b92733")
     static let channelDefault = token("channelDefault", dark: "#81828a", light: "#666770")
+    // The dark value is Discord's; the light one keeps its 2.06:1 contrast on the light sidebar.
+    static let threadSpine = token("threadSpine", dark: "#474850", light: "#aaabb3")
     static let interactiveText = token("interactiveText", dark: "#abacb2", light: "#595a63")
     static let interactiveTextActive = token(
         "interactiveTextActive", dark: "#fbfbfb", light: "#28282d")

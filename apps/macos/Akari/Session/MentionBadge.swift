@@ -29,14 +29,15 @@ struct MentionBadge: View {
     }
 
     /// What VoiceOver reads after a row's or an icon's name.
-    static func accessibilityValue(_ badge: Badge) -> String {
+    static func accessibilityValue(_ badge: Badge, muted: Bool = false) -> String {
         let mentions: String? =
             switch badge.mentions {
             case 0: nil
             case 1: "1 mention"
             default: "\(badge.mentions) mentions"
             }
-        return [badge.unread ? "unread" : nil, mentions].compactMap { $0 }
+        return [muted ? "muted" : nil, badge.unread ? "unread" : nil, mentions]
+            .compactMap { $0 }
             .joined(separator: ", ")
     }
 }

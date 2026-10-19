@@ -1,6 +1,7 @@
 import AppKit
 
-/// A message's body: selectable, not editable, laid out by TextKit 1.
+/// Selectable, not editable, laid out by TextKit 1: a message's body, and the other text Discord
+/// lets the user select (a notice, a channel's start, a message's files).
 final class MessageTextView: NSTextView {
     private var measuredWidth: CGFloat = -1
     private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
@@ -309,6 +310,18 @@ final class MessageTextView: NSTextView {
         layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: 1))
         let line = layoutManager.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
         return padding.top + line.minY + layoutManager.location(forGlyphAt: 0).y
+    }
+
+    // Where the last line's glyphs sit, measured from the bottom, for the start's baselines.
+    override var lastBaselineOffsetFromBottom: CGFloat {
+        guard let layoutManager, let storage = textStorage, storage.length > 0 else {
+            return 0
+        }
+        layoutManager.ensureLayout(forCharacterRange: NSRange(location: 0, length: storage.length))
+        let last = layoutManager.glyphIndexForCharacter(at: storage.length - 1)
+        let line = layoutManager.lineFragmentRect(forGlyphAt: last, effectiveRange: nil)
+        let baseline = padding.top + line.minY + layoutManager.location(forGlyphAt: last).y
+        return intrinsicContentSize.height - baseline
     }
 
     // A non-editable text view would swallow Escape; the list handles it.

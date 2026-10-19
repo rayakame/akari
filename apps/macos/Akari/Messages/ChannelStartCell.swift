@@ -17,9 +17,9 @@ final class ChannelStartCell: NSTableCellView {
     private static let sizing = ChannelStartCell()
 
     let icon = StartIcon()
-    private let title = CellText.label(wrapping: true)
-    private let username = CellText.label()
-    private let subtitle = CellText.label(wrapping: true)
+    private let title = MessageTextView()
+    private let username = MessageTextView()
+    private let subtitle = MessageTextView()
     private let iconWidth: NSLayoutConstraint
     private let iconHeight: NSLayoutConstraint
     private let subtitleAfterTitle: NSLayoutConstraint
@@ -35,12 +35,6 @@ final class ChannelStartCell: NSTableCellView {
         super.init(frame: .zero)
         identifier = Self.identifier
         icon.translatesAutoresizingMaskIntoConstraints = false
-        title.font = TypeScale.startTitle.nsFont
-        title.textColor = Palette.textStrong
-        username.font = TypeScale.startUsername.nsFont
-        username.textColor = Palette.textStrong
-        subtitle.font = TypeScale.startSubtitle.nsFont
-        subtitle.textColor = Palette.textDefault
         for view in [icon, title, username, subtitle] as [NSView] {
             addSubview(view)
         }
@@ -57,8 +51,7 @@ final class ChannelStartCell: NSTableCellView {
             title.firstBaselineAnchor.constraint(
                 equalTo: icon.bottomAnchor, constant: Self.titleBaseline),
             username.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
-            username.trailingAnchor.constraint(
-                lessThanOrEqualTo: trailingAnchor, constant: -Self.side),
+            username.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.side),
             username.firstBaselineAnchor.constraint(
                 equalTo: title.lastBaselineAnchor, constant: Self.usernameBaseline),
             subtitle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
@@ -79,11 +72,11 @@ final class ChannelStartCell: NSTableCellView {
         }
         sizing.show(start)
         let textWidth = max(1, width - 2 * side)
-        // From the field's first baseline to its last.
-        func lines(_ field: NSTextField) -> CGFloat {
-            field.preferredMaxLayoutWidth = textWidth
-            return field.intrinsicContentSize.height - field.firstBaselineOffsetFromTop
-                - field.lastBaselineOffsetFromBottom
+        // From the text's first baseline to its last.
+        func lines(_ text: MessageTextView) -> CGFloat {
+            text.setFrameSize(NSSize(width: textWidth, height: text.frame.height))
+            return text.intrinsicContentSize.height - text.firstBaselineOffsetFromTop
+                - text.lastBaselineOffsetFromBottom
         }
         var height = top + sizing.iconHeight.constant + titleBaseline + lines(sizing.title)
         if start.username != nil {
@@ -102,8 +95,10 @@ final class ChannelStartCell: NSTableCellView {
         let size = if case .avatar = start.icon { Self.avatarSize } else { Self.iconSize }
         iconWidth.constant = size
         iconHeight.constant = size
-        title.stringValue = start.title
-        username.stringValue = start.username ?? ""
+        title.show(CellText.plain(start.title, style: TypeScale.startTitle, color: Palette.textStrong))
+        username.show(
+            CellText.plain(
+                start.username ?? "", style: TypeScale.startUsername, color: Palette.textStrong))
         username.isHidden = start.username == nil
         // Off before on: both at once can't be satisfied.
         let (off, on) =
@@ -112,7 +107,9 @@ final class ChannelStartCell: NSTableCellView {
             : (subtitleAfterTitle, subtitleAfterUsername)
         off.isActive = false
         on.isActive = true
-        subtitle.stringValue = start.subtitle
+        subtitle.show(
+            CellText.plain(
+                start.subtitle, style: TypeScale.startSubtitle, color: Palette.textDefault))
     }
 }
 

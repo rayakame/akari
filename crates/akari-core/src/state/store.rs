@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime};
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, Notify, mpsc};
 
-use super::apply::{Derived, Entities, ReadyDiff, State, wall_millis};
+use super::apply::{Derived, Entities, ReadyDiff, State};
 use super::badges::{Badge, Badges};
+use super::clock::Clock;
 use super::events::{ConnectionState, StoreEvent};
 use super::order;
 use super::read_states::{Ack, ReadState};
@@ -20,6 +21,22 @@ use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
+
+#[cfg(test)]
+thread_local! {
+    static DEADLINE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How often the deadline task read its next deadline on this thread.
+#[cfg(test)]
+pub(crate) fn deadline_reads() -> usize {
+    DEADLINE_READS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn deadline_reads_reset() {
+    DEADLINE_READS.with(|reads| reads.set(0));
+}
 
 // Main-thread readers (SwiftUI, AppKit) wait at most this long for a write.
 const LONG_HOLD: Duration = Duration::from_millis(4);
@@ -63,6 +80,10 @@ pub struct Store {
 
 struct Shared {
     inner: RwLock<Inner>,
+    // What the badges and the deadlines call now.
+    clock: Arc<Clock>,
+    // A write brought a deadline sooner than the ones the deadline task knew.
+    sooner: Notify,
     // Bumped by every write, so the disk cache skips snapshots while nothing changed.
     changes: AtomicU64,
     // Hands out the order of loads and supersedes that place a window, without the lock.
@@ -124,7 +145,6 @@ impl Subscription {
         batch
     }
 
-    #[cfg(test)]
     pub(crate) fn buffered(&self) -> usize {
         self.buffered.load(Ordering::Relaxed)
     }
@@ -172,22 +192,17 @@ fn same(a: &ConnectionState, b: &ConnectionState) -> bool {
     )
 }
 
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
-}
-
 impl Store {
     pub(crate) fn new(limits: WindowLimits) -> Self {
+        let clock = Arc::new(Clock::new());
         Self {
             shared: Arc::new(Shared {
                 changes: AtomicU64::new(0),
                 placings: AtomicU64::new(0),
+                clock: clock.clone(),
+                sooner: Notify::new(),
                 inner: RwLock::new(Inner {
-                    state: State::with_limits(limits),
+                    state: State::with_limits(limits, clock),
                     connection: ConnectionState::Offline,
                     subscribers: Vec::new(),
                     finished: false,
@@ -204,6 +219,15 @@ impl Store {
                 holds: std::sync::Mutex::new(None),
             }),
         }
+    }
+
+    // Never steps back, so a window or mute that ended stays ended.
+    pub(crate) fn now(&self) -> Timestamp {
+        Timestamp::from_unix_millis(self.now_millis())
+    }
+
+    fn now_millis(&self) -> i64 {
+        self.shared.clock.now_millis()
     }
 
     fn read<T>(&self, read: impl FnOnce(&Inner) -> T) -> T {
@@ -235,6 +259,7 @@ impl Store {
         #[cfg(test)]
         super::badges::hooks::writing(true);
         let value = write(&mut inner, &mut events);
+        let sooner = inner.state.take_sooner_deadline();
         #[cfg(test)]
         super::badges::hooks::writing(false);
         self.shared.changes.fetch_add(1, Ordering::Relaxed);
@@ -243,6 +268,9 @@ impl Store {
         self.slow_down();
         let held = taken.elapsed();
         drop(inner);
+        if sooner {
+            self.shared.sooner.notify_one();
+        }
         #[cfg(test)]
         if let Ok(mut holds) = self.shared.holds.lock()
             && let Some(holds) = holds.as_mut()
@@ -312,7 +340,7 @@ impl Store {
         let Some(next) = self.read(|inner| inner.state.with_notification_flags(flags)) else {
             return;
         };
-        let badges = Badges::build(&next, wall_millis());
+        let badges = Badges::build(&next, self.now_millis());
         drop(next);
         self.write("NOTIFICATION_SETTINGS_UPDATE", |inner, events| {
             let current = self.shared.changes.load(Ordering::SeqCst) == start;
@@ -340,7 +368,8 @@ impl Store {
     pub(crate) fn prepare(&self, preparing: Preparing, ready: Ready) -> PreparedReady {
         let mut entities = Entities::from_ready(ready);
         let read_states = entities.read_states.channels().clone();
-        let derived = Derived::build(&entities, wall_millis());
+        self.read(|inner| inner.state.keep_memberships(&mut entities));
+        let derived = Derived::build(&entities, self.now_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
             inner.state.ready_diff(&entities, &derived)
@@ -480,14 +509,14 @@ impl Store {
 
     // Empty when nothing but forums would be acked.
     pub(crate) fn mark_guilds_read(&self, guilds: &[GuildId]) -> Vec<Ack> {
-        let now = now_millis();
+        let now = self.now_millis();
         self.write("mark read", |inner, events| {
             inner.state.mark_guilds_read(guilds, now, events)
         })
     }
 
     pub(crate) fn restore(&self, cached: Entities) -> bool {
-        let derived = Derived::build(&cached, wall_millis());
+        let derived = Derived::build(&cached, self.now_millis());
         let restored = self.write("restore", |inner, events| {
             inner.state.restore(cached, derived, events)
         });
@@ -509,16 +538,37 @@ impl Store {
         });
     }
 
-    pub(crate) fn next_mute_end(&self, after: Timestamp) -> Option<Timestamp> {
-        self.read(|inner| inner.state.next_mute_end(after))
+    // Waits until a write brings a deadline before the ones ahead; a write before the call counts.
+    pub(crate) async fn deadline_sooner(&self) {
+        self.shared.sooner.notified().await;
     }
 
-    // Reports the guilds whose mute, or a channel's, ended within `after..=until`.
-    pub(crate) fn end_mutes(&self, after: Timestamp, until: Timestamp) {
+    // The next mute end or thread window end after `after`.
+    pub(crate) fn next_deadline(&self, after: Timestamp) -> Option<Timestamp> {
+        #[cfg(test)]
+        DEADLINE_READS.with(|reads| reads.set(reads.get() + 1));
+        self.read(|inner| {
+            let mutes = inner.state.next_mute_end(after);
+            mutes
+                .into_iter()
+                .chain(inner.state.next_window_end(after))
+                .min()
+        })
+    }
+
+    // Reports the guilds whose mute, or a channel's, ended within `after..=until`, and the
+    // threads whose window did.
+    pub(crate) fn end_deadlines(&self, after: Timestamp, until: Timestamp) {
         let ended = self.read(|inner| inner.state.mutes_ending(after, until));
         if !ended.is_empty() {
             self.write("mutes", |inner, events| {
                 inner.state.end_mutes(&ended, until.unix_millis(), events);
+            });
+        }
+        let ended = self.read(|inner| inner.state.windows_ending(after, until));
+        if !ended.is_empty() {
+            self.write("windows", |inner, events| {
+                inner.state.end_windows(&ended, until.unix_millis(), events);
             });
         }
     }
@@ -548,7 +598,7 @@ impl Store {
     }
 
     pub(crate) fn queue_message(&self, channel: ChannelId, message: Arc<Message>) {
-        let now = now_millis();
+        let now = self.now_millis();
         self.write("send", |inner, events| {
             inner.state.queue(channel, message, now, events)
         });
@@ -577,7 +627,7 @@ impl Store {
         pending: MessageId,
     ) -> Option<Arc<Message>> {
         let mut message = None;
-        let now = now_millis();
+        let now = self.now_millis();
         self.write("send", |inner, events| {
             message = inner.state.retry(channel, pending, now, events);
         });
@@ -597,7 +647,7 @@ impl Store {
     }
 
     pub(crate) fn hold_cooldown(&self, channel: ChannelId, wait: Duration) {
-        let now = now_millis();
+        let now = self.now_millis();
         self.write("send", |inner, _| {
             inner.state.hold_cooldown(channel, wait, now);
         });
@@ -691,16 +741,17 @@ impl Store {
         self.read(|inner| inner.state.guild_settings(guild))
     }
 
-    /// Muted now by its own settings. Neither a muted category nor a muted guild makes its
-    /// channels muted; see [`guild_settings`](Self::guild_settings).
+    /// Muted now by its own settings, for a thread by its own membership. Neither a muted
+    /// category nor a muted guild makes its channels muted, nor a muted channel its threads;
+    /// see [`guild_settings`](Self::guild_settings).
     pub fn channel_muted(&self, channel: ChannelId) -> bool {
-        let now = Timestamp::from_unix_millis(wall_millis());
+        let now = self.now();
         self.read(|inner| inner.state.channel_muted_at(channel, now))
     }
 
     /// Of `ids`, the channels muted now by their own settings, in the order given.
     pub fn muted_channels(&self, ids: &[ChannelId]) -> Vec<ChannelId> {
-        let now = Timestamp::from_unix_millis(wall_millis());
+        let now = self.now();
         self.read(|inner| {
             ids.iter()
                 .copied()
@@ -711,7 +762,7 @@ impl Store {
 
     /// Whether the guild (`None`: DMs) is muted now. Its channels aren't muted by it.
     pub fn guild_muted(&self, guild: Option<GuildId>) -> bool {
-        let now = Timestamp::from_unix_millis(wall_millis());
+        let now = self.now();
         self.read(|inner| inner.state.guild_settings(guild).muted_now(now))
     }
 
@@ -782,7 +833,7 @@ impl Store {
         self.read(|inner| ids.iter().map(|id| inner.state.guild_badge(*id)).collect())
     }
 
-    /// The sum over the guild's channels and joined threads that count for it. `unread` is
+    /// The sum over the guild's channels and listed threads that count for it. `unread` is
     /// false while the guild is muted; its mentions stay.
     pub fn guild_badge(&self, guild: GuildId) -> Badge {
         self.read(|inner| inner.state.guild_badge(guild))
@@ -814,19 +865,29 @@ impl Store {
 
     /// A guild's channel list as Discord shows it: [`display_order`], only channels the
     /// user can view, the categories holding them, and empty categories the user can
-    /// view. Threads are left out.
+    /// view. Each channel is followed by its listed threads, the last joined first: those the
+    /// user joined that aren't archived and are inside their inactivity window
+    /// ([`Channel::window_end`]), unread, or with mentions. The parent's mute and "hide muted
+    /// channels" don't change which threads are listed.
     ///
     /// [`display_order`]: super::display_order
     pub fn channel_list(&self, guild: GuildId) -> Vec<Arc<Channel>> {
-        let now = now_millis();
+        let now = self.now_millis();
         self.read(|inner| {
             let state = &inner.state;
             let ordered = order::display_order(&state.guild_channels(guild));
-            order::visible_channels(ordered, |channel| {
+            let visible = order::visible_channels(ordered, |channel| {
                 state
                     .permissions(channel.id, now)
                     .is_some_and(|permissions| permissions.contains(Permissions::VIEW_CHANNEL))
-            })
+            });
+            let mut list = Vec::with_capacity(visible.len());
+            for channel in visible {
+                let threads = state.listed_threads(channel.id);
+                list.push(channel);
+                list.extend(threads);
+            }
+            list
         })
     }
 
@@ -855,7 +916,7 @@ impl Store {
     /// `SEND_MESSAGES` means the user may send there. `None` for DMs and for channels,
     /// guilds or memberships the store doesn't know.
     pub fn permissions(&self, channel: ChannelId) -> Option<Permissions> {
-        let now = now_millis();
+        let now = self.now_millis();
         self.read(|inner| inner.state.permissions(channel, now))
     }
 
@@ -867,7 +928,7 @@ impl Store {
     /// The channel's slowmode as it applies to the current user; `None` without slowmode, in
     /// DMs and group DMs, and for unknown channels.
     pub fn slowmode(&self, channel: ChannelId) -> Option<Slowmode> {
-        let now = now_millis();
+        let now = self.now_millis();
         self.read(|inner| {
             inner
                 .state

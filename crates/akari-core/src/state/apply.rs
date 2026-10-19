@@ -1,9 +1,11 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::badges::{Badge, Badges, Dirty};
+use super::clock::Clock;
 use super::events::StoreEvent;
 use super::order::{self, guild_order};
 use super::permissions::compute;
@@ -13,13 +15,14 @@ use super::settings::{
     GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
 };
 use super::threads::ThreadIndex;
-use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, User};
+use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, ThreadMembership, User};
 use super::windows::{
     CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows,
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
-    GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, UserUpdate,
+    GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, ThreadListSync,
+    ThreadMemberUpdate, ThreadMembersUpdate, UserUpdate,
 };
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
@@ -37,6 +40,8 @@ pub(crate) struct Entities {
     pub(crate) channels: HashMap<ChannelId, Arc<Channel>>,
     pub(crate) settings: UserSettings,
     pub(crate) read_states: ReadStates,
+    // Threads READY or GUILD_CREATE listed without the user's member, joined with a default one.
+    pub(crate) memberless: HashSet<ChannelId>,
 }
 
 impl Entities {
@@ -135,8 +140,11 @@ impl Entities {
         // User accounts are only sent the threads they joined.
         for thread in threads {
             let mut thread = Channel::from_wire(thread, Some(id));
-            if let Some(info) = thread.thread.as_deref_mut() {
-                info.joined = true;
+            if let Some(info) = thread.thread.as_deref_mut()
+                && info.member.is_none()
+            {
+                info.member = Some(ThreadMembership::default());
+                self.memberless.insert(thread.id);
             }
             self.insert_channel(thread);
         }
@@ -151,14 +159,21 @@ impl Entities {
         self.guilds.insert(id, Arc::new(guild));
     }
 
+    // A thread's own mute is on its member; neither a muted channel nor a muted category mutes it.
     pub(crate) fn channel_muted_at(&self, channel: ChannelId, now: Timestamp) -> bool {
         let Some(stored) = self.channels.get(&channel) else {
             return false;
         };
-        self.settings
-            .guild(stored.guild_id)
-            .and_then(|settings| settings.channels.get(&channel))
-            .is_some_and(|own| own.muted_now(now))
+        stored
+            .thread
+            .as_deref()
+            .and_then(|info| info.member)
+            .is_some_and(|member| member.muted_now(now))
+            || self
+                .settings
+                .guild(stored.guild_id)
+                .and_then(|settings| settings.channels.get(&channel))
+                .is_some_and(|own| own.muted_now(now))
     }
 
     // A thread inherits from its channel, which inherits from its category.
@@ -330,15 +345,20 @@ pub(crate) struct State {
     journal: Option<Journal>,
     // Replayed acks that kept READY's mention count: their echo brings Discord's.
     recounts: HashMap<ChannelId, MessageId>,
+    // The memberships of joined threads in guilds that are down, for their GUILD_CREATE.
+    outage_members: HashMap<ChannelId, (GuildId, ThreadMembership)>,
+    // Joins for threads the store doesn't have yet, for the THREAD_CREATE that brings them.
+    pending_joins: HashMap<ChannelId, ThreadMembership>,
+    clock: Arc<Clock>,
 }
 
 impl State {
     #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self::with_limits(super::windows::DEFAULT_LIMITS)
+        Self::with_limits(super::windows::DEFAULT_LIMITS, Arc::new(Clock::new()))
     }
 
-    pub(crate) fn with_limits(limits: WindowLimits) -> Self {
+    pub(crate) fn with_limits(limits: WindowLimits, clock: Arc<Clock>) -> Self {
         Self {
             entities: Entities::default(),
             badges: Badges::default(),
@@ -353,12 +373,21 @@ impl State {
             stale_cursors: HashSet::new(),
             journal: None,
             recounts: HashMap::new(),
+            outage_members: HashMap::new(),
+            pending_joins: HashMap::new(),
+            clock,
         }
+    }
+
+    // The store's clock, which the deadline task reads too.
+    pub(crate) fn now_millis(&self) -> i64 {
+        self.clock.now_millis()
     }
 
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_folders(&mut next);
-        let derived = Derived::build(&next, wall_millis());
+        self.keep_memberships(&mut next);
+        let derived = Derived::build(&next, self.now_millis());
         let diff = self.ready_diff(&next, &derived);
         self.swap(next, derived, diff, events);
     }
@@ -368,6 +397,42 @@ impl State {
         if std::mem::take(&mut next.settings.unreadable_folders) {
             next.settings.folders = self.entities.settings.folders.clone();
         }
+    }
+
+    // A payload without the user's member says nothing about its mute or level, and one
+    // without the join time nothing about when the user joined.
+    pub(crate) fn keep_memberships(&self, next: &mut Entities) {
+        let memberless = std::mem::take(&mut next.memberless);
+        for (id, channel) in &mut next.channels {
+            let Some(member) = channel.thread.as_deref().and_then(|info| info.member) else {
+                continue;
+            };
+            let whole = memberless.contains(id);
+            if !whole && member.joined_at.is_some() {
+                continue;
+            }
+            let Some(known) = self.stored_member(*id) else {
+                continue;
+            };
+            if let Some(info) = Arc::make_mut(channel).thread.as_deref_mut() {
+                info.member = Some(if whole {
+                    known
+                } else {
+                    with_join_time(member, Some(known))
+                });
+            }
+        }
+    }
+
+    // The membership the store has for a thread: its own, one kept through an outage, or a
+    // join waiting for its thread.
+    fn stored_member(&self, thread: ChannelId) -> Option<ThreadMembership> {
+        self.entities
+            .channels
+            .get(&thread)
+            .and_then(|known| known.thread.as_deref()?.member)
+            .or_else(|| self.outage_members.get(&thread).map(|(_, member)| *member))
+            .or_else(|| self.pending_joins.get(&thread).copied())
     }
 
     // `None` before the first READY or a restore, which leave nothing to diff against.
@@ -428,6 +493,8 @@ impl State {
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
+        self.keep_outage_members(&next);
+        self.pending_joins.clear();
         let old = Derived {
             badges: std::mem::replace(&mut self.badges, derived.badges),
             threads: std::mem::replace(&mut self.threads, derived.threads),
@@ -436,7 +503,7 @@ impl State {
         // READY's cursors are fresh.
         self.stale_cursors.clear();
         self.follow_ready();
-        self.refresh_badges(wall_millis(), events);
+        self.refresh_badges(self.now_millis(), events);
         old
     }
 
@@ -538,7 +605,7 @@ impl State {
 
     pub(crate) fn apply(&mut self, event: DispatchEvent, events: &mut Vec<StoreEvent>) {
         self.apply_event(event, events);
-        self.settle(wall_millis(), events);
+        self.settle(self.now_millis(), events);
     }
 
     // The end of a write that can move a cursor: the channel being read stays read.
@@ -656,6 +723,9 @@ impl State {
                 self.entities.read_states.update_relationship(update);
             }
             E::RelationshipRemove(removed) => self.entities.read_states.unrelate(removed.id),
+            E::ThreadMemberUpdate(update) => self.thread_member_update(*update, events),
+            E::ThreadMembersUpdate(update) => self.thread_members_update(*update, events),
+            E::ThreadListSync(sync) => self.thread_list_sync(*sync, events),
             E::Resumed | E::Other(_) => {}
         }
     }
@@ -707,9 +777,24 @@ impl State {
             if let Some(last) = known.last_message_id {
                 channel.note_message(last);
             }
-            if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread) {
-                info.joined |= before.joined;
+            // An absent member isn't a leave: only a members update or READY says so.
+            if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread)
+                && info.member.is_none()
+            {
+                info.member = before.member;
             }
+        }
+        let stored = self.stored_member(channel.id);
+        let waiting = self.pending_joins.remove(&channel.id);
+        if let Some(info) = channel.thread.as_deref_mut() {
+            if info.member.is_none() && waiting.is_some() {
+                tracing::debug!(
+                    channel_id = channel.id.get(),
+                    "a kept join reached its thread"
+                );
+                info.member = waiting;
+            }
+            info.member = info.member.map(|member| with_join_time(member, stored));
         }
         let channel = Arc::new(channel);
         self.mark_channel(&channel);
@@ -747,7 +832,7 @@ impl State {
 
     // Discord enforces slowmode per user, so a message from another device starts it too.
     fn note_own_message(&mut self, channel: ChannelId, nonce: Option<MessageId>) {
-        if let Some(interval) = self.cooldown_interval(channel, wall_millis()) {
+        if let Some(interval) = self.cooldown_interval(channel, self.now_millis()) {
             self.cooldowns
                 .seen(channel, nonce, Instant::now(), interval);
         }
@@ -794,6 +879,104 @@ impl State {
         }
     }
 
+    fn thread_member_update(&mut self, update: ThreadMemberUpdate, events: &mut Vec<StoreEvent>) {
+        let member = update.member;
+        let Some(thread) = member.id else {
+            tracing::debug!("skipping a thread member update without its thread");
+            return;
+        };
+        if member
+            .user_id
+            .is_some_and(|user| Some(user) != self.entities.me())
+        {
+            return;
+        }
+        self.set_membership(thread, Some(ThreadMembership::from_wire(member)), events);
+    }
+
+    // Only the current user's membership is kept; others joining or leaving change nothing.
+    fn thread_members_update(&mut self, update: ThreadMembersUpdate, events: &mut Vec<StoreEvent>) {
+        let Some(me) = self.entities.me() else {
+            return;
+        };
+        let member = if let Some(added) = update
+            .added_members
+            .into_iter()
+            .find(|member| member.user_id == Some(me))
+        {
+            Some(ThreadMembership::from_wire(added))
+        } else if update.removed_member_ids.contains(&me) {
+            None
+        } else {
+            return;
+        };
+        self.set_membership(update.id, member, events);
+    }
+
+    // Joins come from the members events; a sync only refreshes the threads already joined.
+    fn thread_list_sync(&mut self, sync: ThreadListSync, events: &mut Vec<StoreEvent>) {
+        let me = self.entities.me();
+        for member in sync.members {
+            let Some(thread) = member.id else {
+                continue;
+            };
+            let joined = self
+                .entities
+                .channels
+                .get(&thread)
+                .and_then(|known| known.thread.as_deref())
+                .is_some_and(|info| info.member.is_some());
+            if joined && member.user_id.is_none_or(|user| Some(user) == me) {
+                self.set_membership(thread, Some(ThreadMembership::from_wire(member)), events);
+            }
+        }
+    }
+
+    fn set_membership(
+        &mut self,
+        thread: ChannelId,
+        member: Option<ThreadMembership>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let stored = self.stored_member(thread);
+        let member = member.map(|member| with_join_time(member, stored));
+        let Some(known) = self
+            .entities
+            .channels
+            .get(&thread)
+            .filter(|known| known.thread.is_some())
+            .cloned()
+        else {
+            // Discord sends the thread with THREAD_CREATE, which can come after the join.
+            if !self.entities.channels.contains_key(&thread) {
+                tracing::debug!(
+                    channel_id = thread.get(),
+                    "keeping a membership change until its thread arrives"
+                );
+                match member {
+                    Some(member) => self.pending_joins.insert(thread, member),
+                    None => self.pending_joins.remove(&thread),
+                };
+            }
+            return;
+        };
+        if known
+            .thread
+            .as_deref()
+            .is_some_and(|info| info.member == member)
+        {
+            return;
+        }
+        let mut next = (*known).clone();
+        if let Some(info) = next.thread.as_deref_mut() {
+            info.member = member;
+        }
+        let next = Arc::new(next);
+        self.dirty.channel(thread);
+        self.entities.channels.insert(thread, next.clone());
+        events.push(StoreEvent::ChannelUpdated(next));
+    }
+
     fn channel_delete(&mut self, delete: ChannelDelete, events: &mut Vec<StoreEvent>) {
         let Some(removed) = self.entities.channels.remove(&delete.id) else {
             tracing::debug!(
@@ -832,13 +1015,18 @@ impl State {
 
     pub(crate) fn add_guild(&mut self, next: Entities, events: &mut Vec<StoreEvent>) {
         self.tracking_server_list(events, |state, events| state.merge_guild(next, events));
-        self.settle(wall_millis(), events);
+        self.settle(self.now_millis(), events);
     }
 
     fn merge_guild(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
+        self.keep_memberships(&mut next);
         let Some((&id, after)) = next.guilds.iter().next() else {
             return;
         };
+        self.outage_members.retain(|_, (guild, _)| *guild != id);
+        for channel in next.channels.keys() {
+            self.pending_joins.remove(channel);
+        }
         for (channel, merged) in &mut next.channels {
             if let Some(last) = self
                 .entities
@@ -917,6 +1105,8 @@ impl State {
             for channel in channels {
                 self.entities.read_states.forget(channel);
             }
+            self.outage_members
+                .retain(|_, (guild, _)| *guild != delete.id);
             self.remove_guild_data(delete.id);
             self.entities.unavailable.remove(&delete.id);
             events.push(StoreEvent::GuildRemoved {
@@ -932,8 +1122,34 @@ impl State {
 
     fn guild_down(&mut self, id: GuildId, events: &mut Vec<StoreEvent>) {
         if self.entities.unavailable.insert(id) {
+            self.stash_members(id);
             self.remove_guild_data(id);
             events.push(StoreEvent::GuildUnavailable { guild_id: id });
+        }
+    }
+
+    fn stash_members(&mut self, guild: GuildId) {
+        for channel in self.entities.channels.values() {
+            if channel.guild_id == Some(guild)
+                && let Some(member) = channel.thread.as_deref().and_then(|info| info.member)
+            {
+                self.outage_members.insert(channel.id, (guild, member));
+            }
+        }
+    }
+
+    // Before the swap: a guild READY lists as down keeps its threads' memberships until it's back.
+    fn keep_outage_members(&mut self, next: &Entities) {
+        self.outage_members
+            .retain(|_, (guild, _)| next.unavailable.contains(guild));
+        let down: Vec<GuildId> = next
+            .unavailable
+            .iter()
+            .filter(|guild| self.entities.guilds.contains_key(guild))
+            .copied()
+            .collect();
+        for guild in down {
+            self.stash_members(guild);
         }
     }
 
@@ -1083,7 +1299,7 @@ impl State {
         if let Some(newest) = newest {
             self.reach_present(ticket.channel, newest, events);
         }
-        self.settle(wall_millis(), events);
+        self.settle(self.now_millis(), events);
         outcome
     }
 
@@ -1268,7 +1484,7 @@ impl State {
             }
             None => {
                 self.dirty.all();
-                self.refresh_badges(wall_millis(), events);
+                self.refresh_badges(self.now_millis(), events);
             }
         }
     }
@@ -1311,7 +1527,57 @@ impl State {
             .mute_ends()
             .map(|(_, end)| end)
             .filter(|end| *end > after)
+            .chain(self.badges.next_thread_mute_end(after))
             .min()
+    }
+
+    pub(crate) fn listed(&self, channel: ChannelId) -> bool {
+        self.badges.listed(channel)
+    }
+
+    // The last joined first, as Discord's sidebar; the newest first among equal or unknown times.
+    pub(crate) fn listed_threads(&self, parent: ChannelId) -> Vec<Arc<Channel>> {
+        let mut threads: Vec<Arc<Channel>> = self
+            .threads
+            .of(parent)
+            .filter(|thread| self.listed(*thread))
+            .filter_map(|thread| self.entities.channels.get(&thread).cloned())
+            .collect();
+        threads.sort_by_key(|thread| {
+            let joined = thread
+                .thread
+                .as_deref()
+                .and_then(|info| info.member)
+                .and_then(|member| member.joined_at);
+            Reverse((joined, thread.id))
+        });
+        threads
+    }
+
+    pub(crate) fn next_window_end(&self, after: Timestamp) -> Option<Timestamp> {
+        self.badges.next_window_end(after)
+    }
+
+    pub(crate) fn windows_ending(&self, after: Timestamp, until: Timestamp) -> Vec<ChannelId> {
+        self.badges.windows_ending(after, until)
+    }
+
+    // Whether a write since the last call brought a deadline before the ones ahead.
+    pub(crate) fn take_sooner_deadline(&mut self) -> bool {
+        self.badges.take_sooner()
+    }
+
+    // Their badges are computed again at `now_millis`, which moves them out of the list.
+    pub(crate) fn end_windows(
+        &mut self,
+        threads: &[ChannelId],
+        now_millis: i64,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        for thread in threads {
+            self.dirty.channel(*thread);
+        }
+        self.refresh_badges(now_millis, events);
     }
 
     pub(crate) fn mutes_ending(&self, after: Timestamp, until: Timestamp) -> Vec<Option<GuildId>> {
@@ -1321,6 +1587,7 @@ impl State {
             .mute_ends()
             .filter(|(_, end)| *end > after && *end <= until)
             .map(|(guild, _)| guild)
+            .chain(self.badges.thread_mutes_ending(after, until))
             .collect();
         ended.into_iter().collect()
     }
@@ -1415,3 +1682,14 @@ mod reading;
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+// A member without its join time keeps the stored one, which orders the list; only a leave
+// clears it.
+fn with_join_time(member: ThreadMembership, stored: Option<ThreadMembership>) -> ThreadMembership {
+    ThreadMembership {
+        joined_at: member
+            .joined_at
+            .or(stored.and_then(|stored| stored.joined_at)),
+        ..member
+    }
+}

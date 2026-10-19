@@ -2,6 +2,7 @@
 
 pub(crate) mod apply;
 mod badges;
+mod clock;
 mod convert;
 mod events;
 mod order;
@@ -27,6 +28,8 @@ pub use settings::{
 };
 pub(crate) use settings::{FolderEntry, UserSettings};
 pub use store::{Store, Subscription};
+#[cfg(test)]
+pub(crate) use store::{deadline_reads, deadline_reads_reset};
 pub use types::*;
 pub use windows::MessageWindow;
 pub(crate) use windows::{

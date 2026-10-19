@@ -1,16 +1,19 @@
 import AppKit
 
 enum CellText {
-    static func label(wrapping: Bool = false) -> NSTextField {
-        let label =
-            wrapping ? NSTextField(wrappingLabelWithString: "") : NSTextField(labelWithString: "")
+    // Chrome Discord doesn't let the user select. Selectable text goes in a MessageTextView, which
+    // a click doesn't redraw as a selectable label's field editor does.
+    static func label() -> NSTextField {
+        let label = NSTextField(labelWithString: "")
         label.translatesAutoresizingMaskIntoConstraints = false
         label.drawsBackground = false
         label.isBordered = false
-        if wrapping {
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        }
+        label.isSelectable = false
         return label
+    }
+
+    static func plain(_ text: String, style: TextStyle, color: NSColor) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: style.nsFont, .foregroundColor: color])
     }
 
     static func body(_ text: String, color: NSColor) -> NSAttributedString {

@@ -124,7 +124,7 @@ thread, a renamed channel, and so on) show as one line:
 
 - a muted icon in the avatar column;
 - a sentence naming who did what, in `textMuted`;
-- the time.
+- the time; hovering it, and only it, shows the full date and time, as Discord does.
 
 They never join a group and always end one. Akari writes these sentences in its own words; it
 doesn't reuse Discord's texts, such as its random welcome lines.
@@ -132,6 +132,14 @@ doesn't reuse Discord's texts, such as its random welcome lines.
 **Which messages count as system messages:** every message type except the default type,
 replies, slash-command and context-menu command results, thread starter messages, and types
 Akari doesn't know. A type Akari doesn't know shows its content like an ordinary message.
+
+## Selecting text
+
+Discord lets the user select a message's text, a system message's line and the channel start's
+text; names, times, day dividers and the reply line can't be selected. *Akari: the same. The
+selectable texts are all text views like a message's, so they select alike, and a click, double
+click or drag never changes their font, color or baseline (a selectable label's field editor
+would).*
 
 ## Loading history
 

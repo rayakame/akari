@@ -16,7 +16,7 @@ use crate::state::{
     Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
     EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
     Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
-    Sticker, ThreadInfo, Unreads, User, UserSettings,
+    Sticker, ThreadInfo, ThreadMembership, Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -168,7 +168,7 @@ pub(crate) fn thread(id: u64, guild: u64, parent: u64) -> Channel {
         parent_id: Some(Snowflake::new(parent)),
         owner_id: Some(Snowflake::new(ME)),
         thread: Some(Box::new(ThreadInfo {
-            joined: true,
+            member: Some(ThreadMembership::default()),
             archived: false,
             locked: true,
             auto_archive_duration: 1440,
@@ -200,6 +200,7 @@ pub(crate) fn entities() -> Entities {
         .into(),
         settings: Default::default(),
         read_states: Default::default(),
+        memberless: Default::default(),
     }
 }
 
@@ -445,6 +446,38 @@ fn every_state_type_round_trips_through_its_row() {
 }
 
 #[test]
+fn a_threads_membership_round_trips() {
+    let dir = TempDir::new();
+    let mut cache = open(&dir);
+    let mut muted = thread(12, 100, 10);
+    if let Some(info) = muted.thread.as_deref_mut() {
+        info.member = Some(ThreadMembership {
+            muted: true,
+            mute_ends: Some(time(1_700_000_000_123_456_000)),
+            level: Some(NotificationLevel::OnlyMentions),
+            joined_at: Some(time(1_699_000_000_654_321_000)),
+        });
+    }
+    let mut unjoined = thread(14, 100, 10);
+    if let Some(info) = unjoined.thread.as_deref_mut() {
+        info.member = None;
+    }
+    cache
+        .write(|writer| {
+            writer.put_channel(&muted)?;
+            writer.put_channel(&unjoined)
+        })
+        .unwrap();
+    drop(cache);
+
+    let read = open(&dir).read_entities().unwrap();
+
+    assert_eq!(read.skipped, 0);
+    assert_eq!(*read.value.channels[&Snowflake::new(12)], muted);
+    assert_eq!(*read.value.channels[&Snowflake::new(14)], unjoined);
+}
+
+#[test]
 fn a_window_reads_oldest_first_and_shares_its_authors() {
     let dir = TempDir::new();
     let mut cache = open(&dir);
@@ -591,8 +624,29 @@ fn the_settings_tables_exist() {
 }
 
 #[test]
+fn a_schema_4_file_is_upgraded_and_keeps_its_rows() {
+    let dir = TempDir::new();
+    let mut cache = open(&dir);
+    write_entities(&mut cache, &entities());
+    drop(cache);
+    raw(&dir.file(ME))
+        .pragma_update(None, "user_version", 4)
+        .unwrap();
+
+    let opened = Cache::open_or_rebuild(&dir.file(ME), UserId::new(ME)).unwrap();
+
+    assert_eq!(opened.discarded, None);
+    assert!(opened.cache.read_entities().unwrap().value == entities());
+    drop(opened);
+    let version: i32 = raw(&dir.file(ME))
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, schema::CURRENT);
+}
+
+#[test]
 fn any_other_schema_version_is_discarded() {
-    for version in [schema::CURRENT - 1, schema::CURRENT + 1, 0] {
+    for version in [3, schema::CURRENT + 1, 0] {
         let dir = TempDir::new();
         let mut cache = open(&dir);
         write_entities(&mut cache, &entities());
@@ -804,6 +858,7 @@ fn rebuilt(entities: &Entities) -> Entities {
             ..entities.settings.clone()
         },
         read_states: entities.read_states.clone(),
+        memberless: entities.memberless.clone(),
     }
 }
 

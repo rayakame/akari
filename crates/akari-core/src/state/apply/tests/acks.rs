@@ -814,10 +814,8 @@ fn marking_a_guild_read_acks_its_unread_channels_and_joined_threads() {
     );
     assert_eq!(
         state.guild_badge(Snowflake::new(G1)),
-        Badge {
-            unread: false,
-            mentions: 1
-        }
+        Badge::default(),
+        "an unjoined thread's ping waits for the join"
     );
     assert_eq!(
         read_state(&state, THREAD),

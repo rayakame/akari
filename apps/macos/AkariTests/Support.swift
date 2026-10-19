@@ -115,6 +115,32 @@ struct Rendered {
     }
 }
 
+/// A red like the mention badge's.
+func isRed(_ color: NSColor?) -> Bool {
+    guard let color else {
+        return false
+    }
+    return color.redComponent > 0.6 && color.greenComponent < 0.35 && color.blueComponent < 0.35
+}
+
+/// Near white, like a bright name or the unread pill.
+func isBright(_ color: NSColor?) -> Bool {
+    guard let color else {
+        return false
+    }
+    return min(color.redComponent, color.greenComponent, color.blueComponent) > 0.85
+}
+
+/// The pixels in the columns `xs` that pass `test`.
+func count(_ rendered: Rendered, in xs: Range<CGFloat>, where test: (NSColor?) -> Bool)
+    -> Int
+{
+    let columns = Int(xs.lowerBound * rendered.scale)..<Int(xs.upperBound * rendered.scale)
+    return columns.reduce(0) { total, x in
+        total + (0..<rendered.rep.pixelsHigh).filter { test(rendered.pixel(x, $0)) }.count
+    }
+}
+
 // Tokens come out shifted by the bitmap's color space, so tests compare rendered colors.
 func same(_ color: NSColor?, _ other: NSColor?) -> Bool {
     guard let color, let other else {

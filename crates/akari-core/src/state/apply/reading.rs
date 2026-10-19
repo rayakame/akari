@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use super::{Derived, Entities, Journal, ReadyDiff, State, wall_millis};
+use super::{Derived, Entities, Journal, ReadyDiff, State};
 use crate::gateway::{ChannelUnread, MessageAck};
 use crate::model::{
     self, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageType, Permissions,
@@ -11,7 +11,7 @@ use crate::state::badges::Dirty;
 use crate::state::events::StoreEvent;
 use crate::state::read_states::{Ack, ReadState};
 use crate::state::settings::NotificationLevel;
-use crate::state::types::Channel;
+use crate::state::types::{Channel, ThreadInfo};
 
 const MENTION_ON_ALL_MESSAGES: u64 = 1 << 5;
 
@@ -27,14 +27,17 @@ impl Entities {
         match self.read_states.get(channel.id) {
             Some(state) => state.acked.map_or(0, Snowflake::get),
             None => self
-                .joined_position(channel)
+                .start_position(channel)
                 .unwrap_or_else(|| channel.last_message_id.map_or(0, Snowflake::get)),
         }
     }
 
-    // Without a read state, what was posted before the user joined is read. DMs, and guilds
-    // whose join is unknown, are read until a message arrives.
-    fn joined_position(&self, channel: &Channel) -> Option<u64> {
+    // Without a read state a thread is unread from its start, including a forum post's starter,
+    // which has the post's ID; a guild channel is read up to the join, a DM until a message.
+    fn start_position(&self, channel: &Channel) -> Option<u64> {
+        if channel.is_thread() {
+            return Some(channel.id.get().saturating_sub(1));
+        }
         let joined = self.members.get(&channel.guild_id?)?.joined_at?;
         Some(Snowflake::<GenericMarker>::from_unix_millis(joined.unix_millis(), 0).get())
     }
@@ -64,9 +67,10 @@ impl State {
     // Runs before the message raises the channel's newest message, which a DM's start needs.
     pub(super) fn read_message(&mut self, message: &model::Message) {
         let Some(channel) = self.entities.channels.get(&message.channel_id).cloned() else {
+            self.note_unknown_mention(message);
             return;
         };
-        let joined = self.entities.joined_position(&channel);
+        let joined = self.entities.start_position(&channel);
         let mut position = self.entities.read_position(&channel);
         let unstarted = joined.is_none() && self.entities.read_states.get(channel.id).is_none();
         // The CHANNEL_CREATE of a DM opened by this message can already name it as the newest.
@@ -95,9 +99,32 @@ impl State {
         if unstarted {
             self.entities.read_states.start(channel.id, start);
         }
-        if self.counts_as_mention(&channel, message, wall_millis()) {
+        if self.counts_as_mention(&channel, message, self.now_millis()) {
             self.entities.read_states.mention(channel.id, start);
         }
+    }
+
+    // A mention that adds the user to a thread the store doesn't have yet: its THREAD_CREATE
+    // can come later, and the count must be there when it does.
+    fn note_unknown_mention(&mut self, message: &model::Message) {
+        let (Some(me), Some(guild)) = (self.entities.me(), message.guild_id) else {
+            return;
+        };
+        if !self.entities.guilds.contains_key(&guild)
+            || message.author.id == me
+            || !message.mentions.iter().any(|user| user.id == me)
+            || self.entities.read_states.ignores(message.author.id)
+            || !self
+                .entities
+                .read_states
+                .first_sight(message.channel_id, message.id)
+        {
+            return;
+        }
+        let start = Snowflake::new(message.channel_id.get().saturating_sub(1));
+        self.entities
+            .read_states
+            .mention(message.channel_id, Some(start));
     }
 
     fn counts_as_mention(
@@ -119,7 +146,7 @@ impl State {
                 && (mentions_me || !self.channel_muted_at(channel.id, now));
         };
         // Only a direct mention adds the user to a thread; nothing reaches one they haven't joined.
-        let member = channel.thread.as_deref().is_none_or(|info| info.joined);
+        let member = channel.thread.as_deref().is_none_or(ThreadInfo::joined);
         let counts = mentions_me
             || (member
                 && (self.mentions_through_everyone_or_roles(guild, message)
@@ -238,7 +265,7 @@ impl State {
         let ack = self
             .reading
             .and_then(|(id, shown)| self.read_shown(id, shown?));
-        self.refresh_badges(wall_millis(), events);
+        self.refresh_badges(self.now_millis(), events);
         ack
     }
 
@@ -309,7 +336,7 @@ impl State {
             journal.undone.insert(channel);
         }
         self.dirty.channel(channel);
-        self.refresh_badges(wall_millis(), events);
+        self.refresh_badges(self.now_millis(), events);
         true
     }
 
@@ -404,7 +431,7 @@ impl State {
         }
         derived
             .badges
-            .update(next, dirty, wall_millis(), &mut Vec::new());
+            .update(next, dirty, self.now_millis(), &mut Vec::new());
         if let Some(diff) = diff {
             self.badges
                 .rediff(&derived.badges, &replayed, &mut diff.events);
@@ -435,12 +462,12 @@ impl State {
         events: &mut Vec<StoreEvent>,
     ) -> Option<Ack> {
         let ack = self.ack_locally(channel);
-        self.refresh_badges(wall_millis(), events);
+        self.refresh_badges(self.now_millis(), events);
         ack
     }
 
-    // As the official client's bulk: what the badges show, never unjoined threads, and every
-    // forum the user can view, read or not.
+    // As the official client's bulk: what the badges show, listed threads only (never unjoined
+    // ones), and every forum the user can view, read or not.
     pub(crate) fn mark_guilds_read(
         &mut self,
         guilds: &[GuildId],
@@ -469,12 +496,9 @@ impl State {
                 }
                 continue;
             }
-            let joined = channel
-                .thread
-                .as_deref()
-                .is_none_or(|info| info.joined && !info.archived);
+            let listed = !channel.is_thread() || self.badges.listed(channel.id);
             let badge = self.badges.channel(channel.id);
-            if joined && (badge.unread || badge.mentions > 0) {
+            if listed && (badge.unread || badge.mentions > 0) {
                 shown.push(channel.id);
             }
         }

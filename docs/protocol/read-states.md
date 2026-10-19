@@ -38,11 +38,16 @@ A channel without a read state:
 - **A DM or group DM** is read until its next message, which starts its read state at the
   message before it, also when the DM's CHANNEL_CREATE already named that message.
 - **A guild whose join time is unknown** is treated like a DM.
-- **A thread** uses its guild's join time.
+- **A thread** is unread from its start: its read position is one before the thread's own ID,
+  so every message in it is unread, a forum post's starter message (which has the post's ID)
+  included, and the new messages line sits above its first message. The official
+  client did so for a thread the user was mentioned into (observed 2026-10-17: the line above
+  the thread's first message, not above the mention). A joined thread from READY without a read
+  state is taken the same way (**unverified**).
 
-A read state the store starts this way (for a DM's first message, or a guild channel's first
-mention) is marked `estimated`: its `acked` is the join or the message before, not a message
-the user read. An ack or the user's own message replaces it with a real one.
+A read state the store starts this way (for a DM's first message, or a guild channel's or a
+thread's first mention) is marked `estimated`: its `acked` is the join, the position before the
+thread or the message before, not a message the user read. An ack or the user's own message replaces it with a real one.
 
 The newest message only moves forward: from MESSAGE_CREATE, CHANNEL_CREATE, CHANNEL_UPDATE
 and GUILD_CREATE (an older or missing `last_message_id` changes nothing), from the unread
@@ -177,8 +182,8 @@ since the Discord epoch, rounded up (at Discord's time, below), and no `flags` o
 The bulk is `{"read_states":[{channel_id, message_id, read_state_type: 0}]}`, in chunks of 50
 entries (an unconfirmed reading of the one 50-entry request seen), one request per chunk. A
 chunk takes whatever bulk entries are due together, so two bulks marked at once can share a
-request. The channels are those whose badge shows unread or mentions, with their joined,
-unarchived threads (never unjoined ones), plus every forum and media channel the user can
+request. The channels are those whose badge shows unread or mentions, with their listed threads
+([Threads](#threads); never unjoined ones), plus every forum and media channel the user can
 view, read or not. With nothing unread there is no bulk, and no forum goes alone.
 
 **Which message ID.** Reading acks the newest message the channel's list shows, or a deleted
@@ -300,11 +305,13 @@ over the DMs; none computes permissions.
   channel shows. Its count is the read state's mentions. A channel the user can't view shows
   nothing.
 - **A guild** sums its text, announcement, forum, media, voice and stage channels and its
-  joined, unarchived threads that the user can view; a thread's mentions count even before
-  Akari learns that the mention added the user to it. Its dot needs one of them unread and
-  not under a muted category or muted channel, and the guild itself unmuted; its count adds
-  up all their mentions, muted or not. With "hide muted channels", muted channels don't count
-  at all. A folder's badge is its guilds' sum, added up by the host.
+  listed threads ([Threads](#threads)): a thread's mentions count while it's listed, so a
+  mention that adds the user counts from the members event that lists the thread, and a thread
+  the user left or that was closed adds nothing. Its dot needs one of them unread, a channel
+  not under a muted category or muted channel (a thread's parent doesn't matter), and the guild
+  itself unmuted; its count adds up all their mentions, muted or not. With "hide muted
+  channels", muted channels and muted threads don't count at all. A folder's badge is its
+  guilds' sum, added up by the host.
 - **Community servers with opt-in channels** ("Channels & Roles": the `COMMUNITY` feature and
   the user's `OPT_IN_CHANNELS_ON`) follow the official client's two extra rules: a channel
   whose newest message is over 7 days old shows neither unread nor mentions, and one that
@@ -333,6 +340,37 @@ A deleted channel or thread, a channel a repeated GUILD_CREATE no longer lists, 
 channel of a guild the user leaves lose their read state, in memory and, with the next flush,
 in the cache. An outage keeps them: the guild's GUILD_CREATE brings no read states back.
 
+## Threads
+
+Observed in the official web client on 2026-10-17, with the second account and a test server.
+
+- **What counts for the guild is what's listed:** joined, not archived, the parent viewable, and
+  inside the "Hide After Inactivity" window or unread or with a mention
+  ([dispatches.md](dispatches.md#threads)). A thread with an unread mention or one plain unread
+  message stayed listed past its hour, also after a reload, and the server badge counted it. So
+  the window never takes a dot or a count away: it only hides read threads. `BadgeChanged`
+  and `ThreadListingChanged` tell a list when a thread's state or its listing changed.
+- **A thread's own mute and level** come from the user's thread member (`muted`,
+  `mute_config.end_time`, and `flags`: `ALL_MESSAGES` 2, `ONLY_MENTIONS` 4, `NO_MESSAGES` 8;
+  `HAS_INTERACTED` 1 isn't a level). A muted thread looks like a muted channel: its row isn't
+  unread, it adds no dot, and its mentions still count and show. A timed thread mute ends on its
+  own, with `GuildSettingsChanged` for its guild. The level changes no badge: with "Only
+  @mentions", plain messages still show the thread unread. Akari keeps the level for
+  notifications.
+- **A muted parent** leaves its threads alone: neither a muted channel nor a muted category
+  changes their unread state, dots or badges. With "hide muted channels", a thread under a
+  hidden muted channel still counts; a thread muted itself adds nothing (**unverified**).
+- **Thread settings** (not sent by Akari yet): `PATCH /channels/{thread}/thread-members/@me/settings`
+  with `{"flags":4}` (Only @mentions; the response's member had `flags: 5`, `muted: false`,
+  `mute_config: null` and `join_timestamp`), `{"flags":2}` (back to the default),
+  `{"muted":true,"mute_config":{"selected_time_window":900,"end_time":"<ISO>"}}` (15 minutes)
+  and `{"muted":false}`.
+- **Acks** (observed; Akari sends them with the thread view): opening an unread joined thread
+  acked `POST /channels/{thread}/messages/{id}/ack` with
+  `{"token":null,"last_viewed":4308,"flags":2}`. Opening an unjoined thread with new messages
+  acked `{"token":null,"flags":2}`, without `last_viewed`. Opening the parent also acked its
+  "started a thread" message, like any message.
+
 ## The disk cache
 
 The read states are cached per channel ([cache.md](cache.md)), so a cold start shows the
@@ -358,11 +396,9 @@ names or message content.
   bulk holds.
 - **Mentions in a voice channel's chat:** counted, but what the official client shows for
   them is **unverified**.
-- **Joining or leaving a thread elsewhere** (THREAD_MEMBER_UPDATE) isn't decoded; such a
-  thread counts for its guild from the next READY.
 - **PASSIVE_UPDATE_V2 on the read → unread transition** is a reading of three runs, not
   documented (**unverified**).
 - **CHANNEL_UNREAD_UPDATE** came in a session with `PASSIVE_GUILD_UPDATE_V2`, for an account
   without directory channels; where from is **unverified**.
-- **`MENTION_ON_ALL_MESSAGES`** under a muted category, and a thread's own mute, aren't
-  modeled; the test account's flags are 0.
+- **`MENTION_ON_ALL_MESSAGES`** under a muted category isn't modeled; the test account's
+  flags are 0.

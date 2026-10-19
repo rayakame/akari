@@ -14,7 +14,7 @@ use crate::state::{
     Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
     EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
     Message, MessageReference, NotificationLevel, PermissionOverwrite, ReadState,
-    ReferencedMessage, Role, Sticker, ThreadInfo, Unreads, User,
+    ReferencedMessage, Role, Sticker, ThreadInfo, ThreadMembership, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -289,8 +289,22 @@ struct OverwriteRow {
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
+struct ThreadMemberRow {
+    #[serde(skip_serializing_if = "is_false")]
+    muted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mute_ends: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    joined_at: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 struct ThreadRow {
-    joined: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    member: Option<ThreadMemberRow>,
     archived: bool,
     locked: bool,
     auto_archive_duration: u32,
@@ -364,7 +378,12 @@ impl From<&Channel> for ChannelRow {
             icon: hash(channel.icon.as_ref()),
             owner_id: id(channel.owner_id),
             thread: channel.thread.as_deref().map(|thread| ThreadRow {
-                joined: thread.joined,
+                member: thread.member.map(|member| ThreadMemberRow {
+                    muted: member.muted,
+                    mute_ends: member.mute_ends.map(nanos),
+                    level: member.level.map(level_code),
+                    joined_at: member.joined_at.map(nanos),
+                }),
                 archived: thread.archived,
                 locked: thread.locked,
                 auto_archive_duration: thread.auto_archive_duration,
@@ -408,7 +427,12 @@ impl ChannelRow {
             owner_id: snowflake(self.owner_id),
             thread: self.thread.map(|thread| {
                 Box::new(ThreadInfo {
-                    joined: thread.joined,
+                    member: thread.member.map(|member| ThreadMembership {
+                        muted: member.muted,
+                        mute_ends: member.mute_ends.map(timestamp),
+                        level: member.level.map(level),
+                        joined_at: member.joined_at.map(timestamp),
+                    }),
                     archived: thread.archived,
                     locked: thread.locked,
                     auto_archive_duration: thread.auto_archive_duration,

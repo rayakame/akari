@@ -79,6 +79,7 @@ async fn store_reads_convert_after_ready() {
             nsfw: false,
             rate_limit_per_user: 0,
             recipient_ids: Vec::new(),
+            thread: None,
         })
     );
     let me = store.current_user().unwrap();

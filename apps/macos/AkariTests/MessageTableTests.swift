@@ -433,6 +433,19 @@ struct MessageTableTests {
         }
     }
 
+    // What a cell shows as text, labels and selectable text alike, in the order of its views.
+    func shownTexts(in view: NSView) -> [String] {
+        view.subviews.filter { !$0.isHidden }.flatMap { subview -> [String] in
+            if let field = subview as? NSTextField {
+                return [field.stringValue]
+            }
+            if let text = subview as? NSTextView {
+                return [text.string]
+            }
+            return shownTexts(in: subview)
+        }
+    }
+
     func cell(of raw: UInt64) throws -> NSView {
         try cell(at: index(of: raw))
     }
@@ -646,6 +659,229 @@ struct MessageTableTests {
         #expect(text.string == "hello there")
         #expect((attribute(.font) as? NSFont)?.pointSize == 16)
         #expect((attribute(.paragraphStyle) as? NSParagraphStyle)?.minimumLineHeight == 22)
+    }
+
+    // A test's window never becomes key, and a window that isn't hands a first click to no text
+    // view; this one says it is, so clicks reach views as the user's would.
+    final class KeyWindow: NSWindow {
+        override var isKeyWindow: Bool { true }
+        override var canBecomeKey: Bool { true }
+    }
+
+    // The list, moved into a window that takes clicks as a key window does.
+    func keyWindow() -> NSWindow {
+        let key = KeyWindow(
+            contentRect: window.contentRect(forFrameRect: window.frame), styleMask: window.styleMask,
+            backing: .buffered, defer: false)
+        key.isReleasedWhenClosed = false
+        key.contentView = controller.scrollView
+        key.orderFront(nil)
+        key.layoutIfNeeded()
+        key.displayIfNeeded()
+        return key
+    }
+
+    // A click, double click or drag as the window gets it: the release waits in the queue for
+    // the tracking loop a press starts.
+    func press(_ view: NSView, clicks: Int = 1, drag: Bool = false) throws {
+        let window = try #require(view.window)
+        let start = view.convert(
+            NSPoint(x: min(12, view.bounds.width / 2), y: view.bounds.midY), to: nil)
+        let end = drag ? NSPoint(x: start.x + 40, y: start.y) : start
+        let event = { (type: NSEvent.EventType, point: NSPoint) in
+            NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: clicks, pressure: 1)
+        }
+        if drag, let dragged = event(.leftMouseDragged, end) {
+            NSApp.postEvent(dragged, atStart: false)
+        }
+        if let up = event(.leftMouseUp, end) {
+            NSApp.postEvent(up, atStart: false)
+        }
+        window.sendEvent(try #require(event(.leftMouseDown, start)))
+        window.layoutIfNeeded()
+    }
+
+    // The window's pixels around `view`, as drawn now.
+    func drawing(around view: NSView) throws -> [UInt8] {
+        let content = try #require(view.window?.contentView)
+        content.displayIfNeeded()
+        let rect = view.convert(view.bounds, to: content).insetBy(dx: -2, dy: -2)
+        let rep = try #require(content.bitmapImageRepForCachingDisplay(in: rect))
+        content.cacheDisplay(in: rect, to: rep)
+        let data = try #require(rep.bitmapData)
+        return Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh))
+    }
+
+    // Clicks, double clicks and drags change neither the drawing nor the font, and no field editor
+    // takes over. Selectable text is a message's text view; chrome isn't selectable.
+    func expectClicksKeepTheDrawing(of view: NSView, selectable: Bool) throws {
+        let window = try #require(view.window)
+        for (clicks, drag) in [(1, false), (2, false), (1, true)] {
+            window.makeFirstResponder(nil)
+            let before = try drawing(around: view)
+            try press(view, clicks: clicks, drag: drag)
+            (view as? NSTextView)?.setSelectedRange(NSRange(location: 0, length: 0))
+            #expect(try drawing(around: view) == before, "\(clicks) clicks, drag \(drag)")
+            #expect((window.firstResponder as? NSTextView)?.isFieldEditor != true)
+            #expect((view as? NSTextField)?.currentEditor() == nil)
+        }
+        if selectable {
+            #expect((view as? MessageTextView)?.isSelectable == true)
+        } else {
+            #expect((view as? NSTextField)?.isSelectable == false)
+        }
+    }
+
+    @Test
+    func clickingANoticeKeepsItsTextAsDrawn() throws {
+        show(
+            MessageTableState(
+                rows: [row(1, at: noon), row(2, at: noon + 60, kind: .userJoin)],
+                reachedOldest: true))
+        let key = keyWindow()
+        defer { key.close() }
+        let notice = try #require(messageText(in: try cell(of: 2)))
+        #expect(notice.string.hasPrefix("Mira joined"))
+
+        try expectClicksKeepTheDrawing(of: notice, selectable: true)
+
+        let font = notice.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        #expect(font == TypeScale.body.nsFont)
+    }
+
+    @Test
+    func clickingTheStartAndAMessagesFilesKeepsThemAsDrawn() throws {
+        let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
+        show(
+            MessageTableState(
+                rows: [row(1, at: noon, content: "hello", attachments: ["a.zip"])],
+                reachedOldest: true, start: general.start))
+        let key = keyWindow()
+        defer { key.close() }
+        let start = try #require(try cell(at: 0) as? ChannelStartCell)
+        let texts = messageTexts(in: start).filter { !$0.isHiddenOrHasHiddenAncestor }
+        #expect(texts.map(\.string) == ["Welcome to #general!", "This is the start of the #general channel."])
+        let files = try #require(
+            messageTexts(in: try cell(of: 1)).first { $0.string.contains("a.zip") })
+
+        for view in texts + [files] {
+            try expectClicksKeepTheDrawing(of: view, selectable: true)
+        }
+    }
+
+    // What the text view's tooltip says at a point, as AppKit asks it while the pointer rests.
+    func toolTip(of text: NSTextView, at point: NSPoint) -> String? {
+        guard let layoutManager = text.layoutManager, let container = text.textContainer else {
+            return nil
+        }
+        let inContainer = NSPoint(
+            x: point.x - text.textContainerOrigin.x, y: point.y - text.textContainerOrigin.y)
+        var fraction: CGFloat = 0
+        let glyph = layoutManager.glyphIndex(
+            for: inContainer, in: container, fractionOfDistanceThroughGlyph: &fraction)
+        let rect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        guard rect.contains(inContainer) else {
+            return nil
+        }
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        return text.textStorage?.attribute(.toolTip, at: index, effectiveRange: nil) as? String
+    }
+
+    // The middle of the glyphs of `part` in the text view, in its own coordinates.
+    func middle(of part: String, in text: NSTextView) throws -> NSPoint {
+        let range = (text.string as NSString).range(of: part, options: .backwards)
+        try #require(range.location != NSNotFound, "\(part) in \(text.string)")
+        let layoutManager = try #require(text.layoutManager)
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(
+            forGlyphRange: glyphs, in: try #require(text.textContainer))
+        return NSPoint(
+            x: rect.midX + text.textContainerOrigin.x, y: rect.midY + text.textContainerOrigin.y)
+    }
+
+    // A notice and a message's files wrap as their text views lay them out at every width.
+    @Test
+    func aWrappingNoticeAndFilesAreAsTallAsTheirCells() {
+        let long = author(4, String(repeating: "Mira Kowalczyk-Lindqvist ", count: 3))
+        show(
+            MessageTableState(
+                rows: [
+                    row(1, by: long, at: noon, kind: .userJoin),
+                    row(3, at: noon + 30, kind: .userJoin),
+                    row(
+                        2, at: noon + 60, content: "",
+                        attachments: [String(repeating: "a-long-file-name-", count: 4) + ".zip"],
+                        edited: noon + 70),
+                ], reachedOldest: true))
+        var wrong: [String] = []
+        for width in stride(from: 150, through: 700, by: 3) {
+            window.setContentSize(NSSize(width: CGFloat(width), height: 400))
+            window.layoutIfNeeded()
+            for raw in [UInt64(1), 3, 2] where table.rect(ofRow: index(of: raw)).height
+                != fittingHeight(ofRow: index(of: raw))
+            {
+                wrong.append("\(raw) at \(width)")
+            }
+        }
+        #expect(wrong.isEmpty, "\(wrong.prefix(6))")
+    }
+
+    // As the official client: the full date over the time only, near the list's top and bottom.
+    @Test
+    func aNoticesFullDateShowsOverItsTimeOnly() throws {
+        let rows = [row(1, at: noon, kind: .userJoin)] + messages(30, from: 2, longText: true)
+            + [row(40, at: noon + 4000, kind: .userJoin)]
+        show(MessageTableState(rows: rows, reachedOldest: true))
+        for raw in [UInt64(1), 40] {
+            clip.scroll(
+                to: NSPoint(x: 0, y: table.rect(ofRow: index(of: raw)).minY - (raw == 1 ? 0 : 300)))
+            window.layoutIfNeeded()
+            let notice = try #require(messageText(in: try cell(of: raw)))
+            let time = try #require(notice.string.components(separatedBy: "  ").last)
+
+            #expect(notice.toolTip == nil, "no tooltip over the whole line")
+            let date = toolTip(of: notice, at: try middle(of: time, in: notice))
+            #expect(date?.isEmpty == false, "\(raw)")
+            #expect(toolTip(of: notice, at: try middle(of: "joined", in: notice)) == nil)
+        }
+    }
+
+    // Discord lets none of these be selected.
+    @Test
+    func namesTimesAndDividersArentSelectable() throws {
+        show(
+            MessageTableState(
+                rows: [
+                    row(1, at: noon, kind: .reply), row(2, at: noon + 60),
+                    row(3, at: noon + 120, delivery: .failed),
+                ], reachedOldest: true))
+        let key = keyWindow()
+        defer { key.close() }
+        let cells = try (0..<table.numberOfRows).map { try cell(at: $0) }
+        (try cell(of: 2) as? MessageCell)?.isHovered = true
+        let fields = cells.flatMap { textFields(in: $0) }.filter {
+            !$0.isHiddenOrHasHiddenAncestor && !$0.stringValue.isEmpty
+        }
+        let shown = Set(fields.map(\.stringValue))
+        #expect(shown.isSuperset(of: ["Mira", "Not sent."]))
+        #expect(shown.contains { $0.hasPrefix("12:00") } && shown.contains { $0.hasPrefix("12:01") })
+        #expect(shown.contains { $0.contains("Replying to") })
+        #expect(shown.contains { $0.contains("October") })
+
+        for field in fields {
+            #expect(!field.isSelectable, "\(field.stringValue)")
+            try expectClicksKeepTheDrawing(of: field, selectable: false)
+        }
+    }
+
+    func messageTexts(in view: NSView) -> [MessageTextView] {
+        view.subviews.flatMap { subview in
+            (subview as? MessageTextView).map { [$0] } ?? messageTexts(in: subview)
+        }
     }
 
     @Test
@@ -890,7 +1126,7 @@ struct MessageTableTests {
     func aComponentsV2MessageShowsAPlaceholder() throws {
         show([row(1, at: noon, content: "", componentsV2: true)])
 
-        let shown = textFields(in: try cell(of: 1)).filter { !$0.isHidden }.map(\.stringValue)
+        let shown = shownTexts(in: try cell(of: 1))
         #expect(shown.contains { $0.contains("This message uses a layout Akari can't show yet") })
     }
 
@@ -1021,8 +1257,8 @@ struct MessageTableTests {
         let marker = text.attributes(at: text.length - 1, effectiveRange: nil)
         #expect((marker[.font] as? NSFont)?.pointSize == 12)
         #expect(marker[.foregroundColor] as? NSColor == Palette.chatTextMuted)
-        let extras = textFields(in: try cell(of: 2)).filter { $0.stringValue.contains("a.zip") }
-        #expect(try #require(extras.first).stringValue.hasSuffix(" (edited)"))
+        let extras = shownTexts(in: try cell(of: 2)).filter { $0.contains("a.zip") }
+        #expect(try #require(extras.first).hasSuffix(" (edited)"))
         #expect(try #require(messageText(in: try cell(of: 3))).string == "message 3")
     }
 
@@ -1397,8 +1633,7 @@ struct MessageTableTests {
         let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
         show(MessageTableState(rows: page, reachedOldest: true, start: general.start))
         #expect(try cell(at: 0) is ChannelStartCell)
-        let shown = textFields(in: try cell(at: 0)).filter { !$0.isHiddenOrHasHiddenAncestor }
-            .map(\.stringValue)
+        let shown = shownTexts(in: try cell(at: 0))
         #expect(shown == ["Welcome to #general!", "This is the start of the #general channel."])
         #expect(table.rect(ofRow: 0).height == fittingHeight(ofRow: 0))
     }
@@ -1427,19 +1662,21 @@ struct MessageTableTests {
         let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
         show(MessageTableState(rows: [row(1, at: noon)], reachedOldest: true, start: general.start))
         let start = try #require(try cell(at: 0) as? ChannelStartCell)
-        let fields = textFields(in: start).filter { !$0.isHiddenOrHasHiddenAncestor }
-        let title = try #require(fields.first { $0.stringValue.hasPrefix("Welcome") })
-        let subtitle = try #require(fields.first { $0.stringValue.hasPrefix("This is") })
+        let texts = messageTexts(in: start).filter { !$0.isHiddenOrHasHiddenAncestor }
+        let title = try #require(texts.first { $0.string.hasPrefix("Welcome") })
+        let subtitle = try #require(texts.first { $0.string.hasPrefix("This is") })
+        let attribute = { (text: NSTextView, key: NSAttributedString.Key) in
+            text.textStorage?.attribute(key, at: 0, effectiveRange: nil)
+        }
 
         #expect(start.icon.frame.size == NSSize(width: 68, height: 68))
         #expect(start.icon.frame.minX == 16)
-        // A label's frame reaches 2 past its text.
-        #expect(title.alignmentRect(forFrame: title.frame).minX == 16)
-        #expect(subtitle.alignmentRect(forFrame: subtitle.frame).minX == 16)
-        #expect(title.font == TypeScale.startTitle.nsFont)
-        #expect(subtitle.font == TypeScale.startSubtitle.nsFont)
+        #expect(title.frame.minX == 16)
+        #expect(subtitle.frame.minX == 16)
+        #expect(attribute(title, .font) as? NSFont == TypeScale.startTitle.nsFont)
+        #expect(attribute(subtitle, .font) as? NSFont == TypeScale.startSubtitle.nsFont)
         // Measured: the message text's color, not a muted one.
-        #expect(subtitle.textColor == Palette.textDefault)
+        #expect(attribute(subtitle, .foregroundColor) as? NSColor == Palette.textDefault)
         // Measured from the official client: the title's baseline 39 below the icon, the
         // subtitle's 33.5 below the title's.
         let fromTop = { (view: NSView, y: CGFloat) in
@@ -1472,8 +1709,7 @@ struct MessageTableTests {
     func aDirectMessageStartsWithTheAvatarAndTheUsername() throws {
         let mira = ChannelName(kind: .direct(author(7, "Mira")), name: "Mira")
         show(MessageTableState(rows: page, reachedOldest: true, start: mira.start))
-        let shown = textFields(in: try cell(at: 0)).filter { !$0.isHiddenOrHasHiddenAncestor }
-            .map(\.stringValue)
+        let shown = shownTexts(in: try cell(at: 0))
 
         #expect(
             shown == [

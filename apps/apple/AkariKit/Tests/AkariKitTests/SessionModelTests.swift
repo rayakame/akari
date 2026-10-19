@@ -378,6 +378,65 @@ final class SessionModelTests {
     }
 
     @Test
+    func enteringAGuildOpensItsFirstChannelNotAThread() {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(10, kind: .guildForum), thread(31, in: 10), channel(11)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+
+        session.open(.guild(id(1)))
+
+        #expect(session.messages?.channelId == id(11))
+        session.close()
+    }
+
+    @Test
+    func anOpenThreadThatStopsBeingListedStaysOpen() async {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(11), thread(31, in: 11)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(31))
+
+        store.update { $0.channelLists[id(1)] = [id(11)] }
+        subscription.send(.threadListingChanged(guildId: id(1), threadId: id(31)))
+        await subscription.batches.pulled(2)
+
+        #expect(session.messages?.channelId == id(31))
+        #expect(session.channels?.shown(open: id(31)).map(\.id) == [id(11), id(31)])
+        session.open(channel: id(11))
+        #expect(session.channels?.shown(open: id(11)).map(\.id) == [id(11)])
+        session.close()
+    }
+
+    @Test
+    func aRemovedOpenThreadCloses() async {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(11), thread(31, in: 11)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(31))
+
+        store.update { state in
+            state.channelLists[id(1)] = [id(11)]
+            state.channels[id(31)] = nil
+        }
+        subscription.send(.channelRemoved(channelId: id(31), guildId: id(1)))
+        await subscription.batches.pulled(2)
+
+        #expect(session.messages?.channelId == id(11))
+        session.close()
+    }
+
+    @Test
     func aChannelOutsideTheListStaysOpenUntilRemoved() async {
         store.update { state in
             state.add(guild(1))

@@ -1,0 +1,37 @@
+{
+  "guild_id": "200000000000000001",
+  "channel_ids": ["300000000000000002"],
+  "threads": [
+    {
+      "id": "300000000000000021",
+      "type": 11,
+      "guild_id": "200000000000000001",
+      "parent_id": "300000000000000002",
+      "owner_id": "100000000000000002",
+      "name": "Sync thread",
+      "last_message_id": "300000000000000031",
+      "message_count": 4,
+      "member_count": 2,
+      "rate_limit_per_user": 0,
+      "flags": 0,
+      "thread_metadata": {
+        "archived": false,
+        "auto_archive_duration": 4320,
+        "archive_timestamp": "2026-10-17T13:46:03.744000+00:00",
+        "locked": false,
+        "create_timestamp": "2026-10-17T13:46:03.744000+00:00"
+      }
+    }
+  ],
+  "members": [
+    {
+      "id": "300000000000000021",
+      "user_id": "100000000000000001",
+      "join_timestamp": "2026-10-17T14:15:07.000000+00:00",
+      "flags": 1,
+      "muted": false,
+      "mute_config": null
+    }
+  ],
+  "most_recent_messages": []
+}

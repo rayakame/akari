@@ -28,7 +28,8 @@ public final class CollapsedCategories {
         defaults.set(categories.map(\.description), forKey: Self.key(guild))
     }
 
-    /// The list as shown: a collapsed category keeps only the channels `keeps` accepts.
+    /// The list as shown: a collapsed category keeps only the channels and threads `keeps`
+    /// accepts, and the channels of the threads it keeps.
     public func visible(
         _ channels: [Channel], in guild: GuildId, keeps: (Channel) -> Bool
     ) -> [Channel] {
@@ -36,11 +37,20 @@ public final class CollapsedCategories {
         guard !categories.isEmpty else {
             return channels
         }
+        let parents = Dictionary(channels.map { ($0.id, $0.parentId) }) { first, _ in first }
+        let collapsed = { (channel: Channel) -> Bool in
+            let category =
+                channel.isThread
+                ? channel.parentId.flatMap { parents[$0] ?? nil } : channel.parentId
+            return category.map(categories.contains) ?? false
+        }
+        let threads = channels.filter { $0.isThread && collapsed($0) && keeps($0) }
+        let kept = Set(threads.map(\.id)).union(threads.compactMap(\.parentId))
         return channels.filter { channel in
-            guard let parent = channel.parentId, categories.contains(parent) else {
+            guard collapsed(channel) else {
                 return true
             }
-            return keeps(channel)
+            return kept.contains(channel.id) || (!channel.isThread && keeps(channel))
         }
     }
 

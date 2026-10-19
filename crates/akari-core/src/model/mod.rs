@@ -11,6 +11,7 @@ mod user;
 
 pub use channel::{
     Channel, ChannelType, OverwriteType, PermissionOverwrite, ThreadMember, ThreadMetadata,
+    ThreadMuteConfig,
 };
 pub use guild::{
     Guild, GuildMember, MessageNotificationLevel, NsfwLevel, PremiumTier, Role, RoleColors,
@@ -27,6 +28,8 @@ pub use snowflake::{
     RoleMarker, SkuMarker, Snowflake, StickerMarker, UserMarker, WebhookMarker,
 };
 pub use timestamp::Timestamp;
+#[cfg(test)]
+pub(crate) use timestamp::iso;
 pub use user::{
     AvatarDecorationData, CurrentUser, PremiumType, PrimaryGuild, RelationshipType, User,
 };

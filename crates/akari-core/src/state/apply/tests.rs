@@ -79,6 +79,9 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::GuildBadgeChanged { guild_id } => {
             format!("GuildBadgeChanged({})", guild_id.get())
         }
+        StoreEvent::ThreadListingChanged { thread_id, .. } => {
+            format!("ThreadListingChanged({})", thread_id.get())
+        }
         other => format!("{other:?}"),
     }
 }
@@ -542,10 +545,12 @@ fn updates_for_unknown_entities_change_nothing() {
         ),
         ("CHANNEL_CREATE", foreign_channel),
         ("GUILD_MEMBER_UPDATE", other_member),
-        (
-            "MESSAGE_CREATE",
-            message(400_000_000_000_000_090, 300_000_000_000_000_099),
-        ),
+        // Plain: a mention there is kept for a thread that may still arrive.
+        ("MESSAGE_CREATE", {
+            let mut plain = message(400_000_000_000_000_090, 300_000_000_000_000_099);
+            plain["mentions"] = json!([]);
+            plain
+        }),
         (
             "GUILD_ROLE_DELETE",
             json!({"guild_id": G1.to_string(), "role_id": "500000000000000099"}),
@@ -1093,3 +1098,4 @@ fn a_window_opened_before_the_first_ready_survives_it() {
 mod acks;
 mod badges;
 mod read_states;
+mod threads;
