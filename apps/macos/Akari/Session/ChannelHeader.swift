@@ -1,5 +1,4 @@
 import AkariKit
-import AppKit
 import SwiftUI
 
 struct ChannelHeader: View {
@@ -23,13 +22,7 @@ struct ChannelHeader: View {
                             .lineLimit(1)
                     }
                     .buttonStyle(.plain)
-                    .onHover { inside in
-                        if inside {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
+                    .background(PointingHandArea())
                     .accessibilityLabel(parent.name ?? "")
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))

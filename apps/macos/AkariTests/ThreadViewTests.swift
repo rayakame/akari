@@ -244,6 +244,14 @@ struct ThreadHeaderTests {
                 > 20)
     }
 
+    // The header's link shows the pointing hand through a cursor rect, which can't outlive it.
+    @Test
+    func thePointingHandAreaLetsClicksThrough() {
+        let area = PointingHandArea.Area(frame: NSRect(x: 0, y: 0, width: 40, height: 20))
+
+        #expect(area.hitTest(NSPoint(x: 10, y: 10)) == nil)
+    }
+
     @Test
     func aChannelsHeaderHasNoParent() throws {
         let plain = try nameStart(ChannelHeader(channel: parent, name: "new"))
