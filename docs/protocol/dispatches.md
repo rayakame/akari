@@ -136,7 +136,8 @@ entry in `added_members` is skipped, so payload drift doesn't drop the dispatch.
 
 **What the channel list shows.** `Store::channel_list` puts a thread right after its parent,
 the last joined first (the member's `join_timestamp`, kept like the rest of the membership when
-a payload leaves the member out; equal or unknown times by thread ID, newest first), when the user joined it, it isn't archived, its parent is viewable, and
+a payload leaves the member out, and kept on its own when a member comes without it; equal or
+unknown times by thread ID, newest first), when the user joined it, it isn't archived, its parent is viewable, and
 it is inside its "Hide After Inactivity" window, unread, or has a mention. The window ends
 `auto_archive_duration` minutes after the later of its newest message and its
 `archive_timestamp` (the [threads](https://docs.discord.food/topics/threads) topic); pinned

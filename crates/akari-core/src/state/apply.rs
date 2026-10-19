@@ -919,6 +919,19 @@ impl State {
         member: Option<ThreadMembership>,
         events: &mut Vec<StoreEvent>,
     ) {
+        let stored = self
+            .entities
+            .channels
+            .get(&thread)
+            .and_then(|known| known.thread.as_deref()?.member)
+            .or_else(|| self.pending_joins.get(&thread).copied());
+        // A member without its join time keeps the stored one, which orders the list.
+        let member = member.map(|member| ThreadMembership {
+            joined_at: member
+                .joined_at
+                .or(stored.and_then(|stored| stored.joined_at)),
+            ..member
+        });
         let Some(known) = self
             .entities
             .channels
