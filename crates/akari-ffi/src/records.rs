@@ -276,7 +276,6 @@ pub enum StarterMessage {
     Unavailable,
 }
 
-// Discord's message flag.
 const HAS_THREAD: u64 = 1 << 5;
 
 impl Message {

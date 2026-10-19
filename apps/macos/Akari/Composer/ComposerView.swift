@@ -50,7 +50,6 @@ struct ComposerView: View {
         composer.canSend == false
     }
 
-    // What the empty composer says.
     static func prompt(denied: Bool, otherwise placeholder: String) -> String {
         denied ? "You do not have permission to send messages in this channel." : placeholder
     }

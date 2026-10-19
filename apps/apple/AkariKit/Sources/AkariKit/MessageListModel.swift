@@ -160,7 +160,6 @@ public final class MessageListModel {
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
     @ObservationIgnored private let ownerId: UserId?
-    // The store's name for the owner, read at the start and after READY.
     @ObservationIgnored private var storedOwner: String?
     @ObservationIgnored private var hasMessages = false
     // Rows the cache showed while the first page loaded; that page didn't bring them.

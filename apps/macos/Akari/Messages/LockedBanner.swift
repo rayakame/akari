@@ -1,6 +1,5 @@
 import SwiftUI
 
-// Over the top of a locked thread's messages, where only moderators can send.
 struct LockedBanner: View {
     static let height: CGFloat = 32
     static let margin: CGFloat = 4

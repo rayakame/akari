@@ -132,7 +132,6 @@ struct SessionView<MessageArea: View>: View {
         return session.channels?.channel(id) ?? conversation?.channel
     }
 
-    // A thread's channel, for the header.
     private var openParent: Channel? {
         guard let openChannel, openChannel.isThread, let parentId = openChannel.parentId else {
             return nil

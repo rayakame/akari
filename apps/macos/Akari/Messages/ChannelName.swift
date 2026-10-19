@@ -4,7 +4,6 @@ import AkariKit
 struct ChannelName: Equatable {
     enum Kind: Equatable {
         case guildChannel(ChannelType)
-        // Who started it, if known.
         case thread(owner: String?)
         // The recipient, if the store knows them.
         case direct(User?)
@@ -61,8 +60,6 @@ struct ChannelStart: Equatable {
     let icon: Icon
     let title: String
     var username: String?
-    // Without one, the start ends with its title.
     let subtitle: String?
-    // After the subtitle, strong: a thread's owner.
     var subtitleName: String?
 }

@@ -441,7 +441,6 @@ impl Windows {
             .find(|message| message.kind == MessageType::ThreadStarterMessage)
     }
 
-    // The parent channel's message a starter points at.
     fn origin(starter: &Message) -> Option<(ChannelId, MessageId)> {
         let reference = starter.reference.as_deref()?;
         Some((reference.channel_id?, reference.message_id?))
@@ -468,7 +467,6 @@ impl Windows {
         })
     }
 
-    // The parent message to fetch: Discord left it out, and it wasn't asked for yet.
     pub(crate) fn wanted_starter(&self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
         let row = self.starter_row(thread)?;
         if row.referenced_message != ReferencedMessage::NotIncluded {

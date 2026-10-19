@@ -190,7 +190,6 @@ struct Ack {
     flags: Option<u8>,
 }
 
-// The read state flag IS_THREAD.
 const IS_THREAD: u8 = 1 << 1;
 
 #[derive(Serialize)]

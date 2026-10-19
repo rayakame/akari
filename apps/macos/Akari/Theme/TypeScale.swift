@@ -72,7 +72,6 @@ nonisolated enum TypeScale {
 
     // Measured against the official client.
     static let body = TextStyle(16, line: 22)
-    // A notice's names and links, as Discord draws them in its system messages.
     static let noticeName = TextStyle(16, .medium, line: 22)
     static let serverHeader = TextStyle(15, .semibold)
     static let category = TextStyle(13, .medium)

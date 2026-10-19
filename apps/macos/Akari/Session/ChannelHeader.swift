@@ -6,7 +6,6 @@ struct ChannelHeader: View {
 
     let channel: Channel?
     let name: String
-    // A thread's channel, before its name; clicking it opens the channel.
     var parent: Channel?
     var openParent: () -> Void = {}
 
