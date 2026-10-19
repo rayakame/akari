@@ -325,6 +325,7 @@ impl ThreadMembership {
             muted: member.muted,
             mute_ends: member.mute_config.and_then(|mute| mute.end_time),
             level,
+            joined_at: member.join_timestamp,
         }
     }
 }

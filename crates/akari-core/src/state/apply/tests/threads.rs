@@ -36,6 +36,9 @@ fn created_unjoined() -> Value {
     thread
 }
 
+// `member`'s join_timestamp.
+const MEMBER_JOINED: i64 = 1_791_461_100_000;
+
 fn member(user: u64, flags: u64) -> Value {
     json!({
         "id": CREATED.to_string(), "user_id": user.to_string(),
@@ -82,6 +85,7 @@ fn a_ready_thread_is_joined_with_its_members_mute() {
             muted: true,
             mute_ends: at(1_792_454_400_000),
             level: Some(NotificationLevel::OnlyMentions),
+            joined_at: at(1_709_281_800_250),
         })
     );
 }
@@ -109,7 +113,10 @@ fn a_thread_create_with_our_member_joins() {
 
     assert_eq!(
         membership(&state, CREATED),
-        Some(ThreadMembership::default())
+        Some(ThreadMembership {
+            joined_at: at(1_791_460_800_000),
+            ..ThreadMembership::default()
+        })
     );
 }
 
@@ -141,6 +148,7 @@ fn a_members_update_with_our_id_joins_the_thread() {
         membership(&state, CREATED),
         Some(ThreadMembership {
             level: Some(NotificationLevel::AllMessages),
+            joined_at: at(MEMBER_JOINED),
             ..ThreadMembership::default()
         })
     );
@@ -206,6 +214,7 @@ fn a_member_update_sets_our_mute_and_level() {
             muted: true,
             mute_ends: at(1_791_461_700_000),
             level: Some(NotificationLevel::OnlyMentions),
+            joined_at: at(MEMBER_JOINED),
         })
     );
     assert!(
@@ -424,9 +433,11 @@ fn the_window_counts_from_the_later_of_message_and_archive_timestamp() {
     assert!(listed(&state, THREAD));
 }
 
+// READY's muted member, joined when ready.json says.
 fn muted_member() -> Option<ThreadMembership> {
     Some(ThreadMembership {
         muted: true,
+        joined_at: at(1_709_281_800_250),
         ..ThreadMembership::default()
     })
 }
@@ -512,6 +523,7 @@ fn a_join_for_a_thread_the_store_doesnt_know_waits_for_it() {
         membership(&state, CREATED),
         Some(ThreadMembership {
             level: Some(NotificationLevel::OnlyMentions),
+            joined_at: at(MEMBER_JOINED),
             ..ThreadMembership::default()
         })
     );

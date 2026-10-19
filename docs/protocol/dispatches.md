@@ -135,7 +135,8 @@ Members decode leniently: a field in another shape falls back to its default, an
 entry in `added_members` is skipped, so payload drift doesn't drop the dispatch.
 
 **What the channel list shows.** `Store::channel_list` puts a thread right after its parent,
-newest created first, when the user joined it, it isn't archived, its parent is viewable, and
+the last joined first (the member's `join_timestamp`, kept like the rest of the membership when
+a payload leaves the member out; equal or unknown times by thread ID, newest first), when the user joined it, it isn't archived, its parent is viewable, and
 it is inside its "Hide After Inactivity" window, unread, or has a mention. The window ends
 `auto_archive_duration` minutes after the later of its newest message and its
 `archive_timestamp` (the [threads](https://docs.discord.food/topics/threads) topic); pinned
@@ -164,8 +165,9 @@ parent), `Toolbar Overflow` (the "…" of a thread opened full width), `Context 
 row's menu, leave only).
 
 The full thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
-`threads: true`. Akari's guild subscriptions ask for it, but THREAD_LIST_SYNC isn't decoded
-yet, so the store ignores it. Losing access to a channel doesn't send THREAD_DELETE for its
+`threads: true`. Akari's guild subscriptions ask for it. The store reads only its `members`, the
+user's own: they refresh the membership, and so the join time, of threads the user already
+joined, and join nothing; its threads aren't kept yet. Losing access to a channel doesn't send THREAD_DELETE for its
 threads ([threads](https://docs.discord.food/topics/threads)); they stay in the store, no longer
 listed, until the next session.
 

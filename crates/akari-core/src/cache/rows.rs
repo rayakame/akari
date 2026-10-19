@@ -428,6 +428,7 @@ impl ChannelRow {
                         muted: member.muted,
                         mute_ends: member.mute_ends.map(timestamp),
                         level: member.level.map(level),
+                        joined_at: None,
                     }),
                     archived: thread.archived,
                     locked: thread.locked,

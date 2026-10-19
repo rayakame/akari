@@ -234,10 +234,26 @@ struct ChannelListModelTests {
     }
 
     @Test
-    func threadsFollowTheirParentNewestFirst() {
+    func threadsFollowTheirParentInTheCoresOrder() {
         let model = threaded()
 
         #expect(model.shown(open: nil).map(\.id) == [id(10), id(11), id(32), id(31), id(12)])
+    }
+
+    @Test
+    func aJoinThatMovesAThreadUpMovesItsRow() {
+        let model = threaded()
+        store.update { state in
+            state.list(
+                [
+                    channel(10, kind: .guildCategory), channel(11, parent: 10),
+                    thread(31, in: 11), thread(32, in: 11), channel(12, parent: 10),
+                ], in: 1)
+        }
+
+        model.apply(EventBatch([.channelUpdated(channelId: id(31), guildId: id(1))]))
+
+        #expect(model.shown(open: nil).map(\.id) == [id(10), id(11), id(31), id(32), id(12)])
     }
 
     @Test

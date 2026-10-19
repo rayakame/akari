@@ -196,6 +196,8 @@ pub struct ThreadMembership {
     pub mute_ends: Option<Timestamp>,
     /// The thread's own notification level; `None` follows its channel. No badge depends on it.
     pub level: Option<NotificationLevel>,
+    /// When the user last joined the thread, which orders the list; `None` if Discord didn't say.
+    pub joined_at: Option<Timestamp>,
 }
 
 impl ThreadMembership {

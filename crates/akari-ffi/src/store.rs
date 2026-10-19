@@ -147,7 +147,7 @@ impl Store {
     }
 
     /// The guild's channel list as Discord shows it, categories included, each channel followed
-    /// by its listed threads, newest first.
+    /// by its listed threads, the last joined first.
     pub fn channel_list(&self, guild_id: GuildId) -> Vec<ChannelId> {
         self.core
             .channel_list(guild_id)

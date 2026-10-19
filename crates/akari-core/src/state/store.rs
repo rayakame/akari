@@ -865,7 +865,7 @@ impl Store {
 
     /// A guild's channel list as Discord shows it: [`display_order`], only channels the
     /// user can view, the categories holding them, and empty categories the user can
-    /// view. Each channel is followed by its listed threads, newest created first: those the
+    /// view. Each channel is followed by its listed threads, the last joined first: those the
     /// user joined that aren't archived and are inside their inactivity window
     /// ([`Channel::window_end`]), unread, or with mentions. The parent's mute and "hide muted
     /// channels" don't change which threads are listed.

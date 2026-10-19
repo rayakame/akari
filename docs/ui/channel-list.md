@@ -138,7 +138,12 @@ Observed in the official web client on 2026-10-17, with the second account and a
   A thread past its window that the user hasn't read stays listed, also after a reload; once
   read, it goes. Threads the user hasn't joined aren't listed. akari-core decides this
   ([dispatches.md](../protocol/dispatches.md#threads)).
-- **Order:** newest created first. New messages don't move a thread.
+- **Order:** the last joined first, by the user's own `join_timestamp` (the time the user last
+  joined the thread); equal times go by thread ID, newest first. New messages don't move a
+  thread; joining or rejoining moves it to the top. Observed 2026-10-19 with the second account:
+  t7, t3, t1, t2, thread-test, exactly their join times newest first, while creation order would
+  swap t1 and t2 (t1 was created first but joined later). The day before, t6, joined after t3,
+  led the list.
 - **Look:**
   - no icon, only the name, in rows as tall as channel rows;
   - joined to the parent by a vertical line, the spine, with a short branch to each row (├,

@@ -759,18 +759,51 @@ fn a_ready_without_the_member_keeps_a_threads_own_mute() {
     assert!(store.channel_muted(Snowflake::new(300_000_000_000_000_020)));
 }
 
-#[test]
-fn threads_follow_their_parent_newest_first() {
-    let store = Store::new(DEFAULT_LIMITS);
-    store.apply(ready_with_threads(
+fn joined_at(mut thread: Value, at: &str) -> Value {
+    thread["member"]["join_timestamp"] = at.into();
+    thread
+}
+
+fn member_of(thread: u64, at: &str) -> Value {
+    json!({
+        "id": thread.to_string(), "user_id": ME.to_string(), "join_timestamp": at,
+        "flags": 1, "muted": false, "mute_config": null
+    })
+}
+
+// Three threads joined in another order than they were created: 022 last, 025 first.
+fn ready_with_joins() -> DispatchEvent {
+    ready_with_threads(
         json!([]),
         vec![
-            thread_in_general(300_000_000_000_000_022, 5),
-            thread_in_general(300_000_000_000_000_025, 50),
-            thread_in_general(300_000_000_000_000_020, 1),
+            joined_at(
+                thread_in_general(300_000_000_000_000_022, 5),
+                "2026-10-17T15:50:54.000000+00:00",
+            ),
+            joined_at(
+                thread_in_general(300_000_000_000_000_025, 50),
+                "2026-10-17T14:00:30.000000+00:00",
+            ),
+            joined_at(
+                thread_in_general(300_000_000_000_000_020, 1),
+                "2026-10-17T14:15:07.000000+00:00",
+            ),
         ],
         |_| {},
-    ));
+    )
+}
+
+fn threads_listed(store: &Store) -> Vec<u64> {
+    ids(&store.channel_list(Snowflake::new(G1)))
+        .into_iter()
+        .filter(|id| ![VOICE, CATEGORY, GENERAL].contains(id))
+        .collect()
+}
+
+#[test]
+fn threads_follow_their_parent_last_joined_first() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_joins());
 
     assert_eq!(
         ids(&store.channel_list(Snowflake::new(G1))),
@@ -778,10 +811,193 @@ fn threads_follow_their_parent_newest_first() {
             VOICE,
             CATEGORY,
             GENERAL,
+            300_000_000_000_000_022,
+            300_000_000_000_000_020,
+            300_000_000_000_000_025
+        ]
+    );
+}
+
+#[test]
+fn equal_join_times_put_the_newest_thread_first() {
+    let at = "2026-10-17T14:00:30.000000+00:00";
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_threads(
+        json!([]),
+        vec![
+            joined_at(thread_in_general(300_000_000_000_000_022, 5), at),
+            joined_at(thread_in_general(300_000_000_000_000_025, 50), at),
+            joined_at(thread_in_general(300_000_000_000_000_020, 1), at),
+        ],
+        |_| {},
+    ));
+
+    assert_eq!(
+        threads_listed(&store),
+        [
             300_000_000_000_000_025,
             300_000_000_000_000_022,
             300_000_000_000_000_020
         ]
+    );
+}
+
+#[test]
+fn a_thread_without_a_join_time_follows_those_with_one() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_threads(
+        json!([]),
+        vec![
+            thread_in_general(300_000_000_000_000_025, 50),
+            joined_at(
+                thread_in_general(300_000_000_000_000_020, 1),
+                "2026-10-17T14:15:07.000000+00:00",
+            ),
+        ],
+        |_| {},
+    ));
+
+    assert_eq!(
+        threads_listed(&store),
+        [300_000_000_000_000_020, 300_000_000_000_000_025]
+    );
+}
+
+#[test]
+fn a_rejoin_moves_the_thread_to_the_top() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_joins());
+    let update = |added: Vec<Value>, removed: Vec<String>| {
+        dispatch(
+            "THREAD_MEMBERS_UPDATE",
+            &json!({
+                "id": "300000000000000020", "guild_id": G1.to_string(), "member_count": 1,
+                "added_members": added, "removed_member_ids": removed
+            }),
+        )
+    };
+
+    store.apply(update(vec![], vec![ME.to_string()]));
+    store.apply(update(
+        vec![member_of(
+            300_000_000_000_000_020,
+            "2026-10-19T19:00:00.000000+00:00",
+        )],
+        vec![],
+    ));
+
+    assert_eq!(
+        threads_listed(&store),
+        [
+            300_000_000_000_000_020,
+            300_000_000_000_000_022,
+            300_000_000_000_000_025
+        ]
+    );
+}
+
+#[test]
+fn a_member_update_with_a_later_join_moves_the_thread_up() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_joins());
+
+    store.apply(dispatch(
+        "THREAD_MEMBER_UPDATE",
+        &json!({
+            "guild_id": G1.to_string(),
+            "id": "300000000000000020", "user_id": ME.to_string(),
+            "join_timestamp": "2026-10-18T10:00:00.000000+00:00",
+            "flags": 1, "muted": false, "mute_config": null
+        }),
+    ));
+
+    assert_eq!(
+        threads_listed(&store),
+        [
+            300_000_000_000_000_020,
+            300_000_000_000_000_022,
+            300_000_000_000_000_025
+        ]
+    );
+}
+
+#[test]
+fn a_thread_payload_without_the_member_keeps_its_join_time() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_joins());
+    let mut renamed = thread_in_general(300_000_000_000_000_025, 50);
+    renamed.as_object_mut().unwrap().remove("member");
+    renamed["name"] = "renamed".into();
+
+    store.apply(dispatch("THREAD_UPDATE", &renamed));
+    store.apply(dispatch("THREAD_CREATE", &renamed));
+
+    assert_eq!(
+        threads_listed(&store),
+        [
+            300_000_000_000_000_022,
+            300_000_000_000_000_020,
+            300_000_000_000_000_025
+        ]
+    );
+}
+
+#[test]
+fn a_thread_list_sync_brings_join_times_of_joined_threads() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_joins());
+
+    store.apply(dispatch(
+        "THREAD_LIST_SYNC",
+        &json!({
+            "guild_id": G1.to_string(),
+            "threads": [],
+            "members": [member_of(300_000_000_000_000_020, "2026-10-18T10:33:21.000000+00:00")]
+        }),
+    ));
+
+    assert_eq!(
+        threads_listed(&store),
+        [
+            300_000_000_000_000_020,
+            300_000_000_000_000_022,
+            300_000_000_000_000_025
+        ]
+    );
+}
+
+#[test]
+fn a_thread_list_sync_joins_nothing() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(ready_with_joins());
+    let mut unjoined = thread_in_general(300_000_000_000_000_027, 1);
+    unjoined.as_object_mut().unwrap().remove("member");
+    store.apply(dispatch("THREAD_CREATE", &unjoined));
+
+    store.apply(dispatch(
+        "THREAD_LIST_SYNC",
+        &json!({
+            "guild_id": G1.to_string(),
+            "members": [
+                member_of(300_000_000_000_000_027, "2026-10-18T10:33:21.000000+00:00"),
+                member_of(300_000_000_000_000_029, "2026-10-18T10:33:21.000000+00:00")
+            ]
+        }),
+    ));
+
+    assert_eq!(
+        threads_listed(&store),
+        [
+            300_000_000_000_000_022,
+            300_000_000_000_000_020,
+            300_000_000_000_000_025
+        ]
+    );
+    assert!(
+        store
+            .channel(Snowflake::new(300_000_000_000_000_027))
+            .and_then(|thread| thread.thread.as_deref().map(|info| info.member))
+            .is_some_and(|member| member.is_none())
     );
 }
 

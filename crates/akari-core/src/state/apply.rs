@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
@@ -20,8 +21,8 @@ use super::windows::{
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
-    GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, ThreadMemberUpdate,
-    ThreadMembersUpdate, UserUpdate,
+    GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, ThreadListSync,
+    ThreadMemberUpdate, ThreadMembersUpdate, UserUpdate,
 };
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
@@ -706,7 +707,8 @@ impl State {
             E::RelationshipRemove(removed) => self.entities.read_states.unrelate(removed.id),
             E::ThreadMemberUpdate(update) => self.thread_member_update(*update, events),
             E::ThreadMembersUpdate(update) => self.thread_members_update(*update, events),
-            E::Resumed | E::ThreadListSync(_) | E::Other(_) => {}
+            E::ThreadListSync(sync) => self.thread_list_sync(*sync, events),
+            E::Resumed | E::Other(_) => {}
         }
     }
 
@@ -890,6 +892,25 @@ impl State {
             return;
         };
         self.set_membership(update.id, member, events);
+    }
+
+    // Joins come from the members events; a sync only refreshes the threads already joined.
+    fn thread_list_sync(&mut self, sync: ThreadListSync, events: &mut Vec<StoreEvent>) {
+        let me = self.entities.me();
+        for member in sync.members {
+            let Some(thread) = member.id else {
+                continue;
+            };
+            let joined = self
+                .entities
+                .channels
+                .get(&thread)
+                .and_then(|known| known.thread.as_deref())
+                .is_some_and(|info| info.member.is_some());
+            if joined && member.user_id.is_none_or(|user| Some(user) == me) {
+                self.set_membership(thread, Some(ThreadMembership::from_wire(member)), events);
+            }
+        }
     }
 
     fn set_membership(
@@ -1493,7 +1514,7 @@ impl State {
         self.badges.listed(channel)
     }
 
-    // Newest created first.
+    // The last joined first, as Discord's sidebar; the newest first among equal or unknown times.
     pub(crate) fn listed_threads(&self, parent: ChannelId) -> Vec<Arc<Channel>> {
         let mut threads: Vec<Arc<Channel>> = self
             .threads
@@ -1501,7 +1522,14 @@ impl State {
             .filter(|thread| self.listed(*thread))
             .filter_map(|thread| self.entities.channels.get(&thread).cloned())
             .collect();
-        threads.reverse();
+        threads.sort_by_key(|thread| {
+            let joined = thread
+                .thread
+                .as_deref()
+                .and_then(|info| info.member)
+                .and_then(|member| member.joined_at);
+            Reverse((joined, thread.id))
+        });
         threads
     }
 

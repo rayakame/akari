@@ -455,6 +455,7 @@ fn a_threads_membership_round_trips() {
             muted: true,
             mute_ends: Some(time(1_700_000_000_123_456_000)),
             level: Some(NotificationLevel::OnlyMentions),
+            joined_at: None,
         });
     }
     let mut unjoined = thread(14, 100, 10);
