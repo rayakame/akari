@@ -20,6 +20,7 @@ impl Permissions {
     pub const READ_MESSAGE_HISTORY: Self = Self(1 << 16);
     pub const MENTION_EVERYONE: Self = Self(1 << 17);
     pub const CHANGE_NICKNAME: Self = Self(1 << 26);
+    pub const MANAGE_THREADS: Self = Self(1 << 34);
     pub const SEND_MESSAGES_IN_THREADS: Self = Self(1 << 38);
     pub const BYPASS_SLOWMODE: Self = Self(1 << 52);
 

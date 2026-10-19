@@ -80,7 +80,9 @@ pub(crate) fn compute(
 
     if channel.is_thread() {
         permissions &= !Permissions::SEND_MESSAGES;
-        if permissions.contains(Permissions::SEND_MESSAGES_IN_THREADS) {
+        let locked = channel.thread.as_deref().is_some_and(|info| info.locked)
+            && !permissions.contains(Permissions::MANAGE_THREADS);
+        if permissions.contains(Permissions::SEND_MESSAGES_IN_THREADS) && !locked {
             permissions |= Permissions::SEND_MESSAGES;
         }
     }
@@ -370,6 +372,54 @@ mod tests {
             thread_of(&guild(VIEW | in_threads, &[]), &hidden_parent),
             Permissions::NONE
         );
+    }
+
+    fn locked(archived: bool, locked: bool) -> Channel {
+        let mut thread = thread();
+        if let Some(info) = thread.thread.as_deref_mut() {
+            info.archived = archived;
+            info.locked = locked;
+        }
+        thread
+    }
+
+    fn in_thread(guild: &Guild, thread: &Channel) -> Permissions {
+        compute(
+            guild,
+            Snowflake::new(USER),
+            &member(&[]),
+            thread,
+            Some(&channel(Vec::new())),
+            noon().unix_millis(),
+        )
+    }
+
+    // Only moderators send in a locked thread; Discord's composer says the user may not.
+    #[test]
+    fn a_locked_thread_lacks_send_without_manage_threads() {
+        let guild = guild(VIEW | Permissions::SEND_MESSAGES_IN_THREADS, &[]);
+
+        assert!(!in_thread(&guild, &locked(false, true)).contains(SEND));
+        assert!(!in_thread(&guild, &locked(true, true)).contains(SEND));
+        assert!(in_thread(&guild, &locked(false, true)).contains(VIEW));
+    }
+
+    #[test]
+    fn a_locked_thread_keeps_send_with_manage_threads() {
+        let guild = guild(
+            VIEW | Permissions::SEND_MESSAGES_IN_THREADS | Permissions::MANAGE_THREADS,
+            &[],
+        );
+
+        assert!(in_thread(&guild, &locked(false, true)).contains(SEND));
+    }
+
+    // Sending reopens a closed thread.
+    #[test]
+    fn an_archived_thread_keeps_send() {
+        let guild = guild(VIEW | Permissions::SEND_MESSAGES_IN_THREADS, &[]);
+
+        assert!(in_thread(&guild, &locked(true, false)).contains(SEND));
     }
 
     #[test]
