@@ -1247,6 +1247,44 @@ fn a_members_update_with_unknown_fields_decodes() {
 }
 
 #[test]
+fn thread_list_sync_decodes_its_members() {
+    let DispatchEvent::ThreadListSync(sync) = dispatch(
+        "THREAD_LIST_SYNC",
+        include_str!("fixtures/thread_list_sync.json"),
+    ) else {
+        panic!("expected THREAD_LIST_SYNC");
+    };
+
+    assert_eq!(sync.guild_id, Some(Snowflake::new(200_000_000_000_000_001)));
+    assert_eq!(sync.members.len(), 1);
+    let member = &sync.members[0];
+    assert_eq!(member.id, Some(Snowflake::new(300_000_000_000_000_021)));
+    assert_eq!(
+        member.user_id,
+        Some(Snowflake::new(100_000_000_000_000_001))
+    );
+    assert_eq!(
+        member.join_timestamp.map(Timestamp::unix_millis),
+        Some(1_792_246_507_000)
+    );
+}
+
+#[test]
+fn a_thread_list_sync_in_another_shape_still_decodes() {
+    let drifted = edited(include_str!("fixtures/thread_list_sync.json"), |value| {
+        let good = value["members"][0].clone();
+        value["members"] = serde_json::json!(["bad", good]);
+        value["threads"] = serde_json::json!({"changed": "shape"});
+        value["channel_ids"] = Value::Null;
+    });
+    let DispatchEvent::ThreadListSync(sync) = dispatch("THREAD_LIST_SYNC", &drifted) else {
+        panic!("expected THREAD_LIST_SYNC");
+    };
+
+    assert_eq!(sync.members.len(), 1);
+}
+
+#[test]
 fn thread_delete_decodes_its_four_fields() {
     let event = dispatch(
         "THREAD_DELETE",

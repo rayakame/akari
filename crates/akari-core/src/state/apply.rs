@@ -706,7 +706,7 @@ impl State {
             E::RelationshipRemove(removed) => self.entities.read_states.unrelate(removed.id),
             E::ThreadMemberUpdate(update) => self.thread_member_update(*update, events),
             E::ThreadMembersUpdate(update) => self.thread_members_update(*update, events),
-            E::Resumed | E::Other(_) => {}
+            E::Resumed | E::ThreadListSync(_) | E::Other(_) => {}
         }
     }
 

@@ -73,6 +73,16 @@ pub struct ThreadMembersUpdate {
     pub removed_member_ids: Vec<UserId>,
 }
 
+/// THREAD_LIST_SYNC: the active threads of some of a guild's channels, sent when the user
+/// subscribes to them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ThreadListSync {
+    pub guild_id: Option<GuildId>,
+    /// The current user's members of the synced threads it joined.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub members: Vec<ThreadMember>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct MessageDelete {
     pub id: MessageId,

@@ -4,7 +4,7 @@ use serde_json::value::RawValue;
 
 use super::dispatch::{
     ChannelDelete, GuildDelete, GuildRoleDelete, GuildRoleEvent, MessageDelete, MessageDeleteBulk,
-    ReadySupplemental, ThreadMemberUpdate, ThreadMembersUpdate,
+    ReadySupplemental, ThreadListSync, ThreadMemberUpdate, ThreadMembersUpdate,
 };
 use super::guild::GatewayGuild;
 use super::hello::Hello;
@@ -59,6 +59,7 @@ pub enum DispatchEvent {
     ThreadDelete(ChannelDelete),
     ThreadMemberUpdate(Box<ThreadMemberUpdate>),
     ThreadMembersUpdate(Box<ThreadMembersUpdate>),
+    ThreadListSync(Box<ThreadListSync>),
     MessageCreate(Box<Message>),
     MessageUpdate(Box<MessageUpdate>),
     MessageDelete(MessageDelete),
@@ -100,6 +101,7 @@ impl DispatchEvent {
             Self::ThreadDelete(_) => "THREAD_DELETE",
             Self::ThreadMemberUpdate(_) => "THREAD_MEMBER_UPDATE",
             Self::ThreadMembersUpdate(_) => "THREAD_MEMBERS_UPDATE",
+            Self::ThreadListSync(_) => "THREAD_LIST_SYNC",
             Self::MessageCreate(_) => "MESSAGE_CREATE",
             Self::MessageUpdate(_) => "MESSAGE_UPDATE",
             Self::MessageDelete(_) => "MESSAGE_DELETE",
@@ -224,6 +226,7 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
         "THREAD_MEMBERS_UPDATE" => {
             parse(json).map(|update| E::ThreadMembersUpdate(Box::new(update)))
         }
+        "THREAD_LIST_SYNC" => parse(json).map(|sync| E::ThreadListSync(Box::new(sync))),
         "MESSAGE_CREATE" => parse(json).map(|message| E::MessageCreate(Box::new(message))),
         "MESSAGE_UPDATE" => parse(json).map(|update| E::MessageUpdate(Box::new(update))),
         "MESSAGE_DELETE" => parse(json).map(E::MessageDelete),
