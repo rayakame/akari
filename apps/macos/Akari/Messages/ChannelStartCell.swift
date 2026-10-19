@@ -24,6 +24,8 @@ final class ChannelStartCell: NSTableCellView {
     private let iconHeight: NSLayoutConstraint
     private let subtitleAfterTitle: NSLayoutConstraint
     private let subtitleAfterUsername: NSLayoutConstraint
+    private var bottomAfterSubtitle: NSLayoutConstraint?
+    private var bottomAfterTitle: NSLayoutConstraint?
 
     init() {
         iconWidth = icon.widthAnchor.constraint(equalToConstant: Self.iconSize)
@@ -39,9 +41,14 @@ final class ChannelStartCell: NSTableCellView {
             addSubview(view)
         }
         // The table sizes the row; a required bottom would conflict while it moves row views.
-        let bottom = bottomAnchor.constraint(
+        let bottomAfterSubtitle = bottomAnchor.constraint(
             equalTo: subtitle.lastBaselineAnchor, constant: Self.bottom)
-        bottom.priority = .init(999)
+        let bottomAfterTitle = bottomAnchor.constraint(
+            equalTo: title.lastBaselineAnchor, constant: Self.bottom)
+        bottomAfterSubtitle.priority = .init(999)
+        bottomAfterTitle.priority = .init(999)
+        self.bottomAfterSubtitle = bottomAfterSubtitle
+        self.bottomAfterTitle = bottomAfterTitle
         NSLayoutConstraint.activate([
             icon.topAnchor.constraint(equalTo: topAnchor, constant: Self.top),
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
@@ -56,7 +63,7 @@ final class ChannelStartCell: NSTableCellView {
                 equalTo: title.lastBaselineAnchor, constant: Self.usernameBaseline),
             subtitle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
             subtitle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.side),
-            subtitleAfterTitle, bottom,
+            subtitleAfterTitle, bottomAfterSubtitle,
         ])
     }
 
@@ -82,8 +89,11 @@ final class ChannelStartCell: NSTableCellView {
         if start.username != nil {
             height += usernameBaseline + lines(sizing.username)
         }
+        if start.subtitle != nil {
+            height += subtitleBaseline + lines(sizing.subtitle)
+        }
         // Auto Layout gives the cell whole points.
-        return (height + subtitleBaseline + lines(sizing.subtitle) + bottom).rounded(.up)
+        return (height + bottom).rounded(.up)
     }
 
     func show(_ start: ChannelStart?) {
@@ -107,9 +117,20 @@ final class ChannelStartCell: NSTableCellView {
             : (subtitleAfterTitle, subtitleAfterUsername)
         off.isActive = false
         on.isActive = true
-        subtitle.show(
-            CellText.plain(
-                start.subtitle, style: TypeScale.startSubtitle, color: Palette.textDefault))
+        subtitle.isHidden = start.subtitle == nil
+        let (unused, bottom) =
+            start.subtitle == nil
+            ? (bottomAfterSubtitle, bottomAfterTitle) : (bottomAfterTitle, bottomAfterSubtitle)
+        unused?.isActive = false
+        bottom?.isActive = true
+        let line = NSMutableAttributedString(
+            attributedString: CellText.plain(
+                start.subtitle ?? "", style: TypeScale.startSubtitle, color: Palette.textDefault))
+        if let name = start.subtitleName {
+            line.append(
+                CellText.plain(name, style: TypeScale.startOwner, color: Palette.textStrong))
+        }
+        subtitle.show(line)
     }
 }
 

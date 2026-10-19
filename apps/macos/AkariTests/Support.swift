@@ -25,7 +25,8 @@ func row(
     _ raw: UInt64, by user: User = author(1), at time: Date, kind: MessageType = .default,
     content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false,
     attachments: [String] = [], embedCount: UInt32 = 0, stickers: [String] = [],
-    delivery: Delivery = .sent, edited: Date? = nil
+    delivery: Delivery = .sent, edited: Date? = nil, reference: MessageReference? = nil,
+    hasThread: Bool = false
 ) -> MessageListModel.Row {
     let files = attachments.enumerated().map { index, name in
         Attachment(
@@ -38,7 +39,8 @@ func row(
         author: user, fromWebhook: false, content: content, timestamp: time,
         editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
         embedCount: embedCount, stickerNames: stickers, componentsV2: componentsV2,
-        delivery: delivery, formatted: formattedText(content: content), mentionsMe: false, reference: nil, hasThread: false)
+        delivery: delivery, formatted: formattedText(content: content), mentionsMe: false,
+        reference: reference, hasThread: hasThread)
     return MessageListModel.Row(id: MessageId(rawValue: key ?? raw), message: message)
 }
 

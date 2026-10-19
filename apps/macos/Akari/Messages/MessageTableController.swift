@@ -418,7 +418,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         case "channel":
             actions?.openChannel(ChannelId(rawValue: value))
         case "link":
-            let links = row.message.formatted.links
+            let links = row.shown.formatted.links
             if value < links.count, let target = URL(string: links[Int(value)].url) {
                 actions?.openLink(target, masked: true)
             }
@@ -858,8 +858,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         case .newMessages:
             return NewMessagesDivider.height
         case .message(let row, let startsGroup):
-            let message = row.message
-            if let notice = message.notice {
+            let message = row.shown
+            if let notice = row.notice {
                 let time = MessageFormat.groupTime(
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(
@@ -902,12 +902,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return reuse(NewMessagesDivider.identifier) as? NewMessagesDivider
                 ?? NewMessagesDivider()
         case .message(let row, let startsGroup):
-            let message = row.message
+            let message = row.shown
             let groupTime = MessageFormat.groupTime(
                 message.timestamp, now: now(), calendar: calendar, locale: locale)
             let fullDate = MessageFormat.fullDate(
                 message.timestamp, calendar: calendar, locale: locale)
-            if let notice = message.notice {
+            if let notice = row.notice {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
@@ -918,8 +918,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 reuse(MessageCell.identifier) as? MessageCell
                 ?? Signposts.interval("message cell made") { MessageCell() }
             cell.isHovered = item.id == hovered
-            cell.onRetry = { [weak self] in self?.actions?.retry(message.id) }
-            cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
+            cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
+            cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
@@ -935,11 +935,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let revealed = revealed[row.id] ?? []
         let now = now()
         // A relative time that changed waits for the timer, which re-measures its row too.
-        if let cached = texts[row.id], cached.revealed == revealed, cached.message == row.message {
+        if let cached = texts[row.id], cached.revealed == revealed, cached.message == row.shown {
             return cached.built.text
         }
-        let built = build(row.message, revealed, now, times)
-        texts[row.id] = (row.message, revealed, built)
+        let built = build(row.shown, revealed, now, times)
+        texts[row.id] = (row.shown, revealed, built)
         relativeTimes[row.id] = built.nextChange
         return built.text
     }
@@ -1301,7 +1301,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return top
         }
         let afterDay = followsDay(row - 1)
-        if item.message.notice != nil {
+        if item.notice != nil {
             return top + NoticeCell.textTop(followsDay: false, followsLine: true)
                 - NoticeCell.textTop(followsDay: afterDay, followsLine: false)
         }

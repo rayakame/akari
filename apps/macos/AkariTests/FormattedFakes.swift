@@ -172,7 +172,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(number) * 600),
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
                 embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
-                formatted: formattedText(content: content), mentionsMe: mentioned, reference: nil, hasThread: false)
+                formatted: formattedText(content: content), mentionsMe: mentioned,
+                reference: nil, hasThread: false)
         }
     }
 

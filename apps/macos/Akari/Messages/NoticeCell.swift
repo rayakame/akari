@@ -88,7 +88,7 @@ final class NoticeCell: NSTableCellView {
         followsLine ? lineTop : followsDay ? dayTop : top
     }
 
-    private static func symbol(_ kind: MessageType) -> String {
+    static func symbol(_ kind: MessageType) -> String {
         switch kind {
         case .userJoin: "arrow.right"
         case .channelPinnedMessage: "pin"
@@ -97,7 +97,7 @@ final class NoticeCell: NSTableCellView {
             "sparkles"
         case .call: "phone"
         case .channelNameChange, .channelIconChange: "pencil"
-        case .threadCreated: "text.bubble"
+        case .threadCreated, .threadStarterMessage: "text.bubble"
         default: "info.circle"
         }
     }

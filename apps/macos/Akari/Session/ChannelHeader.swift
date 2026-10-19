@@ -1,4 +1,5 @@
 import AkariKit
+import AppKit
 import SwiftUI
 
 struct ChannelHeader: View {
@@ -6,10 +7,35 @@ struct ChannelHeader: View {
 
     let channel: Channel?
     let name: String
+    // A thread's channel, before its name; clicking it opens the channel.
+    var parent: Channel?
+    var openParent: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 8) {
             if let channel {
+                if let parent, channel.isThread {
+                    ChannelSymbol(channel: parent)
+                    Button(action: openParent) {
+                        Text(parent.name ?? "")
+                            .font(TypeScale.channelHeader.font)
+                            .foregroundStyle(Color(nsColor: Palette.interactiveText))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { inside in
+                        if inside {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                    .accessibilityLabel(parent.name ?? "")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color(nsColor: Palette.textMuted))
+                        .accessibilityHidden(true)
+                }
                 ChannelSymbol(channel: channel)
                 Text(name)
                     .font(TypeScale.channelHeader.font)
