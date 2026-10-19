@@ -136,8 +136,10 @@ thread, a renamed channel, and so on) show as one line:
 2026-10-17 and 2026-10-19): "Ray", "t2" and "threads" in `textStrong` (#FBFBFB) and medium, the
 rest in `chatTextMuted` (#818289), all three links with the pointing hand and an underline while
 the pointer is over them. The thread's name opens the thread, "threads" the channel's Threads
-popover, and "Ray" the profile (**unverified**). *Akari: the name opens the thread full width; "Ray" and
-"threads" are drawn the same but aren't links yet: Akari has no profiles and no Threads popover.*
+popover, and "Ray" the profile (**unverified**). *Akari: the name opens the thread full width
+while Akari has the thread (a joined one, or one seen this session); for one it doesn't have,
+such as a thread archived since, the name stays strong text. "Ray" and "threads" are drawn the
+same but aren't links yet: Akari has no profiles and no Threads popover.*
 Whether Discord draws other system messages' actors the same way isn't observed; Akari keeps
 them in one `textMuted` sentence.
 
