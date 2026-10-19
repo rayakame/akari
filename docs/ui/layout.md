@@ -83,6 +83,12 @@ The rail and the channel list together form the sidebar.
 - 16 padding on the left, 8 between toolbar buttons on the right.
 - A guild channel shows its icon, its name, a short divider and the topic on one line. A DM
   shows the other person's name.
+- A thread opened full width shows its channel first: "# new › [thread] t1", the channel's
+  symbol and name, a chevron, the thread's symbol and its name (observed 2026-10-17). Clicking
+  the channel's name opens the channel. The official client also has Threads, the bell, pins,
+  members, "…" and a search field on the right; Akari has none of them yet. *Akari: the
+  channel's name in `interactiveText` at the header's size with the pointing hand, the chevron
+  11 semibold `textMuted`; not measured yet.*
 
 ## User panel
 

@@ -33,7 +33,9 @@ Sending shrinks it back to one line.
 
 The official client's wording, in `textMuted`, at the size of message text:
 
-- a guild channel or thread: "Message #general";
+- a guild channel: "Message #general";
+- a thread: "Message "t1"", its name in quotes (observed 2026-10-17; German "Nachricht an
+  "t1"");
 - a DM: "Message @Mira", with the other person's display name.
 - a group DM: "Message Weekend plans", the group's name without "@" (**unverified**).
 
@@ -80,8 +82,21 @@ never reaches back past a send or into another channel's draft.
 ## Without permission
 
 When the user can't send in a channel, the card stays where it is, dimmed and disabled, and
-says "You can't send messages in this channel." The official client keeps a dimmed composer
-with a similar note (**unverified**). The same applies while the user is timed out.
+says "You do not have permission to send messages in this channel.", the official client's
+words (observed 2026-10-17 in a locked thread and a channel without send permission). The same
+applies while the user is timed out.
+
+## Threads
+
+- **A closed (archived) thread** has the normal composer and no notice; sending reopens it
+  (observed 2026-10-17).
+- **A locked thread** shows a gray banner at the top of its messages, "This thread has been
+  locked. Only moderators can send messages.", and the composer is disabled with the text
+  above (observed 2026-10-17). Only Manage Threads (moderators, the owner, administrators) can
+  send there. *Akari: the banner shows for moderators too (**unverified**); 32 tall, 16 from
+  the sides and 4 from the top like the unread bar, in `card` with a lock symbol and 14 medium
+  `textDefault` text; not measured yet.*
+- Sending in a thread the user hasn't joined joins it, with no request besides the message.
 
 ## Slowmode
 

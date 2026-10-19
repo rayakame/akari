@@ -11,9 +11,11 @@ server rail (the user's order, with folders, unread pills and mention badges, an
 with mentions under Home), a server's channel list (muted channels dimmed, "hide muted
 channels" followed, unread rows bright with their counts, a collapsed category keeping
 its unread and mentioned channels, and joined threads under their parent, hung from a spine
-with branches), the DM list at home, the channel header, the user panel, the message list with formatted
-messages, and the composer. Images, attachments, reactions, replies, the thread view beyond
-its messages, voice, notifications and settings come later.
+with branches), the DM list at home, the channel header (a thread's with its channel's name,
+which opens the channel), the user panel, the message list with formatted messages (a thread's
+start with its owner, its starter message, the "started a thread" line with its link), and
+the composer (a locked thread's banner). Images, attachments, reactions, replies, the box
+under a message with a thread, the split view, voice, notifications and settings come later.
 
 ## Messages and the composer
 

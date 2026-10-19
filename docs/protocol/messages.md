@@ -98,6 +98,26 @@ every stale window with the latest 100 messages:
   nothing.
 - Older parts of a window aren't re-checked, like the official client.
 
+## A thread's starter message
+
+A thread started from a message begins with a `THREAD_STARTER_MESSAGE` (21): no content, only
+`message_reference` (the parent channel's message) and `referenced_message`, which is the
+message, `null` when it was deleted, or absent when "the backend did not attempt to fetch" it
+([Messages](https://docs.discord.food/resources/message)). Get Message
+(`GET /channels/{c}/messages/{m}`) "is not usable by user accounts", so when a page of the
+thread brings a starter without its message, Akari asks the parent channel for the page of one
+around it, `GET /channels/{parent}/messages?limit=1&around={id}`, through the rate limiter.
+
+- The message whose ID was asked for is the starter. A page without it, or a Discord error (403
+  Missing Access, 404) means it's gone: `StarterMessage::Unavailable`.
+- A network or server error leaves it `Unavailable` too, and the thread's next page asks again.
+- Otherwise each thread's starter is asked for once per account. While the request runs the
+  starter is `Loading`; once it settles, `MessageUpdated` for the thread's first message tells a
+  list to read it again. The disk cache doesn't keep `referenced_message`, so a cached starter is
+  fetched only when no fresh page of the thread brings the message along.
+- A loaded starter is the parent window's copy when that window holds the message, so a list
+  reading it gets the newest edit; an edit in the parent sends no event for the thread's row.
+
 ## Sending
 
 [Create Message](https://docs.discord.food/resources/message#create-message):

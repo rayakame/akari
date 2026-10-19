@@ -38,7 +38,8 @@ and mention counts per channel and server) and `Account`, which keeps the store
 current from the gateway, ends timed mutes, loads message history and sends messages over
 rate-limited REST, applying the message length limit and slowmode; it also acks what the user
 reads (paced per channel, one request at a time, "now" message IDs from Discord's clock, not the
-Mac's) and marks channels and servers read, in bulk chunks;
+Mac's; threads with their flag) and marks channels and servers read, in bulk chunks; it fetches a
+thread's starter message when Discord leaves it out;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, and show where a channel's unread state and mentions come from. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
@@ -49,7 +50,9 @@ rail (the user's order, with folders, unread pills and mention badges, and unrea
 Home), the channel and DM lists (muted channels dimmed, unread rows bright with the pill, channel
 rows with their counts, joined threads under their parent), a
 message list that loads history in both directions, with the "new messages" line and the unread
-bar, the composer, and marking read with Escape, Shift+Escape and the context menus; it shows the
+bar, the composer, and marking read with Escape, Shift+Escape and the context menus; a thread
+opens with its header ("# channel › thread"), its start and starter message, and a locked
+thread's banner, and the "started a thread" line links to its thread; it shows the
 connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
 messages, which the macOS app restores before the gateway connects. `akari-markdown` parses

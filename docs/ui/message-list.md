@@ -69,14 +69,19 @@ group when any of these holds:
 5. Both are webhook messages and their author names differ. One webhook can post under
    several names.
 6. It is a reply, or the result of a slash command or a context-menu command.
-7. Its timestamp is **7 minutes (420 seconds) or more** after the previous message's. At
+7. It or the previous message has a thread started from it (observed 2026-10-19: Ray's 17:22
+   message with a thread started a group 6 minutes after his 17:16 one). That the message
+   *after* one with a thread starts a group is **unverified**; the thread's box sits between
+   them.
+8. It or the previous message is a thread's starter ([Threads](#threads)).
+9. Its timestamp is **7 minutes (420 seconds) or more** after the previous message's. At
    419 seconds it still continues the group.
 
 Otherwise it continues the previous message's group.
 
-Discord also starts a group for a message that has a thread, when ephemeral, scheduled,
-blocked or silent state changes, when the posting application changes, and for the first
-message of a forum post. Akari applies those once its records carry the fields they need.
+Discord also starts a group when ephemeral, scheduled, blocked or silent state changes, when
+the posting application changes, and for the first message of a forum post. Akari applies
+those once its records carry the fields they need.
 
 ## Times
 
@@ -86,13 +91,13 @@ The time in a group's first line:
 |---|---|
 | Today | the time only, "2:05 PM" (observed 2026-10-14) |
 | Yesterday | "Yesterday at 11:59 PM" (**unverified** since the today form changed) |
-| Earlier, or a date in the future | numeric date and short time, "10/03/2026, 2:05 PM" (**unverified** since then) |
+| Earlier, or a date in the future | the locale's short date and short time, "10/17/26, 4:02 PM"; German "17.10.26, 16:02" (observed 2026-10-19) |
 
 All of them follow the user's locale and time zone, also when those change while the app
 runs: at midnight "2:05 PM" becomes "Yesterday at 2:05 PM", and a new time zone or locale
 redraws the times and moves day dividers without reopening the channel. Hovering the time
-shows the full date and time. Discord writes the older form without the comma; Akari uses the
-platform's date format for the locale.
+shows the full date and time. Akari uses the platform's short date and time styles for the
+locale, which include the user's own date format and 24-hour settings.
 
 ### Locale
 
@@ -124,14 +129,25 @@ thread, a renamed channel, and so on) show as one line:
 
 - a muted icon in the avatar column;
 - a sentence naming who did what, in `textMuted`;
-- the time; hovering it, and only it, shows the full date and time, as Discord does.
+- the time, one space after the sentence and on its baseline (observed 2026-10-19); hovering
+  it, and only it, shows the full date and time, as Discord does.
+
+**A new thread** posts "Ray started a thread: t2. See all threads." in the channel (observed
+2026-10-17 and 2026-10-19): "Ray", "t2" and "threads" in `textStrong` (#FBFBFB) and medium, the
+rest in `chatTextMuted` (#818289), all three links with the pointing hand and an underline while
+the pointer is over them. The thread's name opens the thread, "threads" the channel's Threads
+popover, and "Ray" the profile (**unverified**). *Akari: the name opens the thread full width; "Ray" and
+"threads" are drawn the same but aren't links yet: Akari has no profiles and no Threads popover.*
+Whether Discord draws other system messages' actors the same way isn't observed; Akari keeps
+them in one `textMuted` sentence.
 
 They never join a group and always end one. Akari writes these sentences in its own words; it
 doesn't reuse Discord's texts, such as its random welcome lines.
 
 **Which messages count as system messages:** every message type except the default type,
 replies, slash-command and context-menu command results, thread starter messages, and types
-Akari doesn't know. A type Akari doesn't know shows its content like an ordinary message.
+Akari doesn't know. A type Akari doesn't know shows its content like an ordinary message. A
+thread's starter that can't be loaded shows as one ([Threads](#threads)).
 
 ## Selecting text
 
@@ -191,6 +207,29 @@ with Mira." **Group DMs** show the group symbol, the group's name and "Welcome t
 beginning of the Weekend plans group." **Unverified**: the DM and group sizes, spacing and
 wording, which no screenshot showed yet; the official DM header also has buttons (add friend,
 block) that Akari leaves out.
+
+## Threads
+
+A thread opens like a channel, with its own start, starter and composer. Observed in the
+official web client on 2026-10-17 (German and English UI) and from the user's screenshots on
+2026-10-19.
+
+- **The start** of every thread: the round icon with the thread symbol, the thread's name as the
+  title ("t1"), and "Started by Ray" with the owner's name in `textStrong` and semibold, the rest
+  in the subtitle's `textDefault`. Then the day divider and the messages. *Akari: the channel
+  start's sizes; the owner's name from the store or from a loaded message of theirs. While no
+  name is known, the line is left out (**unverified** what the official client shows then).*
+- **The starter.** A thread started from a message begins with that message, drawn as it is in
+  the channel: its author, its time and its content, not as a reply. It is a group of its own,
+  and the next message starts a new one with a full header, whatever the time between them.
+- **A starter that can't be loaded** (deleted, or not readable): after the day divider, a
+  system line with the thread symbol, "Sorry, we couldn't load the first message in this
+  thread", and its time; then the other messages.
+- *Akari:* when Discord sends the starter without the message it points at, Akari fetches that
+  message once ([messages.md](../protocol/messages.md#a-threads-starter-message)); until it's
+  there the starter has no row, and the new messages line waits on the next one. A starter
+  whose fetch failed shows the "couldn't load" line until a later page of the thread fetches it
+  again.
 
 ## Jump to present
 

@@ -51,7 +51,7 @@ read state, and `GuildBadgeChanged { guild_id }` that guild's badge and its fold
 
 ## Threads
 
-`channel_list(guild_id)` puts each channel's listed threads right after it, newest created
+`channel_list(guild_id)` puts each channel's listed threads right after it, the last joined
 first: those the user joined that aren't archived and are inside their "Hide After Inactivity"
 window, unread, or with a mention. A thread's `Channel` carries `thread: ThreadInfo` (joined,
 archived, locked, private, its message count and owner). `ThreadListingChanged { guild_id,
@@ -59,6 +59,14 @@ thread_id }` says to read the list again when a thread left or rejoined it witho
 itself (its window ended, it was read past it, a message came after it); joining, leaving and
 closing come as `ChannelUpdated`. Which listed threads a list hides (under a collapsed
 category, a muted parent, "hide muted channels") is the host's rule.
+
+A `Message` carries its `reference` (what a reply, pin, forward or thread notice points at; a
+"started a thread" message's `channel_id` is its thread) and `has_thread`, set when a thread was
+started from it. `starter_message(thread_id)` reads a thread's first message when it started
+from a message in its channel: `Loaded { message }` with the parent's `Message`, `Loading`
+while the core fetches it (Discord sometimes leaves it out), or `Unavailable` when it was
+deleted or can't be read; `None` until the thread's window holds its first message. When it
+settles, `MessageUpdated` names that first message.
 
 Acks: `set_reading(channel_id)` names the channel the user is reading at its newest messages
 (or `None`), `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request
