@@ -92,13 +92,11 @@ final class NoticeCell: NSTableCellView {
                 line.append(link)
             }
         }
-        line.append(
-            NSAttributedString(
-                string: "  ",
-                attributes: [.font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted]
-            ))
+        line.append(CellText.body(" ", color: gray))
+        // On the text's baseline, which the body raises (D122).
         var timeAttributes: [NSAttributedString.Key: Any] = [
             .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
+            .baselineOffset: CellText.bodyRaise,
         ]
         if let fullDate, !fullDate.isEmpty {
             timeAttributes[.toolTip] = fullDate

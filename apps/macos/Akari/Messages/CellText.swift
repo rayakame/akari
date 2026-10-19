@@ -16,6 +16,9 @@ enum CellText {
         NSAttributedString(string: text, attributes: [.font: style.nsFont, .foregroundColor: color])
     }
 
+    // How far body text sits above its line's baseline, centering it on the 22 line.
+    static var bodyRaise: CGFloat { TypeScale.size(3) }
+
     static func body(_ text: String, color: NSColor, style: TextStyle = TypeScale.body)
         -> NSAttributedString
     {
@@ -23,7 +26,7 @@ enum CellText {
             string: text,
             attributes: [
                 .font: style.nsFont, .foregroundColor: color,
-                .paragraphStyle: bodyLine, .baselineOffset: TypeScale.size(3),
+                .paragraphStyle: bodyLine, .baselineOffset: bodyRaise,
             ])
     }
 
