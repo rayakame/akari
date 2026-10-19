@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::fs::{self, DirBuilder};
 use std::io;
 use std::os::unix::fs::DirBuilderExt as _;
@@ -532,6 +533,7 @@ struct WireFacts {
     guild_flags: Option<u64>,
     channel_override: Option<Value>,
     parent_override: Option<Value>,
+    threads: Vec<Value>,
 }
 
 fn wire_facts(frame: &Value, channel: u64) -> WireFacts {
@@ -574,8 +576,24 @@ fn wire_facts(frame: &Value, channel: u64) -> WireFacts {
                 "last_message_id",
                 "last_pin_timestamp",
                 "flags",
+                "thread_metadata",
+                "member",
             ],
         ));
+        let mut threads: Vec<&Value> = list(&guild["threads"])
+            .iter()
+            .filter(|thread| thread["parent_id"].as_str() == Some(&id))
+            .collect();
+        threads.sort_by_key(|thread| Reverse(snowflake(&thread["id"])));
+        facts.threads = threads
+            .into_iter()
+            .map(|thread| {
+                picked(
+                    thread,
+                    &["id", "last_message_id", "thread_metadata", "member"],
+                )
+            })
+            .collect();
         let features = guild
             .get("features")
             .or_else(|| guild["properties"].get("features"));
@@ -628,6 +646,13 @@ fn wire_lines(facts: &WireFacts) -> Vec<String> {
         return lines;
     };
     lines.push(format!("  channel: {channel}"));
+    lines.push(format!(
+        "  its threads in READY, newest created first: {}",
+        facts.threads.len()
+    ));
+    for thread in &facts.threads {
+        lines.push(format!("    {thread}"));
+    }
     lines.push(format!(
         "  server: COMMUNITY feature: {}; user guild settings flags {} (OPT_IN_CHANNELS_ON: {})",
         facts.community.map_or("unknown", yes),
@@ -808,6 +833,26 @@ mod tests {
     const CHANNEL: u64 = 200_000_000_000_000_002;
     const CATEGORY: &str = "200000000000000009";
     const GUILD: &str = "100000000000000001";
+    const THREAD: u64 = 200_000_000_000_000_011;
+    const NEWER_THREAD: u64 = 200_000_000_000_000_012;
+
+    fn thread(id: u64, parent: u64, joined: &str) -> Value {
+        json!({
+            "id": id.to_string(),
+            "type": 11,
+            "name": "secret-thread",
+            "parent_id": parent.to_string(),
+            "last_message_id": (id + 100_000_000_000_000_000).to_string(),
+            "thread_metadata": {
+                "archived": false,
+                "auto_archive_duration": 4320,
+                "archive_timestamp": "2026-10-17T14:21:24.724000+00:00",
+                "locked": false,
+                "create_timestamp": "2026-10-17T13:46:03.744000+00:00"
+            },
+            "member": {"join_timestamp": joined, "flags": 1, "muted": false, "mute_config": null}
+        })
+    }
 
     fn ready() -> Value {
         json!({
@@ -844,7 +889,11 @@ mod tests {
                             "flags": 0
                         }
                     ],
-                    "threads": []
+                    "threads": [
+                        thread(THREAD, CHANNEL, "2026-10-17T14:30:00.000000+00:00"),
+                        thread(NEWER_THREAD, CHANNEL, "2026-10-17T14:10:00.000000+00:00"),
+                        thread(200_000_000_000_000_013, 200_000_000_000_000_001, "2026-10-17T14:40:00.000000+00:00")
+                    ]
                 }],
                 "user_guild_settings": {
                     "version": 3,
@@ -903,6 +952,48 @@ mod tests {
         assert!(text.contains("\"mention_count\":2"), "{text}");
         assert!(text.contains("COMMUNITY feature: yes"), "{text}");
         assert!(text.contains("OPT_IN_CHANNELS_ON: yes"), "{text}");
+    }
+
+    #[test]
+    fn a_parent_lists_its_threads_with_their_membership_and_times() {
+        let facts = wire_facts(&ready(), CHANNEL);
+        let text = wire_lines(&facts).join("\n");
+
+        let ids: Vec<Value> = facts
+            .threads
+            .iter()
+            .map(|thread| thread["id"].clone())
+            .collect();
+        assert_eq!(
+            ids,
+            [json!("200000000000000012"), json!("200000000000000011")]
+        );
+        for shown in [
+            "\"join_timestamp\":\"2026-10-17T14:30:00.000000+00:00\"",
+            "\"join_timestamp\":\"2026-10-17T14:10:00.000000+00:00\"",
+            "\"archive_timestamp\":\"2026-10-17T14:21:24.724000+00:00\"",
+            "\"create_timestamp\":\"2026-10-17T13:46:03.744000+00:00\"",
+            "\"last_message_id\":\"300000000000000011\"",
+        ] {
+            assert!(text.contains(shown), "{shown} in {text}");
+        }
+        assert!(!text.contains("2026-10-17T14:40"), "{text}");
+        assert!(!text.contains("secret"), "{text}");
+    }
+
+    #[test]
+    fn a_thread_shows_its_own_membership_and_times() {
+        let facts = wire_facts(&ready(), THREAD);
+
+        let channel = facts.channel.unwrap_or_default();
+        assert_eq!(
+            channel["member"]["join_timestamp"],
+            json!("2026-10-17T14:30:00.000000+00:00")
+        );
+        assert_eq!(
+            channel["thread_metadata"]["create_timestamp"],
+            json!("2026-10-17T13:46:03.744000+00:00")
+        );
     }
 
     #[test]

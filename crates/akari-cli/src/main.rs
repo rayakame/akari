@@ -42,8 +42,8 @@ enum Command {
     Logout,
     /// Connect to the gateway with the stored login and print a summary of READY.
     Connect(ConnectArgs),
-    /// Print what Discord sent and what Akari has for one channel's unread state and
-    /// mentions: IDs, flags and counts, no names or message content.
+    /// Print what Discord sent and what Akari has for one channel's unread state, mentions
+    /// and threads: IDs, flags, counts and times, no names or message content.
     ReadState(ReadStateArgs),
     #[command(flatten)]
     Session(SessionCommand),
