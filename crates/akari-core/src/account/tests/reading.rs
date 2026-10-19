@@ -978,3 +978,97 @@ async fn a_refused_ack_from_ready_preparation_never_rolls_ready_back() {
     assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST, 0)));
     assert_eq!(badge(&online.account, GENERAL), Badge::default());
 }
+
+fn body(request: &Received) -> Value {
+    serde_json::from_slice(&request.body).unwrap()
+}
+
+async fn ack_body(online: &Online) -> Value {
+    sent(&online.server, 1).await;
+    let acks = posted(&online.server).await;
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    body(&acks[0])
+}
+
+// The official client's: {"token": null, "last_viewed": 4308, "flags": 2} (Q28).
+#[tokio::test]
+async fn a_thread_ack_carries_flags_2() {
+    let online = acking(thread_unread).await;
+
+    online.account.mark_read(id(THREAD));
+
+    let body = ack_body(&online).await;
+    assert_eq!(body["token"], Value::Null);
+    assert!(body["last_viewed"].is_u64(), "{body}");
+    assert_eq!(body["flags"], 2);
+}
+
+#[tokio::test]
+async fn an_unjoined_thread_is_acked_without_last_viewed() {
+    let mut online = acking(|_| {}).await;
+    let mut unjoined: Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/thread_create.json")).unwrap();
+    unjoined.as_object_mut().unwrap().remove("member");
+    online
+        .connection
+        .send(dispatch(2, "THREAD_CREATE", unjoined))
+        .await;
+    let mut ping = message(3, AFTER_JOIN + 1);
+    ping["d"]["channel_id"] = UNJOINED.to_string().into();
+    online.connection.send(ping).await;
+    sync(&mut online.connection, &online.subscription, 4).await;
+
+    online.account.mark_read(id(UNJOINED));
+
+    let body = ack_body(&online).await;
+    assert_eq!(body, json!({"token": null, "flags": 2}));
+}
+
+#[tokio::test]
+async fn a_channel_ack_is_unchanged() {
+    let online = acking(|_| {}).await;
+
+    online.account.mark_read(general());
+
+    let body = ack_body(&online).await;
+    let keys: Vec<&String> = body.as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["last_viewed", "token"]);
+    assert_eq!(body["token"], Value::Null);
+}
+
+// Q28: opening #new acked its "started a thread" message, as any other.
+#[tokio::test]
+async fn the_started_a_thread_line_is_read_and_acked_like_a_message() {
+    let mut online = acking(general_read).await;
+    let mut line = message(2, NEWEST + 1);
+    line["d"]["type"] = 18.into();
+    line["d"]["content"] = "t1".into();
+    line["d"]["message_reference"] =
+        json!({"channel_id": UNJOINED.to_string(), "guild_id": "200000000000000001"});
+    online.connection.send(line.clone()).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert!(badge(&online.account, GENERAL).unread);
+    let mut newest = message(0, NEWEST)["d"].clone();
+    newest.as_object_mut().unwrap().remove("nonce");
+    let mut line = line["d"].clone();
+    line.as_object_mut().unwrap().remove("nonce");
+    Mock::given(method("GET"))
+        .and(path(MESSAGES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([line, newest])))
+        .mount(&online.server)
+        .await;
+    online
+        .account
+        .load_messages(general(), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap();
+
+    online.account.set_reading(Some(general()));
+
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+    assert_eq!(
+        sent(&online.server, 1).await,
+        [Sent::Ack(GENERAL, NEWEST + 1)]
+    );
+    assert!(ack_body(&online).await.get("flags").is_none());
+}

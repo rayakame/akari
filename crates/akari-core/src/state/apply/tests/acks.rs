@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{Ack, Badge, LoadKind, ReadState};
+use crate::state::{Ack, AckBody, Badge, LoadKind, ReadState};
 
 const FORUM: u64 = 300_000_000_000_000_030;
 const MEDIA: u64 = 300_000_000_000_000_032;
@@ -27,6 +27,7 @@ fn at(channel: u64, cursor: u64) -> Option<Ack> {
         now: false,
         before: None,
         after: None,
+        body: AckBody::Channel,
     })
 }
 
@@ -37,6 +38,7 @@ fn at_now(channel: u64, cursor: u64) -> Option<Ack> {
         now: true,
         before: None,
         after: None,
+        body: AckBody::Channel,
     })
 }
 
@@ -809,7 +811,10 @@ fn marking_a_guild_read_acks_its_unread_channels_and_joined_threads() {
         acks,
         [
             at(GENERAL, NEWEST).unwrap(),
-            at(THREAD, 400_000_000_000_000_030).unwrap()
+            Ack {
+                body: AckBody::Thread { joined: true },
+                ..at(THREAD, 400_000_000_000_000_030).unwrap()
+            }
         ]
     );
     assert_eq!(
@@ -859,6 +864,7 @@ fn every_viewable_forum_goes_into_a_guilds_ack() {
                 now: true,
                 before: None,
                 after: None,
+                body: AckBody::Channel,
             },
             at_now(MEDIA, BEFORE_JOIN).unwrap(),
         ]

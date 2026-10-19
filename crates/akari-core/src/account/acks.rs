@@ -11,7 +11,7 @@ use super::deadlines::until;
 use crate::model::{ChannelId, MessageId};
 use crate::ms;
 use crate::rest::{AccountRest, Failure, RequestError, last_viewed};
-use crate::state::{Ack, ReadState, wall_millis};
+use crate::state::{Ack, AckBody, ReadState, wall_millis};
 
 const TARGET: &str = "akari_core::acks";
 // Like the official client: an ack about 2 s after the last message read.
@@ -165,6 +165,8 @@ impl Wanted {
 struct Request {
     entries: Vec<(ChannelId, MessageId)>,
     bulk: bool,
+    // A single ack's; a bulk's entries carry none.
+    body: AckBody,
     pace: Pace,
     waited: Duration,
     failures: u32,
@@ -205,6 +207,8 @@ struct Queue {
     swapping: bool,
     orders: u64,
     closed: bool,
+    // Each channel's latest, for when it goes out as a single ack.
+    bodies: HashMap<ChannelId, AckBody>,
 }
 
 impl Queue {
@@ -345,6 +349,7 @@ impl Queue {
             let mut request = Request {
                 entries: Vec::with_capacity(channels.len()),
                 bulk: head.bulk(),
+                body: self.bodies.get(&channel).copied().unwrap_or_default(),
                 pace: head.pace(),
                 waited: Duration::ZERO,
                 failures: 0,
@@ -590,6 +595,10 @@ impl Wants {
         self.changed.notify_one();
     }
 
+    fn note_body(&self, channel: ChannelId, body: AckBody) {
+        self.lock().bodies.insert(channel, body);
+    }
+
     fn confirmed(&self) {
         self.lock().confirmed();
     }
@@ -698,6 +707,7 @@ impl AckSender {
     pub(crate) fn want(&self, ack: Ack, pace: Pace) {
         #[cfg(test)]
         self.hand(Handed::One(ack.channel, ack.into(), pace));
+        self.wants.note_body(ack.channel, ack.body);
         if let Some(id) = self.resolve(ack) {
             self.wants
                 .want(ack.channel, id, ack.before, ack.after, pace);
@@ -712,6 +722,9 @@ impl AckSender {
                 .map(|ack| (ack.channel, (*ack).into()))
                 .collect(),
         ));
+        for ack in &acks {
+            self.wants.note_body(ack.channel, ack.body);
+        }
         let entries = acks
             .into_iter()
             .filter_map(|ack| Some((ack.channel, self.resolve(ack)?, ack.before, ack.after)))
@@ -821,7 +834,9 @@ async fn send(
     while let Some(request) = wants.next().await {
         let last_viewed = last_viewed(rest.server_now_millis().unwrap_or_else(wall_millis));
         let result = match request.entries[..] {
-            [(channel, id)] if !request.bulk => rest.ack(channel, id, last_viewed).await,
+            [(channel, id)] if !request.bulk => {
+                rest.ack(channel, id, last_viewed, request.body).await
+            }
             _ => rest.ack_bulk(&request.entries).await,
         };
         let err = match result {
