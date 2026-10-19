@@ -60,6 +60,9 @@ struct StarterMessageTests {
         #expect(
             model.rows.first?.notice
                 == "Sorry, we couldn't load the first message in this thread")
+        #expect(
+            model.rows.first?.noticeParts
+                == [.text("Sorry, we couldn't load the first message in this thread")])
     }
 
     @Test

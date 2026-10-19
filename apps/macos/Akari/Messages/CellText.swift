@@ -16,11 +16,13 @@ enum CellText {
         NSAttributedString(string: text, attributes: [.font: style.nsFont, .foregroundColor: color])
     }
 
-    static func body(_ text: String, color: NSColor) -> NSAttributedString {
+    static func body(_ text: String, color: NSColor, style: TextStyle = TypeScale.body)
+        -> NSAttributedString
+    {
         NSAttributedString(
             string: text,
             attributes: [
-                .font: TypeScale.body.nsFont, .foregroundColor: color,
+                .font: style.nsFont, .foregroundColor: color,
                 .paragraphStyle: bodyLine, .baselineOffset: TypeScale.size(3),
             ])
     }

@@ -6,6 +6,7 @@ final class NoticeCell: NSTableCellView {
 
     private let icon = NSImageView()
     private let text = MessageTextView()
+    var onLink: (URL) -> Void = { _ in }
     private static let top: CGFloat = 18
     // 10 less right after a day divider, as a message's (MessageCell).
     private static let dayTop: CGFloat = 8
@@ -21,6 +22,7 @@ final class NoticeCell: NSTableCellView {
     init() {
         super.init(frame: .zero)
         identifier = Self.identifier
+        text.onLink = { [weak self] url in self?.onLink(url) }
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.contentTintColor = Palette.textMuted
         icon.symbolConfiguration = .init(pointSize: 16, weight: .regular)
@@ -44,7 +46,7 @@ final class NoticeCell: NSTableCellView {
 
     /// The row height for a notice at `width`, as Auto Layout would size the cell.
     static func height(
-        _ message: Message, notice: String, time: String, followsDay: Bool = false,
+        _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
         followsLine: Bool = false, width: CGFloat
     ) -> CGFloat {
         sizing.show(line(notice, time: time))
@@ -54,7 +56,7 @@ final class NoticeCell: NSTableCellView {
     }
 
     func configure(
-        _ message: Message, notice: String, time: String, followsDay: Bool = false,
+        _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
         followsLine: Bool = false, fullDate: String
     ) {
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
@@ -64,11 +66,32 @@ final class NoticeCell: NSTableCellView {
     }
 
     // The full date shows over the time only, as Discord's; TextKit keeps its rect in step.
-    private static func line(_ notice: String, time: String, fullDate: String? = nil)
-        -> NSAttributedString
-    {
-        let line = NSMutableAttributedString(
-            attributedString: CellText.body(notice, color: Palette.textMuted))
+    private static func line(
+        _ notice: [Message.NoticePart], time: String, fullDate: String? = nil
+    ) -> NSAttributedString {
+        // Kinds whose actor Discord draws as a name have their gray too (D121).
+        let named = notice.contains { if case .actor = $0 { true } else { false } }
+        let gray = named ? Palette.chatTextMuted : Palette.textMuted
+        let line = NSMutableAttributedString()
+        for part in notice {
+            switch part {
+            case .text(let text):
+                line.append(CellText.body(text, color: gray))
+            case .actor(let name), .threads(let name):
+                line.append(
+                    CellText.body(name, color: Palette.textStrong, style: TypeScale.noticeName))
+            case .thread(let name, let id):
+                let link = NSMutableAttributedString(
+                    attributedString: CellText.body(
+                        name, color: Palette.textStrong, style: TypeScale.noticeName))
+                if let id, let url = URL(string: "akari://channel/\(id.rawValue)") {
+                    link.addAttributes(
+                        [.link: url, MessageTextView.underlinesOnHover: true],
+                        range: NSRange(location: 0, length: link.length))
+                }
+                line.append(link)
+            }
+        }
         line.append(
             NSAttributedString(
                 string: "  ",

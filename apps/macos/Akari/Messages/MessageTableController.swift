@@ -859,7 +859,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return NewMessagesDivider.height
         case .message(let row, let startsGroup):
             let message = row.shown
-            if let notice = row.notice {
+            if let notice = row.noticeParts {
                 let time = MessageFormat.groupTime(
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(
@@ -907,8 +907,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 message.timestamp, now: now(), calendar: calendar, locale: locale)
             let fullDate = MessageFormat.fullDate(
                 message.timestamp, calendar: calendar, locale: locale)
-            if let notice = row.notice {
+            if let notice = row.noticeParts {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
+                cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
                     followsLine: followsLine, fullDate: fullDate)

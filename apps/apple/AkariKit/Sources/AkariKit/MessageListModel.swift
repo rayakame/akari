@@ -67,6 +67,11 @@ public final class MessageListModel {
         public var notice: String? {
             starter == .unavailable ? Self.unavailableStarter : shown.notice
         }
+
+        /// `notice` in parts.
+        public var noticeParts: [Message.NoticePart]? {
+            starter == .unavailable ? [.text(Self.unavailableStarter)] : shown.noticeParts
+        }
     }
 
     /// Over the list's top while the new messages line hasn't been on screen.

@@ -380,7 +380,7 @@ final class TimeRefreshTests {
         let notice = row(1, by: author(1, "Mira Kowalczyk-Lindqvist"), at: start, kind: .userJoin)
         let rows = [notice] + (2...60).map { row(UInt64($0), at: start + Double($0)) }
         let message = notice.message
-        let text = try #require(message.notice)
+        let text = try #require(notice.noticeParts)
         let height = { (time: String, width: CGFloat) in
             // The list's first message, right below its day's divider.
             NoticeCell.height(message, notice: text, time: time, followsDay: true, width: width)

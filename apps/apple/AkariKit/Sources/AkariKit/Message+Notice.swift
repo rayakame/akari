@@ -1,4 +1,34 @@
 extension Message {
+    /// A piece of a notice: the parts Discord draws as names and links, and the text between.
+    public enum NoticePart: Equatable, Sendable {
+        case text(String)
+        /// Who did it.
+        case actor(String)
+        /// A new thread's name, which opens it; `nil` when the message doesn't say which.
+        case thread(name: String, id: ChannelId?)
+        /// "threads" in "See all threads.", for the channel's threads.
+        case threads(String)
+
+        var text: String {
+            switch self {
+            case .text(let text), .actor(let text), .thread(let text, _), .threads(let text): text
+            }
+        }
+    }
+
+    /// `notice` in parts; `nil` for messages people write.
+    public var noticeParts: [NoticePart]? {
+        guard kind == .threadCreated else {
+            return notice.map { [.text($0)] }
+        }
+        // Discord's wording (Q38).
+        return [
+            .actor(author.displayName), .text(" started a thread: "),
+            .thread(name: content, id: reference?.channelId), .text(". See all "),
+            .threads("threads"), .text("."),
+        ]
+    }
+
     /// What a system message says, in Akari's words, e.g. "Mira pinned a message to this
     /// channel."; `nil` for messages people write (default, reply, commands).
     public var notice: String? {
@@ -18,7 +48,7 @@ extension Message {
         case .call: return "\(name) started a call."
         case .channelNameChange: return "\(name) changed the channel name: \(content)"
         case .channelIconChange: return "\(name) changed the channel icon."
-        case .threadCreated: return "\(name) started a thread: \(content)"
+        case .threadCreated: return noticeParts?.map(\.text).joined()
         case .channelFollowAdd: return "\(name) followed this channel's announcements."
         case .autoModerationAction: return "AutoMod blocked or flagged a message."
         case .stageStart: return "\(name) started the stage."
