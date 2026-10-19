@@ -15,9 +15,11 @@ use super::settings::{
     GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
 };
 use super::threads::ThreadIndex;
-use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, ThreadMembership, User};
+use super::types::{
+    Channel, CurrentUser, Guild, Member, Message, Role, StarterMessage, ThreadMembership, User,
+};
 use super::windows::{
-    CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows,
+    CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits, Windows,
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
@@ -1667,6 +1669,28 @@ impl State {
 
     pub(crate) fn permissions(&self, channel: ChannelId, now_millis: i64) -> Option<Permissions> {
         self.entities.permissions(channel, now_millis)
+    }
+
+    pub(crate) fn starter_message(&self, thread: ChannelId) -> Option<StarterMessage> {
+        self.windows.starter_message(thread)
+    }
+
+    pub(crate) fn wants_starter(&self, thread: ChannelId) -> bool {
+        self.windows.wanted_starter(thread).is_some()
+    }
+
+    pub(crate) fn starter_to_fetch(&mut self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
+        self.windows.starter_to_fetch(thread)
+    }
+
+    pub(crate) fn settle_starter(
+        &mut self,
+        thread: ChannelId,
+        fetch: StarterFetch,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows
+            .settle_starter(thread, fetch, &self.entities.users, events);
     }
 }
 

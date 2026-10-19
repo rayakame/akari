@@ -266,6 +266,18 @@ pub enum ReferencedMessage {
     Message(Arc<Message>),
 }
 
+/// A thread's first message when it started from a message in its parent channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StarterMessage {
+    /// The parent channel's message the thread started from.
+    Loaded(Arc<Message>),
+    /// Akari is fetching it; nothing to show yet.
+    Loading,
+    /// Deleted, or Akari can't read it.
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct MessageReference {

@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use super::apply::wall_millis;
 use super::events::StoreEvent;
-use super::types::{Delivery, Message, User};
+use super::types::{Delivery, Message, ReferencedMessage, StarterMessage, User};
 use crate::gateway::MessageUpdate;
 use crate::load_report::PageOutcome;
-use crate::model::{self, ChannelId, MessageId, UserId};
+use crate::model::{self, ChannelId, MessageId, MessageType, UserId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct WindowLimits {
@@ -399,6 +399,26 @@ pub(crate) struct Windows {
     order: VecDeque<ChannelId>,
     windows: HashMap<ChannelId, Window>,
     generations: u64,
+    // Threads whose first message came without the one it started from: what the fetch found.
+    starters: HashMap<ChannelId, Starter>,
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
+enum Starter {
+    Fetching,
+    Found(Arc<Message>),
+    Gone,
+    // A request that failed; the thread's next page asks again.
+    Failed,
+}
+
+/// What fetching a thread's starter found.
+#[derive(Debug)]
+pub(crate) enum StarterFetch {
+    Found(Box<model::Message>),
+    Gone,
+    Failed,
 }
 
 impl Windows {
@@ -408,6 +428,88 @@ impl Windows {
             order: VecDeque::new(),
             windows: HashMap::new(),
             generations: 0,
+            starters: HashMap::new(),
+        }
+    }
+
+    // A thread started from a message begins with one pointing back at it.
+    fn starter_row(&self, thread: ChannelId) -> Option<&Arc<Message>> {
+        self.windows
+            .get(&thread)?
+            .messages
+            .iter()
+            .find(|message| message.kind == MessageType::ThreadStarterMessage)
+    }
+
+    // The parent channel's message a starter points at.
+    fn origin(starter: &Message) -> Option<(ChannelId, MessageId)> {
+        let reference = starter.reference.as_deref()?;
+        Some((reference.channel_id?, reference.message_id?))
+    }
+
+    pub(crate) fn starter_message(&self, thread: ChannelId) -> Option<StarterMessage> {
+        let row = self.starter_row(thread)?;
+        let origin = Self::origin(row);
+        // The parent's window has the newest copy, edits included.
+        let fresh = |message: &Arc<Message>| {
+            origin
+                .and_then(|(channel, id)| self.message(channel, id))
+                .unwrap_or_else(|| message.clone())
+        };
+        Some(match &row.referenced_message {
+            ReferencedMessage::Message(message) => StarterMessage::Loaded(fresh(message)),
+            ReferencedMessage::Deleted => StarterMessage::Unavailable,
+            ReferencedMessage::NotIncluded if origin.is_none() => StarterMessage::Unavailable,
+            ReferencedMessage::NotIncluded => match self.starters.get(&thread) {
+                Some(Starter::Found(message)) => StarterMessage::Loaded(fresh(message)),
+                Some(Starter::Gone | Starter::Failed) => StarterMessage::Unavailable,
+                Some(Starter::Fetching) | None => StarterMessage::Loading,
+            },
+        })
+    }
+
+    // The parent message to fetch: Discord left it out, and it wasn't asked for yet.
+    pub(crate) fn wanted_starter(&self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
+        let row = self.starter_row(thread)?;
+        if row.referenced_message != ReferencedMessage::NotIncluded {
+            return None;
+        }
+        match self.starters.get(&thread) {
+            None | Some(Starter::Failed) => Self::origin(row),
+            Some(Starter::Fetching | Starter::Found(_) | Starter::Gone) => None,
+        }
+    }
+
+    // Marks the fetch as running, so each thread's starter is asked for once.
+    pub(crate) fn starter_to_fetch(&mut self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
+        let origin = self.wanted_starter(thread)?;
+        self.starters.insert(thread, Starter::Fetching);
+        Some(origin)
+    }
+
+    pub(crate) fn settle_starter(
+        &mut self,
+        thread: ChannelId,
+        fetch: StarterFetch,
+        users: &HashMap<UserId, Arc<User>>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        // Dropped with its thread meanwhile.
+        if !matches!(self.starters.get(&thread), Some(Starter::Fetching)) {
+            return;
+        }
+        let settled = match fetch {
+            StarterFetch::Found(message) => {
+                Starter::Found(Arc::new(Message::from_wire(*message, &mut |user| {
+                    intern(user, users, &[])
+                })))
+            }
+            StarterFetch::Gone => Starter::Gone,
+            StarterFetch::Failed => Starter::Failed,
+        };
+        self.starters.insert(thread, settled);
+        if let Some(row) = self.starter_row(thread) {
+            events.push(StoreEvent::MessageUpdated(row.clone()));
         }
     }
 
@@ -1041,6 +1143,7 @@ impl Windows {
     }
 
     pub(crate) fn drop_channel(&mut self, channel: ChannelId) {
+        self.starters.remove(&channel);
         let generation = self.next_generation();
         let Some(window) = self.windows.get_mut(&channel) else {
             return;

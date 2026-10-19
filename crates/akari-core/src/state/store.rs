@@ -13,10 +13,12 @@ use super::order;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
-use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
+use super::types::{Channel, CurrentUser, Guild, Member, Message, StarterMessage, User};
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
-use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits};
+use super::windows::{
+    CachedWindow, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits,
+};
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
@@ -465,6 +467,21 @@ impl Store {
             let outcome = inner.state.finish_load(ticket, page, reached_end, events);
             (outcome, inner.state.take_reading_ack())
         })
+    }
+
+    // The parent message to fetch for `thread`'s starter, if it's needed and not asked for yet.
+    // Read first: a write for every page would bump `changes` and the cache's snapshots.
+    pub(crate) fn starter_to_fetch(&self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
+        if !self.read(|inner| inner.state.wants_starter(thread)) {
+            return None;
+        }
+        self.write("starter", |inner, _| inner.state.starter_to_fetch(thread))
+    }
+
+    pub(crate) fn settle_starter(&self, thread: ChannelId, fetch: StarterFetch) {
+        self.write("starter", |inner, events| {
+            inner.state.settle_starter(thread, fetch, events);
+        });
     }
 
     pub(crate) fn supersede_around(&self, channel: ChannelId) {
@@ -939,6 +956,12 @@ impl Store {
     /// The loaded messages of a viewed channel; `None` if it isn't viewed.
     pub fn messages(&self, channel: ChannelId) -> Option<MessageWindow> {
         self.read(|inner| inner.state.messages(channel))
+    }
+
+    /// The message `thread` started from, once its window holds the thread's first message;
+    /// `None` for a thread started without one, or before that message is loaded.
+    pub fn starter_message(&self, thread: ChannelId) -> Option<StarterMessage> {
+        self.read(|inner| inner.state.starter_message(thread))
     }
 
     pub fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {

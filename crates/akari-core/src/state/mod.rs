@@ -33,5 +33,5 @@ pub(crate) use store::{deadline_reads, deadline_reads_reset};
 pub use types::*;
 pub use windows::MessageWindow;
 pub(crate) use windows::{
-    CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket, WindowLimits,
+    CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket, StarterFetch, WindowLimits,
 };

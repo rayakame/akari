@@ -13,7 +13,7 @@ use crate::gateway::{
 use crate::model::{ChannelId, GuildId, MessageId, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
-    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits,
+    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, StarterFetch, Store, WindowLimits,
     message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
@@ -304,6 +304,7 @@ impl Shared {
                 }
                 (report.prepare, report.prepared) = prepared;
                 log_page(channel, ticket.kind, &report);
+                self.fetch_starter(channel);
                 Ok(Some(report))
             }
             Err(err) => {
@@ -321,6 +322,50 @@ impl Shared {
                 Err(err)
             }
         }
+    }
+
+    // Discord can send a thread's first message without the parent's message it started from.
+    // A user account can't get one message, so it asks for the page of one around it.
+    fn fetch_starter(self: &Arc<Self>, thread: ChannelId) {
+        let Some((channel, id)) = self.store.starter_to_fetch(thread) else {
+            return;
+        };
+        let shared = self.clone();
+        self.runtime.spawn(async move {
+            let fetch = match shared
+                .rest
+                .list_messages(channel, Query::Around(id), 1)
+                .await
+            {
+                Ok(page) => match page.messages.into_iter().find(|message| message.id == id) {
+                    Some(message) => {
+                        let mut prepared = (Duration::ZERO, 0);
+                        shared
+                            .prepare_page(std::slice::from_ref(&message), &mut prepared)
+                            .await;
+                        StarterFetch::Found(Box::new(message))
+                    }
+                    None => StarterFetch::Gone,
+                },
+                // Deleted, or the user can't read the parent.
+                Err(RequestError::Discord { .. }) => StarterFetch::Gone,
+                Err(err) => {
+                    shared.failed(&err);
+                    StarterFetch::Failed
+                }
+            };
+            tracing::debug!(
+                target: "akari_core::load",
+                thread_id = thread.get(),
+                outcome = match fetch {
+                    StarterFetch::Found(_) => "found",
+                    StarterFetch::Gone => "gone",
+                    StarterFetch::Failed => "failed",
+                },
+                "starter message fetched"
+            );
+            shared.store.settle_starter(thread, fetch);
+        });
     }
 
     // On a blocking thread, so a slow preparer holds up only this load.
