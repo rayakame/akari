@@ -336,6 +336,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     // Every height is measured again: system rows carry the time in their wrapped text.
     func refreshTimes() {
+        MessageFormat.forgetFormats()
         calendar = calendarSource()
         locale = localeSource()
         times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)

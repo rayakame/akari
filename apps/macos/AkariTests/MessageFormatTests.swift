@@ -24,8 +24,8 @@ struct MessageFormatTests {
         #expect(groupTime(berlinTime(2026, 10, 10, 14, 5)) == "2:05\u{202F}PM")
         #expect(groupTime(berlinTime(2026, 10, 10, 0, 0)) == "12:00\u{202F}AM")
         #expect(groupTime(berlinTime(2026, 10, 9, 23, 59)) == "Yesterday at 11:59\u{202F}PM")
-        #expect(groupTime(berlinTime(2026, 10, 3, 14, 5)) == "10/03/2026, 2:05\u{202F}PM")
-        #expect(groupTime(berlinTime(2026, 10, 11, 10, 0)) == "10/11/2026, 10:00\u{202F}AM")
+        #expect(groupTime(berlinTime(2026, 10, 3, 14, 5)) == "10/3/26, 2:05\u{202F}PM")
+        #expect(groupTime(berlinTime(2026, 10, 11, 10, 0)) == "10/11/26, 10:00\u{202F}AM")
         #expect(
             MessageFormat.shortTime(
                 berlinTime(2026, 10, 10, 14, 5), calendar: berlin, locale: locale)
@@ -36,7 +36,7 @@ struct MessageFormatTests {
     func timesFollowTheLocale() {
         #expect(groupTime(berlinTime(2026, 10, 10, 14, 5), german) == "14:05")
         #expect(groupTime(berlinTime(2026, 10, 9, 23, 59), german) == "Yesterday at 23:59")
-        #expect(groupTime(berlinTime(2026, 10, 3, 14, 5), german) == "03.10.2026, 14:05")
+        #expect(groupTime(berlinTime(2026, 10, 3, 14, 5), german) == "03.10.26, 14:05")
     }
 
     // The system's 24-hour setting reaches Akari as the locale's hour cycle.
@@ -47,9 +47,39 @@ struct MessageFormatTests {
         let german = hourCycle("de_DE", .oneToTwelve)
 
         #expect(MessageFormat.shortTime(time, calendar: berlin, locale: english) == "14:05")
-        #expect(groupTime(time, english) == "10/03/2026, 14:05")
+        #expect(groupTime(time, english) == "10/3/26, 14:05")
         #expect(MessageFormat.shortTime(time, calendar: berlin, locale: german) == "2:05\u{202F}PM")
-        #expect(groupTime(time, german) == "03.10.2026, 2:05\u{202F}PM")
+        #expect(groupTime(time, german) == "03.10.26, 2:05\u{202F}PM")
+    }
+
+    // D123, the user's screenshot: "17.10.26, 16:02" in German, "10/17/26, 4:02 PM" in English.
+    @Test
+    func fullDatesUseTheLocalesShortDateAndTime() {
+        let time = berlinTime(2026, 10, 17, 16, 2)
+
+        #expect(groupTime(time, german) == "17.10.26, 16:02")
+        #expect(groupTime(time) == "10/17/26, 4:02\u{202F}PM")
+        #expect(groupTime(time, Locale(identifier: "en_DE")) == "17.10.26, 16:02")
+    }
+
+    // A changed 24-hour or date format setting keeps the locale's identifier.
+    @MainActor
+    @Test
+    func aLocaleChangeDropsTheKeptFormats() {
+        _ = groupTime(berlinTime(2026, 10, 3, 14, 5))
+        #expect(MessageFormat.keptFormats > 0)
+
+        MessageTableTests().controller.refreshTimes()
+
+        #expect(MessageFormat.keptFormats == 0)
+    }
+
+    @Test
+    func todayAndYesterdayStay() {
+        #expect(groupTime(berlinTime(2026, 10, 10, 9, 30)) == "9:30\u{202F}AM")
+        #expect(groupTime(berlinTime(2026, 10, 9, 9, 30)) == "Yesterday at 9:30\u{202F}AM")
+        #expect(groupTime(berlinTime(2026, 10, 9, 9, 30), german) == "Yesterday at 09:30")
+        #expect(groupTime(berlinTime(2026, 10, 8, 9, 30), german) == "08.10.26, 09:30")
     }
 
     @Test
