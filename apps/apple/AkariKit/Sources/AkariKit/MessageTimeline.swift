@@ -114,8 +114,8 @@ public struct MessageTimeline: Equatable, Sendable {
         }
         let message = row.shown
         let previous = previousRow.shown
-        // A message with a thread starts a group, and its thread's box ends it (D124).
-        if message.hasThread || previous.hasThread {
+        // Only before it: the next message joins its group under the thread's box (D124).
+        if message.hasThread {
             return true
         }
         if message.author.id != previous.author.id {

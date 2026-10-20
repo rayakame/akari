@@ -69,10 +69,10 @@ group when any of these holds:
 5. Both are webhook messages and their author names differ. One webhook can post under
    several names.
 6. It is a reply, or the result of a slash command or a context-menu command.
-7. It or the previous message has a thread started from it (observed 2026-10-19: Ray's 17:22
-   message with a thread started a group 6 minutes after his 17:16 one). That the message
-   *after* one with a thread starts a group is **unverified**; the thread's box sits between
-   them.
+7. It has a thread started from it (observed 2026-10-19: Ray's 17:22 message with a thread
+   started a group 6 minutes after his 17:16 one). The message after it doesn't start one for
+   that: it continues the group under the thread's box, without a header (observed 2026-10-20:
+   Ray's "danach" seconds after his "tb14").
 8. It or the previous message is a thread's starter ([Threads](#threads)).
 9. Its timestamp is **7 minutes (420 seconds) or more** after the previous message's. At
    419 seconds it still continues the group.

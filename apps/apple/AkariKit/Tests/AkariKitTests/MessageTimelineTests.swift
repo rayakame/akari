@@ -58,13 +58,14 @@ struct MessageTimelineTests {
         #expect(shown.shape == ["day", "+1", "+2"])
     }
 
-    // The thread's box (PR C) sits between them (B10, inferred; TB4 checks it).
+    // TB4.4: Ray's "danach" seconds after his "tb14" sits under tb14's thread box, without a
+    // header.
     @Test
-    func theMessageAfterAThreadStartsAGroup() {
+    func theMessageAfterAThreadJoinsItsGroup() {
         let shown = timeline(
-            row(1, at: noon, hasThread: true), row(2, at: noon + 60), row(3, at: noon + 120))
+            row(1, at: noon, hasThread: true), row(2, at: noon + 5), row(3, at: noon + 60))
 
-        #expect(shown.shape == ["day", "+1", "+2", "3"])
+        #expect(shown.shape == ["day", "+1", "2", "3"])
     }
 
     @Test
