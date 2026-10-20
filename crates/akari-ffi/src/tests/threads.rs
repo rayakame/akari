@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use akari_core::model::{ChannelId, MessageId, UserId};
 use serde_json::{Value, json};
@@ -142,11 +143,26 @@ struct Loaded {
 
 // `newest_first`: the channel's only page.
 async fn loaded(channel: ChannelId, newest_first: Vec<Value>) -> Loaded {
+    loaded_answering(channel, newest_first, None).await
+}
+
+// `general`: how #general answers a starter's fetch.
+async fn loaded_answering(
+    channel: ChannelId,
+    newest_first: Vec<Value>,
+    general: Option<ResponseTemplate>,
+) -> Loaded {
     let server = MockServer::start().await;
     Mock::given(path(format!("/api/v9/channels/{}/messages", channel.get())))
         .respond_with(ResponseTemplate::new(200).set_body_json(Value::Array(newest_first)))
         .mount(&server)
         .await;
+    if let Some(general) = general {
+        Mock::given(path(format!("/api/v9/channels/{}/messages", GENERAL.get())))
+            .respond_with(general)
+            .mount(&server)
+            .await;
+    }
     let gateway = FakeGateway::start().await;
     let account = gateway
         .client_with_api(&format!("{}/api/v9/", server.uri()))
@@ -199,10 +215,8 @@ async fn a_message_carries_its_reference_and_thread_flag() {
     loaded.account.close();
 }
 
-#[tokio::test]
-async fn the_starter_read_gives_the_parent_message() {
-    let mut original = page_message(THREAD.get(), GENERAL);
-    original["content"] = "the **original**".into();
+// `referenced`: `None` when Discord leaves the original out, `Some(null)` when it was deleted.
+fn starter(referenced: Option<Value>) -> Value {
     let mut starter = page_message(400_000_000_000_000_031, THREAD);
     starter["type"] = 21.into();
     starter["content"] = "".into();
@@ -210,10 +224,22 @@ async fn the_starter_read_gives_the_parent_message() {
         "message_id": THREAD.get().to_string(), "channel_id": GENERAL.get().to_string(),
         "guild_id": GUILD.get().to_string()
     });
-    starter["referenced_message"] = original;
+    if let Some(referenced) = referenced {
+        starter["referenced_message"] = referenced;
+    }
+    starter
+}
+
+#[tokio::test]
+async fn the_starter_read_gives_the_parent_message() {
+    let mut original = page_message(THREAD.get(), GENERAL);
+    original["content"] = "the **original**".into();
     let loaded = loaded(
         THREAD,
-        vec![page_message(400_000_000_000_000_032, THREAD), starter],
+        vec![
+            page_message(400_000_000_000_000_032, THREAD),
+            starter(Some(original)),
+        ],
     )
     .await;
 
@@ -234,5 +260,30 @@ async fn a_thread_without_a_starter_reads_none() {
     let loaded = loaded(THREAD, vec![page_message(400_000_000_000_000_032, THREAD)]).await;
 
     assert_eq!(loaded.account.store().starter_message(THREAD), None);
+    loaded.account.close();
+}
+
+#[tokio::test]
+async fn a_starter_being_fetched_reads_loading() {
+    let slow = ResponseTemplate::new(200)
+        .set_body_json(json!([]))
+        .set_delay(Duration::from_secs(5));
+    let loaded = loaded_answering(THREAD, vec![starter(None)], Some(slow)).await;
+
+    assert_eq!(
+        loaded.account.store().starter_message(THREAD),
+        Some(StarterMessage::Loading)
+    );
+    loaded.account.close();
+}
+
+#[tokio::test]
+async fn a_deleted_starter_reads_unavailable() {
+    let loaded = loaded(THREAD, vec![starter(Some(Value::Null))]).await;
+
+    assert_eq!(
+        loaded.account.store().starter_message(THREAD),
+        Some(StarterMessage::Unavailable)
+    );
     loaded.account.close();
 }

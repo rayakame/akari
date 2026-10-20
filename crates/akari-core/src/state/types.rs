@@ -267,8 +267,8 @@ pub enum ReferencedMessage {
 }
 
 /// A thread's first message when it started from a message in its parent channel.
+// Exhaustive, so a new case can't reach the apps as one of these unnoticed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum StarterMessage {
     /// The parent channel's message the thread started from.
     Loaded(Arc<Message>),

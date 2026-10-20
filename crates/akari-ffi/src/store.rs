@@ -241,7 +241,7 @@ impl Store {
                 }
             }
             state::StarterMessage::Loading => StarterMessage::Loading,
-            _ => StarterMessage::Unavailable,
+            state::StarterMessage::Unavailable => StarterMessage::Unavailable,
         })
     }
 
