@@ -980,8 +980,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
-                message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                followsLine: followsLine, groupTime: groupTime,
+                message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
+                followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)

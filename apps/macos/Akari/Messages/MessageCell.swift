@@ -76,13 +76,17 @@ final class MessageCell: NSTableCellView {
         nil
     }
 
+    /// `authorName` is the header's name, as the list resolves it; the author's display name
+    /// without it.
     func configure(
-        _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
-        followsLine: Bool = false, groupTime: String, shortTime: String, fullDate: String
+        _ message: Message, body: NSAttributedString, authorName: String? = nil,
+        startsGroup: Bool, followsDay: Bool = false, followsLine: Bool = false,
+        groupTime: String, shortTime: String, fullDate: String
     ) {
         configureAllButTheBody(
-            message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
-            groupTime: groupTime, shortTime: shortTime, fullDate: fullDate)
+            message, authorName: authorName, startsGroup: startsGroup, followsDay: followsDay,
+            followsLine: followsLine, groupTime: groupTime, shortTime: shortTime,
+            fullDate: fullDate)
         let same = self.message?.id == message.id
         self.message = message
         mentioned = message.mentionsMe
@@ -102,9 +106,10 @@ final class MessageCell: NSTableCellView {
 
     // The sizing cell measures the body instead of laying it out in its text view.
     private func configureAllButTheBody(
-        _ message: Message, startsGroup: Bool, followsDay: Bool, followsLine: Bool,
-        groupTime: String, shortTime: String, fullDate: String
+        _ message: Message, authorName: String? = nil, startsGroup: Bool, followsDay: Bool,
+        followsLine: Bool, groupTime: String, shortTime: String, fullDate: String
     ) {
+        let name = authorName ?? message.author.displayName
         showsHeader = startsGroup
         spacing = Self.spacing(
             startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine)
@@ -113,10 +118,10 @@ final class MessageCell: NSTableCellView {
         avatarBottom?.isActive = startsGroup
         top?.constant = startsGroup ? spacing + Self.groupInset : Self.continuationTop
         bottom?.constant = -(startsGroup ? Self.groupBottom : Self.continuationBottom)
-        avatar.name = message.author.displayName
+        avatar.name = name
         avatar.userId = message.author.id.rawValue
         header.show(
-            name: message.author.displayName, tagged: message.author.bot || message.fromWebhook,
+            name: name, tagged: message.author.bot || message.fromWebhook,
             time: groupTime, fullDate: fullDate)
         hoverTime.stringValue = shortTime
         hoverTime.toolTip = fullDate

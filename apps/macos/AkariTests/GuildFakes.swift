@@ -63,6 +63,11 @@ nonisolated final class GuildStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
+    // A fake has no Rust object to ask.
+    override func memberNick(guildId: GuildId, userId: UserId) -> String? {
+        nil
+    }
+
     override func channelList(guildId: GuildId) -> [ChannelId] {
         [channel.id]
     }

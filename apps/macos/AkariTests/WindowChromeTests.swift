@@ -109,4 +109,9 @@ nonisolated private final class EmptyStore: Store, @unchecked Sendable {
     required init(unsafeFromHandle handle: UInt64) {
         fatalError("a fake has no Rust object")
     }
+
+    // A fake has no Rust object to ask.
+    override func memberNick(guildId: GuildId, userId: UserId) -> String? {
+        nil
+    }
 }

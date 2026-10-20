@@ -86,6 +86,19 @@ struct NoticePartsTests {
         #expect(actions.calls.last == "jump to 5")
     }
 
+    // The list resolves a header's name as Discord's client does: the server nickname first.
+    @Test
+    func aHeaderShowsTheRowsName() throws {
+        list.show([row(1, by: author(2, "Ray"), at: noon, authorName: "Rayo")])
+        let cell = try list.cell(of: 1)
+
+        let names = list.textFields(in: cell).filter { !$0.isHiddenOrHasHiddenAncestor }
+            .map(\.stringValue)
+
+        #expect(names.contains("Rayo"))
+        #expect(!names.contains("Ray"))
+    }
+
     @Test
     func aKindWithoutALineHasNoRow() {
         list.show([
