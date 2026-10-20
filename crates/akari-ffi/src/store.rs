@@ -63,6 +63,14 @@ impl Store {
         self.core.user(id).map(|user| User::from(&*user))
     }
 
+    /// A member's server nickname, where the store has their member: so far only the current
+    /// user's.
+    pub fn member_nick(&self, guild_id: GuildId, user_id: UserId) -> Option<String> {
+        self.core
+            .member_nick(guild_id, user_id)
+            .map(|nick| nick.into_string())
+    }
+
     /// The server list in the user's order, with their folders. Unavailable guilds are left
     /// out; see `unavailable_guild_ids`.
     pub fn server_list(&self) -> Vec<ServerListItem> {

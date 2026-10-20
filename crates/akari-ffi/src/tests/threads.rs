@@ -289,6 +289,17 @@ async fn a_system_messages_data_crosses_the_boundary() {
     loaded.account.close();
 }
 
+// So far the store has only the current user's member.
+#[tokio::test]
+async fn a_members_nick_crosses_the_boundary() {
+    let loaded = loaded(GENERAL, vec![]).await;
+    let store = loaded.account.store();
+
+    assert_eq!(store.member_nick(GUILD, USER).as_deref(), Some("Tester"));
+    assert_eq!(store.member_nick(GUILD, MIRA), None);
+    loaded.account.close();
+}
+
 // `referenced`: `None` when Discord leaves the original out, `Some(null)` when it was deleted.
 fn starter(referenced: Option<Value>) -> Value {
     let mut starter = page_message(400_000_000_000_000_031, THREAD);
