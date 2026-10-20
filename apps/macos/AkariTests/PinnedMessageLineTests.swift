@@ -75,6 +75,7 @@ struct PinnedMessageLineTests {
     @Test
     func aMessageShowsThePointerAndAnUnderlineOnHover() throws {
         let (_, text) = try shown()
+        #expect(text.linkTextAttributes?[.cursor] as? NSCursor == NSCursor.pointingHand)
         let layout = try #require(text.layoutManager)
         let underline = { (part: String) in
             layout.temporaryAttribute(
@@ -183,6 +184,21 @@ struct MessageJumpScrollTests {
                 rows: list.messages(50, from: 21), atPresent: false, messageJump: jump(to: 46, 1)))
 
         #expect(abs(offset(of: 46)) <= 0.5)
+    }
+
+    // A locked thread's banner and the unread bar each cover the list's top 36.
+    @Test(arguments: [(false, false, 0.0), (true, false, 36), (false, true, 36), (true, true, 72)])
+    func aJumpLeavesRoomForWhatCoversTheListsTop(line: Bool, locked: Bool, room: CGFloat) {
+        let line = line ? MessageId(rawValue: 190) : nil
+        let banner: CGFloat = locked ? LockedBanner.room : 0
+        list.show(MessageTableState(rows: list.page, newMessages: line, startRoom: banner))
+
+        list.show(
+            MessageTableState(
+                rows: list.page, newMessages: line, messageJump: jump(to: 120, 1),
+                startRoom: banner))
+
+        #expect(abs(offset(of: 120) - room) <= 0.5, "\(offset(of: 120))")
     }
 
     // A new table for a list that jumped before doesn't jump again.

@@ -206,10 +206,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         reload(revealedNow)
         // A new table for a model that jumped before doesn't jump again.
         if wasFilled, state.unreadJumps != previous.unreadJumps {
-            scrollToTop(lineRow)
+            scrollToTop(lineRow, below: state.startRoom)
         }
         if wasFilled, let jump = state.messageJump, jump != previous.messageJump {
-            scrollToTop(row(atOrAfter: jump.messageId))
+            // Unless the line has been seen, the unread bar shows once it's out of sight.
+            let bar = state.newMessages == nil ? 0 : UnreadBar.margin + UnreadBar.height
+            scrollToTop(row(atOrAfter: jump.messageId), below: state.startRoom + bar)
         }
         reportLine()
         updateRelativeTimer()
@@ -462,12 +464,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     // Keeps the reader's place as clipMoved does after a user's scroll; it skips our own.
-    private func scrollToTop(_ row: Int?) {
+    // `cover` is what the overlays over the list's top hide.
+    private func scrollToTop(_ row: Int?, below cover: CGFloat) {
         guard let row else {
             return
         }
         let range = clipView.originRange
-        let y = min(max(tableView.rect(ofRow: row).minY, range.lowerBound), range.upperBound)
+        let y = min(
+            max(tableView.rect(ofRow: row).minY - cover, range.lowerBound), range.upperBound)
         ownChanges += 1
         defer { ownChanges -= 1 }
         clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: y))
