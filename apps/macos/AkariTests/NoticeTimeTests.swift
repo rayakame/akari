@@ -51,7 +51,8 @@ struct NoticeTimeTests {
     func oneSpaceBeforeANoticesTime() throws {
         let (cell, text, time) = try shown()
 
-        #expect(text.string == "Mira joined the server. \(time)")
+        // Discord's welcome line 5, which the message's time picks.
+        #expect(text.string == "Mira just slid into the server. \(time)")
         let space = (text.string as NSString).range(of: ". ").location + 1
         #expect(
             text.textStorage?.attribute(.font, at: space, effectiveRange: nil) as? NSFont

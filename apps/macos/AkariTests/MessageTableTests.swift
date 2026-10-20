@@ -747,7 +747,8 @@ struct MessageTableTests {
         let key = keyWindow()
         defer { key.close() }
         let notice = try #require(messageText(in: try cell(of: 2)))
-        #expect(notice.string.hasPrefix("Mira joined"))
+        // Discord's welcome line 5, which message 2's time picks.
+        #expect(notice.string.hasPrefix("Mira just slid into the server."))
 
         try expectClicksKeepTheDrawing(of: notice, selectable: true)
 
@@ -852,7 +853,7 @@ struct MessageTableTests {
             #expect(notice.toolTip == nil, "no tooltip over the whole line")
             let date = toolTip(of: notice, at: try middle(of: time, in: notice))
             #expect(date?.isEmpty == false, "\(raw)")
-            #expect(toolTip(of: notice, at: try middle(of: "joined", in: notice)) == nil)
+            #expect(toolTip(of: notice, at: try middle(of: "slid", in: notice)) == nil)
         }
     }
 
