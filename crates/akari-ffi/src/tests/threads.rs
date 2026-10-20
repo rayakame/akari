@@ -242,7 +242,9 @@ async fn a_system_messages_data_crosses_the_boundary() {
         {"name": "poll_question_text", "value": "Lunch?"},
         {"name": "total_votes", "value": "2"}
     ]}]);
-    let loaded = loaded(GENERAL, vec![call, subscription, join, poll]).await;
+    let mut plain = page_message(400_000_000_000_000_054, GENERAL);
+    plain["embeds"] = json!([{"type": "rich", "fields": [{"name": "a", "value": "b"}]}]);
+    let loaded = loaded(GENERAL, vec![call, subscription, join, poll, plain]).await;
     let store = loaded.account.store();
 
     let messages = store.messages(GENERAL, store.window(GENERAL).unwrap().message_ids);
@@ -280,6 +282,10 @@ async fn a_system_messages_data_crosses_the_boundary() {
         ]
     );
     assert!(messages[0].embed_fields.is_empty());
+    assert!(
+        messages[4].embed_fields.is_empty(),
+        "only the kinds whose lines read them"
+    );
     loaded.account.close();
 }
 

@@ -4,8 +4,8 @@ use super::settings::NotificationLevel;
 use super::types::{
     Attachment, Call, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
     EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
-    PermissionOverwrite, ReferencedMessage, Role, RoleSubscription, Sticker, ThreadInfo,
-    ThreadMembership, User,
+    PermissionOverwrite, ReferencedMessage, Role, RoleSubscription, Sticker, SystemData,
+    ThreadInfo, ThreadMembership, User,
 };
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
@@ -379,22 +379,23 @@ impl Message {
             }),
             referenced_message,
             delivery: Delivery::Sent,
-            call: message.call.map(call),
-            role_subscription: message.role_subscription_data.map(|data| {
-                Box::new(RoleSubscription {
+            system: SystemData {
+                call: message.call.map(call),
+                role_subscription: message.role_subscription_data.map(|data| RoleSubscription {
                     tier_name: text(data.tier_name),
                     total_months_subscribed: data.total_months_subscribed,
                     is_renewal: data.is_renewal,
-                })
-            }),
-            purchased_product: message
-                .purchase_notification
-                .and_then(|notification| notification.guild_product_purchase)
-                .map(|purchase| text(purchase.product_name)),
-            actor: message.actor.map(&mut *intern),
-            application_name: message
-                .application
-                .map(|application| text(application.name)),
+                }),
+                purchased_product: message
+                    .purchase_notification
+                    .and_then(|notification| notification.guild_product_purchase)
+                    .map(|purchase| text(purchase.product_name)),
+                actor: message.actor.map(&mut *intern),
+                application_name: message
+                    .application
+                    .map(|application| text(application.name)),
+            }
+            .boxed(),
         }
     }
 
@@ -426,11 +427,7 @@ impl Message {
             reference: None,
             referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Pending,
-            call: None,
-            role_subscription: None,
-            purchased_product: None,
-            actor: None,
-            application_name: None,
+            system: None,
         }
     }
 
@@ -466,17 +463,19 @@ impl Message {
         next.pinned = update.pinned.unwrap_or(next.pinned);
         next.flags = update.flags.unwrap_or(next.flags);
         if let Some(ended) = update.call {
-            next.call = Some(call(ended));
+            let mut system = next.system.take().map(|system| *system).unwrap_or_default();
+            system.call = Some(call(ended));
+            next.system = system.boxed();
         }
         next
     }
 }
 
-fn call(call: model::MessageCall) -> Box<Call> {
-    Box::new(Call {
+fn call(call: model::MessageCall) -> Call {
+    Call {
         participants: call.participants.into_boxed_slice(),
         ended_timestamp: call.ended_timestamp,
-    })
+    }
 }
 
 fn attachment(attachment: model::Attachment) -> Attachment {
@@ -896,6 +895,17 @@ mod tests {
         assert!(edited_message.edited_timestamp.is_some());
     }
 
+    // A message's rare system data costs a plain message one pointer.
+    #[test]
+    fn a_plain_message_carries_no_system_data() {
+        let plain = Message::from_wire(
+            parse(include_str!("../../tests/fixtures/message.json")),
+            &mut new_arc,
+        );
+
+        assert_eq!(plain.system, None);
+    }
+
     fn system_message(kind: u8, field: &str, data: Value) -> Message {
         Message::from_wire(
             edited(include_str!("../../tests/fixtures/message.json"), |value| {
@@ -914,7 +924,11 @@ mod tests {
             serde_json::json!({"participants": ["100000000000000001"], "ended_timestamp": null}),
         );
 
-        let call = message.call.as_deref().unwrap();
+        let call = message
+            .system
+            .as_deref()
+            .and_then(|s| s.call.as_ref())
+            .unwrap();
         assert_eq!(
             &*call.participants,
             [Snowflake::new(100_000_000_000_000_001)]
@@ -944,13 +958,17 @@ mod tests {
             &mut new_arc,
         );
 
-        let call = ended.call.as_deref().unwrap();
+        let call = ended
+            .system
+            .as_deref()
+            .and_then(|s| s.call.as_ref())
+            .unwrap();
         assert_eq!(call.participants.len(), 2);
         assert_eq!(
             call.ended_timestamp.map(Timestamp::unix_millis),
             Some(1_709_282_400_250)
         );
-        assert_eq!(untouched.call, ended.call);
+        assert_eq!(untouched.system, ended.system);
     }
 
     #[test]
@@ -966,12 +984,23 @@ mod tests {
             serde_json::json!({"type": 0, "guild_product_purchase": {"listing_id": "1", "product_name": "Badge"}}),
         );
 
-        let data = subscription.role_subscription.as_deref().unwrap();
+        let data = subscription
+            .system
+            .as_deref()
+            .and_then(|s| s.role_subscription.as_ref())
+            .unwrap();
         assert_eq!(&*data.tier_name, "Gold");
         assert_eq!(data.total_months_subscribed, 3);
         assert!(data.is_renewal);
-        assert_eq!(purchase.purchased_product.as_deref(), Some("Badge"));
-        assert_eq!(subscription.call, None);
+        let product = purchase
+            .system
+            .as_deref()
+            .and_then(|s| s.purchased_product.as_deref());
+        assert_eq!(product, Some("Badge"));
+        assert_eq!(
+            subscription.system.as_deref().and_then(|s| s.call.as_ref()),
+            None
+        );
     }
 
     #[test]
@@ -996,10 +1025,19 @@ mod tests {
         );
 
         assert_eq!(
-            join.actor.as_deref().map(|user| &*user.username),
+            join.system
+                .as_deref()
+                .and_then(|s| s.actor.as_deref())
+                .map(|user| &*user.username),
             Some("ray")
         );
         assert!(seen.contains(&Snowflake::new(100_000_000_000_000_003)));
-        assert_eq!(upgrade.application_name.as_deref(), Some("Akari Bot"));
+        assert_eq!(
+            upgrade
+                .system
+                .as_deref()
+                .and_then(|s| s.application_name.as_deref()),
+            Some("Akari Bot")
+        );
     }
 }

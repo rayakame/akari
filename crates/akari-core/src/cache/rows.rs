@@ -14,8 +14,8 @@ use crate::state::{
     Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor,
     EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings,
     ImageHash, Member, Message, MessageReference, NotificationLevel, PermissionOverwrite,
-    ReadState, ReferencedMessage, Role, RoleSubscription, Sticker, ThreadInfo, ThreadMembership,
-    Unreads, User,
+    ReadState, ReferencedMessage, Role, RoleSubscription, Sticker, SystemData, ThreadInfo,
+    ThreadMembership, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -727,6 +727,7 @@ struct RoleSubscriptionRow {
 
 impl From<&Message> for MessageRow {
     fn from(message: &Message) -> Self {
+        let system = message.system.as_deref();
         Self {
             kind: message.kind.into(),
             author: UserRow::from(&*message.author),
@@ -780,20 +781,24 @@ impl From<&Message> for MessageRow {
                 channel_id: id(reference.channel_id),
                 guild_id: id(reference.guild_id),
             }),
-            call: message.call.as_deref().map(|call| CallRow {
-                participants: call.participants.iter().map(|user| user.get()).collect(),
-                ended_timestamp: call.ended_timestamp.map(nanos),
-            }),
-            role_subscription: message.role_subscription.as_deref().map(|data| {
-                RoleSubscriptionRow {
+            call: system
+                .and_then(|system| system.call.as_ref())
+                .map(|call| CallRow {
+                    participants: call.participants.iter().map(|user| user.get()).collect(),
+                    ended_timestamp: call.ended_timestamp.map(nanos),
+                }),
+            role_subscription: system
+                .and_then(|system| system.role_subscription.as_ref())
+                .map(|data| RoleSubscriptionRow {
                     tier_name: data.tier_name.clone(),
                     total_months_subscribed: data.total_months_subscribed,
                     is_renewal: data.is_renewal,
-                }
-            }),
-            purchased_product: message.purchased_product.clone(),
-            actor: message.actor.as_deref().map(UserRow::from),
-            application_name: message.application_name.clone(),
+                }),
+            purchased_product: system.and_then(|system| system.purchased_product.clone()),
+            actor: system
+                .and_then(|system| system.actor.as_deref())
+                .map(UserRow::from),
+            application_name: system.and_then(|system| system.application_name.clone()),
         }
     }
 }
@@ -868,22 +873,21 @@ impl MessageRow {
             }),
             referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Sent,
-            call: self.call.map(|call| {
-                Box::new(Call {
+            system: SystemData {
+                call: self.call.map(|call| Call {
                     participants: call.participants.into_iter().map(Snowflake::new).collect(),
                     ended_timestamp: call.ended_timestamp.map(timestamp),
-                })
-            }),
-            role_subscription: self.role_subscription.map(|data| {
-                Box::new(RoleSubscription {
+                }),
+                role_subscription: self.role_subscription.map(|data| RoleSubscription {
                     tier_name: data.tier_name,
                     total_months_subscribed: data.total_months_subscribed,
                     is_renewal: data.is_renewal,
-                })
-            }),
-            purchased_product: self.purchased_product,
-            actor: self.actor.map(&mut intern),
-            application_name: self.application_name,
+                }),
+                purchased_product: self.purchased_product,
+                actor: self.actor.map(&mut intern),
+                application_name: self.application_name,
+            }
+            .boxed(),
         }
     }
 }

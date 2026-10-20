@@ -264,7 +264,7 @@ pub struct Message {
     pub actor: Option<User>,
     /// The app a GUILD_APPLICATION_PREMIUM_SUBSCRIPTION upgraded.
     pub application_name: Option<String>,
-    /// The first embed's fields: a poll result's and an AutoMod alert's data.
+    /// A poll result's or an AutoMod alert's first embed's fields, which their lines read.
     pub embed_fields: Vec<EmbedField>,
 }
 
@@ -318,6 +318,7 @@ impl Message {
         formatted: FormattedText,
         mentions_me: bool,
     ) -> Self {
+        let system = message.system.as_deref();
         Self {
             id: message.id,
             channel_id: message.channel_id,
@@ -354,35 +355,36 @@ impl Message {
                 .iter()
                 .map(|user| User::from(&**user))
                 .collect(),
-            call: message.call.as_deref().map(|call| MessageCall {
-                participants: call.participants.to_vec(),
-                ended_timestamp: call.ended_timestamp.map(system_time),
-            }),
-            role_subscription: message
-                .role_subscription
-                .as_deref()
+            call: system
+                .and_then(|system| system.call.as_ref())
+                .map(|call| MessageCall {
+                    participants: call.participants.to_vec(),
+                    ended_timestamp: call.ended_timestamp.map(system_time),
+                }),
+            role_subscription: system
+                .and_then(|system| system.role_subscription.as_ref())
                 .map(|data| RoleSubscription {
                     tier_name: data.tier_name.to_string(),
                     total_months_subscribed: data.total_months_subscribed,
                     is_renewal: data.is_renewal,
                 }),
-            purchased_product: message.purchased_product.as_deref().map(str::to_owned),
-            actor: message.actor.as_deref().map(User::from),
-            application_name: message.application_name.as_deref().map(str::to_owned),
+            purchased_product: system
+                .and_then(|system| system.purchased_product.as_deref())
+                .map(str::to_owned),
+            actor: system
+                .and_then(|system| system.actor.as_deref())
+                .map(User::from),
+            application_name: system
+                .and_then(|system| system.application_name.as_deref())
+                .map(str::to_owned),
             embed_fields: message
-                .embeds
-                .first()
-                .map(|embed| {
-                    embed
-                        .fields
-                        .iter()
-                        .map(|field| EmbedField {
-                            name: field.name.to_string(),
-                            value: field.value.to_string(),
-                        })
-                        .collect()
+                .system_embed_fields()
+                .iter()
+                .map(|field| EmbedField {
+                    name: field.name.to_string(),
+                    value: field.value.to_string(),
                 })
-                .unwrap_or_default(),
+                .collect(),
         }
     }
 }
