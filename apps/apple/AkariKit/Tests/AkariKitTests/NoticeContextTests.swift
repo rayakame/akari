@@ -139,6 +139,39 @@ struct NoticeContextTests {
         #expect(call?.notice == "You missed a call from Ray that lasted an hour.")
     }
 
+    // A thread started from a system message words it from the original's needs.
+    @Test
+    func aThreadsStarterIsWordedForTheOriginal() {
+        let original = message(41, by: ray, content: "", kind: .premiumGuildSubscriptionTier2)
+        store.update { state in
+            state.channels[id(20)] = thread(20, in: 10)
+            state.starters[id(20)] = .loaded(message: original)
+        }
+
+        let starter = row(
+            in: id(20),
+            message(
+                1, in: 20, by: ray, kind: .threadStarterMessage,
+                reference: MessageReference(messageId: id(41), channelId: id(10), guildId: id(1))))
+
+        #expect(starter?.notice == "Ray just boosted the server! Lab has achieved Level 2!")
+    }
+
+    @Test
+    func aRenamedThreadRewordsItsLine() {
+        store.update { $0.channels[id(20)] = thread(20, in: 10, name: "plans") }
+        let line = message(
+            1, by: ray, content: "plans", kind: .threadCreated,
+            reference: MessageReference(messageId: nil, channelId: id(20), guildId: id(1)))
+        _ = row(in: id(10), line)
+        let model = MessageListModel(channelId: id(10), userId: id(1), account: account, store: store)
+
+        store.update { $0.channels[id(20)] = thread(20, in: 10, name: "launch") }
+        model.apply(EventBatch([.channelUpdated(channelId: id(20), guildId: id(1))]))
+
+        #expect(model.rows.first?.notice == "Ray started a thread: launch. See all threads.")
+    }
+
     @Test
     func aKindWithoutALineIsHidden() {
         let reminder = row(in: id(10), message(1, by: ray, kind: .guildInviteReminder))

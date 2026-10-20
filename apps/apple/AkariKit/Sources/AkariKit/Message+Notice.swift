@@ -60,8 +60,8 @@ extension Message {
         public var recipientName: String?
         /// A voice session's participants the store knows, without its author.
         public var participantNames: [String] = []
-        /// For dates in a line, such as when security actions end.
-        public var calendar: Calendar = .current
+        /// For dates in a line, such as when security actions end; `nil` is the user's.
+        public var calendar: Calendar?
 
         public init(currentUserId: UserId? = nil, place: Place = .channel) {
             self.currentUserId = currentUserId
@@ -98,13 +98,13 @@ extension Message {
             .giftingPrompt, .inGameMessageNux, .guildBoostUpsell, .channelLinkedToLobby:
             return []
         case .recipientAdd:
-            let thread = context.place == .thread
+            let thread = context.place == .thread || context.place == .forumPost
             return [
                 actor, .text(" added "), .strong(mentioned ?? (thread ? "???" : "unknown-user")),
                 .text(thread ? " to the thread." : " to the group."),
             ]
         case .recipientRemove:
-            if context.place == .thread {
+            if context.place == .thread || context.place == .forumPost {
                 return [
                     actor, .text(" removed "), .strong(mentioned ?? "???"),
                     .text(" from the thread."),
@@ -309,14 +309,14 @@ extension Message {
     ) -> [NoticePart] {
         // JavaScript's Number(content): empty or not a number is one boost.
         let number = Double(content.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-        let count = number.isNaN || number == 0 ? 1 : number
+        let count = !number.isFinite || number == 0 ? 1 : number
+        // Whole numbers below 1e21 print without an exponent, as in JavaScript.
+        let written =
+            count == count.rounded() && abs(count) < 1e21
+            ? String(format: "%.0f", count) : String(count)
         var parts: [NoticePart] =
             count > 1
-            ? [
-                actor, .text(" just boosted the server "),
-                .strong(count == count.rounded() ? String(Int(count)) : String(count)),
-                .text(" times!"),
-            ]
+            ? [actor, .text(" just boosted the server "), .strong(written), .text(" times!")]
             : [actor, .text(" just boosted the server!")]
         if let level, let guild = context.guildName {
             parts += [.text(" \(guild) has achieved "), .strong("Level \(level)!")]
@@ -393,9 +393,9 @@ extension Message {
             // What JavaScript's Date gives for text that isn't a date.
             return "Invalid Date"
         }
+        let calendar = context.calendar ?? .current
         let style = Date.FormatStyle(
-            locale: context.calendar.locale ?? .current, calendar: context.calendar,
-            timeZone: context.calendar.timeZone)
+            locale: calendar.locale ?? .current, calendar: calendar, timeZone: calendar.timeZone)
         return end.formatted(
             style.month(.twoDigits).day(.twoDigits).year().hour().minute(.twoDigits))
     }

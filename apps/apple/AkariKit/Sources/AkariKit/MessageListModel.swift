@@ -687,12 +687,15 @@ public final class MessageListModel {
 
     private func row(_ id: MessageId, _ message: Message) -> Row {
         let thread = message.kind == .threadCreated ? message.reference?.channelId : nil
+        let starter = starter(of: message)
+        // A loaded starter draws the original, which is worded for its own kind.
+        let shown = if case .loaded(let original)? = starter { original } else { message }
         return Row(
-            id: id, message: message, starter: starter(of: message),
+            id: id, message: message, starter: starter,
             threadLinked: thread.map {
                 store.channel(id: $0) != nil || !store.threadUnavailable(threadId: $0)
             } ?? true,
-            noticeContext: noticeContext(for: message))
+            noticeContext: noticeContext(for: shown))
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {

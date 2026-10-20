@@ -54,6 +54,17 @@ struct NoticeWordingTests {
         #expect(added.notice(in: context(.groupDM)) == "Ray added Mira to the group.")
     }
 
+    // A forum post is a thread too.
+    @Test
+    func aForumPostsMembersAreAddedToTheThread() {
+        #expect(
+            message(.recipientAdd, mentions: [mira]).notice(in: context(.forumPost))
+                == "Ray added Mira to the thread.")
+        #expect(
+            message(.recipientRemove, mentions: [mira]).notice(in: context(.forumPost))
+                == "Ray removed Mira from the thread.")
+    }
+
     @Test
     func someoneRemovedFromAThreadOrAGroupIsNamed() {
         let removed = message(.recipientRemove, mentions: [mira])
@@ -223,6 +234,17 @@ struct NoticeWordingTests {
                 == "Ray just boosted the server!")
     }
 
+    // Number("inf") is NaN in JavaScript; Swift's Double reads it as infinity.
+    @Test
+    func aBoostCountThatIsntANumberReadsAsOne() {
+        #expect(
+            message(.premiumGuildSubscription, content: "inf").notice(in: context())
+                == "Ray just boosted the server!")
+        #expect(
+            message(.premiumGuildSubscription, content: "1e19").notice(in: context())
+                == "Ray just boosted the server 10000000000000000000 times!")
+    }
+
     // MARK: Server notices
 
     @Test
@@ -333,10 +355,11 @@ struct NoticeWordingTests {
     @Test
     func securityLinesSayWhatHappened() {
         var utc = context()
-        utc.calendar = Calendar(identifier: .gregorian)
-        utc.calendar.timeZone = TimeZone(identifier: "UTC")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
         // Akari's English on a German Mac; the platform's format, as for every date.
-        utc.calendar.locale = Locale(identifier: "en_DE")
+        calendar.locale = Locale(identifier: "en_DE")
+        utc.calendar = calendar
 
         #expect(
             message(.guildIncidentAlertModeEnabled, content: "2026-10-21T08:30:00.000000+00:00")
