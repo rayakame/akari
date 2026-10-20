@@ -58,8 +58,10 @@ struct JumpFlashTests {
         #expect(try flash(of: 121) == nil)
     }
 
-    @Test
-    func theFlashIsDiscordsBlurpleOverTheMessagesBox() throws {
+    // The same in both themes.
+    @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theFlashIsDiscordsBlurpleOverTheMessagesBox(appearance: NSAppearance.Name) throws {
+        list.window.appearance = NSAppearance(named: appearance)
         jumped(to: 120)
         let cell = try #require(try list.cell(of: 120) as? MessageCell)
 
@@ -115,11 +117,39 @@ struct JumpFlashTests {
         clock.now += 1
         list.show(MessageTableState(rows: list.page + [row(201, at: list.noon)], messageJump: jump(to: 120, 1)))
         list.table.reloadData(forRowIndexes: [list.index(of: 120)], columnIndexes: [0])
-        #expect(try flash(of: 120) != nil)
+        let shown = try #require(try list.cell(of: 120) as? MessageCell)
+        let begin = try #require(shown.flashAnimation).beginTime
+        let layerNow = shown.flashLayer.convertTime(CACurrentMediaTime(), from: nil)
+        #expect(abs(layerNow - begin - 1) < 0.1, "it carries on 1 s in")
 
         clock.now += 1.3
         list.table.reloadData(forRowIndexes: [list.index(of: 120)], columnIndexes: [0])
         #expect(try flash(of: 120) == nil)
+    }
+
+    // Discord has one flash at a time.
+    @Test
+    func aSecondJumpEndsTheFirstsFlash() throws {
+        jumped(to: 125)
+
+        list.show(MessageTableState(rows: list.page, messageJump: jump(to: 120, 2)))
+
+        #expect(list.visibleRows.contains(list.index(of: 125)))
+        #expect(try flash(of: 125) == nil)
+        #expect(try flash(of: 120) != nil)
+    }
+
+    @Test
+    func aCellReusedForAnotherRowCarriesNoFlash() throws {
+        jumped(to: 120)
+
+        list.scroll(toRowOf: 195)
+
+        let flashing = list.visibleRows.filter { row in
+            (list.table.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageCell)?
+                .flashAnimation != nil
+        }
+        #expect(flashing.isEmpty)
     }
 
     @Test

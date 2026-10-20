@@ -488,8 +488,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         askForMore()
     }
 
-    // Discord flashes the message itself only, not the one after a deleted target.
+    // Discord flashes the message itself only, not the one after a deleted target, and one at
+    // a time.
     private func startFlash(at row: Int?, of message: MessageId) {
+        if let old = flash.flatMap({ flash in timeline.items.firstIndex { $0.id == flash.row } }) {
+            (tableView.view(atColumn: 0, row: old, makeIfNecessary: false) as? MessageCell)?
+                .flash(elapsed: nil, reducesMotion: false)
+        }
         guard let row, case .message(let shown, _) = timeline.items[row],
             shown.message.id == message
         else {
