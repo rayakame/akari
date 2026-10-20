@@ -76,6 +76,19 @@ struct JumpFlashTests {
         #expect(cell.flashLayer.maskedCorners == [.layerMaxXMinYCorner, .layerMaxXMaxYCorner])
     }
 
+    // A legacy scroller's gutter can come and go without resizing the cell (CI's Macs).
+    @Test
+    func theFlashFollowsALegacyScrollersGutter() throws {
+        list.controller.scrollView.scrollerStyle = .legacy
+        NotificationCenter.default.post(
+            name: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil)
+
+        jumped(to: 120)
+
+        let cell = try #require(try list.cell(of: 120) as? MessageCell)
+        #expect(cell.flashFrame == cell.box, "\(cell.flashFrame) \(cell.box)")
+    }
+
     @Test
     func withReducedMotionItComesAndGoesAtOnce() throws {
         list.controller.reducesMotion = { true }

@@ -225,6 +225,8 @@ final class MessageCell: NSTableCellView {
         }
         animation.duration = length
         animation.beginTime = flashLayer.convertTime(CACurrentMediaTime(), from: nil) - elapsed
+        // A legacy scroller's gutter can change without a layout of the cell.
+        flashView.frame = box
         effectiveAppearance.performAsCurrentDrawingAppearance {
             flashLayer.backgroundColor = Palette.messageHighlight.cgColor
         }
