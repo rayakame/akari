@@ -72,7 +72,8 @@ settles, `MessageUpdated` names that first message.
 `parent_id` names when the store doesn't have it (archived, or never synced) and returns whether
 the store has it now. When Discord refuses it or it is gone, `Store.thread_unavailable(thread_id)`
 says so for the session, and `StoreEvent::ThreadUnavailable { guild_id, thread_id }` tells the
-guild's lists to read the lines that name it again.
+lists of the parent's guild to read the lines that name it again. A later READY keeps a thread
+fetched this session.
 
 Acks: `set_reading(channel_id)` names the channel the user is reading at its newest messages
 (or `None`), `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request

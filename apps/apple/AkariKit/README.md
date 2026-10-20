@@ -109,8 +109,8 @@ An open thread that stops being listed (left, closed, or read past its window) s
 as in the official client; only its deletion closes it. `openParent()` opens the open
 thread's channel, for the thread header's link. `open(thread:from:)` opens the thread a
 "started a thread" line names, fetched first when the store doesn't have it; nothing opens when
-Discord refuses it, it's gone or the fetch fails, nor once the user opened something else
-meanwhile. A row's `threadLinked` is false for such a line once the thread is unavailable. In a
+Discord refuses it, it's gone or the fetch fails, nor once the user opened something else or
+clicked another line meanwhile. A row's `threadLinked` is false for such a line once the thread is unavailable. In a
 thread, a row's `starter` is set for
 its first message when it started from one in the channel: the row draws `shown`, the
 parent's message, once loaded; `notice` says it couldn't be loaded; while it's fetched the

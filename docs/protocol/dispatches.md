@@ -167,10 +167,13 @@ through the rate limiter. User accounts may call it, and for a thread it include
 thread member when they joined it. The store keeps the answer as THREAD_CREATE would, so the
 thread is unjoined unless the member came along. A 403 or 404, or a channel that isn't a thread,
 makes it `Store::thread_unavailable` for the session, with
-`ThreadUnavailable { guild_id, thread_id }`, and it isn't asked for again; another failure is
-asked again on the next click. The request is logged at `akari_core::load` (the thread's ID and
-the outcome). Whether the official client fetches such a thread this way isn't observed. A later
-READY drops an unjoined fetched thread, as it does every unjoined one.
+`ThreadUnavailable { guild_id, thread_id }` when the store has the parent, and it isn't asked for
+again; another failure, or a guild the store doesn't have (down, or not restored yet), is asked
+again on the next click. An answer for a thread the gateway brought meanwhile changes nothing.
+The request is logged at `akari_core::load` (the thread's ID and the outcome). Whether the
+official client fetches such a thread this way isn't observed. READY lists only joined threads,
+so a later READY keeps a thread fetched this session while its guild and parent are there, also
+one fetched while the READY was prepared.
 
 **Joining and leaving** (observed 2026-10-17; not sent by Akari yet):
 `POST /channels/{thread}/thread-members/@me?location=…` joins (the docs say PUT; the official
