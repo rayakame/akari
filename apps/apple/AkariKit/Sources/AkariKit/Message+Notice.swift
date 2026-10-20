@@ -8,57 +8,77 @@ extension Message {
         case thread(name: String, id: ChannelId?)
         /// "threads" in "See all threads.", for the channel's threads.
         case threads(String)
+        /// "a message" in a pin's line, which jumps to the pinned message.
+        case message(String, id: MessageId)
+        /// "pinned messages" in "See all pinned messages.", for the channel's pins.
+        case pins(String)
 
         var text: String {
             switch self {
-            case .text(let text), .actor(let text), .thread(let text, _), .threads(let text): text
+            case .text(let text), .actor(let text), .thread(let text, _), .threads(let text),
+                .message(let text, _), .pins(let text):
+                text
             }
         }
     }
 
-    /// `notice` in parts; `nil` for messages people write.
+    /// What a system message says in parts, e.g. "Mira" and " joined the server."; `nil` for
+    /// messages people write (default, reply, commands).
     public var noticeParts: [NoticePart]? {
-        guard kind == .threadCreated else {
-            return notice.map { [.text($0)] }
+        // Discord draws the actor of each line observed as a name (TB3.4).
+        func named(_ rest: String) -> [NoticePart] {
+            [.actor(author.displayName), .text(rest)]
         }
-        // Discord's wording (Q38).
-        return [
-            .actor(author.displayName), .text(" started a thread: "),
-            .thread(name: content, id: reference?.channelId), .text(". See all "),
-            .threads("threads"), .text("."),
-        ]
-    }
-
-    /// What a system message says, in Akari's words, e.g. "Mira pinned a message to this
-    /// channel."; `nil` for messages people write (default, reply, commands).
-    public var notice: String? {
-        let name = author.displayName
         switch kind {
         case .default, .reply, .chatInputCommand, .contextMenuCommand, .threadStarterMessage,
             .unknown:
             return nil
-        case .userJoin: return "\(name) joined the server."
-        case .channelPinnedMessage: return "\(name) pinned a message to this channel."
-        case .premiumGuildSubscription: return "\(name) boosted the server."
-        case .premiumGuildSubscriptionTier1: return Self.boost(name, level: 1)
-        case .premiumGuildSubscriptionTier2: return Self.boost(name, level: 2)
-        case .premiumGuildSubscriptionTier3: return Self.boost(name, level: 3)
-        case .recipientAdd: return "\(name) added someone to the group."
-        case .recipientRemove: return "\(name) left the group or removed someone."
-        case .call: return "\(name) started a call."
-        case .channelNameChange: return "\(name) changed the channel name: \(content)"
-        case .channelIconChange: return "\(name) changed the channel icon."
-        case .threadCreated: return noticeParts?.map(\.text).joined()
-        case .channelFollowAdd: return "\(name) followed this channel's announcements."
-        case .autoModerationAction: return "AutoMod blocked or flagged a message."
-        case .stageStart: return "\(name) started the stage."
-        case .stageEnd: return "\(name) ended the stage."
-        case .pollResult: return "A poll has ended."
-        default: return content.isEmpty ? "System message" : "System message: \(content)"
+        case .userJoin: return named(" joined the server.")
+        // Discord's wording (TB3.4); without the reference "a message" isn't a link.
+        case .channelPinnedMessage:
+            let pinned: [NoticePart] =
+                if let id = reference?.messageId {
+                    [
+                        .text(" pinned "), .message("a message", id: id),
+                        .text(" to this channel. See all "),
+                    ]
+                } else {
+                    [.text(" pinned a message to this channel. See all ")]
+                }
+            return [.actor(author.displayName)] + pinned + [.pins("pinned messages"), .text(".")]
+        case .premiumGuildSubscription: return named(" boosted the server.")
+        case .premiumGuildSubscriptionTier1: return named(Self.boosted(level: 1))
+        case .premiumGuildSubscriptionTier2: return named(Self.boosted(level: 2))
+        case .premiumGuildSubscriptionTier3: return named(Self.boosted(level: 3))
+        case .recipientAdd: return named(" added someone to the group.")
+        case .recipientRemove: return named(" left the group or removed someone.")
+        case .call: return named(" started a call.")
+        case .channelNameChange: return named(" changed the channel name: \(content)")
+        case .channelIconChange: return named(" changed the channel icon.")
+        // Discord's wording (Q38).
+        case .threadCreated:
+            return [
+                .actor(author.displayName), .text(" started a thread: "),
+                .thread(name: content, id: reference?.channelId), .text(". See all "),
+                .threads("threads"), .text("."),
+            ]
+        case .channelFollowAdd: return named(" followed this channel's announcements.")
+        case .autoModerationAction: return [.text("AutoMod blocked or flagged a message.")]
+        case .stageStart: return named(" started the stage.")
+        case .stageEnd: return named(" ended the stage.")
+        case .pollResult: return [.text("A poll has ended.")]
+        default:
+            return [.text(content.isEmpty ? "System message" : "System message: \(content)")]
         }
     }
 
-    private static func boost(_ name: String, level: Int) -> String {
-        "\(name) boosted the server. It reached level \(level)."
+    /// What a system message says, e.g. "Mira joined the server."; `nil` for messages people
+    /// write.
+    public var notice: String? {
+        noticeParts?.map(\.text).joined()
+    }
+
+    private static func boosted(level: Int) -> String {
+        " boosted the server. It reached level \(level)."
     }
 }

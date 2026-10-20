@@ -45,17 +45,65 @@ struct MessageNoticeTests {
                 .thread(name: "plans", id: nil)) == true)
     }
 
-    // Without observations of their actors, they stay one muted text (B8).
+    // TB3.4: "Ray pinned a message to this channel. See all pinned messages.", the actor, "a
+    // message" and "pinned messages" strong.
     @Test
-    func otherNoticesAreOneText() {
-        #expect(message(.userJoin).noticeParts == [.text("Mira joined the server.")])
+    func aPinsLineNamesItsActorTheMessageAndAllPinnedMessages() {
+        let line = message(
+            .channelPinnedMessage,
+            reference: MessageReference(messageId: id(5), channelId: id(10), guildId: id(1)))
+
+        #expect(
+            line.noticeParts == [
+                .actor("Mira"), .text(" pinned "), .message("a message", id: id(5)),
+                .text(" to this channel. See all "), .pins("pinned messages"), .text("."),
+            ])
+        #expect(line.notice == "Mira pinned a message to this channel. See all pinned messages.")
+    }
+
+    // Discord's string for a pin without its reference has "a message" as plain text.
+    @Test
+    func aPinsLineWithoutItsMessageSaysSoInText() {
+        #expect(
+            message(.channelPinnedMessage).noticeParts == [
+                .actor("Mira"), .text(" pinned a message to this channel. See all "),
+                .pins("pinned messages"), .text("."),
+            ])
+    }
+
+    // Both lines observed draw their actor as a name (TB3.4), so every kind does.
+    @Test(arguments: [
+        MessageType.userJoin, .channelPinnedMessage, .premiumGuildSubscription,
+        .premiumGuildSubscriptionTier1, .premiumGuildSubscriptionTier2,
+        .premiumGuildSubscriptionTier3, .recipientAdd, .recipientRemove, .call,
+        .channelNameChange, .channelIconChange, .threadCreated, .channelFollowAdd, .stageStart,
+        .stageEnd,
+    ])
+    func everyNoticeWithAnActorNamesIt(kind: MessageType) {
+        let parts = message(kind, content: "lobby").noticeParts
+
+        #expect(parts?.first == .actor("Mira"))
+        #expect(parts?.dropFirst().first?.text.hasPrefix(" ") == true)
+    }
+
+    @Test
+    func aJoinIsItsActorThenOneText() {
+        #expect(message(.userJoin).noticeParts == [.actor("Mira"), .text(" joined the server.")])
+    }
+
+    @Test
+    func noticesWithoutAnActorAreOneText() {
+        #expect(message(.pollResult).noticeParts == [.text("A poll has ended.")])
+        #expect(message(.guildInviteReminder).noticeParts == [.text("System message")])
         #expect(message(.default, content: "hi").noticeParts == nil)
     }
 
     @Test
     func noticesNameTheAuthor() {
         #expect(notice(.userJoin) == "Mira joined the server.")
-        #expect(notice(.channelPinnedMessage) == "Mira pinned a message to this channel.")
+        #expect(
+            notice(.channelPinnedMessage)
+                == "Mira pinned a message to this channel. See all pinned messages.")
         #expect(
             notice(.premiumGuildSubscriptionTier2) == "Mira boosted the server. It reached level 2."
         )

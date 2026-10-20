@@ -21,6 +21,8 @@ public final class MessageListModel {
         case newer
         /// Around the read position, for the jump to the first unread message.
         case around
+        /// Around a message, for a jump to it.
+        case aroundMessage
     }
 
     /// Where a channel's first rows came from.
@@ -106,6 +108,19 @@ public final class MessageListModel {
         }
     }
 
+    /// A jump to a message, such as a pin's: the view scrolls it to its top, or the first
+    /// message after it when it's gone.
+    public struct MessageJump: Equatable, Sendable {
+        public let messageId: MessageId
+        /// Counts the jumps, so one to the same message again scrolls again.
+        public let number: Int
+
+        public init(messageId: MessageId, number: Int) {
+            self.messageId = messageId
+            self.number = number
+        }
+    }
+
     public let channelId: ChannelId
     /// Oldest first, then our pending and failed messages.
     public private(set) var rows: [Row] = []
@@ -136,6 +151,8 @@ public final class MessageListModel {
     public private(set) var unreadBar: UnreadBar?
     /// Counts the jumps to the first unread message; on each the view scrolls the line to its top.
     public private(set) var unreadJumps = 0
+    /// The last jump to a message that landed.
+    public private(set) var messageJump: MessageJump?
     /// Who started the thread, by name, if the store or the loaded messages know them.
     public private(set) var threadOwner: String?
 
@@ -180,6 +197,7 @@ public final class MessageListModel {
     @ObservationIgnored private var owedPresent: Int?
     @ObservationIgnored private var retired = false
     @ObservationIgnored private var landed = 0
+    @ObservationIgnored private var messageJumps = 0
 
     init(
         channelId: ChannelId, userId: UserId, account: Account, store: Store,
@@ -274,10 +292,31 @@ public final class MessageListModel {
         unreadJumps += 1
     }
 
+    /// "a message" in a pin's line: loads the messages around it unless the loaded ones reach
+    /// it; a failed load leaves the list where it is. What cancels the jump to unread cancels
+    /// this one too, and so does either jump started after it. Scrolling is the view's part.
+    public func jump(to messageId: MessageId) async {
+        if !loadedRange(reaches: messageId) {
+            let (ticket, outcome) = await load(.aroundMessage, around: messageId)
+            guard outcome == .applied, ticket == lastPlacing else {
+                if !retired, owedPresent != nil, activeLoads[lastPlacing] == nil {
+                    await load(.latest)
+                }
+                return
+            }
+        } else if aroundLoadRunning {
+            account.supersedeAroundLoads(channelId: channelId)
+            loads += 1
+            lastPlacing = loads
+        }
+        messageJumps += 1
+        messageJump = MessageJump(messageId: messageId, number: messageJumps)
+    }
+
     // A jump landing after the user left would reopen the channel in history, without its scroll.
     func retire() {
         retired = true
-        if activeLoads.values.contains(.around) {
+        if aroundLoadRunning {
             account.supersedeAroundLoads(channelId: channelId)
         }
     }
@@ -331,7 +370,7 @@ public final class MessageListModel {
     // Marked read or a send: only a message newer than what is known now starts the next line.
     func endNewMessagesLine() {
         // A latest load would overtake a running jump too, but at the present none runs.
-        if activeLoads.values.contains(.around) {
+        if aroundLoadRunning {
             account.supersedeAroundLoads(channelId: channelId)
             loads += 1
             lastPlacing = loads
@@ -402,9 +441,16 @@ public final class MessageListModel {
             || batch.channelsChanged[guildId] != nil
     }
 
-    // The outcome is `nil` when it failed or there was nothing to load.
+    private var aroundLoadRunning: Bool {
+        activeLoads.values.contains { $0 == .around || $0 == .aroundMessage }
+    }
+
+    // The outcome is `nil` when it failed or there was nothing to load. `target` is the message
+    // an `aroundMessage` load centers on.
     @discardableResult
-    private func load(_ kind: Load) async -> (ticket: Int, outcome: PageOutcome?) {
+    private func load(_ kind: Load, around target: MessageId? = nil) async -> (
+        ticket: Int, outcome: PageOutcome?
+    ) {
         loads += 1
         let ticket = loads
         activeLoads[ticket] = kind
@@ -421,10 +467,12 @@ public final class MessageListModel {
             case .newer: .newer(limit: Self.pageSize)
             case .around:
                 .around(messageId: readUpTo ?? MessageId(rawValue: 0), limit: Self.pageSize)
+            case .aroundMessage:
+                .around(messageId: target ?? MessageId(rawValue: 0), limit: Self.pageSize)
             }
         // Taken now, in the order the user acted: the load begins later, on Akari's runtime.
         var placing: UInt64?
-        if kind == .latest || kind == .around {
+        if kind.places {
             placing = account.reservePlacing()
             lastPlacing = ticket
         }
@@ -454,7 +502,7 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: report,
                 failure: nil, page: Set(page), read: read, started: started,
                 duration: started.duration(to: .now))
-            if kind == .latest || kind == .around {
+            if kind.places {
                 notePlaced(ticket, kind: kind, outcome: report?.outcome)
             }
             return (ticket, report?.outcome)
@@ -570,6 +618,17 @@ public final class MessageListModel {
         return UnreadBar(count: count, more: !loaded || !atPresent, since: since)
     }
 
+    // So it's among them, or was deleted from between them.
+    private func loadedRange(reaches id: MessageId) -> Bool {
+        let sent = { (row: Row) in row.message.delivery == .sent }
+        guard let oldest = rows.first(where: sent)?.message.id,
+            let newest = rows.last(where: sent)?.message.id
+        else {
+            return false
+        }
+        return (reachedOldest || oldest <= id) && (atPresent || id <= newest)
+    }
+
     // Then the line stands right before the first unread message.
     private func readPositionLoaded(_ position: MessageId) -> Bool {
         guard !reachedOldest else {
@@ -642,5 +701,12 @@ public final class MessageListModel {
         if owner != threadOwner {
             threadOwner = owner
         }
+    }
+}
+
+extension MessageListModel.Load {
+    // Older and newer loads extend the list; the others put it where they load.
+    fileprivate var places: Bool {
+        self != .older && self != .newer
     }
 }
