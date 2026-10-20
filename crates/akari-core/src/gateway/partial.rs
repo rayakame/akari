@@ -1,8 +1,8 @@
 use serde::de::{self, Deserialize, Deserializer};
 
-use crate::lenient::skip_invalid_option;
+use crate::lenient::{default_on_error, skip_invalid_option};
 use crate::model::{
-    Attachment, ChannelId, ChannelType, Embed, GenericMarker, GuildId, MessageId,
+    Attachment, ChannelId, ChannelType, Embed, GenericMarker, GuildId, MessageCall, MessageId,
     MessageNotificationLevel, MessageType, PermissionOverwrite, PremiumType, Role, RoleId,
     Snowflake, StickerItem, ThreadMetadata, Timestamp, User, UserId, WebhookId, double_option,
 };
@@ -122,6 +122,9 @@ pub struct MessageUpdate {
     pub sticker_items: Option<Vec<StickerItem>>,
     pub pinned: Option<bool>,
     pub flags: Option<u64>,
+    /// A CALL message's call, edited in when it ends.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub call: Option<MessageCall>,
 }
 
 /// GUILD_MEMBER_UPDATE. A missing field is unchanged, `Some(None)` is `null`.

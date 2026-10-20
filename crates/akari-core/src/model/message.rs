@@ -5,11 +5,11 @@ use super::guild::GuildMember;
 use super::int_enum::int_enum;
 use super::snowflake::{
     AttachmentMarker, ChannelMarker, EmojiMarker, GuildMarker, MessageMarker, RoleMarker,
-    Snowflake, StickerMarker, WebhookMarker,
+    Snowflake, StickerMarker, UserMarker, WebhookMarker,
 };
 use super::timestamp::Timestamp;
 use super::user::User;
-use crate::lenient::skip_invalid;
+use crate::lenient::{default_on_error, skip_invalid};
 
 /// A message from REST or from MESSAGE_CREATE / MESSAGE_UPDATE.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -56,6 +56,42 @@ pub struct Message {
     /// The sender's deduplication value; Discord echoes it to the sender's sessions.
     #[serde(default, deserialize_with = "lenient_nonce")]
     pub nonce: Option<Nonce>,
+    /// On a CALL message.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub call: Option<MessageCall>,
+    /// On a ROLE_SUBSCRIPTION_PURCHASE message.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub role_subscription_data: Option<RoleSubscriptionData>,
+    /// On a PURCHASE_NOTIFICATION message.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub purchase_notification: Option<PurchaseNotification>,
+}
+
+/// The call a CALL message records.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MessageCall {
+    /// The recipients who joined it.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub participants: Vec<Snowflake<UserMarker>>,
+    /// `None` while the call runs.
+    pub ended_timestamp: Option<Timestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RoleSubscriptionData {
+    pub tier_name: String,
+    pub total_months_subscribed: u32,
+    pub is_renewal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PurchaseNotification {
+    pub guild_product_purchase: Option<GuildProductPurchase>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GuildProductPurchase {
+    pub product_name: String,
 }
 
 /// A message nonce. Clients send a snowflake as a string; Discord also accepts integers.

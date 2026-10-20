@@ -234,6 +234,30 @@ pub struct Message {
     pub referenced_message: ReferencedMessage,
     /// `Pending` and `Failed` messages are ours, waiting in the window's outbox.
     pub delivery: Delivery,
+    /// On a CALL message.
+    pub call: Option<Box<Call>>,
+    /// On a ROLE_SUBSCRIPTION_PURCHASE message.
+    pub role_subscription: Option<Box<RoleSubscription>>,
+    /// On a PURCHASE_NOTIFICATION message: the guild product's name.
+    pub purchased_product: Option<Box<str>>,
+}
+
+/// The call a CALL message records.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Call {
+    /// The recipients who joined it.
+    pub participants: Box<[UserId]>,
+    /// `None` while it runs.
+    pub ended_timestamp: Option<Timestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RoleSubscription {
+    pub tier_name: Box<str>,
+    pub total_months_subscribed: u32,
+    pub is_renewal: bool,
 }
 
 impl Message {

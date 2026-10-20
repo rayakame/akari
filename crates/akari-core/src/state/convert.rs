@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use super::settings::NotificationLevel;
 use super::types::{
-    Attachment, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
+    Attachment, Call, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
     EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
-    PermissionOverwrite, ReferencedMessage, Role, Sticker, ThreadInfo, ThreadMembership, User,
+    PermissionOverwrite, ReferencedMessage, Role, RoleSubscription, Sticker, ThreadInfo,
+    ThreadMembership, User,
 };
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
@@ -378,6 +379,18 @@ impl Message {
             }),
             referenced_message,
             delivery: Delivery::Sent,
+            call: message.call.map(call),
+            role_subscription: message.role_subscription_data.map(|data| {
+                Box::new(RoleSubscription {
+                    tier_name: text(data.tier_name),
+                    total_months_subscribed: data.total_months_subscribed,
+                    is_renewal: data.is_renewal,
+                })
+            }),
+            purchased_product: message
+                .purchase_notification
+                .and_then(|notification| notification.guild_product_purchase)
+                .map(|purchase| text(purchase.product_name)),
         }
     }
 
@@ -409,6 +422,9 @@ impl Message {
             reference: None,
             referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Pending,
+            call: None,
+            role_subscription: None,
+            purchased_product: None,
         }
     }
 
@@ -443,8 +459,18 @@ impl Message {
         }
         next.pinned = update.pinned.unwrap_or(next.pinned);
         next.flags = update.flags.unwrap_or(next.flags);
+        if let Some(ended) = update.call {
+            next.call = Some(call(ended));
+        }
         next
     }
+}
+
+fn call(call: model::MessageCall) -> Box<Call> {
+    Box::new(Call {
+        participants: call.participants.into_boxed_slice(),
+        ended_timestamp: call.ended_timestamp,
+    })
 }
 
 fn attachment(attachment: model::Attachment) -> Attachment {
@@ -862,5 +888,83 @@ mod tests {
         assert!(Arc::ptr_eq(&unfurled.author, &message.author));
         assert!(edited_message.content.ends_with("(fixed link)"));
         assert!(edited_message.edited_timestamp.is_some());
+    }
+
+    fn system_message(kind: u8, field: &str, data: Value) -> Message {
+        Message::from_wire(
+            edited(include_str!("../../tests/fixtures/message.json"), |value| {
+                value["type"] = kind.into();
+                value[field] = data;
+            }),
+            &mut new_arc,
+        )
+    }
+
+    #[test]
+    fn a_call_message_keeps_its_call() {
+        let message = system_message(
+            3,
+            "call",
+            serde_json::json!({"participants": ["100000000000000001"], "ended_timestamp": null}),
+        );
+
+        let call = message.call.as_deref().unwrap();
+        assert_eq!(
+            &*call.participants,
+            [Snowflake::new(100_000_000_000_000_001)]
+        );
+        assert_eq!(call.ended_timestamp, None);
+    }
+
+    // Discord edits the CALL message when the call ends.
+    #[test]
+    fn an_update_brings_the_calls_end() {
+        let running = system_message(
+            3,
+            "call",
+            serde_json::json!({"participants": ["100000000000000001"]}),
+        );
+
+        let ended = running.patch(
+            parse(
+                r#"{"id": "400000000000000001", "channel_id": "300000000000000002",
+                    "call": {"participants": ["100000000000000001", "100000000000000002"],
+                             "ended_timestamp": "2024-03-01T08:40:00.250000+00:00"}}"#,
+            ),
+            &mut new_arc,
+        );
+        let untouched = ended.patch(
+            parse(r#"{"id": "400000000000000001", "channel_id": "300000000000000002"}"#),
+            &mut new_arc,
+        );
+
+        let call = ended.call.as_deref().unwrap();
+        assert_eq!(call.participants.len(), 2);
+        assert_eq!(
+            call.ended_timestamp.map(Timestamp::unix_millis),
+            Some(1_709_282_400_250)
+        );
+        assert_eq!(untouched.call, ended.call);
+    }
+
+    #[test]
+    fn a_subscription_and_a_purchase_convert() {
+        let subscription = system_message(
+            25,
+            "role_subscription_data",
+            serde_json::json!({"tier_name": "Gold", "total_months_subscribed": 3, "is_renewal": true}),
+        );
+        let purchase = system_message(
+            44,
+            "purchase_notification",
+            serde_json::json!({"type": 0, "guild_product_purchase": {"listing_id": "1", "product_name": "Badge"}}),
+        );
+
+        let data = subscription.role_subscription.as_deref().unwrap();
+        assert_eq!(&*data.tier_name, "Gold");
+        assert_eq!(data.total_months_subscribed, 3);
+        assert!(data.is_renewal);
+        assert_eq!(purchase.purchased_product.as_deref(), Some("Badge"));
+        assert_eq!(subscription.call, None);
     }
 }

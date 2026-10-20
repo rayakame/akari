@@ -11,10 +11,11 @@ use crate::model::{
     Permissions, PremiumType, Snowflake, StickerFormatType, Timestamp, UserId,
 };
 use crate::state::{
-    Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
-    EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
-    Message, MessageReference, NotificationLevel, PermissionOverwrite, ReadState,
-    ReferencedMessage, Role, Sticker, ThreadInfo, ThreadMembership, Unreads, User,
+    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor,
+    EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings,
+    ImageHash, Member, Message, MessageReference, NotificationLevel, PermissionOverwrite,
+    ReadState, ReferencedMessage, Role, RoleSubscription, Sticker, ThreadInfo, ThreadMembership,
+    Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -696,6 +697,28 @@ pub(super) struct MessageRow {
     stickers: Vec<StickerRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reference: Option<ReferenceRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    call: Option<CallRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role_subscription: Option<RoleSubscriptionRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    purchased_product: Option<Box<str>>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct CallRow {
+    participants: Vec<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ended_timestamp: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct RoleSubscriptionRow {
+    tier_name: Box<str>,
+    total_months_subscribed: u32,
+    is_renewal: bool,
 }
 
 impl From<&Message> for MessageRow {
@@ -753,6 +776,18 @@ impl From<&Message> for MessageRow {
                 channel_id: id(reference.channel_id),
                 guild_id: id(reference.guild_id),
             }),
+            call: message.call.as_deref().map(|call| CallRow {
+                participants: call.participants.iter().map(|user| user.get()).collect(),
+                ended_timestamp: call.ended_timestamp.map(nanos),
+            }),
+            role_subscription: message.role_subscription.as_deref().map(|data| {
+                RoleSubscriptionRow {
+                    tier_name: data.tier_name.clone(),
+                    total_months_subscribed: data.total_months_subscribed,
+                    is_renewal: data.is_renewal,
+                }
+            }),
+            purchased_product: message.purchased_product.clone(),
         }
     }
 }
@@ -827,6 +862,20 @@ impl MessageRow {
             }),
             referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Sent,
+            call: self.call.map(|call| {
+                Box::new(Call {
+                    participants: call.participants.into_iter().map(Snowflake::new).collect(),
+                    ended_timestamp: call.ended_timestamp.map(timestamp),
+                })
+            }),
+            role_subscription: self.role_subscription.map(|data| {
+                Box::new(RoleSubscription {
+                    tier_name: data.tier_name,
+                    total_months_subscribed: data.total_months_subscribed,
+                    is_renewal: data.is_renewal,
+                })
+            }),
+            purchased_product: self.purchased_product,
         }
     }
 }
