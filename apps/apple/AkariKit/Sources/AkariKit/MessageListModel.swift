@@ -198,6 +198,8 @@ public final class MessageListModel {
     @ObservationIgnored private var retired = false
     @ObservationIgnored private var landed = 0
     @ObservationIgnored private var messageJumps = 0
+    // The message the last jump that loaded goes to.
+    @ObservationIgnored private var jumpingTo: MessageId?
 
     init(
         channelId: ChannelId, userId: UserId, account: Account, store: Store,
@@ -272,7 +274,10 @@ public final class MessageListModel {
             return
         }
         // A channel never read has no position to load around; its line is among the loaded rows.
-        if readUpTo.rawValue != 0, !readPositionLoaded(readUpTo) {
+        // A jump to a message still loading would land after the scroll.
+        if readUpTo.rawValue != 0,
+            !readPositionLoaded(readUpTo) || activeLoads[lastPlacing] == .aroundMessage
+        {
             // The running load jumps once its messages are in, if nothing placed the list since.
             guard activeLoads[lastPlacing] != .around else {
                 return
@@ -286,6 +291,8 @@ public final class MessageListModel {
                 }
                 return
             }
+        } else if activeLoads[lastPlacing] == .aroundMessage {
+            supersedeJumps()
         }
         seenLineFrom = self.readUpTo
         updateUnreadBar()
@@ -293,10 +300,18 @@ public final class MessageListModel {
     }
 
     /// "a message" in a pin's line: loads the messages around it unless the loaded ones reach
-    /// it; a failed load leaves the list where it is. What cancels the jump to unread cancels
-    /// this one too, and so does either jump started after it. Scrolling is the view's part.
+    /// it and nothing else is placing the list; a failed load leaves the list where it is. What
+    /// cancels the jump to unread cancels this one too, and so does either jump started after
+    /// it. Scrolling is the view's part.
     public func jump(to messageId: MessageId) async {
-        if !loadedRange(reaches: messageId) {
+        let placing = activeLoads[lastPlacing]
+        // The running load jumps once its messages are in.
+        if placing == .aroundMessage, jumpingTo == messageId {
+            return
+        }
+        // A load still placing the list would replace the rows the jump scrolls.
+        if placing != nil || !loadedRange(reaches: messageId) {
+            jumpingTo = messageId
             let (ticket, outcome) = await load(.aroundMessage, around: messageId)
             guard outcome == .applied, ticket == lastPlacing else {
                 if !retired, owedPresent != nil, activeLoads[lastPlacing] == nil {
@@ -304,10 +319,6 @@ public final class MessageListModel {
                 }
                 return
             }
-        } else if aroundLoadRunning {
-            account.supersedeAroundLoads(channelId: channelId)
-            loads += 1
-            lastPlacing = loads
         }
         messageJumps += 1
         messageJump = MessageJump(messageId: messageId, number: messageJumps)
@@ -371,9 +382,7 @@ public final class MessageListModel {
     func endNewMessagesLine() {
         // A latest load would overtake a running jump too, but at the present none runs.
         if aroundLoadRunning {
-            account.supersedeAroundLoads(channelId: channelId)
-            loads += 1
-            lastPlacing = loads
+            supersedeJumps()
         }
         let newest = rows.last { $0.message.delivery == .sent }?.message.id
         // Marking read acks up to the channel's newest message, also one not loaded here.
@@ -439,6 +448,13 @@ public final class MessageListModel {
         }
         return batch.guildsChanged.contains(guildId) || batch.membersChanged.contains(guildId)
             || batch.channelsChanged[guildId] != nil
+    }
+
+    // Drops the pages of the jumps still loading; what comes after places the list.
+    private func supersedeJumps() {
+        account.supersedeAroundLoads(channelId: channelId)
+        loads += 1
+        lastPlacing = loads
     }
 
     private var aroundLoadRunning: Bool {
