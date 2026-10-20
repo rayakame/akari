@@ -230,7 +230,8 @@ When a jump lands on a message (a pin's "a message", a poll's title; in Discord 
 quote and search results), Discord's client highlights it: `messageHighlight`, #5865F2 at 41/255
 in both themes, over the message's box (not the space above its group), its trailing corners
 rounded 4. It fades in over 0.2 s (CSS `ease`), holds until 2 s after the jump and fades out over
-0.2 s; with reduced motion it comes and goes at once. A new jump restarts it. Read from its flash
+0.2 s; with reduced motion it comes and goes at once. A new jump restarts it, and only one
+message flashes at a time. Read from its flash
 component (a 2 s timer) and its CSS (a 0.2 s `background-color` transition), 2026-10-20. *Akari:
 the same, with macOS's Reduce Motion. A jump to a message deleted since flashes nothing, as in
 Discord; the unread bar's jump doesn't flash.*
