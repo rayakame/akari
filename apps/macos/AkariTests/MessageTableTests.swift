@@ -1201,6 +1201,10 @@ struct MessageTableTests {
             calls.append("channel \(id.rawValue)")
         }
 
+        func openThread(_ id: ChannelId, from parent: ChannelId) {
+            calls.append("thread \(id.rawValue) from \(parent.rawValue)")
+        }
+
         func openLink(_ url: URL, masked: Bool) {
             calls.append("link \(url.absoluteString)\(masked ? " masked" : "")")
         }

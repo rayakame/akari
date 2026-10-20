@@ -26,6 +26,7 @@ final class ChannelStartCell: NSTableCellView {
     private let subtitleAfterUsername: NSLayoutConstraint
     private var bottomAfterSubtitle: NSLayoutConstraint?
     private var bottomAfterTitle: NSLayoutConstraint?
+    private var iconTop: NSLayoutConstraint?
 
     init() {
         iconWidth = icon.widthAnchor.constraint(equalToConstant: Self.iconSize)
@@ -49,8 +50,10 @@ final class ChannelStartCell: NSTableCellView {
         bottomAfterTitle.priority = .init(999)
         self.bottomAfterSubtitle = bottomAfterSubtitle
         self.bottomAfterTitle = bottomAfterTitle
+        let iconTop = icon.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
+        self.iconTop = iconTop
         NSLayoutConstraint.activate([
-            icon.topAnchor.constraint(equalTo: topAnchor, constant: Self.top),
+            iconTop,
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
             iconWidth, iconHeight,
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
@@ -72,8 +75,8 @@ final class ChannelStartCell: NSTableCellView {
     }
 
     /// The row height for `start` at `width`, as Auto Layout would size the cell; a channel
-    /// whose name isn't known yet gets a row too thin to see.
-    static func height(_ start: ChannelStart?, width: CGFloat) -> CGFloat {
+    /// whose name isn't known yet gets a row too thin to see. `room` goes above the icon.
+    static func height(_ start: ChannelStart?, width: CGFloat, room: CGFloat = 0) -> CGFloat {
         guard let start else {
             return 1
         }
@@ -85,7 +88,7 @@ final class ChannelStartCell: NSTableCellView {
             return text.intrinsicContentSize.height - text.firstBaselineOffsetFromTop
                 - text.lastBaselineOffsetFromBottom
         }
-        var height = top + sizing.iconHeight.constant + titleBaseline + lines(sizing.title)
+        var height = top + room + sizing.iconHeight.constant + titleBaseline + lines(sizing.title)
         if start.username != nil {
             height += usernameBaseline + lines(sizing.username)
         }
@@ -96,11 +99,13 @@ final class ChannelStartCell: NSTableCellView {
         return (height + bottom).rounded(.up)
     }
 
-    func show(_ start: ChannelStart?) {
+    // `room`: what overlays the list's top, such as a locked thread's banner.
+    func show(_ start: ChannelStart?, room: CGFloat = 0) {
         isHidden = start == nil
         guard let start else {
             return
         }
+        iconTop?.constant = Self.top + room
         icon.icon = start.icon
         let size = if case .avatar = start.icon { Self.avatarSize } else { Self.iconSize }
         iconWidth.constant = size

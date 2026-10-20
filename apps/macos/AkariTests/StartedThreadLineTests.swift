@@ -87,12 +87,24 @@ struct StartedThreadLineTests {
         list.controller.actions = actions
         let (_, text) = try shown()
         let link = try #require(try attribute(.link, of: "t2", in: text))
-        #expect((link as? URL)?.absoluteString == "akari://channel/20")
+        #expect((link as? URL)?.absoluteString == "akari://thread/20")
 
         actions.calls = []
         text.clicked(onLink: link, at: try index(of: "t2", in: text))
 
-        #expect(actions.calls == ["channel 20"])
+        #expect(actions.calls == ["thread 20 from 10"])
+    }
+
+    // A configure adds or drops only the hover area; NSTextView's own areas stay as they were.
+    @Test
+    func showingTheLineAgainLeavesTheTextViewsTrackingAreasAlone() throws {
+        let (_, text) = try shown()
+        let before = text.trackingAreas.map(ObjectIdentifier.init)
+        try #require(!before.isEmpty)
+
+        text.show(try #require(text.textStorage?.copy() as? NSAttributedString))
+
+        #expect(text.trackingAreas.map(ObjectIdentifier.init) == before)
     }
 
     // An author's name opens nothing yet (no profile popouts), and neither does the actor.

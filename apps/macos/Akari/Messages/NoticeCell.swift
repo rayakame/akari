@@ -84,7 +84,7 @@ final class NoticeCell: NSTableCellView {
                 let link = NSMutableAttributedString(
                     attributedString: CellText.body(
                         name, color: Palette.textStrong, style: TypeScale.noticeName))
-                if let id, let url = URL(string: "akari://channel/\(id.rawValue)") {
+                if let id, let url = URL(string: "akari://thread/\(id.rawValue)") {
                     link.addAttributes(
                         [.link: url, MessageTextView.underlinesOnHover: true],
                         range: NSRange(location: 0, length: link.length))

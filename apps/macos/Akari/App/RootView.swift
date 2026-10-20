@@ -112,6 +112,9 @@ struct SessionScreen: View {
             MessageArea(
                 messages: messages, name: name, links: links,
                 go: { [session] in session.go(to: $0) },
+                openThread: { [session] thread, parent in
+                    Task { await session.open(thread: thread, from: parent) }
+                },
                 markRead: { [session] in session.markRead(channel: messages.channelId) },
                 markServerRead: { [session] in session.markServerRead() })
         }

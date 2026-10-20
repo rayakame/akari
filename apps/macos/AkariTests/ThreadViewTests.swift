@@ -263,6 +263,60 @@ struct ThreadHeaderTests {
 
 @MainActor
 struct LockedBannerTests {
+    let noon = berlinTime(2026, 10, 10, 12, 0)
+
+    // From the cell's top to its icon's.
+    func iconTop(_ cell: ChannelStartCell) -> CGFloat {
+        cell.layoutSubtreeIfNeeded()
+        return cell.isFlipped ? cell.icon.frame.minY : cell.bounds.height - cell.icon.frame.maxY
+    }
+
+    // The banner covers the list's top 4–36; a locked thread's start keeps its icon below it.
+    @Test
+    func aLockedThreadsStartSitsBelowTheBanner() throws {
+        let list = MessageTableTests()
+        let start = ChannelName(kind: .thread(owner: "Ray"), name: "t1").start
+        let rows = [row(1, by: author(2, "Ray"), at: noon)]
+        list.show(MessageTableState(rows: rows, reachedOldest: true, start: start))
+        let open = iconTop(try #require(try list.cell(at: 0) as? ChannelStartCell))
+
+        list.show(
+            MessageTableState(
+                rows: rows, reachedOldest: true, start: start, startRoom: LockedBanner.room))
+        let locked = try #require(try list.cell(at: 0) as? ChannelStartCell)
+
+        #expect(iconTop(locked) == open + LockedBanner.room)
+        #expect(iconTop(locked) >= LockedBanner.margin + LockedBanner.height + 16)
+        #expect(list.table.rect(ofRow: 0).height == list.fittingHeight(ofRow: 0))
+    }
+
+    // MessageArea's part: a locked thread's composer brings the banner and the denied composer.
+    @Test
+    func aLockedThreadsAreaShowsTheBannerOverTheListAndDisablesTheComposer() throws {
+        let screen = SessionScreenTests()
+        let session = screen.formattedSession(FormattedAccount(contents: ["test"], locked: true))
+        let host = NSHostingView(rootView: SessionScreen(session: session))
+        let window = screen.shownWindow(host)
+        window.appearance = NSAppearance(named: .darkAqua)
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+        let table = try #require(screen.views(MessageTableView.self, in: host).first)
+        let list = try #require(table.enclosingScrollView)
+        let area = list.convert(list.bounds, to: host)
+        let rep = try renderedAt2x(host)
+
+        // Inside the banner's left padding, at its middle.
+        let x = Int((area.minX + 16 + 4) * 2)
+        let y = Int((area.minY + LockedBanner.margin + LockedBanner.height / 2) * 2)
+        var card: NSColor?
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
+            card = Palette.card.usingColorSpace(.sRGB)
+        }
+        #expect(same(rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), card))
+        let composer = try #require(screen.views(ComposerTextView.self, in: host).first)
+        #expect(!composer.isEditable)
+    }
+
     // Q38's wording, a gray bar at the top of the list.
     @Test
     func aLockedThreadShowsTheBannerAndDisablesTheComposer() throws {

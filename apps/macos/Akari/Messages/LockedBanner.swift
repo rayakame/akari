@@ -3,6 +3,8 @@ import SwiftUI
 struct LockedBanner: View {
     static let height: CGFloat = 32
     static let margin: CGFloat = 4
+    /// What it covers of the list's top.
+    static let room = margin + height
     static let text = "This thread has been locked. Only moderators can send messages."
 
     var body: some View {

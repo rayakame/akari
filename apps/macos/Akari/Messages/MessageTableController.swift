@@ -15,6 +15,8 @@ struct MessageTableState: Equatable {
     var revealedSpoilers: Set<SpoilerKey> = []
     var newMessages: MessageId?
     var unreadJumps = 0
+    // Kept clear above the start's icon for what covers the list's top.
+    var startRoom: CGFloat = 0
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -207,11 +209,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reportLine()
         updateRelativeTimer()
-        if previous.start != state.start {
+        let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
+        if startChanged {
             remeasureStart()
         }
         if previous.loading != state.loading || previous.failedLoads != state.failedLoads
-            || previous.reachedOldest != state.reachedOldest || previous.start != state.start
+            || previous.reachedOldest != state.reachedOldest || startChanged
         {
             configureEdges()
         }
@@ -418,6 +421,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.reveal(SpoilerKey(messageId: row.id, index: UInt16(clamping: value)))
         case "channel":
             actions?.openChannel(ChannelId(rawValue: value))
+        case "thread":
+            actions?.openThread(ChannelId(rawValue: value), from: row.message.channelId)
         case "link":
             let links = row.shown.formatted.links
             if value < links.count, let target = URL(string: links[Int(value)].url) {
@@ -700,7 +705,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func configure(_ cell: NSView, _ edge: MessageTimeline.Edge) {
         if let cell = cell as? ChannelStartCell {
-            cell.show(state.start)
+            cell.show(state.start, room: state.startRoom)
         } else if let cell = cell as? PlaceholderCell {
             let failure: String? =
                 if state.rows.isEmpty {
@@ -851,7 +856,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     ) -> CGFloat {
         switch item {
         case .edge(.beginning):
-            return ChannelStartCell.height(state.start, width: width)
+            return ChannelStartCell.height(state.start, width: width, room: state.startRoom)
         case .edge:
             return placeholderHeight
         case .day:

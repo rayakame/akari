@@ -85,7 +85,7 @@ final class MessageTextView: NSTextView {
         underline(at: nil)
         storage.setAttributedString(text)
         linkElements = nil
-        updateTrackingAreas()
+        trackHover()
         selectedRanges = kept ?? [NSValue(range: NSRange(location: 0, length: 0))]
         invalidateIntrinsicContentSize()
         updateDecorations()
@@ -229,6 +229,10 @@ final class MessageTextView: NSTextView {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
+        trackHover()
+    }
+
+    private func trackHover() {
         var hovers = false
         if let storage = textStorage, storage.length > 0 {
             storage.enumerateAttribute(
