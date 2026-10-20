@@ -27,6 +27,8 @@ protocol MessageListActions: AnyObject {
     func openChannel(_ id: ChannelId)
     // A "started a thread" line's thread, fetched first when the store doesn't have it.
     func openThread(_ id: ChannelId, from parent: ChannelId)
+    // "a message" in a pin's line; the table scrolls once the model has jumped.
+    func jump(to message: MessageId)
     // A masked link may ask first (D65).
     func openLink(_ url: URL, masked: Bool)
 }

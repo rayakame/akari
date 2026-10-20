@@ -15,6 +15,7 @@ struct MessageTableState: Equatable {
     var revealedSpoilers: Set<SpoilerKey> = []
     var newMessages: MessageId?
     var unreadJumps = 0
+    var messageJump: MessageListModel.MessageJump?
     // Kept clear above the start's icon for what covers the list's top.
     var startRoom: CGFloat = 0
 }
@@ -205,7 +206,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         reload(revealedNow)
         // A new table for a model that jumped before doesn't jump again.
         if wasFilled, state.unreadJumps != previous.unreadJumps {
-            scrollLineToTop()
+            scrollToTop(lineRow)
+        }
+        if wasFilled, let jump = state.messageJump, jump != previous.messageJump {
+            scrollToTop(row(atOrAfter: jump.messageId))
         }
         reportLine()
         updateRelativeTimer()
@@ -423,6 +427,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.openChannel(ChannelId(rawValue: value))
         case "thread":
             actions?.openThread(ChannelId(rawValue: value), from: row.message.channelId)
+        case "message":
+            actions?.jump(to: MessageId(rawValue: value))
         case "link":
             let links = row.shown.formatted.links
             if value < links.count, let target = URL(string: links[Int(value)].url) {
@@ -456,8 +462,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     // Keeps the reader's place as clipMoved does after a user's scroll; it skips our own.
-    private func scrollLineToTop() {
-        guard let row = lineRow else {
+    private func scrollToTop(_ row: Int?) {
+        guard let row else {
             return
         }
         let range = clipView.originRange
@@ -469,6 +475,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         sticksToBottom = isPinnedToBottom
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()
+    }
+
+    // A message deleted since leaves the one after it.
+    private func row(atOrAfter message: MessageId) -> Int? {
+        timeline.items.firstIndex { item in
+            if case .message(let row, _) = item { row.message.id >= message } else { false }
+        }
     }
 
     // Where it's drawn, mid-row, and not under the strip over the list's bottom. Only where rows

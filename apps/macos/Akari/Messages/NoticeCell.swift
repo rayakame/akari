@@ -69,27 +69,18 @@ final class NoticeCell: NSTableCellView {
     private static func line(
         _ notice: [Message.NoticePart], time: String, fullDate: String? = nil
     ) -> NSAttributedString {
-        // Kinds whose actor Discord draws as a name have their gray too (D121).
-        let named = notice.contains { if case .actor = $0 { true } else { false } }
-        let gray = named ? Palette.chatTextMuted : Palette.textMuted
+        let gray = Palette.chatTextMuted
         let line = NSMutableAttributedString()
         for part in notice {
             switch part {
             case .text(let text):
                 line.append(CellText.body(text, color: gray))
-            case .actor(let name), .threads(let name):
-                line.append(
-                    CellText.body(name, color: Palette.textStrong, style: TypeScale.noticeName))
+            case .actor(let name), .threads(let name), .pins(let name):
+                line.append(Self.name(name, link: nil))
             case .thread(let name, let id):
-                let link = NSMutableAttributedString(
-                    attributedString: CellText.body(
-                        name, color: Palette.textStrong, style: TypeScale.noticeName))
-                if let id, let url = URL(string: "akari://thread/\(id.rawValue)") {
-                    link.addAttributes(
-                        [.link: url, MessageTextView.underlinesOnHover: true],
-                        range: NSRange(location: 0, length: link.length))
-                }
-                line.append(link)
+                line.append(Self.name(name, link: id.map { "akari://thread/\($0.rawValue)" }))
+            case .message(let name, let id):
+                line.append(Self.name(name, link: "akari://message/\(id.rawValue)"))
             }
         }
         line.append(CellText.body(" ", color: gray))
@@ -103,6 +94,18 @@ final class NoticeCell: NSTableCellView {
         }
         line.append(NSAttributedString(string: time, attributes: timeAttributes))
         return line
+    }
+
+    private static func name(_ name: String, link: String?) -> NSAttributedString {
+        let text = NSMutableAttributedString(
+            attributedString: CellText.body(
+                name, color: Palette.textStrong, style: TypeScale.noticeName))
+        if let url = link.flatMap(URL.init(string:)) {
+            text.addAttributes(
+                [.link: url, MessageTextView.underlinesOnHover: true],
+                range: NSRange(location: 0, length: text.length))
+        }
+        return text
     }
 
     static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {

@@ -7,14 +7,16 @@ import os
 nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     let formattedStore: FormattedStore
 
-    // `locked`: 1001 is a locked thread under 1002, where the user can't send.
+    // `locked`: 1001 is a locked thread under 1002, where the user can't send. `pinned`: each
+    // channel's newest message is the line for pinning its message with this number.
     init(
         contents: [String], formattedEvery: Int = 3, slowmode: Slowmode? = nil,
-        mentioned: Bool = false, readUpTo: UInt64? = nil, locked: Bool = false
+        mentioned: Bool = false, readUpTo: UInt64? = nil, locked: Bool = false,
+        pinned: UInt64? = nil
     ) {
         formattedStore = FormattedStore(
             contents: contents, formattedEvery: formattedEvery, slowmode: slowmode,
-            mentioned: mentioned, readUpTo: readUpTo, locked: locked)
+            mentioned: mentioned, readUpTo: readUpTo, locked: locked, pinned: pinned)
         super.init(noHandle: NoHandle())
     }
 
@@ -50,11 +52,12 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     // The number of each channel's last read message; without it every channel is read.
     private let readUpTo: UInt64?
     private let locked: Bool
+    private let pinned: UInt64?
     private let counts = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
 
     init(
         contents: [String], formattedEvery: Int, slowmode: Slowmode?, mentioned: Bool,
-        readUpTo: UInt64?, locked: Bool = false
+        readUpTo: UInt64?, locked: Bool = false, pinned: UInt64? = nil
     ) {
         self.contents = contents
         self.formattedEvery = formattedEvery
@@ -62,6 +65,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         self.mentioned = mentioned
         self.readUpTo = readUpTo
         self.locked = locked
+        self.pinned = pinned
         super.init(noHandle: NoHandle())
     }
 
@@ -171,19 +175,27 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
 
     // Every so many messages formatted, the rest one plain line.
     override func messages(channelId: ChannelId, ids: [MessageId]) -> [Message] {
-        ids.map { id in
+        let newest = counts.withLock { $0[channelId.rawValue, default: 40] }
+        return ids.map { id in
             let number = Int(id.rawValue % 1000)
             let content =
                 number % formattedEvery == 0
                 ? contents[number / formattedEvery % contents.count] : "test \(number)"
+            let pin = pinned.flatMap { pinned in
+                UInt64(number) == newest
+                    ? MessageReference(
+                        messageId: MessageId(rawValue: channelId.rawValue * 1000 + pinned),
+                        channelId: channelId, guildId: GuildId(rawValue: 1)) : nil
+            }
             return Message(
-                id: id, channelId: channelId, kind: .default, author: person(UInt64(2 + number % 2)),
+                id: id, channelId: channelId, kind: pin == nil ? .default : .channelPinnedMessage,
+                author: person(UInt64(2 + number % 2)),
                 fromWebhook: false, content: content,
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(number) * 600),
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
                 embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: mentioned,
-                reference: nil, hasThread: false)
+                reference: pin, hasThread: false)
         }
     }
 

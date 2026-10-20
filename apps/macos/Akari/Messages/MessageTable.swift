@@ -103,7 +103,7 @@ struct MessageArea: View {
             channelId: messages.channelId, lastLoad: messages.lastLoad,
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
             revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine,
-            unreadJumps: messages.unreadJumps,
+            unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
             startRoom: messages.composer.locked ? LockedBanner.room : 0)
     }
 }
@@ -198,6 +198,10 @@ final class MessageListBridge: MessageListActions {
 
     func openThread(_ id: ChannelId, from parent: ChannelId) {
         thread(id, parent)
+    }
+
+    func jump(to message: MessageId) {
+        Task { await messages.jump(to: message) }
     }
 
     func openLink(_ url: URL, masked: Bool) {

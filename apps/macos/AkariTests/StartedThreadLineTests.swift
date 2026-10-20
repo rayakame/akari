@@ -26,37 +26,6 @@ struct StartedThreadLineTests {
         return (cell, text)
     }
 
-    func index(of part: String, in text: NSTextView) throws -> Int {
-        let range = (text.string as NSString).range(of: part)
-        try #require(range.location != NSNotFound)
-        return range.location
-    }
-
-    func attribute(_ key: NSAttributedString.Key, of part: String, in text: NSTextView) throws
-        -> Any?
-    {
-        text.textStorage?.attribute(key, at: try index(of: part, in: text), effectiveRange: nil)
-    }
-
-    func changedPixels(in rect: NSRect, _ one: NSBitmapImageRep, _ other: NSBitmapImageRep)
-        -> Int
-    {
-        var changed = 0
-        for x in Int(rect.minX * 2)..<Int(rect.maxX * 2) {
-            for y in Int(rect.minY * 2)..<Int(rect.maxY * 2)
-            where one.colorAt(x: x, y: y) != other.colorAt(x: x, y: y) {
-                changed += 1
-            }
-        }
-        return changed
-    }
-
-    // The middle of `part`'s glyphs in the text view's coordinates.
-    func middle(of part: String, in text: NSTextView) throws -> NSPoint {
-        let rect = try glyphs(of: part, in: text, within: text)
-        return NSPoint(x: rect.midX, y: text.isFlipped ? rect.midY : text.bounds.height - rect.midY)
-    }
-
     @Test
     func theLineStylesItsActorNameAndThreads() throws {
         let (cell, text) = try shown()
@@ -160,14 +129,24 @@ struct StartedThreadLineTests {
                 .underlineStyle, atCharacterIndex: threads, effectiveRange: nil) == nil)
     }
 
-    // Other notices keep their one muted text until their actors are observed.
+    // Both lines observed draw their actor so (TB3.4); every notice does, in the same gray.
     @Test
-    func otherNoticesStayAsTheyWere() throws {
-        list.show([row(1, by: author(2, "Ray"), at: noon, kind: .userJoin)])
-        let cell = try #require(try list.cell(of: 1) as? NoticeCell)
-        let text = try #require(list.messageTexts(in: cell).first)
+    func everyNoticesActorIsWhiteAndMedium() throws {
+        list.show([
+            row(1, by: author(2, "Ray"), at: noon, kind: .userJoin),
+            row(2, by: author(3, "Mira"), at: noon + 60, kind: .pollResult),
+        ])
+        let join = try #require(list.messageTexts(in: try list.cell(of: 1)).first)
+        let poll = try #require(list.messageTexts(in: try list.cell(of: 2)).first)
 
-        #expect(try attribute(.foregroundColor, of: "Ray", in: text) as? NSColor == Palette.textMuted)
-        #expect(try attribute(.font, of: "Ray", in: text) as? NSFont == TypeScale.body.nsFont)
+        #expect(
+            try attribute(.foregroundColor, of: "Ray", in: join) as? NSColor == Palette.textStrong)
+        #expect(try attribute(.font, of: "Ray", in: join) as? NSFont == TypeScale.noticeName.nsFont)
+        #expect(
+            try attribute(.foregroundColor, of: " joined", in: join) as? NSColor
+                == Palette.chatTextMuted)
+        #expect(
+            try attribute(.foregroundColor, of: "A poll", in: poll) as? NSColor
+                == Palette.chatTextMuted)
     }
 }

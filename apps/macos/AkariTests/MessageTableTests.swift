@@ -748,8 +748,11 @@ struct MessageTableTests {
 
         try expectClicksKeepTheDrawing(of: notice, selectable: true)
 
-        let font = notice.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
-        #expect(font == TypeScale.body.nsFont)
+        let font = { (index: Int) in
+            notice.textStorage?.attribute(.font, at: index, effectiveRange: nil) as? NSFont
+        }
+        #expect(font(0) == TypeScale.noticeName.nsFont, "the actor")
+        #expect(font("Mira".count) == TypeScale.body.nsFont)
     }
 
     @Test
@@ -1203,6 +1206,10 @@ struct MessageTableTests {
 
         func openThread(_ id: ChannelId, from parent: ChannelId) {
             calls.append("thread \(id.rawValue) from \(parent.rawValue)")
+        }
+
+        func jump(to message: MessageId) {
+            calls.append("jump to \(message.rawValue)")
         }
 
         func openLink(_ url: URL, masked: Bool) {
