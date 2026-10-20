@@ -93,6 +93,8 @@ struct Shared {
     #[cfg(test)]
     park: std::sync::Mutex<Option<Park>>,
     #[cfg(test)]
+    diff_park: std::sync::Mutex<Option<Park>>,
+    #[cfg(test)]
     ready_thread: std::sync::Mutex<Option<std::thread::ThreadId>>,
     #[cfg(test)]
     slow_write: std::sync::Mutex<Option<std::time::Duration>>,
@@ -211,6 +213,8 @@ impl Store {
                 }),
                 #[cfg(test)]
                 park: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                diff_park: std::sync::Mutex::new(None),
                 #[cfg(test)]
                 ready_thread: std::sync::Mutex::new(None),
                 #[cfg(test)]
@@ -374,9 +378,15 @@ impl Store {
             inner.state.keep_memberships(&mut entities);
             inner.state.keep_fetched(&mut entities);
         });
-        let derived = Derived::build(&entities, self.now_millis());
+        let mut derived = Derived::build(&entities, self.now_millis());
+        #[cfg(test)]
+        Self::park_in(&self.shared.diff_park);
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
+            // Fetched since the first pass; the diff mustn't report them removed.
+            for thread in inner.state.keep_fetched(&mut entities) {
+                derived.add_thread(&thread);
+            }
             inner.state.ready_diff(&entities, &derived)
         });
         #[cfg(test)]
@@ -1026,6 +1036,19 @@ impl Store {
         (on_parked, release)
     }
 
+    // Between READY's build and its diff.
+    #[cfg(test)]
+    pub(crate) fn park_next_diff(
+        &self,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (parked, on_parked) = std::sync::mpsc::channel();
+        let (release, on_release) = std::sync::mpsc::channel();
+        if let Ok(mut park) = self.shared.diff_park.lock() {
+            *park = Some((parked, on_release));
+        }
+        (on_parked, release)
+    }
+
     #[cfg(test)]
     pub(crate) fn delay_next_write(&self, delay: std::time::Duration) {
         if let Ok(mut slow) = self.shared.slow_write.lock() {
@@ -1074,12 +1097,12 @@ impl Store {
 
     #[cfg(test)]
     fn park(&self) {
-        let park = self
-            .shared
-            .park
-            .lock()
-            .ok()
-            .and_then(|mut park| park.take());
+        Self::park_in(&self.shared.park);
+    }
+
+    #[cfg(test)]
+    fn park_in(slot: &std::sync::Mutex<Option<Park>>) {
+        let park = slot.lock().ok().and_then(|mut park| park.take());
         if let Some((parked, release)) = park {
             let _ = parked.send(());
             let _ = release.recv();

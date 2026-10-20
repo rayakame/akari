@@ -2175,3 +2175,31 @@ fn a_fetched_joined_thread_is_listed_at_once() {
             .any(|channel| channel.id == fetched_id())
     );
 }
+
+#[tokio::test]
+async fn a_thread_fetched_between_readys_build_and_diff_isnt_reported_removed() {
+    let store = ready_store();
+    let subscription = store.subscribe();
+    let (parked, release) = store.park_next_diff();
+    let applying = {
+        let store = store.clone();
+        thread::spawn(move || store.apply(ready()))
+    };
+    parked
+        .recv_timeout(WAIT)
+        .expect("READY never reached its diff");
+
+    assert!(matches!(
+        store.learn_thread(fetched(true, false)),
+        Learned::Kept
+    ));
+    release.send(()).unwrap();
+    applying.join().unwrap();
+
+    assert!(store.channel(fetched_id()).is_some());
+    let events = subscription.next_batch(1000).await;
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        StoreEvent::ChannelRemoved { channel_id, .. } if *channel_id == fetched_id()
+    )));
+}

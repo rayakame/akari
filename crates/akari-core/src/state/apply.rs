@@ -310,6 +310,10 @@ impl Derived {
             threads: ThreadIndex::build(entities),
         }
     }
+
+    pub(crate) fn add_thread(&mut self, thread: &Channel) {
+        self.threads.add(thread);
+    }
 }
 
 // What a READY's swap replays of the local acks taken while it was prepared.
@@ -499,11 +503,17 @@ impl State {
             Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
             None => HashMap::new(),
         };
-        // Fetched while the READY was prepared, after its own pass.
-        let late = self.keep_fetched(&mut next);
-        for thread in &late {
-            derived.threads.add(thread);
+        // Fetched while the READY was prepared, after its own passes.
+        for thread in self.keep_fetched(&mut next) {
+            derived.threads.add(&thread);
         }
+        // Their badges weren't built with the READY's.
+        let fetched: Vec<ChannelId> = self
+            .fetched_threads
+            .iter()
+            .filter(|id| next.channels.contains_key(id))
+            .copied()
+            .collect();
         if let Some(diff) = diff {
             events.extend(diff.events);
             for channel in diff.removed_channels {
@@ -516,8 +526,8 @@ impl State {
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
-        for thread in &late {
-            self.dirty.channel(thread.id);
+        for thread in fetched {
+            self.dirty.channel(thread);
         }
         self.keep_outage_members(&next);
         self.pending_joins.clear();
