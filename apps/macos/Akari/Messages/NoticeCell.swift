@@ -75,12 +75,16 @@ final class NoticeCell: NSTableCellView {
             switch part {
             case .text(let text):
                 line.append(CellText.body(text, color: gray))
-            case .actor(let name), .threads(let name), .pins(let name):
+            case .actor(let name), .strong(let name), .threads(let name), .pins(let name):
                 line.append(Self.name(name, link: nil))
             case .thread(let name, let id):
                 line.append(Self.name(name, link: id.map { "akari://thread/\($0.rawValue)" }))
             case .message(let name, let id):
                 line.append(Self.name(name, link: "akari://message/\(id.rawValue)"))
+            case .channel(let name, let id):
+                line.append(Self.name(name, link: "akari://channel/\(id.rawValue)"))
+            case .guild(let name, let id):
+                line.append(Self.name(name, link: "akari://guild/\(id.rawValue)"))
             }
         }
         line.append(CellText.body(" ", color: gray))

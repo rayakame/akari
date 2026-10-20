@@ -47,6 +47,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // turn; the last measure of a turn wins.
     private var measuredLine: (onScreen: Bool, line: MessageId)?
     private(set) var lineReport: Task<Void, Never>?
+    var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    // The row a jump landed on, and when: Discord flashes it.
+    private var flash: (row: MessageTimeline.ItemId, since: Date)?
     private let calendarSource: () -> Calendar
     private let localeSource: () -> Locale
     private var calendar: Calendar
@@ -211,7 +214,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if wasFilled, let jump = state.messageJump, jump != previous.messageJump {
             // Unless the line has been seen, the unread bar shows once it's out of sight.
             let bar = state.newMessages == nil ? 0 : UnreadBar.margin + UnreadBar.height
-            scrollToTop(row(atOrAfter: jump.messageId), below: state.startRoom + bar)
+            let target = row(atOrAfter: jump.messageId)
+            scrollToTop(target, below: state.startRoom + bar)
+            startFlash(at: target, of: jump.messageId)
         }
         reportLine()
         updateRelativeTimer()
@@ -431,6 +436,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.openThread(ChannelId(rawValue: value), from: row.message.channelId)
         case "message":
             actions?.jump(to: MessageId(rawValue: value))
+        case "guild":
+            actions?.openGuild(GuildId(rawValue: value))
         case "link":
             let links = row.shown.formatted.links
             if value < links.count, let target = URL(string: links[Int(value)].url) {
@@ -479,6 +486,26 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         sticksToBottom = isPinnedToBottom
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()
+    }
+
+    // Discord flashes the message itself only, not the one after a deleted target.
+    private func startFlash(at row: Int?, of message: MessageId) {
+        guard let row, case .message(let shown, _) = timeline.items[row],
+            shown.message.id == message
+        else {
+            flash = nil
+            return
+        }
+        flash = (timeline.items[row].id, now())
+        (tableView.view(atColumn: 0, row: row, makeIfNecessary: true) as? MessageCell)?
+            .flash(elapsed: 0, reducesMotion: reducesMotion())
+    }
+
+    private func flashElapsed(_ id: MessageTimeline.ItemId) -> TimeInterval? {
+        guard let flash, flash.row == id else {
+            return nil
+        }
+        return now().timeIntervalSince(flash.since)
     }
 
     // A message deleted since leaves the one after it.
@@ -951,6 +978,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)
+            cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             return cell
         }
     }

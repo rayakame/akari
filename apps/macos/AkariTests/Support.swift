@@ -26,7 +26,8 @@ func row(
     content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false,
     attachments: [String] = [], embedCount: UInt32 = 0, stickers: [String] = [],
     delivery: Delivery = .sent, edited: Date? = nil, reference: MessageReference? = nil,
-    hasThread: Bool = false
+    hasThread: Bool = false, fields: [EmbedField] = [],
+    context: Message.NoticeContext = .init()
 ) -> MessageListModel.Row {
     let files = attachments.enumerated().map { index, name in
         Attachment(
@@ -40,8 +41,11 @@ func row(
         editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
         embedCount: embedCount, stickerNames: stickers, componentsV2: componentsV2,
         delivery: delivery, formatted: formattedText(content: content), mentionsMe: false,
-        reference: reference, hasThread: hasThread)
-    return MessageListModel.Row(id: MessageId(rawValue: key ?? raw), message: message)
+        reference: reference, hasThread: hasThread, mentions: [],
+        call: nil, roleSubscription: nil, purchasedProduct: nil, actor: nil,
+        applicationName: nil, embedFields: fields)
+    return MessageListModel.Row(
+        id: MessageId(rawValue: key ?? raw), message: message, noticeContext: context)
 }
 
 func keyDown(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [])

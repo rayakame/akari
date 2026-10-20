@@ -29,6 +29,8 @@ protocol MessageListActions: AnyObject {
     func openThread(_ id: ChannelId, from parent: ChannelId)
     // "a message" in a pin's line; the table scrolls once the model has jumped.
     func jump(to message: MessageId)
+    // A server a system line names.
+    func openGuild(_ id: GuildId)
     // A masked link may ask first (D65).
     func openLink(_ url: URL, masked: Bool)
 }

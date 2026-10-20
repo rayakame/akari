@@ -142,11 +142,13 @@ struct StartedThreadLineTests {
         #expect(
             try attribute(.foregroundColor, of: "Ray", in: join) as? NSColor == Palette.textStrong)
         #expect(try attribute(.font, of: "Ray", in: join) as? NSFont == TypeScale.noticeName.nsFont)
+        // Message 1's time picks Discord's welcome line 5.
+        #expect(join.string.hasPrefix("Ray just slid into the server."))
         #expect(
-            try attribute(.foregroundColor, of: " joined", in: join) as? NSColor
+            try attribute(.foregroundColor, of: " just slid", in: join) as? NSColor
                 == Palette.chatTextMuted)
         #expect(
-            try attribute(.foregroundColor, of: "A poll", in: poll) as? NSColor
+            try attribute(.foregroundColor, of: "'s poll", in: poll) as? NSColor
                 == Palette.chatTextMuted)
     }
 }

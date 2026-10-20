@@ -58,9 +58,12 @@ struct MessageTableTests {
         self.init(onScreen: MessageTableController.isOnScreen)
     }
 
-    init(onScreen: @escaping @MainActor (NSWindow) -> Bool) {
+    init(
+        onScreen: @escaping @MainActor (NSWindow) -> Bool,
+        now: @escaping () -> Date = { berlinTime(2026, 10, 10, 15, 0) }
+    ) {
         controller = MessageTableController(
-            tableView: table, calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) },
+            tableView: table, calendar: { berlin }, now: now,
             pointer: { [pointer] in pointer.location }, onScreen: onScreen)
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
@@ -1210,6 +1213,10 @@ struct MessageTableTests {
 
         func jump(to message: MessageId) {
             calls.append("jump to \(message.rawValue)")
+        }
+
+        func openGuild(_ id: GuildId) {
+            calls.append("guild \(id.rawValue)")
         }
 
         func openLink(_ url: URL, masked: Bool) {

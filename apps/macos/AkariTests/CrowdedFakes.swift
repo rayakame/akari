@@ -149,7 +149,9 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
                 embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: false,
-                reference: nil, hasThread: false)
+                reference: nil, hasThread: false, mentions: [],
+                call: nil, roleSubscription: nil, purchasedProduct: nil, actor: nil,
+                applicationName: nil, embedFields: [])
         }
     }
 
