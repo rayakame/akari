@@ -65,6 +65,18 @@ pub struct Message {
     /// On a PURCHASE_NOTIFICATION message.
     #[serde(default, deserialize_with = "default_on_error")]
     pub purchase_notification: Option<PurchaseNotification>,
+    /// Who added a bot, on the bot's USER_JOIN; undocumented, read by the official client.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub actor: Option<User>,
+    /// The app of a rich presence activity, or the one a GUILD_APPLICATION_PREMIUM_SUBSCRIPTION
+    /// upgraded.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub application: Option<MessageApplication>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct MessageApplication {
+    pub name: String,
 }
 
 /// The call a CALL message records.

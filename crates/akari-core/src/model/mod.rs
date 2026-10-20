@@ -18,9 +18,9 @@ pub use guild::{
 };
 pub use message::{
     Attachment, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
-    GuildProductPurchase, Message, MessageCall, MessageReference, MessageReferenceType,
-    MessageType, Nonce, PartialEmoji, PurchaseNotification, Reaction, ReactionCountDetails,
-    RoleSubscriptionData, StickerFormatType, StickerItem,
+    GuildProductPurchase, Message, MessageApplication, MessageCall, MessageReference,
+    MessageReferenceType, MessageType, Nonce, PartialEmoji, PurchaseNotification, Reaction,
+    ReactionCountDetails, RoleSubscriptionData, StickerFormatType, StickerItem,
 };
 pub use permissions::Permissions;
 pub(crate) use snowflake::DISCORD_EPOCH;

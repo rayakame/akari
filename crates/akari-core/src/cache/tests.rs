@@ -232,6 +232,8 @@ pub(crate) fn message(channel: u64, id: u64, content: &str) -> Message {
         call: None,
         role_subscription: None,
         purchased_product: None,
+        actor: None,
+        application_name: None,
     }
 }
 
@@ -326,6 +328,8 @@ fn full_message() -> Message {
             is_renewal: true,
         })),
         purchased_product: Some("Badge".into()),
+        actor: Some(Arc::new(user(22, "Ray"))),
+        application_name: Some("Akari Bot".into()),
         ..message(10, 500, "hello there")
     }
 }

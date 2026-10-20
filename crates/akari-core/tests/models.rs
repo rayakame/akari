@@ -689,3 +689,24 @@ fn a_purchase_names_its_product() {
         "Badge"
     );
 }
+
+// Undocumented: the official client names who added a bot from a USER_JOIN's `actor`.
+#[test]
+fn a_bot_joins_actor_parses() {
+    let message = system_message(
+        7,
+        "actor",
+        json!({"id": "100000000000000003", "username": "ray", "discriminator": "0"}),
+    );
+
+    assert_eq!(message.actor.unwrap().username, "ray");
+}
+
+#[test]
+fn a_messages_application_parses_its_name() {
+    let message = system_message(32, "application", json!({"id": "1", "name": "Akari Bot"}));
+    let malformed = system_message(32, "application", json!(5));
+
+    assert_eq!(message.application.unwrap().name, "Akari Bot");
+    assert_eq!(malformed.application, None);
+}

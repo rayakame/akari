@@ -391,6 +391,10 @@ impl Message {
                 .purchase_notification
                 .and_then(|notification| notification.guild_product_purchase)
                 .map(|purchase| text(purchase.product_name)),
+            actor: message.actor.map(&mut *intern),
+            application_name: message
+                .application
+                .map(|application| text(application.name)),
         }
     }
 
@@ -425,6 +429,8 @@ impl Message {
             call: None,
             role_subscription: None,
             purchased_product: None,
+            actor: None,
+            application_name: None,
         }
     }
 
@@ -966,5 +972,34 @@ mod tests {
         assert!(data.is_renewal);
         assert_eq!(purchase.purchased_product.as_deref(), Some("Badge"));
         assert_eq!(subscription.call, None);
+    }
+
+    #[test]
+    fn a_bot_joins_actor_and_an_apps_name_convert() {
+        let mut seen = Vec::new();
+        let join = Message::from_wire(
+            edited(include_str!("../../tests/fixtures/message.json"), |value| {
+                value["type"] = 7.into();
+                value["actor"] = serde_json::json!(
+                    {"id": "100000000000000003", "username": "ray", "discriminator": "0"}
+                );
+            }),
+            &mut |user: model::User| {
+                seen.push(user.id);
+                new_arc(user)
+            },
+        );
+        let upgrade = system_message(
+            32,
+            "application",
+            serde_json::json!({"id": "1", "name": "Akari Bot"}),
+        );
+
+        assert_eq!(
+            join.actor.as_deref().map(|user| &*user.username),
+            Some("ray")
+        );
+        assert!(seen.contains(&Snowflake::new(100_000_000_000_000_003)));
+        assert_eq!(upgrade.application_name.as_deref(), Some("Akari Bot"));
     }
 }

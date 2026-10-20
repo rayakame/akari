@@ -703,6 +703,10 @@ pub(super) struct MessageRow {
     role_subscription: Option<RoleSubscriptionRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     purchased_product: Option<Box<str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actor: Option<UserRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    application_name: Option<Box<str>>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -788,6 +792,8 @@ impl From<&Message> for MessageRow {
                 }
             }),
             purchased_product: message.purchased_product.clone(),
+            actor: message.actor.as_deref().map(UserRow::from),
+            application_name: message.application_name.clone(),
         }
     }
 }
@@ -876,6 +882,8 @@ impl MessageRow {
                 })
             }),
             purchased_product: self.purchased_product,
+            actor: self.actor.map(&mut intern),
+            application_name: self.application_name,
         }
     }
 }

@@ -240,6 +240,10 @@ pub struct Message {
     pub role_subscription: Option<Box<RoleSubscription>>,
     /// On a PURCHASE_NOTIFICATION message: the guild product's name.
     pub purchased_product: Option<Box<str>>,
+    /// Who added a bot, on the bot's USER_JOIN.
+    pub actor: Option<Arc<User>>,
+    /// The app a GUILD_APPLICATION_PREMIUM_SUBSCRIPTION upgraded.
+    pub application_name: Option<Box<str>>,
 }
 
 /// The call a CALL message records.
