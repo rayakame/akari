@@ -51,17 +51,17 @@ public final class MessageListModel {
         public let message: Message
         /// Set for a thread's first message that points at its parent's.
         public let starter: Starter?
-        /// Whether the store has the thread a "started a thread" message names; one it doesn't
-        /// have would open without its name, start or composer.
-        public let threadKnown: Bool
+        /// Whether a "started a thread" message links its thread: not once Discord refused it or
+        /// it's gone.
+        public let threadLinked: Bool
 
         public init(
-            id: MessageId, message: Message, starter: Starter? = nil, threadKnown: Bool = true
+            id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true
         ) {
             self.id = id
             self.message = message
             self.starter = starter
-            self.threadKnown = threadKnown
+            self.threadLinked = threadLinked
         }
 
         /// What the row draws: a loaded starter draws the message the thread started from.
@@ -74,13 +74,13 @@ public final class MessageListModel {
             starter == .unavailable ? Self.unavailableStarter : shown.notice
         }
 
-        /// `notice` in parts; a thread the store doesn't have isn't linked.
+        /// `notice` in parts; an unavailable thread isn't linked.
         public var noticeParts: [Message.NoticePart]? {
             if starter == .unavailable {
                 return [.text(Self.unavailableStarter)]
             }
             return shown.noticeParts?.map { part in
-                if case .thread(let name, _) = part, !threadKnown {
+                if case .thread(let name, _) = part, !threadLinked {
                     return .thread(name: name, id: nil)
                 }
                 return part
@@ -602,11 +602,13 @@ public final class MessageListModel {
         let thread = message.kind == .threadCreated ? message.reference?.channelId : nil
         return Row(
             id: id, message: message, starter: starter(of: message),
-            threadKnown: thread.map { store.channel(id: $0) != nil } ?? true)
+            threadLinked: thread.map {
+                store.channel(id: $0) != nil || !store.threadUnavailable(threadId: $0)
+            } ?? true)
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
-        Row(id: id, message: message, starter: held.starter, threadKnown: held.threadKnown)
+        Row(id: id, message: message, starter: held.starter, threadLinked: held.threadLinked)
     }
 
     private func starter(of message: Message) -> Row.Starter? {
@@ -633,9 +635,12 @@ public final class MessageListModel {
         guard let ownerId else {
             return
         }
-        threadOwner =
+        let owner =
             storedOwner
             ?? rows.lazy.flatMap { [$0.shown, $0.message] }
             .first { $0.author.id == ownerId }?.author.displayName
+        if owner != threadOwner {
+            threadOwner = owner
+        }
     }
 }

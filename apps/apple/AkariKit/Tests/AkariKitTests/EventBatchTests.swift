@@ -54,6 +54,15 @@ struct EventBatchTests {
         #expect(batch.removedChannels.isEmpty)
     }
 
+    // Its guild's lists read the lines that name it again.
+    @Test
+    func anUnavailableThreadRereadsItsGuildsLists() {
+        let batch = EventBatch([.threadUnavailable(guildId: id(1), threadId: id(21))])
+
+        #expect(batch.channelsChanged == [id(1): [id(21)]])
+        #expect(batch.removedChannels.isEmpty)
+    }
+
     @Test
     func badgeEventsAreCollectedPerGuild() {
         let batch = EventBatch([

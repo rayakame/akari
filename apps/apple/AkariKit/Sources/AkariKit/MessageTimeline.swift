@@ -24,8 +24,8 @@ public struct MessageTimeline: Equatable, Sendable {
         case edge(Edge)
         /// Before a day's first message; the date is that day's start.
         case day(Date)
-        /// The new messages line, right before the row with this ID and after its day's divider.
-        /// It starts no group.
+        /// The new messages line, right before the row with this ID and after its day's divider,
+        /// or last while that row is a thread's starter being fetched. It starts no group.
         case newMessages(MessageId)
         /// `startsGroup` shows the avatar, the name and the time.
         case message(MessageListModel.Row, startsGroup: Bool)
@@ -47,7 +47,7 @@ public struct MessageTimeline: Equatable, Sendable {
 
     /// `edges` wrap the rows: `.beginning` or `.older` first, `.newer` last. Without rows only
     /// `.older` stays, for messages that aren't loaded yet. The new messages line goes before the
-    /// row whose ID is `newMessages`, if it is shown.
+    /// row whose ID is `newMessages`, or the next shown one; last if none is.
     public init(
         rows: [MessageListModel.Row], calendar: Calendar = .current, edges: Set<Edge> = [],
         newMessages: MessageId? = nil
@@ -68,7 +68,8 @@ public struct MessageTimeline: Equatable, Sendable {
             if row.id == newMessages {
                 line = row.id
             }
-            // A starter still being fetched has no row yet; the line goes before the next one.
+            // A starter still being fetched has no row yet; the line goes before the next one, or
+            // last.
             if row.starter == .loading {
                 continue
             }
@@ -87,6 +88,10 @@ public struct MessageTimeline: Equatable, Sendable {
             let startsGroup = newDay || Self.startsGroup(row, after: previous)
             items.append(.message(row, startsGroup: startsGroup))
             previous = row
+        }
+        // The unread bar counts a starter still being fetched.
+        if let placed = line {
+            items.append(.newMessages(placed))
         }
         if edges.contains(.newer) {
             items.append(.edge(.newer))

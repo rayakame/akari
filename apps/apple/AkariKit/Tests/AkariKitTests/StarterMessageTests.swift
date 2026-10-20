@@ -118,6 +118,24 @@ struct StarterMessageTests {
         #expect(makeModel().threadOwner == "Me")
     }
 
+    // SessionView reads it, so an equal name mustn't make the session's view render again.
+    @Test
+    func aRereadThatKeepsTheOwnerDoesntNotify() {
+        starts(.loaded(message: original))
+        let model = makeModel()
+        let changed = Locked(false)
+        withObservationTracking {
+            _ = model.threadOwner
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+
+        model.apply(EventBatch([.messageUpdated(channelId: thread, messageId: id(32))]))
+
+        #expect(!changed.current)
+        #expect(model.threadOwner == "Ray")
+    }
+
     @Test
     func aThreadWithoutAKnownOwnerHasNoName() {
         store.update { state in
@@ -152,6 +170,17 @@ struct StarterTimelineTests {
         #expect(shown.items.map(\.id).contains(.newMessages(id(31))))
     }
 
+    // The unread bar counts the starter, so the line stays, last until the starter shows.
+    @Test
+    func aLoadingStarterInTheLastRowKeepsTheNewMessagesLine() {
+        let shown = MessageTimeline(
+            rows: [row(30, by: ray, at: noon - 60), starter(.loading)], calendar: berlin,
+            newMessages: id(31))
+
+        #expect(shown.shape == ["day", "+30", "new"])
+        #expect(shown.items.last?.id == .newMessages(id(31)))
+    }
+
     @Test
     func theMessageAfterTheStarterStartsItsOwnGroup() {
         let shown = MessageTimeline(
@@ -179,8 +208,8 @@ struct StarterTimelineTests {
     }
 }
 
-// "started a thread" lines in channel 10 for thread 21: the name opens the thread only while the
-// store has it, since an unknown thread would open without its name, start or composer.
+// "started a thread" lines in channel 10 for thread 21: the name opens the thread, fetched first
+// when the store doesn't have it, unless Discord refused it or it's gone.
 @MainActor @Suite(.timeLimit(.minutes(1)))
 struct ThreadLineTests {
     let store = FakeStore()
@@ -215,7 +244,14 @@ struct ThreadLineTests {
     }
 
     @Test
-    func aLineForAThreadTheStoreDoesntKnowDoesntLinkIt() {
+    func aLineForAThreadTheStoreDoesntHaveLinksIt() {
+        #expect(thread(of: makeModel()) == .thread(name: "t2", id: id(21)))
+    }
+
+    @Test
+    func aLineForAnUnavailableThreadDoesntLinkIt() {
+        store.update { $0.unavailableThreads.insert(id(21)) }
+
         let model = makeModel()
 
         #expect(thread(of: model) == .thread(name: "t2", id: nil))
@@ -223,7 +259,18 @@ struct ThreadLineTests {
     }
 
     @Test
-    func aThreadArrivingLinksItsLine() {
+    func aThreadBecomingUnavailableUnlinksItsLine() {
+        let model = makeModel()
+        store.update { $0.unavailableThreads.insert(id(21)) }
+
+        model.apply(EventBatch([.threadUnavailable(guildId: id(1), threadId: id(21))]))
+
+        #expect(thread(of: model) == .thread(name: "t2", id: nil))
+    }
+
+    @Test
+    func aThreadArrivingLinksItsLineAgain() {
+        store.update { $0.unavailableThreads.insert(id(21)) }
         let model = makeModel()
         store.update { $0.channels[id(21)] = AkariKitTests.thread(21, in: 10) }
 
