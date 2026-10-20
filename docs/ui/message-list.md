@@ -45,8 +45,12 @@ author; the rest show only their content.
   line's 41. *Akari: avatar and name line 4 into its 47 box (name baseline at 19), text
   baseline 41, the avatar 3 above the box's bottom; a group start whose content is shorter than
   the avatar is as tall as a one-line one.*
-- The display name in medium `textStrong`. Bots carry a small tag after the name ("APP"
-  since 2024). **Unverified** that webhooks get the same tag.
+- The author's name in medium `textStrong`: their server nickname, else their global name, else
+  their username, as Discord's client names people. Bots carry a small tag after the name
+  ("APP" since 2024). **Unverified** that webhooks get the same tag. *Akari: the nickname where
+  the store has the member, which so far is only the user's own; other members' nicknames wait
+  for a member cache. A webhook's name is its own; in DMs Discord would prefer a friend's
+  nickname, which Akari doesn't keep.*
 - The time, 4 after the name, in medium `chatTextMuted` (12 px in the official client;
   Akari's sizes in [typography.md](typography.md)).
 
@@ -193,10 +197,10 @@ seconds", then "a minute", "2 minutes" from 90 s, "an hour" from 44.5 minutes, "
 90 minutes, "a day" from 21.5 hours, "2 days" from 36 hours, "a month" from 25.5 days, and so on
 (JavaScript's rounding, halves up).
 
-*Akari: a call runs while its message has no end; Discord asks its call state. Names are display
-names; Discord prefers a member's server nickname, and in DMs a friend's nickname. A voice
-session names the participants the store knows, as Discord's client does with its own store;
-Akari's knows DM recipients. Akari can't join calls, so "Join the call" is strong text.*
+*Akari: a call runs while its message has no end; Discord asks its call state. Every name a line
+shows resolves as a message's header does ([Groups](#groups)). A voice session names the
+participants the store knows, as Discord's client does with its own store; Akari's knows DM
+recipients. Akari can't join calls, so "Join the call" is strong text.*
 
 **Links:** a part links only where Akari has its target: a thread's name, "a message" and a
 poll's title (they jump), an AutoMod alert's channel while the user can see it, and a Discovery
