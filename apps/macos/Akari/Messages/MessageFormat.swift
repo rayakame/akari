@@ -1,5 +1,7 @@
 import Foundation
 
+// Its formatter cache isn't locked: everything that formats runs on the main actor.
+@MainActor
 enum MessageFormat {
     static func groupTime(_ date: Date, now: Date, calendar: Calendar, locale: Locale) -> String {
         let time = shortTime(date, calendar: calendar, locale: locale)
