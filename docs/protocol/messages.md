@@ -114,7 +114,9 @@ around it, `GET /channels/{parent}/messages?limit=1&around={id}`, through the ra
 - Otherwise each thread's starter is asked for once per account. While the request runs the
   starter is `Loading`; once it settles, `MessageUpdated` for the thread's first message tells a
   list to read it again. The disk cache doesn't keep `referenced_message`, so a cached starter is
-  fetched only when no fresh page of the thread brings the message along.
+  fetched only when no fresh page of the thread brings the message along. A page that fails
+  leaves a cached starter `Unavailable` without a request, and the next page asks.
+- A live MESSAGE_CREATE of a starter without its message is fetched at once.
 - A loaded starter is the parent window's copy when that window holds the message, so a list
   reading it gets the newest edit; an edit in the parent sends no event for the thread's row.
 

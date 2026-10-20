@@ -136,10 +136,11 @@ thread, a renamed channel, and so on) show as one line:
 2026-10-17 and 2026-10-19): "Ray", "t2" and "threads" in `textStrong` (#FBFBFB) and medium, the
 rest in `chatTextMuted` (#818289), all three links with the pointing hand and an underline while
 the pointer is over them. The thread's name opens the thread, "threads" the channel's Threads
-popover, and "Ray" the profile (**unverified**). *Akari: the name opens the thread full width
-while Akari has the thread (a joined one, or one seen this session); for one it doesn't have,
-such as a thread archived since, the name stays strong text. "Ray" and "threads" are drawn the
-same but aren't links yet: Akari has no profiles and no Threads popover.*
+popover, and "Ray" the profile (**unverified**). *Akari: the name opens the thread full width.
+A thread Akari doesn't have, such as one archived since, is fetched first
+([dispatches.md](../protocol/dispatches.md#threads)); if Discord refuses it or it's gone, the
+name stays strong text without the link. "Ray" and "threads" are drawn the same but aren't
+links yet: Akari has no profiles and no Threads popover.*
 Whether Discord draws other system messages' actors the same way isn't observed; Akari keeps
 them in one `textMuted` sentence.
 
@@ -229,9 +230,9 @@ official web client on 2026-10-17 (German and English UI) and from the user's sc
   thread", and its time; then the other messages.
 - *Akari:* when Discord sends the starter without the message it points at, Akari fetches that
   message once ([messages.md](../protocol/messages.md#a-threads-starter-message)); until it's
-  there the starter has no row, and the new messages line waits on the next one. A starter
-  whose fetch failed shows the "couldn't load" line until a later page of the thread fetches it
-  again.
+  there the starter has no row, and the new messages line waits on the next one, or stays last.
+  A starter whose fetch failed, or a cached one whose page failed, shows the "couldn't load" line
+  until a later page of the thread fetches it again.
 
 ## Jump to present
 

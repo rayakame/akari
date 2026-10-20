@@ -92,10 +92,11 @@ applies while the user is timed out.
   (observed 2026-10-17).
 - **A locked thread** shows a gray banner at the top of its messages, "This thread has been
   locked. Only moderators can send messages.", and the composer is disabled with the text
-  above (observed 2026-10-17). Only Manage Threads (moderators, the owner, administrators) can
-  send there. *Akari: the banner shows for moderators too (**unverified**); 32 tall, 16 from
-  the sides and 4 from the top like the unread bar, in `card` with a lock symbol and 14 medium
-  `textDefault` text; not measured yet.*
+  above (observed 2026-10-17). Only Manage Threads (moderators, the server owner,
+  administrators) can send there. *Akari: the banner shows for moderators too
+  (**unverified**); 32 tall, 16 from the sides and 4 from the top like the unread bar, in `card`
+  with a lock symbol and 14 medium `textDefault` text; not measured yet. The thread's start
+  leaves the banner's 36 above its icon, so the banner doesn't cover it.*
 - Sending in a thread the user hasn't joined joins it, with no request besides the message.
 
 ## Slowmode

@@ -39,7 +39,8 @@ current from the gateway, ends timed mutes, loads message history and sends mess
 rate-limited REST, applying the message length limit and slowmode; it also acks what the user
 reads (paced per channel, one request at a time, "now" message IDs from Discord's clock, not the
 Mac's; threads with their flag) and marks channels and servers read, in bulk chunks; it fetches a
-thread's starter message when Discord leaves it out;
+thread's starter message when Discord leaves it out, and a thread a "started a thread" line names
+that the store doesn't have;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, and show where a channel's unread state and mentions come from. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its

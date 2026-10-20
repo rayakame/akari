@@ -107,7 +107,11 @@ The session replaces `messages` on its own when the open channel is deleted or t
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.
 An open thread that stops being listed (left, closed, or read past its window) stays open,
 as in the official client; only its deletion closes it. `openParent()` opens the open
-thread's channel, for the thread header's link. In a thread, a row's `starter` is set for
+thread's channel, for the thread header's link. `open(thread:from:)` opens the thread a
+"started a thread" line names, fetched first when the store doesn't have it; nothing opens when
+Discord refuses it, it's gone or the fetch fails, nor once the user opened something else
+meanwhile. A row's `threadLinked` is false for such a line once the thread is unavailable. In a
+thread, a row's `starter` is set for
 its first message when it started from one in the channel: the row draws `shown`, the
 parent's message, once loaded; `notice` says it couldn't be loaded; while it's fetched the
 timeline leaves the row out. `MessageListModel.threadOwner` names who started the thread,
