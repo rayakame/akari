@@ -115,6 +115,23 @@ impl Account {
         .map_err(Into::into)
     }
 
+    /// Fetches a thread that a "started a thread" line in `parent_id` names when the store
+    /// doesn't have it (archived, or never synced) and keeps it, unjoined unless the user is a
+    /// member. Returns whether the store has it now; when Discord refuses it or it is gone,
+    /// `Store.thread_unavailable` says so for the session.
+    pub async fn fetch_thread(
+        &self,
+        parent_id: ChannelId,
+        thread_id: ChannelId,
+    ) -> Result<bool, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.fetch_thread(parent_id, thread_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
     /// Drops the pages of `Around` loads running for the channel, so they don't replace its
     /// window: Escape or a mark as read during a jump, where no `Latest` load overtakes them.
     pub fn supersede_around_loads(&self, channel_id: ChannelId) {

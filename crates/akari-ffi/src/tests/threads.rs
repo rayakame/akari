@@ -287,3 +287,81 @@ async fn a_deleted_starter_reads_unavailable() {
     );
     loaded.account.close();
 }
+
+// An archived thread under GENERAL that READY didn't bring.
+const ARCHIVED: ChannelId = ChannelId::new(300_000_000_000_000_040);
+
+async fn online_answering(answer: ResponseTemplate) -> Loaded {
+    let server = MockServer::start().await;
+    Mock::given(path(format!("/api/v9/channels/{}", ARCHIVED.get())))
+        .respond_with(answer)
+        .mount(&server)
+        .await;
+    let gateway = FakeGateway::start().await;
+    let account = gateway
+        .client_with_api(&format!("{}/api/v9/", server.uri()))
+        .account(token("t"), USER)
+        .unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    Loaded {
+        account,
+        _server: server,
+        _ws: ws,
+    }
+}
+
+#[tokio::test]
+async fn a_fetched_thread_can_be_read() {
+    let archived = json!({
+        "id": ARCHIVED.get().to_string(), "type": 11, "name": "old plans",
+        "guild_id": GUILD.get().to_string(), "parent_id": GENERAL.get().to_string(),
+        "owner_id": MIRA.get().to_string(),
+        "thread_metadata": {"archived": true, "auto_archive_duration": 1440,
+            "archive_timestamp": "2024-03-02T08:30:00.250000+00:00", "locked": false}
+    });
+    let loaded = online_answering(ResponseTemplate::new(200).set_body_json(archived)).await;
+
+    let found = loaded
+        .account
+        .fetch_thread(GENERAL, ARCHIVED)
+        .await
+        .unwrap();
+
+    assert!(found);
+    let thread = loaded.account.store().channel(ARCHIVED).unwrap();
+    assert_eq!(
+        thread.thread.map(|info| (info.joined, info.archived)),
+        Some((false, true))
+    );
+    loaded.account.close();
+}
+
+#[tokio::test]
+async fn an_unavailable_thread_reaches_the_subscription_and_the_read() {
+    let loaded = online_answering(
+        ResponseTemplate::new(404).set_body_json(json!({"code": 10003, "message": "Unknown"})),
+    )
+    .await;
+    let subscription = loaded.account.store().subscribe();
+
+    let found = loaded
+        .account
+        .fetch_thread(GENERAL, ARCHIVED)
+        .await
+        .unwrap();
+
+    assert!(!found);
+    assert!(loaded.account.store().thread_unavailable(ARCHIVED));
+    let events = events_until(&subscription, |event| {
+        matches!(event, StoreEvent::ThreadUnavailable { .. })
+    })
+    .await;
+    assert!(events.contains(&StoreEvent::ThreadUnavailable {
+        guild_id: GUILD,
+        thread_id: ARCHIVED,
+    }));
+    loaded.account.close();
+}

@@ -230,6 +230,12 @@ impl Store {
         messages
     }
 
+    /// Whether `Account.fetch_thread` found this session that the user can't see the thread, or
+    /// that it is gone.
+    pub fn thread_unavailable(&self, thread_id: ChannelId) -> bool {
+        self.core.thread_unavailable(thread_id)
+    }
+
     /// The message `thread_id` started from, once its window holds the thread's first message;
     /// `None` for a thread started without one, or before that message is loaded.
     pub fn starter_message(&self, thread_id: ChannelId) -> Option<StarterMessage> {
