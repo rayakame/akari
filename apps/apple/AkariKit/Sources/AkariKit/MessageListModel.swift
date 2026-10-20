@@ -58,16 +58,21 @@ public final class MessageListModel {
         public let threadLinked: Bool
         /// What a system message's line is worded for.
         public let noticeContext: Message.NoticeContext
+        /// The header's name for `shown`'s author: their server nickname where the store has
+        /// their member, else their display name.
+        public let authorName: String
 
         public init(
             id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true,
-            noticeContext: Message.NoticeContext = .init()
+            noticeContext: Message.NoticeContext = .init(), authorName: String? = nil
         ) {
             self.id = id
             self.message = message
             self.starter = starter
             self.threadLinked = threadLinked
             self.noticeContext = noticeContext
+            let shown = if case .loaded(let original)? = starter { original } else { message }
+            self.authorName = authorName ?? shown.author.displayName
         }
 
         /// What the row draws: a loaded starter draws the message the thread started from.
@@ -187,6 +192,8 @@ public final class MessageListModel {
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
     @ObservationIgnored private let place: Message.NoticeContext.Place
+    // Server nicknames by user, `nil` for none; cleared when the guild's members change.
+    @ObservationIgnored private var nicks: [UserId: String?] = [:]
     @ObservationIgnored private let ownerId: UserId?
     @ObservationIgnored private var storedOwner: String?
     @ObservationIgnored private var hasMessages = false
@@ -428,6 +435,9 @@ public final class MessageListModel {
             placeNewMessagesLine()
         }
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
+        if batch.everythingChanged || guildId.map(batch.membersChanged.contains) == true {
+            nicks = [:]
+        }
         if batch.everythingChanged || batch.currentUserChanged
             || ownerId.map(batch.usersChanged.contains) == true
         {
@@ -695,19 +705,38 @@ public final class MessageListModel {
             threadLinked: thread.map {
                 store.channel(id: $0) != nil || !store.threadUnavailable(threadId: $0)
             } ?? true,
-            noticeContext: noticeContext(for: shown))
+            noticeContext: noticeContext(for: shown),
+            authorName: shown.fromWebhook ? shown.author.displayName : name(of: shown.author))
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
         Row(
             id: id, message: message, starter: held.starter, threadLinked: held.threadLinked,
-            noticeContext: held.noticeContext)
+            noticeContext: held.noticeContext, authorName: held.authorName)
+    }
+
+    // As Discord's client names people: the server nickname where the store has the member.
+    private func name(of user: User) -> String {
+        guard let guildId else {
+            return user.displayName
+        }
+        if let known = nicks[user.id] {
+            return known ?? user.displayName
+        }
+        let nick = store.memberNick(guildId: guildId, userId: user.id)
+        nicks[user.id] = .some(nick)
+        return nick ?? user.displayName
     }
 
     // Reads only what the kind's line needs: most rows are people's messages.
     private func noticeContext(for message: Message) -> Message.NoticeContext {
         var context = Message.NoticeContext(currentUserId: userId, place: place)
         context.guildId = guildId
+        if guildId != nil, message.noticeParts(in: context) != nil {
+            for user in [message.author] + message.mentions + [message.actor].compactMap({ $0 }) {
+                context.names[user.id] = name(of: user)
+            }
+        }
         switch message.kind {
         case .premiumGuildSubscriptionTier1, .premiumGuildSubscriptionTier2,
             .premiumGuildSubscriptionTier3, .guildDiscoveryDisqualified,
@@ -734,7 +763,7 @@ public final class MessageListModel {
         case .voiceSession:
             context.participantNames = (message.call?.participants ?? [])
                 .filter { $0 != message.author.id }
-                .compactMap { store.user(id: $0)?.displayName }
+                .compactMap { store.user(id: $0).map(name(of:)) }
         default:
             break
         }

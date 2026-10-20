@@ -60,12 +60,18 @@ extension Message {
         public var recipientName: String?
         /// A voice session's participants the store knows, without its author.
         public var participantNames: [String] = []
+        /// People by name as headers show them; anyone missing goes by their display name.
+        public var names: [UserId: String] = [:]
         /// For dates in a line, such as when security actions end; `nil` is the user's.
         public var calendar: Calendar?
 
         public init(currentUserId: UserId? = nil, place: Place = .channel) {
             self.currentUserId = currentUserId
             self.place = place
+        }
+
+        func name(of user: User) -> String {
+            names[user.id] ?? user.displayName
         }
     }
 
@@ -82,9 +88,8 @@ extension Message {
     }
 
     private func parts(in context: NoticeContext) -> [NoticePart]? {
-        let name = author.displayName
-        let actor = NoticePart.actor(name)
-        let mentioned = mentions.first?.displayName
+        let actor = NoticePart.actor(context.name(of: author))
+        let mentioned = mentions.first.map(context.name(of:))
         switch kind {
         case .default, .reply, .chatInputCommand, .contextMenuCommand, .threadStarterMessage,
             .interactionPremiumUpsell, .customGift, .changelog, .mediaMentionMessage:
@@ -114,7 +119,8 @@ extension Message {
                 return [actor, .text(" left the group.")]
             }
             return [
-                actor, .text(" removed "), .strong(target.displayName), .text(" from the group."),
+                actor, .text(" removed "), .strong(context.name(of: target)),
+                .text(" from the group."),
             ]
         case .call:
             return callParts(actor, in: context)
@@ -146,7 +152,7 @@ extension Message {
                 }
             return [actor] + pinned + [.pins("pinned messages"), .text(".")]
         case .userJoin:
-            return joinParts(actor)
+            return joinParts(actor, in: context)
         case .premiumGuildSubscription:
             return boostParts(actor, level: nil, in: context)
         case .premiumGuildSubscriptionTier1:
@@ -288,14 +294,14 @@ extension Message {
         ("Glad you're here, ", "."), ("Good to see you, ", "."), ("Yay you made it, ", "!"),
     ]
 
-    private func joinParts(_ actor: NoticePart) -> [NoticePart] {
+    private func joinParts(_ actor: NoticePart, in context: NoticeContext) -> [NoticePart] {
         if author.bot {
             guard let adder = self.actor else {
                 return [actor, .text(" was added to the server.")]
             }
             return [
-                .actor(adder.displayName), .text(" has added "), .strong(author.displayName),
-                .text(" to the server."),
+                .actor(context.name(of: adder)), .text(" has added "),
+                .strong(context.name(of: author)), .text(" to the server."),
             ]
         }
         // The ID's time through a double, as JavaScript's Number(id) takes it.

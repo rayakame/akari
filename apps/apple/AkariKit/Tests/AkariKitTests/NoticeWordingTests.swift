@@ -90,6 +90,20 @@ struct NoticeWordingTests {
                 == "Ray added unknown-user to the group.")
     }
 
+    // The list resolves names as headers show them; a person it has no name for goes by their
+    // display name.
+    @Test
+    func aLineNamesPeopleAsItsContextDoes() {
+        var here = context(.thread)
+        here.names = [ray.id: "Rayo", mira.id: "Mimi"]
+
+        #expect(
+            message(.recipientAdd, mentions: [mira]).notice(in: here)
+                == "Rayo added Mimi to the thread.")
+        #expect(
+            message(.recipientAdd, mentions: [me]).notice(in: here) == "Rayo added Me to the thread.")
+    }
+
     // MARK: Calls
 
     @Test

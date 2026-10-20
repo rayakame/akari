@@ -27,6 +27,7 @@ final class FakeStore: Store, @unchecked Sendable {
         var unreadPrivateChannels: [ChannelId] = []
         var starters: [ChannelId: StarterMessage] = [:]
         var unavailableThreads: Set<ChannelId> = []
+        var memberNicks: [GuildId: [UserId: String]] = [:]
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -100,6 +101,11 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func user(id: UserId) -> User? {
         read(.user(id)) { $0.users[id] }
+    }
+
+    // Not logged: the read-count tests predate nicknames.
+    override func memberNick(guildId: GuildId, userId: UserId) -> String? {
+        state.withLock { $0.memberNicks[guildId]?[userId] }
     }
 
     override func guildIds() -> [GuildId] {
