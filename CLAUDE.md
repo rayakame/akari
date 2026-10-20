@@ -53,8 +53,9 @@ rows with their counts, joined threads under their parent), a
 message list that loads history in both directions, with the "new messages" line and the unread
 bar, the composer, and marking read with Escape, Shift+Escape and the context menus; a thread
 opens with its header ("# channel › thread"), its start and starter message, and a locked
-thread's banner, the "started a thread" line links to its thread and a pin's line jumps to
-the pinned message; it shows the
+thread's banner, system lines read as Discord words them, the "started a thread" line links to
+its thread, a pin's line jumps to the pinned message, and a jump flashes its message; it shows
+the
 connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
 messages, which the macOS app restores before the gateway connects. `akari-markdown` parses

@@ -187,6 +187,12 @@ Sources: [message object](https://docs.discord.food/resources/message#message-st
 - `referenced_message` has three states (footnote 5 of the message table): a missing key
   means Discord didn't try to fetch it, `null` means the message was deleted, and an
   object is the referenced message. The model uses `Option<Option<Box<Message>>>`.
+- For system lines: `call` (`participants`, `ended_timestamp`, `null` while the call runs; a
+  MESSAGE_UPDATE brings its end), `role_subscription_data`, `purchase_notification` (only its
+  `guild_product_purchase.product_name` is kept), `application` (its `name`) and `actor`, the
+  user who added a bot, on the bot's USER_JOIN. `actor` isn't documented; Discord's own client
+  reads it (its message record, 2026-10-20). Each falls back to `None` when it doesn't parse,
+  so the message stays readable.
 - `message_reference.type` is 0 (`DEFAULT`) when missing; 1 (`FORWARD`) comes with
   `message_snapshots`, which isn't modeled yet
   ([message reference](https://docs.discord.food/resources/message#message-reference-structure)).

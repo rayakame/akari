@@ -158,17 +158,82 @@ and the unread bar (36 each) while either can show; one deleted since leaves the
 there. The user's last request places the list, as for the unread bar's jump: a click while
 another jump or the jump to the present loads takes their place, and a second click on the same
 message while it loads asks once. Whether Discord puts the message at the top or
-in the middle isn't observed; Akari doesn't highlight it yet. "pinned messages" isn't a link
-yet: Akari has no pins popout.*
+in the middle isn't observed. The message flashes ([below](#the-flash)). "pinned messages"
+isn't a link yet: Akari has no pins popout.*
 
-They never join a group and always end one. Apart from the thread and pin lines, whose links
-need Discord's wording, Akari writes these sentences in its own words; it doesn't reuse
-Discord's texts, such as its random welcome lines.
+**Every other kind** is worded as Discord's client words it (its en-US strings and its
+system-message renderer, read 2026-10-20), from what the message carries and what the store
+knows. **Bold** below is strong text, as names are:
 
-**Which messages count as system messages:** every message type except the default type,
-replies, slash-command and context-menu command results, thread starter messages, and types
-Akari doesn't know. A type Akari doesn't know shows its content like an ordinary message. A
-thread's starter that can't be loaded shows as one ([Threads](#threads)).
+| Type | The line |
+|---|---|
+| 1 added | "Ray added **Mira** to the thread." in a thread, "… to the group." elsewhere; Mira is the message's first mention, "???" (thread) or "unknown-user" without one |
+| 2 removed | in a thread "Ray removed **Mira** from the thread."; elsewhere "Ray removed **Mira** from the group.", or "Ray left the group." when the mention is the author or missing |
+| 3 call | while it runs "Ray started a call. — **Join the call**"; then "Ray started a call that lasted {length}."; "You missed a call from Ray that lasted {length}." when the reader isn't a participant; without an end, no length |
+| 4 renamed | "Ray changed the channel name: **name**" (also in threads); a forum post "… changed the post title: **name**"; a group "Ray changed the group name: **name**. **Edit Group**" or "Ray removed the custom group name. **Edit Group**" |
+| 5 icon | "Ray changed the group icon. **Edit Group**" |
+| 7 join | one of Discord's 13 welcome lines, by the message's time: its ID's milliseconds since 1970 (through a double, as JavaScript's `Number` takes the ID) mod 13: "Ray joined the party.", "Ray is here.", "Welcome, Ray. We hope you brought pizza.", "A wild Ray appeared.", … "Yay you made it, Ray!"; a bot's join "Mira has added **Akari Bot** to the server." (from the message's `actor`, undocumented) or "Akari Bot was added to the server." |
+| 8–11 boost | "Ray just boosted the server!", or "… **3** times!" for a count above one; at a level, with the server known, "… Lab has achieved **Level 2!**" |
+| 12 followed | "Ray has added **Lab #news** to this channel. Its most important updates will show up here." |
+| 14–17 Discovery | "**Lab** has been removed from Server Discovery because it no longer passes all the requirements. Check **Server Settings** for more details." and its relisted and warning lines; "this server" without the name |
+| 24 AutoMod | "**AutoMod** has blocked a message in **general**" (or "has flagged" unless the alert says blocked); "unknown-channel" when the store doesn't have it |
+| 25 subscription | "Ray joined **Gold** and has been a subscriber of **Lab** for 3 months!", "Ray renewed …", and for no months "Ray joined **Gold** as a subscriber of **Lab**!" or "Ray renewed **Gold** in their **Lab** membership!" |
+| 27–31 stage | "Ray started **topic**", "Ray ended **topic**", "Ray is now a speaker.", "Ray requested to speak.", "Ray changed the Stage topic: **topic**" |
+| 32 app upgrade | "Ray upgraded Akari Bot to premium for this server! 🎉", or "… a deleted application …" |
+| 36–39 security | "Ray enabled security actions until {date}.", "Ray disabled security actions.", "Ray reported a raid in Lab.", "Ray resolved an Activity Alert." |
+| 44 purchase | "Ray has purchased **Badge**!" |
+| 46 poll | "Ray's poll **Lunch?** has closed."; a title over 50 UTF-16 units keeps 49 code points without trailing spaces and dots, then "…" |
+| 52–54 join request | "This application was approved! Welcome!", "… was rejected.", "… has been withdrawn." (Discord's words when the client doesn't have the request) |
+| 58–62 report | "Ray banned **Mira**", "Ray kicked **Mira**", "Ray timed out **Mira**", "Ray deleted the message", "Ray resolved this flag" (no periods) |
+| 65 voice | "Ray started **a voice hangout**."; once it ended "Ray was hanging out for an hour.", "Ray and **Mira** were …", "Ray, **Mira**, and **Noa** were …", "Ray, **Mira**, and **2 others** were …" |
+| 67 friend | in a DM only: "You accepted **Ray**'s friend request." (plus " They said: **note**") or "**Ray** accepted your friend request." (plus " You said: **note**") |
+
+Call lengths are moment's English `humanize()` as Discord's client uses it: under 44.5 s "a few
+seconds", then "a minute", "2 minutes" from 90 s, "an hour" from 44.5 minutes, "2 hours" from
+90 minutes, "a day" from 21.5 hours, "2 days" from 36 hours, "a month" from 25.5 days, and so on
+(JavaScript's rounding, halves up).
+
+*Akari: a call runs while its message has no end; Discord asks its call state. Names are display
+names; Discord prefers a member's server nickname, and in DMs a friend's nickname. A voice
+session names the participants the store knows, as Discord's client does with its own store;
+Akari's knows DM recipients. Akari can't join calls, so "Join the call" is strong text.*
+
+**Links:** a part links only where Akari has its target: a thread's name, "a message" and a
+poll's title (they jump), an AutoMod alert's channel while the user can see it, and a Discovery
+notice's server. Discord's other links are strong text without the hand until Akari has their
+targets: profiles (every actor and named person), "threads", "pinned messages", "Join the call",
+"Edit Group", a followed channel's server popout, "Server Settings", a subscription's server
+page, a product, and "a voice hangout".
+
+**Not drawn:** Discord's client shows no line for invite reminders (22), revive and gaming
+prompts (40, 42), HD streaming (55), wallpapers and emoji (56, 57, 63) and a purchase that isn't
+of a server product; it makes 48, 50, 51 and 66 itself; 35 and 64 are cards; a channel linked to
+a lobby (49) shows only when the client knows the app. *Akari leaves all of them out of the
+list, and the messages around them group as if they weren't there. Not drawn yet either: the
+poll result's card, the AutoMod alert's message block, the "Wave to say hi!" button, a bot's APP
+tag, a subscription's welcome badge and sticker buttons, a purchase's thank-you card.*
+
+Discord's client draws 26, 41, 47 and 68 as messages people write, and so does Akari (without
+41's gift card and 68's time chip).
+
+They never join a group and always end one.
+
+**Which messages count as system messages:** every type except Discord's message set (the
+default type, replies, slash-command and context-menu command results, 26, 41, 47, 68), thread
+starter messages, and types Akari doesn't know, which show their content like an ordinary
+message; of those, 56, 57 and 63 show nothing. A thread's starter that can't be loaded shows as
+one ([Threads](#threads)).
+
+### The flash
+
+When a jump lands on a message (a pin's "a message", a poll's title; in Discord also a reply's
+quote and search results), Discord's client highlights it: `messageHighlight`, #5865F2 at 41/255
+in both themes, over the message's box (not the space above its group), its trailing corners
+rounded 4. It fades in over 0.2 s (CSS `ease`), holds until 2 s after the jump and fades out over
+0.2 s; with reduced motion it comes and goes at once. A new jump restarts it. Read from its flash
+component (a 2 s timer) and its CSS (a 0.2 s `background-color` transition), 2026-10-20. *Akari:
+the same, with macOS's Reduce Motion. A jump to a message deleted since flashes nothing, as in
+Discord; the unread bar's jump doesn't flash.*
 
 ## Selecting text
 

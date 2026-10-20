@@ -51,6 +51,8 @@ Two details:
   `CLIENT_STATE_V2` nests the guild's fields there as it does in READY and GUILD_CREATE.
 - MESSAGE_UPDATE's `tts` isn't read: "The value for `tts` will always be `false` in message
   updates."
+- MESSAGE_UPDATE's `call` replaces the CALL message's call: Discord edits the message when the
+  call ends, with its participants and `ended_timestamp`. A missing `call` keeps the old one.
 
 ## What each dispatch does
 

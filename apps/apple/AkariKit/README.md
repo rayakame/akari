@@ -179,9 +179,14 @@ Rules every Apple app shows the same way, so they live here rather than in the a
   (`SessionModel.trustedLinks()`); lists of one account share their hosts. Logging out and an
   expired session forget them with the account's spot (`AccountMemory.forget`), and a list
   made before that stores nothing more.
-- `Message.notice` is the sentence for a system message and `noticeParts` the same in parts
-  (the actor, a new thread's name and its ID, "threads", a pin's "a message" with the pinned
-  message's ID, "pinned messages", the text between), which the apps draw as Discord does; `Initials` gives the letters a
+- `Message.notice(in:)` is a system message's sentence in Discord's wording and
+  `noticeParts(in:)` the same in parts: the actor, other names and bold text (`strong`), the
+  links Akari can follow (a thread, a message to jump to, a channel, a server), "threads",
+  "pinned messages", the text between. Both take a `NoticeContext`: the reader, where the
+  line is (channel, thread, forum post, group DM, DM) and what the store knows that the line
+  names. `nil` is a message people write, an empty list a kind Discord shows no line for.
+  A list's rows carry their context, `Row.isHidden` marks the empty ones, and the timeline
+  leaves them out; `Initials` gives the letters a
   server or avatar without an image shows; `Channel.opensMessageList` says which channels
   have a message list.
 

@@ -41,6 +41,7 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `mentionBackground` | a mention's pill | `#5865f2` at 30% | `#5865f2` at 15% |
 | `mentionedBackground` | a message that mentions you | `#f8a300` at 8% | `#f8a300` at 10% |
 | `mentionedBar` | the bar beside a message that mentions you | `#f8a300` | `#f8a300` |
+| `messageHighlight` | a message a jump landed on, for 2 s (Discord's flash) | `#5865f2` at 41/255 | `#5865f2` at 41/255 |
 | `codeBackground` | inline code and code blocks | `#97979f` at 8% | `#97979f` at 10% |
 | `codeBorder` | the outline of inline code and code blocks | `#97979f` at 16% | `#97979f` at 24% |
 | `quoteBar` | the bar beside a quote | `#97979f` at 40% | `#97979f` at 40% |
