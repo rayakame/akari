@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tokio::sync::{Mutex, Notify, mpsc};
 
-use super::apply::{Derived, Entities, ReadyDiff, State};
+use super::apply::{Derived, Entities, Learned, ReadyDiff, State};
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
 use super::events::{ConnectionState, StoreEvent};
@@ -370,7 +370,10 @@ impl Store {
     pub(crate) fn prepare(&self, preparing: Preparing, ready: Ready) -> PreparedReady {
         let mut entities = Entities::from_ready(ready);
         let read_states = entities.read_states.channels().clone();
-        self.read(|inner| inner.state.keep_memberships(&mut entities));
+        self.read(|inner| {
+            inner.state.keep_memberships(&mut entities);
+            inner.state.keep_fetched(&mut entities);
+        });
         let derived = Derived::build(&entities, self.now_millis());
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
@@ -484,7 +487,7 @@ impl Store {
         });
     }
 
-    pub(crate) fn learn_thread(&self, thread: model::Channel) -> bool {
+    pub(crate) fn learn_thread(&self, thread: model::Channel) -> Learned {
         self.write("thread", |inner, events| {
             inner.state.learn_thread(thread, events)
         })

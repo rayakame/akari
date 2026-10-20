@@ -15,7 +15,7 @@ mod threads;
 mod types;
 mod windows;
 
-pub(crate) use apply::wall_millis;
+pub(crate) use apply::{Learned, wall_millis};
 pub use badges::Badge;
 pub use events::{ConnectionState, StoreEvent};
 pub use order::display_order;

@@ -321,6 +321,15 @@ struct Journal {
     undone: BTreeSet<ChannelId>,
 }
 
+// What the store made of a thread Get Channel brought.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Learned {
+    Kept,
+    NotAThread,
+    // Its guild isn't in the store: down, or not restored yet.
+    Unplaced,
+}
+
 pub(crate) struct ReadyDiff {
     events: Vec<StoreEvent>,
     removed_channels: Vec<ChannelId>,
@@ -353,6 +362,8 @@ pub(crate) struct State {
     pending_joins: HashMap<ChannelId, ThreadMembership>,
     // Threads Get Channel refused or didn't find, for the session.
     unavailable_threads: HashSet<ChannelId>,
+    // Threads Get Channel brought this session.
+    fetched_threads: HashSet<ChannelId>,
     clock: Arc<Clock>,
 }
 
@@ -380,6 +391,7 @@ impl State {
             outage_members: HashMap::new(),
             pending_joins: HashMap::new(),
             unavailable_threads: HashSet::new(),
+            fetched_threads: HashSet::new(),
             clock,
         }
     }
@@ -392,6 +404,7 @@ impl State {
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_folders(&mut next);
         self.keep_memberships(&mut next);
+        self.keep_fetched(&mut next);
         let derived = Derived::build(&next, self.now_millis());
         let diff = self.ready_diff(&next, &derived);
         self.swap(next, derived, diff, events);
@@ -486,6 +499,11 @@ impl State {
             Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
             None => HashMap::new(),
         };
+        // Fetched while the READY was prepared, after its own pass.
+        let late = self.keep_fetched(&mut next);
+        for thread in &late {
+            derived.threads.add(thread);
+        }
         if let Some(diff) = diff {
             events.extend(diff.events);
             for channel in diff.removed_channels {
@@ -498,6 +516,9 @@ impl State {
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
+        for thread in &late {
+            self.dirty.channel(thread.id);
+        }
         self.keep_outage_members(&next);
         self.pending_joins.clear();
         let old = Derived {
@@ -1700,12 +1721,12 @@ impl State {
         self.windows.fail_starter(thread, events);
     }
 
-    // Get Channel's answer, as a THREAD_CREATE would bring it; false if it isn't a thread here.
+    // Get Channel's answer, as a THREAD_CREATE would bring it.
     pub(crate) fn learn_thread(
         &mut self,
         thread: model::Channel,
         events: &mut Vec<StoreEvent>,
-    ) -> bool {
+    ) -> Learned {
         let id = thread.id;
         if !matches!(
             thread.kind,
@@ -1713,10 +1734,41 @@ impl State {
                 | model::ChannelType::PublicThread
                 | model::ChannelType::PrivateThread
         ) {
-            return false;
+            return Learned::NotAThread;
+        }
+        // The gateway's copy is newer than an answer to a request sent before it.
+        if self.entities.channels.contains_key(&id) {
+            return Learned::Kept;
         }
         self.put_channel(thread, events);
-        self.entities.channels.contains_key(&id)
+        if !self.entities.channels.contains_key(&id) {
+            return Learned::Unplaced;
+        }
+        self.fetched_threads.insert(id);
+        self.settle(self.now_millis(), events);
+        Learned::Kept
+    }
+
+    // READY lists only joined threads, so it says nothing about one fetched this session; it
+    // stays while its guild and parent do. Returns the threads it put into `next`.
+    pub(crate) fn keep_fetched(&self, next: &mut Entities) -> Vec<Arc<Channel>> {
+        let mut kept = Vec::new();
+        for id in &self.fetched_threads {
+            let Some(thread) = self.entities.channels.get(id) else {
+                continue;
+            };
+            let placed = thread
+                .guild_id
+                .is_some_and(|guild| next.guilds.contains_key(&guild))
+                && thread
+                    .parent_id
+                    .is_some_and(|parent| next.channels.contains_key(&parent));
+            if placed && !next.channels.contains_key(id) {
+                next.channels.insert(*id, thread.clone());
+                kept.push(thread.clone());
+            }
+        }
+        kept
     }
 
     pub(crate) fn thread_unavailable(&self, thread: ChannelId) -> bool {

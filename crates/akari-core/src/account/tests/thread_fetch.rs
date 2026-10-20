@@ -207,3 +207,15 @@ async fn a_channel_that_isnt_a_thread_is_unavailable() {
     assert!(online.account.store().channel(archived_id()).is_none());
     assert!(online.account.store().thread_unavailable(archived_id()));
 }
+
+// Nothing Discord refused: the guild may be down, or not restored yet.
+#[tokio::test]
+async fn a_thread_in_a_guild_the_store_lacks_stays_to_be_fetched() {
+    let mut thread = archived(false);
+    thread["guild_id"] = "200000000000000099".into();
+    let online = online_answering(ResponseTemplate::new(200).set_body_json(thread)).await;
+
+    assert!(!online.fetch().await.unwrap());
+
+    assert!(!online.account.store().thread_unavailable(archived_id()));
+}

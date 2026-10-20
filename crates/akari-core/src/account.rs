@@ -13,8 +13,8 @@ use crate::gateway::{
 use crate::model::{ChannelId, GuildId, MessageId, MessageType, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
-    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, StarterFetch, Store, WindowLimits,
-    message_length,
+    Ack, ConnectionState, Cursor, Learned, LoadKind, LoadTicket, Message, StarterFetch, Store,
+    WindowLimits, message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 use acks::{AckSender, Pace, Refusal};
@@ -977,30 +977,31 @@ impl Account {
         if shared.store.thread_unavailable(thread) {
             return Ok(false);
         }
-        let fetched = match shared.rest.get_channel(thread).await {
+        let learned = match shared.rest.get_channel(thread).await {
             Ok(channel) => Ok(shared.store.learn_thread(channel)),
             Err(RequestError::Discord {
                 status: 403 | 404, ..
-            }) => Ok(false),
+            }) => Ok(Learned::NotAThread),
             Err(err) => {
                 shared.failed(&err);
                 Err(err)
             }
         };
-        if matches!(fetched, Ok(false)) {
+        if matches!(learned, Ok(Learned::NotAThread)) {
             shared.store.mark_thread_unavailable(parent, thread);
         }
         tracing::debug!(
             target: "akari_core::load",
             thread_id = thread.get(),
-            outcome = match &fetched {
-                Ok(true) => "found",
-                Ok(false) => "unavailable",
+            outcome = match &learned {
+                Ok(Learned::Kept) => "found",
+                Ok(Learned::NotAThread) => "unavailable",
+                Ok(Learned::Unplaced) => "no_guild",
                 Err(err) => err.kind(),
             },
             "thread fetched"
         );
-        fetched
+        learned.map(|learned| matches!(learned, Learned::Kept))
     }
 
     /// The next place among loads and supersedes, for [`Account::load_messages_placed`]. A host
