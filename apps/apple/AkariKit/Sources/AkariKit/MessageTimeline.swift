@@ -25,7 +25,8 @@ public struct MessageTimeline: Equatable, Sendable {
         /// Before a day's first message; the date is that day's start.
         case day(Date)
         /// The new messages line, right before the row with this ID and after its day's divider,
-        /// or last while that row is a thread's starter being fetched. It starts no group.
+        /// or the next shown row: last while that row is a thread's starter being fetched or a
+        /// hidden system message. It starts no group.
         case newMessages(MessageId)
         /// `startsGroup` shows the avatar, the name and the time.
         case message(MessageListModel.Row, startsGroup: Bool)
@@ -68,9 +69,9 @@ public struct MessageTimeline: Equatable, Sendable {
             if row.id == newMessages {
                 line = row.id
             }
-            // A starter still being fetched has no row yet; the line goes before the next one, or
-            // last.
-            if row.starter == .loading {
+            // A starter still being fetched has no row yet, and a hidden system message none at
+            // all; the line goes before the next one, or last.
+            if row.starter == .loading || row.isHidden {
                 continue
             }
             let start = calendar.startOfDay(for: row.shown.timestamp)

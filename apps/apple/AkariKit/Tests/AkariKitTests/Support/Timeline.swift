@@ -24,7 +24,9 @@ func row(
         content: content, timestamp: time, editedTimestamp: nil, pinned: false,
         mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
         componentsV2: false, delivery: delivery, formatted: formattedText(content: content),
-        mentionsMe: false, reference: nil, hasThread: hasThread
+        mentionsMe: false, reference: nil, hasThread: hasThread, mentions: [], call: nil,
+        roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
+        embedFields: []
     )
     return MessageListModel.Row(id: id(key ?? raw), message: message)
 }

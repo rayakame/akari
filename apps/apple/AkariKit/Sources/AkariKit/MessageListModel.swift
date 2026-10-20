@@ -56,14 +56,18 @@ public final class MessageListModel {
         /// Whether a "started a thread" message links its thread: not once Discord refused it or
         /// it's gone.
         public let threadLinked: Bool
+        /// What a system message's line is worded for.
+        public let noticeContext: Message.NoticeContext
 
         public init(
-            id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true
+            id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true,
+            noticeContext: Message.NoticeContext = .init()
         ) {
             self.id = id
             self.message = message
             self.starter = starter
             self.threadLinked = threadLinked
+            self.noticeContext = noticeContext
         }
 
         /// What the row draws: a loaded starter draws the message the thread started from.
@@ -73,7 +77,8 @@ public final class MessageListModel {
 
         /// What the row says when it draws as a system message.
         public var notice: String? {
-            starter == .unavailable ? Self.unavailableStarter : shown.notice
+            starter == .unavailable
+                ? Self.unavailableStarter : shown.notice(in: noticeContext)
         }
 
         /// `notice` in parts; an unavailable thread isn't linked.
@@ -81,12 +86,17 @@ public final class MessageListModel {
             if starter == .unavailable {
                 return [.text(Self.unavailableStarter)]
             }
-            return shown.noticeParts?.map { part in
+            return shown.noticeParts(in: noticeContext)?.map { part in
                 if case .thread(let name, _) = part, !threadLinked {
                     return .thread(name: name, id: nil)
                 }
                 return part
             }
+        }
+
+        /// A system message Discord shows no line for; the timeline leaves it out.
+        public var isHidden: Bool {
+            noticeParts?.isEmpty == true
         }
     }
 
@@ -176,6 +186,7 @@ public final class MessageListModel {
     @ObservationIgnored var readHere = false
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
+    @ObservationIgnored private let place: Message.NoticeContext.Place
     @ObservationIgnored private let ownerId: UserId?
     @ObservationIgnored private var storedOwner: String?
     @ObservationIgnored private var hasMessages = false
@@ -211,6 +222,7 @@ public final class MessageListModel {
         self.store = store
         let channel = store.channel(id: channelId)
         guildId = channel?.guildId
+        place = Self.place(of: channel, in: store)
         ownerId = channel?.thread?.ownerId
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
@@ -679,11 +691,51 @@ public final class MessageListModel {
             id: id, message: message, starter: starter(of: message),
             threadLinked: thread.map {
                 store.channel(id: $0) != nil || !store.threadUnavailable(threadId: $0)
-            } ?? true)
+            } ?? true,
+            noticeContext: noticeContext(for: message))
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
-        Row(id: id, message: message, starter: held.starter, threadLinked: held.threadLinked)
+        Row(
+            id: id, message: message, starter: held.starter, threadLinked: held.threadLinked,
+            noticeContext: held.noticeContext)
+    }
+
+    // Reads only what the kind's line needs: most rows are people's messages.
+    private func noticeContext(for message: Message) -> Message.NoticeContext {
+        var context = Message.NoticeContext(currentUserId: userId, place: place)
+        context.guildId = guildId
+        switch message.kind {
+        case .premiumGuildSubscriptionTier1, .premiumGuildSubscriptionTier2,
+            .premiumGuildSubscriptionTier3, .guildDiscoveryDisqualified,
+            .guildDiscoveryGracePeriodInitialWarning, .guildDiscoveryGracePeriodFinalWarning,
+            .roleSubscriptionPurchase, .guildIncidentReportRaid:
+            context.guildName = guildId.flatMap { store.guild(id: $0)?.name }
+        case .threadCreated:
+            context.threadName = message.reference?.channelId.flatMap {
+                store.channel(id: $0)?.name
+            }
+        case .autoModerationAction:
+            let field = message.embedFields.first { $0.name == "channel_id" }
+            if let alerted = field.flatMap({ UInt64($0.value) }).map(ChannelId.init(rawValue:)) {
+                context.alertChannelName = store.channel(id: alerted)?.name
+                // Discord links it only while the user can see it.
+                if store.permissions(channelId: alerted)?.contains(.viewChannel) == true {
+                    context.alertChannelId = alerted
+                }
+            }
+        case .friendRequestAccepted:
+            context.recipientName = store.channel(id: channelId)?.recipientIds.first.flatMap {
+                store.user(id: $0)?.displayName
+            }
+        case .voiceSession:
+            context.participantNames = (message.call?.participants ?? [])
+                .filter { $0 != message.author.id }
+                .compactMap { store.user(id: $0)?.displayName }
+        default:
+            break
+        }
+        return context
     }
 
     private func starter(of message: Message) -> Row.Starter? {
@@ -716,6 +768,20 @@ public final class MessageListModel {
             .first { $0.author.id == ownerId }?.author.displayName
         if owner != threadOwner {
             threadOwner = owner
+        }
+    }
+}
+
+extension MessageListModel {
+    fileprivate static func place(of channel: Channel?, in store: Store) -> Message.NoticeContext.Place
+    {
+        switch channel?.kind {
+        case .dm?: return .dm
+        case .groupDm?: return .groupDM
+        case .publicThread?, .privateThread?, .newsThread?:
+            let parent = channel?.parentId.flatMap { store.channel(id: $0)?.kind }
+            return parent == .guildForum || parent == .guildMedia ? .forumPost : .thread
+        default: return .channel
         }
     }
 }

@@ -68,6 +68,20 @@ struct MessageTimelineTests {
         #expect(shown.shape == ["day", "+1", "2", "3"])
     }
 
+    // An invite reminder: Discord draws nothing, and the messages around it group as if it
+    // weren't there. The new messages line moves to the next shown row.
+    @Test
+    func aKindWithoutALineIsLeftOut() {
+        let rows = [
+            row(1, at: noon), row(2, at: noon + 1, kind: .guildInviteReminder),
+            row(3, at: noon + 2),
+        ]
+
+        let shown = MessageTimeline(rows: rows, calendar: berlin, newMessages: id(2))
+
+        #expect(shown.shape == ["day", "+1", "new", "3"])
+    }
+
     @Test
     func aNewDayGetsADividerAndStartsAGroup() {
         let shown = timeline(

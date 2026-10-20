@@ -238,7 +238,7 @@ struct ThreadLineTests {
 
     @Test
     func aLineForAThreadTheStoreKnowsLinksIt() {
-        store.update { $0.channels[id(21)] = AkariKitTests.thread(21, in: 10) }
+        store.update { $0.channels[id(21)] = AkariKitTests.thread(21, in: 10, name: "t2") }
 
         #expect(thread(of: makeModel()) == .thread(name: "t2", id: id(21)))
     }
@@ -272,7 +272,7 @@ struct ThreadLineTests {
     func aThreadArrivingLinksItsLineAgain() {
         store.update { $0.unavailableThreads.insert(id(21)) }
         let model = makeModel()
-        store.update { $0.channels[id(21)] = AkariKitTests.thread(21, in: 10) }
+        store.update { $0.channels[id(21)] = AkariKitTests.thread(21, in: 10, name: "t2") }
 
         model.apply(EventBatch([.channelAdded(channelId: id(21), guildId: id(1))]))
 

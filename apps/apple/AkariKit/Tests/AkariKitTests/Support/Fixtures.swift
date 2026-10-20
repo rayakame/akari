@@ -27,8 +27,8 @@ func channel(
     )
 }
 
-func thread(_ raw: UInt64, in parent: UInt64, guild: UInt64 = 1) -> Channel {
-    var thread = channel(raw, guild: guild, kind: .publicThread, parent: parent)
+func thread(_ raw: UInt64, in parent: UInt64, guild: UInt64 = 1, name: String? = nil) -> Channel {
+    var thread = channel(raw, guild: guild, kind: .publicThread, name: name, parent: parent)
     thread.thread = ThreadInfo(
         joined: true, archived: false, locked: false, private: false, messageCount: nil,
         ownerId: nil)
@@ -65,7 +65,8 @@ func group(_ raw: UInt64, name: String? = nil, with recipients: [UInt64]) -> Cha
 func message(
     _ raw: UInt64, in channelRaw: UInt64 = 10, by author: User = user(1),
     content: String? = nil, delivery: Delivery = .sent, kind: MessageType = .default,
-    reference: MessageReference? = nil
+    reference: MessageReference? = nil, mentions: [User] = [], call: MessageCall? = nil,
+    fields: [EmbedField] = []
 ) -> Message {
     let content = content ?? "message \(raw)"
     return Message(
@@ -75,7 +76,9 @@ func message(
         editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
         embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery,
         formatted: formattedText(content: content), mentionsMe: false, reference: reference,
-        hasThread: false
+        hasThread: false, mentions: mentions, call: call,
+        roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
+        embedFields: fields
     )
 }
 
