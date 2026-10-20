@@ -143,12 +143,12 @@ struct JumpFlashTests {
     // Discord has one flash at a time.
     @Test
     func aSecondJumpEndsTheFirstsFlash() throws {
-        jumped(to: 125)
+        jumped(to: 121)
 
         list.show(MessageTableState(rows: list.page, messageJump: jump(to: 120, 2)))
 
-        #expect(list.visibleRows.contains(list.index(of: 125)))
-        #expect(try flash(of: 125) == nil)
+        #expect(list.visibleRows.contains(list.index(of: 121)))
+        #expect(try flash(of: 121) == nil)
         #expect(try flash(of: 120) != nil)
     }
 

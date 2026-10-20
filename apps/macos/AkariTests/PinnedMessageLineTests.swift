@@ -131,64 +131,70 @@ struct MessageJumpScrollTests {
         MessageListModel.MessageJump(messageId: MessageId(rawValue: raw), number: number)
     }
 
-    // How far the message's row starts below the top of what the list shows.
-    func offset(of raw: UInt64) -> CGFloat {
-        list.table.rect(ofRow: list.index(of: raw)).minY - list.clip.bounds.minY
+    // How far the message's middle is from the middle of what the list shows: below `cover`,
+    // above the strip and the jump bar over its bottom.
+    func offCenter(_ raw: UInt64, below cover: CGFloat = 0) -> CGFloat {
+        let bounds = list.clip.bounds
+        let bottom = list.controller.scrollView.contentInsets.bottom
+        let middle = bounds.minY + cover + (bounds.height - cover - bottom) / 2
+        return list.table.rect(ofRow: list.index(of: raw)).midY - middle
     }
 
+    // As the official client does (TB3.4).
     @Test
-    func aJumpScrollsTheMessageToTheTop() {
+    func aJumpCentersTheMessage() {
         list.show(MessageTableState(rows: list.page))
         #expect(list.controller.isPinnedToBottom)
 
         list.show(MessageTableState(rows: list.page, messageJump: jump(to: 120, 1)))
 
-        #expect(abs(offset(of: 120)) <= 0.5)
+        #expect(abs(offCenter(120)) <= 0.5, "\(offCenter(120))")
         #expect(actions.bottoms.last == false)
 
         // Where the reader is now, a message arriving below moves nothing.
         let arrived = list.page + [row(201, by: author(2), at: list.noon + 201 * 120)]
         list.show(MessageTableState(rows: arrived, messageJump: jump(to: 120, 1)))
-        #expect(abs(offset(of: 120)) <= 0.5)
+        #expect(abs(offCenter(120)) <= 0.5)
     }
 
     @Test
-    func jumpingToItAgainScrollsAgain() {
+    func jumpingToItAgainCentersItAgain() {
         list.show(MessageTableState(rows: list.page))
         list.show(MessageTableState(rows: list.page, messageJump: jump(to: 120, 1)))
         list.scroll(toRowOf: 150)
 
         list.show(MessageTableState(rows: list.page, messageJump: jump(to: 120, 2)))
 
-        #expect(abs(offset(of: 120)) <= 0.5)
+        #expect(abs(offCenter(120)) <= 0.5)
     }
 
     // Deleted since it was pinned.
     @Test
-    func aJumpToAGoneMessageScrollsToTheNextOne() {
+    func aJumpToAGoneMessageCentersTheNextOne() {
         let rows = list.page.filter { $0.id.rawValue != 120 }
         list.show(MessageTableState(rows: rows))
 
         list.show(MessageTableState(rows: rows, messageJump: jump(to: 120, 1)))
 
-        #expect(abs(offset(of: 121)) <= 0.5)
+        #expect(abs(offCenter(121)) <= 0.5)
     }
 
-    // The pinned message wasn't loaded: the page around it comes with the jump.
+    // The pinned message wasn't loaded: the page around it comes with the jump, and the jump
+    // bar covers the list's bottom.
     @Test
-    func aJumpWithThePageAroundTheMessageScrollsToIt() {
+    func aJumpWithThePageAroundTheMessageCentersIt() {
         list.show(MessageTableState(rows: list.page))
 
         list.show(
             MessageTableState(
                 rows: list.messages(50, from: 21), atPresent: false, messageJump: jump(to: 46, 1)))
 
-        #expect(abs(offset(of: 46)) <= 0.5)
+        #expect(abs(offCenter(46)) <= 0.5, "\(offCenter(46))")
     }
 
     // A locked thread's banner and the unread bar each cover the list's top 36.
     @Test(arguments: [(false, false, 0.0), (true, false, 36), (false, true, 36), (true, true, 72)])
-    func aJumpLeavesRoomForWhatCoversTheListsTop(line: Bool, locked: Bool, room: CGFloat) {
+    func aJumpCentersBelowWhatCoversTheListsTop(line: Bool, locked: Bool, cover: CGFloat) {
         let line = line ? MessageId(rawValue: 190) : nil
         let banner: CGFloat = locked ? LockedBanner.room : 0
         list.show(MessageTableState(rows: list.page, newMessages: line, startRoom: banner))
@@ -198,7 +204,22 @@ struct MessageJumpScrollTests {
                 rows: list.page, newMessages: line, messageJump: jump(to: 120, 1),
                 startRoom: banner))
 
-        #expect(abs(offset(of: 120) - room) <= 0.5, "\(offset(of: 120))")
+        #expect(abs(offCenter(120, below: cover)) <= 0.5, "\(offCenter(120, below: cover))")
+    }
+
+    // Near the channel's start or the present, the list stops at its end instead.
+    @Test
+    func aJumpNearAnEndStopsAtTheListsEnd() throws {
+        let clip = try #require(list.clip as? BottomClipView)
+        list.show(MessageTableState(rows: list.page, reachedOldest: true))
+
+        list.show(
+            MessageTableState(rows: list.page, reachedOldest: true, messageJump: jump(to: 101, 1)))
+        #expect(abs(clip.bounds.minY - clip.originRange.lowerBound) <= 0.5)
+
+        list.show(
+            MessageTableState(rows: list.page, reachedOldest: true, messageJump: jump(to: 200, 2)))
+        #expect(abs(clip.bounds.minY - clip.originRange.upperBound) <= 0.5)
     }
 
     // A new table for a list that jumped before doesn't jump again.
@@ -218,7 +239,7 @@ struct PinnedMessageLineScreenTests {
     let channel = FormattedStore.channelIds[0]
 
     @Test
-    func clickingAMessageScrollsThePinnedMessageToTheTop() async throws {
+    func clickingAMessageCentersThePinnedMessage() async throws {
         let session = screens.formattedSession(account)
         let host = NSHostingView(rootView: SessionScreen(session: session))
         let window = screens.shownWindow(host)
@@ -227,8 +248,12 @@ struct PinnedMessageLineScreenTests {
         let controller = try #require(table.delegate as? MessageTableController)
         let pinned = MessageId(rawValue: channel.rawValue * 1000 + 5)
         let row = try #require(controller.timeline.items.firstIndex { $0.id == .message(pinned) })
-        let clip = try #require(table.enclosingScrollView).contentView
-        let offset = { table.rect(ofRow: row).minY - clip.bounds.minY }
+        let scroll = try #require(table.enclosingScrollView)
+        let clip = scroll.contentView
+        let offset = {
+            let middle = clip.bounds.minY + (clip.bounds.height - scroll.contentInsets.bottom) / 2
+            return table.rect(ofRow: row).midY - middle
+        }
         #expect(offset() < 0, "the pinned message is above the view")
         let line = try #require(
             table.view(atColumn: 0, row: table.numberOfRows - 1, makeIfNecessary: false)

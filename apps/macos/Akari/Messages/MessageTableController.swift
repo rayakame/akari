@@ -209,13 +209,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         reload(revealedNow)
         // A new table for a model that jumped before doesn't jump again.
         if wasFilled, state.unreadJumps != previous.unreadJumps {
-            scrollToTop(lineRow, below: state.startRoom)
+            scroll(toRow: lineRow, below: state.startRoom)
         }
         if wasFilled, let jump = state.messageJump, jump != previous.messageJump {
             // Unless the line has been seen, the unread bar shows once it's out of sight.
             let bar = state.newMessages == nil ? 0 : UnreadBar.margin + UnreadBar.height
             let target = row(atOrAfter: jump.messageId)
-            scrollToTop(target, below: state.startRoom + bar)
+            scroll(toRow: target, below: state.startRoom + bar, centered: true)
             startFlash(at: target, of: jump.messageId)
         }
         reportLine()
@@ -471,14 +471,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     // Keeps the reader's place as clipMoved does after a user's scroll; it skips our own.
-    // `cover` is what the overlays over the list's top hide.
-    private func scrollToTop(_ row: Int?, below cover: CGFloat) {
+    // `centered`: the row's middle between `cover`, the top's overlays, and the bottom inset.
+    private func scroll(toRow row: Int?, below cover: CGFloat, centered: Bool = false) {
         guard let row else {
             return
         }
+        let rect = tableView.rect(ofRow: row)
+        let shown = clipView.bounds.height - cover - scrollView.contentInsets.bottom
+        let wanted = centered ? rect.midY - cover - shown / 2 : rect.minY - cover
         let range = clipView.originRange
-        let y = min(
-            max(tableView.rect(ofRow: row).minY - cover, range.lowerBound), range.upperBound)
+        let y = min(max(wanted, range.lowerBound), range.upperBound)
         ownChanges += 1
         defer { ownChanges -= 1 }
         clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: y))

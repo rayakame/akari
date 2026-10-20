@@ -153,12 +153,12 @@ client, read 2026-10-20). A line that doesn't refer to its message has "a messag
 gray text. *Akari: "a message" has the
 pointing hand and the underline and jumps as the unread bar does: it loads the messages around
 the pinned one unless they're loaded and nothing else is loading a place for the list, and the
-message goes to the top of the list, as far as the list scrolls, below a locked thread's banner
-and the unread bar (36 each) while either can show; one deleted since leaves the next message
-there. The user's last request places the list, as for the unread bar's jump: a click while
+message goes to the vertical middle of what the list shows, below a locked thread's banner and
+the unread bar (36 each) while either can show and above the strip and the jump bar at its
+bottom, as far as the list scrolls (the official client centers it, observed 2026-10-20); one
+deleted since leaves the next message there. The user's last request places the list, as for the unread bar's jump: a click while
 another jump or the jump to the present loads takes their place, and a second click on the same
-message while it loads asks once. Whether Discord puts the message at the top or
-in the middle isn't observed. The message flashes ([below](#the-flash)). "pinned messages"
+message while it loads asks once. The message flashes ([below](#the-flash)). "pinned messages"
 isn't a link yet: Akari has no pins popout.*
 
 **Every other kind** is worded as Discord's client words it (its en-US strings and its

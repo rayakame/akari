@@ -118,8 +118,8 @@ public final class MessageListModel {
         }
     }
 
-    /// A jump to a message, such as a pin's: the view scrolls it to its top, or the first
-    /// message after it when it's gone.
+    /// A jump to a message, such as a pin's: the view centers it, or the first message after it
+    /// when it's gone.
     public struct MessageJump: Equatable, Sendable {
         public let messageId: MessageId
         /// Counts the jumps, so one to the same message again scrolls again.
