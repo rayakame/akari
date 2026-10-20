@@ -484,6 +484,12 @@ impl Store {
         });
     }
 
+    pub(crate) fn fail_starter(&self, thread: ChannelId) {
+        self.write("starter", |inner, events| {
+            inner.state.fail_starter(thread, events);
+        });
+    }
+
     pub(crate) fn supersede_around(&self, channel: ChannelId) {
         let placing = self.next_placing();
         self.write("load", |inner, _| {

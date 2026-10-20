@@ -74,7 +74,7 @@ struct Online {
     account: Account,
     subscription: Subscription,
     server: MockServer,
-    _connection: FakeConnection,
+    connection: FakeConnection,
     _fake: FakeGateway,
 }
 
@@ -90,7 +90,7 @@ async fn online_with_thread(newest_first: Vec<Value>) -> Online {
         account,
         subscription,
         server,
-        _connection: connection,
+        connection,
         _fake: fake,
     }
 }
@@ -259,6 +259,28 @@ async fn a_failed_starter_fetch_is_tried_again_with_the_next_page() {
         Some(StarterMessage::Unavailable)
     ));
     open_thread(&online).await;
+    settled(&online).await;
+
+    assert!(matches!(
+        starter_of(&online),
+        Some(StarterMessage::Loaded(_))
+    ));
+}
+
+#[tokio::test]
+async fn a_live_starter_without_its_original_is_fetched_at_once() {
+    let mut online = online_with_thread(vec![]).await;
+    mock_fetch(
+        &online.server,
+        ResponseTemplate::new(200).set_body_json(json!([original()])),
+    )
+    .await;
+    open_thread(&online).await;
+
+    online
+        .connection
+        .send(json!({"op": 0, "s": 2, "t": "MESSAGE_CREATE", "d": starter(None)}))
+        .await;
     settled(&online).await;
 
     assert!(matches!(

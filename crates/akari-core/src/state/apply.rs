@@ -1692,6 +1692,10 @@ impl State {
         self.windows
             .settle_starter(thread, fetch, &self.entities.users, events);
     }
+
+    pub(crate) fn fail_starter(&mut self, thread: ChannelId, events: &mut Vec<StoreEvent>) {
+        self.windows.fail_starter(thread, events);
+    }
 }
 
 pub(crate) fn wall_millis() -> i64 {

@@ -10,7 +10,7 @@ use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
     MemberLists, PresenceStatus, SendError,
 };
-use crate::model::{ChannelId, GuildId, MessageId, UserId};
+use crate::model::{ChannelId, GuildId, MessageId, MessageType, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
     Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, StarterFetch, Store, WindowLimits,
@@ -310,6 +310,7 @@ impl Shared {
             Err(err) => {
                 unfinished.ticket = None;
                 self.store.abort_load(ticket);
+                self.store.fail_starter(channel);
                 self.failed(&err);
                 tracing::debug!(
                     target: "akari_core::load",
@@ -470,15 +471,26 @@ impl Shared {
     }
 
     // Without the gate: the pump forgets and swaps itself, so its own acks can't come between.
-    fn dispatched(&self, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
+    fn dispatched(self: &Arc<Self>, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
         if let ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) = &event
             && ack.manual
             && ack.ack_type == 0
         {
             self.acks.forget(ack.channel_id);
         }
+        let starter = match &event {
+            ConnectionEvent::Dispatch(DispatchEvent::MessageCreate(message))
+                if message.kind == MessageType::ThreadStarterMessage =>
+            {
+                Some(message.channel_id)
+            }
+            _ => None,
+        };
         let ack = on_event(&self.store, event, connecting);
         self.ack_reading(ack);
+        if let Some(thread) = starter {
+            self.fetch_starter(thread);
+        }
     }
 
     fn view(self: &Arc<Self>, channel: ChannelId) {

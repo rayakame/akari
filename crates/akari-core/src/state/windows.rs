@@ -511,6 +511,17 @@ impl Windows {
         }
     }
 
+    // After a failed page, whose fetch would fail too; the next page asks again.
+    pub(crate) fn fail_starter(&mut self, thread: ChannelId, events: &mut Vec<StoreEvent>) {
+        if self.starters.contains_key(&thread) || self.wanted_starter(thread).is_none() {
+            return;
+        }
+        self.starters.insert(thread, Starter::Failed);
+        if let Some(row) = self.starter_row(thread) {
+            events.push(StoreEvent::MessageUpdated(row.clone()));
+        }
+    }
+
     fn next_generation(&mut self) -> u64 {
         self.generations += 1;
         self.generations
