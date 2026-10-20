@@ -23,8 +23,8 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `borderMuted` | the user panel's outline | `#97979f` at 4% | `#97979f` at 20% |
 | `textDefault` | message text | `#efeff1` | `#2e2e34` |
 | `textStrong` | names, headings, the server rail's pill | `#fbfbfb` | `#28282d` |
-| `textMuted` | day dividers, system messages, secondary text | `#96979e` | `#6c6d76` |
-| `chatTextMuted` | message times | `#81828a` | `#70717a` |
+| `textMuted` | day dividers, system messages' icons, secondary text | `#96979e` | `#6c6d76` |
+| `chatTextMuted` | message times, system messages' text | `#81828a` | `#70717a` |
 | `textLink` | links | `#4d96ee` | `#006dd4` |
 | `textError` | errors next to form fields | `#f87e7a` | `#b92733` |
 | `channelDefault` | channel and category names | `#81828a` | `#666770` |

@@ -116,6 +116,9 @@ its first message when it started from one in the channel: the row draws `shown`
 parent's message, once loaded; `notice` says it couldn't be loaded; while it's fetched the
 timeline leaves the row out. `MessageListModel.threadOwner` names who started the thread,
 from the store or from a loaded message of theirs.
+`MessageListModel.jump(to:)` is the jump a pin's "a message" makes: it loads the messages
+around the message unless the loaded ones reach it, then counts a `messageJump` for the view
+to scroll to; the requests that cancel a jump to unread cancel it too.
 A list the session replaces, also on a channel switch, starts no more loads, and a jump to
 unread it is still loading doesn't land. The view calls `open()` when the message area appears
 and whenever `messages.channelId` changes, which is what `.task(id:)` does. When the area
@@ -175,9 +178,9 @@ Rules every Apple app shows the same way, so they live here rather than in the a
   (`SessionModel.trustedLinks()`); lists of one account share their hosts. Logging out and an
   expired session forget them with the account's spot (`AccountMemory.forget`), and a list
   made before that stores nothing more.
-- `Message.notice` is Akari's sentence for a system message and `noticeParts` the same in
-  parts (the actor, a new thread's name and its ID, "threads", the text between), which the
-  apps draw as Discord does; `Initials` gives the letters a
+- `Message.notice` is the sentence for a system message and `noticeParts` the same in parts
+  (the actor, a new thread's name and its ID, "threads", a pin's "a message" with the pinned
+  message's ID, "pinned messages", the text between), which the apps draw as Discord does; `Initials` gives the letters a
   server or avatar without an image shows; `Channel.opensMessageList` says which channels
   have a message list.
 

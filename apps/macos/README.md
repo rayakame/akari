@@ -13,7 +13,8 @@ channels" followed, unread rows bright with their counts, a collapsed category k
 its unread and mentioned channels, and joined threads under their parent, hung from a spine
 with branches), the DM list at home, the channel header (a thread's with its channel's name,
 which opens the channel), the user panel, the message list with formatted messages (a thread's
-start with its owner, its starter message, the "started a thread" line with its link), and
+start with its owner, its starter message, the "started a thread" line with its link, and a pin's line, which jumps to the pinned
+message), and
 the composer (a locked thread's banner). Images, attachments, reactions, replies, the box
 under a message with a thread, the split view, voice, notifications and settings come later.
 

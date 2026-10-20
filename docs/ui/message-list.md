@@ -128,7 +128,9 @@ Messages Discord writes itself (someone joined, a message was pinned, a boost, a
 thread, a renamed channel, and so on) show as one line:
 
 - a muted icon in the avatar column;
-- a sentence naming who did what, in `textMuted`;
+- a sentence naming who did what, in `chatTextMuted` (#818289), its actor in `textStrong`
+  (#FBFBFB) and medium (observed 2026-10-20 on the thread and pin lines; Akari draws every
+  kind's actor so);
 - the time, one space after the sentence and on its baseline (observed 2026-10-19); hovering
   it, and only it, shows the full date and time, as Discord does.
 
@@ -141,11 +143,24 @@ A thread Akari doesn't have, such as one archived since, is fetched first
 ([dispatches.md](../protocol/dispatches.md#threads)); if Discord refuses it or it's gone, the
 name stays strong text without the link. "Ray" and "threads" are drawn the same but aren't
 links yet: Akari has no profiles and no Threads popover.*
-Whether Discord draws other system messages' actors the same way isn't observed; Akari keeps
-them in one `textMuted` sentence.
 
-They never join a group and always end one. Akari writes these sentences in its own words; it
-doesn't reuse Discord's texts, such as its random welcome lines.
+**A pinned message** posts "Ray pinned a message to this channel. See all pinned messages."
+(observed 2026-10-20, in German "Ray hat eine Nachricht an diesen Kanal angepinnt. Alle
+angepinnten Nachrichten anzeigen."): "Ray", "a message" and "pinned messages" strong and
+medium, the rest gray. "a message" jumps to the pinned message, the message the line refers
+to, with a brief highlight, and "pinned messages" opens the channel's pins popout (Discord's
+client, read 2026-10-20). A line that doesn't refer to its message has "a message" in plain
+gray text. *Akari: "a message" has the
+pointing hand and the underline and jumps as the unread bar does: it loads the messages around
+the pinned one unless they're loaded, and the message goes to the top of the list, as far as
+the list scrolls; one deleted since leaves the next message there. The user's last request
+places the list, as for the unread bar's jump. Whether Discord puts the message at the top or
+in the middle isn't observed; Akari doesn't highlight it yet. "pinned messages" isn't a link
+yet: Akari has no pins popout.*
+
+They never join a group and always end one. Apart from the thread and pin lines, whose links
+need Discord's wording, Akari writes these sentences in its own words; it doesn't reuse
+Discord's texts, such as its random welcome lines.
 
 **Which messages count as system messages:** every message type except the default type,
 replies, slash-command and context-menu command results, thread starter messages, and types
