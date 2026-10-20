@@ -117,8 +117,9 @@ parent's message, once loaded; `notice` says it couldn't be loaded; while it's f
 timeline leaves the row out. `MessageListModel.threadOwner` names who started the thread,
 from the store or from a loaded message of theirs.
 `MessageListModel.jump(to:)` is the jump a pin's "a message" makes: it loads the messages
-around the message unless the loaded ones reach it, then counts a `messageJump` for the view
-to scroll to; the requests that cancel a jump to unread cancel it too.
+around the message unless the loaded ones reach it and no other load is placing the list, then
+counts a `messageJump` for the view to scroll to; the requests that cancel a jump to unread
+cancel it too, and the later of the two jumps wins.
 A list the session replaces, also on a channel switch, starts no more loads, and a jump to
 unread it is still loading doesn't land. The view calls `open()` when the message area appears
 and whenever `messages.channelId` changes, which is what `.task(id:)` does. When the area

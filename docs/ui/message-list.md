@@ -152,9 +152,12 @@ to, with a brief highlight, and "pinned messages" opens the channel's pins popou
 client, read 2026-10-20). A line that doesn't refer to its message has "a message" in plain
 gray text. *Akari: "a message" has the
 pointing hand and the underline and jumps as the unread bar does: it loads the messages around
-the pinned one unless they're loaded, and the message goes to the top of the list, as far as
-the list scrolls; one deleted since leaves the next message there. The user's last request
-places the list, as for the unread bar's jump. Whether Discord puts the message at the top or
+the pinned one unless they're loaded and nothing else is loading a place for the list, and the
+message goes to the top of the list, as far as the list scrolls, below a locked thread's banner
+and the unread bar (36 each) while either can show; one deleted since leaves the next message
+there. The user's last request places the list, as for the unread bar's jump: a click while
+another jump or the jump to the present loads takes their place, and a second click on the same
+message while it loads asks once. Whether Discord puts the message at the top or
 in the middle isn't observed; Akari doesn't highlight it yet. "pinned messages" isn't a link
 yet: Akari has no pins popout.*
 
@@ -358,7 +361,7 @@ Akari's bar:
   so the first loaded unread message's). **Unconfirmed:** the wording is the user's translation
   of the German UI.
 - Clicking it jumps to the first unread message: the line goes to the top of the list, as far
-  as the list scrolls. When that message isn't loaded, Akari first loads the messages around
+  as the list scrolls, and in a locked thread below the banner. When that message isn't loaded, Akari first loads the messages around
   the read position (not compared with 80 or more unread messages yet); a channel never read
   has none, and the jump goes to the first loaded unread message. The jump counts as seeing the
   line once those messages are in the list, so the bar goes then; if they can't be loaded, the
