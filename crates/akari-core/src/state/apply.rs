@@ -351,6 +351,8 @@ pub(crate) struct State {
     outage_members: HashMap<ChannelId, (GuildId, ThreadMembership)>,
     // Joins for threads the store doesn't have yet, for the THREAD_CREATE that brings them.
     pending_joins: HashMap<ChannelId, ThreadMembership>,
+    // Threads Get Channel refused or didn't find, for the session.
+    unavailable_threads: HashSet<ChannelId>,
     clock: Arc<Clock>,
 }
 
@@ -377,6 +379,7 @@ impl State {
             recounts: HashMap::new(),
             outage_members: HashMap::new(),
             pending_joins: HashMap::new(),
+            unavailable_threads: HashSet::new(),
             clock,
         }
     }
@@ -1695,6 +1698,51 @@ impl State {
 
     pub(crate) fn fail_starter(&mut self, thread: ChannelId, events: &mut Vec<StoreEvent>) {
         self.windows.fail_starter(thread, events);
+    }
+
+    // Get Channel's answer, as a THREAD_CREATE would bring it; false if it isn't a thread here.
+    pub(crate) fn learn_thread(
+        &mut self,
+        thread: model::Channel,
+        events: &mut Vec<StoreEvent>,
+    ) -> bool {
+        let id = thread.id;
+        if !matches!(
+            thread.kind,
+            model::ChannelType::NewsThread
+                | model::ChannelType::PublicThread
+                | model::ChannelType::PrivateThread
+        ) {
+            return false;
+        }
+        self.put_channel(thread, events);
+        self.entities.channels.contains_key(&id)
+    }
+
+    pub(crate) fn thread_unavailable(&self, thread: ChannelId) -> bool {
+        self.unavailable_threads.contains(&thread)
+    }
+
+    pub(crate) fn mark_thread_unavailable(
+        &mut self,
+        parent: ChannelId,
+        thread: ChannelId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if !self.unavailable_threads.insert(thread) {
+            return;
+        }
+        if let Some(guild_id) = self
+            .entities
+            .channels
+            .get(&parent)
+            .and_then(|channel| channel.guild_id)
+        {
+            events.push(StoreEvent::ThreadUnavailable {
+                guild_id,
+                thread_id: thread,
+            });
+        }
     }
 }
 

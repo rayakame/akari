@@ -960,6 +960,49 @@ impl Account {
         self.load_placed(channel, load, Some(placing)).await
     }
 
+    /// Fetches a thread that a "started a thread" line in `parent` names when the store doesn't
+    /// have it (archived, or never synced) and keeps it as Discord sends it: unjoined, unless
+    /// the user is a member. Returns whether the store has the thread now. A 403 or 404, or a
+    /// channel that isn't a thread, makes it [`Store::thread_unavailable`] for the session, and
+    /// it isn't asked for again; other failures leave it to be fetched again.
+    pub async fn fetch_thread(
+        &self,
+        parent: ChannelId,
+        thread: ChannelId,
+    ) -> Result<bool, RequestError> {
+        let shared = &self.shared;
+        if shared.store.channel(thread).is_some() {
+            return Ok(true);
+        }
+        if shared.store.thread_unavailable(thread) {
+            return Ok(false);
+        }
+        let fetched = match shared.rest.get_channel(thread).await {
+            Ok(channel) => Ok(shared.store.learn_thread(channel)),
+            Err(RequestError::Discord {
+                status: 403 | 404, ..
+            }) => Ok(false),
+            Err(err) => {
+                shared.failed(&err);
+                Err(err)
+            }
+        };
+        if matches!(fetched, Ok(false)) {
+            shared.store.mark_thread_unavailable(parent, thread);
+        }
+        tracing::debug!(
+            target: "akari_core::load",
+            thread_id = thread.get(),
+            outcome = match &fetched {
+                Ok(true) => "found",
+                Ok(false) => "unavailable",
+                Err(err) => err.kind(),
+            },
+            "thread fetched"
+        );
+        fetched
+    }
+
     /// The next place among loads and supersedes, for [`Account::load_messages_placed`]. A host
     /// takes it where the user acts, so a later supersede overtakes the load even if it comes
     /// before the load begins.

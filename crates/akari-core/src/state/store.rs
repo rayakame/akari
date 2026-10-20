@@ -484,6 +484,18 @@ impl Store {
         });
     }
 
+    pub(crate) fn learn_thread(&self, thread: model::Channel) -> bool {
+        self.write("thread", |inner, events| {
+            inner.state.learn_thread(thread, events)
+        })
+    }
+
+    pub(crate) fn mark_thread_unavailable(&self, parent: ChannelId, thread: ChannelId) {
+        self.write("thread", |inner, events| {
+            inner.state.mark_thread_unavailable(parent, thread, events);
+        });
+    }
+
     pub(crate) fn fail_starter(&self, thread: ChannelId) {
         self.write("starter", |inner, events| {
             inner.state.fail_starter(thread, events);
@@ -879,6 +891,12 @@ impl Store {
     /// A guild channel, category, thread, DM or group DM.
     pub fn channel(&self, id: ChannelId) -> Option<Arc<Channel>> {
         self.read(|inner| inner.state.channel(id))
+    }
+
+    /// Whether [`Account::fetch_thread`](crate::Account::fetch_thread) found this session that
+    /// the user can't see the thread, or that it is gone.
+    pub fn thread_unavailable(&self, thread: ChannelId) -> bool {
+        self.read(|inner| inner.state.thread_unavailable(thread))
     }
 
     /// A guild's channels and categories without threads, in no particular order.

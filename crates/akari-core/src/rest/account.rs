@@ -15,6 +15,7 @@ use crate::model::{self, ChannelId, DISCORD_EPOCH, MessageId};
 use crate::state::{AckBody, limit_in};
 use crate::{DiscordClient, LoadReport, Token};
 
+const CHANNEL: &str = "channels/{}";
 const MESSAGES: &str = "channels/{}/messages";
 const ACK: &str = "channels/{}/messages/{}/ack";
 const ACK_BULK: &str = "read-states/ack-bulk";
@@ -299,6 +300,21 @@ impl AccountRest {
             received,
             report,
         })
+    }
+
+    pub(crate) async fn get_channel(
+        &self,
+        channel: ChannelId,
+    ) -> Result<model::Channel, RequestError> {
+        let path = format!("channels/{}", channel.get());
+        let route = RouteKey::new(Method::Get, CHANNEL, channel.get());
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Allowed, || {
+                self.request(HttpMethod::GET, &path)
+            })
+            .await
+            .map_err(RequestError::from)?;
+        serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
     }
 
     // Retries send the same body, so the nonce stays the same.
