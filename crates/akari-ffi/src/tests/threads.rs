@@ -12,7 +12,7 @@ use super::fake::{CATEGORY, FakeGateway, GENERAL, GUILD, VOICE, events_until, fi
 use super::gateway::send;
 use super::support::{USER, token};
 use crate::account::{Account, MessageLoad};
-use crate::records::{MessageReference, StarterMessage, ThreadInfo};
+use crate::records::{EmbedField, MessageReference, StarterMessage, ThreadInfo};
 use crate::subscription::StoreEvent;
 
 // READY's thread in GENERAL, its last message 400000000000000030.
@@ -212,6 +212,74 @@ async fn a_message_carries_its_reference_and_thread_flag() {
         [false, true, false]
     );
     assert_eq!(messages[2].reference, None);
+    loaded.account.close();
+}
+
+// What the apps word system lines with.
+#[tokio::test]
+async fn a_system_messages_data_crosses_the_boundary() {
+    let mira = json!({"id": "100000000000000003", "username": "mira", "discriminator": "0"});
+    let mut call = page_message(400_000_000_000_000_050, GENERAL);
+    call["type"] = 3.into();
+    call["mentions"] = json!([mira]);
+    call["call"] = json!({
+        "participants": ["100000000000000003"],
+        "ended_timestamp": "2024-03-01T08:40:00.250000+00:00"
+    });
+    let mut subscription = page_message(400_000_000_000_000_051, GENERAL);
+    subscription["type"] = 25.into();
+    subscription["role_subscription_data"] =
+        json!({"tier_name": "Gold", "total_months_subscribed": 3, "is_renewal": false});
+    subscription["purchase_notification"] =
+        json!({"type": 0, "guild_product_purchase": {"listing_id": "1", "product_name": "Badge"}});
+    let mut join = page_message(400_000_000_000_000_052, GENERAL);
+    join["type"] = 7.into();
+    join["actor"] = mira.clone();
+    join["application"] = json!({"id": "1", "name": "Akari Bot"});
+    let mut poll = page_message(400_000_000_000_000_053, GENERAL);
+    poll["type"] = 46.into();
+    poll["embeds"] = json!([{"type": "poll_result", "fields": [
+        {"name": "poll_question_text", "value": "Lunch?"},
+        {"name": "total_votes", "value": "2"}
+    ]}]);
+    let loaded = loaded(GENERAL, vec![call, subscription, join, poll]).await;
+    let store = loaded.account.store();
+
+    let messages = store.messages(GENERAL, store.window(GENERAL).unwrap().message_ids);
+
+    assert_eq!(messages[0].mentions[0].username, "mira");
+    let call = messages[0].call.as_ref().unwrap();
+    assert_eq!(call.participants, [UserId::new(100_000_000_000_000_003)]);
+    assert!(call.ended_timestamp.is_some());
+    let data = messages[1].role_subscription.as_ref().unwrap();
+    assert_eq!(
+        (data.tier_name.as_str(), data.total_months_subscribed),
+        ("Gold", 3)
+    );
+    assert!(!data.is_renewal);
+    assert_eq!(messages[1].purchased_product.as_deref(), Some("Badge"));
+    assert_eq!(
+        messages[2]
+            .actor
+            .as_ref()
+            .map(|user| user.username.as_str()),
+        Some("mira")
+    );
+    assert_eq!(messages[2].application_name.as_deref(), Some("Akari Bot"));
+    assert_eq!(
+        messages[3].embed_fields,
+        [
+            EmbedField {
+                name: "poll_question_text".into(),
+                value: "Lunch?".into()
+            },
+            EmbedField {
+                name: "total_votes".into(),
+                value: "2".into()
+            },
+        ]
+    );
+    assert!(messages[0].embed_fields.is_empty());
     loaded.account.close();
 }
 

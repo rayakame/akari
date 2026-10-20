@@ -253,6 +253,40 @@ pub struct Message {
     pub reference: Option<MessageReference>,
     /// A thread was started from this message.
     pub has_thread: bool,
+    /// The users it mentions, in Discord's order: a system message's other person.
+    pub mentions: Vec<User>,
+    /// A CALL or VOICE_SESSION message's call.
+    pub call: Option<MessageCall>,
+    pub role_subscription: Option<RoleSubscription>,
+    /// A PURCHASE_NOTIFICATION's product.
+    pub purchased_product: Option<String>,
+    /// Who added a bot, on the bot's USER_JOIN.
+    pub actor: Option<User>,
+    /// The app a GUILD_APPLICATION_PREMIUM_SUBSCRIPTION upgraded.
+    pub application_name: Option<String>,
+    /// The first embed's fields: a poll result's and an AutoMod alert's data.
+    pub embed_fields: Vec<EmbedField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MessageCall {
+    /// The recipients who joined it.
+    pub participants: Vec<UserId>,
+    /// `None` while it runs.
+    pub ended_timestamp: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RoleSubscription {
+    pub tier_name: String,
+    pub total_months_subscribed: u32,
+    pub is_renewal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct EmbedField {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
@@ -315,6 +349,40 @@ impl Message {
                     guild_id: reference.guild_id,
                 }),
             has_thread: message.flags & HAS_THREAD != 0,
+            mentions: message
+                .mentions
+                .iter()
+                .map(|user| User::from(&**user))
+                .collect(),
+            call: message.call.as_deref().map(|call| MessageCall {
+                participants: call.participants.to_vec(),
+                ended_timestamp: call.ended_timestamp.map(system_time),
+            }),
+            role_subscription: message
+                .role_subscription
+                .as_deref()
+                .map(|data| RoleSubscription {
+                    tier_name: data.tier_name.to_string(),
+                    total_months_subscribed: data.total_months_subscribed,
+                    is_renewal: data.is_renewal,
+                }),
+            purchased_product: message.purchased_product.as_deref().map(str::to_owned),
+            actor: message.actor.as_deref().map(User::from),
+            application_name: message.application_name.as_deref().map(str::to_owned),
+            embed_fields: message
+                .embeds
+                .first()
+                .map(|embed| {
+                    embed
+                        .fields
+                        .iter()
+                        .map(|field| EmbedField {
+                            name: field.name.to_string(),
+                            value: field.value.to_string(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
