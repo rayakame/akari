@@ -71,7 +71,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // rows arriving below don't unpin the list, only the user's own scroll to older ones does.
     private var heldPinBottom: CGFloat?
     private var atPresent = true
-    private var state = MessageTableState(rows: [])
+    private(set) var state = MessageTableState(rows: [])
     private var revealed: [MessageId: Set<UInt16>] = [:]
     private var relativeTimes: [MessageId: Date] = [:]
     private let schedule: Schedule

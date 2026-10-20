@@ -170,15 +170,15 @@ struct StarterTimelineTests {
         #expect(shown.items.map(\.id).contains(.newMessages(id(31))))
     }
 
-    // The unread bar counts the starter, so the line stays, last until the starter shows.
+    // A new thread from a message: the unread bar counts its starter, so the line stays, after
+    // the thread's start until the starter shows.
     @Test
     func aLoadingStarterInTheLastRowKeepsTheNewMessagesLine() {
         let shown = MessageTimeline(
-            rows: [row(30, by: ray, at: noon - 60), starter(.loading)], calendar: berlin,
+            rows: [starter(.loading)], calendar: berlin, edges: [.beginning],
             newMessages: id(31))
 
-        #expect(shown.shape == ["day", "+30", "new"])
-        #expect(shown.items.last?.id == .newMessages(id(31)))
+        #expect(shown.shape == ["beginning", "new"])
     }
 
     @Test

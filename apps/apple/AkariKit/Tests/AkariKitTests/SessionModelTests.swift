@@ -508,6 +508,60 @@ final class SessionModelTests {
     }
 
     @Test
+    func aThreadFetchedAfterTheUserLeftAndCameBackDoesntOpen() async {
+        let session = inChannel11(besides: [channel(12)])
+        account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        let opening = Task { await session.open(thread: id(32), from: id(11)) }
+        await account.threadFetches.pulled(1)
+        session.open(channel: id(12))
+        session.open(channel: id(11))
+        account.threadFetches.send(())
+        await opening.value
+
+        #expect(session.messages?.channelId == id(11))
+        session.close()
+    }
+
+    @Test
+    func theLastClickedLineWins() async {
+        let session = inChannel11()
+        account.fetchedThreads.withLock { state in
+            state[id(32)] = thread(32, in: 11)
+            state[id(33)] = thread(33, in: 11)
+        }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        let first = Task { await session.open(thread: id(32), from: id(11)) }
+        await account.threadFetches.pulled(1)
+        let second = Task { await session.open(thread: id(33), from: id(11)) }
+        await account.threadFetches.pulled(2)
+        account.threadFetches.send(())
+        await first.value
+        account.threadFetches.send(())
+        await second.value
+
+        #expect(session.messages?.channelId == id(33))
+        session.close()
+    }
+
+    @Test
+    func aThreadFetchedAfterTheSessionClosedDoesntOpen() async {
+        let session = inChannel11()
+        account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        let opening = Task { await session.open(thread: id(32), from: id(11)) }
+        await account.threadFetches.pulled(1)
+        session.close()
+        account.threadFetches.send(())
+        await opening.value
+
+        #expect(session.messages?.channelId == id(11))
+    }
+
+    @Test
     func aSecondClickWhileTheThreadIsFetchedAsksOnce() async {
         let session = inChannel11()
         account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }

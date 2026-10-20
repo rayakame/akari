@@ -315,6 +315,8 @@ struct LockedBannerTests {
         #expect(same(rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), card))
         let composer = try #require(screen.views(ComposerTextView.self, in: host).first)
         #expect(!composer.isEditable)
+        let controller = try #require(table.delegate as? MessageTableController)
+        #expect(controller.state.startRoom == LockedBanner.room)
     }
 
     // Q38's wording, a gray bar at the top of the list.

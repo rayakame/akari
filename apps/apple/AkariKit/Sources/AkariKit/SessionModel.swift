@@ -60,6 +60,7 @@ public final class SessionModel {
     // Only channels opened here can hold this session's unsent messages.
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var fetchingThreads: Set<ChannelId> = []
+    @ObservationIgnored private var clickedThread: ChannelId?
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
     @ObservationIgnored private var appActive = false
@@ -195,8 +196,10 @@ public final class SessionModel {
 
     /// A "started a thread" line's link in `parent`: opens the thread, fetched first when the
     /// store doesn't have it (archived, or never synced). Nothing opens when Discord refuses it,
-    /// it's gone or the fetch fails, nor once the user opened something else meanwhile.
+    /// it's gone or the fetch fails, nor once the user opened something else or clicked another
+    /// line meanwhile.
     public func open(thread id: ChannelId, from parent: ChannelId) async {
+        clickedThread = id
         guard store.channel(id: id) == nil else {
             go(to: id)
             return
@@ -205,9 +208,9 @@ public final class SessionModel {
             return
         }
         defer { fetchingThreads.remove(id) }
-        let opened = messages?.channelId
+        let opened = messages
         let found = (try? await account.fetchThread(parentId: parent, threadId: id)) ?? false
-        guard found, messages?.channelId == opened else {
+        guard found, !ended, clickedThread == id, messages === opened else {
             return
         }
         go(to: id)
