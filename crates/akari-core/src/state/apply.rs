@@ -1471,19 +1471,20 @@ impl State {
             Vec::new()
         };
         let mut entities = self.entities.clone();
-        // An unjoined thread is kept only for a cached message's box; the rest come again with the
-        // next subscription's sync and pages.
-        let boxed: HashSet<ChannelId> = windows
+        // An unjoined thread is kept only for its own cached window or a cached message's box; the
+        // rest come again with the next subscription's sync and pages.
+        let shown: HashSet<ChannelId> = windows
             .iter()
             .flat_map(|(_, window)| &window.messages)
             .filter(|message| message.has_thread())
             .map(|message| message.id.cast())
+            .chain(windows.iter().map(|(channel, _)| *channel))
             .collect();
         entities.channels.retain(|id, channel| {
             channel
                 .thread
                 .as_deref()
-                .is_none_or(|info| info.joined() || boxed.contains(id))
+                .is_none_or(|info| info.joined() || shown.contains(id))
         });
         (entities, windows)
     }

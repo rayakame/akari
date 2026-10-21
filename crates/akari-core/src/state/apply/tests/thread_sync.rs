@@ -596,6 +596,28 @@ fn the_thread_of_a_cached_messages_box_is_cached() {
     assert!(!entities.channels.contains_key(&Snowflake::new(SYNCED)));
 }
 
+// The snapshot evicts every window whose channel it doesn't write.
+#[test]
+fn an_unjoined_thread_with_a_cached_window_is_cached() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_LIST_SYNC",
+        sync(Some(&[GENERAL]), &[SYNCED], Vec::new()),
+    );
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(SYNCED), LoadKind::Latest, 1, &mut events)
+        .unwrap();
+    let page = vec![serde_json::from_value(in_thread(LATEST, SYNCED, "read")).unwrap()];
+    state.finish_load(ticket, page, true, &mut events);
+
+    let (entities, windows) = state.cache_parts(50);
+
+    assert!(windows.iter().any(|(channel, _)| channel.get() == SYNCED));
+    assert!(entities.channels.contains_key(&Snowflake::new(SYNCED)));
+}
+
 // Akari loads the last channel while it connects; before READY the store has no guild to put a
 // message's thread in.
 #[test]

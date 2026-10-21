@@ -49,8 +49,9 @@ every other target builds rusqlite's bundled copy.
   mention count). Each row is its key columns plus a `data` column of JSON in the cache's own
   row types, never the wire structs or the state types, so either can change without breaking
   files already written. A field added later reads old rows through its default. A thread the
-  user hasn't joined is kept only when a cached message shows its box, so a relaunch shows the
-  box at once; the others, and each thread's newest message, aren't: the next subscription's
+  user hasn't joined is kept only when its own messages are cached or a cached message shows
+  its box, so a relaunch shows the box at once and the thread's window isn't evicted with it;
+  the others, and each thread's newest message, aren't: the next subscription's
   THREAD_LIST_SYNC and the refreshed pages bring them again.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
