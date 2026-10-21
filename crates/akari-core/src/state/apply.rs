@@ -375,6 +375,8 @@ pub(crate) struct State {
     fetched_threads: HashSet<ChannelId>,
     // Each thread's newest message, for its box; never cached.
     latest: HashMap<ChannelId, Arc<Message>>,
+    // Threads messages brought before their guild was known.
+    unplaced_threads: HashMap<ChannelId, model::Channel>,
     clock: Arc<Clock>,
 }
 
@@ -404,6 +406,7 @@ impl State {
             unavailable_threads: HashSet::new(),
             fetched_threads: HashSet::new(),
             latest: HashMap::new(),
+            unplaced_threads: HashMap::new(),
             clock,
         }
     }
@@ -549,6 +552,9 @@ impl State {
         // READY's cursors are fresh.
         self.stale_cursors.clear();
         self.follow_ready();
+        self.place_waiting_threads(events);
+        // A guild READY doesn't list won't come in this session.
+        self.unplaced_threads.clear();
         self.refresh_badges(self.now_millis(), events);
         old
     }
@@ -577,6 +583,7 @@ impl State {
         self.threads = derived.threads;
         self.restored = true;
         events.push(StoreEvent::Restored);
+        self.place_waiting_threads(events);
         true
     }
 
@@ -1186,6 +1193,7 @@ impl State {
             self.threads.add(channel);
         }
         self.entities.channels.extend(next.channels);
+        self.place_waiting_threads(events);
     }
 
     fn guild_update(&mut self, update: GuildUpdate, events: &mut Vec<StoreEvent>) {
@@ -1463,10 +1471,20 @@ impl State {
             Vec::new()
         };
         let mut entities = self.entities.clone();
-        // Unjoined threads come again with the next subscription's sync and pages.
-        entities
-            .channels
-            .retain(|_, channel| channel.thread.as_deref().is_none_or(|info| info.joined()));
+        // An unjoined thread is kept only for a cached message's box; the rest come again with the
+        // next subscription's sync and pages.
+        let boxed: HashSet<ChannelId> = windows
+            .iter()
+            .flat_map(|(_, window)| &window.messages)
+            .filter(|message| message.has_thread())
+            .map(|message| message.id.cast())
+            .collect();
+        entities.channels.retain(|id, channel| {
+            channel
+                .thread
+                .as_deref()
+                .is_none_or(|info| info.joined() || boxed.contains(id))
+        });
         (entities, windows)
     }
 

@@ -215,7 +215,7 @@ fn a_later_ready_keeps_unjoined_threads() {
 }
 
 #[test]
-fn unjoined_threads_are_never_cached() {
+fn unjoined_threads_without_a_cached_box_arent_cached() {
     let mut state = ready_state();
     apply(
         &mut state,
@@ -538,9 +538,9 @@ fn a_repeated_guild_create_keeps_unjoined_threads() {
     assert!(!events.contains(&format!("ChannelRemoved({SYNCED})")));
 }
 
-// Without its guild or a known parent there's nowhere to put it.
+// Without its guild or a known parent there's nowhere to put it yet.
 #[test]
-fn a_thread_without_a_guild_or_a_known_parent_is_skipped() {
+fn a_thread_without_a_guild_or_a_known_parent_waits_unstored() {
     let mut state = ready_state();
     let mut thread = thread_object(SYNCED);
     thread.as_object_mut().unwrap().remove("guild_id");
@@ -558,4 +558,56 @@ fn a_thread_without_a_guild_or_a_known_parent_is_skipped() {
             .iter()
             .all(|channel| channel.id.get() != SYNCED)
     );
+}
+
+fn general_page_with_a_box(state: &mut State) {
+    let mut started = message(LATEST, GENERAL);
+    started["flags"] = 32.into();
+    let mut thread = thread_object(LATEST);
+    thread["thread_metadata"]["archived"] = true.into();
+    started["thread"] = thread;
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(GENERAL), LoadKind::Latest, 1, &mut events)
+        .unwrap();
+    let page = vec![serde_json::from_str(&started.to_string()).unwrap()];
+    state.finish_load(ticket, page, true, &mut events);
+}
+
+// A relaunch shows the cached message with its box before the gateway brings the thread again.
+#[test]
+fn the_thread_of_a_cached_messages_box_is_cached() {
+    let mut state = ready_state();
+    general_page_with_a_box(&mut state);
+    apply(
+        &mut state,
+        "THREAD_LIST_SYNC",
+        sync(Some(&[GENERAL]), &[SYNCED], Vec::new()),
+    );
+
+    let (entities, windows) = state.cache_parts(50);
+
+    assert!(windows.iter().any(|(channel, _)| channel.get() == GENERAL));
+    let cached = entities
+        .channels
+        .get(&Snowflake::new(LATEST))
+        .expect("the box's thread");
+    assert!(!cached.thread.as_deref().unwrap().joined());
+    assert!(!entities.channels.contains_key(&Snowflake::new(SYNCED)));
+}
+
+// Akari loads the last channel while it connects; before READY the store has no guild to put a
+// message's thread in.
+#[test]
+fn a_page_before_its_guild_is_known_keeps_its_threads_for_ready() {
+    let mut state = State::new();
+    general_page_with_a_box(&mut state);
+    assert!(state.channel(Snowflake::new(LATEST)).is_none());
+
+    apply(&mut state, "READY", ready_value());
+
+    let thread = state
+        .channel(Snowflake::new(LATEST))
+        .expect("the page's thread");
+    assert!(!thread.thread.as_deref().unwrap().joined());
 }

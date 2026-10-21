@@ -127,14 +127,26 @@ impl State {
                 .and_then(|parent| self.entities.channels.get(&parent))
                 .and_then(|parent| parent.guild_id);
         }
-        if thread.guild_id.is_none() {
+        if !thread
+            .guild_id
+            .is_some_and(|guild| self.entities.guilds.contains_key(&guild))
+        {
             tracing::debug!(
                 channel_id = thread.id.get(),
-                "skipping a thread without its guild or a known parent"
+                "keeping a thread until its guild arrives"
             );
+            self.unplaced_threads.insert(thread.id, thread);
             return;
         }
         self.put_channel(thread, events);
+    }
+
+    // Threads messages brought before the store knew their guild (the last channel's page loads
+    // while the gateway connects); the ones still without a guild keep waiting.
+    pub(super) fn place_waiting_threads(&mut self, events: &mut Vec<StoreEvent>) {
+        for (_, thread) in std::mem::take(&mut self.unplaced_threads) {
+            self.put_thread(thread, events);
+        }
     }
 
     pub(super) fn put_threads_of(
