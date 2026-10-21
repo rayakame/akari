@@ -29,6 +29,23 @@ final class MessageTableLink {
     weak var composer: ComposerTextView?
 }
 
+// The message tables on screen, the channel's and the split thread's: Escape in either jumps
+// both to the present (Q37).
+@MainActor
+final class PaneTables {
+    private let links = NSHashTable<MessageTableLink>.weakObjects()
+
+    func add(_ link: MessageTableLink) {
+        links.add(link)
+    }
+
+    func jumpToPresent() {
+        for link in links.allObjects {
+            link.controller?.jumpToPresent(load: false)
+        }
+    }
+}
+
 struct MessageArea: View {
     let messages: MessageListModel
     let name: ChannelName
@@ -40,12 +57,19 @@ struct MessageArea: View {
     // The open channel, as its menu would.
     let markRead: () -> Void
     let markServerRead: () -> Void
+    // Escape for every list on screen; without it, this list's own.
+    var tables: PaneTables?
+    var escape: (() -> Void)?
+    // The split's composer takes the focus only when the user opened the split.
+    var autoFocus = true
+    var focusNow = false
+    var onFocused: () -> Void = {}
     @State private var link = MessageTableLink()
 
     var body: some View {
         let bridge = MessageListBridge(
             messages: messages, link: link, links: links, go: go, openThread: openThread,
-            openGuild: openGuild, markServerRead: markServerRead)
+            openGuild: openGuild, markServerRead: markServerRead, escapeAll: escape)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
@@ -88,12 +112,14 @@ struct MessageArea: View {
                     onEscape: { bridge.escape() },
                     onShiftEscape: { bridge.markServerRead() },
                     onShiftPageUp: { bridge.jumpToUnread() },
-                    onAttach: { link.composer = $0 }
+                    onAttach: { link.composer = $0 },
+                    autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused
                 )
                 .id(messages.channelId)
             }
         }
         .task(id: messages.channelId) { await messages.open() }
+        .onAppear { [link] in tables?.add(link) }
     }
 
     private var state: MessageTableState {
@@ -117,13 +143,15 @@ final class MessageListBridge: MessageListActions {
     let thread: (ChannelId, ChannelId) -> Void
     let guild: (GuildId) -> Void
     let serverRead: () -> Void
+    let escapeAll: (() -> Void)?
 
     init(
         messages: MessageListModel, link: MessageTableLink, links: LinkFollower,
         go: @escaping (ChannelId) -> Void,
         openThread: @escaping (ChannelId, ChannelId) -> Void = { _, _ in },
         openGuild: @escaping (GuildId) -> Void = { _ in },
-        markServerRead: @escaping () -> Void
+        markServerRead: @escaping () -> Void,
+        escapeAll: (() -> Void)? = nil
     ) {
         self.messages = messages
         self.link = link
@@ -132,6 +160,7 @@ final class MessageListBridge: MessageListActions {
         thread = openThread
         guild = openGuild
         serverRead = markServerRead
+        self.escapeAll = escapeAll
     }
 
     func retry(_ message: MessageId) {
@@ -157,8 +186,12 @@ final class MessageListBridge: MessageListActions {
     }
 
     func escape() {
-        Task { await messages.escape() }
-        link.controller?.jumpToPresent(load: false)
+        if let escapeAll {
+            escapeAll()
+        } else {
+            Task { await messages.escape() }
+            link.controller?.jumpToPresent(load: false)
+        }
         link.composer?.takeFocus()
     }
 

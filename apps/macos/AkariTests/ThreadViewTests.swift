@@ -258,10 +258,10 @@ struct ThreadHeaderTests {
             }
             return count(image, in: 560..<600, where: lit)
         }
-        let leave = ChannelHeader.Membership(
-            item: SessionModel.MembershipItem(joins: false, enabled: true), act: {})
+        let leave = ThreadMenu.fullView(
+            membership: SessionModel.MembershipItem(joins: false, enabled: true))
 
-        #expect(try ink(ChannelHeader(channel: thread, name: "t1", membership: leave)) > 10)
+        #expect(try ink(ChannelHeader(channel: thread, name: "t1", menu: leave)) > 10)
         #expect(try ink(ChannelHeader(channel: thread, name: "t1")) == 0)
     }
 

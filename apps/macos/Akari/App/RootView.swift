@@ -90,6 +90,7 @@ struct SessionScreen: View {
     var reconnect: () -> Void = {}
     // Trusted hosts are the account's (D65).
     @State private var links: LinkFollower
+    @State private var tables = PaneTables()
 
     init(
         session: SessionModel, warning: AppModel.Warning? = nil,
@@ -109,6 +110,7 @@ struct SessionScreen: View {
             session: session, warning: warning, dismissWarning: dismissWarning,
             reconnect: reconnect
         ) { messages, name in
+            let beside = messages === session.split
             MessageArea(
                 messages: messages, name: name, links: links,
                 go: { [session] in session.go(to: $0) },
@@ -117,7 +119,16 @@ struct SessionScreen: View {
                 },
                 openGuild: { [session] in session.open(.guild($0)) },
                 markRead: { [session] in session.markRead(channel: messages.channelId) },
-                markServerRead: { [session] in session.markServerRead() })
+                markServerRead: { [session] in session.markServerRead() },
+                tables: tables,
+                escape: { [session, tables] in
+                    if session.escape() {
+                        tables.jumpToPresent()
+                    }
+                },
+                autoFocus: !beside && !session.focusSplit,
+                focusNow: beside && session.focusSplit,
+                onFocused: { [session] in session.splitFocused() })
         }
         .background(ReadingSignals.Attach(session: session))
         // A reconnect brings a new session for the same channel; without a new identity its
