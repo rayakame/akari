@@ -129,7 +129,22 @@ a German localization of Akari, a milestone of its own.
 Messages Discord writes itself (someone joined, a message was pinned, a boost, a call, a new
 thread, a renamed channel, and so on) show as one line:
 
-- a muted icon in the avatar column;
+- an icon in the avatar column, centered on the first line, whose shape, color and box size
+  follow the kind (Discord's system-message renderer, read 2026-10-21; Chris's screenshots
+  showed the pin and the poll): a green arrow right for joins, additions, follows,
+  subscriptions, purchases and accepted join requests, a red arrow left for removals and
+  refused or withdrawn requests (16); a green handset for a call, grey and mirrored for a missed
+  one (16); a pencil for renames and icon changes (16); a filled pushpin leaning right for pins
+  (18); a pink gem for boosts (16); a red X, a green check or an amber warning for Discovery
+  (16); the thread symbol for threads (18); stage lines with a person and broadcast arcs, green
+  for a start, muted otherwise, a microphone or a raised hand (24); a ticket for an app upgrade
+  (16); left-aligned bars for a poll result (16); a trash can, a clock with a warning, a person
+  with a minus, a hammer or a check for reports (20); a green speaker for a voice session (24);
+  a green person with a check for an accepted friend request (18). Unless colored, icons are in
+  `channelDefault`; a poll's in `interactiveText`, stage lines' in `textMuted`. *Akari: SF
+  Symbols fitted into Discord's box sizes; threads keep Akari's thread symbol and boosts a
+  plain hexagon (Discord's are its own drawings); AutoMod alerts, which Discord draws as a
+  message from "AutoMod", keep the info symbol until that block comes;*
 - a sentence naming who did what, in `chatTextMuted` (#818289), its actor in `textStrong`
   (#FBFBFB) and medium (observed 2026-10-20 on the thread and pin lines; Akari draws every
   kind's actor so);
@@ -326,8 +341,10 @@ A message a thread started from has a box under it, and so does the "started a t
 a thread started without a message (observed 2026-10-17, Q21, Q38; the rules and measures from
 Discord's web client, read 2026-10-21, and the user's screenshots of 2026-10-19). A thread
 started from an older message has its box under that message only; its line has none. The box
-shows only once Akari has the thread: from the message's page, THREAD_LIST_SYNC, or
-THREAD_CREATE.
+shows once Akari has the thread: from the message itself (its page, MESSAGE_CREATE or the
+MESSAGE_UPDATE that starts it), THREAD_LIST_SYNC or THREAD_CREATE, joined or not, archived or
+not. *Akari keeps the thread of a cached message's box in its cache, so a relaunch shows the
+box at once.*
 
 - **First line:** the thread's name, 14 semibold `textStrong`, then 8 and the count in the link
   color: "1 Message ›", "16 Messages ›", "See Thread ›" at none, "50+ Messages ›" for a thread
@@ -349,8 +366,9 @@ THREAD_CREATE.
     Discord redraws it only with the box.*
 - **Measures:** 1 border (#323237 dark), fill (#242429 dark), radius 4, 8 padding inside the
   border, the two 18-tall lines 2 apart: 56 tall. As wide as its content, at most 480. Its
-  left edge on the text column (72), 8 below the message's text, 0 under a line; its bottom is
-  the message's.
+  left edge on the text column (72). Its top border 15.5 below the message's last baseline,
+  9.5 below a line's (measured at 2x on the official client, 2026-10-21); its bottom is the
+  message's.
 - **The connector:** from 5 under the avatar's (or the line's icon's) center, 2 wide in the
   thread spine's color, down and into the box's middle with an 8 outer corner radius, ending 3
   before the box.

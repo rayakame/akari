@@ -117,8 +117,10 @@ The store keeps the joined threads from READY, whatever THREAD_CREATE brings, th
 threads THREAD_LIST_SYNC brings, the threads messages carry (a message's `thread`, on history
 pages, MESSAGE_CREATE and the MESSAGE_UPDATE that starts one), and the threads the account
 fetched because a line named them (below). Threads the user hasn't joined are never listed or
-counted, and never cached; a READY, which lists only joined ones, keeps them while their guild
-and parent stay.
+counted, and cached only for a cached message's box; a READY or GUILD_CREATE, which lists only
+joined ones, keeps them while their guild and parent stay. A thread a page brings before the
+store knows its guild (the last channel loads while the gateway connects) waits for the guild:
+a cache restore, READY or GUILD_CREATE places it.
 
 **Membership.** `ThreadInfo::member` is the user's membership: its mute (`muted`,
 `mute_config.end_time`) and its notification level from the member's `flags`
