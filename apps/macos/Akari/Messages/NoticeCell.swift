@@ -6,7 +6,12 @@ final class NoticeCell: NSTableCellView {
 
     private let icon = NSImageView()
     private let text = MessageTextView()
+    // Built for the first line with a box: buttons cost.
+    private var threadBox: ThreadBoxView?
     var onLink: (URL) -> Void = { _ in }
+    var onOpenThread: () -> Void = {}
+    private var textBottom: NSLayoutConstraint?
+    private var textAboveBox: NSLayoutConstraint?
     private static let top: CGFloat = 18
     // 10 less right after a day divider, as a message's (MessageCell).
     private static let dayTop: CGFloat = 8
@@ -30,9 +35,11 @@ final class NoticeCell: NSTableCellView {
         addSubview(text)
         let textTop = text.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
         self.textTop = textTop
+        let textBottom = text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom)
+        self.textBottom = textBottom
         NSLayoutConstraint.activate([
             textTop,
-            text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
+            textBottom,
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leading),
             text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailing),
             icon.centerXAnchor.constraint(equalTo: leadingAnchor, constant: 36),
@@ -47,18 +54,28 @@ final class NoticeCell: NSTableCellView {
     /// The row height for a notice at `width`, as Auto Layout would size the cell.
     static func height(
         _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
-        followsLine: Bool = false, width: CGFloat
+        followsLine: Bool = false, hasBox: Bool = false, width: CGFloat
     ) -> CGFloat {
         sizing.show(line(notice, time: time))
         sizing.setFrameSize(NSSize(width: width - leading - trailing, height: sizing.frame.height))
         return textTop(followsDay: followsDay, followsLine: followsLine)
-            + sizing.intrinsicContentSize.height + bottom
+            + sizing.intrinsicContentSize.height + (hasBox ? ThreadBoxView.height : 0) + bottom
     }
 
     func configure(
         _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
-        followsLine: Bool = false, fullDate: String
+        followsLine: Bool = false, fullDate: String,
+        threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil
     ) {
+        if let threadBox {
+            boxView().configure(threadBox.box, content: threadBox.content, time: threadBox.time)
+        }
+        self.threadBox?.isHidden = threadBox == nil
+        // Off before on: both at once can't be satisfied.
+        let (off, on) = threadBox == nil ? (textAboveBox, textBottom) : (textBottom, textAboveBox)
+        off?.isActive = false
+        on?.isActive = true
+        needsDisplay = true
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
         icon.image = NSImage(
             systemSymbolName: Self.symbol(message.kind), accessibilityDescription: nil)
@@ -110,6 +127,38 @@ final class NoticeCell: NSTableCellView {
                 range: NSRange(location: 0, length: text.length))
         }
         return text
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let threadBox, !threadBox.isHidden else {
+            return
+        }
+        ThreadBoxView.drawConnector(
+            under: icon.frame, to: threadBox.convert(threadBox.boxFrame, to: self),
+            flipped: isFlipped)
+    }
+
+    @objc private func threadBoxClicked() {
+        onOpenThread()
+    }
+
+    private func boxView() -> ThreadBoxView {
+        if let threadBox {
+            return threadBox
+        }
+        let box = ThreadBoxView()
+        box.target = self
+        box.action = #selector(threadBoxClicked)
+        addSubview(box)
+        // Under a system line Discord's box has no gap above it.
+        textAboveBox = text.bottomAnchor.constraint(equalTo: box.topAnchor)
+        NSLayoutConstraint.activate([
+            box.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
+            box.leadingAnchor.constraint(equalTo: text.leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: text.trailingAnchor),
+        ])
+        threadBox = box
+        return box
     }
 
     static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {

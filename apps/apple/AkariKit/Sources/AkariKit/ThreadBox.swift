@@ -30,6 +30,14 @@ public struct ThreadBox: Equatable, Sendable {
     /// When the thread last had a message, shown after the second line; `nil` shows none.
     public let time: Date?
 
+    public init(threadId: ChannelId, name: String, link: String, bottom: Bottom, time: Date?) {
+        self.threadId = threadId
+        self.name = name
+        self.link = link
+        self.bottom = bottom
+        self.time = time
+    }
+
     // Discord counted only up to 50 before 2022-07-01.
     private static let cappedBefore: UInt64 = 992_549_565_104_128_000
 

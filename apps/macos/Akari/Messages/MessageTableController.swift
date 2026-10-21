@@ -84,6 +84,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // Shared by the height pass and the cell, so a row's text is built once per change (D71).
     private var texts: [MessageId: (message: Message, revealed: Set<UInt16>, built: MessageText.Built)] =
         [:]
+    // A thread box's newest message as the box shows it, and when the box's time changes.
+    private var boxContents: [MessageId: (message: Message, text: NSAttributedString)] = [:]
+    private var boxTimes: [MessageId: Date] = [:]
     nonisolated(unsafe) private var relativeTimer: (date: Date, cancel: () -> Void)?
     private var lastRelativeFire = Date.distantPast
     // A page that lands while the list is bounced past its top waits for the bounce to end:
@@ -355,6 +358,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         locale = localeSource()
         times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)
         texts.removeAll()
+        boxContents.removeAll()
         let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
         if let place {
             anchor = place
@@ -916,16 +920,17 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return NewMessagesDivider.height
         case .message(let row, let startsGroup):
             let message = row.shown
+            let hasBox = row.threadBox != nil
             if let notice = row.noticeParts {
                 let time = MessageFormat.groupTime(
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(
                     message, notice: notice, time: time, followsDay: followsDay,
-                    followsLine: followsLine, width: width)
+                    followsLine: followsLine, hasBox: hasBox, width: width)
             }
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                followsLine: followsLine, width: width)
+                followsLine: followsLine, hasBox: hasBox, width: width)
         }
     }
 
@@ -964,12 +969,18 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 message.timestamp, now: now(), calendar: calendar, locale: locale)
             let fullDate = MessageFormat.fullDate(
                 message.timestamp, calendar: calendar, locale: locale)
+            let openThread = { [weak self] in
+                if let box = row.threadBox {
+                    self?.actions?.openThread(box.threadId, from: row.message.channelId)
+                }
+            }
             if let notice = row.noticeParts {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
+                cell.onOpenThread = openThread
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
-                    followsLine: followsLine, fullDate: fullDate)
+                    followsLine: followsLine, fullDate: fullDate, threadBox: boxParts(row))
                 return cell
             }
             let cell =
@@ -979,12 +990,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
+            cell.onOpenThread = openThread
             cell.configure(
                 message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
-                fullDate: fullDate)
+                fullDate: fullDate, threadBox: boxParts(row))
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             return cell
         }
@@ -1001,6 +1013,38 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         texts[row.id] = (row.shown, revealed, built)
         relativeTimes[row.id] = built.nextChange
         return built.text
+    }
+
+    // The box's newest message is built once per change, like the body; its time each time.
+    private func boxParts(
+        _ row: MessageListModel.Row
+    ) -> (box: ThreadBox, content: NSAttributedString?, time: String?)? {
+        guard let box = row.threadBox else {
+            boxTimes[row.id] = nil
+            return nil
+        }
+        var content: NSAttributedString?
+        if case .latest(let latest, _) = box.bottom {
+            if let cached = boxContents[row.id], cached.message == latest {
+                content = cached.text
+            } else {
+                let text =
+                    ThreadBox.placeholder(for: latest).map(ThreadBoxView.placeholder)
+                    ?? ThreadBoxView.content(build(latest, [], now(), times).text)
+                boxContents[row.id] = (latest, text)
+                content = text
+            }
+        }
+        let time = box.time.map {
+            ThreadBox.relativeTime(
+                since: $0, now: now(), locale: locale, timeZone: calendar.timeZone)
+        }
+        boxTimes[row.id] = time?.nextChange
+        return (box, content, time?.text)
+    }
+
+    private func nextChange(of row: MessageListModel.Row) -> Date? {
+        [relativeTimes[row.id], boxTimes[row.id]].compactMap { $0 }.min()
     }
 
     static func isOnScreen(_ window: NSWindow) -> Bool {
@@ -1022,7 +1066,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let visible = shown ? tableView.rows(in: tableView.visibleRect) : NSRange()
         var earliest: Date?
         for index in visible.location..<min(NSMaxRange(visible), timeline.items.count) {
-            if case .message(let row, _) = timeline.items[index], let next = relativeTimes[row.id] {
+            if case .message(let row, _) = timeline.items[index], let next = nextChange(of: row) {
                 earliest = min(earliest ?? next, next)
             }
         }
@@ -1069,10 +1113,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         lastRelativeFire = now
         var due = IndexSet()
         for (index, item) in timeline.items.enumerated() {
-            if case .message(let row, _) = item, let next = relativeTimes[row.id], next <= now {
+            if case .message(let row, _) = item, let next = nextChange(of: row), next <= now {
                 due.insert(index)
                 rowHeights[item.id] = nil
                 texts[row.id] = nil
+                boxTimes[row.id] = nil
             }
         }
         if !due.isEmpty {

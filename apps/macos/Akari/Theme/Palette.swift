@@ -20,6 +20,10 @@ enum Palette {
     static let channelDefault = token("channelDefault", dark: "#81828a", light: "#666770")
     // The dark value is Discord's; the light one keeps its 2.06:1 contrast on the light sidebar.
     static let threadSpine = token("threadSpine", dark: "#474850", light: "#aaabb3")
+    // The box under a message with a thread, measured from the user's screenshots (amendment 175).
+    static let threadBoxFill = token("threadBoxFill", dark: "#242429", light: "#ffffff")
+    static let threadBoxBorder = token("threadBoxBorder", dark: "#323237", light: "#e2e2e5")
+    static let threadBoxLink = token("threadBoxLink", dark: "#5f94e7", light: "#006dd4")
     static let interactiveText = token("interactiveText", dark: "#abacb2", light: "#595a63")
     static let interactiveTextActive = token(
         "interactiveTextActive", dark: "#fbfbfb", light: "#28282d")

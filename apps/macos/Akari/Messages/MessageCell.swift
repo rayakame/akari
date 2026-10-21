@@ -23,6 +23,9 @@ final class MessageCell: NSTableCellView {
     private let hoverTime = CellText.label()
     private let content = MessageTextView()
     private let extras = MessageTextView()
+    // Built for the first message with a thread, as the failed line is: buttons cost.
+    private var threadBox: ThreadBoxView?
+    var onOpenThread: () -> Void = {}
     // Built for the first failed message: its buttons cost a layout pass each.
     private var failed: FailedLine?
     var onRetry: () -> Void = {}
@@ -64,6 +67,8 @@ final class MessageCell: NSTableCellView {
     private static let textTrailing: CGFloat = 16
     private static let spacing: CGFloat = 2
     private static let avatarSize: CGFloat = 40
+    // Discord's box sits 8 below the message's text; the stack's spacing gives 2 of it.
+    private static let boxGap: CGFloat = 8
     private static let sizing = MessageCell()
 
     init() {
@@ -77,16 +82,20 @@ final class MessageCell: NSTableCellView {
     }
 
     /// `authorName` is the header's name, as the list resolves it; the author's display name
-    /// without it.
+    /// without it. `threadBox` comes with the newest message's text and the box's time.
     func configure(
         _ message: Message, body: NSAttributedString, authorName: String? = nil,
         startsGroup: Bool, followsDay: Bool = false, followsLine: Bool = false,
-        groupTime: String, shortTime: String, fullDate: String
+        groupTime: String, shortTime: String, fullDate: String,
+        threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil
     ) {
         configureAllButTheBody(
             message, authorName: authorName, startsGroup: startsGroup, followsDay: followsDay,
             followsLine: followsLine, groupTime: groupTime, shortTime: shortTime,
-            fullDate: fullDate)
+            fullDate: fullDate, hasBox: threadBox != nil)
+        if let threadBox {
+            boxView().configure(threadBox.box, content: threadBox.content, time: threadBox.time)
+        }
         let same = self.message?.id == message.id
         self.message = message
         mentioned = message.mentionsMe
@@ -107,8 +116,15 @@ final class MessageCell: NSTableCellView {
     // The sizing cell measures the body instead of laying it out in its text view.
     private func configureAllButTheBody(
         _ message: Message, authorName: String? = nil, startsGroup: Bool, followsDay: Bool,
-        followsLine: Bool, groupTime: String, shortTime: String, fullDate: String
+        followsLine: Bool, groupTime: String, shortTime: String, fullDate: String,
+        hasBox: Bool = false
     ) {
+        if hasBox {
+            boxView().isHidden = false
+        } else {
+            threadBox?.isHidden = true
+        }
+        needsDisplay = true
         let name = authorName ?? message.author.displayName
         showsHeader = startsGroup
         spacing = Self.spacing(
@@ -160,11 +176,11 @@ final class MessageCell: NSTableCellView {
     /// cell.
     static func height(
         _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
-        followsLine: Bool = false, width: CGFloat
+        followsLine: Bool = false, hasBox: Bool = false, width: CGFloat
     ) -> CGFloat {
         sizing.configureAllButTheBody(
             message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
-            groupTime: "", shortTime: "", fullDate: "")
+            groupTime: "", shortTime: "", fullDate: "", hasBox: hasBox)
         let textWidth = width - textLeading - textTrailing
         let body = message.content.isEmpty ? 0 : TextMeasurer.shared.height(body, width: textWidth)
         return sizing.height(width: width, body: body)
@@ -173,9 +189,8 @@ final class MessageCell: NSTableCellView {
     // The constraints of build() in arithmetic; the stack leaves hidden views out.
     private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
-        let shown = ([reply, header, content, extras] + [failed].compactMap { $0 }).filter {
-            !$0.isHidden
-        }
+        let shown = ([reply, header, content, extras] + [threadBox, failed].compactMap { $0 })
+            .filter { !$0.isHidden }
         let stacked =
             shown.map { view in
                 view === header
@@ -184,6 +199,8 @@ final class MessageCell: NSTableCellView {
                         ? body
                         : view === extras
                             ? extrasHeight(width: textWidth)
+                            : view === threadBox
+                                ? view.intrinsicContentSize.height
                             : view === failed
                                 ? FailedLine.height : view.intrinsicContentSize.height
             }
@@ -263,8 +280,22 @@ final class MessageCell: NSTableCellView {
             height: max(0, bounds.height - spacing))
     }
 
+    /// The avatar's frame from the cell's top left; `nil` while a follow-up hides it.
+    var avatarFrame: NSRect? {
+        guard !avatar.isHidden else {
+            return nil
+        }
+        let frame = avatar.frame
+        return isFlipped
+            ? frame
+            : NSRect(
+                x: frame.minX, y: bounds.height - frame.maxY, width: frame.width,
+                height: frame.height)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let box = box
+        defer { drawConnector() }
         if mentioned {
             Palette.mentionedBackground.setFill()
             box.fill(using: .sourceOver)
@@ -275,6 +306,34 @@ final class MessageCell: NSTableCellView {
             Palette.hoverBackground.setFill()
             box.fill(using: .sourceOver)
         }
+    }
+
+    private func drawConnector() {
+        guard let threadBox, !threadBox.isHidden, !avatar.isHidden else {
+            return
+        }
+        ThreadBoxView.drawConnector(
+            under: avatar.frame, to: threadBox.convert(threadBox.boxFrame, to: self),
+            flipped: isFlipped)
+    }
+
+    @objc private func threadBoxClicked() {
+        onOpenThread()
+    }
+
+    private func boxView() -> ThreadBoxView {
+        if let threadBox {
+            return threadBox
+        }
+        let box = ThreadBoxView()
+        box.topInset = Self.boxGap - Self.spacing
+        box.target = self
+        box.action = #selector(threadBoxClicked)
+        let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
+        stack.insertView(box, at: after, in: .top)
+        box.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        threadBox = box
+        return box
     }
 
     private func build() {

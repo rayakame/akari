@@ -150,7 +150,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
             thread: thread
                 ? ThreadInfo(
                     joined: true, archived: false, locked: true, private: false,
-                    messageCount: 40, ownerId: UserId(rawValue: 2))
+                    messageCount: 40, ownerId: UserId(rawValue: 2), lastMessageId: nil,
+                    createdAt: nil)
                 : nil)
     }
 
