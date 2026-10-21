@@ -16,9 +16,12 @@ which opens the channel), the user panel, the message list with formatted messag
 start with its owner, its starter message, the "started a thread" line with its link, a pin's
 line, which jumps to the pinned message, and the thread box under a message with a thread or a
 "started a thread" line, hung from its connector, with its live count, newest message and
-time, which opens the thread), the thread header's "…" and a thread row's menu with Join Thread
-or Leave Thread, and the composer (a locked thread's banner). Images, attachments, reactions,
-replies, the split view, voice, notifications and settings come later.
+time, which opens the thread beside it), the split view (`SplitPane.swift`: the thread on the
+right of its channel, docked after a draggable gap or floating over a narrow page, with its own
+header, list and composer; `docs/ui/layout.md`), the thread header's and the split's "…"
+(`ThreadMenu`: Join Thread or Leave Thread, Open in Split View or Open in Full View) and a
+thread row's menu, and the composer (a locked thread's banner). Images, attachments, reactions,
+replies, voice, notifications and settings come later.
 
 ## Messages and the composer
 
@@ -31,7 +34,8 @@ replies, the split view, voice, notifications and settings come later.
 - **History:** older pages load before the top is reached and newer ones near the bottom while
   older messages are shown; the text being read never moves when a page lands, an edit
   changes a message's height or a message is deleted. A bar above the composer jumps to the
-  present, and so does Escape, from the list or the composer (`docs/ui/message-list.md`).
+  present, and so does Escape, from the list or the composer (`docs/ui/message-list.md`); in the
+  split view Escape does it for both lists (`PaneTables` reaches both tables).
 - **Up arrow** in an empty composer is reserved for editing the last message, which isn't
   built yet.
 - **Times** (today's time, "Yesterday at", day dividers) follow midnight, time zone and locale

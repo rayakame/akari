@@ -126,17 +126,19 @@ message IDs above. The rules are in `crates/akari-core/src/account/acks.rs` (pac
 retries and refusals), `rest/clock.rs` (Discord's time) and `state/apply/reading.rs` (what to
 ack); how the requests share Discord's limits is in [rate-limits.md](rate-limits.md#acks).
 
-**When.** Only for the channel the host says the user is reading (`Account::set_reading`),
-never for one that merely receives messages, and never in answer to a MESSAGE_ACK from
-elsewhere. The macOS app sets it only while the session is online, the app is active, the
-window is key and visible, the list is at the present's bottom with its refresh after READY
-in, and the user is engaged: opening the channel, a click or a key press in the window engages;
-scrolling clearly away from the bottom, the window losing key, the app going inactive, the
-window being minimized, the Mac going to sleep or fast user switching ends it, and after that,
-coming back to the bottom or the window alone doesn't read
-([message-list.md](../ui/message-list.md#reading-the-signal-to-ack)). A list the session
-opened on its own (the open channel deleted or hidden, its server gone) isn't read until the
-user clicks.
+**When.** Only for the channels the host says the user is reading (`Account::set_reading`):
+the open channel, and in the split view also the thread beside it, at most two, each acked on
+its own, as the official client acks both panes whichever was clicked last (observed
+2026-10-17). Never for one that merely receives messages, and never in answer to a MESSAGE_ACK
+from elsewhere. The macOS app names a channel only while the session is online, the app is
+active, the window is key and visible, the channel's list is at the present's bottom with its
+refresh after READY in, and the user is engaged: opening the channel, a click or a key press in
+the window engages; the window losing key, the app going inactive, the window being minimized,
+the Mac going to sleep or fast user switching ends it, and scrolling clearly away from one
+list's bottom ends it for that list. After that, coming back to the bottom or the window alone
+doesn't read ([message-list.md](../ui/message-list.md#reading-the-signal-to-ack)). A list the
+session opened on its own (the open channel deleted or hidden, its server gone) isn't read
+until the user clicks.
 
 **What reading acks.** Up to the newest message the channel's list shows, while that list is at
 the present and not stale, and never "now". Past that row it acks only messages known to be
@@ -152,7 +154,8 @@ follows, if the message is past the read position or the channel has mentions. A
 only the list growing at its present end reads again: a live message, or a page that reaches
 the present. A newest message raised any other way (a GUILD_CREATE, an unread update) reads
 nothing until the list shows it, so a channel whose newest message is past its list stays
-unread. `set_reading(None)` stops reading and clears nothing.
+unread. `set_reading(&[])` stops reading and clears nothing; a channel left out of the next
+call stops being read, and the other goes on.
 
 **Connection drops.** The core stops reading whenever the connection drops (every reconnect,
 a resume included), on `disconnect()` and when the account closes: the session that comes back

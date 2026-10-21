@@ -33,8 +33,12 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   and jumps to the present: it loads the newest messages if the list shows older ones, and
   scrolls to the bottom; a jump to the first unread message that is still loading doesn't land
   ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)). It does this
-  from the message list and from the composer, through one action. Shift+Escape, from the same
-  places, marks the open server read, and does nothing at Home
+  from the message list and from the composer, through one action. In the split view, Escape in
+  either pane does it for both: both lists are marked read and jump to the present, as in the
+  official client (observed 2026-10-17), and the pane's own composer takes the focus. With
+  nothing to mark read or load in either, Escape closes the split view instead (Discord's key
+  handler, read 2026-10-21).
+  Shift+Escape, from the same places, marks the open server read, and does nothing at Home
   ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
 - **Only the Escape key.** macOS sends Cmd+. as the same cancel command as Escape; in Akari it
   marks nothing read, and Cmd+Shift+. doesn't mark the server read. In the composer it does
