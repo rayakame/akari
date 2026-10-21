@@ -48,13 +48,17 @@ every other target builds rusqlite's bundled copy.
   `notification_flags`) and `read_states` (per channel: the acknowledged message and the
   mention count). Each row is its key columns plus a `data` column of JSON in the cache's own
   row types, never the wire structs or the state types, so either can change without breaking
-  files already written. A field added later reads old rows through its default.
+  files already written. A field added later reads old rows through its default. Threads the
+  user hasn't joined and each thread's newest message aren't kept: the next subscription's
+  THREAD_LIST_SYNC and the refreshed pages bring them again.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
-- **Version:** `PRAGMA user_version`, 5 since a thread's membership holds the user's join time,
-  which orders the channel list; 4 brought the membership (its mute and level) instead of
-  `joined`; 3 brought the read states. A version 4 file is upgraded in place: its rows read as
-  they are, its threads without a join time order by ID until READY brings the times. Older
+- **Version:** `PRAGMA user_version`, 6 since a message row keeps the thread started from it;
+  5 brought a thread membership's join time, which orders the channel list; 4 brought the
+  membership (its mute and level) instead of `joined`; 3 brought the read states. Version 4 and 5
+  files are upgraded in place: their rows read as they are, threads without a join time order
+  by ID until READY brings the times, and messages without their thread get it back from the
+  page that refreshes their window. Older
   files are deleted once, so the first launch after such an update starts empty: a version 3
   file would restore every joined thread as unjoined and leave it out of the channel list until
   READY, and a version 2 file would restore without read states. A file with any other version

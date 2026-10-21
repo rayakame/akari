@@ -213,3 +213,18 @@ fn a_later_ready_keeps_unjoined_threads() {
         Some("the newest")
     );
 }
+
+#[test]
+fn unjoined_threads_are_never_cached() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_LIST_SYNC",
+        sync(Some(&[GENERAL]), &[SYNCED], Vec::new()),
+    );
+
+    let (entities, _) = state.cache_parts(50);
+
+    assert!(!entities.channels.contains_key(&Snowflake::new(SYNCED)));
+    assert!(entities.channels.contains_key(&Snowflake::new(THREAD)));
+}

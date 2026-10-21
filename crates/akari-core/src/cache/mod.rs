@@ -163,7 +163,7 @@ impl Cache {
             // Before the first table, or it can't be turned on.
             conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
             schema::create(&conn, user)?;
-        } else if version != schema::CURRENT && version != schema::UPGRADABLE {
+        } else if version != schema::CURRENT && !schema::UPGRADABLE.contains(&version) {
             return Err(CacheError::OtherSchema);
         } else {
             let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
@@ -178,7 +178,7 @@ impl Cache {
             if owner != Some(user.get().to_string()) {
                 return Err(CacheError::OtherUser);
             }
-            if version == schema::UPGRADABLE {
+            if schema::UPGRADABLE.contains(&version) {
                 schema::upgrade(&conn)?;
             }
         }

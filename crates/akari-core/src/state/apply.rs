@@ -1420,7 +1420,12 @@ impl State {
         } else {
             Vec::new()
         };
-        (self.entities.clone(), windows)
+        let mut entities = self.entities.clone();
+        // Unjoined threads come again with the next subscription's sync and pages.
+        entities
+            .channels
+            .retain(|_, channel| channel.thread.as_deref().is_none_or(|info| info.joined()));
+        (entities, windows)
     }
 
     pub(crate) fn viewed_channels(&self) -> Vec<Arc<Channel>> {

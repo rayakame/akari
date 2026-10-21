@@ -329,6 +329,7 @@ fn full_message() -> Message {
             actor: Some(Arc::new(user(22, "Ray"))),
             application_name: Some("Akari Bot".into()),
         })),
+        thread: Some(Snowflake::new(500)),
         ..message(10, 500, "hello there")
     }
 }
@@ -641,24 +642,38 @@ fn the_settings_tables_exist() {
 }
 
 #[test]
-fn a_schema_4_file_is_upgraded_and_keeps_its_rows() {
-    let dir = TempDir::new();
-    let mut cache = open(&dir);
-    write_entities(&mut cache, &entities());
-    drop(cache);
-    raw(&dir.file(ME))
-        .pragma_update(None, "user_version", 4)
-        .unwrap();
+fn schema_4_and_5_files_are_upgraded_and_keep_their_rows() {
+    for version in [4, 5] {
+        let dir = TempDir::new();
+        let mut cache = open(&dir);
+        write_entities(&mut cache, &entities());
+        cache
+            .write(|writer| {
+                writer.put_window(
+                    Snowflake::new(10),
+                    42,
+                    &[Arc::new(message(10, 600, "kept"))],
+                )
+            })
+            .unwrap();
+        drop(cache);
+        raw(&dir.file(ME))
+            .pragma_update(None, "user_version", version)
+            .unwrap();
 
-    let opened = Cache::open_or_rebuild(&dir.file(ME), UserId::new(ME)).unwrap();
+        let opened = Cache::open_or_rebuild(&dir.file(ME), UserId::new(ME)).unwrap();
 
-    assert_eq!(opened.discarded, None);
-    assert!(opened.cache.read_entities().unwrap().value == entities());
-    drop(opened);
-    let version: i32 = raw(&dir.file(ME))
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .unwrap();
-    assert_eq!(version, schema::CURRENT);
+        assert_eq!(opened.discarded, None, "{version}");
+        assert!(opened.cache.read_entities().unwrap().value == entities());
+        let window = opened.cache.read_window(Snowflake::new(10)).unwrap();
+        assert_eq!(window.value.len(), 1, "{version}");
+        assert_eq!(window.value[0].thread, None);
+        drop(opened);
+        let upgraded: i32 = raw(&dir.file(ME))
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(upgraded, schema::CURRENT);
+    }
 }
 
 #[test]
