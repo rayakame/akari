@@ -60,8 +60,11 @@ final class ThreadBoxView: NSButton {
         self.box = box
         self.content = content
         self.time = time
+        // A reused cell's box may be elsewhere now; the pointer's next move says.
+        hovered = false
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
+        updateTrackingAreas()
     }
 
     /// The box itself, within the view.
@@ -86,6 +89,11 @@ final class ThreadBoxView: NSButton {
     /// Where `text` is drawn, from the view's top left.
     func rect(of text: String) -> NSRect? {
         parts.first { $0.text.string == text }?.rect
+    }
+
+    /// The drawn part that reads `text`, with its attributes.
+    func text(of text: String) -> NSAttributedString? {
+        parts.first { $0.text.string == text }?.text
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -152,15 +160,33 @@ final class ThreadBoxView: NSButton {
         }
     }
 
+    // A hidden spoiler reads as "Spoiler", as in the message itself.
     override func accessibilityValue() -> Any? {
-        let words = bottom
-        guard let first = words.first else {
+        guard let box else {
             return nil
         }
-        if case .latest? = box?.bottom, words.count >= 2 {
-            return "\(first): " + words.dropFirst().joined(separator: ", ")
+        var words: [String]
+        switch box.bottom {
+        case .latest(_, let authorName):
+            let text = content.map(MessageText.accessible) ?? ""
+            words = [text.isEmpty ? authorName : "\(authorName): \(text)"]
+        case .noRecentMessages:
+            words = [ThreadBox.noRecentMessages]
+        case .noMessages:
+            words = [ThreadBox.noMessages]
+        }
+        if let time {
+            words.append(time)
         }
         return words.joined(separator: ", ")
+    }
+
+    override var focusRingMaskBounds: NSRect {
+        boxFrame
+    }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(roundedRect: boxFrame, xRadius: Self.radius, yRadius: Self.radius).fill()
     }
 
     // The newest message's content on one line: formatted, small, links not clickable, hidden

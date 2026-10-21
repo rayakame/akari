@@ -211,11 +211,45 @@ struct ThreadBoxViewTests {
     @Test
     func onlyTheCountUnderlinesWhileHovered() throws {
         let (_, view) = try shown()
-        #expect(!view.underlinesLink)
+        let underline = { (part: String) in
+            view.text(of: part)?.attribute(.underlineStyle, at: 0, effectiveRange: nil)
+        }
+        #expect(underline("16 Messages ›") == nil)
 
         view.hovered = true
 
-        #expect(view.underlinesLink)
+        #expect(underline("16 Messages ›") as? Int == NSUnderlineStyle.single.rawValue)
+        #expect(underline("t1") == nil)
+        #expect(underline("the newest") == nil)
+    }
+
+    // A reused cell starts without the last row's hover.
+    @Test
+    func aReconfiguredBoxForgetsItsHover() throws {
+        let (_, view) = try shown()
+        view.hovered = true
+
+        view.configure(box(.noMessages, time: .some(nil)), content: nil, time: nil)
+
+        #expect(!view.hovered)
+    }
+
+    @Test
+    func voiceOverReadsAHiddenSpoilerAsSpoiler() throws {
+        let latest = row(25, by: author(3, "Mira"), at: newest, content: "the ||secret||").message
+        let (_, view) = try shown(box(.latest(latest, authorName: "Mira")))
+
+        let value = try #require(view.accessibilityValue() as? String)
+        #expect(!value.contains("secret"), "\(value)")
+        #expect(value.contains("Spoiler"), "\(value)")
+    }
+
+    // Focused with Tab, the ring follows the box, not the full width or the gap above it.
+    @Test
+    func theFocusRingIsTheBoxs() throws {
+        let (_, view) = try shown()
+
+        #expect(view.focusRingMaskBounds == view.boxFrame)
     }
 
     @Test
@@ -289,5 +323,40 @@ struct ThreadBoxTimeTests {
         refresh.timers.fire()
 
         #expect(try box().bottom.last == "2m ago")
+        #expect(refresh.timers.active.map(\.date) == [since + 180])
+    }
+
+    // AppKit keeps row views ready beyond the visible rows; a slight scroll shows them as they are.
+    @Test
+    func aBoxTimeReachesRowViewsPreparedOutOfSight() throws {
+        let since = refresh.clock.now - 30
+        let box = ThreadBox(
+            threadId: ChannelId(rawValue: 1), name: "t1", link: "1 Message ›",
+            bottom: .noRecentMessages, time: since)
+        var rows = (1...60).map { raw in
+            row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: refresh.clock.now - 3600 + Double(raw))
+        }
+        rows[0] = row(
+            1, by: author(2), at: refresh.clock.now - 3600, content: "test", hasThread: true,
+            threadBox: box)
+        rows[59] = row(
+            60, by: author(1), at: refresh.clock.now - 60, content: "last", hasThread: true,
+            threadBox: box)
+        refresh.show(rows)
+        let first = try #require(
+            refresh.controller.timeline.items.firstIndex {
+                $0.id == .message(MessageId(rawValue: 1))
+            })
+        try #require(!refresh.table.visibleRect.intersects(refresh.table.rect(ofRow: first)))
+        // As AppKit's overdraw does ahead of a scroll.
+        _ = try #require(refresh.table.view(atColumn: 0, row: first, makeIfNecessary: true))
+        refresh.window.layoutIfNeeded()
+
+        refresh.clock.now = since + 120
+        refresh.timers.fire()
+
+        let prepared = try #require(
+            refresh.table.view(atColumn: 0, row: first, makeIfNecessary: false))
+        #expect(ThreadBoxViewTests.boxView(in: prepared)?.bottom.last == "2m ago")
     }
 }

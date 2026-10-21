@@ -104,7 +104,8 @@ public struct ThreadBox: Equatable, Sendable {
         return "Click to see attachment"
     }
 
-    /// "1m ago" under a minute too, up to "29d ago", then ">30d ago", and the date after 360 days.
+    /// "1m ago" under two minutes too, up to "29d ago", then ">30d ago", and the date after 360
+    /// days.
     public static func relativeTime(
         since date: Date, now: Date, locale: Locale, timeZone: TimeZone = .current
     ) -> RelativeTime {

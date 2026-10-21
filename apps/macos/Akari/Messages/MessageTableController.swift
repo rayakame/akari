@@ -583,6 +583,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             if case .message(let row, _) = timeline.items[index] {
                 relativeTimes[row.id] = nil
                 texts[row.id] = nil
+                boxContents[row.id] = nil
+                boxTimes[row.id] = nil
             }
         }
         for index in changes.reloaded {
@@ -1112,11 +1114,21 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let now = now()
         lastRelativeFire = now
         var due = IndexSet()
+        // A box's time keeps its row's height; a body's relative time may not.
+        var remeasured = IndexSet()
         for (index, item) in timeline.items.enumerated() {
-            if case .message(let row, _) = item, let next = nextChange(of: row), next <= now {
-                due.insert(index)
+            guard case .message(let row, _) = item else {
+                continue
+            }
+            let body = relativeTimes[row.id].map { $0 <= now } ?? false
+            let box = boxTimes[row.id].map { $0 <= now } ?? false
+            if body {
+                remeasured.insert(index)
                 rowHeights[item.id] = nil
                 texts[row.id] = nil
+            }
+            if body || box {
+                due.insert(index)
                 boxTimes[row.id] = nil
             }
         }
@@ -1127,12 +1139,17 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             ownChanges += 1
             defer { ownChanges -= 1 }
-            let visible = tableView.rows(in: tableView.visibleRect)
-            let shown = due.filteredIndexSet { NSLocationInRange($0, visible) }
-            if !shown.isEmpty {
-                tableView.reloadData(forRowIndexes: shown, columnIndexes: [0])
+            // Not only the visible rows: AppKit prepares row views beyond them, shown as they are.
+            var held = IndexSet()
+            tableView.enumerateAvailableRowViews { _, row in
+                if due.contains(row) {
+                    held.insert(row)
+                }
             }
-            tableView.noteHeightOfRows(withIndexesChanged: due)
+            if !held.isEmpty {
+                tableView.reloadData(forRowIndexes: held, columnIndexes: [0])
+            }
+            tableView.noteHeightOfRows(withIndexesChanged: remeasured)
             measureRows()
             if pinsToBottom {
                 scrollToBottom()
