@@ -725,7 +725,7 @@ impl State {
                     .and_then(model::Nonce::as_u64)
                     .map(MessageId::new);
                 self.put_threads_of(std::slice::from_ref(&message), events);
-                if self.count_thread_messages(channel, 1, 0) | self.note_latest(&message) {
+                if self.count_created(&message) | self.note_live_latest(&message) {
                     self.reread_boxes(channel, events);
                 }
                 self.read_message(&message);
@@ -749,7 +749,7 @@ impl State {
                 self.windows.update(*update, &self.entities.users, events);
             }
             E::MessageDelete(delete) => {
-                if self.count_thread_messages(delete.channel_id, 0, 1)
+                if self.count_deleted(delete.channel_id, &[delete.id])
                     | self.delete_latest(delete.channel_id, delete.id)
                 {
                     self.reread_boxes(delete.channel_id, events);
@@ -757,8 +757,7 @@ impl State {
                 self.windows.delete(delete.channel_id, delete.id, events);
             }
             E::MessageDeleteBulk(delete) => {
-                let removed = u32::try_from(delete.ids.len()).unwrap_or(u32::MAX);
-                let mut changed = self.count_thread_messages(delete.channel_id, 0, removed);
+                let mut changed = self.count_deleted(delete.channel_id, &delete.ids);
                 for id in &delete.ids {
                     changed |= self.delete_latest(delete.channel_id, *id);
                 }
@@ -872,16 +871,20 @@ impl State {
         let channel = Arc::new(channel);
         self.mark_channel(&channel);
         self.threads.add(&channel);
-        match self.entities.channels.get(&channel.id) {
+        let id = channel.id;
+        match self.entities.channels.get(&id) {
             Some(known) if *known == channel => {}
             Some(_) => {
-                self.entities.channels.insert(channel.id, channel.clone());
+                self.entities.channels.insert(id, channel.clone());
                 events.push(StoreEvent::ChannelUpdated(channel));
             }
             None => {
-                self.entities.channels.insert(channel.id, channel.clone());
+                self.entities.channels.insert(id, channel.clone());
                 events.push(StoreEvent::ChannelAdded(channel));
             }
+        }
+        if self.drop_stale_latest(id) {
+            self.reread_boxes(id, events);
         }
     }
 
@@ -944,11 +947,15 @@ impl State {
         }
         let next = Arc::new(known.patch(update));
         if next != known {
+            let id = next.id;
             self.mark_channel(&next);
             self.threads.remove(&known);
             self.threads.add(&next);
-            self.entities.channels.insert(next.id, next.clone());
+            self.entities.channels.insert(id, next.clone());
             events.push(StoreEvent::ChannelUpdated(next));
+            if self.drop_stale_latest(id) {
+                self.reread_boxes(id, events);
+            }
         }
     }
 
@@ -986,29 +993,24 @@ impl State {
         self.set_membership(update.id, member, events);
     }
 
-    // Joins come from the members events; a sync only refreshes the threads already joined.
+    // As the official client reads it: it adds and updates threads, keeps the ones it doesn't
+    // list, and its members are the user's own memberships.
     fn thread_list_sync(&mut self, sync: ThreadListSync, events: &mut Vec<StoreEvent>) {
         for thread in sync.threads {
             self.put_thread(thread, events);
-        }
-        for message in &sync.most_recent_messages {
-            if self.note_latest(message) {
-                self.reread_boxes(message.channel_id, events);
-            }
         }
         let me = self.entities.me();
         for member in sync.members {
             let Some(thread) = member.id else {
                 continue;
             };
-            let joined = self
-                .entities
-                .channels
-                .get(&thread)
-                .and_then(|known| known.thread.as_deref())
-                .is_some_and(|info| info.member.is_some());
-            if joined && member.user_id.is_none_or(|user| Some(user) == me) {
+            if member.user_id.is_none_or(|user| Some(user) == me) {
                 self.set_membership(thread, Some(ThreadMembership::from_wire(member)), events);
+            }
+        }
+        for message in &sync.most_recent_messages {
+            if self.note_latest(message) {
+                self.reread_boxes(message.channel_id, events);
             }
         }
     }
@@ -1406,6 +1408,9 @@ impl State {
             .max()
             .filter(|_| present);
         self.put_threads_of(&page, events);
+        if present && self.note_newest_page(ticket.channel, &page) {
+            self.reread_boxes(ticket.channel, events);
+        }
         let outcome =
             self.windows
                 .finish_load(ticket, page, &self.entities.users, reached_end, events);

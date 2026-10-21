@@ -966,8 +966,9 @@ fn a_thread_list_sync_brings_join_times_of_joined_threads() {
     );
 }
 
+// The official client reads a sync's members as the user's memberships.
 #[test]
-fn a_thread_list_sync_joins_nothing() {
+fn a_thread_list_sync_member_joins_its_thread() {
     let store = Store::new(DEFAULT_LIMITS);
     store.apply(ready_with_joins());
     let mut unjoined = thread_in_general(300_000_000_000_000_027, 1);
@@ -988,16 +989,11 @@ fn a_thread_list_sync_joins_nothing() {
     assert_eq!(
         threads_listed(&store),
         [
+            300_000_000_000_000_027,
             300_000_000_000_000_022,
             300_000_000_000_000_020,
             300_000_000_000_000_025
         ]
-    );
-    assert!(
-        store
-            .channel(Snowflake::new(300_000_000_000_000_027))
-            .and_then(|thread| thread.thread.as_deref().map(|info| info.member))
-            .is_some_and(|member| member.is_none())
     );
 }
 

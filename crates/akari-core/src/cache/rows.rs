@@ -707,8 +707,6 @@ pub(super) struct MessageRow {
     actor: Option<UserRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     application_name: Option<Box<str>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thread: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -801,7 +799,6 @@ impl From<&Message> for MessageRow {
                 .and_then(|system| system.actor.as_deref())
                 .map(UserRow::from),
             application_name: system.and_then(|system| system.application_name.clone()),
-            thread: message.thread.map(Snowflake::get),
         }
     }
 }
@@ -891,7 +888,6 @@ impl MessageRow {
                 application_name: self.application_name,
             }
             .boxed(),
-            thread: snowflake(self.thread),
         }
     }
 }

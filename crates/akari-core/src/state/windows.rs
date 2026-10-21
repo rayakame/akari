@@ -626,24 +626,14 @@ impl Windows {
             .cloned()
     }
 
-    // The loaded rows of `parent` that show `thread`'s box.
-    pub(crate) fn box_rows(&self, parent: ChannelId, thread: ChannelId) -> Vec<Arc<Message>> {
-        let Some(window) = self.windows.get(&parent) else {
-            return Vec::new();
-        };
-        let started = Window::position(&window.messages, thread.cast())
-            .ok()
-            .map(|index| &window.messages[index])
-            .filter(|message| message.thread == Some(thread));
-        let lines = window.messages.iter().filter(|message| {
-            message.kind == MessageType::ThreadCreated
-                && message
-                    .reference
-                    .as_deref()
-                    .and_then(|reference| reference.channel_id)
-                    == Some(thread)
-        });
-        started.into_iter().chain(lines).cloned().collect()
+    // The loaded row of `parent` that shows `thread`'s box: the one with the thread's ID.
+    pub(crate) fn box_row(&self, parent: ChannelId, thread: ChannelId) -> Option<Arc<Message>> {
+        let messages = &self.windows.get(&parent)?.messages;
+        let index = Window::position(messages, thread.cast()).ok()?;
+        messages
+            .get(index)
+            .filter(|message| message.has_thread())
+            .cloned()
     }
 
     #[cfg(test)]

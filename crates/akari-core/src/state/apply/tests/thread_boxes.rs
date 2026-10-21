@@ -30,9 +30,14 @@ fn plain(id: u64, channel: u64) -> Value {
     message
 }
 
+// A thread started without a message posts this line with the thread's ID and HAS_THREAD; one
+// started from an older message posts it with an ID of its own and no flag.
 fn line(id: u64, thread: u64) -> Value {
     let mut line = plain(id, GENERAL);
     line["type"] = 18.into();
+    if id == thread {
+        line["flags"] = 32.into();
+    }
     line["content"] = "Bug triage".into();
     line["message_reference"] =
         json!({"channel_id": thread.to_string(), "guild_id": G1.to_string()});
@@ -70,14 +75,6 @@ fn count(state: &State, thread: u64) -> Option<u32> {
     })
 }
 
-fn stored_thread(state: &State, channel: u64, id: u64) -> Option<u64> {
-    state
-        .message(Snowflake::new(channel), Snowflake::new(id))
-        .expect("a loaded message")
-        .thread
-        .map(Snowflake::get)
-}
-
 // GENERAL viewed, with MESSAGE and the thread started from it.
 fn with_a_box() -> State {
     let mut state = viewing_general();
@@ -104,7 +101,6 @@ fn a_message_with_a_thread_brings_the_thread() {
     assert_eq!(thread.parent_id, Some(Snowflake::new(GENERAL)));
     assert!(!thread.thread.as_deref().unwrap().joined());
     assert_eq!(count(&state, MESSAGE), Some(3));
-    assert_eq!(stored_thread(&state, GENERAL, MESSAGE), Some(MESSAGE));
     assert!(events.contains(&format!("ChannelAdded({MESSAGE})")));
 }
 
@@ -126,8 +122,6 @@ fn a_page_with_a_thread_brings_the_thread() {
     state.finish_load(ticket, page, false, &mut events);
 
     assert_eq!(count(&state, MESSAGE), Some(7));
-    assert_eq!(stored_thread(&state, GENERAL, MESSAGE), Some(MESSAGE));
-    assert_eq!(stored_thread(&state, GENERAL, MESSAGE - 1), None);
 }
 
 #[test]
@@ -142,7 +136,6 @@ fn a_new_thread_on_a_message_arrives_with_its_update() {
     apply(&mut state, "MESSAGE_UPDATE", update);
 
     assert!(state.channel(Snowflake::new(MESSAGE)).is_some());
-    assert_eq!(stored_thread(&state, GENERAL, MESSAGE), Some(MESSAGE));
 }
 
 #[test]
@@ -212,7 +205,7 @@ fn a_started_a_thread_line_rereads_with_its_thread() {
     apply(
         &mut state,
         "MESSAGE_CREATE",
-        line(MESSAGE + 5, OTHER_THREAD),
+        line(OTHER_THREAD, OTHER_THREAD),
     );
 
     let events = apply_events(
@@ -221,8 +214,83 @@ fn a_started_a_thread_line_rereads_with_its_thread() {
         plain(MESSAGE + 6, OTHER_THREAD),
     );
 
-    assert_eq!(updated(&events), [MESSAGE + 5]);
+    assert_eq!(updated(&events), [OTHER_THREAD]);
     assert_eq!(count(&state, OTHER_THREAD), Some(1));
+}
+
+// The box goes under the message the thread started from, not under the line about it.
+#[test]
+fn a_line_about_an_older_messages_thread_isnt_its_box() {
+    let mut state = with_a_box();
+    apply(&mut state, "MESSAGE_CREATE", line(MESSAGE + 5, MESSAGE));
+
+    let events = apply_events(&mut state, "MESSAGE_CREATE", plain(MESSAGE + 6, MESSAGE));
+
+    assert_eq!(updated(&events), [MESSAGE]);
+}
+
+#[test]
+fn a_starter_message_isnt_counted() {
+    let mut state = with_a_box();
+    let mut starter = plain(MESSAGE + 1, MESSAGE);
+    starter["type"] = 21.into();
+    starter["message_reference"] =
+        json!({"message_id": MESSAGE.to_string(), "channel_id": GENERAL.to_string()});
+
+    let events = apply_events(&mut state, "MESSAGE_CREATE", starter);
+
+    assert_eq!(count(&state, MESSAGE), Some(3));
+    assert!(updated(&events).is_empty());
+}
+
+// A forum post's first message has the post's ID.
+#[test]
+fn a_posts_first_message_isnt_counted() {
+    let mut state = with_a_box();
+
+    apply(&mut state, "MESSAGE_CREATE", plain(MESSAGE, MESSAGE));
+    assert_eq!(count(&state, MESSAGE), Some(3));
+
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": MESSAGE.to_string(), "channel_id": MESSAGE.to_string()}),
+    );
+    assert_eq!(count(&state, MESSAGE), Some(3));
+}
+
+#[test]
+fn a_thread_without_a_count_counts_from_zero() {
+    let mut state = viewing_general();
+    let mut thread = thread_object(OTHER_THREAD, 0);
+    thread.as_object_mut().unwrap().remove("message_count");
+    apply(&mut state, "THREAD_CREATE", thread);
+
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        plain(MESSAGE + 6, OTHER_THREAD),
+    );
+
+    assert_eq!(count(&state, OTHER_THREAD), Some(1));
+}
+
+#[test]
+fn a_count_stops_at_100k() {
+    let mut state = viewing_general();
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        thread_object(OTHER_THREAD, 100_000),
+    );
+
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        plain(MESSAGE + 6, OTHER_THREAD),
+    );
+
+    assert_eq!(count(&state, OTHER_THREAD), Some(100_000));
 }
 
 #[test]
