@@ -16,7 +16,8 @@ use super::settings::{
 };
 use super::threads::ThreadIndex;
 use super::types::{
-    Channel, CurrentUser, Guild, Member, Message, Role, StarterMessage, ThreadMembership, User,
+    Channel, CurrentUser, Guild, Member, Message, Role, StarterMessage, ThreadInfo,
+    ThreadMembership, User,
 };
 use super::windows::{
     CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits, Windows,
@@ -1010,6 +1011,32 @@ impl State {
                 self.set_membership(thread, Some(ThreadMembership::from_wire(member)), events);
             }
         }
+    }
+
+    pub(crate) fn set_own_membership(
+        &mut self,
+        thread: ChannelId,
+        joined_at: Option<Timestamp>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let joined = self
+            .entities
+            .channels
+            .get(&thread)
+            .and_then(|channel| channel.thread.as_deref())
+            .map(ThreadInfo::joined);
+        match (joined, joined_at) {
+            (Some(false), Some(joined_at)) => {
+                let member = ThreadMembership {
+                    joined_at: Some(joined_at),
+                    ..ThreadMembership::default()
+                };
+                self.set_membership(thread, Some(member), events);
+            }
+            (Some(true), None) => self.set_membership(thread, None, events),
+            _ => return,
+        }
+        self.settle(self.now_millis(), events);
     }
 
     fn set_membership(

@@ -15,6 +15,7 @@ const GLOBAL_WINDOW: Duration = Duration::from_secs(1);
 pub(crate) enum Method {
     Get,
     Post,
+    Delete,
 }
 
 // With its top-level resource ID: limits apply per channel, guild or webhook.

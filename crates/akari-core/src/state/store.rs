@@ -503,6 +503,24 @@ impl Store {
         })
     }
 
+    // Discord refuses joining or leaving an archived thread.
+    pub(crate) fn can_change_membership(&self, thread: ChannelId) -> bool {
+        self.read(|inner| {
+            inner
+                .state
+                .channel(thread)
+                .and_then(|channel| channel.thread.as_deref().map(|info| !info.archived))
+                .unwrap_or(false)
+        })
+    }
+
+    // `Some(joined_at)` joins, `None` leaves; a membership the gateway already brought stays.
+    pub(crate) fn set_own_membership(&self, thread: ChannelId, joined_at: Option<Timestamp>) {
+        self.write("thread member", |inner, events| {
+            inner.state.set_own_membership(thread, joined_at, events);
+        });
+    }
+
     pub(crate) fn mark_thread_unavailable(&self, parent: ChannelId, thread: ChannelId) {
         self.write("thread", |inner, events| {
             inner.state.mark_thread_unavailable(parent, thread, events);
