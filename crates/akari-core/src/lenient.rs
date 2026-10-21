@@ -15,6 +15,26 @@ where
     Ok(parse_valid(entries.unwrap_or_default()))
 }
 
+// A list that isn't one at all becomes empty instead of failing the payload.
+pub(crate) fn skip_invalid_or_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let Some(raw) = Option::<&'de RawValue>::deserialize(deserializer)? else {
+        return Ok(Vec::new());
+    };
+    let entries = serde_json::from_str::<Vec<&'de RawValue>>(raw.get()).unwrap_or_else(|err| {
+        tracing::warn!(
+            error = %JsonError::from(&err),
+            "using no {} for a list that failed to parse",
+            type_name::<T>()
+        );
+        Vec::new()
+    });
+    Ok(parse_valid(entries))
+}
+
 // For partial updates: a missing or `null` list means "unchanged".
 pub(crate) fn skip_invalid_option<'de, D, T>(deserializer: D) -> Result<Option<Vec<T>>, D::Error>
 where

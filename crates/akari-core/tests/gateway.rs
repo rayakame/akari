@@ -1282,6 +1282,105 @@ fn a_thread_list_sync_in_another_shape_still_decodes() {
     };
 
     assert_eq!(sync.members.len(), 1);
+    assert!(sync.threads.is_empty());
+    assert_eq!(sync.channel_ids, None);
+}
+
+#[test]
+fn thread_list_sync_decodes_its_threads_and_latest_messages() {
+    let DispatchEvent::ThreadListSync(sync) = dispatch(
+        "THREAD_LIST_SYNC",
+        include_str!("fixtures/thread_list_sync.json"),
+    ) else {
+        panic!("expected THREAD_LIST_SYNC");
+    };
+
+    assert_eq!(
+        sync.channel_ids,
+        Some(vec![Snowflake::new(300_000_000_000_000_002)])
+    );
+    assert_eq!(sync.threads.len(), 1);
+    assert_eq!(sync.threads[0].id, Snowflake::new(300_000_000_000_000_021));
+    assert_eq!(sync.threads[0].message_count, Some(4));
+    assert_eq!(sync.most_recent_messages.len(), 1);
+    assert_eq!(
+        sync.most_recent_messages[0].channel_id,
+        Snowflake::new(300_000_000_000_000_021)
+    );
+}
+
+#[test]
+fn a_broken_thread_or_latest_message_in_a_sync_drops_only_itself() {
+    let drifted = edited(include_str!("fixtures/thread_list_sync.json"), |value| {
+        let thread = value["threads"][0].clone();
+        let message = value["most_recent_messages"][0].clone();
+        value["threads"] = serde_json::json!([{"id": "bad"}, thread]);
+        value["most_recent_messages"] = serde_json::json!([{"content": 3}, message]);
+    });
+    let DispatchEvent::ThreadListSync(sync) = dispatch("THREAD_LIST_SYNC", &drifted) else {
+        panic!("expected THREAD_LIST_SYNC");
+    };
+
+    assert_eq!(sync.threads.len(), 1);
+    assert_eq!(sync.most_recent_messages.len(), 1);
+}
+
+fn with_thread(fixture: &str) -> String {
+    edited(fixture, |value| {
+        value["flags"] = serde_json::json!(32);
+        let mut thread: Value = serde_json::from_str(include_str!("fixtures/thread_create.json"))
+            .unwrap_or_else(|err| panic!("fixture is not JSON: {err}"));
+        thread["id"] = value["id"].clone();
+        thread["message_count"] = serde_json::json!(3);
+        value["thread"] = thread;
+    })
+}
+
+#[test]
+fn a_message_brings_the_thread_started_from_it() {
+    let DispatchEvent::MessageCreate(message) = dispatch(
+        "MESSAGE_CREATE",
+        &with_thread(include_str!("fixtures/message_create.json")),
+    ) else {
+        panic!("expected MESSAGE_CREATE");
+    };
+
+    let thread = message.thread.expect("the thread is kept");
+    assert_eq!(thread.id, Snowflake::new(400_000_000_000_000_003));
+    assert_eq!(thread.name.as_deref(), Some("Bug triage"));
+    assert_eq!(thread.message_count, Some(3));
+    assert!(thread.member.is_some());
+}
+
+#[test]
+fn a_thread_in_another_shape_leaves_its_message_alone() {
+    let drifted = edited(include_str!("fixtures/message_create.json"), |value| {
+        value["thread"] = serde_json::json!({"changed": "shape"});
+    });
+    let DispatchEvent::MessageCreate(message) = dispatch("MESSAGE_CREATE", &drifted) else {
+        panic!("expected MESSAGE_CREATE");
+    };
+
+    assert_eq!(message.thread, None);
+    assert_eq!(message.content, "hi");
+}
+
+#[test]
+fn a_message_update_brings_a_new_thread() {
+    let DispatchEvent::MessageUpdate(update) = dispatch(
+        "MESSAGE_UPDATE",
+        &with_thread(
+            r#"{"id": "400000000000000001", "channel_id": "300000000000000002", "flags": 32}"#,
+        ),
+    ) else {
+        panic!("expected MESSAGE_UPDATE");
+    };
+
+    assert_eq!(update.flags, Some(32));
+    assert_eq!(
+        update.thread.map(|thread| thread.id),
+        Some(Snowflake::new(400_000_000_000_000_001))
+    );
 }
 
 #[test]

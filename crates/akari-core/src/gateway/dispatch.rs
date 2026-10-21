@@ -1,8 +1,9 @@
 use serde::Deserialize;
 
-use crate::lenient::{skip_invalid, skip_invalid_in_each};
+use crate::lenient::{default_on_error, skip_invalid, skip_invalid_in_each, skip_invalid_or_empty};
 use crate::model::{
-    Channel, ChannelId, GuildId, GuildMember, MessageId, Role, RoleId, ThreadMember, UserId,
+    Channel, ChannelId, GuildId, GuildMember, Message, MessageId, Role, RoleId, ThreadMember,
+    UserId,
 };
 
 /// READY_SUPPLEMENTAL: what READY leaves out, sent right after it.
@@ -75,12 +76,22 @@ pub struct ThreadMembersUpdate {
 
 /// THREAD_LIST_SYNC: the active threads of some of a guild's channels, sent when the user
 /// subscribes to them.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ThreadListSync {
     pub guild_id: Option<GuildId>,
+    /// The parent channels synced, which may have no active thread left; `None`: the whole guild.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub channel_ids: Option<Vec<ChannelId>>,
+    /// Every active thread in those channels the user can see.
+    #[serde(default, deserialize_with = "skip_invalid_or_empty")]
+    pub threads: Vec<Channel>,
     /// The current user's members of the synced threads it joined.
     #[serde(default, deserialize_with = "skip_invalid")]
     pub members: Vec<ThreadMember>,
+    /// The newest message of each synced thread that has one; undocumented, read by
+    /// discord.py-self.
+    #[serde(default, deserialize_with = "skip_invalid_or_empty")]
+    pub most_recent_messages: Vec<Message>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

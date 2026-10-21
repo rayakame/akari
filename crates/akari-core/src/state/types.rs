@@ -236,6 +236,8 @@ pub struct Message {
     pub delivery: Delivery,
     /// What a system message's line names beyond its author and content; `None` for most.
     pub system: Option<Box<SystemData>>,
+    /// The thread started from this message.
+    pub thread: Option<ChannelId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

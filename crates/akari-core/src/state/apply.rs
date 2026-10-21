@@ -714,6 +714,8 @@ impl State {
                     .as_ref()
                     .and_then(model::Nonce::as_u64)
                     .map(MessageId::new);
+                self.put_threads_of(std::slice::from_ref(&message), events);
+                self.count_thread_messages(channel, 1, 0, events);
                 self.read_message(&message);
                 self.dirty.channel(channel);
                 let forced = self.forced_through(&message);
@@ -725,9 +727,19 @@ impl State {
                     self.note_own_message(channel, nonce);
                 }
             }
-            E::MessageUpdate(update) => self.windows.update(*update, &self.entities.users, events),
-            E::MessageDelete(delete) => self.windows.delete(delete.channel_id, delete.id, events),
+            E::MessageUpdate(update) => {
+                if let Some(thread) = update.thread.as_deref() {
+                    self.put_thread(thread.clone(), events);
+                }
+                self.windows.update(*update, &self.entities.users, events);
+            }
+            E::MessageDelete(delete) => {
+                self.count_thread_messages(delete.channel_id, 0, 1, events);
+                self.windows.delete(delete.channel_id, delete.id, events);
+            }
             E::MessageDeleteBulk(delete) => {
+                let removed = u32::try_from(delete.ids.len()).unwrap_or(u32::MAX);
+                self.count_thread_messages(delete.channel_id, 0, removed, events);
                 for id in delete.ids {
                     self.windows.delete(delete.channel_id, id, events);
                 }
@@ -1329,6 +1341,7 @@ impl State {
             .map(|message| message.id)
             .max()
             .filter(|_| present);
+        self.put_threads_of(&page, events);
         let outcome =
             self.windows
                 .finish_load(ticket, page, &self.entities.users, reached_end, events);
@@ -1723,6 +1736,9 @@ impl State {
         fetch: StarterFetch,
         events: &mut Vec<StoreEvent>,
     ) {
+        if let StarterFetch::Found(original) = &fetch {
+            self.put_threads_of(std::slice::from_ref(original), events);
+        }
         self.windows
             .settle_starter(thread, fetch, &self.entities.users, events);
     }
@@ -1816,6 +1832,7 @@ pub(crate) fn wall_millis() -> i64 {
         })
 }
 
+mod boxes;
 mod reading;
 
 #[cfg(test)]

@@ -888,6 +888,7 @@ impl MessageRow {
                 application_name: self.application_name,
             }
             .boxed(),
+            thread: None,
         }
     }
 }

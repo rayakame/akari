@@ -230,6 +230,7 @@ pub(crate) fn message(channel: u64, id: u64, content: &str) -> Message {
         referenced_message: ReferencedMessage::NotIncluded,
         delivery: Delivery::Sent,
         system: None,
+        thread: None,
     }
 }
 

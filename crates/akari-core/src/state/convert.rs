@@ -344,6 +344,7 @@ pub(crate) type Intern<'a> = &'a mut dyn FnMut(model::User) -> Arc<User>;
 
 impl Message {
     pub(crate) fn from_wire(message: model::Message, intern: Intern<'_>) -> Self {
+        let thread = message.thread.as_ref().map(|thread| thread.id);
         let referenced_message = match message.referenced_message {
             None => ReferencedMessage::NotIncluded,
             Some(None) => ReferencedMessage::Deleted,
@@ -396,6 +397,7 @@ impl Message {
                     .map(|application| text(application.name)),
             }
             .boxed(),
+            thread,
         }
     }
 
@@ -428,6 +430,7 @@ impl Message {
             referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Pending,
             system: None,
+            thread: None,
         }
     }
 
@@ -462,6 +465,9 @@ impl Message {
         }
         next.pinned = update.pinned.unwrap_or(next.pinned);
         next.flags = update.flags.unwrap_or(next.flags);
+        if let Some(thread) = update.thread {
+            next.thread = Some(thread.id);
+        }
         if let Some(ended) = update.call {
             let mut system = next.system.take().map(|system| *system).unwrap_or_default();
             system.call = Some(call(ended));
