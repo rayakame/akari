@@ -69,13 +69,14 @@ impl Account {
         self.core.view_channel(channel_id);
     }
 
-    /// The channel the user is reading at its newest messages, or `None`. While set, the
-    /// channel is acked up to the newest message its list shows at the present, and again as
-    /// that list grows, paced. Hosts set it only while the user is engaged with the channel at
-    /// the bottom of its list. A dropped connection clears it: set it again once online and the
-    /// list is refreshed.
-    pub fn set_reading(&self, channel_id: Option<ChannelId>) {
-        self.core.set_reading(channel_id);
+    /// The channels the user is reading at their newest messages, at most two (a channel and
+    /// the thread beside it); further ones are ignored, and an empty list reads none. Each is
+    /// acked up to the newest message its list shows at the present, and again as that list
+    /// grows, paced per channel. Hosts name a channel only while the user is engaged with it at
+    /// the bottom of its list. A dropped connection clears them: set them again once online and
+    /// the lists are refreshed.
+    pub fn set_reading(&self, channel_ids: Vec<ChannelId>) {
+        self.core.set_reading(&channel_ids);
     }
 
     /// Marks the channel read now (Escape, the context menu).

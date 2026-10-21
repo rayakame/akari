@@ -76,13 +76,19 @@ fn target(ack: Ack) -> Ack {
     }
 }
 
+// One channel read: at most one ack.
+fn single(mut acks: Vec<Ack>) -> Option<Ack> {
+    assert!(acks.len() <= 1, "{acks:?}");
+    acks.pop().map(target)
+}
+
 fn taken(state: &mut State) -> Option<Ack> {
-    state.take_reading_ack().map(target)
+    single(state.take_reading_acks())
 }
 
 fn reading(state: &mut State, channel: Option<u64>) -> (Option<Ack>, Vec<String>) {
     let mut events = Vec::new();
-    let ack = state.set_reading(channel.map(id), &mut events).map(target);
+    let ack = single(state.set_reading(channel.map(id).as_slice(), &mut events));
     (ack, events.iter().map(describe).collect())
 }
 
@@ -154,6 +160,44 @@ fn reading_a_channel_with_only_mentions_acks_it() {
     assert_eq!(read_state(&state, GENERAL), Some((Some(NEWEST), 0)));
 }
 
+// The split view: the channel and the thread beside it are read at once.
+#[test]
+fn reading_two_channels_acks_both_locally() {
+    let mut state = ready_where(thread_unread);
+    let thread_newest = 400_000_000_000_000_030;
+    showing(&mut state, GENERAL, &[NEWEST]);
+    showing(&mut state, THREAD, &[thread_newest]);
+    let thread_ack = |cursor| Ack {
+        body: AckBody::Thread { joined: true },
+        ..at(THREAD, cursor).unwrap()
+    };
+
+    let acks: Vec<Ack> = state
+        .set_reading(&[id(GENERAL), id(THREAD)], &mut Vec::new())
+        .into_iter()
+        .map(target)
+        .collect();
+
+    assert_eq!(
+        acks,
+        [at(GENERAL, NEWEST).unwrap(), thread_ack(thread_newest)]
+    );
+    assert_eq!(badge(&state, GENERAL), Badge::default());
+    assert_eq!(badge(&state, THREAD), Badge::default());
+    apply(&mut state, "MESSAGE_CREATE", plain(NEWEST + 1, GENERAL));
+    assert_eq!(taken(&mut state), at(GENERAL, NEWEST + 1));
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        plain(thread_newest + 1, THREAD),
+    );
+    assert_eq!(taken(&mut state), Some(thread_ack(thread_newest + 1)));
+    assert_eq!(
+        read_state(&state, THREAD),
+        Some((Some(thread_newest + 1), 0))
+    );
+}
+
 #[test]
 fn a_message_arriving_while_reading_is_read_at_once() {
     let mut state = general_read();
@@ -178,7 +222,7 @@ fn an_ack_carries_the_read_state_from_before_it() {
     let ready = state.read_state(id(GENERAL));
     assert_eq!(ready.map(|read| read.mentions), Some(2));
 
-    let read = state.set_reading(Some(id(GENERAL)), &mut Vec::new());
+    let read = state.set_reading(&[id(GENERAL)], &mut Vec::new()).pop();
     assert_eq!(read.map(|ack| ack.before), Some(ready));
     assert_eq!(
         read.map(|ack| ack.after),
@@ -187,7 +231,7 @@ fn an_ack_carries_the_read_state_from_before_it() {
     );
     apply(&mut state, "MESSAGE_CREATE", message(NEWEST + 1, GENERAL));
     assert_eq!(
-        state.take_reading_ack().map(|ack| ack.before),
+        state.take_reading_acks().pop().map(|ack| ack.before),
         Some(Some(ReadState {
             acked: Some(Snowflake::new(NEWEST)),
             mentions: 1,
@@ -953,7 +997,8 @@ fn a_refused_reading_ack_isnt_taken_again() {
     let mut state = ready_state();
     showing(&mut state, GENERAL, &[NEWEST]);
     let ack = state
-        .set_reading(Some(id(GENERAL)), &mut Vec::new())
+        .set_reading(&[id(GENERAL)], &mut Vec::new())
+        .pop()
         .unwrap();
 
     undo(&mut state, ack);

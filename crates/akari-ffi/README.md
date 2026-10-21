@@ -88,16 +88,17 @@ leave, telling Discord where the user chose it (`ThreadLocation`: `SidebarOverfl
 comes as `ChannelUpdated`. An archived thread, or one the store doesn't have, fails with
 `InvalidRequest` before asking.
 
-Acks: `set_reading(channel_id)` names the channel the user is reading at its newest messages
-(or `None`), `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request
+Acks: `set_reading(channel_ids)` names the channels the user is reading at their newest
+messages: none, one, or two in the split view (a channel and the thread beside it; further ones
+are ignored). `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request
 (Escape, context menus). All three return at once, and the core sends the acks in the
 background. `mark_read` and `mark_guilds_read` clear the badges at once: the events fire before
-Discord answers. `set_reading(Some)` clears them only when the channel's list, at the present
-and not stale, shows messages past the read position (or the channel has mentions), and only
-up to the newest message it shows; it reads again as that list grows. `set_reading(None)`
-clears nothing. The core stops reading on its own when the connection drops, on `disconnect()`
-and when the account closes: set the channel again once the session is online and its list is
-refreshed. An ack Discord refuses can bring a channel's badge back (`BadgeChanged`). The host
+Discord answers. `set_reading` clears a channel's only when its list, at the present and not
+stale, shows messages past the read position (or the channel has mentions), and only up to the
+newest message it shows; it reads again as that list grows. An empty list clears nothing. The
+core stops reading on its own when the connection drops, on `disconnect()` and when the account
+closes: set the channels again once the session is online and their lists are refreshed. An ack
+Discord refuses can bring a channel's badge back (`BadgeChanged`). The host
 decides when the user is reading; the core never infers it
 ([read-states.md](../../docs/protocol/read-states.md#how-akari-acks)).
 

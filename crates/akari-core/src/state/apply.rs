@@ -355,10 +355,11 @@ pub(crate) struct State {
     restored: bool,
     windows: Windows,
     cooldowns: Cooldowns,
-    // The channel the user is reading, with the newest row its list showed after the last write.
-    reading: Option<(ChannelId, Option<MessageId>)>,
-    // Its local ack from the latest write, for the account to send.
-    due: Option<Ack>,
+    // The channels the user is reading (a channel and the thread beside it), each with the newest
+    // row its list showed after the last write.
+    reading: Vec<(ChannelId, Option<MessageId>)>,
+    // Their local acks from the latest write, for the account to send.
+    due: Vec<Ack>,
     // Channels whose cursor came from an unread update and may be behind Discord's.
     stale_cursors: HashSet<ChannelId>,
     // Open while a READY is prepared.
@@ -396,8 +397,8 @@ impl State {
             restored: false,
             windows: Windows::new(limits),
             cooldowns: Cooldowns::default(),
-            reading: None,
-            due: None,
+            reading: Vec::new(),
+            due: Vec::new(),
             stale_cursors: HashSet::new(),
             journal: None,
             recounts: HashMap::new(),

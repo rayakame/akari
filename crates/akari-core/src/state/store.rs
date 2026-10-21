@@ -297,13 +297,13 @@ impl Store {
         value
     }
 
-    // Returns the ack of the channel being read, when the event left it unread.
-    pub(crate) fn apply(&self, event: DispatchEvent) -> Option<Ack> {
+    // Returns the acks of the channels being read that the event left unread.
+    pub(crate) fn apply(&self, event: DispatchEvent) -> Vec<Ack> {
         match event {
             DispatchEvent::Ready(ready) => {
                 let next = self.prepare_ready(*ready);
                 self.replace(next);
-                None
+                Vec::new()
             }
             DispatchEvent::GuildCreate(guild) => match *guild {
                 GatewayGuild::Available(guild) => {
@@ -314,26 +314,26 @@ impl Store {
                     self.park();
                     self.write("GUILD_CREATE", |inner, events| {
                         inner.state.add_guild(next, events);
-                        inner.state.take_reading_ack()
+                        inner.state.take_reading_acks()
                     })
                 }
                 unavailable => {
                     let event = DispatchEvent::GuildCreate(Box::new(unavailable));
                     self.write("GUILD_CREATE", |inner, events| {
                         inner.state.apply(event, events);
-                        inner.state.take_reading_ack()
+                        inner.state.take_reading_acks()
                     })
                 }
             },
             DispatchEvent::NotificationSettingsUpdate(settings) => {
                 self.set_notification_flags(settings.flags);
-                None
+                Vec::new()
             }
             event => {
                 let name = event.name();
                 self.write(name, |inner, events| {
                     inner.state.apply(event, events);
-                    inner.state.take_reading_ack()
+                    inner.state.take_reading_acks()
                 })
             }
         }
@@ -475,10 +475,10 @@ impl Store {
         ticket: LoadTicket,
         page: Vec<model::Message>,
         reached_end: bool,
-    ) -> (PageOutcome, Option<Ack>) {
+    ) -> (PageOutcome, Vec<Ack>) {
         self.write("load", |inner, events| {
             let outcome = inner.state.finish_load(ticket, page, reached_end, events);
-            (outcome, inner.state.take_reading_ack())
+            (outcome, inner.state.take_reading_acks())
         })
     }
 
@@ -540,18 +540,19 @@ impl Store {
         });
     }
 
-    // Returns the channel's ack when its list shows unread messages; before the first READY, none.
-    pub(crate) fn set_reading(&self, channel: Option<ChannelId>) -> Option<Ack> {
+    // Returns the acks of the channels whose lists show unread messages; before the first READY,
+    // none.
+    pub(crate) fn set_reading(&self, channels: &[ChannelId]) -> Vec<Ack> {
         self.write("reading", |inner, events| {
-            inner.state.set_reading(channel, events)
+            inner.state.set_reading(channels, events)
         })
     }
 
     // A connection that dropped may come back in a new session: until the host says the user
-    // still reads the channel, nothing acks it.
+    // still reads the channels, nothing acks them.
     pub(crate) fn stop_reading(&self) {
         self.write("reading", |inner, events| {
-            inner.state.set_reading(None, events);
+            inner.state.set_reading(&[], events);
         });
     }
 

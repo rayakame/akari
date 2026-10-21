@@ -79,7 +79,8 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.view(channelId))
     }
 
-    override func setReading(channelId: ChannelId?) {
+    override func setReading(channelIds: [ChannelId]) {
+        let channelId = channelIds.first
         readingCalls.withLock { $0.append(channelId) }
         if let channelId, let state = readStateAfterReading.current {
             fakeStore.update { $0.readStates[channelId] = state }

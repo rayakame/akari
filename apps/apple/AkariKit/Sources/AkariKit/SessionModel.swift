@@ -686,7 +686,7 @@ public final class SessionModel {
         }
         resendReading = false
         toldReading = reading
-        account.setReading(channelId: reading)
+        account.setReading(channelIds: reading.map { [$0] } ?? [])
     }
 
     private static func showsUnread(_ badge: Badge) -> Bool {

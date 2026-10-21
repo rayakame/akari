@@ -14,6 +14,8 @@ use crate::state::settings::NotificationLevel;
 use crate::state::types::{Channel, ThreadInfo};
 
 const MENTION_ON_ALL_MESSAGES: u64 = 1 << 5;
+// A channel and the thread beside it in the split view.
+const READING_LIMIT: usize = 2;
 
 impl Entities {
     /// The channel's newest message is past where the user stopped reading.
@@ -255,42 +257,56 @@ impl State {
                     }))
     }
 
-    // Before the first READY the channel is only remembered.
+    // Before the first READY the channels are only remembered. Duplicates count once; past
+    // `READING_LIMIT` channels are ignored.
     pub(crate) fn set_reading(
         &mut self,
-        channel: Option<ChannelId>,
+        channels: &[ChannelId],
         events: &mut Vec<StoreEvent>,
-    ) -> Option<Ack> {
-        self.reading = channel.map(|id| (id, self.windows.newest_at_present(id)));
-        let ack = self
-            .reading
-            .and_then(|(id, shown)| self.read_shown(id, shown?));
+    ) -> Vec<Ack> {
+        self.reading.clear();
+        for &channel in channels {
+            if self.reading.len() == READING_LIMIT {
+                break;
+            }
+            if !self.reading.iter().any(|(read, _)| *read == channel) {
+                self.reading
+                    .push((channel, self.windows.newest_at_present(channel)));
+            }
+        }
+        let reading = self.reading.clone();
+        let acks = reading
+            .into_iter()
+            .filter_map(|(channel, shown)| self.read_shown(channel, shown?))
+            .collect();
         self.refresh_badges(self.now_millis(), events);
-        ack
+        acks
     }
 
     // Only the list growing at its present end reads the channel again. A cursor moved by
     // anything else may be past what the list shows, and an ack from elsewhere moves no row.
     pub(super) fn follow_reading(&mut self) {
-        let Some((channel, seen)) = self.reading else {
-            return;
-        };
-        let shown = self.windows.newest_at_present(channel);
-        if shown == seen {
-            return;
-        }
-        self.reading = Some((channel, shown));
-        if let Some(newest) = shown.filter(|_| shown > seen)
-            && let Some(ack) = self.read_shown(channel, newest)
-        {
-            self.due = Some(ack);
+        for index in 0..self.reading.len() {
+            let (channel, seen) = self.reading[index];
+            let shown = self.windows.newest_at_present(channel);
+            if shown == seen {
+                continue;
+            }
+            self.reading[index] = (channel, shown);
+            if let Some(newest) = shown.filter(|_| shown > seen)
+                && let Some(ack) = self.read_shown(channel, newest)
+            {
+                self.due.retain(|due| due.channel != channel);
+                self.due.push(ack);
+            }
         }
     }
 
-    // A READY reads nothing itself: the list it leaves is read once it grows.
+    // A READY reads nothing itself: the lists it leaves are read once they grow.
     pub(super) fn follow_ready(&mut self) {
-        if let Some((channel, _)) = self.reading {
-            self.reading = Some((channel, self.windows.newest_at_present(channel)));
+        for index in 0..self.reading.len() {
+            let channel = self.reading[index].0;
+            self.reading[index] = (channel, self.windows.newest_at_present(channel));
         }
     }
 
@@ -342,8 +358,8 @@ impl State {
         true
     }
 
-    pub(crate) fn take_reading_ack(&mut self) -> Option<Ack> {
-        self.due.take()
+    pub(crate) fn take_reading_acks(&mut self) -> Vec<Ack> {
+        std::mem::take(&mut self.due)
     }
 
     // `None` when the channel is read and has no mentions: nothing to send.

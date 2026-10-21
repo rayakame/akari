@@ -1974,7 +1974,7 @@ fn reading_and_marking_guilds_read_during_ready_preparation_survive_the_swap() {
     load_page(&store, GENERAL, 400_000_000_000_000_003);
     let prepared = store.prepare_ready(ready_where(thread_unread));
 
-    assert!(store.set_reading(Some(general())).is_some());
+    assert!(!store.set_reading(&[general()]).is_empty());
     assert!(!store.mark_guilds_read(&[Snowflake::new(G1)]).is_empty());
     store.replace(prepared);
 

@@ -37,7 +37,7 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     override func reservePlacing() -> UInt64 { 0 }
     override func viewChannel(channelId: ChannelId) {}
     override func supersedeAroundLoads(channelId: ChannelId) {}
-    override func setReading(channelId: ChannelId?) {}
+    override func setReading(channelIds: [ChannelId]) {}
     override func markRead(channelId: ChannelId) {}
     override func markGuildsRead(guildIds: [GuildId]) {}
 }
