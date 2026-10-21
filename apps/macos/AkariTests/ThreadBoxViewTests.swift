@@ -98,14 +98,11 @@ struct ThreadBoxViewTests {
     @Test
     func theBoxMatchesItsMeasures() throws {
         let (cell, view) = try shown()
-        let content = try #require(list.messageTexts(in: cell).first)
         let frame = Self.frame(of: view, in: cell)
         let box = view.boxFrame.offsetBy(dx: frame.minX, dy: frame.minY)
-        let text = Self.frame(of: content, in: cell)
 
         #expect(box.minX == 72)
         #expect(box.height == 56)
-        #expect(box.minY - text.maxY == 8)
         #expect(box.width <= 480)
 
         let rep = try renderedAt2x(cell)
@@ -120,11 +117,67 @@ struct ThreadBoxViewTests {
         #expect(same(Self.pixel(rep, box.minX + 20, box.minY + 0.25), border))
         #expect(same(Self.pixel(rep, box.minX + 20, box.maxY - 0.25), border))
         #expect(blank(Self.pixel(rep, box.minX + 20, box.minY - 0.25)))
-        // As Discord's, the box ends with the message.
-        #expect(box.maxY == cell.bounds.height)
+        // As Discord's, the box ends with the message (a row's height rounds up to a point).
+        #expect(cell.bounds.height - box.maxY < 1)
         // A 4 pt radius leaves the corner itself to the chat behind it.
         #expect(blank(Self.pixel(rep, box.minX + 0.25, box.minY + 0.25)))
         #expect(same(Self.pixel(rep, box.minX + 0.25, box.minY + 4.25), border))
+    }
+
+    // The bottom of a text's ink without descenders, in points from the view's top: its baseline.
+    static func baseline(of rect: NSRect, in rep: NSBitmapImageRep) -> CGFloat? {
+        var last: Int?
+        for y in Int(rect.minY * 2)..<Int(rect.maxY * 2) {
+            let inked = (Int(rect.minX * 2)..<Int(rect.maxX * 2)).contains { x in
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+                    return false
+                }
+                return color.alphaComponent > 0.5 && color.brightnessComponent > 0.5
+            }
+            if inked {
+                last = y
+            }
+        }
+        return last.map { CGFloat($0 + 1) / 2 }
+    }
+
+    // Measured on the official client at 2x: 15.5 from a message's baseline to the box's border.
+    @Test
+    func theBoxSitsWhereDiscordsDoesUnderAMessage() throws {
+        let (cell, view) = try shown()
+        let content = try #require(list.messageTexts(in: cell).first)
+        let frame = Self.frame(of: view, in: cell)
+        let box = view.boxFrame.offsetBy(dx: frame.minX, dy: frame.minY)
+        let rep = try renderedAt2x(cell)
+
+        let baseline = try #require(
+            Self.baseline(of: try glyphs(of: "test", in: content, within: cell), in: rep))
+
+        #expect(abs(box.minY - baseline - 15.5) <= 0.5, "\(box.minY - baseline)")
+    }
+
+    // And 9.5 from a "started a thread" line's (Chris: about 10).
+    @Test
+    func theBoxSitsWhereDiscordsDoesUnderALine() throws {
+        list.show([
+            row(
+                22, by: author(2, "Ray"), at: newest, kind: .threadCreated, content: "t13",
+                reference: MessageReference(
+                    messageId: nil, channelId: ChannelId(rawValue: 22),
+                    guildId: GuildId(rawValue: 1)),
+                hasThread: true, threadBox: box())
+        ])
+        let cell = try #require(try list.cell(of: 22) as? NoticeCell)
+        let view = try #require(Self.boxView(in: cell))
+        let text = try #require(list.messageTexts(in: cell).first)
+        let frame = Self.frame(of: view, in: cell)
+        let box = view.boxFrame.offsetBy(dx: frame.minX, dy: frame.minY)
+        let rep = try renderedAt2x(cell)
+
+        let baseline = try #require(
+            Self.baseline(of: try glyphs(of: "t13", in: text, within: cell), in: rep))
+
+        #expect(abs(box.minY - baseline - 9.5) <= 0.5, "\(box.minY - baseline)")
     }
 
     @Test
@@ -268,7 +321,7 @@ struct ThreadBoxViewTests {
 
         let box = view.boxFrame.offsetBy(
             dx: Self.frame(of: view, in: cell).minX, dy: Self.frame(of: view, in: cell).minY)
-        #expect(box.minY - Self.frame(of: text, in: cell).maxY == 0)
+        #expect(box.minY > Self.frame(of: text, in: cell).maxY - 1)
         #expect(box.minX == 72)
     }
 

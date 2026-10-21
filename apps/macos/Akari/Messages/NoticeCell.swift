@@ -19,6 +19,8 @@ final class NoticeCell: NSTableCellView {
     private static let lineTop: CGFloat = 2
     private var textTop: NSLayoutConstraint?
     private static let bottom: CGFloat = 2
+    // Discord's box border sits 9.5 below a line's baseline.
+    private static let boxGap: CGFloat = 3.5
     private static let leading: CGFloat = 72
     private static let trailing: CGFloat = 16
     // Measures as the cell's own text view lays out; string drawing breaks the line differently.
@@ -59,7 +61,8 @@ final class NoticeCell: NSTableCellView {
         sizing.show(line(notice, time: time))
         sizing.setFrameSize(NSSize(width: width - leading - trailing, height: sizing.frame.height))
         return textTop(followsDay: followsDay, followsLine: followsLine)
-            + sizing.intrinsicContentSize.height + (hasBox ? ThreadBoxView.height : 0) + bottom
+            + sizing.intrinsicContentSize.height
+            + (hasBox ? ThreadBoxView.height(topInset: boxGap) : 0) + bottom
     }
 
     func configure(
@@ -150,8 +153,8 @@ final class NoticeCell: NSTableCellView {
         box.target = self
         box.action = #selector(threadBoxClicked)
         addSubview(box)
-        // Under a system line Discord's box has no gap above it.
-        textAboveBox = text.bottomAnchor.constraint(equalTo: box.topAnchor)
+        box.topInset = Self.boxGap
+        textAboveBox = box.topAnchor.constraint(equalTo: text.bottomAnchor)
         NSLayoutConstraint.activate([
             box.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
             box.leadingAnchor.constraint(equalTo: text.leadingAnchor),

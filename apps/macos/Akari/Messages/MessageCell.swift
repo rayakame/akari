@@ -67,8 +67,8 @@ final class MessageCell: NSTableCellView {
     private static let textTrailing: CGFloat = 16
     private static let spacing: CGFloat = 2
     private static let avatarSize: CGFloat = 40
-    // Discord's box sits 8 below the message's text; the stack's spacing gives 2 of it.
-    private static let boxGap: CGFloat = 8
+    // Discord's box border sits 15.5 below the text's baseline; the stack's spacing gives 2 of it.
+    private static let boxGap: CGFloat = 9.5
     private static let sizing = MessageCell()
 
     init() {

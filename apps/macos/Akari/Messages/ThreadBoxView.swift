@@ -23,7 +23,8 @@ final class ThreadBoxView: NSButton {
     private(set) var box: ThreadBox?
     private var content: NSAttributedString?
     private var time: String?
-    /// Kept clear above the box: the gap to the message's text.
+    /// Kept clear above the box: the gap to the message's text. The view's height rounds up to a
+    /// whole point, as row heights do.
     var topInset: CGFloat = 0 {
         didSet { invalidateIntrinsicContentSize() }
     }
@@ -52,7 +53,11 @@ final class ThreadBoxView: NSButton {
     override var isFlipped: Bool { true }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: topInset + Self.height)
+        NSSize(width: NSView.noIntrinsicMetric, height: Self.height(topInset: topInset))
+    }
+
+    static func height(topInset: CGFloat) -> CGFloat {
+        (topInset + height).rounded(.up)
     }
 
     /// `content`: the newest message's text as the box shows it, `time` the relative time.
