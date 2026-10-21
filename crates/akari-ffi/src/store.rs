@@ -251,6 +251,15 @@ impl Store {
         })
     }
 
+    /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC, live messages and
+    /// the thread's newest page, for the session; `None` while none is known. A change comes as
+    /// `MessageUpdated` for the box's row: the parent's message with the thread's ID.
+    pub fn latest_message(&self, thread_id: ChannelId) -> Option<Message> {
+        let message = self.core.latest_message(thread_id)?;
+        let names = Names::new(&self.core, thread_id);
+        Some(self.message(&message, &names, &mut 0))
+    }
+
     /// How this account's message contents were parsed so far.
     pub fn content_stats(&self) -> ContentStats {
         self.contents.stats()

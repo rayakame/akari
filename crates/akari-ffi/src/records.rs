@@ -195,9 +195,15 @@ pub struct ThreadInfo {
     pub locked: bool,
     /// Only its members and moderators see it.
     pub private: bool,
+    /// As the store keeps it: moved by every message in the thread and every delete, which
+    /// `MessageUpdated` for its box's row reports, not `ChannelUpdated`.
     pub message_count: Option<u32>,
     /// Who started it.
     pub owner_id: Option<UserId>,
+    /// Its newest message, moved by every message in it.
+    pub last_message_id: Option<MessageId>,
+    /// `None` for threads created before 2022-01-09.
+    pub created_at: Option<SystemTime>,
 }
 
 impl From<&state::Channel> for Channel {
@@ -220,6 +226,8 @@ impl From<&state::Channel> for Channel {
                 private: channel.kind == ChannelType::PrivateThread,
                 message_count: info.message_count,
                 owner_id: channel.owner_id,
+                last_message_id: channel.last_message_id.map(|id| id.cast()),
+                created_at: info.create_timestamp.map(system_time),
             }),
         }
     }

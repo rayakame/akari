@@ -132,6 +132,35 @@ impl Account {
         .map_err(Into::into)
     }
 
+    /// Joins the thread; the store has it joined once Discord says yes. `InvalidRequest` for an
+    /// archived thread or one the store doesn't have, before asking.
+    pub async fn join_thread(
+        &self,
+        thread_id: ChannelId,
+        location: ThreadLocation,
+    ) -> Result<(), RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.join_thread(thread_id, location.into()).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Leaves the thread, as `join_thread` joins it.
+    pub async fn leave_thread(
+        &self,
+        thread_id: ChannelId,
+        location: ThreadLocation,
+    ) -> Result<(), RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.leave_thread(thread_id, location.into()).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
     /// Drops the pages of `Around` loads running for the channel, so they don't replace its
     /// window: Escape or a mark as read during a jump, where no `Latest` load overtakes them.
     pub fn supersede_around_loads(&self, channel_id: ChannelId) {
@@ -204,6 +233,27 @@ impl Account {
     /// Drops a failed message.
     pub fn discard_message(&self, channel_id: ChannelId, pending_id: MessageId) {
         self.core.discard_message(channel_id, pending_id);
+    }
+}
+
+/// Where the user chose to join or leave a thread, which Discord's own client tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ThreadLocation {
+    /// The "…" menu of a thread beside its parent.
+    SidebarOverflow,
+    /// The "…" menu of a thread open full width.
+    ToolbarOverflow,
+    /// A thread row's context menu.
+    ContextMenu,
+}
+
+impl From<ThreadLocation> for akari_core::ThreadLocation {
+    fn from(location: ThreadLocation) -> Self {
+        match location {
+            ThreadLocation::SidebarOverflow => Self::SidebarOverflow,
+            ThreadLocation::ToolbarOverflow => Self::ToolbarOverflow,
+            ThreadLocation::ContextMenu => Self::ContextMenu,
+        }
     }
 }
 
