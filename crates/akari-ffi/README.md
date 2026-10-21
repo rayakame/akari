@@ -66,7 +66,7 @@ started from it. For system lines it also carries its `mentions`, a call's `call
 end), `role_subscription`, `purchased_product`, a bot join's `actor`, `application_name`, and the
 first embed's `embed_fields` (a poll result's and an AutoMod alert's data). `member_nick(guild_id,
 user_id)` gives a member's server nickname where the store has their member: so far only the
-current user's. `starter_message(thread_id)` reads a thread's first message when it started
+current user's. The apps don't use it yet; it waits for the member milestone. `starter_message(thread_id)` reads a thread's first message when it started
 from a message in its channel: `Loaded { message }` with the parent's `Message`, `Loading`
 while the core fetches it (Discord sometimes leaves it out), or `Unavailable` when it was
 deleted or can't be read; `None` until the thread's window holds its first message. When it

@@ -45,12 +45,10 @@ author; the rest show only their content.
   line's 41. *Akari: avatar and name line 4 into its 47 box (name baseline at 19), text
   baseline 41, the avatar 3 above the box's bottom; a group start whose content is shorter than
   the avatar is as tall as a one-line one.*
-- The author's name in medium `textStrong`: their server nickname, else their global name, else
-  their username, as Discord's client names people. Bots carry a small tag after the name
-  ("APP" since 2024). **Unverified** that webhooks get the same tag. *Akari: the nickname where
-  the store has the member, which so far is only the user's own; other members' nicknames wait
-  for a member cache. A webhook's name is its own; in DMs Discord would prefer a friend's
-  nickname, which Akari doesn't keep.*
+- The author's name in medium `textStrong`: Discord shows the server nickname, else the global
+  name, else the username. Bots carry a small tag after the name ("APP" since 2024).
+  **Unverified** that webhooks get the same tag. *Akari: the global name, else the username;
+  server nicknames come with the member milestone.*
 - The time, 4 after the name, in medium `chatTextMuted` (12 px in the official client;
   Akari's sizes in [typography.md](typography.md)).
 

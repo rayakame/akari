@@ -187,8 +187,7 @@ Rules every Apple app shows the same way, so they live here rather than in the a
   names. `nil` is a message people write, an empty list a kind Discord shows no line for.
   A list's rows carry their context, `Row.isHidden` marks the empty ones, and the timeline
   leaves them out. `Row.authorName` is the header's name; it and the people a line names
-  resolve as Discord's client does: the server nickname where the store has the member
-  (`Store.memberNick`, so far the user's own), else the display name; `Initials` gives the letters a
+  follow one rule, the display name (the global name, else the username); `Initials` gives the letters a
   server or avatar without an image shows; `Channel.opensMessageList` says which channels
   have a message list.
 
