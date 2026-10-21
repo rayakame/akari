@@ -58,8 +58,8 @@ public final class MessageListModel {
         public let threadLinked: Bool
         /// What a system message's line is worded for.
         public let noticeContext: Message.NoticeContext
-        /// The header's name for `shown`'s author: their server nickname where the store has
-        /// their member, else their display name.
+        /// The header's name for `shown`'s author, by the rule system lines name people with:
+        /// the global name, else the username.
         public let authorName: String
 
         public init(
@@ -192,8 +192,6 @@ public final class MessageListModel {
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
     @ObservationIgnored private let place: Message.NoticeContext.Place
-    // Server nicknames by user, `nil` for none; cleared when the guild's members change.
-    @ObservationIgnored private var nicks: [UserId: String?] = [:]
     @ObservationIgnored private let ownerId: UserId?
     @ObservationIgnored private var storedOwner: String?
     @ObservationIgnored private var hasMessages = false
@@ -435,9 +433,6 @@ public final class MessageListModel {
             placeNewMessagesLine()
         }
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
-        if batch.everythingChanged || guildId.map(batch.membersChanged.contains) == true {
-            nicks = [:]
-        }
         if batch.everythingChanged || batch.currentUserChanged
             || ownerId.map(batch.usersChanged.contains) == true
         {
@@ -715,24 +710,16 @@ public final class MessageListModel {
             noticeContext: held.noticeContext, authorName: held.authorName)
     }
 
-    // As Discord's client names people: the server nickname where the store has the member.
+    // One rule for headers and system lines; server nicknames come with the member milestone.
     private func name(of user: User) -> String {
-        guard let guildId else {
-            return user.displayName
-        }
-        if let known = nicks[user.id] {
-            return known ?? user.displayName
-        }
-        let nick = store.memberNick(guildId: guildId, userId: user.id)
-        nicks[user.id] = .some(nick)
-        return nick ?? user.displayName
+        user.displayName
     }
 
     // Reads only what the kind's line needs: most rows are people's messages.
     private func noticeContext(for message: Message) -> Message.NoticeContext {
         var context = Message.NoticeContext(currentUserId: userId, place: place)
         context.guildId = guildId
-        if guildId != nil, message.noticeParts(in: context) != nil {
+        if message.noticeParts(in: context) != nil {
             for user in [message.author] + message.mentions + [message.actor].compactMap({ $0 }) {
                 context.names[user.id] = name(of: user)
             }

@@ -172,58 +172,20 @@ struct NoticeContextTests {
         #expect(model.rows.first?.notice == "Ray started a thread: launch. See all threads.")
     }
 
-    // As Discord's client names people: the member's server nickname where Akari has it, then
-    // the display name.
+    // Headers and system lines name a person by one rule: the global name, else the username
+    // (the user's display name). Server nicknames come with the member milestone.
     @Test
-    func noticesAndHeadersUseTheServerNickname() {
-        let me = user(1, name: "Me")
-        store.update { state in
-            state.channels[id(20)] = thread(20, in: 10)
-            state.memberNicks[id(1)] = [id(1): "Boss", mira.id: "Mimi"]
-        }
+    func headersAndLinesNameAPersonAlike() {
+        let raw = User(
+            id: id(4), username: "noa", globalName: nil, displayName: "noa", bot: false,
+            system: false)
+        store.update { $0.channels[id(20)] = thread(20, in: 10) }
 
-        let added = row(in: id(20), message(1, in: 20, by: me, kind: .recipientAdd, mentions: [mira]))
+        let added = row(in: id(20), message(1, in: 20, by: raw, kind: .recipientAdd, mentions: [mira]))
 
-        #expect(added?.notice == "Boss added Mimi to the thread.")
-        #expect(added?.authorName == "Boss")
+        #expect(added?.authorName == "noa")
+        #expect(added?.notice == "noa added Mira to the thread.")
         #expect(row(in: id(10), message(2, by: ray))?.authorName == "Ray")
-    }
-
-    @Test
-    func aNicknameChangeRenamesTheRows() {
-        store.update { state in
-            state.memberNicks[id(1)] = [id(1): "Boss"]
-            state.show(message(1, by: user(1, name: "Me")))
-            state.windows[id(10)] = window([1])
-        }
-        let model = MessageListModel(channelId: id(10), userId: id(1), account: account, store: store)
-        #expect(model.rows.first?.authorName == "Boss")
-
-        store.update { $0.memberNicks[id(1)] = [id(1): "Chief"] }
-        model.apply(EventBatch([.currentMemberUpdated(guildId: id(1))]))
-
-        #expect(model.rows.first?.authorName == "Chief")
-    }
-
-    // A DM has no server; a webhook's author isn't a member.
-    @Test
-    func aDMAndAWebhookGoByTheirDisplayNames() {
-        store.update { state in
-            state.channels[id(50)] = dm(50, with: 2)
-            state.memberNicks[id(1)] = [ray.id: "Rayo"]
-        }
-        let webhook = Message(
-            id: id(3), channelId: id(10), kind: .default, author: ray, fromWebhook: true,
-            content: "hook", timestamp: .now, editedTimestamp: nil, pinned: false,
-            mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
-            componentsV2: false, delivery: .sent, formatted: formattedText(content: "hook"),
-            mentionsMe: false, reference: nil, hasThread: false, mentions: [], call: nil,
-            roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
-            embedFields: [])
-
-        #expect(row(in: id(50), message(1, in: 50, by: ray))?.authorName == "Ray")
-        #expect(row(in: id(10), webhook)?.authorName == "Ray")
-        #expect(row(in: id(10), message(2, by: ray))?.authorName == "Rayo")
     }
 
     @Test

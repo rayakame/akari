@@ -27,7 +27,6 @@ final class FakeStore: Store, @unchecked Sendable {
         var unreadPrivateChannels: [ChannelId] = []
         var starters: [ChannelId: StarterMessage] = [:]
         var unavailableThreads: Set<ChannelId> = []
-        var memberNicks: [GuildId: [UserId: String]] = [:]
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -103,9 +102,9 @@ final class FakeStore: Store, @unchecked Sendable {
         read(.user(id)) { $0.users[id] }
     }
 
-    // Not logged: the read-count tests predate nicknames.
+    // The app doesn't ask yet; the member milestone does.
     override func memberNick(guildId: GuildId, userId: UserId) -> String? {
-        state.withLock { $0.memberNicks[guildId]?[userId] }
+        nil
     }
 
     override func guildIds() -> [GuildId] {

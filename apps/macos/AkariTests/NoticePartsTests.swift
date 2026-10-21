@@ -86,7 +86,7 @@ struct NoticePartsTests {
         #expect(actions.calls.last == "jump to 5")
     }
 
-    // The list resolves a header's name as Discord's client does: the server nickname first.
+    // The header shows the name the list resolves, by the rule system lines use too.
     @Test
     func aHeaderShowsTheRowsName() throws {
         list.show([row(1, by: author(2, "Ray"), at: noon, authorName: "Rayo")])
