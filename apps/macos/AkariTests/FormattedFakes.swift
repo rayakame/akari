@@ -73,11 +73,6 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
-    // A fake has no Rust object to ask.
-    override func memberNick(guildId: GuildId, userId: UserId) -> String? {
-        nil
-    }
-
     func add(_ count: UInt64, to channel: ChannelId) {
         counts.withLock { $0[channel.rawValue, default: 40] += count }
     }

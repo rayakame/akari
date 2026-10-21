@@ -834,18 +834,6 @@ impl Store {
         self.read(|inner| inner.state.current_member(guild))
     }
 
-    /// A member's server nickname, where the store has their member: so far only the current
-    /// user's.
-    pub fn member_nick(&self, guild: GuildId, user: UserId) -> Option<Box<str>> {
-        self.read(|inner| {
-            let state = &inner.state;
-            if state.current_user()?.user.id != user {
-                return None;
-            }
-            state.current_member(guild)?.nick.clone()
-        })
-    }
-
     /// Whether `message` mentions the current user: by ID, through @everyone or @here, or
     /// through one of the current member's roles. Suppress settings don't change it: the
     /// official client still highlights such a message and only leaves out its badge.

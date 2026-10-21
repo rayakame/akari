@@ -102,11 +102,6 @@ final class FakeStore: Store, @unchecked Sendable {
         read(.user(id)) { $0.users[id] }
     }
 
-    // The app doesn't ask yet; the member milestone does.
-    override func memberNick(guildId: GuildId, userId: UserId) -> String? {
-        nil
-    }
-
     override func guildIds() -> [GuildId] {
         read(.guildIds) { $0.guildIds }
     }

@@ -49,11 +49,6 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
-    // A fake has no Rust object to ask.
-    override func memberNick(guildId: GuildId, userId: UserId) -> String? {
-        nil
-    }
-
     private func person(_ raw: UInt64) -> User {
         User(
             id: UserId(rawValue: raw), username: "user\(raw)", globalName: nil,

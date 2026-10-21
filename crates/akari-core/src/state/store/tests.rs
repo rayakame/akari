@@ -1079,19 +1079,6 @@ fn a_private_thread_is_listed_only_when_joined() {
     );
 }
 
-// The store keeps only the current user's member so far; other nicknames wait for a member
-// cache.
-#[test]
-fn a_members_nick_is_known_for_the_current_user() {
-    let store = ready_store();
-
-    let me = store.member_nick(Snowflake::new(G1), Snowflake::new(ME));
-    let other = store.member_nick(Snowflake::new(G1), Snowflake::new(100_000_000_000_000_002));
-
-    assert_eq!(me.as_deref(), Some("Tester"));
-    assert_eq!(other, None);
-}
-
 #[test]
 fn guild_list_reads_join_dates_from_the_current_member() {
     let store = ready_store();
