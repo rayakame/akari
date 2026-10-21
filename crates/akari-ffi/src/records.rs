@@ -318,8 +318,6 @@ pub enum StarterMessage {
     Unavailable,
 }
 
-const HAS_THREAD: u64 = 1 << 5;
-
 impl Message {
     pub(crate) fn new(
         message: &state::Message,
@@ -357,7 +355,7 @@ impl Message {
                     channel_id: reference.channel_id,
                     guild_id: reference.guild_id,
                 }),
-            has_thread: message.flags & HAS_THREAD != 0,
+            has_thread: message.has_thread(),
             mentions: message
                 .mentions
                 .iter()

@@ -856,6 +856,11 @@ impl State {
                 info.member = before.member;
             }
         }
+        let newest_before = self
+            .entities
+            .channels
+            .get(&channel.id)
+            .and_then(|known| known.last_message_id);
         let stored = self.stored_member(channel.id);
         let waiting = self.pending_joins.remove(&channel.id);
         if let Some(info) = channel.thread.as_deref_mut() {
@@ -883,7 +888,7 @@ impl State {
                 events.push(StoreEvent::ChannelAdded(channel));
             }
         }
-        if self.drop_stale_latest(id) {
+        if self.drop_stale_latest(id, newest_before) {
             self.reread_boxes(id, events);
         }
     }
@@ -953,7 +958,7 @@ impl State {
             self.threads.add(&next);
             self.entities.channels.insert(id, next.clone());
             events.push(StoreEvent::ChannelUpdated(next));
-            if self.drop_stale_latest(id) {
+            if self.drop_stale_latest(id, known.last_message_id) {
                 self.reread_boxes(id, events);
             }
         }
@@ -1131,6 +1136,8 @@ impl State {
 
     fn merge_guild(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_memberships(&mut next);
+        // Like READY, GUILD_CREATE lists only the joined threads.
+        self.keep_known_threads(&mut next);
         let Some((&id, after)) = next.guilds.iter().next() else {
             return;
         };
@@ -1408,12 +1415,15 @@ impl State {
             .max()
             .filter(|_| present);
         self.put_threads_of(&page, events);
-        if present && self.note_newest_page(ticket.channel, &page) {
-            self.reread_boxes(ticket.channel, events);
-        }
         let outcome =
             self.windows
                 .finish_load(ticket, page, &self.entities.users, reached_end, events);
+        if outcome == PageOutcome::Applied
+            && ticket.cursor == Cursor::Latest
+            && self.note_newest_window(ticket.channel)
+        {
+            self.reread_boxes(ticket.channel, events);
+        }
         if let Some(newest) = newest {
             self.reach_present(ticket.channel, newest, events);
         }

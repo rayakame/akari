@@ -373,3 +373,189 @@ fn an_empty_newest_page_leaves_no_latest_and_no_count() {
         .and_then(|channel| channel.thread.as_deref()?.message_count);
     assert_eq!(count, Some(0));
 }
+
+fn synced_with_latest(state: &mut State) {
+    let mut thread = thread_object(SYNCED);
+    thread["message_count"] = 4.into();
+    let mut sync = sync(
+        Some(&[GENERAL]),
+        &[],
+        vec![in_thread(LATEST, SYNCED, "the newest")],
+    );
+    sync["threads"] = json!([thread]);
+    apply(state, "THREAD_LIST_SYNC", sync);
+}
+
+fn count_of(state: &State, thread: u64) -> Option<u32> {
+    state
+        .channel(Snowflake::new(thread))
+        .and_then(|channel| channel.thread.as_deref()?.message_count)
+}
+
+fn page_of(ids: &[u64]) -> Vec<model::Message> {
+    ids.iter()
+        .map(|id| {
+            serde_json::from_str(&in_thread(*id, SYNCED, &format!("page {id}")).to_string())
+                .unwrap()
+        })
+        .collect()
+}
+
+fn load(state: &mut State, kind: LoadKind, ids: &[u64], reached_end: bool) {
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(SYNCED), kind, 1, &mut events)
+        .unwrap();
+    state.finish_load(ticket, page_of(ids), reached_end, &mut events);
+}
+
+// Only the thread's newest page says it has no messages; an empty page after the newest doesn't.
+#[test]
+fn an_empty_page_after_the_newest_leaves_the_latest_and_the_count() {
+    let mut state = ready_state();
+    synced_with_latest(&mut state);
+    load(
+        &mut state,
+        LoadKind::Around(Snowflake::new(LATEST)),
+        &[LATEST - 1, LATEST],
+        false,
+    );
+
+    load(&mut state, LoadKind::Newer, &[], true);
+
+    assert_eq!(
+        latest_content(&state, SYNCED).as_deref(),
+        Some("the newest")
+    );
+    assert_eq!(count_of(&state, SYNCED), Some(4));
+}
+
+#[test]
+fn a_live_message_during_the_newest_page_stays_the_latest() {
+    let mut state = ready_state();
+    synced_with_latest(&mut state);
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(SYNCED), LoadKind::Latest, 1, &mut events)
+        .unwrap();
+
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        in_thread(LATEST + 5, SYNCED, "live"),
+    );
+    state.finish_load(ticket, page_of(&[LATEST]), true, &mut events);
+
+    assert_eq!(latest_content(&state, SYNCED).as_deref(), Some("live"));
+}
+
+#[test]
+fn a_message_deleted_during_the_newest_page_isnt_the_latest() {
+    let mut state = ready_state();
+    synced_with_latest(&mut state);
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(SYNCED), LoadKind::Latest, 1, &mut events)
+        .unwrap();
+
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": (LATEST + 1).to_string(), "channel_id": SYNCED.to_string()}),
+    );
+    state.finish_load(ticket, page_of(&[LATEST, LATEST + 1]), true, &mut events);
+
+    assert_eq!(
+        latest_content(&state, SYNCED),
+        Some(format!("page {LATEST}"))
+    );
+}
+
+#[test]
+fn a_newest_page_that_changes_nothing_rereads_no_box() {
+    let mut state = viewing_general();
+    let mut started = message(SYNCED, GENERAL);
+    started["flags"] = 32.into();
+    started["thread"] = thread_object(SYNCED);
+    apply(&mut state, "MESSAGE_CREATE", started);
+    load(&mut state, LoadKind::Latest, &[LATEST], true);
+    let mut events = Vec::new();
+    state.view_channel(Snowflake::new(SYNCED), &mut events);
+    let ticket = state.begin_load(Snowflake::new(SYNCED), LoadKind::Latest, 2, &mut events);
+    let ticket = ticket.unwrap();
+
+    state.finish_load(ticket, page_of(&[LATEST]), true, &mut events);
+
+    assert!(
+        !events.iter().any(
+            |event| matches!(event, StoreEvent::MessageUpdated(row) if row.id.get() == SYNCED)
+        )
+    );
+}
+
+// Discord keeps a deleted message as the thread's last_message_id; the one before it stays.
+#[test]
+fn a_payload_naming_a_deleted_newest_message_keeps_the_latest() {
+    let mut state = viewing_general();
+    let mut thread = thread_object(SYNCED);
+    thread["last_message_id"] = (LATEST + 9).to_string().into();
+    let mut sync = sync(
+        Some(&[GENERAL]),
+        &[],
+        vec![in_thread(LATEST, SYNCED, "the newest left")],
+    );
+    sync["threads"] = json!([thread.clone()]);
+    apply(&mut state, "THREAD_LIST_SYNC", sync);
+
+    apply(&mut state, "THREAD_UPDATE", thread.clone());
+    let mut started = message(SYNCED, GENERAL);
+    started["flags"] = 32.into();
+    started["thread"] = thread;
+    apply(&mut state, "MESSAGE_CREATE", started);
+
+    assert_eq!(
+        latest_content(&state, SYNCED).as_deref(),
+        Some("the newest left")
+    );
+}
+
+#[test]
+fn a_repeated_guild_create_keeps_unjoined_threads() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_LIST_SYNC",
+        sync(Some(&[GENERAL]), &[SYNCED], Vec::new()),
+    );
+
+    let events = apply(
+        &mut state,
+        "GUILD_CREATE",
+        ready_value()["guilds"][0].clone(),
+    );
+
+    assert_eq!(joined(&state, SYNCED), Some(false));
+    assert!(!events.contains(&format!("ChannelRemoved({SYNCED})")));
+}
+
+// Without its guild or a known parent there's nowhere to put it.
+#[test]
+fn a_thread_without_a_guild_or_a_known_parent_is_skipped() {
+    let mut state = ready_state();
+    let mut thread = thread_object(SYNCED);
+    thread.as_object_mut().unwrap().remove("guild_id");
+    thread["parent_id"] = "300000000000000099".into();
+    let mut message = message(LATEST, GENERAL);
+    message["flags"] = 32.into();
+    message["thread"] = thread;
+
+    apply(&mut state, "MESSAGE_CREATE", message);
+
+    assert!(state.channel(Snowflake::new(SYNCED)).is_none());
+    assert!(
+        state
+            .private_channels()
+            .iter()
+            .all(|channel| channel.id.get() != SYNCED)
+    );
+}

@@ -326,3 +326,15 @@ fn unjoined_threads_are_never_listed_or_counted() {
     );
     assert_eq!(state.guild_badge(Snowflake::new(G1)), before);
 }
+
+#[test]
+fn a_message_with_the_threads_id_but_without_the_flag_isnt_its_box() {
+    let mut state = viewing_general();
+    apply(&mut state, "THREAD_CREATE", thread_object(MESSAGE, 3));
+    apply(&mut state, "MESSAGE_CREATE", plain(MESSAGE, GENERAL));
+
+    let events = apply_events(&mut state, "MESSAGE_CREATE", plain(MESSAGE + 1, MESSAGE));
+
+    assert!(updated(&events).is_empty());
+    assert_eq!(count(&state, MESSAGE), Some(4));
+}

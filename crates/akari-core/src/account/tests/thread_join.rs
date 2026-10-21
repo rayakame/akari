@@ -231,7 +231,7 @@ async fn a_thread_the_store_doesnt_have_is_refused_locally() {
 }
 
 #[tokio::test]
-async fn the_members_event_after_a_join_changes_nothing_visible() {
+async fn the_members_event_after_a_join_brings_discords_join_time() {
     let mut online = online_with_an_unjoined_thread(false).await;
     online.answer("POST", UNJOINED_MEMBER, 204).await;
     online

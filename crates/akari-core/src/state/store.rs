@@ -1024,8 +1024,8 @@ impl Store {
         self.read(|inner| inner.state.message(channel, id))
     }
 
-    /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC and live messages,
-    /// kept for the session only; `None` while none is known. A change comes as `MessageUpdated`
+    /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC, live messages and
+    /// the thread's newest page, kept for the session only; `None` while none is known. A change comes as `MessageUpdated`
     /// for the rows showing the box.
     pub fn latest_message(&self, thread: ChannelId) -> Option<Arc<Message>> {
         self.read(|inner| inner.state.latest_message(thread))

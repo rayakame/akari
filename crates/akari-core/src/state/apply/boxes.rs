@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::State;
 use crate::gateway::MessageUpdate;
-use crate::model::{self, ChannelId, MessageId, MessageType, UserId};
+use crate::model::{self, ChannelId, GenericMarker, MessageId, MessageType, Snowflake, UserId};
 
 // The official client's count stops here and shows "100k+".
 const MAX_COUNT: u32 = 100_000;
@@ -61,8 +61,9 @@ impl State {
         true
     }
 
-    // The newest page of a thread says what its newest message is, or that it has none.
-    pub(super) fn note_newest_page(&mut self, thread: ChannelId, page: &[model::Message]) -> bool {
+    // After the thread's newest page: its window's newest message, with what came and went while
+    // the page loaded, or none at all. A starter there changes nothing.
+    pub(super) fn note_newest_window(&mut self, thread: ChannelId) -> bool {
         let is_thread = self
             .entities
             .channels
@@ -71,32 +72,43 @@ impl State {
         if !is_thread {
             return false;
         }
-        let Some(newest) = page.iter().max_by_key(|message| message.id) else {
+        let Some(newest) = self.windows.newest_message(thread) else {
             let had = self.latest.remove(&thread).is_some();
             return self.recount(thread, |_| 0) | had;
         };
-        if newest.kind == MessageType::ThreadStarterMessage {
+        if newest.kind == MessageType::ThreadStarterMessage
+            || self
+                .latest
+                .get(&thread)
+                .is_some_and(|known| **known == *newest)
+        {
             return false;
         }
-        self.latest.remove(&thread);
-        self.note_latest(newest)
+        self.latest.insert(thread, newest);
+        true
     }
 
-    // A thread payload naming a newer message than the one kept: it was missed.
-    pub(super) fn drop_stale_latest(&mut self, thread: ChannelId) -> bool {
-        let newest = self
+    // A thread payload that moved its newest message past the kept one: that one was missed.
+    // Discord keeps a deleted message as the newest, so a payload that only repeats it isn't.
+    pub(super) fn drop_stale_latest(
+        &mut self,
+        thread: ChannelId,
+        before: Option<Snowflake<GenericMarker>>,
+    ) -> bool {
+        let Some(known) = self.latest.get(&thread).map(|known| known.id.get()) else {
+            return false;
+        };
+        let after = self
             .entities
             .channels
             .get(&thread)
             .and_then(|stored| stored.last_message_id);
-        let stale = self
-            .latest
-            .get(&thread)
-            .is_some_and(|known| newest.is_some_and(|newest| newest.get() > known.id.get()));
-        if stale {
+        let moved_past = before.is_none_or(|before| before.get() <= known)
+            && after.is_some_and(|after| after.get() > known);
+        if moved_past {
             self.latest.remove(&thread);
         }
-        stale
+        moved_past
     }
 
     pub(super) fn delete_latest(&mut self, thread: ChannelId, id: MessageId) -> bool {
@@ -114,6 +126,13 @@ impl State {
                 .parent_id
                 .and_then(|parent| self.entities.channels.get(&parent))
                 .and_then(|parent| parent.guild_id);
+        }
+        if thread.guild_id.is_none() {
+            tracing::debug!(
+                channel_id = thread.id.get(),
+                "skipping a thread without its guild or a known parent"
+            );
+            return;
         }
         self.put_channel(thread, events);
     }
