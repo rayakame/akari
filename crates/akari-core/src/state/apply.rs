@@ -301,6 +301,8 @@ fn push_channel_changes(
 pub(crate) struct Derived {
     badges: Badges,
     threads: ThreadIndex,
+    // Threads added after the build, whose badges the swap computes.
+    late: Vec<ChannelId>,
 }
 
 impl Derived {
@@ -308,11 +310,13 @@ impl Derived {
         Self {
             badges: Badges::build(entities, now_millis),
             threads: ThreadIndex::build(entities),
+            late: Vec::new(),
         }
     }
 
     pub(crate) fn add_thread(&mut self, thread: &Channel) {
         self.threads.add(thread);
+        self.late.push(thread.id);
     }
 }
 
@@ -368,6 +372,8 @@ pub(crate) struct State {
     unavailable_threads: HashSet<ChannelId>,
     // Threads Get Channel brought this session.
     fetched_threads: HashSet<ChannelId>,
+    // Each thread's newest message, for its box; never cached.
+    latest: HashMap<ChannelId, Arc<Message>>,
     clock: Arc<Clock>,
 }
 
@@ -396,6 +402,7 @@ impl State {
             pending_joins: HashMap::new(),
             unavailable_threads: HashSet::new(),
             fetched_threads: HashSet::new(),
+            latest: HashMap::new(),
             clock,
         }
     }
@@ -408,7 +415,7 @@ impl State {
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_folders(&mut next);
         self.keep_memberships(&mut next);
-        self.keep_fetched(&mut next);
+        self.keep_known_threads(&mut next);
         let derived = Derived::build(&next, self.now_millis());
         let diff = self.ready_diff(&next, &derived);
         self.swap(next, derived, diff, events);
@@ -503,21 +510,22 @@ impl State {
             Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
             None => HashMap::new(),
         };
-        // Fetched while the READY was prepared, after its own passes.
-        for thread in self.keep_fetched(&mut next) {
-            derived.threads.add(&thread);
+        // Known since the READY's own passes.
+        for thread in self.keep_known_threads(&mut next) {
+            derived.add_thread(&thread);
         }
         // Their badges weren't built with the READY's.
-        let fetched: Vec<ChannelId> = self
-            .fetched_threads
-            .iter()
-            .filter(|id| next.channels.contains_key(id))
-            .copied()
-            .collect();
+        let mut late = std::mem::take(&mut derived.late);
+        late.extend(
+            self.fetched_threads
+                .iter()
+                .filter(|id| next.channels.contains_key(id)),
+        );
         if let Some(diff) = diff {
             events.extend(diff.events);
             for channel in diff.removed_channels {
                 self.windows.drop_channel(channel);
+                self.latest.remove(&channel);
             }
             // Pages loaded since a restore predate this session too: what happened in between
             // never comes as a dispatch.
@@ -526,7 +534,7 @@ impl State {
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
-        for thread in fetched {
+        for thread in late {
             self.dirty.channel(thread);
         }
         self.keep_outage_members(&next);
@@ -534,6 +542,7 @@ impl State {
         let old = Derived {
             badges: std::mem::replace(&mut self.badges, derived.badges),
             threads: std::mem::replace(&mut self.threads, derived.threads),
+            late: Vec::new(),
         };
         let old = (std::mem::replace(&mut self.entities, next), old);
         // READY's cursors are fresh.
@@ -715,7 +724,9 @@ impl State {
                     .and_then(model::Nonce::as_u64)
                     .map(MessageId::new);
                 self.put_threads_of(std::slice::from_ref(&message), events);
-                self.count_thread_messages(channel, 1, 0, events);
+                if self.count_thread_messages(channel, 1, 0) | self.note_latest(&message) {
+                    self.reread_boxes(channel, events);
+                }
                 self.read_message(&message);
                 self.dirty.channel(channel);
                 let forced = self.forced_through(&message);
@@ -731,15 +742,28 @@ impl State {
                 if let Some(thread) = update.thread.as_deref() {
                     self.put_thread(thread.clone(), events);
                 }
+                if self.update_latest(&update) {
+                    self.reread_boxes(update.channel_id, events);
+                }
                 self.windows.update(*update, &self.entities.users, events);
             }
             E::MessageDelete(delete) => {
-                self.count_thread_messages(delete.channel_id, 0, 1, events);
+                if self.count_thread_messages(delete.channel_id, 0, 1)
+                    | self.delete_latest(delete.channel_id, delete.id)
+                {
+                    self.reread_boxes(delete.channel_id, events);
+                }
                 self.windows.delete(delete.channel_id, delete.id, events);
             }
             E::MessageDeleteBulk(delete) => {
                 let removed = u32::try_from(delete.ids.len()).unwrap_or(u32::MAX);
-                self.count_thread_messages(delete.channel_id, 0, removed, events);
+                let mut changed = self.count_thread_messages(delete.channel_id, 0, removed);
+                for id in &delete.ids {
+                    changed |= self.delete_latest(delete.channel_id, *id);
+                }
+                if changed {
+                    self.reread_boxes(delete.channel_id, events);
+                }
                 for id in delete.ids {
                     self.windows.delete(delete.channel_id, id, events);
                 }
@@ -963,6 +987,14 @@ impl State {
 
     // Joins come from the members events; a sync only refreshes the threads already joined.
     fn thread_list_sync(&mut self, sync: ThreadListSync, events: &mut Vec<StoreEvent>) {
+        for thread in sync.threads {
+            self.put_thread(thread, events);
+        }
+        for message in &sync.most_recent_messages {
+            if self.note_latest(message) {
+                self.reread_boxes(message.channel_id, events);
+            }
+        }
         let me = self.entities.me();
         for member in sync.members {
             let Some(thread) = member.id else {
@@ -1034,6 +1066,7 @@ impl State {
             return;
         };
         self.windows.drop_channel(removed.id);
+        self.latest.remove(&removed.id);
         self.entities.read_states.forget(removed.id);
         self.dirty.channel(removed.id);
         events.push(StoreEvent::ChannelRemoved {
@@ -1047,6 +1080,7 @@ impl State {
                 self.threads.remove(&gone);
             }
             self.windows.drop_channel(thread);
+            self.latest.remove(&thread);
             self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {
@@ -1104,6 +1138,7 @@ impl State {
                     self.threads.remove(channel);
                     self.entities.read_states.forget(*id);
                     self.windows.drop_channel(*id);
+                    self.latest.remove(id);
                 }
             }
             None => events.push(StoreEvent::GuildAdded(after)),
@@ -1207,10 +1242,12 @@ impl State {
         self.entities.members.remove(&id);
         let windows = &mut self.windows;
         let threads = &mut self.threads;
+        let latest = &mut self.latest;
         self.entities.channels.retain(|channel_id, channel| {
             let keep = channel.guild_id != Some(id);
             if !keep {
                 windows.drop_channel(*channel_id);
+                latest.remove(channel_id);
                 threads.remove(channel);
             }
             keep
@@ -1775,22 +1812,26 @@ impl State {
         Learned::Kept
     }
 
-    // READY lists only joined threads, so it says nothing about one fetched this session; it
-    // stays while its guild and parent do. Returns the threads it put into `next`.
-    pub(crate) fn keep_fetched(&self, next: &mut Entities) -> Vec<Arc<Channel>> {
+    // READY lists only the joined, active threads, so it says nothing about the unjoined ones the
+    // store has (from messages, syncs or Get Channel) nor about one fetched this session; they
+    // stay while their guild and parent do. Returns the threads it put into `next`.
+    pub(crate) fn keep_known_threads(&self, next: &mut Entities) -> Vec<Arc<Channel>> {
         let mut kept = Vec::new();
-        for id in &self.fetched_threads {
-            let Some(thread) = self.entities.channels.get(id) else {
+        for thread in self.entities.channels.values() {
+            let Some(info) = thread.thread.as_deref() else {
                 continue;
             };
+            if info.joined() && !self.fetched_threads.contains(&thread.id) {
+                continue;
+            }
             let placed = thread
                 .guild_id
                 .is_some_and(|guild| next.guilds.contains_key(&guild))
                 && thread
                     .parent_id
                     .is_some_and(|parent| next.channels.contains_key(&parent));
-            if placed && !next.channels.contains_key(id) {
-                next.channels.insert(*id, thread.clone());
+            if placed && !next.channels.contains_key(&thread.id) {
+                next.channels.insert(thread.id, thread.clone());
                 kept.push(thread.clone());
             }
         }

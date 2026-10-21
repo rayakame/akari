@@ -376,15 +376,15 @@ impl Store {
         let read_states = entities.read_states.channels().clone();
         self.read(|inner| {
             inner.state.keep_memberships(&mut entities);
-            inner.state.keep_fetched(&mut entities);
+            inner.state.keep_known_threads(&mut entities);
         });
         let mut derived = Derived::build(&entities, self.now_millis());
         #[cfg(test)]
         Self::park_in(&self.shared.diff_park);
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
-            // Fetched since the first pass; the diff mustn't report them removed.
-            for thread in inner.state.keep_fetched(&mut entities) {
+            // Known since the first pass; the diff mustn't report them removed.
+            for thread in inner.state.keep_known_threads(&mut entities) {
                 derived.add_thread(&thread);
             }
             inner.state.ready_diff(&entities, &derived)
@@ -945,7 +945,8 @@ impl Store {
         })
     }
 
-    /// The threads the user has joined in a guild.
+    /// The threads the store has in a guild: the joined ones, and those the user hasn't joined
+    /// that messages, THREAD_LIST_SYNC or a fetch brought.
     pub fn threads(&self, guild: GuildId) -> Vec<Arc<Channel>> {
         self.read(|inner| inner.state.threads(guild))
     }
@@ -1003,6 +1004,13 @@ impl Store {
 
     pub fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.read(|inner| inner.state.message(channel, id))
+    }
+
+    /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC and live messages,
+    /// kept for the session only; `None` while none is known. A change comes as `MessageUpdated`
+    /// for the rows showing the box.
+    pub fn latest_message(&self, thread: ChannelId) -> Option<Arc<Message>> {
+        self.read(|inner| inner.state.latest_message(thread))
     }
 
     #[cfg(test)]
