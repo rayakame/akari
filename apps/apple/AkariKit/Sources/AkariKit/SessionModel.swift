@@ -10,6 +10,31 @@ public final class SessionModel {
         case guild(GuildId)
     }
 
+    /// "Join Thread" or "Leave Thread" in a thread's menus.
+    public struct MembershipItem: Equatable, Sendable {
+        public let joins: Bool
+        /// Archived threads can be neither joined nor left.
+        public let enabled: Bool
+
+        public var title: String { joins ? "Join Thread" : "Leave Thread" }
+
+        public init(joins: Bool, enabled: Bool) {
+            self.joins = joins
+            self.enabled = enabled
+        }
+    }
+
+    /// Why joining or leaving a thread failed, in Discord's words.
+    public struct MembershipError: Equatable, Sendable {
+        public let title: String
+        public let message: String
+
+        public init(title: String, message: String) {
+            self.title = title
+            self.message = message
+        }
+    }
+
     public let userId: UserId
     public private(set) var connection: ConnectionState = .offline
     public private(set) var currentUser: User?
@@ -31,6 +56,8 @@ public final class SessionModel {
             channels?.setOpen(messages?.channelId)
         }
     }
+    /// The last join or leave that failed, until `dismissMembershipError()`.
+    public private(set) var membershipError: MembershipError?
     /// The channel the user is reading: the open channel while the session is online, the app
     /// active, its window key and visible, the list fresh at the present's bottom and the user
     /// engaged. The core hears of a change the list reports on the next turn.
@@ -214,6 +241,57 @@ public final class SessionModel {
             return
         }
         go(to: id)
+    }
+
+    /// What a thread of the open server offers in its menus; `nil` for anything else.
+    public func membershipItem(for thread: ChannelId) -> MembershipItem? {
+        guard let info = channels?.channel(thread)?.thread else {
+            return nil
+        }
+        return MembershipItem(joins: !info.joined, enabled: !info.archived)
+    }
+
+    /// Joins the thread; the store lists it once Discord says yes.
+    public func join(thread: ChannelId, from location: ThreadLocation) async {
+        await changeMembership(of: thread, joins: true, from: location)
+    }
+
+    /// Leaves the thread. An open thread stays open, its row on top until the user goes elsewhere.
+    public func leave(thread: ChannelId, from location: ThreadLocation) async {
+        await changeMembership(of: thread, joins: false, from: location)
+    }
+
+    public func dismissMembershipError() {
+        membershipError = nil
+    }
+
+    private func changeMembership(
+        of thread: ChannelId, joins: Bool, from location: ThreadLocation
+    ) async {
+        guard let item = membershipItem(for: thread), item.enabled, item.joins == joins else {
+            return
+        }
+        do {
+            if joins {
+                try await account.joinThread(threadId: thread, location: location)
+            } else {
+                try await account.leaveThread(threadId: thread, location: location)
+            }
+        } catch {
+            membershipError = Self.membershipError(error as? RequestError)
+        }
+    }
+
+    // TOO_MANY_THREAD_MEMBERS.
+    private static let threadFull: UInt32 = 30033
+
+    private static func membershipError(_ error: RequestError?) -> MembershipError {
+        if case .Discord(_, threadFull, _)? = error {
+            return MembershipError(
+                title: "Cannot join thread",
+                message: "This thread has reached the maximum possible number of members.")
+        }
+        return MembershipError(title: "Error", message: "An error occurred, please try again.")
     }
 
     /// The thread header's link: opens the open thread's channel.
