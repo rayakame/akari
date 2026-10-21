@@ -348,7 +348,7 @@ THREAD_CREATE.
     date ("January 20, 2026"), in `textMuted`. *Akari moves it on with the list's timer;
     Discord redraws it only with the box.*
 - **Measures:** 1 border (#323237 dark), fill (#242429 dark), radius 4, 8 padding inside the
-  border, the two 18 tall lines 2 apart: 56 tall. As wide as its content, at most 480. Its
+  border, the two 18-tall lines 2 apart: 56 tall. As wide as its content, at most 480. Its
   left edge on the text column (72), 8 below the message's text, 0 under a line; its bottom is
   the message's.
 - **The connector:** from 5 under the avatar's (or the line's icon's) center, 2 wide in the
