@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use super::types::Channel;
 use crate::gateway::{MessageAck, ReadStateEntry, Relationship, RelationshipUpdate, Versioned};
 use crate::model::{ChannelId, MessageId, RelationshipType, Snowflake, UserId};
 
@@ -31,6 +32,29 @@ pub(crate) struct Ack {
     pub(crate) before: Option<ReadState>,
     // The one it left, which a refusal may undo only while the store still holds it.
     pub(crate) after: Option<ReadState>,
+    pub(crate) body: AckBody,
+}
+
+// What a single ack says besides its message, as the official client sends it (Q28).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum AckBody {
+    #[default]
+    Channel,
+    // IS_THREAD; a thread the user hasn't joined goes without `last_viewed`.
+    Thread {
+        joined: bool,
+    },
+}
+
+impl AckBody {
+    pub(crate) fn of(channel: &Channel) -> Self {
+        match channel.thread.as_deref() {
+            Some(info) => Self::Thread {
+                joined: info.joined(),
+            },
+            None => Self::Channel,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

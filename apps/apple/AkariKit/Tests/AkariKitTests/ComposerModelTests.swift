@@ -191,6 +191,47 @@ struct ComposerModelTests {
         #expect(store.reads.contains(.slowmode(here)))
     }
 
+    // The core leaves sending in a locked thread to moderators; the composer says it's locked.
+    @Test
+    func aLockedThreadsComposerIsLockedAndDenied() {
+        store.update { state in
+            var locked = thread(20, in: 10)
+            locked.thread?.locked = true
+            state.channels[id(20)] = locked
+            state.permissions[id(20)] = [.viewChannel]
+        }
+        let composer = ComposerModel(
+            channelId: id(20), account: account, store: store, drafts: Drafts())
+        #expect(composer.locked)
+        #expect(composer.canSend == false)
+
+        store.update { state in
+            state.channels[id(20)]?.thread?.locked = false
+            state.permissions[id(20)] = [.viewChannel, .sendMessages]
+        }
+        composer.apply(EventBatch([.channelUpdated(channelId: id(20), guildId: id(1))]))
+
+        #expect(!composer.locked)
+        #expect(composer.canSend == true)
+    }
+
+    @Test
+    func aClosedThreadsComposerIsNormal() {
+        store.update { state in
+            var closed = thread(20, in: 10)
+            closed.thread?.archived = true
+            state.channels[id(20)] = closed
+            state.permissions[id(20)] = [.viewChannel, .sendMessages]
+        }
+
+        let composer = ComposerModel(
+            channelId: id(20), account: account, store: store, drafts: Drafts())
+
+        #expect(!composer.locked)
+        #expect(composer.canSend == true)
+        #expect(!makeComposer().locked)
+    }
+
     @Test
     func canSendFollowsPermissionsAndDms() {
         store.update { $0.permissions[id(10)] = [.viewChannel] }

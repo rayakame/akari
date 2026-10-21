@@ -53,6 +53,7 @@ fn ack_over(
         now,
         before,
         after,
+        body: AckBody::Channel,
     }
 }
 
@@ -238,6 +239,7 @@ fn an_ack_at_now_keeps_the_cursor_as_its_floor() {
         now,
         before: None,
         after: None,
+        body: AckBody::Channel,
     };
 
     assert_eq!(

@@ -37,6 +37,12 @@ final class MessageCell: NSTableCellView {
         }
     }
     private let stack = NSStackView()
+    // Discord's flash: the color fades in for 0.2 s, holds to 2 s, then fades out for 0.2 s.
+    private let flashView = FlashView()
+    let flashLayer = CALayer()
+    private static let flashKey = "flash"
+    private static let flashHold: TimeInterval = 2
+    private static let flashFade: TimeInterval = 0.2
     private var top: NSLayoutConstraint?
     private var bottom: NSLayoutConstraint?
     private var avatarBottom: NSLayoutConstraint?
@@ -70,13 +76,17 @@ final class MessageCell: NSTableCellView {
         nil
     }
 
+    /// `authorName` is the header's name, as the list resolves it; the author's display name
+    /// without it.
     func configure(
-        _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
-        followsLine: Bool = false, groupTime: String, shortTime: String, fullDate: String
+        _ message: Message, body: NSAttributedString, authorName: String? = nil,
+        startsGroup: Bool, followsDay: Bool = false, followsLine: Bool = false,
+        groupTime: String, shortTime: String, fullDate: String
     ) {
         configureAllButTheBody(
-            message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
-            groupTime: groupTime, shortTime: shortTime, fullDate: fullDate)
+            message, authorName: authorName, startsGroup: startsGroup, followsDay: followsDay,
+            followsLine: followsLine, groupTime: groupTime, shortTime: shortTime,
+            fullDate: fullDate)
         let same = self.message?.id == message.id
         self.message = message
         mentioned = message.mentionsMe
@@ -96,9 +106,10 @@ final class MessageCell: NSTableCellView {
 
     // The sizing cell measures the body instead of laying it out in its text view.
     private func configureAllButTheBody(
-        _ message: Message, startsGroup: Bool, followsDay: Bool, followsLine: Bool,
-        groupTime: String, shortTime: String, fullDate: String
+        _ message: Message, authorName: String? = nil, startsGroup: Bool, followsDay: Bool,
+        followsLine: Bool, groupTime: String, shortTime: String, fullDate: String
     ) {
+        let name = authorName ?? message.author.displayName
         showsHeader = startsGroup
         spacing = Self.spacing(
             startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine)
@@ -107,10 +118,10 @@ final class MessageCell: NSTableCellView {
         avatarBottom?.isActive = startsGroup
         top?.constant = startsGroup ? spacing + Self.groupInset : Self.continuationTop
         bottom?.constant = -(startsGroup ? Self.groupBottom : Self.continuationBottom)
-        avatar.name = message.author.displayName
+        avatar.name = name
         avatar.userId = message.author.id.rawValue
         header.show(
-            name: message.author.displayName, tagged: message.author.bot || message.fromWebhook,
+            name: name, tagged: message.author.bot || message.fromWebhook,
             time: groupTime, fullDate: fullDate)
         hoverTime.stringValue = shortTime
         hoverTime.toolTip = fullDate
@@ -192,6 +203,54 @@ final class MessageCell: NSTableCellView {
         return extras.intrinsicContentSize.height
     }
 
+    /// Highlights the message as Discord does when a jump lands on it, `elapsed` seconds into
+    /// the highlight; `nil` clears it.
+    func flash(elapsed: TimeInterval?, reducesMotion: Bool) {
+        flashLayer.removeAnimation(forKey: Self.flashKey)
+        let length = reducesMotion ? Self.flashHold : Self.flashHold + Self.flashFade
+        guard let elapsed, elapsed < length else {
+            return
+        }
+        let animation: CAAnimation
+        if reducesMotion {
+            let hold = CABasicAnimation(keyPath: "opacity")
+            hold.fromValue = 1.0
+            hold.toValue = 1.0
+            animation = hold
+        } else {
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [0.0, 1.0, 1.0, 0.0]
+            fade.keyTimes = [0, Self.flashFade / length, Self.flashHold / length, 1].map {
+                NSNumber(value: $0)
+            }
+            // CSS's ease.
+            let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+            fade.timingFunctions = [ease, CAMediaTimingFunction(name: .linear), ease]
+            animation = fade
+        }
+        animation.duration = length
+        animation.beginTime = flashLayer.convertTime(CACurrentMediaTime(), from: nil) - elapsed
+        // A legacy scroller's gutter can change without a layout of the cell.
+        flashView.frame = box
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            flashLayer.backgroundColor = Palette.messageHighlight.cgColor
+        }
+        flashLayer.add(animation, forKey: Self.flashKey)
+    }
+
+    var flashAnimation: CAAnimation? {
+        flashLayer.animation(forKey: Self.flashKey)
+    }
+
+    var flashFrame: NSRect {
+        flashView.frame
+    }
+
+    override func layout() {
+        super.layout()
+        flashView.frame = box
+    }
+
     /// The message's own area, which hover and the mention highlight cover.
     var box: NSRect {
         // A legacy scroller sits in a gutter of its own beside the list, while it shows.
@@ -236,7 +295,12 @@ final class MessageCell: NSTableCellView {
         stack.spacing = Self.spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.setViews([reply, header, content, extras], in: .top)
-        for view in [avatar, stack, hoverTime] as [NSView] {
+        flashView.layer = flashLayer
+        flashView.wantsLayer = true
+        flashLayer.cornerRadius = 4
+        flashLayer.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        flashLayer.opacity = 0
+        for view in [flashView, avatar, stack, hoverTime] as [NSView] {
             addSubview(view)
         }
 
@@ -456,5 +520,12 @@ private final class FailedLine: NSView {
             string: title,
             attributes: [.font: TypeScale.detail.nsFont, .foregroundColor: Palette.textLink])
         return button
+    }
+}
+
+// Under the message's text; clicks and hover go to the cell.
+private final class FlashView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 }

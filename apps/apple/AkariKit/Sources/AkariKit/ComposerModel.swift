@@ -88,6 +88,8 @@ public final class ComposerModel {
     /// Whether the user's permissions allow sending here; DMs always do. `nil` until the store
     /// knows the channel, e.g. before READY.
     public private(set) var canSend: Bool?
+    /// A locked thread: only moderators can send there.
+    public private(set) var locked = false
     public private(set) var slowmode: Slowmode? {
         didSet { awaitCooldownEnd() }
     }
@@ -207,9 +209,11 @@ public final class ComposerModel {
     private func readCanSend() {
         guard let channel = store.channel(id: channelId) else {
             canSend = nil
+            locked = false
             return
         }
         guildId = channel.guildId
+        locked = channel.thread?.locked == true
         // DMs have no permissions to check.
         canSend =
             channel.guildId == nil

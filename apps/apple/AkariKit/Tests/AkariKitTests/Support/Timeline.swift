@@ -16,7 +16,7 @@ func berlinTime(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
 
 func row(
     _ raw: UInt64, by author: User = user(1), at time: Date, kind: MessageType = .default,
-    webhook: Bool = false, key: UInt64? = nil, delivery: Delivery = .sent
+    webhook: Bool = false, key: UInt64? = nil, delivery: Delivery = .sent, hasThread: Bool = false
 ) -> MessageListModel.Row {
     let content = "message \(raw)"
     let message = Message(
@@ -24,7 +24,9 @@ func row(
         content: content, timestamp: time, editedTimestamp: nil, pinned: false,
         mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
         componentsV2: false, delivery: delivery, formatted: formattedText(content: content),
-        mentionsMe: false
+        mentionsMe: false, reference: nil, hasThread: hasThread, mentions: [], call: nil,
+        roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
+        embedFields: []
     )
     return MessageListModel.Row(id: id(key ?? raw), message: message)
 }

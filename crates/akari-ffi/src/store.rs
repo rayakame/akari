@@ -8,7 +8,7 @@ use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
     Badge, Channel, ChannelBadge, ConnectionState, ContentStats, Guild, GuildBadge, GuildSettings,
-    Message, MessageWindow, ReadState, ServerListItem, Slowmode, User,
+    Message, MessageWindow, ReadState, ServerListItem, Slowmode, StarterMessage, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -228,6 +228,27 @@ impl Store {
             );
         }
         messages
+    }
+
+    /// Whether `Account.fetch_thread` found this session that the user can't see the thread, or
+    /// that it is gone.
+    pub fn thread_unavailable(&self, thread_id: ChannelId) -> bool {
+        self.core.thread_unavailable(thread_id)
+    }
+
+    /// The message `thread_id` started from, once its window holds the thread's first message;
+    /// `None` for a thread started without one, or before that message is loaded.
+    pub fn starter_message(&self, thread_id: ChannelId) -> Option<StarterMessage> {
+        Some(match self.core.starter_message(thread_id)? {
+            state::StarterMessage::Loaded(message) => {
+                let names = Names::new(&self.core, message.channel_id);
+                StarterMessage::Loaded {
+                    message: self.message(&message, &names, &mut 0),
+                }
+            }
+            state::StarterMessage::Loading => StarterMessage::Loading,
+            state::StarterMessage::Unavailable => StarterMessage::Unavailable,
+        })
     }
 
     /// How this account's message contents were parsed so far.

@@ -89,7 +89,8 @@ screen, so views render from them without calling into Rust.
   says (`ConnectionNotice`: connecting, reconnecting, offline after `suspend()`, or closed with
   its error), with the delay before a bar shows it.
 - `ComposerModel` (`messages.composer`) holds the channel's draft, kept per channel for the
-  session, its length as Discord counts it and the limit, whether the user may send there,
+  session, its length as Discord counts it and the limit, whether the user may send there
+  (`locked` for a locked thread, where only moderators can),
   the slowmode from akari-core, and the problem shown under the composer in Akari's words.
   `submit()` sends the trimmed draft unless it is blank, too long or held back by slowmode,
   and clears it only once the core has queued the message;
@@ -105,7 +106,20 @@ screen, so views render from them without calling into Rust.
 The session replaces `messages` on its own when the open channel is deleted or the user can
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.
 An open thread that stops being listed (left, closed, or read past its window) stays open,
-as in the official client; only its deletion closes it.
+as in the official client; only its deletion closes it. `openParent()` opens the open
+thread's channel, for the thread header's link. `open(thread:from:)` opens the thread a
+"started a thread" line names, fetched first when the store doesn't have it; nothing opens when
+Discord refuses it, it's gone or the fetch fails, nor once the user opened something else or
+clicked another line meanwhile. A row's `threadLinked` is false for such a line once the thread is unavailable. In a
+thread, a row's `starter` is set for
+its first message when it started from one in the channel: the row draws `shown`, the
+parent's message, once loaded; `notice` says it couldn't be loaded; while it's fetched the
+timeline leaves the row out. `MessageListModel.threadOwner` names who started the thread,
+from the store or from a loaded message of theirs.
+`MessageListModel.jump(to:)` is the jump a pin's "a message" makes: it loads the messages
+around the message unless the loaded ones reach it and no other load is placing the list, then
+counts a `messageJump` for the view to scroll to; the requests that cancel a jump to unread
+cancel it too, and the later of the two jumps wins.
 A list the session replaces, also on a channel switch, starts no more loads, and a jump to
 unread it is still loading doesn't land. The view calls `open()` when the message area appears
 and whenever `messages.channelId` changes, which is what `.task(id:)` does. When the area
@@ -146,7 +160,8 @@ one row instead of removing and inserting it.
 Rules every Apple app shows the same way, so they live here rather than in the app:
 
 - `MessageTimeline` turns `MessageListModel.rows` into table items: a divider before each
-  local day and where author groups start, by the rule in `docs/ui/message-list.md`, wrapped
+  local day and where author groups start, by the rule in `docs/ui/message-list.md` (a thread's
+  starter and a message with a thread are groups of their own), wrapped
   in edge items when asked: `.edge(.older)` and `.edge(.newer)` where more history lies beyond
   the loaded messages (the app shows placeholder rows there), `.edge(.beginning)` where the
   channel begins. Without rows only `.edge(.older)` is left, standing in for messages that
@@ -164,7 +179,15 @@ Rules every Apple app shows the same way, so they live here rather than in the a
   (`SessionModel.trustedLinks()`); lists of one account share their hosts. Logging out and an
   expired session forget them with the account's spot (`AccountMemory.forget`), and a list
   made before that stores nothing more.
-- `Message.notice` is Akari's sentence for a system message; `Initials` gives the letters a
+- `Message.notice(in:)` is a system message's sentence in Discord's wording and
+  `noticeParts(in:)` the same in parts: the actor, other names and bold text (`strong`), the
+  links Akari can follow (a thread, a message to jump to, a channel, a server), "threads",
+  "pinned messages", the text between. Both take a `NoticeContext`: the reader, where the
+  line is (channel, thread, forum post, group DM, DM) and what the store knows that the line
+  names. `nil` is a message people write, an empty list a kind Discord shows no line for.
+  A list's rows carry their context, `Row.isHidden` marks the empty ones, and the timeline
+  leaves them out. `Row.authorName` is the header's name; it and the people a line names
+  follow one rule, the display name (the global name, else the username); `Initials` gives the letters a
   server or avatar without an image shows; `Channel.opensMessageList` says which channels
   have a message list.
 

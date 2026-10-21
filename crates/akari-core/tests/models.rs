@@ -599,3 +599,114 @@ fn a_page_of_messages_decodes() {
         ]
     );
 }
+
+fn system_message(kind: u8, field: &str, data: Value) -> Message {
+    let mut value: Value = parse(include_str!("fixtures/message.json"));
+    value["type"] = kind.into();
+    value[field] = data;
+    parse(&value.to_string())
+}
+
+#[test]
+fn a_call_parses_its_participants_and_end() {
+    let message = system_message(
+        3,
+        "call",
+        json!({
+            "participants": ["100000000000000001", "100000000000000002"],
+            "ended_timestamp": "2024-03-01T08:40:00.250000+00:00"
+        }),
+    );
+
+    let call = message.call.unwrap();
+    assert_eq!(
+        call.participants,
+        [
+            Snowflake::<UserMarker>::new(100_000_000_000_000_001),
+            Snowflake::new(100_000_000_000_000_002)
+        ]
+    );
+    assert_eq!(
+        call.ended_timestamp.map(Timestamp::unix_millis),
+        Some(1_709_282_400_250)
+    );
+}
+
+#[test]
+fn a_call_still_running_has_no_end() {
+    let message = system_message(
+        3,
+        "call",
+        json!({"participants": ["100000000000000001"], "ended_timestamp": null}),
+    );
+
+    assert_eq!(message.call.unwrap().ended_timestamp, None);
+}
+
+// A system message's extra data is only for its line; the message stays readable without it.
+#[test]
+fn malformed_system_data_leaves_the_message() {
+    let call = system_message(3, "call", json!({"participants": 5}));
+    let subscription = system_message(25, "role_subscription_data", json!("gold"));
+    let purchase = system_message(44, "purchase_notification", json!([1]));
+
+    assert_eq!(call.call, None);
+    assert_eq!(call.kind, MessageType::Call);
+    assert_eq!(subscription.role_subscription_data, None);
+    assert_eq!(purchase.purchase_notification, None);
+}
+
+#[test]
+fn a_role_subscription_parses() {
+    let message = system_message(
+        25,
+        "role_subscription_data",
+        json!({
+            "role_subscription_listing_id": "1",
+            "tier_name": "Gold",
+            "total_months_subscribed": 3,
+            "is_renewal": true
+        }),
+    );
+
+    let data = message.role_subscription_data.unwrap();
+    assert_eq!(data.tier_name, "Gold");
+    assert_eq!(data.total_months_subscribed, 3);
+    assert!(data.is_renewal);
+}
+
+#[test]
+fn a_purchase_names_its_product() {
+    let message = system_message(
+        44,
+        "purchase_notification",
+        json!({"type": 0, "guild_product_purchase": {"listing_id": "1", "product_name": "Badge"}}),
+    );
+
+    let purchase = message.purchase_notification.unwrap();
+    assert_eq!(
+        purchase.guild_product_purchase.unwrap().product_name,
+        "Badge"
+    );
+}
+
+// Undocumented: the official client names who added a bot from a USER_JOIN's `actor`.
+#[test]
+fn a_bot_joins_actor_parses() {
+    let message = system_message(
+        7,
+        "actor",
+        json!({"id": "100000000000000003", "username": "ray", "discriminator": "0"}),
+    );
+
+    assert_eq!(message.actor.unwrap().username, "ray");
+}
+
+#[test]
+fn a_messages_application_parses_its_name() {
+    let message = system_message(32, "application", json!({"id": "1", "name": "Akari Bot"}));
+    let malformed = system_message(32, "application", json!(5));
+
+    assert_eq!(message.application.unwrap().name, "Akari Bot");
+    assert_eq!(malformed.application, None);
+}

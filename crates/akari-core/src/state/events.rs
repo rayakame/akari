@@ -60,6 +60,12 @@ pub enum StoreEvent {
         guild_id: GuildId,
         thread_id: ChannelId,
     },
+    /// Discord refused the thread a line in the guild names, or it is gone: see
+    /// [`Store::thread_unavailable`](super::Store::thread_unavailable).
+    ThreadUnavailable {
+        guild_id: GuildId,
+        thread_id: ChannelId,
+    },
     /// A channel, category, thread, DM or group DM appeared.
     ChannelAdded(Arc<Channel>),
     ChannelUpdated(Arc<Channel>),

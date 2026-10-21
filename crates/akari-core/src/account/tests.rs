@@ -3852,6 +3852,68 @@ mod cache {
         assert!(!seen[1].window_before.contains(&51));
         assert_eq!(report.prepared, 100);
     }
+
+    // READY's thread under #general, which started from #general's message of the same ID.
+    #[tokio::test]
+    async fn a_cached_starter_is_unavailable_when_its_page_fails() {
+        use wiremock::matchers::path;
+
+        const THREAD: u64 = 300_000_000_000_000_020;
+        let thread: ChannelId = Snowflake::new(THREAD);
+        let dir = TempDir::new();
+        let fake = FakeGateway::start().await;
+        let server = wiremock::MockServer::start().await;
+        let mut wire = message(0, 400_000_000_000_000_031)["d"].clone();
+        wire["channel_id"] = THREAD.to_string().into();
+        wire["type"] = 21.into();
+        wire["message_reference"] = json!({
+            "message_id": THREAD.to_string(),
+            "channel_id": GENERAL.to_string(),
+            "guild_id": "200000000000000001",
+        });
+        let wire: crate::model::Message = serde_json::from_str(&wire.to_string()).unwrap();
+        let starter = Arc::new(Message::from_wire(wire, &mut |user| {
+            Arc::new(crate::state::User::from_wire(user))
+        }));
+        CacheThread::start(dir.file(OWNER), UserId::new(OWNER))
+            .flush(crate::cache::Snapshot {
+                entities: ready_entities(&fake, |_| {}),
+                windows: [(
+                    thread,
+                    crate::state::CachedWindow {
+                        viewed_at: 1,
+                        messages: vec![starter],
+                    },
+                )]
+                .into(),
+                ..crate::cache::Snapshot::default()
+            })
+            .await
+            .unwrap();
+        let (account, _thread) = start_cached_with(&fake, &server, &dir);
+        let _subscription = restored(&account).await;
+        wiremock::Mock::given(path("/api/v9/channels/300000000000000020/messages"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let loaded = account
+            .load_messages(thread, MessageLoad::Latest { limit: 50 })
+            .await;
+
+        assert!(loaded.is_err());
+        assert!(matches!(
+            account.store().starter_message(thread),
+            Some(crate::state::StarterMessage::Unavailable)
+        ));
+        let requests = server.received_requests().await.unwrap();
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.url.path() != MESSAGES),
+            "no fetch while the page fails"
+        );
+    }
 }
 
 mod preparer {
@@ -4132,3 +4194,5 @@ mod preparer {
 }
 
 mod reading;
+mod starters;
+mod thread_fetch;

@@ -234,6 +234,48 @@ pub struct Message {
     pub referenced_message: ReferencedMessage,
     /// `Pending` and `Failed` messages are ours, waiting in the window's outbox.
     pub delivery: Delivery,
+    /// What a system message's line names beyond its author and content; `None` for most.
+    pub system: Option<Box<SystemData>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct SystemData {
+    /// On a CALL or VOICE_SESSION message.
+    pub call: Option<Call>,
+    /// On a ROLE_SUBSCRIPTION_PURCHASE message.
+    pub role_subscription: Option<RoleSubscription>,
+    /// On a PURCHASE_NOTIFICATION message: the guild product's name.
+    pub purchased_product: Option<Box<str>>,
+    /// Who added a bot, on the bot's USER_JOIN.
+    pub actor: Option<Arc<User>>,
+    /// The app a GUILD_APPLICATION_PREMIUM_SUBSCRIPTION upgraded.
+    pub application_name: Option<Box<str>>,
+}
+
+impl SystemData {
+    // Boxed only when there's something to keep.
+    pub(crate) fn boxed(self) -> Option<Box<Self>> {
+        (self != Self::default()).then(|| Box::new(self))
+    }
+}
+
+/// The call a CALL message records.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Call {
+    /// The recipients who joined it.
+    pub participants: Box<[UserId]>,
+    /// `None` while it runs.
+    pub ended_timestamp: Option<Timestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RoleSubscription {
+    pub tier_name: Box<str>,
+    pub total_months_subscribed: u32,
+    pub is_renewal: bool,
 }
 
 impl Message {
@@ -244,6 +286,17 @@ impl Message {
     /// which Akari doesn't read yet.
     pub fn uses_components_v2(&self) -> bool {
         self.flags & Self::IS_COMPONENTS_V2 != 0
+    }
+
+    /// The fields of the first embed of a poll result or an AutoMod alert, which their lines
+    /// read; empty for other kinds.
+    pub fn system_embed_fields(&self) -> &[EmbedField] {
+        match self.kind {
+            MessageType::PollResult | MessageType::AutoModerationAction => {
+                self.embeds.first().map_or(&[], |embed| &embed.fields)
+            }
+            _ => &[],
+        }
     }
 }
 
@@ -264,6 +317,18 @@ pub enum ReferencedMessage {
     NotIncluded,
     Deleted,
     Message(Arc<Message>),
+}
+
+/// A thread's first message when it started from a message in its parent channel.
+// Exhaustive, so a new case can't reach the apps as one of these unnoticed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StarterMessage {
+    /// The parent channel's message the thread started from.
+    Loaded(Arc<Message>),
+    /// Akari is fetching it; nothing to show yet.
+    Loading,
+    /// Deleted, or Akari can't read it.
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

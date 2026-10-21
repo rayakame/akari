@@ -6,6 +6,7 @@ final class NoticeCell: NSTableCellView {
 
     private let icon = NSImageView()
     private let text = MessageTextView()
+    var onLink: (URL) -> Void = { _ in }
     private static let top: CGFloat = 18
     // 10 less right after a day divider, as a message's (MessageCell).
     private static let dayTop: CGFloat = 8
@@ -21,6 +22,7 @@ final class NoticeCell: NSTableCellView {
     init() {
         super.init(frame: .zero)
         identifier = Self.identifier
+        text.onLink = { [weak self] url in self?.onLink(url) }
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.contentTintColor = Palette.textMuted
         icon.symbolConfiguration = .init(pointSize: 16, weight: .regular)
@@ -44,7 +46,7 @@ final class NoticeCell: NSTableCellView {
 
     /// The row height for a notice at `width`, as Auto Layout would size the cell.
     static func height(
-        _ message: Message, notice: String, time: String, followsDay: Bool = false,
+        _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
         followsLine: Bool = false, width: CGFloat
     ) -> CGFloat {
         sizing.show(line(notice, time: time))
@@ -54,7 +56,7 @@ final class NoticeCell: NSTableCellView {
     }
 
     func configure(
-        _ message: Message, notice: String, time: String, followsDay: Bool = false,
+        _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
         followsLine: Bool = false, fullDate: String
     ) {
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
@@ -64,18 +66,32 @@ final class NoticeCell: NSTableCellView {
     }
 
     // The full date shows over the time only, as Discord's; TextKit keeps its rect in step.
-    private static func line(_ notice: String, time: String, fullDate: String? = nil)
-        -> NSAttributedString
-    {
-        let line = NSMutableAttributedString(
-            attributedString: CellText.body(notice, color: Palette.textMuted))
-        line.append(
-            NSAttributedString(
-                string: "  ",
-                attributes: [.font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted]
-            ))
+    private static func line(
+        _ notice: [Message.NoticePart], time: String, fullDate: String? = nil
+    ) -> NSAttributedString {
+        let gray = Palette.chatTextMuted
+        let line = NSMutableAttributedString()
+        for part in notice {
+            switch part {
+            case .text(let text):
+                line.append(CellText.body(text, color: gray))
+            case .actor(let name), .strong(let name), .threads(let name), .pins(let name):
+                line.append(Self.name(name, link: nil))
+            case .thread(let name, let id):
+                line.append(Self.name(name, link: id.map { "akari://thread/\($0.rawValue)" }))
+            case .message(let name, let id):
+                line.append(Self.name(name, link: "akari://message/\(id.rawValue)"))
+            case .channel(let name, let id):
+                line.append(Self.name(name, link: "akari://channel/\(id.rawValue)"))
+            case .guild(let name, let id):
+                line.append(Self.name(name, link: "akari://guild/\(id.rawValue)"))
+            }
+        }
+        line.append(CellText.body(" ", color: gray))
+        // On the text's baseline, which the body raises (D122).
         var timeAttributes: [NSAttributedString.Key: Any] = [
             .font: TypeScale.small.nsFont, .foregroundColor: Palette.chatTextMuted,
+            .baselineOffset: CellText.bodyRaise,
         ]
         if let fullDate, !fullDate.isEmpty {
             timeAttributes[.toolTip] = fullDate
@@ -84,11 +100,23 @@ final class NoticeCell: NSTableCellView {
         return line
     }
 
+    private static func name(_ name: String, link: String?) -> NSAttributedString {
+        let text = NSMutableAttributedString(
+            attributedString: CellText.body(
+                name, color: Palette.textStrong, style: TypeScale.noticeName))
+        if let url = link.flatMap(URL.init(string:)) {
+            text.addAttributes(
+                [.link: url, MessageTextView.underlinesOnHover: true],
+                range: NSRange(location: 0, length: text.length))
+        }
+        return text
+    }
+
     static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
         followsLine ? lineTop : followsDay ? dayTop : top
     }
 
-    private static func symbol(_ kind: MessageType) -> String {
+    static func symbol(_ kind: MessageType) -> String {
         switch kind {
         case .userJoin: "arrow.right"
         case .channelPinnedMessage: "pin"
@@ -97,7 +125,7 @@ final class NoticeCell: NSTableCellView {
             "sparkles"
         case .call: "phone"
         case .channelNameChange, .channelIconChange: "pencil"
-        case .threadCreated: "text.bubble"
+        case .threadCreated, .threadStarterMessage: "text.bubble"
         default: "info.circle"
         }
     }

@@ -606,8 +606,8 @@ async fn an_ack_hands_a_429_back_instead_of_retrying_it() {
         .await;
     let rest = rest(&server).await;
 
-    let first = rest.ack(channel(), message(), 4305).await;
-    let second = rest.ack(channel(), message(), 4305).await;
+    let first = rest.ack(channel(), message(), 4305, AckBody::Channel).await;
+    let second = rest.ack(channel(), message(), 4305, AckBody::Channel).await;
 
     let short = |wait: Duration| wait > Duration::ZERO && wait <= Duration::from_millis(500);
     assert!(limited_for(&first).is_some_and(short), "{first:?}");
@@ -629,10 +629,15 @@ async fn an_ack_fails_at_once_instead_of_waiting_for_its_bucket() {
         .await;
     let rest = rest(&server).await;
 
-    rest.ack(channel(), message(), 4305).await.unwrap();
-    let second = tokio::time::timeout(Duration::from_secs(1), rest.ack(channel(), message(), 4305))
+    rest.ack(channel(), message(), 4305, AckBody::Channel)
         .await
-        .expect("waited for the bucket");
+        .unwrap();
+    let second = tokio::time::timeout(
+        Duration::from_secs(1),
+        rest.ack(channel(), message(), 4305, AckBody::Channel),
+    )
+    .await
+    .expect("waited for the bucket");
 
     assert!(
         held_for(&second).is_some_and(|wait| wait > Duration::from_secs(3)),
@@ -654,7 +659,10 @@ async fn an_ack_hands_a_502_back_instead_of_retrying_it() {
         .mount(&server)
         .await;
 
-    let result = rest(&server).await.ack(channel(), message(), 4305).await;
+    let result = rest(&server)
+        .await
+        .ack(channel(), message(), 4305, AckBody::Channel)
+        .await;
 
     assert!(
         matches!(

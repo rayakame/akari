@@ -15,9 +15,11 @@ use super::settings::{
     GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
 };
 use super::threads::ThreadIndex;
-use super::types::{Channel, CurrentUser, Guild, Member, Message, Role, ThreadMembership, User};
+use super::types::{
+    Channel, CurrentUser, Guild, Member, Message, Role, StarterMessage, ThreadMembership, User,
+};
 use super::windows::{
-    CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, WindowLimits, Windows,
+    CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits, Windows,
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
@@ -308,6 +310,10 @@ impl Derived {
             threads: ThreadIndex::build(entities),
         }
     }
+
+    pub(crate) fn add_thread(&mut self, thread: &Channel) {
+        self.threads.add(thread);
+    }
 }
 
 // What a READY's swap replays of the local acks taken while it was prepared.
@@ -317,6 +323,15 @@ struct Journal {
     acks: Vec<(ChannelId, MessageId)>,
     // Undone since: nothing to replay, but their badges moved after the diff.
     undone: BTreeSet<ChannelId>,
+}
+
+// What the store made of a thread Get Channel brought.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Learned {
+    Kept,
+    NotAThread,
+    // Its guild isn't in the store: down, or not restored yet.
+    Unplaced,
 }
 
 pub(crate) struct ReadyDiff {
@@ -349,6 +364,10 @@ pub(crate) struct State {
     outage_members: HashMap<ChannelId, (GuildId, ThreadMembership)>,
     // Joins for threads the store doesn't have yet, for the THREAD_CREATE that brings them.
     pending_joins: HashMap<ChannelId, ThreadMembership>,
+    // Threads Get Channel refused or didn't find, for the session.
+    unavailable_threads: HashSet<ChannelId>,
+    // Threads Get Channel brought this session.
+    fetched_threads: HashSet<ChannelId>,
     clock: Arc<Clock>,
 }
 
@@ -375,6 +394,8 @@ impl State {
             recounts: HashMap::new(),
             outage_members: HashMap::new(),
             pending_joins: HashMap::new(),
+            unavailable_threads: HashSet::new(),
+            fetched_threads: HashSet::new(),
             clock,
         }
     }
@@ -387,6 +408,7 @@ impl State {
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_folders(&mut next);
         self.keep_memberships(&mut next);
+        self.keep_fetched(&mut next);
         let derived = Derived::build(&next, self.now_millis());
         let diff = self.ready_diff(&next, &derived);
         self.swap(next, derived, diff, events);
@@ -481,6 +503,17 @@ impl State {
             Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
             None => HashMap::new(),
         };
+        // Fetched while the READY was prepared, after its own passes.
+        for thread in self.keep_fetched(&mut next) {
+            derived.threads.add(&thread);
+        }
+        // Their badges weren't built with the READY's.
+        let fetched: Vec<ChannelId> = self
+            .fetched_threads
+            .iter()
+            .filter(|id| next.channels.contains_key(id))
+            .copied()
+            .collect();
         if let Some(diff) = diff {
             events.extend(diff.events);
             for channel in diff.removed_channels {
@@ -493,6 +526,9 @@ impl State {
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
+        for thread in fetched {
+            self.dirty.channel(thread);
+        }
         self.keep_outage_members(&next);
         self.pending_joins.clear();
         let old = Derived {
@@ -1667,6 +1703,108 @@ impl State {
 
     pub(crate) fn permissions(&self, channel: ChannelId, now_millis: i64) -> Option<Permissions> {
         self.entities.permissions(channel, now_millis)
+    }
+
+    pub(crate) fn starter_message(&self, thread: ChannelId) -> Option<StarterMessage> {
+        self.windows.starter_message(thread)
+    }
+
+    pub(crate) fn wants_starter(&self, thread: ChannelId) -> bool {
+        self.windows.wanted_starter(thread).is_some()
+    }
+
+    pub(crate) fn starter_to_fetch(&mut self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
+        self.windows.starter_to_fetch(thread)
+    }
+
+    pub(crate) fn settle_starter(
+        &mut self,
+        thread: ChannelId,
+        fetch: StarterFetch,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.windows
+            .settle_starter(thread, fetch, &self.entities.users, events);
+    }
+
+    pub(crate) fn fail_starter(&mut self, thread: ChannelId, events: &mut Vec<StoreEvent>) {
+        self.windows.fail_starter(thread, events);
+    }
+
+    // Get Channel's answer, as a THREAD_CREATE would bring it.
+    pub(crate) fn learn_thread(
+        &mut self,
+        thread: model::Channel,
+        events: &mut Vec<StoreEvent>,
+    ) -> Learned {
+        let id = thread.id;
+        if !matches!(
+            thread.kind,
+            model::ChannelType::NewsThread
+                | model::ChannelType::PublicThread
+                | model::ChannelType::PrivateThread
+        ) {
+            return Learned::NotAThread;
+        }
+        // The gateway's copy is newer than an answer to a request sent before it.
+        if self.entities.channels.contains_key(&id) {
+            return Learned::Kept;
+        }
+        self.put_channel(thread, events);
+        if !self.entities.channels.contains_key(&id) {
+            return Learned::Unplaced;
+        }
+        self.fetched_threads.insert(id);
+        self.settle(self.now_millis(), events);
+        Learned::Kept
+    }
+
+    // READY lists only joined threads, so it says nothing about one fetched this session; it
+    // stays while its guild and parent do. Returns the threads it put into `next`.
+    pub(crate) fn keep_fetched(&self, next: &mut Entities) -> Vec<Arc<Channel>> {
+        let mut kept = Vec::new();
+        for id in &self.fetched_threads {
+            let Some(thread) = self.entities.channels.get(id) else {
+                continue;
+            };
+            let placed = thread
+                .guild_id
+                .is_some_and(|guild| next.guilds.contains_key(&guild))
+                && thread
+                    .parent_id
+                    .is_some_and(|parent| next.channels.contains_key(&parent));
+            if placed && !next.channels.contains_key(id) {
+                next.channels.insert(*id, thread.clone());
+                kept.push(thread.clone());
+            }
+        }
+        kept
+    }
+
+    pub(crate) fn thread_unavailable(&self, thread: ChannelId) -> bool {
+        self.unavailable_threads.contains(&thread)
+    }
+
+    pub(crate) fn mark_thread_unavailable(
+        &mut self,
+        parent: ChannelId,
+        thread: ChannelId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if !self.unavailable_threads.insert(thread) {
+            return;
+        }
+        if let Some(guild_id) = self
+            .entities
+            .channels
+            .get(&parent)
+            .and_then(|channel| channel.guild_id)
+        {
+            events.push(StoreEvent::ThreadUnavailable {
+                guild_id,
+                thread_id: thread,
+            });
+        }
     }
 }
 

@@ -16,12 +16,17 @@ enum CellText {
         NSAttributedString(string: text, attributes: [.font: style.nsFont, .foregroundColor: color])
     }
 
-    static func body(_ text: String, color: NSColor) -> NSAttributedString {
+    // How far body text sits above its line's baseline, centering it on the 22 line.
+    static var bodyRaise: CGFloat { TypeScale.size(3) }
+
+    static func body(_ text: String, color: NSColor, style: TextStyle = TypeScale.body)
+        -> NSAttributedString
+    {
         NSAttributedString(
             string: text,
             attributes: [
-                .font: TypeScale.body.nsFont, .foregroundColor: color,
-                .paragraphStyle: bodyLine, .baselineOffset: TypeScale.size(3),
+                .font: style.nsFont, .foregroundColor: color,
+                .paragraphStyle: bodyLine, .baselineOffset: bodyRaise,
             ])
     }
 

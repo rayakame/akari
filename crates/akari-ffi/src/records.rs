@@ -248,7 +248,69 @@ pub struct Message {
     pub formatted: FormattedText,
     /// Mentions the current user, by ID, @everyone or @here, or a role of theirs.
     pub mentions_me: bool,
+    /// What a reply, pin, crosspost, forward or thread notice points at; a "started a thread"
+    /// message's `channel_id` is its thread.
+    pub reference: Option<MessageReference>,
+    /// A thread was started from this message.
+    pub has_thread: bool,
+    /// The users it mentions, in Discord's order: a system message's other person.
+    pub mentions: Vec<User>,
+    /// A CALL or VOICE_SESSION message's call.
+    pub call: Option<MessageCall>,
+    pub role_subscription: Option<RoleSubscription>,
+    /// A PURCHASE_NOTIFICATION's product.
+    pub purchased_product: Option<String>,
+    /// Who added a bot, on the bot's USER_JOIN.
+    pub actor: Option<User>,
+    /// The app a GUILD_APPLICATION_PREMIUM_SUBSCRIPTION upgraded.
+    pub application_name: Option<String>,
+    /// A poll result's or an AutoMod alert's first embed's fields, which their lines read.
+    pub embed_fields: Vec<EmbedField>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MessageCall {
+    /// The recipients who joined it.
+    pub participants: Vec<UserId>,
+    /// `None` while it runs.
+    pub ended_timestamp: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RoleSubscription {
+    pub tier_name: String,
+    pub total_months_subscribed: u32,
+    pub is_renewal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct EmbedField {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct MessageReference {
+    pub message_id: Option<MessageId>,
+    pub channel_id: Option<ChannelId>,
+    pub guild_id: Option<GuildId>,
+}
+
+/// A thread's first message when it started from a message in its parent channel.
+// Copied across once per read; UniFFI can't lower a boxed record.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum StarterMessage {
+    /// The parent channel's message the thread started from.
+    Loaded { message: Message },
+    /// Akari is fetching it; nothing to show yet. `MessageUpdated` for the thread's first
+    /// message says when to read it again.
+    Loading,
+    /// Deleted, or the user can't read it.
+    Unavailable,
+}
+
+const HAS_THREAD: u64 = 1 << 5;
 
 impl Message {
     pub(crate) fn new(
@@ -256,6 +318,7 @@ impl Message {
         formatted: FormattedText,
         mentions_me: bool,
     ) -> Self {
+        let system = message.system.as_deref();
         Self {
             id: message.id,
             channel_id: message.channel_id,
@@ -278,6 +341,50 @@ impl Message {
             delivery: message.delivery.into(),
             formatted,
             mentions_me,
+            reference: message
+                .reference
+                .as_deref()
+                .map(|reference| MessageReference {
+                    message_id: reference.message_id,
+                    channel_id: reference.channel_id,
+                    guild_id: reference.guild_id,
+                }),
+            has_thread: message.flags & HAS_THREAD != 0,
+            mentions: message
+                .mentions
+                .iter()
+                .map(|user| User::from(&**user))
+                .collect(),
+            call: system
+                .and_then(|system| system.call.as_ref())
+                .map(|call| MessageCall {
+                    participants: call.participants.to_vec(),
+                    ended_timestamp: call.ended_timestamp.map(system_time),
+                }),
+            role_subscription: system
+                .and_then(|system| system.role_subscription.as_ref())
+                .map(|data| RoleSubscription {
+                    tier_name: data.tier_name.to_string(),
+                    total_months_subscribed: data.total_months_subscribed,
+                    is_renewal: data.is_renewal,
+                }),
+            purchased_product: system
+                .and_then(|system| system.purchased_product.as_deref())
+                .map(str::to_owned),
+            actor: system
+                .and_then(|system| system.actor.as_deref())
+                .map(User::from),
+            application_name: system
+                .and_then(|system| system.application_name.as_deref())
+                .map(str::to_owned),
+            embed_fields: message
+                .system_embed_fields()
+                .iter()
+                .map(|field| EmbedField {
+                    name: field.name.to_string(),
+                    value: field.value.to_string(),
+                })
+                .collect(),
         }
     }
 }

@@ -21,6 +21,8 @@ public final class MessageListModel {
         case newer
         /// Around the read position, for the jump to the first unread message.
         case around
+        /// Around a message, for a jump to it.
+        case aroundMessage
     }
 
     /// Where a channel's first rows came from.
@@ -32,13 +34,74 @@ public final class MessageListModel {
     }
 
     public struct Row: Identifiable, Equatable, Sendable {
+        /// A thread's first message when it started from a message in its parent channel.
+        public enum Starter: Equatable, Sendable {
+            /// Being fetched; the row isn't shown yet.
+            case loading
+            /// The parent channel's message the thread started from.
+            case loaded(Message)
+            /// Deleted, or the user can't read it.
+            case unavailable
+        }
+
+        public static let unavailableStarter =
+            "Sorry, we couldn't load the first message in this thread"
+
         /// Stable for the row's life: a sent message keeps its pending ID as its key.
         public let id: MessageId
+        /// As the store holds it.
         public let message: Message
+        /// Set for a thread's first message that points at its parent's.
+        public let starter: Starter?
+        /// Whether a "started a thread" message links its thread: not once Discord refused it or
+        /// it's gone.
+        public let threadLinked: Bool
+        /// What a system message's line is worded for.
+        public let noticeContext: Message.NoticeContext
+        /// The header's name for `shown`'s author, by the rule system lines name people with:
+        /// the global name, else the username.
+        public let authorName: String
 
-        public init(id: MessageId, message: Message) {
+        public init(
+            id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true,
+            noticeContext: Message.NoticeContext = .init(), authorName: String? = nil
+        ) {
             self.id = id
             self.message = message
+            self.starter = starter
+            self.threadLinked = threadLinked
+            self.noticeContext = noticeContext
+            let shown = if case .loaded(let original)? = starter { original } else { message }
+            self.authorName = authorName ?? shown.author.displayName
+        }
+
+        /// What the row draws: a loaded starter draws the message the thread started from.
+        public var shown: Message {
+            if case .loaded(let original) = starter { original } else { message }
+        }
+
+        /// What the row says when it draws as a system message.
+        public var notice: String? {
+            starter == .unavailable
+                ? Self.unavailableStarter : shown.notice(in: noticeContext)
+        }
+
+        /// `notice` in parts; an unavailable thread isn't linked.
+        public var noticeParts: [Message.NoticePart]? {
+            if starter == .unavailable {
+                return [.text(Self.unavailableStarter)]
+            }
+            return shown.noticeParts(in: noticeContext)?.map { part in
+                if case .thread(let name, _) = part, !threadLinked {
+                    return .thread(name: name, id: nil)
+                }
+                return part
+            }
+        }
+
+        /// A system message Discord shows no line for; the timeline leaves it out.
+        public var isHidden: Bool {
+            noticeParts?.isEmpty == true
         }
     }
 
@@ -57,6 +120,19 @@ public final class MessageListModel {
             let number = count.formatted() + (more ? "+" : "")
             let messages = count == 1 && !more ? "message" : "messages"
             return "\(number) new \(messages) since \(time)"
+        }
+    }
+
+    /// A jump to a message, such as a pin's: the view centers it, or the first message after it
+    /// when it's gone.
+    public struct MessageJump: Equatable, Sendable {
+        public let messageId: MessageId
+        /// Counts the jumps, so one to the same message again scrolls again.
+        public let number: Int
+
+        public init(messageId: MessageId, number: Int) {
+            self.messageId = messageId
+            self.number = number
         }
     }
 
@@ -90,6 +166,10 @@ public final class MessageListModel {
     public private(set) var unreadBar: UnreadBar?
     /// Counts the jumps to the first unread message; on each the view scrolls the line to its top.
     public private(set) var unreadJumps = 0
+    /// The last jump to a message that landed.
+    public private(set) var messageJump: MessageJump?
+    /// Who started the thread, by name, if the store or the loaded messages know them.
+    public private(set) var threadOwner: String?
 
     private static let pageSize: UInt8 = 50
     // A trackpad's bounce or momentum at the bottom stays below it.
@@ -111,6 +191,9 @@ public final class MessageListModel {
     @ObservationIgnored var readHere = false
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
+    @ObservationIgnored private let place: Message.NoticeContext.Place
+    @ObservationIgnored private let ownerId: UserId?
+    @ObservationIgnored private var storedOwner: String?
     @ObservationIgnored private var hasMessages = false
     // Rows the cache showed while the first page loaded; that page didn't bring them.
     @ObservationIgnored private var fromDisk: Set<MessageId> = []
@@ -130,6 +213,9 @@ public final class MessageListModel {
     @ObservationIgnored private var owedPresent: Int?
     @ObservationIgnored private var retired = false
     @ObservationIgnored private var landed = 0
+    @ObservationIgnored private var messageJumps = 0
+    // The message the last jump that loaded goes to.
+    @ObservationIgnored private var jumpingTo: MessageId?
 
     init(
         channelId: ChannelId, userId: UserId, account: Account, store: Store,
@@ -139,10 +225,14 @@ public final class MessageListModel {
         self.userId = userId
         self.account = account
         self.store = store
-        guildId = store.channel(id: channelId)?.guildId
+        let channel = store.channel(id: channelId)
+        guildId = channel?.guildId
+        place = Self.place(of: channel, in: store)
+        ownerId = channel?.thread?.ownerId
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
         readStoredPosition()
+        readOwner()
         reload(rereading: [])
         if hasMessages {
             openedFrom = .window
@@ -201,7 +291,10 @@ public final class MessageListModel {
             return
         }
         // A channel never read has no position to load around; its line is among the loaded rows.
-        if readUpTo.rawValue != 0, !readPositionLoaded(readUpTo) {
+        // A jump to a message still loading would land after the scroll.
+        if readUpTo.rawValue != 0,
+            !readPositionLoaded(readUpTo) || activeLoads[lastPlacing] == .aroundMessage
+        {
             // The running load jumps once its messages are in, if nothing placed the list since.
             guard activeLoads[lastPlacing] != .around else {
                 return
@@ -215,16 +308,43 @@ public final class MessageListModel {
                 }
                 return
             }
+        } else if activeLoads[lastPlacing] == .aroundMessage {
+            supersedeJumps()
         }
         seenLineFrom = self.readUpTo
         updateUnreadBar()
         unreadJumps += 1
     }
 
+    /// "a message" in a pin's line: loads the messages around it unless the loaded ones reach
+    /// it and nothing else is placing the list; a failed load leaves the list where it is. What
+    /// cancels the jump to unread cancels this one too, and so does either jump started after
+    /// it. Scrolling is the view's part.
+    public func jump(to messageId: MessageId) async {
+        let placing = activeLoads[lastPlacing]
+        // The running load jumps once its messages are in.
+        if placing == .aroundMessage, jumpingTo == messageId {
+            return
+        }
+        // A load still placing the list would replace the rows the jump scrolls.
+        if placing != nil || !loadedRange(reaches: messageId) {
+            jumpingTo = messageId
+            let (ticket, outcome) = await load(.aroundMessage, around: messageId)
+            guard outcome == .applied, ticket == lastPlacing else {
+                if !retired, owedPresent != nil, activeLoads[lastPlacing] == nil {
+                    await load(.latest)
+                }
+                return
+            }
+        }
+        messageJumps += 1
+        messageJump = MessageJump(messageId: messageId, number: messageJumps)
+    }
+
     // A jump landing after the user left would reopen the channel in history, without its scroll.
     func retire() {
         retired = true
-        if activeLoads.values.contains(.around) {
+        if aroundLoadRunning {
             account.supersedeAroundLoads(channelId: channelId)
         }
     }
@@ -278,10 +398,8 @@ public final class MessageListModel {
     // Marked read or a send: only a message newer than what is known now starts the next line.
     func endNewMessagesLine() {
         // A latest load would overtake a running jump too, but at the present none runs.
-        if activeLoads.values.contains(.around) {
-            account.supersedeAroundLoads(channelId: channelId)
-            loads += 1
-            lastPlacing = loads
+        if aroundLoadRunning {
+            supersedeJumps()
         }
         let newest = rows.last { $0.message.delivery == .sent }?.message.id
         // Marking read acks up to the channel's newest message, also one not loaded here.
@@ -315,6 +433,11 @@ public final class MessageListModel {
             placeNewMessagesLine()
         }
         pendingKeys.merge(batch.confirmed[channelId] ?? [:]) { _, confirmed in confirmed }
+        if batch.everythingChanged || batch.currentUserChanged
+            || ownerId.map(batch.usersChanged.contains) == true
+        {
+            readOwner()
+        }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages
         if batch.windowsChanged.contains(channelId) {
@@ -344,9 +467,23 @@ public final class MessageListModel {
             || batch.channelsChanged[guildId] != nil
     }
 
-    // The outcome is `nil` when it failed or there was nothing to load.
+    // Drops the pages of the jumps still loading; what comes after places the list.
+    private func supersedeJumps() {
+        account.supersedeAroundLoads(channelId: channelId)
+        loads += 1
+        lastPlacing = loads
+    }
+
+    private var aroundLoadRunning: Bool {
+        activeLoads.values.contains { $0 == .around || $0 == .aroundMessage }
+    }
+
+    // The outcome is `nil` when it failed or there was nothing to load. `target` is the message
+    // an `aroundMessage` load centers on.
     @discardableResult
-    private func load(_ kind: Load) async -> (ticket: Int, outcome: PageOutcome?) {
+    private func load(_ kind: Load, around target: MessageId? = nil) async -> (
+        ticket: Int, outcome: PageOutcome?
+    ) {
         loads += 1
         let ticket = loads
         activeLoads[ticket] = kind
@@ -363,10 +500,12 @@ public final class MessageListModel {
             case .newer: .newer(limit: Self.pageSize)
             case .around:
                 .around(messageId: readUpTo ?? MessageId(rawValue: 0), limit: Self.pageSize)
+            case .aroundMessage:
+                .around(messageId: target ?? MessageId(rawValue: 0), limit: Self.pageSize)
             }
         // Taken now, in the order the user acted: the load begins later, on Akari's runtime.
         var placing: UInt64?
-        if kind == .latest || kind == .around {
+        if kind.places {
             placing = account.reservePlacing()
             lastPlacing = ticket
         }
@@ -396,7 +535,7 @@ public final class MessageListModel {
                 sequence: ticket, channelId: channelId, kind: kind, report: report,
                 failure: nil, page: Set(page), read: read, started: started,
                 duration: started.duration(to: .now))
-            if kind == .latest || kind == .around {
+            if kind.places {
                 notePlaced(ticket, kind: kind, outcome: report?.outcome)
             }
             return (ticket, report?.outcome)
@@ -443,18 +582,19 @@ public final class MessageListModel {
             return
         }
         let ids = window.messageIds + window.pendingIds
-        var held = Dictionary(rows.map { ($0.message.id, $0.message) }) { first, _ in first }
+        var held = Dictionary(rows.map { ($0.message.id, $0) }) { first, _ in first }
         let unread = ids.filter { held[$0] == nil || changed.contains($0) }
         if !unread.isEmpty {
             for message in store.messages(channelId: channelId, ids: unread) {
-                held[message.id] = message
+                held[message.id] = row(message.id, message)
             }
         }
         let shown = Set(ids)
         pendingKeys = pendingKeys.filter { shown.contains($0.key) }
         rows = ids.compactMap { id in
-            held[id].map { Row(id: pendingKeys[id] ?? id, message: $0) }
+            held[id].map { row(pendingKeys[id] ?? id, $0.message, from: $0) }
         }
+        nameOwner()
         hasMessages = !window.messageIds.isEmpty
         reachedOldest = window.oldest
         atPresent = window.latest
@@ -511,6 +651,17 @@ public final class MessageListModel {
         return UnreadBar(count: count, more: !loaded || !atPresent, since: since)
     }
 
+    // So it's among them, or was deleted from between them.
+    private func loadedRange(reaches id: MessageId) -> Bool {
+        let sent = { (row: Row) in row.message.delivery == .sent }
+        guard let oldest = rows.first(where: sent)?.message.id,
+            let newest = rows.last(where: sent)?.message.id
+        else {
+            return false
+        }
+        return (reachedOldest || oldest <= id) && (atPresent || id <= newest)
+    }
+
     // Then the line stands right before the first unread message.
     private func readPositionLoaded(_ position: MessageId) -> Bool {
         guard !reachedOldest else {
@@ -534,7 +685,129 @@ public final class MessageListModel {
             store.messages(channelId: channelId, ids: ids).map { ($0.id, $0) }
         ) { first, _ in first }
         rows = rows.map { row in
-            fresh[row.message.id].map { Row(id: row.id, message: $0) } ?? row
+            fresh[row.message.id].map { self.row(row.id, $0) } ?? row
         }
+        nameOwner()
+    }
+
+    private func row(_ id: MessageId, _ message: Message) -> Row {
+        let thread = message.kind == .threadCreated ? message.reference?.channelId : nil
+        let starter = starter(of: message)
+        // A loaded starter draws the original, which is worded for its own kind.
+        let shown = if case .loaded(let original)? = starter { original } else { message }
+        return Row(
+            id: id, message: message, starter: starter,
+            threadLinked: thread.map {
+                store.channel(id: $0) != nil || !store.threadUnavailable(threadId: $0)
+            } ?? true,
+            noticeContext: noticeContext(for: shown),
+            authorName: shown.fromWebhook ? shown.author.displayName : name(of: shown.author))
+    }
+
+    private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
+        Row(
+            id: id, message: message, starter: held.starter, threadLinked: held.threadLinked,
+            noticeContext: held.noticeContext, authorName: held.authorName)
+    }
+
+    // One rule for headers and system lines; server nicknames come with the member milestone.
+    private func name(of user: User) -> String {
+        user.displayName
+    }
+
+    // Reads only what the kind's line needs: most rows are people's messages.
+    private func noticeContext(for message: Message) -> Message.NoticeContext {
+        var context = Message.NoticeContext(currentUserId: userId, place: place)
+        context.guildId = guildId
+        if message.noticeParts(in: context) != nil {
+            for user in [message.author] + message.mentions + [message.actor].compactMap({ $0 }) {
+                context.names[user.id] = name(of: user)
+            }
+        }
+        switch message.kind {
+        case .premiumGuildSubscriptionTier1, .premiumGuildSubscriptionTier2,
+            .premiumGuildSubscriptionTier3, .guildDiscoveryDisqualified,
+            .guildDiscoveryGracePeriodInitialWarning, .guildDiscoveryGracePeriodFinalWarning,
+            .roleSubscriptionPurchase, .guildIncidentReportRaid:
+            context.guildName = guildId.flatMap { store.guild(id: $0)?.name }
+        case .threadCreated:
+            context.threadName = message.reference?.channelId.flatMap {
+                store.channel(id: $0)?.name
+            }
+        case .autoModerationAction:
+            let field = message.embedFields.first { $0.name == "channel_id" }
+            if let alerted = field.flatMap({ UInt64($0.value) }).map(ChannelId.init(rawValue:)) {
+                context.alertChannelName = store.channel(id: alerted)?.name
+                // Discord links it only while the user can see it.
+                if store.permissions(channelId: alerted)?.contains(.viewChannel) == true {
+                    context.alertChannelId = alerted
+                }
+            }
+        case .friendRequestAccepted:
+            context.recipientName = store.channel(id: channelId)?.recipientIds.first.flatMap {
+                store.user(id: $0)?.displayName
+            }
+        case .voiceSession:
+            context.participantNames = (message.call?.participants ?? [])
+                .filter { $0 != message.author.id }
+                .compactMap { store.user(id: $0).map(name(of:)) }
+        default:
+            break
+        }
+        return context
+    }
+
+    private func starter(of message: Message) -> Row.Starter? {
+        guard message.kind == .threadStarterMessage else {
+            return nil
+        }
+        return switch store.starterMessage(threadId: channelId) {
+        case .loaded(let original)?: .loaded(original)
+        case .loading?: .loading
+        case .unavailable?, nil: .unavailable
+        }
+    }
+
+    // The store's users are DM recipients; the user may not have posted in their own thread.
+    private func readOwner() {
+        storedOwner = ownerId.flatMap { owner in
+            owner == userId
+                ? store.currentUser()?.displayName : store.user(id: owner)?.displayName
+        }
+        nameOwner()
+    }
+
+    private func nameOwner() {
+        guard let ownerId else {
+            return
+        }
+        let owner =
+            storedOwner
+            ?? rows.lazy.flatMap { [$0.shown, $0.message] }
+            .first { $0.author.id == ownerId }?.author.displayName
+        if owner != threadOwner {
+            threadOwner = owner
+        }
+    }
+}
+
+extension MessageListModel {
+    fileprivate static func place(of channel: Channel?, in store: Store) -> Message.NoticeContext.Place
+    {
+        switch channel?.kind {
+        case .dm?: return .dm
+        case .groupDm?: return .groupDM
+        case .publicThread?, .privateThread?, .newsThread?:
+            let parent = channel?.parentId.flatMap { store.channel(id: $0)?.kind }
+            return parent == .guildForum || parent == .guildMedia ? .forumPost : .thread
+        default: return .channel
+        }
+    }
+}
+
+extension MessageListModel.Load {
+    // Older and newer loads extend the list; the others put it where they load.
+    fileprivate var places: Bool {
+        self != .older && self != .newer
     }
 }

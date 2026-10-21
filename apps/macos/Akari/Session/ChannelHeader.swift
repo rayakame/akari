@@ -6,10 +6,28 @@ struct ChannelHeader: View {
 
     let channel: Channel?
     let name: String
+    var parent: Channel?
+    var openParent: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 8) {
             if let channel {
+                if let parent, channel.isThread {
+                    ChannelSymbol(channel: parent)
+                    Button(action: openParent) {
+                        Text(parent.name ?? "")
+                            .font(TypeScale.channelHeader.font)
+                            .foregroundStyle(Color(nsColor: Palette.interactiveText))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .background(PointingHandArea())
+                    .accessibilityLabel(parent.name ?? "")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color(nsColor: Palette.textMuted))
+                        .accessibilityHidden(true)
+                }
                 ChannelSymbol(channel: channel)
                 Text(name)
                     .font(TypeScale.channelHeader.font)

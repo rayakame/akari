@@ -12,9 +12,10 @@ use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
 use crate::lenient::parse_list;
 use crate::model::{self, ChannelId, DISCORD_EPOCH, MessageId};
-use crate::state::limit_in;
+use crate::state::{AckBody, limit_in};
 use crate::{DiscordClient, LoadReport, Token};
 
+const CHANNEL: &str = "channels/{}";
 const MESSAGES: &str = "channels/{}/messages";
 const ACK: &str = "channels/{}/messages/{}/ack";
 const ACK_BULK: &str = "read-states/ack-bulk";
@@ -184,8 +185,13 @@ impl CreateMessage {
 struct Ack {
     // Not the account's token: an old ack token, which the official client sends as null.
     token: Option<String>,
-    last_viewed: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_viewed: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    flags: Option<u8>,
 }
+
+const IS_THREAD: u8 = 1 << 1;
 
 #[derive(Serialize)]
 struct BulkAck {
@@ -296,6 +302,21 @@ impl AccountRest {
         })
     }
 
+    pub(crate) async fn get_channel(
+        &self,
+        channel: ChannelId,
+    ) -> Result<model::Channel, RequestError> {
+        let path = format!("channels/{}", channel.get());
+        let route = RouteKey::new(Method::Get, CHANNEL, channel.get());
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Allowed, || {
+                self.request(HttpMethod::GET, &path)
+            })
+            .await
+            .map_err(RequestError::from)?;
+        serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
+    }
+
     // Retries send the same body, so the nonce stays the same.
     pub(crate) async fn create_message(
         &self,
@@ -318,12 +339,21 @@ impl AccountRest {
         channel: ChannelId,
         message: MessageId,
         last_viewed: u32,
+        kind: AckBody,
     ) -> Result<(), Failure> {
         let path = format!("channels/{}/messages/{}/ack", channel.get(), message.get());
         let route = RouteKey::new(Method::Post, ACK, channel.get());
-        let body = Ack {
-            token: None,
-            last_viewed,
+        let body = match kind {
+            AckBody::Channel => Ack {
+                token: None,
+                last_viewed: Some(last_viewed),
+                flags: None,
+            },
+            AckBody::Thread { joined } => Ack {
+                token: None,
+                last_viewed: joined.then_some(last_viewed),
+                flags: Some(IS_THREAD),
+            },
         };
         self.send(route, Waiting::Never, || {
             Ok(self.request(HttpMethod::POST, &path)?.json(&body))

@@ -34,6 +34,9 @@ struct MessageArea: View {
     let name: ChannelName
     let links: LinkFollower
     let go: (ChannelId) -> Void
+    // A thread and the channel whose line names it.
+    let openThread: (ChannelId, ChannelId) -> Void
+    let openGuild: (GuildId) -> Void
     // The open channel, as its menu would.
     let markRead: () -> Void
     let markServerRead: () -> Void
@@ -41,13 +44,17 @@ struct MessageArea: View {
 
     var body: some View {
         let bridge = MessageListBridge(
-            messages: messages, link: link, links: links, go: go, markServerRead: markServerRead)
+            messages: messages, link: link, links: links, go: go, openThread: openThread,
+            openGuild: openGuild, markServerRead: markServerRead)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
                     .id(messages.channelId)
                     .overlay(alignment: .top) {
                         VStack(spacing: 0) {
+                            if messages.composer.locked {
+                                LockedBanner()
+                            }
                             if let bar = messages.unreadBar {
                                 UnreadBar(
                                     text: UnreadBar.text(bar), jump: { bridge.jumpToUnread() },
@@ -97,7 +104,8 @@ struct MessageArea: View {
             channelId: messages.channelId, lastLoad: messages.lastLoad,
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
             revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine,
-            unreadJumps: messages.unreadJumps)
+            unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
+            startRoom: messages.composer.locked ? LockedBanner.room : 0)
     }
 }
 
@@ -106,16 +114,23 @@ final class MessageListBridge: MessageListActions {
     let link: MessageTableLink
     let links: LinkFollower
     let go: (ChannelId) -> Void
+    let thread: (ChannelId, ChannelId) -> Void
+    let guild: (GuildId) -> Void
     let serverRead: () -> Void
 
     init(
         messages: MessageListModel, link: MessageTableLink, links: LinkFollower,
-        go: @escaping (ChannelId) -> Void, markServerRead: @escaping () -> Void
+        go: @escaping (ChannelId) -> Void,
+        openThread: @escaping (ChannelId, ChannelId) -> Void = { _, _ in },
+        openGuild: @escaping (GuildId) -> Void = { _ in },
+        markServerRead: @escaping () -> Void
     ) {
         self.messages = messages
         self.link = link
         self.links = links
         self.go = go
+        thread = openThread
+        guild = openGuild
         serverRead = markServerRead
     }
 
@@ -183,6 +198,18 @@ final class MessageListBridge: MessageListActions {
 
     func openChannel(_ id: ChannelId) {
         go(id)
+    }
+
+    func openThread(_ id: ChannelId, from parent: ChannelId) {
+        thread(id, parent)
+    }
+
+    func jump(to message: MessageId) {
+        Task { await messages.jump(to: message) }
+    }
+
+    func openGuild(_ id: GuildId) {
+        guild(id)
     }
 
     func openLink(_ url: URL, masked: Bool) {

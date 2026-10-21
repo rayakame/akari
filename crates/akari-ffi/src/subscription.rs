@@ -129,6 +129,12 @@ pub enum StoreEvent {
         guild_id: GuildId,
         thread_id: ChannelId,
     },
+    /// Discord refused a thread `Account.fetch_thread` asked for, or it is gone: lines that name
+    /// it stop linking it.
+    ThreadUnavailable {
+        guild_id: GuildId,
+        thread_id: ChannelId,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -221,6 +227,13 @@ impl StoreEvent {
                 guild_id,
                 thread_id,
             } => Self::ThreadListingChanged {
+                guild_id,
+                thread_id,
+            },
+            E::ThreadUnavailable {
+                guild_id,
+                thread_id,
+            } => Self::ThreadUnavailable {
                 guild_id,
                 thread_id,
             },

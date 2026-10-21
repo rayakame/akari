@@ -45,8 +45,10 @@ author; the rest show only their content.
   line's 41. *Akari: avatar and name line 4 into its 47 box (name baseline at 19), text
   baseline 41, the avatar 3 above the box's bottom; a group start whose content is shorter than
   the avatar is as tall as a one-line one.*
-- The display name in medium `textStrong`. Bots carry a small tag after the name ("APP"
-  since 2024). **Unverified** that webhooks get the same tag.
+- The author's name in medium `textStrong`: Discord shows the server nickname, else the global
+  name, else the username. Bots carry a small tag after the name ("APP" since 2024).
+  **Unverified** that webhooks get the same tag. *Akari: the global name, else the username;
+  server nicknames come with the member milestone.*
 - The time, 4 after the name, in medium `chatTextMuted` (12 px in the official client;
   Akari's sizes in [typography.md](typography.md)).
 
@@ -69,14 +71,19 @@ group when any of these holds:
 5. Both are webhook messages and their author names differ. One webhook can post under
    several names.
 6. It is a reply, or the result of a slash command or a context-menu command.
-7. Its timestamp is **7 minutes (420 seconds) or more** after the previous message's. At
+7. It has a thread started from it (observed 2026-10-19: Ray's 17:22 message with a thread
+   started a group 6 minutes after his 17:16 one). The message after it doesn't start one for
+   that: it continues the group under the thread's box, without a header (observed 2026-10-20:
+   Ray's "danach" seconds after his "tb14").
+8. It or the previous message is a thread's starter ([Threads](#threads)).
+9. Its timestamp is **7 minutes (420 seconds) or more** after the previous message's. At
    419 seconds it still continues the group.
 
 Otherwise it continues the previous message's group.
 
-Discord also starts a group for a message that has a thread, when ephemeral, scheduled,
-blocked or silent state changes, when the posting application changes, and for the first
-message of a forum post. Akari applies those once its records carry the fields they need.
+Discord also starts a group when ephemeral, scheduled, blocked or silent state changes, when
+the posting application changes, and for the first message of a forum post. Akari applies
+those once its records carry the fields they need.
 
 ## Times
 
@@ -86,13 +93,13 @@ The time in a group's first line:
 |---|---|
 | Today | the time only, "2:05 PM" (observed 2026-10-14) |
 | Yesterday | "Yesterday at 11:59 PM" (**unverified** since the today form changed) |
-| Earlier, or a date in the future | numeric date and short time, "10/03/2026, 2:05 PM" (**unverified** since then) |
+| Earlier, or a date in the future | the locale's short date and short time, "10/17/26, 4:02 PM"; German "17.10.26, 16:02" (observed 2026-10-19) |
 
 All of them follow the user's locale and time zone, also when those change while the app
 runs: at midnight "2:05 PM" becomes "Yesterday at 2:05 PM", and a new time zone or locale
 redraws the times and moves day dividers without reopening the channel. Hovering the time
-shows the full date and time. Discord writes the older form without the comma; Akari uses the
-platform's date format for the locale.
+shows the full date and time. Akari uses the platform's short date and time styles for the
+locale, which include the user's own date format and 24-hour settings.
 
 ### Locale
 
@@ -123,15 +130,113 @@ Messages Discord writes itself (someone joined, a message was pinned, a boost, a
 thread, a renamed channel, and so on) show as one line:
 
 - a muted icon in the avatar column;
-- a sentence naming who did what, in `textMuted`;
-- the time; hovering it, and only it, shows the full date and time, as Discord does.
+- a sentence naming who did what, in `chatTextMuted` (#818289), its actor in `textStrong`
+  (#FBFBFB) and medium (observed 2026-10-20 on the thread and pin lines; Akari draws every
+  kind's actor so);
+- the time, one space after the sentence and on its baseline (observed 2026-10-19); hovering
+  it, and only it, shows the full date and time, as Discord does.
 
-They never join a group and always end one. Akari writes these sentences in its own words; it
-doesn't reuse Discord's texts, such as its random welcome lines.
+**A new thread** posts "Ray started a thread: t2. See all threads." in the channel (observed
+2026-10-17 and 2026-10-19): "Ray", "t2" and "threads" in `textStrong` (#FBFBFB) and medium, the
+rest in `chatTextMuted` (#818289), all three links with the pointing hand and an underline while
+the pointer is over them. The thread's name opens the thread, "threads" the channel's Threads
+popover, and "Ray" the profile (**unverified**). *Akari: the name opens the thread full width.
+A thread Akari doesn't have, such as one archived since, is fetched first
+([dispatches.md](../protocol/dispatches.md#threads)); if Discord refuses it or it's gone, the
+name stays strong text without the link. "Ray" and "threads" are drawn the same but aren't
+links yet: Akari has no profiles and no Threads popover.*
 
-**Which messages count as system messages:** every message type except the default type,
-replies, slash-command and context-menu command results, thread starter messages, and types
-Akari doesn't know. A type Akari doesn't know shows its content like an ordinary message.
+**A pinned message** posts "Ray pinned a message to this channel. See all pinned messages."
+(observed 2026-10-20, in German "Ray hat eine Nachricht an diesen Kanal angepinnt. Alle
+angepinnten Nachrichten anzeigen."): "Ray", "a message" and "pinned messages" strong and
+medium, the rest gray. "a message" jumps to the pinned message, the message the line refers
+to, with a brief highlight, and "pinned messages" opens the channel's pins popout (Discord's
+client, read 2026-10-20). A line that doesn't refer to its message has "a message" in plain
+gray text. *Akari: "a message" has the
+pointing hand and the underline and jumps as the unread bar does: it loads the messages around
+the pinned one unless they're loaded and nothing else is loading a place for the list, and the
+message goes to the vertical middle of what the list shows, below a locked thread's banner and
+the unread bar (36 each) while either can show and above the strip and the jump bar at its
+bottom, as far as the list scrolls (the official client centers it, observed 2026-10-20); one
+deleted since leaves the next message there. The user's last request places the list, as for the unread bar's jump: a click while
+another jump or the jump to the present loads takes their place, and a second click on the same
+message while it loads asks once. The message flashes ([below](#the-flash)). "pinned messages"
+isn't a link yet: Akari has no pins popout.*
+
+**Every other kind** is worded as Discord's client words it (its en-US strings and its
+system-message renderer, read 2026-10-20), from what the message carries and what the store
+knows. **Bold** below is strong text, as names are:
+
+| Type | The line |
+|---|---|
+| 1 added | "Ray added **Mira** to the thread." in a thread, "… to the group." elsewhere; Mira is the message's first mention, "???" (thread) or "unknown-user" without one |
+| 2 removed | in a thread "Ray removed **Mira** from the thread."; elsewhere "Ray removed **Mira** from the group.", or "Ray left the group." when the mention is the author or missing |
+| 3 call | while it runs "Ray started a call. — **Join the call**"; then "Ray started a call that lasted {length}."; "You missed a call from Ray that lasted {length}." when the reader isn't a participant; without an end, no length |
+| 4 renamed | "Ray changed the channel name: **name**" (also in threads); a forum post "… changed the post title: **name**"; a group "Ray changed the group name: **name**. **Edit Group**" or "Ray removed the custom group name. **Edit Group**" |
+| 5 icon | "Ray changed the group icon. **Edit Group**" |
+| 7 join | one of Discord's 13 welcome lines, by the message's time: its ID's milliseconds since 1970 (through a double, as JavaScript's `Number` takes the ID) mod 13: "Ray joined the party.", "Ray is here.", "Welcome, Ray. We hope you brought pizza.", "A wild Ray appeared.", … "Yay you made it, Ray!"; a bot's join "Mira has added **Akari Bot** to the server." (from the message's `actor`, undocumented) or "Akari Bot was added to the server." |
+| 8–11 boost | "Ray just boosted the server!", or "… **3** times!" for a count above one; at a level, with the server known, "… Lab has achieved **Level 2!**" |
+| 12 followed | "Ray has added **Lab #news** to this channel. Its most important updates will show up here." |
+| 14–17 Discovery | "**Lab** has been removed from Server Discovery because it no longer passes all the requirements. Check **Server Settings** for more details." and its relisted and warning lines; "this server" without the name |
+| 24 AutoMod | "**AutoMod** has blocked a message in **general**" (or "has flagged" unless the alert says blocked); "unknown-channel" when the store doesn't have it |
+| 25 subscription | "Ray joined **Gold** and has been a subscriber of **Lab** for 3 months!", "Ray renewed …", and for no months "Ray joined **Gold** as a subscriber of **Lab**!" or "Ray renewed **Gold** in their **Lab** membership!" |
+| 27–31 stage | "Ray started **topic**", "Ray ended **topic**", "Ray is now a speaker.", "Ray requested to speak.", "Ray changed the Stage topic: **topic**" |
+| 32 app upgrade | "Ray upgraded Akari Bot to premium for this server! 🎉", or "… a deleted application …" |
+| 36–39 security | "Ray enabled security actions until {date}.", "Ray disabled security actions.", "Ray reported a raid in Lab.", "Ray resolved an Activity Alert." |
+| 44 purchase | "Ray has purchased **Badge**!" |
+| 46 poll | "Ray's poll **Lunch?** has closed."; a title over 50 UTF-16 units keeps 49 code points without trailing spaces and dots, then "…" |
+| 52–54 join request | "This application was approved! Welcome!", "… was rejected.", "… has been withdrawn." (Discord's words when the client doesn't have the request) |
+| 58–62 report | "Ray banned **Mira**", "Ray kicked **Mira**", "Ray timed out **Mira**", "Ray deleted the message", "Ray resolved this flag" (no periods) |
+| 65 voice | "Ray started **a voice hangout**."; once it ended "Ray was hanging out for an hour.", "Ray and **Mira** were …", "Ray, **Mira**, and **Noa** were …", "Ray, **Mira**, and **2 others** were …" |
+| 67 friend | in a DM only: "You accepted **Ray**'s friend request." (plus " They said: **note**") or "**Ray** accepted your friend request." (plus " You said: **note**") |
+
+Call lengths are moment's English `humanize()` as Discord's client uses it: under 44.5 s "a few
+seconds", then "a minute", "2 minutes" from 90 s, "an hour" from 44.5 minutes, "2 hours" from
+90 minutes, "a day" from 21.5 hours, "2 days" from 36 hours, "a month" from 25.5 days, and so on
+(JavaScript's rounding, halves up).
+
+*Akari: a call runs while its message has no end; Discord asks its call state. Every name a line
+shows resolves as a message's header does ([Groups](#groups)). A voice session names the
+participants the store knows, as Discord's client does with its own store; Akari's knows DM
+recipients. Akari can't join calls, so "Join the call" is strong text.*
+
+**Links:** a part links only where Akari has its target: a thread's name, "a message" and a
+poll's title (they jump), an AutoMod alert's channel while the user can see it, and a Discovery
+notice's server. Discord's other links are strong text without the hand until Akari has their
+targets: profiles (every actor and named person), "threads", "pinned messages", "Join the call",
+"Edit Group", a followed channel's server popout, "Server Settings", a subscription's server
+page, a product, and "a voice hangout".
+
+**Not drawn:** Discord's client shows no line for invite reminders (22), revive and gaming
+prompts (40, 42), HD streaming (55), wallpapers and emoji (56, 57, 63) and a purchase that isn't
+of a server product; it makes 48, 50, 51 and 66 itself; 35 and 64 are cards; a channel linked to
+a lobby (49) shows only when the client knows the app. *Akari leaves all of them out of the
+list, and the messages around them group as if they weren't there. Not drawn yet either: the
+poll result's card, the AutoMod alert's message block, the "Wave to say hi!" button, a bot's APP
+tag, a subscription's welcome badge and sticker buttons, a purchase's thank-you card.*
+
+Discord's client draws 26, 41, 47 and 68 as messages people write, and so does Akari (without
+41's gift card and 68's time chip).
+
+They never join a group and always end one.
+
+**Which messages count as system messages:** every type except Discord's message set (the
+default type, replies, slash-command and context-menu command results, 26, 41, 47, 68), thread
+starter messages, and types Akari doesn't know, which show their content like an ordinary
+message; of those, 56, 57 and 63 show nothing. A thread's starter that can't be loaded shows as
+one ([Threads](#threads)).
+
+### The flash
+
+When a jump lands on a message (a pin's "a message", a poll's title; in Discord also a reply's
+quote and search results), Discord's client highlights it: `messageHighlight`, #5865F2 at 41/255
+in both themes, over the message's box (not the space above its group), its trailing corners
+rounded 4. It fades in over 0.2 s (CSS `ease`), holds until 2 s after the jump and fades out over
+0.2 s; with reduced motion it comes and goes at once. A new jump restarts it, and only one
+message flashes at a time. Read from its flash
+component (a 2 s timer) and its CSS (a 0.2 s `background-color` transition), 2026-10-20. *Akari:
+the same, with macOS's Reduce Motion. A jump to a message deleted since flashes nothing, as in
+Discord; the unread bar's jump doesn't flash.*
 
 ## Selecting text
 
@@ -191,6 +296,29 @@ with Mira." **Group DMs** show the group symbol, the group's name and "Welcome t
 beginning of the Weekend plans group." **Unverified**: the DM and group sizes, spacing and
 wording, which no screenshot showed yet; the official DM header also has buttons (add friend,
 block) that Akari leaves out.
+
+## Threads
+
+A thread opens like a channel, with its own start, starter and composer. Observed in the
+official web client on 2026-10-17 (German and English UI) and from the user's screenshots on
+2026-10-19.
+
+- **The start** of every thread: the round icon with the thread symbol, the thread's name as the
+  title ("t1"), and "Started by Ray" with the owner's name in `textStrong` and semibold, the rest
+  in the subtitle's `textDefault`. Then the day divider and the messages. *Akari: the channel
+  start's sizes; the owner's name from the store or from a loaded message of theirs. While no
+  name is known, the line is left out (**unverified** what the official client shows then).*
+- **The starter.** A thread started from a message begins with that message, drawn as it is in
+  the channel: its author, its time and its content, not as a reply. It is a group of its own,
+  and the next message starts a new one with a full header, whatever the time between them.
+- **A starter that can't be loaded** (deleted, or not readable): after the day divider, a
+  system line with the thread symbol, "Sorry, we couldn't load the first message in this
+  thread", and its time; then the other messages.
+- *Akari:* when Discord sends the starter without the message it points at, Akari fetches that
+  message once ([messages.md](../protocol/messages.md#a-threads-starter-message)); until it's
+  there the starter has no row, and the new messages line waits on the next one, or stays last.
+  A starter whose fetch failed, or a cached one whose page failed, shows the "couldn't load" line
+  until a later page of the thread fetches it again.
 
 ## Jump to present
 
@@ -301,7 +429,7 @@ Akari's bar:
   so the first loaded unread message's). **Unconfirmed:** the wording is the user's translation
   of the German UI.
 - Clicking it jumps to the first unread message: the line goes to the top of the list, as far
-  as the list scrolls. When that message isn't loaded, Akari first loads the messages around
+  as the list scrolls, and in a locked thread below the banner. When that message isn't loaded, Akari first loads the messages around
   the read position (not compared with 80 or more unread messages yet); a channel never read
   has none, and the jump goes to the first loaded unread message. The jump counts as seeing the
   line once those messages are in the list, so the bar goes then; if they can't be loaded, the

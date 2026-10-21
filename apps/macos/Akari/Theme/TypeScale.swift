@@ -72,6 +72,7 @@ nonisolated enum TypeScale {
 
     // Measured against the official client.
     static let body = TextStyle(16, line: 22)
+    static let noticeName = TextStyle(16, .medium, line: 22)
     static let serverHeader = TextStyle(15, .semibold)
     static let category = TextStyle(13, .medium)
     static let channelName = TextStyle(15, .medium)
@@ -82,6 +83,7 @@ nonisolated enum TypeScale {
     static let dayDivider = TextStyle(11, .semibold, line: 15)
     static let startTitle = TextStyle(30, .heavy)
     static let startSubtitle = TextStyle(15.5)
+    static let startOwner = TextStyle(15.5, .semibold)
     static let titleBar = TextStyle(12.5, .medium)
 
     // Not measured yet: the values Akari had.

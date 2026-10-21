@@ -7,13 +7,16 @@ import os
 nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     let formattedStore: FormattedStore
 
+    // `locked`: 1001 is a locked thread under 1002, where the user can't send. `pinned`: each
+    // channel's newest message is the line for pinning its message with this number.
     init(
         contents: [String], formattedEvery: Int = 3, slowmode: Slowmode? = nil,
-        mentioned: Bool = false, readUpTo: UInt64? = nil
+        mentioned: Bool = false, readUpTo: UInt64? = nil, locked: Bool = false,
+        pinned: UInt64? = nil
     ) {
         formattedStore = FormattedStore(
             contents: contents, formattedEvery: formattedEvery, slowmode: slowmode,
-            mentioned: mentioned, readUpTo: readUpTo)
+            mentioned: mentioned, readUpTo: readUpTo, locked: locked, pinned: pinned)
         super.init(noHandle: NoHandle())
     }
 
@@ -48,17 +51,21 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     private let mentioned: Bool
     // The number of each channel's last read message; without it every channel is read.
     private let readUpTo: UInt64?
+    private let locked: Bool
+    private let pinned: UInt64?
     private let counts = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
 
     init(
         contents: [String], formattedEvery: Int, slowmode: Slowmode?, mentioned: Bool,
-        readUpTo: UInt64?
+        readUpTo: UInt64?, locked: Bool = false, pinned: UInt64? = nil
     ) {
         self.contents = contents
         self.formattedEvery = formattedEvery
         self.slowmode = slowmode
         self.mentioned = mentioned
         self.readUpTo = readUpTo
+        self.locked = locked
+        self.pinned = pinned
         super.init(noHandle: NoHandle())
     }
 
@@ -134,10 +141,17 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         guard Self.channelIds.contains(id) else {
             return nil
         }
+        let thread = locked && id == Self.channelIds[0]
         return Channel(
-            id: id, kind: .guildText, guildId: GuildId(rawValue: 1), parentId: nil,
+            id: id, kind: thread ? .publicThread : .guildText, guildId: GuildId(rawValue: 1),
+            parentId: thread ? Self.channelIds[1] : nil,
             name: "channel-\(id.rawValue)", position: Int32(id.rawValue), topic: nil,
-            nsfw: false, rateLimitPerUser: 0, recipientIds: [], thread: nil)
+            nsfw: false, rateLimitPerUser: 0, recipientIds: [],
+            thread: thread
+                ? ThreadInfo(
+                    joined: true, archived: false, locked: true, private: false,
+                    messageCount: 40, ownerId: UserId(rawValue: 2))
+                : nil)
     }
 
     override func channels(ids: [ChannelId]) -> [Channel] {
@@ -145,7 +159,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     }
 
     override func permissions(channelId: ChannelId) -> Permissions? {
-        nil
+        locked && channelId == Self.channelIds[0] ? [.viewChannel, .readMessageHistory] : nil
     }
 
     override func window(channelId: ChannelId) -> MessageWindow? {
@@ -161,18 +175,29 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
 
     // Every so many messages formatted, the rest one plain line.
     override func messages(channelId: ChannelId, ids: [MessageId]) -> [Message] {
-        ids.map { id in
+        let newest = counts.withLock { $0[channelId.rawValue, default: 40] }
+        return ids.map { id in
             let number = Int(id.rawValue % 1000)
             let content =
                 number % formattedEvery == 0
                 ? contents[number / formattedEvery % contents.count] : "test \(number)"
+            let pin = pinned.flatMap { pinned in
+                UInt64(number) == newest
+                    ? MessageReference(
+                        messageId: MessageId(rawValue: channelId.rawValue * 1000 + pinned),
+                        channelId: channelId, guildId: GuildId(rawValue: 1)) : nil
+            }
             return Message(
-                id: id, channelId: channelId, kind: .default, author: person(UInt64(2 + number % 2)),
+                id: id, channelId: channelId, kind: pin == nil ? .default : .channelPinnedMessage,
+                author: person(UInt64(2 + number % 2)),
                 fromWebhook: false, content: content,
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(number) * 600),
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
                 embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
-                formatted: formattedText(content: content), mentionsMe: mentioned)
+                formatted: formattedText(content: content), mentionsMe: mentioned,
+                reference: pin, hasThread: false, mentions: [],
+                call: nil, roleSubscription: nil, purchasedProduct: nil, actor: nil,
+                applicationName: nil, embedFields: [])
         }
     }
 

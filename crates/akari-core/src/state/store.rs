@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tokio::sync::{Mutex, Notify, mpsc};
 
-use super::apply::{Derived, Entities, ReadyDiff, State};
+use super::apply::{Derived, Entities, Learned, ReadyDiff, State};
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
 use super::events::{ConnectionState, StoreEvent};
@@ -13,10 +13,12 @@ use super::order;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
-use super::types::{Channel, CurrentUser, Guild, Member, Message, User};
+use super::types::{Channel, CurrentUser, Guild, Member, Message, StarterMessage, User};
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
-use super::windows::{CachedWindow, LoadKind, LoadTicket, MessageWindow, WindowLimits};
+use super::windows::{
+    CachedWindow, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits,
+};
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
@@ -90,6 +92,8 @@ struct Shared {
     placings: AtomicU64,
     #[cfg(test)]
     park: std::sync::Mutex<Option<Park>>,
+    #[cfg(test)]
+    diff_park: std::sync::Mutex<Option<Park>>,
     #[cfg(test)]
     ready_thread: std::sync::Mutex<Option<std::thread::ThreadId>>,
     #[cfg(test)]
@@ -209,6 +213,8 @@ impl Store {
                 }),
                 #[cfg(test)]
                 park: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                diff_park: std::sync::Mutex::new(None),
                 #[cfg(test)]
                 ready_thread: std::sync::Mutex::new(None),
                 #[cfg(test)]
@@ -368,10 +374,19 @@ impl Store {
     pub(crate) fn prepare(&self, preparing: Preparing, ready: Ready) -> PreparedReady {
         let mut entities = Entities::from_ready(ready);
         let read_states = entities.read_states.channels().clone();
-        self.read(|inner| inner.state.keep_memberships(&mut entities));
-        let derived = Derived::build(&entities, self.now_millis());
+        self.read(|inner| {
+            inner.state.keep_memberships(&mut entities);
+            inner.state.keep_fetched(&mut entities);
+        });
+        let mut derived = Derived::build(&entities, self.now_millis());
+        #[cfg(test)]
+        Self::park_in(&self.shared.diff_park);
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
+            // Fetched since the first pass; the diff mustn't report them removed.
+            for thread in inner.state.keep_fetched(&mut entities) {
+                derived.add_thread(&thread);
+            }
             inner.state.ready_diff(&entities, &derived)
         });
         #[cfg(test)]
@@ -465,6 +480,39 @@ impl Store {
             let outcome = inner.state.finish_load(ticket, page, reached_end, events);
             (outcome, inner.state.take_reading_ack())
         })
+    }
+
+    // The parent message to fetch for `thread`'s starter, if it's needed and not asked for yet.
+    // Read first: a write for every page would bump `changes` and the cache's snapshots.
+    pub(crate) fn starter_to_fetch(&self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
+        if !self.read(|inner| inner.state.wants_starter(thread)) {
+            return None;
+        }
+        self.write("starter", |inner, _| inner.state.starter_to_fetch(thread))
+    }
+
+    pub(crate) fn settle_starter(&self, thread: ChannelId, fetch: StarterFetch) {
+        self.write("starter", |inner, events| {
+            inner.state.settle_starter(thread, fetch, events);
+        });
+    }
+
+    pub(crate) fn learn_thread(&self, thread: model::Channel) -> Learned {
+        self.write("thread", |inner, events| {
+            inner.state.learn_thread(thread, events)
+        })
+    }
+
+    pub(crate) fn mark_thread_unavailable(&self, parent: ChannelId, thread: ChannelId) {
+        self.write("thread", |inner, events| {
+            inner.state.mark_thread_unavailable(parent, thread, events);
+        });
+    }
+
+    pub(crate) fn fail_starter(&self, thread: ChannelId) {
+        self.write("starter", |inner, events| {
+            inner.state.fail_starter(thread, events);
+        });
     }
 
     pub(crate) fn supersede_around(&self, channel: ChannelId) {
@@ -858,6 +906,12 @@ impl Store {
         self.read(|inner| inner.state.channel(id))
     }
 
+    /// Whether [`Account::fetch_thread`](crate::Account::fetch_thread) found this session that
+    /// the user can't see the thread, or that it is gone.
+    pub fn thread_unavailable(&self, thread: ChannelId) -> bool {
+        self.read(|inner| inner.state.thread_unavailable(thread))
+    }
+
     /// A guild's channels and categories without threads, in no particular order.
     pub fn guild_channels(&self, guild: GuildId) -> Vec<Arc<Channel>> {
         self.read(|inner| inner.state.guild_channels(guild))
@@ -941,6 +995,12 @@ impl Store {
         self.read(|inner| inner.state.messages(channel))
     }
 
+    /// The message `thread` started from, once its window holds the thread's first message;
+    /// `None` for a thread started without one, or before that message is loaded.
+    pub fn starter_message(&self, thread: ChannelId) -> Option<StarterMessage> {
+        self.read(|inner| inner.state.starter_message(thread))
+    }
+
     pub fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.read(|inner| inner.state.message(channel, id))
     }
@@ -971,6 +1031,19 @@ impl Store {
         let (parked, on_parked) = std::sync::mpsc::channel();
         let (release, on_release) = std::sync::mpsc::channel();
         if let Ok(mut park) = self.shared.park.lock() {
+            *park = Some((parked, on_release));
+        }
+        (on_parked, release)
+    }
+
+    // Between READY's build and its diff.
+    #[cfg(test)]
+    pub(crate) fn park_next_diff(
+        &self,
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+        let (parked, on_parked) = std::sync::mpsc::channel();
+        let (release, on_release) = std::sync::mpsc::channel();
+        if let Ok(mut park) = self.shared.diff_park.lock() {
             *park = Some((parked, on_release));
         }
         (on_parked, release)
@@ -1024,12 +1097,12 @@ impl Store {
 
     #[cfg(test)]
     fn park(&self) {
-        let park = self
-            .shared
-            .park
-            .lock()
-            .ok()
-            .and_then(|mut park| park.take());
+        Self::park_in(&self.shared.park);
+    }
+
+    #[cfg(test)]
+    fn park_in(slot: &std::sync::Mutex<Option<Park>>) {
+        let park = slot.lock().ok().and_then(|mut park| park.take());
         if let Some((parked, release)) = park {
             let _ = parked.send(());
             let _ = release.recv();

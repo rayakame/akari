@@ -58,9 +58,12 @@ struct MessageTableTests {
         self.init(onScreen: MessageTableController.isOnScreen)
     }
 
-    init(onScreen: @escaping @MainActor (NSWindow) -> Bool) {
+    init(
+        onScreen: @escaping @MainActor (NSWindow) -> Bool,
+        now: @escaping () -> Date = { berlinTime(2026, 10, 10, 15, 0) }
+    ) {
         controller = MessageTableController(
-            tableView: table, calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) },
+            tableView: table, calendar: { berlin }, now: now,
             pointer: { [pointer] in pointer.location }, onScreen: onScreen)
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
@@ -744,12 +747,16 @@ struct MessageTableTests {
         let key = keyWindow()
         defer { key.close() }
         let notice = try #require(messageText(in: try cell(of: 2)))
-        #expect(notice.string.hasPrefix("Mira joined"))
+        // Discord's welcome line 5, which message 2's time picks.
+        #expect(notice.string.hasPrefix("Mira just slid into the server."))
 
         try expectClicksKeepTheDrawing(of: notice, selectable: true)
 
-        let font = notice.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
-        #expect(font == TypeScale.body.nsFont)
+        let font = { (index: Int) in
+            notice.textStorage?.attribute(.font, at: index, effectiveRange: nil) as? NSFont
+        }
+        #expect(font(0) == TypeScale.noticeName.nsFont, "the actor")
+        #expect(font("Mira".count) == TypeScale.body.nsFont)
     }
 
     @Test
@@ -841,12 +848,12 @@ struct MessageTableTests {
                 to: NSPoint(x: 0, y: table.rect(ofRow: index(of: raw)).minY - (raw == 1 ? 0 : 300)))
             window.layoutIfNeeded()
             let notice = try #require(messageText(in: try cell(of: raw)))
-            let time = try #require(notice.string.components(separatedBy: "  ").last)
+            let time = try #require(notice.string.components(separatedBy: ". ").last)
 
             #expect(notice.toolTip == nil, "no tooltip over the whole line")
             let date = toolTip(of: notice, at: try middle(of: time, in: notice))
             #expect(date?.isEmpty == false, "\(raw)")
-            #expect(toolTip(of: notice, at: try middle(of: "joined", in: notice)) == nil)
+            #expect(toolTip(of: notice, at: try middle(of: "slid", in: notice)) == nil)
         }
     }
 
@@ -1199,6 +1206,18 @@ struct MessageTableTests {
 
         func openChannel(_ id: ChannelId) {
             calls.append("channel \(id.rawValue)")
+        }
+
+        func openThread(_ id: ChannelId, from parent: ChannelId) {
+            calls.append("thread \(id.rawValue) from \(parent.rawValue)")
+        }
+
+        func jump(to message: MessageId) {
+            calls.append("jump to \(message.rawValue)")
+        }
+
+        func openGuild(_ id: GuildId) {
+            calls.append("guild \(id.rawValue)")
         }
 
         func openLink(_ url: URL, masked: Bool) {

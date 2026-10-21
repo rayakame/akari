@@ -161,6 +161,18 @@ struct UnreadBarTests {
         #expect(abs(try lineOffset()) <= 0.5)
     }
 
+    @Test
+    func aJumpInALockedThreadPutsTheLineBelowTheBanner() throws {
+        list.show(MessageTableState(rows: list.page, newMessages: line, startRoom: LockedBanner.room))
+
+        list.show(
+            MessageTableState(
+                rows: list.page, newMessages: line, unreadJumps: 1, startRoom: LockedBanner.room))
+
+        let offset = try lineOffset()
+        #expect(abs(offset - LockedBanner.room) <= 0.5, "\(offset)")
+    }
+
     // The first unread message wasn't loaded: the page around the read position comes with the
     // jump.
     @Test

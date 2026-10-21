@@ -225,6 +225,28 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.discard(channelId, pendingId))
     }
 
+    // The threads a fetch finds, put into the store as akari-core would; Discord refuses the rest.
+    let fetchedThreads = Locked<[ChannelId: Channel]>([:])
+    let threadFetchError = Locked<RequestError?>(nil)
+    // While set, each thread fetch waits for one value here.
+    let holdThreadFetches = Locked(false)
+    let threadFetches = AsyncQueue<Void>()
+
+    override func fetchThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
+        log.append(.fetchThread(parentId, threadId))
+        if holdThreadFetches.current {
+            _ = await threadFetches.next()
+        }
+        if let error = threadFetchError.current {
+            throw error
+        }
+        guard let thread = fetchedThreads.current[threadId] else {
+            return false
+        }
+        fakeStore.update { $0.channels[threadId] = thread }
+        return true
+    }
+
     // While set, each cache flush waits for one value here.
     let holdFlushes = Locked(false)
     let flushes = AsyncQueue<Void>()

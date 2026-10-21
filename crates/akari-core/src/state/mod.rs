@@ -15,12 +15,12 @@ mod threads;
 mod types;
 mod windows;
 
-pub(crate) use apply::wall_millis;
+pub(crate) use apply::{Learned, wall_millis};
 pub use badges::Badge;
 pub use events::{ConnectionState, StoreEvent};
 pub use order::display_order;
 pub use read_states::ReadState;
-pub(crate) use read_states::{Ack, ReadStates};
+pub(crate) use read_states::{Ack, AckBody, ReadStates};
 pub(crate) use send::limit_in;
 pub use send::{Slowmode, message_length};
 pub use settings::{
@@ -33,5 +33,5 @@ pub(crate) use store::{deadline_reads, deadline_reads_reset};
 pub use types::*;
 pub use windows::MessageWindow;
 pub(crate) use windows::{
-    CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket, WindowLimits,
+    CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket, StarterFetch, WindowLimits,
 };

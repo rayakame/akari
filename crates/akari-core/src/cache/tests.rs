@@ -13,10 +13,11 @@ use crate::model::{
 };
 use crate::state::apply::Entities;
 use crate::state::{
-    Attachment, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField,
-    EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings, ImageHash, Member,
-    Message, MessageReference, NotificationLevel, PermissionOverwrite, ReferencedMessage, Role,
-    Sticker, ThreadInfo, ThreadMembership, Unreads, User, UserSettings,
+    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor,
+    EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings,
+    ImageHash, Member, Message, MessageReference, NotificationLevel, PermissionOverwrite,
+    ReferencedMessage, Role, RoleSubscription, Sticker, SystemData, ThreadInfo, ThreadMembership,
+    Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -228,6 +229,7 @@ pub(crate) fn message(channel: u64, id: u64, content: &str) -> Message {
         reference: None,
         referenced_message: ReferencedMessage::NotIncluded,
         delivery: Delivery::Sent,
+        system: None,
     }
 }
 
@@ -312,6 +314,20 @@ fn full_message() -> Message {
             guild_id: Some(Snowflake::new(100)),
         })),
         referenced_message: ReferencedMessage::Message(Arc::new(replied)),
+        system: Some(Box::new(SystemData {
+            call: Some(Call {
+                participants: vec![Snowflake::new(20), Snowflake::new(21)].into(),
+                ended_timestamp: Some(time(1_700_000_200_000_000_000)),
+            }),
+            role_subscription: Some(RoleSubscription {
+                tier_name: "Gold".into(),
+                total_months_subscribed: 3,
+                is_renewal: true,
+            }),
+            purchased_product: Some("Badge".into()),
+            actor: Some(Arc::new(user(22, "Ray"))),
+            application_name: Some("Akari Bot".into()),
+        })),
         ..message(10, 500, "hello there")
     }
 }

@@ -7,6 +7,11 @@ final class MessageTextView: NSTextView {
     private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
     private var linkElements: [LinkElement]?
     var onLink: (URL) -> Void = { _ in }
+    /// On a link Discord underlines while the pointer is over it.
+    static let underlinesOnHover = NSAttributedString.Key("akari.underlinesOnHover")
+    private var underlined: NSRange?
+    // Only text with such links watches the pointer.
+    private var hoverArea: NSTrackingArea?
     // The message's own items, above the text's.
     var messageMenu: () -> [NSMenuItem] = { [] }
     let decorations = MessageDecorations()
@@ -77,8 +82,10 @@ final class MessageTextView: NSTextView {
             textContainerInset = NSSize(width: 0, height: padding.top)
         }
         let kept = keepingSelection && storage.string == text.string ? selectedRanges : nil
+        underline(at: nil)
         storage.setAttributedString(text)
         linkElements = nil
+        trackHover()
         selectedRanges = kept ?? [NSValue(range: NSRange(location: 0, length: 0))]
         invalidateIntrinsicContentSize()
         updateDecorations()
@@ -218,6 +225,83 @@ final class MessageTextView: NSTextView {
             return
         }
         super.mouseDown(with: event)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackHover()
+    }
+
+    private func trackHover() {
+        var hovers = false
+        if let storage = textStorage, storage.length > 0 {
+            storage.enumerateAttribute(
+                Self.underlinesOnHover, in: NSRange(location: 0, length: storage.length)
+            ) { value, _, stop in
+                hovers = value != nil
+                stop.pointee = ObjCBool(hovers)
+            }
+        }
+        if hovers == (hoverArea != nil) {
+            return
+        }
+        if let hoverArea {
+            removeTrackingArea(hoverArea)
+            self.hoverArea = nil
+        } else {
+            let area = NSTrackingArea(
+                rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow,
+                    .inVisibleRect], owner: self)
+            addTrackingArea(area)
+            hoverArea = area
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        underline(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        underline(at: nil)
+    }
+
+    /// Underlines the hover link under `point`, in this view's coordinates; `nil` takes it away.
+    func underline(at point: NSPoint?) {
+        let range = point.flatMap(hoverLink(at:))
+        guard range != underlined, let layoutManager else {
+            return
+        }
+        if let underlined {
+            layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: underlined)
+        }
+        if let range {
+            layoutManager.addTemporaryAttribute(
+                .underlineStyle, value: NSUnderlineStyle.single.rawValue, forCharacterRange: range)
+        }
+        underlined = range
+    }
+
+    private func hoverLink(at point: NSPoint) -> NSRange? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0
+        else {
+            return nil
+        }
+        let inside = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        let glyph = layoutManager.glyphIndex(for: inside, in: textContainer)
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
+        guard glyphRect.contains(inside) else {
+            return nil
+        }
+        var range = NSRange()
+        let index = layoutManager.characterIndexForGlyph(at: glyph)
+        guard storage.attribute(Self.underlinesOnHover, at: index, effectiveRange: &range) != nil
+        else {
+            return nil
+        }
+        return range
     }
 
     override func resetCursorRects() {

@@ -15,6 +15,9 @@ struct MessageTableState: Equatable {
     var revealedSpoilers: Set<SpoilerKey> = []
     var newMessages: MessageId?
     var unreadJumps = 0
+    var messageJump: MessageListModel.MessageJump?
+    // Kept clear above the start's icon for what covers the list's top.
+    var startRoom: CGFloat = 0
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -44,6 +47,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // turn; the last measure of a turn wins.
     private var measuredLine: (onScreen: Bool, line: MessageId)?
     private(set) var lineReport: Task<Void, Never>?
+    var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    // The row a jump landed on, and when: Discord flashes it.
+    private var flash: (row: MessageTimeline.ItemId, since: Date)?
     private let calendarSource: () -> Calendar
     private let localeSource: () -> Locale
     private var calendar: Calendar
@@ -69,7 +75,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // rows arriving below don't unpin the list, only the user's own scroll to older ones does.
     private var heldPinBottom: CGFloat?
     private var atPresent = true
-    private var state = MessageTableState(rows: [])
+    private(set) var state = MessageTableState(rows: [])
     private var revealed: [MessageId: Set<UInt16>] = [:]
     private var relativeTimes: [MessageId: Date] = [:]
     private let schedule: Schedule
@@ -203,15 +209,23 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         reload(revealedNow)
         // A new table for a model that jumped before doesn't jump again.
         if wasFilled, state.unreadJumps != previous.unreadJumps {
-            scrollLineToTop()
+            scroll(toRow: lineRow, below: state.startRoom)
+        }
+        if wasFilled, let jump = state.messageJump, jump != previous.messageJump {
+            // Unless the line has been seen, the unread bar shows once it's out of sight.
+            let bar = state.newMessages == nil ? 0 : UnreadBar.margin + UnreadBar.height
+            let target = row(atOrAfter: jump.messageId)
+            scroll(toRow: target, below: state.startRoom + bar, centered: true)
+            startFlash(at: target, of: jump.messageId)
         }
         reportLine()
         updateRelativeTimer()
-        if previous.start != state.start {
+        let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
+        if startChanged {
             remeasureStart()
         }
         if previous.loading != state.loading || previous.failedLoads != state.failedLoads
-            || previous.reachedOldest != state.reachedOldest || previous.start != state.start
+            || previous.reachedOldest != state.reachedOldest || startChanged
         {
             configureEdges()
         }
@@ -336,6 +350,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     // Every height is measured again: system rows carry the time in their wrapped text.
     func refreshTimes() {
+        MessageFormat.forgetFormats()
         calendar = calendarSource()
         locale = localeSource()
         times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)
@@ -417,8 +432,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.reveal(SpoilerKey(messageId: row.id, index: UInt16(clamping: value)))
         case "channel":
             actions?.openChannel(ChannelId(rawValue: value))
+        case "thread":
+            actions?.openThread(ChannelId(rawValue: value), from: row.message.channelId)
+        case "message":
+            actions?.jump(to: MessageId(rawValue: value))
+        case "guild":
+            actions?.openGuild(GuildId(rawValue: value))
         case "link":
-            let links = row.message.formatted.links
+            let links = row.shown.formatted.links
             if value < links.count, let target = URL(string: links[Int(value)].url) {
                 actions?.openLink(target, masked: true)
             }
@@ -450,12 +471,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     // Keeps the reader's place as clipMoved does after a user's scroll; it skips our own.
-    private func scrollLineToTop() {
-        guard let row = lineRow else {
+    // `centered`: the row's middle between `cover`, the top's overlays, and the bottom inset.
+    private func scroll(toRow row: Int?, below cover: CGFloat, centered: Bool = false) {
+        guard let row else {
             return
         }
+        let rect = tableView.rect(ofRow: row)
+        let shown = clipView.bounds.height - cover - scrollView.contentInsets.bottom
+        let wanted = centered ? rect.midY - cover - shown / 2 : rect.minY - cover
         let range = clipView.originRange
-        let y = min(max(tableView.rect(ofRow: row).minY, range.lowerBound), range.upperBound)
+        let y = min(max(wanted, range.lowerBound), range.upperBound)
         ownChanges += 1
         defer { ownChanges -= 1 }
         clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: y))
@@ -463,6 +488,38 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         sticksToBottom = isPinnedToBottom
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()
+    }
+
+    // Discord flashes the message itself only, not the one after a deleted target, and one at
+    // a time.
+    private func startFlash(at row: Int?, of message: MessageId) {
+        if let old = flash.flatMap({ flash in timeline.items.firstIndex { $0.id == flash.row } }) {
+            (tableView.view(atColumn: 0, row: old, makeIfNecessary: false) as? MessageCell)?
+                .flash(elapsed: nil, reducesMotion: false)
+        }
+        guard let row, case .message(let shown, _) = timeline.items[row],
+            shown.message.id == message
+        else {
+            flash = nil
+            return
+        }
+        flash = (timeline.items[row].id, now())
+        (tableView.view(atColumn: 0, row: row, makeIfNecessary: true) as? MessageCell)?
+            .flash(elapsed: 0, reducesMotion: reducesMotion())
+    }
+
+    private func flashElapsed(_ id: MessageTimeline.ItemId) -> TimeInterval? {
+        guard let flash, flash.row == id else {
+            return nil
+        }
+        return now().timeIntervalSince(flash.since)
+    }
+
+    // A message deleted since leaves the one after it.
+    private func row(atOrAfter message: MessageId) -> Int? {
+        timeline.items.firstIndex { item in
+            if case .message(let row, _) = item { row.message.id >= message } else { false }
+        }
     }
 
     // Where it's drawn, mid-row, and not under the strip over the list's bottom. Only where rows
@@ -699,7 +756,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func configure(_ cell: NSView, _ edge: MessageTimeline.Edge) {
         if let cell = cell as? ChannelStartCell {
-            cell.show(state.start)
+            cell.show(state.start, room: state.startRoom)
         } else if let cell = cell as? PlaceholderCell {
             let failure: String? =
                 if state.rows.isEmpty {
@@ -850,7 +907,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     ) -> CGFloat {
         switch item {
         case .edge(.beginning):
-            return ChannelStartCell.height(state.start, width: width)
+            return ChannelStartCell.height(state.start, width: width, room: state.startRoom)
         case .edge:
             return placeholderHeight
         case .day:
@@ -858,8 +915,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         case .newMessages:
             return NewMessagesDivider.height
         case .message(let row, let startsGroup):
-            let message = row.message
-            if let notice = message.notice {
+            let message = row.shown
+            if let notice = row.noticeParts {
                 let time = MessageFormat.groupTime(
                     message.timestamp, now: now(), calendar: calendar, locale: locale)
                 return NoticeCell.height(
@@ -902,13 +959,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return reuse(NewMessagesDivider.identifier) as? NewMessagesDivider
                 ?? NewMessagesDivider()
         case .message(let row, let startsGroup):
-            let message = row.message
+            let message = row.shown
             let groupTime = MessageFormat.groupTime(
                 message.timestamp, now: now(), calendar: calendar, locale: locale)
             let fullDate = MessageFormat.fullDate(
                 message.timestamp, calendar: calendar, locale: locale)
-            if let notice = message.notice {
+            if let notice = row.noticeParts {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
+                cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
                     followsLine: followsLine, fullDate: fullDate)
@@ -918,15 +976,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 reuse(MessageCell.identifier) as? MessageCell
                 ?? Signposts.interval("message cell made") { MessageCell() }
             cell.isHovered = item.id == hovered
-            cell.onRetry = { [weak self] in self?.actions?.retry(message.id) }
-            cell.onDelete = { [weak self] in self?.actions?.delete(message.id) }
+            cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
+            cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.configure(
-                message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                followsLine: followsLine, groupTime: groupTime,
+                message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
+                followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
                 fullDate: fullDate)
+            cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             return cell
         }
     }
@@ -935,11 +994,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let revealed = revealed[row.id] ?? []
         let now = now()
         // A relative time that changed waits for the timer, which re-measures its row too.
-        if let cached = texts[row.id], cached.revealed == revealed, cached.message == row.message {
+        if let cached = texts[row.id], cached.revealed == revealed, cached.message == row.shown {
             return cached.built.text
         }
-        let built = build(row.message, revealed, now, times)
-        texts[row.id] = (row.message, revealed, built)
+        let built = build(row.shown, revealed, now, times)
+        texts[row.id] = (row.shown, revealed, built)
         relativeTimes[row.id] = built.nextChange
         return built.text
     }
@@ -1301,7 +1360,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return top
         }
         let afterDay = followsDay(row - 1)
-        if item.message.notice != nil {
+        if item.notice != nil {
             return top + NoticeCell.textTop(followsDay: false, followsLine: true)
                 - NoticeCell.textTop(followsDay: afterDay, followsLine: false)
         }

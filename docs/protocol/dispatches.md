@@ -51,6 +51,8 @@ Two details:
   `CLIENT_STATE_V2` nests the guild's fields there as it does in READY and GUILD_CREATE.
 - MESSAGE_UPDATE's `tts` isn't read: "The value for `tts` will always be `false` in message
   updates."
+- MESSAGE_UPDATE's `call` replaces the CALL message's call: Discord edits the message when the
+  call ends, with its participants and `ended_timestamp`. A missing `call` keeps the old one.
 
 ## What each dispatch does
 
@@ -111,7 +113,8 @@ captures READY.
 
 User accounts "are only synced threads they have been added to"
 ([gateway guild](https://docs.discord.food/gateway/gateway-events#gateway-guild-object)).
-The store keeps the joined threads from READY and whatever THREAD_CREATE brings.
+The store keeps the joined threads from READY, whatever THREAD_CREATE brings, and the threads
+the account fetched because a line named them (below).
 
 **Membership.** `ThreadInfo::member` is the user's membership: its mute (`muted`,
 `mute_config.end_time`) and its notification level from the member's `flags`
@@ -157,6 +160,22 @@ the task; a burst of events (a READY's diff, a server marked read) costs it one 
 Badge time and the deadlines read one clock, which never steps back when the wall clock does.
 `ThreadListingChanged { guild_id, thread_id }` reports a thread whose listing changed while the
 thread itself didn't: its window ended, it was read past it, or a message came after it.
+
+**A thread the store doesn't have.** A "started a thread" line can name a thread the store
+doesn't have: archived before the session, or never synced. When the user opens it from the
+line, `Account::fetch_thread` asks
+[Get Channel](https://docs.discord.food/resources/channel#get-channel), `GET /channels/{thread}`,
+through the rate limiter. User accounts may call it, and for a thread it includes the user's
+thread member when they joined it. The store keeps the answer as THREAD_CREATE would, so the
+thread is unjoined unless the member came along. A 403 or 404, or a channel that isn't a thread,
+makes it `Store::thread_unavailable` for the session, with
+`ThreadUnavailable { guild_id, thread_id }` when the store has the parent, and it isn't asked for
+again; another failure, or a guild the store doesn't have (down, or not restored yet), is asked
+again on the next click. An answer for a thread the gateway brought meanwhile changes nothing.
+The request is logged at `akari_core::load` (the thread's ID and the outcome). Whether the
+official client fetches such a thread this way isn't observed. READY lists only joined threads,
+so a later READY keeps a thread fetched this session while its guild and parent are there, also
+one fetched while the READY was prepared.
 
 **Joining and leaving** (observed 2026-10-17; not sent by Akari yet):
 `POST /channels/{thread}/thread-members/@me?location=…` joins (the docs say PUT; the official

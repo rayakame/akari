@@ -38,6 +38,9 @@ enum Palette {
     static let mentionedBackground = token(
         "mentionedBackground", dark: "#f8a300", light: "#f8a300", alpha: (0.08, 0.10))
     static let mentionedBar = token("mentionedBar", dark: "#f8a300", light: "#f8a300")
+    // Discord's --message-highlight-background-default, the same in both themes.
+    static let messageHighlight = token(
+        "messageHighlight", dark: "#5865f2", light: "#5865f2", alpha: (41 / 255, 41 / 255))
     static let codeBackground = token(
         "codeBackground", dark: "#97979f", light: "#97979f", alpha: (0.08, 0.10))
     static let codeBorder = token(

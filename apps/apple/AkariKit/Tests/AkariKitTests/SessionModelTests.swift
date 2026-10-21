@@ -415,6 +415,170 @@ final class SessionModelTests {
     }
 
     @Test
+    func theParentInTheHeaderOpensIt() {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(11), thread(31, in: 11)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(31))
+
+        session.openParent()
+
+        #expect(session.messages?.channelId == id(11))
+        session.openParent()
+        #expect(session.messages?.channelId == id(11))
+        session.close()
+    }
+
+    // A "started a thread" line in channel 11 names thread 32, which the store doesn't have.
+    func inChannel11(besides others: [Channel] = []) -> SessionModel {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(11)] + others, in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(11))
+        return session
+    }
+
+    @Test
+    func aLineOpensAThreadTheStoreHasWithoutFetchingIt() async {
+        let session = inChannel11(besides: [thread(31, in: 11)])
+
+        await session.open(thread: id(31), from: id(11))
+
+        #expect(session.messages?.channelId == id(31))
+        #expect(!store.log.calls.contains(.fetchThread(id(11), id(31))))
+        session.close()
+    }
+
+    @Test
+    func aLineFetchesAThreadTheStoreDoesntHaveAndOpensIt() async {
+        let session = inChannel11()
+        account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }
+
+        await session.open(thread: id(32), from: id(11))
+
+        #expect(store.log.calls.contains(.fetchThread(id(11), id(32))))
+        #expect(session.messages?.channelId == id(32))
+        session.close()
+    }
+
+    @Test
+    func aThreadDiscordRefusesDoesntOpen() async {
+        let session = inChannel11()
+
+        await session.open(thread: id(32), from: id(11))
+
+        #expect(session.messages?.channelId == id(11))
+        session.close()
+    }
+
+    @Test
+    func aThreadThatFailsToFetchDoesntOpen() async {
+        let session = inChannel11()
+        account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }
+        account.threadFetchError.withLock { $0 = .Network(kind: .connect) }
+
+        await session.open(thread: id(32), from: id(11))
+
+        #expect(session.messages?.channelId == id(11))
+        session.close()
+    }
+
+    @Test
+    func aThreadFetchedAfterTheUserMovedOnDoesntOpen() async {
+        let session = inChannel11(besides: [channel(12)])
+        account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        let opening = Task { await session.open(thread: id(32), from: id(11)) }
+        await account.threadFetches.pulled(1)
+        session.open(channel: id(12))
+        account.threadFetches.send(())
+        await opening.value
+
+        #expect(session.messages?.channelId == id(12))
+        session.close()
+    }
+
+    @Test
+    func aThreadFetchedAfterTheUserLeftAndCameBackDoesntOpen() async {
+        let session = inChannel11(besides: [channel(12)])
+        account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        let opening = Task { await session.open(thread: id(32), from: id(11)) }
+        await account.threadFetches.pulled(1)
+        session.open(channel: id(12))
+        session.open(channel: id(11))
+        account.threadFetches.send(())
+        await opening.value
+
+        #expect(session.messages?.channelId == id(11))
+        session.close()
+    }
+
+    @Test
+    func theLastClickedLineWins() async {
+        let session = inChannel11()
+        account.fetchedThreads.withLock { state in
+            state[id(32)] = thread(32, in: 11)
+            state[id(33)] = thread(33, in: 11)
+        }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        let first = Task { await session.open(thread: id(32), from: id(11)) }
+        await account.threadFetches.pulled(1)
+        let second = Task { await session.open(thread: id(33), from: id(11)) }
+        await account.threadFetches.pulled(2)
+        account.threadFetches.send(())
+        await first.value
+        account.threadFetches.send(())
+        await second.value
+
+        #expect(session.messages?.channelId == id(33))
+        session.close()
+    }
+
+    @Test
+    func aThreadFetchedAfterTheSessionClosedDoesntOpen() async {
+        let session = inChannel11()
+        account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        let opening = Task { await session.open(thread: id(32), from: id(11)) }
+        await account.threadFetches.pulled(1)
+        session.close()
+        account.threadFetches.send(())
+        await opening.value
+
+        #expect(session.messages?.channelId == id(11))
+    }
+
+    @Test
+    func aSecondClickWhileTheThreadIsFetchedAsksOnce() async {
+        let session = inChannel11()
+        account.fetchedThreads.withLock { $0[id(32)] = thread(32, in: 11) }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        let first = Task { await session.open(thread: id(32), from: id(11)) }
+        await account.threadFetches.pulled(1)
+        await session.open(thread: id(32), from: id(11))
+        account.threadFetches.send(())
+        await first.value
+
+        #expect(store.log.calls.filter { $0 == .fetchThread(id(11), id(32)) }.count == 1)
+        #expect(session.messages?.channelId == id(32))
+        session.close()
+    }
+
+    @Test
     func aRemovedOpenThreadCloses() async {
         store.update { state in
             state.add(guild(1))

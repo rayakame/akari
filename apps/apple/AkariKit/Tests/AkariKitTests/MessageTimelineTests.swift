@@ -50,6 +50,38 @@ struct MessageTimelineTests {
         #expect(shown.shape == ["day", "+1", "+2", "+3", "+4", "5", "+6", "+7"])
     }
 
+    // D124, image 2: Ray's 17:22 message with a thread starts a group 6 minutes after his 17:16.
+    @Test
+    func aMessageWithAThreadStartsAGroup() {
+        let shown = timeline(row(1, at: noon), row(2, at: noon + 360, hasThread: true))
+
+        #expect(shown.shape == ["day", "+1", "+2"])
+    }
+
+    // TB4.4: Ray's "danach" seconds after his "tb14" sits under tb14's thread box, without a
+    // header.
+    @Test
+    func theMessageAfterAThreadJoinsItsGroup() {
+        let shown = timeline(
+            row(1, at: noon, hasThread: true), row(2, at: noon + 5), row(3, at: noon + 60))
+
+        #expect(shown.shape == ["day", "+1", "2", "3"])
+    }
+
+    // An invite reminder: Discord draws nothing, and the messages around it group as if it
+    // weren't there. The new messages line moves to the next shown row.
+    @Test
+    func aKindWithoutALineIsLeftOut() {
+        let rows = [
+            row(1, at: noon), row(2, at: noon + 1, kind: .guildInviteReminder),
+            row(3, at: noon + 2),
+        ]
+
+        let shown = MessageTimeline(rows: rows, calendar: berlin, newMessages: id(2))
+
+        #expect(shown.shape == ["day", "+1", "new", "3"])
+    }
+
     @Test
     func aNewDayGetsADividerAndStartsAGroup() {
         let shown = timeline(

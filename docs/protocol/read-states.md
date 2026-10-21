@@ -178,7 +178,11 @@ account like a rejected token, and what's pending is dropped. Any other error re
 ([below](#refused-acks)).
 
 **The body.** A channel ack is `{"token":null,"last_viewed":N}` with `last_viewed` the days
-since the Discord epoch, rounded up (at Discord's time, below), and no `flags` or `manual`.
+since the Discord epoch, rounded up (at Discord's time, below), and no `flags` or `manual`. A
+thread's is `{"token":null,"last_viewed":N,"flags":2}` (`IS_THREAD`), and one the user hasn't
+joined goes without `last_viewed`: `{"token":null,"flags":2}`, as the official client sends
+them ([Threads](#threads)). Akari sends the flag every time; whether the official client leaves
+it out once the stored flags match isn't known.
 The bulk is `{"read_states":[{channel_id, message_id, read_state_type: 0}]}`, in chunks of 50
 entries (an unconfirmed reading of the one 50-entry request seen), one request per chunk. A
 chunk takes whatever bulk entries are due together, so two bulks marked at once can share a
@@ -365,7 +369,7 @@ Observed in the official web client on 2026-10-17, with the second account and a
   `mute_config: null` and `join_timestamp`), `{"flags":2}` (back to the default),
   `{"muted":true,"mute_config":{"selected_time_window":900,"end_time":"<ISO>"}}` (15 minutes)
   and `{"muted":false}`.
-- **Acks** (observed; Akari sends them with the thread view): opening an unread joined thread
+- **Acks** (observed; Akari sends the same bodies): opening an unread joined thread
   acked `POST /channels/{thread}/messages/{id}/ack` with
   `{"token":null,"last_viewed":4308,"flags":2}`. Opening an unjoined thread with new messages
   acked `{"token":null,"flags":2}`, without `last_viewed`. Opening the parent also acked its

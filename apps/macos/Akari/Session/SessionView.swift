@@ -77,7 +77,9 @@ struct SessionView<MessageArea: View>: View {
 
     private var page: some View {
         VStack(spacing: 0) {
-            ChannelHeader(channel: openChannel, name: openName)
+            ChannelHeader(
+                channel: openChannel, name: openName, parent: openParent,
+                openParent: session.openParent)
             if let messages = session.messages {
                 messageArea(messages, channelName)
             } else if session.currentUser == nil {
@@ -130,6 +132,13 @@ struct SessionView<MessageArea: View>: View {
         return session.channels?.channel(id) ?? conversation?.channel
     }
 
+    private var openParent: Channel? {
+        guard let openChannel, openChannel.isThread, let parentId = openChannel.parentId else {
+            return nil
+        }
+        return session.channels?.channel(parentId)
+    }
+
     private var openName: String {
         conversation?.name ?? openChannel?.name ?? ""
     }
@@ -139,6 +148,8 @@ struct SessionView<MessageArea: View>: View {
             switch openChannel?.kind {
             case .dm: .direct(conversation?.recipients.first)
             case .groupDm: .group
+            case .publicThread?, .privateThread?, .newsThread?:
+                .thread(owner: session.messages?.threadOwner)
             case let kind?: .guildChannel(kind)
             case nil: .guildChannel(.guildText)
             }

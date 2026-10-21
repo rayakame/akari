@@ -24,8 +24,9 @@ public struct MessageTimeline: Equatable, Sendable {
         case edge(Edge)
         /// Before a day's first message; the date is that day's start.
         case day(Date)
-        /// The new messages line, right before the row with this ID and after its day's divider.
-        /// It starts no group.
+        /// The new messages line, right before the row with this ID and after its day's divider,
+        /// or the next shown row: last while that row is a thread's starter being fetched or a
+        /// hidden system message. It starts no group.
         case newMessages(MessageId)
         /// `startsGroup` shows the avatar, the name and the time.
         case message(MessageListModel.Row, startsGroup: Bool)
@@ -47,7 +48,7 @@ public struct MessageTimeline: Equatable, Sendable {
 
     /// `edges` wrap the rows: `.beginning` or `.older` first, `.newer` last. Without rows only
     /// `.older` stays, for messages that aren't loaded yet. The new messages line goes before the
-    /// row whose ID is `newMessages`, if it is shown.
+    /// row whose ID is `newMessages`, or the next shown one; last if none is.
     public init(
         rows: [MessageListModel.Row], calendar: Calendar = .current, edges: Set<Edge> = [],
         newMessages: MessageId? = nil
@@ -61,10 +62,19 @@ public struct MessageTimeline: Equatable, Sendable {
         if let top = [Edge.beginning, .older].first(where: edges.contains) {
             items.append(.edge(top))
         }
-        var previous: Message?
+        var previous: MessageListModel.Row?
         var day: Date?
+        var line: MessageId?
         for row in rows {
-            let start = calendar.startOfDay(for: row.message.timestamp)
+            if row.id == newMessages {
+                line = row.id
+            }
+            // A starter still being fetched has no row yet, and a hidden system message none at
+            // all; the line goes before the next one, or last.
+            if row.starter == .loading || row.isHidden {
+                continue
+            }
+            let start = calendar.startOfDay(for: row.shown.timestamp)
             // Only forward, so a message stamped earlier than the one before (a skewed clock)
             // can't repeat a divider's key.
             let newDay = day.map { start > $0 } ?? true
@@ -72,12 +82,17 @@ public struct MessageTimeline: Equatable, Sendable {
                 items.append(.day(start))
                 day = start
             }
-            if row.id == newMessages {
-                items.append(.newMessages(row.id))
+            if let placed = line {
+                items.append(.newMessages(placed))
+                line = nil
             }
-            let startsGroup = newDay || Self.startsGroup(row.message, after: previous)
+            let startsGroup = newDay || Self.startsGroup(row, after: previous)
             items.append(.message(row, startsGroup: startsGroup))
-            previous = row.message
+            previous = row
+        }
+        // The unread bar counts a starter still being fetched.
+        if let placed = line {
+            items.append(.newMessages(placed))
         }
         if edges.contains(.newer) {
             items.append(.edge(.newer))
@@ -85,11 +100,23 @@ public struct MessageTimeline: Equatable, Sendable {
         self.items = items
     }
 
-    private static func startsGroup(_ message: Message, after previous: Message?) -> Bool {
-        guard let previous else {
+    private static func startsGroup(
+        _ row: MessageListModel.Row, after previousRow: MessageListModel.Row?
+    ) -> Bool {
+        guard let previousRow else {
             return true
         }
-        if message.notice != nil || previous.notice != nil {
+        if row.notice != nil || previousRow.notice != nil {
+            return true
+        }
+        // A thread's starter is a group of its own, whatever comes after it.
+        if row.starter != nil || previousRow.starter != nil {
+            return true
+        }
+        let message = row.shown
+        let previous = previousRow.shown
+        // Only before it: the next message joins its group under the thread's box (D124).
+        if message.hasThread {
             return true
         }
         if message.author.id != previous.author.id {

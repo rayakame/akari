@@ -10,11 +10,11 @@ use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
     MemberLists, PresenceStatus, SendError,
 };
-use crate::model::{ChannelId, GuildId, MessageId, UserId};
+use crate::model::{ChannelId, GuildId, MessageId, MessageType, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
-    Ack, ConnectionState, Cursor, LoadKind, LoadTicket, Message, Store, WindowLimits,
-    message_length,
+    Ack, ConnectionState, Cursor, Learned, LoadKind, LoadTicket, Message, StarterFetch, Store,
+    WindowLimits, message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 use acks::{AckSender, Pace, Refusal};
@@ -304,11 +304,13 @@ impl Shared {
                 }
                 (report.prepare, report.prepared) = prepared;
                 log_page(channel, ticket.kind, &report);
+                self.fetch_starter(channel);
                 Ok(Some(report))
             }
             Err(err) => {
                 unfinished.ticket = None;
                 self.store.abort_load(ticket);
+                self.store.fail_starter(channel);
                 self.failed(&err);
                 tracing::debug!(
                     target: "akari_core::load",
@@ -321,6 +323,50 @@ impl Shared {
                 Err(err)
             }
         }
+    }
+
+    // Discord can send a thread's first message without the parent's message it started from.
+    // A user account can't get one message, so it asks for the page of one around it.
+    fn fetch_starter(self: &Arc<Self>, thread: ChannelId) {
+        let Some((channel, id)) = self.store.starter_to_fetch(thread) else {
+            return;
+        };
+        let shared = self.clone();
+        self.runtime.spawn(async move {
+            let fetch = match shared
+                .rest
+                .list_messages(channel, Query::Around(id), 1)
+                .await
+            {
+                Ok(page) => match page.messages.into_iter().find(|message| message.id == id) {
+                    Some(message) => {
+                        let mut prepared = (Duration::ZERO, 0);
+                        shared
+                            .prepare_page(std::slice::from_ref(&message), &mut prepared)
+                            .await;
+                        StarterFetch::Found(Box::new(message))
+                    }
+                    None => StarterFetch::Gone,
+                },
+                // Deleted, or the user can't read the parent.
+                Err(RequestError::Discord { .. }) => StarterFetch::Gone,
+                Err(err) => {
+                    shared.failed(&err);
+                    StarterFetch::Failed
+                }
+            };
+            tracing::debug!(
+                target: "akari_core::load",
+                thread_id = thread.get(),
+                outcome = match fetch {
+                    StarterFetch::Found(_) => "found",
+                    StarterFetch::Gone => "gone",
+                    StarterFetch::Failed => "failed",
+                },
+                "starter message fetched"
+            );
+            shared.store.settle_starter(thread, fetch);
+        });
     }
 
     // On a blocking thread, so a slow preparer holds up only this load.
@@ -425,15 +471,26 @@ impl Shared {
     }
 
     // Without the gate: the pump forgets and swaps itself, so its own acks can't come between.
-    fn dispatched(&self, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
+    fn dispatched(self: &Arc<Self>, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
         if let ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) = &event
             && ack.manual
             && ack.ack_type == 0
         {
             self.acks.forget(ack.channel_id);
         }
+        let starter = match &event {
+            ConnectionEvent::Dispatch(DispatchEvent::MessageCreate(message))
+                if message.kind == MessageType::ThreadStarterMessage =>
+            {
+                Some(message.channel_id)
+            }
+            _ => None,
+        };
         let ack = on_event(&self.store, event, connecting);
         self.ack_reading(ack);
+        if let Some(thread) = starter {
+            self.fetch_starter(thread);
+        }
     }
 
     fn view(self: &Arc<Self>, channel: ChannelId) {
@@ -901,6 +958,50 @@ impl Account {
         placing: u64,
     ) -> Result<Option<LoadReport>, RequestError> {
         self.load_placed(channel, load, Some(placing)).await
+    }
+
+    /// Fetches a thread that a "started a thread" line in `parent` names when the store doesn't
+    /// have it (archived, or never synced) and keeps it as Discord sends it: unjoined, unless
+    /// the user is a member. Returns whether the store has the thread now. A 403 or 404, or a
+    /// channel that isn't a thread, makes it [`Store::thread_unavailable`] for the session, and
+    /// it isn't asked for again; other failures leave it to be fetched again.
+    pub async fn fetch_thread(
+        &self,
+        parent: ChannelId,
+        thread: ChannelId,
+    ) -> Result<bool, RequestError> {
+        let shared = &self.shared;
+        if shared.store.channel(thread).is_some() {
+            return Ok(true);
+        }
+        if shared.store.thread_unavailable(thread) {
+            return Ok(false);
+        }
+        let learned = match shared.rest.get_channel(thread).await {
+            Ok(channel) => Ok(shared.store.learn_thread(channel)),
+            Err(RequestError::Discord {
+                status: 403 | 404, ..
+            }) => Ok(Learned::NotAThread),
+            Err(err) => {
+                shared.failed(&err);
+                Err(err)
+            }
+        };
+        if matches!(learned, Ok(Learned::NotAThread)) {
+            shared.store.mark_thread_unavailable(parent, thread);
+        }
+        tracing::debug!(
+            target: "akari_core::load",
+            thread_id = thread.get(),
+            outcome = match &learned {
+                Ok(Learned::Kept) => "found",
+                Ok(Learned::NotAThread) => "unavailable",
+                Ok(Learned::Unplaced) => "no_guild",
+                Err(err) => err.kind(),
+            },
+            "thread fetched"
+        );
+        learned.map(|learned| matches!(learned, Learned::Kept))
     }
 
     /// The next place among loads and supersedes, for [`Account::load_messages_placed`]. A host

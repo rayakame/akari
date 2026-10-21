@@ -24,6 +24,9 @@ final class ChannelStartCell: NSTableCellView {
     private let iconHeight: NSLayoutConstraint
     private let subtitleAfterTitle: NSLayoutConstraint
     private let subtitleAfterUsername: NSLayoutConstraint
+    private var bottomAfterSubtitle: NSLayoutConstraint?
+    private var bottomAfterTitle: NSLayoutConstraint?
+    private var iconTop: NSLayoutConstraint?
 
     init() {
         iconWidth = icon.widthAnchor.constraint(equalToConstant: Self.iconSize)
@@ -39,11 +42,18 @@ final class ChannelStartCell: NSTableCellView {
             addSubview(view)
         }
         // The table sizes the row; a required bottom would conflict while it moves row views.
-        let bottom = bottomAnchor.constraint(
+        let bottomAfterSubtitle = bottomAnchor.constraint(
             equalTo: subtitle.lastBaselineAnchor, constant: Self.bottom)
-        bottom.priority = .init(999)
+        let bottomAfterTitle = bottomAnchor.constraint(
+            equalTo: title.lastBaselineAnchor, constant: Self.bottom)
+        bottomAfterSubtitle.priority = .init(999)
+        bottomAfterTitle.priority = .init(999)
+        self.bottomAfterSubtitle = bottomAfterSubtitle
+        self.bottomAfterTitle = bottomAfterTitle
+        let iconTop = icon.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
+        self.iconTop = iconTop
         NSLayoutConstraint.activate([
-            icon.topAnchor.constraint(equalTo: topAnchor, constant: Self.top),
+            iconTop,
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
             iconWidth, iconHeight,
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
@@ -56,7 +66,7 @@ final class ChannelStartCell: NSTableCellView {
                 equalTo: title.lastBaselineAnchor, constant: Self.usernameBaseline),
             subtitle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
             subtitle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.side),
-            subtitleAfterTitle, bottom,
+            subtitleAfterTitle, bottomAfterSubtitle,
         ])
     }
 
@@ -65,8 +75,8 @@ final class ChannelStartCell: NSTableCellView {
     }
 
     /// The row height for `start` at `width`, as Auto Layout would size the cell; a channel
-    /// whose name isn't known yet gets a row too thin to see.
-    static func height(_ start: ChannelStart?, width: CGFloat) -> CGFloat {
+    /// whose name isn't known yet gets a row too thin to see. `room` goes above the icon.
+    static func height(_ start: ChannelStart?, width: CGFloat, room: CGFloat = 0) -> CGFloat {
         guard let start else {
             return 1
         }
@@ -78,19 +88,24 @@ final class ChannelStartCell: NSTableCellView {
             return text.intrinsicContentSize.height - text.firstBaselineOffsetFromTop
                 - text.lastBaselineOffsetFromBottom
         }
-        var height = top + sizing.iconHeight.constant + titleBaseline + lines(sizing.title)
+        var height = top + room + sizing.iconHeight.constant + titleBaseline + lines(sizing.title)
         if start.username != nil {
             height += usernameBaseline + lines(sizing.username)
         }
+        if start.subtitle != nil {
+            height += subtitleBaseline + lines(sizing.subtitle)
+        }
         // Auto Layout gives the cell whole points.
-        return (height + subtitleBaseline + lines(sizing.subtitle) + bottom).rounded(.up)
+        return (height + bottom).rounded(.up)
     }
 
-    func show(_ start: ChannelStart?) {
+    // `room`: what overlays the list's top, such as a locked thread's banner.
+    func show(_ start: ChannelStart?, room: CGFloat = 0) {
         isHidden = start == nil
         guard let start else {
             return
         }
+        iconTop?.constant = Self.top + room
         icon.icon = start.icon
         let size = if case .avatar = start.icon { Self.avatarSize } else { Self.iconSize }
         iconWidth.constant = size
@@ -107,9 +122,20 @@ final class ChannelStartCell: NSTableCellView {
             : (subtitleAfterTitle, subtitleAfterUsername)
         off.isActive = false
         on.isActive = true
-        subtitle.show(
-            CellText.plain(
-                start.subtitle, style: TypeScale.startSubtitle, color: Palette.textDefault))
+        subtitle.isHidden = start.subtitle == nil
+        let (unused, bottom) =
+            start.subtitle == nil
+            ? (bottomAfterSubtitle, bottomAfterTitle) : (bottomAfterTitle, bottomAfterSubtitle)
+        unused?.isActive = false
+        bottom?.isActive = true
+        let line = NSMutableAttributedString(
+            attributedString: CellText.plain(
+                start.subtitle ?? "", style: TypeScale.startSubtitle, color: Palette.textDefault))
+        if let name = start.subtitleName {
+            line.append(
+                CellText.plain(name, style: TypeScale.startOwner, color: Palette.textStrong))
+        }
+        subtitle.show(line)
     }
 }
 

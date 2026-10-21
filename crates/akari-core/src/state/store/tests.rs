@@ -2062,3 +2062,144 @@ fn an_ack_undone_while_ready_is_prepared_still_gets_its_badge_event() {
         ]
     );
 }
+
+// A thread under #general that READY doesn't bring, as Get Channel answers it.
+const FETCHED: u64 = 300_000_000_000_000_040;
+
+fn fetched(archived: bool, member: bool) -> model::Channel {
+    let mut thread = json!({
+        "id": FETCHED.to_string(),
+        "type": 11,
+        "name": "old plans",
+        "guild_id": G1.to_string(),
+        "parent_id": GENERAL.to_string(),
+        "owner_id": "100000000000000002",
+        "last_message_id": "400000000000000041",
+        "thread_metadata": {
+            "archived": archived,
+            "auto_archive_duration": 1440,
+            "archive_timestamp": "2024-03-02T08:30:00.250000+00:00",
+            "locked": false
+        }
+    });
+    if member {
+        thread["member"] = json!({
+            "join_timestamp": "2024-03-01T08:30:00.250000+00:00", "flags": 1, "muted": false
+        });
+    }
+    serde_json::from_str(&thread.to_string()).unwrap()
+}
+
+fn fetched_id() -> ChannelId {
+    Snowflake::new(FETCHED)
+}
+
+// READY lists only joined threads, so a reconnect says nothing about one the user opened.
+#[tokio::test]
+async fn a_fetched_thread_survives_a_later_ready() {
+    let store = ready_store();
+    assert!(matches!(
+        store.learn_thread(fetched(true, false)),
+        Learned::Kept
+    ));
+    let subscription = store.subscribe();
+
+    store.apply(ready());
+
+    assert!(store.channel(fetched_id()).is_some());
+    let events = subscription.next_batch(1000).await;
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        StoreEvent::ChannelRemoved { channel_id, .. } if *channel_id == fetched_id()
+    )));
+}
+
+#[test]
+fn a_thread_fetched_while_a_ready_is_prepared_survives_its_swap() {
+    let store = ready_store();
+    let (parked, release) = store.park_next_conversion();
+    let applying = {
+        let store = store.clone();
+        thread::spawn(move || store.apply(ready()))
+    };
+    parked
+        .recv_timeout(WAIT)
+        .expect("READY never reached the build");
+
+    assert!(matches!(
+        store.learn_thread(fetched(true, false)),
+        Learned::Kept
+    ));
+    release.send(()).unwrap();
+    applying.join().unwrap();
+
+    assert!(store.channel(fetched_id()).is_some());
+}
+
+// The gateway's copy is newer than an answer to a request sent before it.
+#[test]
+fn a_fetch_keeps_what_the_gateway_brought_meanwhile() {
+    let store = ready_store();
+    store.apply(dispatch(
+        "THREAD_CREATE",
+        &json!({
+            "id": FETCHED.to_string(), "type": 11, "name": "old plans",
+            "guild_id": G1.to_string(), "parent_id": GENERAL.to_string(),
+            "thread_metadata": {"archived": false, "auto_archive_duration": 1440,
+                "archive_timestamp": "2024-03-03T08:30:00.250000+00:00", "locked": false}
+        }),
+    ));
+
+    assert!(matches!(
+        store.learn_thread(fetched(true, false)),
+        Learned::Kept
+    ));
+
+    let thread = store.channel(fetched_id()).unwrap();
+    assert!(!thread.thread.as_deref().unwrap().archived);
+}
+
+#[test]
+fn a_fetched_joined_thread_is_listed_at_once() {
+    let store = ready_store();
+
+    assert!(matches!(
+        store.learn_thread(fetched(false, true)),
+        Learned::Kept
+    ));
+
+    assert!(
+        store
+            .channel_list(Snowflake::new(G1))
+            .iter()
+            .any(|channel| channel.id == fetched_id())
+    );
+}
+
+#[tokio::test]
+async fn a_thread_fetched_between_readys_build_and_diff_isnt_reported_removed() {
+    let store = ready_store();
+    let subscription = store.subscribe();
+    let (parked, release) = store.park_next_diff();
+    let applying = {
+        let store = store.clone();
+        thread::spawn(move || store.apply(ready()))
+    };
+    parked
+        .recv_timeout(WAIT)
+        .expect("READY never reached its diff");
+
+    assert!(matches!(
+        store.learn_thread(fetched(true, false)),
+        Learned::Kept
+    ));
+    release.send(()).unwrap();
+    applying.join().unwrap();
+
+    assert!(store.channel(fetched_id()).is_some());
+    let events = subscription.next_batch(1000).await;
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        StoreEvent::ChannelRemoved { channel_id, .. } if *channel_id == fetched_id()
+    )));
+}

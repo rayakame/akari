@@ -9,7 +9,7 @@ use crate::model::{
 };
 use crate::state::badges::Dirty;
 use crate::state::events::StoreEvent;
-use crate::state::read_states::{Ack, ReadState};
+use crate::state::read_states::{Ack, AckBody, ReadState};
 use crate::state::settings::NotificationLevel;
 use crate::state::types::{Channel, ThreadInfo};
 
@@ -301,6 +301,7 @@ impl State {
             return None;
         }
         let stored = self.entities.channels.get(&channel)?;
+        let body = AckBody::of(stored);
         let before = self.entities.read_states.get(channel);
         if shown.get() <= self.entities.read_position(stored)
             && before.is_none_or(|state| state.mentions == 0)
@@ -315,6 +316,7 @@ impl State {
             now: false,
             before,
             after,
+            body,
         })
     }
 
@@ -453,6 +455,7 @@ impl State {
                 || self.stale_cursors.contains(&channel.id),
             before: self.entities.read_states.get(channel.id),
             after: None,
+            body: AckBody::of(channel),
         }
     }
 

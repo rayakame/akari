@@ -25,6 +25,12 @@ protocol MessageListActions: AnyObject {
     func reveal(_ spoiler: SpoilerKey)
     // Wherever the channel is: another server's, or a conversation.
     func openChannel(_ id: ChannelId)
+    // A "started a thread" line's thread, fetched first when the store doesn't have it.
+    func openThread(_ id: ChannelId, from parent: ChannelId)
+    // "a message" in a pin's line; the table scrolls once the model has jumped.
+    func jump(to message: MessageId)
+    // A server a system line names.
+    func openGuild(_ id: GuildId)
     // A masked link may ask first (D65).
     func openLink(_ url: URL, masked: Bool)
 }
