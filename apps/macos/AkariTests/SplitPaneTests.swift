@@ -99,6 +99,28 @@ struct SplitWidthTests {
 }
 
 @MainActor
+struct ResizeCursorTests {
+    // A gap that goes away under the pointer gets no hover's end: it pops on its way out.
+    @Test
+    func theCursorIsPushedOnceAndPoppedOnce() {
+        var pushes = 0
+        var pops = 0
+        let cursor = ResizeCursor(push: { pushes += 1 }, pop: { pops += 1 })
+
+        cursor.hover(true)
+        cursor.hover(true)
+        #expect((pushes, pops) == (1, 0))
+        cursor.release()
+        cursor.hover(false)
+        cursor.release()
+        #expect((pushes, pops) == (1, 1))
+        cursor.hover(true)
+        cursor.hover(false)
+        #expect((pushes, pops) == (2, 2))
+    }
+}
+
+@MainActor
 struct SplitHeaderTests {
     let thread = Channel(
         id: ChannelId(rawValue: 31), kind: .publicThread, guildId: GuildId(rawValue: 1),

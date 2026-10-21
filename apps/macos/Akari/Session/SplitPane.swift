@@ -31,23 +31,49 @@ final class SplitWidth {
     }
 }
 
+// A gap that goes away under the pointer gets no hover's end, so it pops on its way out.
+@MainActor
+final class ResizeCursor {
+    private(set) var pushed = false
+    private let push: () -> Void
+    private let pop: () -> Void
+
+    init(
+        push: @escaping () -> Void = { NSCursor.resizeLeftRight.push() },
+        pop: @escaping () -> Void = { NSCursor.pop() }
+    ) {
+        self.push = push
+        self.pop = pop
+    }
+
+    func hover(_ inside: Bool) {
+        if inside, !pushed {
+            push()
+            pushed = true
+        } else if !inside, pushed {
+            pop()
+            pushed = false
+        }
+    }
+
+    func release() {
+        hover(false)
+    }
+}
+
 // Like Discord's handle it draws nothing; only the cursor changes.
 struct SplitGap: View {
     let split: SplitWidth
     let page: CGFloat
     @State private var start: CGFloat?
+    @State private var cursor = ResizeCursor()
 
     var body: some View {
         Color(nsColor: Palette.frame)
             .frame(width: SplitWidth.gap)
             .contentShape(Rectangle())
-            .onHover { inside in
-                if inside {
-                    NSCursor.resizeLeftRight.push()
-                } else {
-                    NSCursor.pop()
-                }
-            }
+            .onHover { cursor.hover($0) }
+            .onDisappear { cursor.release() }
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { drag in
