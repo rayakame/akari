@@ -169,8 +169,10 @@ Observed in the official web client on 2026-10-17, with the second account and a
   parent stays selected; leaving the thread there removes its row at once. *Akari: the split
   view comes later.*
 - **The row's menu:** Mark As Read (disabled when read) | Leave Thread, Copy Link |
-  Mute Thread ›, Notification Settings › | Copy Thread ID. *Akari: Mark As Read; Leave Thread
-  comes with joining and leaving; the other items later.*
+  Mute Thread ›, Notification Settings › | Copy Thread ID. The official client's thread menu
+  offers Join Thread instead for a thread the user isn't in, such as the open one's row.
+  *Akari: Mark As Read | Join Thread or Leave Thread (disabled while archived); the other items
+  later.*
 
 ### The spine
 

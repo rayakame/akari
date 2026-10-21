@@ -54,7 +54,12 @@ read state, and `GuildBadgeChanged { guild_id }` that guild's badge and its fold
 `channel_list(guild_id)` puts each channel's listed threads right after it, the last joined
 first: those the user joined that aren't archived and are inside their "Hide After Inactivity"
 window, unread, or with a mention. A thread's `Channel` carries `thread: ThreadInfo` (joined,
-archived, locked, private, its message count and owner). `ThreadListingChanged { guild_id,
+archived, locked, private, its message count, owner, newest message ID and creation time). The
+count moves with every message in the thread without `ChannelUpdated`: `MessageUpdated` for
+the row that shows the thread's box (the message with `has_thread` and the thread's ID) says
+when to read it again, and so does a change of the thread's newest message,
+`Store.latest_message(thread_id)` (from THREAD_LIST_SYNC, live messages and the thread's
+newest page, for the session; `None` while none is known). `ThreadListingChanged { guild_id,
 thread_id }` says to read the list again when a thread left or rejoined it without changing
 itself (its window ended, it was read past it, a message came after it); joining, leaving and
 closing come as `ChannelUpdated`. Which listed threads a list hides (under a collapsed
@@ -75,7 +80,13 @@ settles, `MessageUpdated` names that first message.
 the store has it now. When Discord refuses it or it is gone, `Store.thread_unavailable(thread_id)`
 says so for the session, and `StoreEvent::ThreadUnavailable { guild_id, thread_id }` tells the
 lists of the parent's guild to read the lines that name it again. A later READY keeps a thread
-fetched this session.
+fetched this session, and every thread the user hasn't joined.
+
+`Account.join_thread(thread_id, location)` and `leave_thread(thread_id, location)` join and
+leave, telling Discord where the user chose it (`ThreadLocation`: `SidebarOverflow`,
+`ToolbarOverflow`, `ContextMenu`); the store has it joined or left once Discord says yes, which
+comes as `ChannelUpdated`. An archived thread, or one the store doesn't have, fails with
+`InvalidRequest` before asking.
 
 Acks: `set_reading(channel_id)` names the channel the user is reading at its newest messages
 (or `None`), `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request
