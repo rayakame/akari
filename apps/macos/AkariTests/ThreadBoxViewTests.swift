@@ -261,6 +261,16 @@ struct ThreadBoxViewTests {
         #expect(actions.calls == ["thread 20 from 10"])
     }
 
+    // Discord's --text-link: #4d96ee in its Dark theme (amendment 220).
+    @Test
+    func theCountIsInTheLinkColor() throws {
+        let (_, view) = try shown()
+
+        let color = view.text(of: "16 Messages ›")?
+            .attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        #expect(color == Palette.textLink)
+    }
+
     @Test
     func onlyTheCountUnderlinesWhileHovered() throws {
         let (_, view) = try shown()

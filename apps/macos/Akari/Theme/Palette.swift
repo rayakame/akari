@@ -23,7 +23,6 @@ enum Palette {
     // The box under a message with a thread, measured from the user's screenshots (amendment 175).
     static let threadBoxFill = token("threadBoxFill", dark: "#242429", light: "#ffffff")
     static let threadBoxBorder = token("threadBoxBorder", dark: "#323237", light: "#e2e2e5")
-    static let threadBoxLink = token("threadBoxLink", dark: "#5f94e7", light: "#006dd4")
     // System lines' icons, from Discord's client: its arrow and call assets carry their colors.
     static let noticeIn = token("noticeIn", dark: "#3ba55c", light: "#3ba55c")
     static let noticeOut = token("noticeOut", dark: "#ed4245", light: "#ed4245")

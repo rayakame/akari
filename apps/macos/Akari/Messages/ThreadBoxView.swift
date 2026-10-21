@@ -286,7 +286,7 @@ final class ThreadBoxView: NSButton {
             return []
         }
         var link: [NSAttributedString.Key: Any] = [
-            .font: Self.strongFont, .foregroundColor: Palette.threadBoxLink,
+            .font: Self.strongFont, .foregroundColor: Palette.textLink,
         ]
         if hovered {
             link[.underlineStyle] = NSUnderlineStyle.single.rawValue
