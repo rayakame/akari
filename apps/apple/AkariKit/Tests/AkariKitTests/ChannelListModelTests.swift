@@ -448,4 +448,18 @@ struct ChannelListModelTests {
         #expect(model.muted == [id(32)])
         #expect(store.reads.contains(.mutedChannels([id(32)])))
     }
+
+    @Test
+    func anUnlistedOpenThreadsMuteChangeIsRead() {
+        let model = threaded { $0.channels[id(33)] = thread(33, in: 11) }
+        model.setOpen(id(33))
+
+        store.update { $0.mutedChannels = [id(33)] }
+        model.apply(EventBatch([.channelUpdated(channelId: id(33), guildId: id(1))]))
+        #expect(model.muted.contains(id(33)))
+
+        store.update { $0.mutedChannels = [] }
+        model.apply(EventBatch([.channelUpdated(channelId: id(33), guildId: id(1))]))
+        #expect(!model.muted.contains(id(33)))
+    }
 }
