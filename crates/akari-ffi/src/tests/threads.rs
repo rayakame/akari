@@ -5,13 +5,13 @@ use akari_core::model::{ChannelId, MessageId, UserId};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
-use wiremock::matchers::path;
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::fake::{CATEGORY, FakeGateway, GENERAL, GUILD, VOICE, events_until, fixture, online};
 use super::gateway::send;
 use super::support::{USER, token};
-use crate::account::{Account, MessageLoad};
+use crate::account::{Account, MessageLoad, ThreadLocation};
 use crate::records::{EmbedField, MessageReference, StarterMessage, ThreadInfo};
 use crate::subscription::StoreEvent;
 
@@ -45,6 +45,8 @@ async fn a_threads_record_carries_its_state() {
             private: false,
             message_count: Some(12),
             owner_id: Some(MIRA),
+            last_message_id: Some(MessageId::new(400_000_000_000_000_030)),
+            created_at: None,
         })
     );
     assert_eq!(
@@ -438,4 +440,69 @@ async fn an_unavailable_thread_reaches_the_subscription_and_the_read() {
         thread_id: ARCHIVED,
     }));
     loaded.account.close();
+}
+
+#[tokio::test]
+async fn the_latest_message_read_gives_the_threads_newest() {
+    let mut newest = page_message(400_000_000_000_000_033, THREAD);
+    newest["content"] = "the **newest**".into();
+    let loaded = loaded(
+        THREAD,
+        vec![newest, page_message(400_000_000_000_000_032, THREAD)],
+    )
+    .await;
+
+    let latest = loaded
+        .account
+        .store()
+        .latest_message(THREAD)
+        .expect("the newest message");
+
+    assert_eq!(latest.id, MessageId::new(400_000_000_000_000_033));
+    assert_eq!(latest.content, "the **newest**");
+    assert!(!latest.formatted.blocks.is_empty());
+    loaded.account.close();
+}
+
+#[tokio::test]
+async fn leaving_and_joining_cross_the_boundary() {
+    let server = MockServer::start().await;
+    let member = format!("/api/v9/channels/{}/thread-members/@me", THREAD.get());
+    for verb in ["DELETE", "POST"] {
+        Mock::given(method(verb))
+            .and(path(member.as_str()))
+            .and(query_param("location", "Toolbar Overflow"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+    }
+    let gateway = FakeGateway::start().await;
+    let account = gateway
+        .client_with_api(&format!("{}/api/v9/", server.uri()))
+        .account(token("t"), USER)
+        .unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let _ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    let joined = || {
+        account
+            .store()
+            .channel(THREAD)
+            .and_then(|channel| channel.thread)
+            .map(|thread| thread.joined)
+    };
+
+    account
+        .leave_thread(THREAD, ThreadLocation::ToolbarOverflow)
+        .await
+        .unwrap();
+    assert_eq!(joined(), Some(false));
+
+    account
+        .join_thread(THREAD, ThreadLocation::ToolbarOverflow)
+        .await
+        .unwrap();
+    assert_eq!(joined(), Some(true));
+    account.close();
 }

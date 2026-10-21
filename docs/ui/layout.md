@@ -86,9 +86,14 @@ The rail and the channel list together form the sidebar.
 - A thread opened full width shows its channel first: "# new › [thread] t1", the channel's
   symbol and name, a chevron, the thread's symbol and its name (observed 2026-10-17). Clicking
   the channel's name opens the channel. The official client also has Threads, the bell, pins,
-  members, "…" and a search field on the right; Akari has none of them yet. *Akari: the
-  channel's name in `interactiveText` at the header's size with the pointing hand, the chevron
-  11 semibold `textMuted`; not measured yet.*
+  members, "…" and a search field on the right. Its "…" for a thread: Join Thread or Leave
+  Thread | Jump To Top, Open in Split View | Copy Link, Copy Thread ID (observed 2026-10-17).
+  *Akari: the channel's name in `interactiveText` at the header's size with the pointing hand,
+  the chevron 11 semibold `textMuted`; not measured yet. Of the buttons only "…", for threads,
+  with Join Thread or Leave Thread (disabled while the thread is archived); the other items
+  come later. A join or leave that fails shows Discord's alert: "Cannot join thread" / "This
+  thread has reached the maximum possible number of members." when it's full, else "Error" /
+  "An error occurred, please try again."*
 
 ## User panel
 

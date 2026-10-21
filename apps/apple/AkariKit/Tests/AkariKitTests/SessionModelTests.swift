@@ -414,6 +414,27 @@ final class SessionModelTests {
         session.close()
     }
 
+    // A thread needs its parent's VIEW_CHANNEL, and losing it sends no THREAD_DELETE.
+    @Test
+    func anOpenThreadGivesWayWhenItsParentLeavesTheList() async {
+        store.update { state in
+            state.add(guild(1))
+            state.list([channel(11), thread(31, in: 11), channel(12)], in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(31))
+
+        store.update { $0.channelLists[id(1)] = [id(12)] }
+        subscription.send(.currentMemberUpdated(guildId: id(1)))
+        await subscription.batches.pulled(2)
+
+        #expect(session.messages?.channelId == id(12))
+        #expect(session.channels?.shown(open: id(12)).map(\.id) == [id(12)])
+        session.close()
+    }
+
     @Test
     func theParentInTheHeaderOpensIt() {
         store.update { state in

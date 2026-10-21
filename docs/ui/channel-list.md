@@ -164,13 +164,17 @@ Observed in the official web client on 2026-10-17, with the second account and a
 - **The open thread** (opened full width) always has a row. When it stops being listed (the user
   left or closed it, or read it past its window), the row moves to the top of its parent's
   threads and goes when the user opens something else. An unlisted thread opened full width,
-  such as one the user hasn't joined, gets that row too, selected.
+  such as one the user hasn't joined, gets that row too, selected. When its parent leaves the
+  list (the user can't see it any more, nor its threads), the thread gives way as a hidden
+  channel does: the server's last or first channel opens.
 - **In the split view** (a thread beside its parent) the thread has no row of its own and the
   parent stays selected; leaving the thread there removes its row at once. *Akari: the split
   view comes later.*
 - **The row's menu:** Mark As Read (disabled when read) | Leave Thread, Copy Link |
-  Mute Thread ›, Notification Settings › | Copy Thread ID. *Akari: Mark As Read; Leave Thread
-  comes with joining and leaving; the other items later.*
+  Mute Thread ›, Notification Settings › | Copy Thread ID. The official client's thread menu
+  offers Join Thread instead for a thread the user isn't in, such as the open one's row.
+  *Akari: Mark As Read | Join Thread or Leave Thread (disabled while archived); the other items
+  later.*
 
 ### The spine
 

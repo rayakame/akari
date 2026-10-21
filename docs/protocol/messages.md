@@ -98,6 +98,25 @@ every stale window with the latest 100 messages:
   nothing.
 - Older parts of a window aren't re-checked, like the official client.
 
+## A thread's box
+
+The box under a message that started a thread (and under the line about a thread started
+without one) needs the thread and its newest message:
+
+- **Which message:** the one with `HAS_THREAD` (1 << 5) whose ID is the thread's: a thread
+  started from a message has that message's ID, and the official client looks no further (its
+  code, read 2026-10-21). A line about a thread started from an older message has its own ID.
+- **The thread** comes as the message's `thread` (history pages, MESSAGE_CREATE, the
+  MESSAGE_UPDATE that starts it), THREAD_CREATE or THREAD_LIST_SYNC.
+- **The count** starts from `message_count` and, like the official client's, moves by one with
+  every MESSAGE_CREATE in the thread but a starter (21) and a forum post's first message (which
+  has the post's ID), up to 100,000, and with every delete, never below 0; thread payloads set
+  it again. It changes without a channel event: the box's row gets `MessageUpdated`.
+- **The newest message** (`Store::latest_message`) comes from THREAD_LIST_SYNC's
+  `most_recent_messages`, live messages and the thread's newest page (an empty one clears it
+  and the count), newer only, never a starter; an edit patches it, deleting it leaves none, and
+  a thread payload naming a newer `last_message_id` drops it. It isn't cached.
+
 ## A thread's starter message
 
 A thread started from a message begins with a `THREAD_STARTER_MESSAGE` (21): no content, only

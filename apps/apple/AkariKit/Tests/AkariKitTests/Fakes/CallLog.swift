@@ -17,6 +17,8 @@ final class CallLog: Sendable {
         case retry(ChannelId, MessageId)
         case discard(ChannelId, MessageId)
         case fetchThread(ChannelId, ChannelId)
+        case joinThread(ChannelId, ThreadLocation)
+        case leaveThread(ChannelId, ThreadLocation)
         case flushCache
     }
 
@@ -38,6 +40,7 @@ final class CallLog: Sendable {
         case window(ChannelId)
         case messages(ChannelId, [MessageId])
         case starterMessage(ChannelId)
+        case latestMessage(ChannelId)
         case threadUnavailable(ChannelId)
         case messageLengthLimit
         case slowmode(ChannelId)

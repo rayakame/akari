@@ -110,7 +110,15 @@ as in the official client; only its deletion closes it. `openParent()` opens the
 thread's channel, for the thread header's link. `open(thread:from:)` opens the thread a
 "started a thread" line names, fetched first when the store doesn't have it; nothing opens when
 Discord refuses it, it's gone or the fetch fails, nor once the user opened something else or
-clicked another line meanwhile. A row's `threadLinked` is false for such a line once the thread is unavailable. In a
+clicked another line meanwhile. A row's `threadLinked` is false for such a line once the thread is unavailable. A
+row's `threadBox` (`ThreadBox`) is the box of the thread started from its message, or that its
+"started a thread" line is about: the name, the count as Discord words it, the second line
+(`Bottom`: the newest message with its author, no recent messages, no messages yet) and the time
+it's measured from; `ThreadBox.relativeTime` words that time ("25m ago") and says when it
+changes, `placeholder(for:)` what an empty newest message shows. `membershipItem(for:)` gives a
+thread of the open server's menus Join Thread or Leave Thread (disabled while archived);
+`join(thread:from:)` and `leave(thread:from:)` send the menu's `ThreadLocation`, and a failure
+waits in `membershipError`, in Discord's words, until `dismissMembershipError()`. In a
 thread, a row's `starter` is set for
 its first message when it started from one in the channel: the row draws `shown`, the
 parent's message, once loaded; `notice` says it couldn't be loaded; while it's fetched the

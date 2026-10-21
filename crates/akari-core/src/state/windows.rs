@@ -626,6 +626,21 @@ impl Windows {
             .cloned()
     }
 
+    // The newest loaded message; pending and failed ones aren't in `messages`.
+    pub(crate) fn newest_message(&self, channel: ChannelId) -> Option<Arc<Message>> {
+        self.windows.get(&channel)?.messages.last().cloned()
+    }
+
+    // The loaded row of `parent` that shows `thread`'s box: the one with the thread's ID.
+    pub(crate) fn box_row(&self, parent: ChannelId, thread: ChannelId) -> Option<Arc<Message>> {
+        let messages = &self.windows.get(&parent)?.messages;
+        let index = Window::position(messages, thread.cast()).ok()?;
+        messages
+            .get(index)
+            .filter(|message| message.has_thread())
+            .cloned()
+    }
+
     #[cfg(test)]
     pub(crate) fn held(&self, channel: ChannelId) -> Vec<Arc<Message>> {
         self.windows

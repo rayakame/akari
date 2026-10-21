@@ -38,9 +38,11 @@ struct ChannelSidebar: View {
                             ) {
                                 session.open(channel: channel.id)
                             }
-                            .markReadMenu(enabled: session.canMarkRead(channel: channel.id)) {
-                                session.markRead(channel: channel.id)
-                            }
+                            .threadMenu(
+                                markReadEnabled: session.canMarkRead(channel: channel.id),
+                                markRead: { session.markRead(channel: channel.id) },
+                                membership: session.membershipItem(for: channel.id),
+                                changeMembership: { changeMembership(of: channel.id) })
                         } else {
                             ChannelRow(
                                 channel: channel, selected: channel.id == open, muted: muted,
@@ -55,6 +57,20 @@ struct ChannelSidebar: View {
                     }
                 }
                 .padding(.bottom, 72)
+            }
+        }
+    }
+
+    // A row's menu says "Context Menu" to Discord, as the official client's does.
+    private func changeMembership(of thread: ChannelId) {
+        guard let item = session.membershipItem(for: thread) else {
+            return
+        }
+        Task {
+            if item.joins {
+                await session.join(thread: thread, from: .contextMenu)
+            } else {
+                await session.leave(thread: thread, from: .contextMenu)
             }
         }
     }

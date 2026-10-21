@@ -5,8 +5,16 @@ final class NoticeCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("notice")
 
     private let icon = NSImageView()
+    private(set) var shownIcon: NoticeIcon?
+    private var iconWidth: NSLayoutConstraint?
+    private var iconHeight: NSLayoutConstraint?
     private let text = MessageTextView()
+    // Built for the first line with a box: buttons cost.
+    private var threadBox: ThreadBoxView?
     var onLink: (URL) -> Void = { _ in }
+    var onOpenThread: () -> Void = {}
+    private var textBottom: NSLayoutConstraint?
+    private var textAboveBox: NSLayoutConstraint?
     private static let top: CGFloat = 18
     // 10 less right after a day divider, as a message's (MessageCell).
     private static let dayTop: CGFloat = 8
@@ -14,6 +22,8 @@ final class NoticeCell: NSTableCellView {
     private static let lineTop: CGFloat = 2
     private var textTop: NSLayoutConstraint?
     private static let bottom: CGFloat = 2
+    // Discord's box border sits 9.5 below a line's baseline.
+    private static let boxGap: CGFloat = 3.5
     private static let leading: CGFloat = 72
     private static let trailing: CGFloat = 16
     // Measures as the cell's own text view lays out; string drawing breaks the line differently.
@@ -24,17 +34,24 @@ final class NoticeCell: NSTableCellView {
         identifier = Self.identifier
         text.onLink = { [weak self] url in self?.onLink(url) }
         icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.contentTintColor = Palette.textMuted
-        icon.symbolConfiguration = .init(pointSize: 16, weight: .regular)
+        icon.imageScaling = .scaleProportionallyDown
+        let iconWidth = icon.widthAnchor.constraint(equalToConstant: 16)
+        let iconHeight = icon.heightAnchor.constraint(equalToConstant: 16)
+        self.iconWidth = iconWidth
+        self.iconHeight = iconHeight
         addSubview(icon)
         addSubview(text)
         let textTop = text.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
         self.textTop = textTop
+        let textBottom = text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom)
+        self.textBottom = textBottom
         NSLayoutConstraint.activate([
             textTop,
-            text.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
+            textBottom,
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leading),
             text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailing),
+            iconWidth,
+            iconHeight,
             icon.centerXAnchor.constraint(equalTo: leadingAnchor, constant: 36),
             icon.centerYAnchor.constraint(equalTo: text.topAnchor, constant: 11),
         ])
@@ -47,21 +64,38 @@ final class NoticeCell: NSTableCellView {
     /// The row height for a notice at `width`, as Auto Layout would size the cell.
     static func height(
         _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
-        followsLine: Bool = false, width: CGFloat
+        followsLine: Bool = false, hasBox: Bool = false, width: CGFloat
     ) -> CGFloat {
         sizing.show(line(notice, time: time))
         sizing.setFrameSize(NSSize(width: width - leading - trailing, height: sizing.frame.height))
         return textTop(followsDay: followsDay, followsLine: followsLine)
-            + sizing.intrinsicContentSize.height + bottom
+            + sizing.intrinsicContentSize.height
+            + (hasBox ? ThreadBoxView.height(topInset: boxGap) : 0) + bottom
     }
 
     func configure(
         _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
-        followsLine: Bool = false, fullDate: String
+        followsLine: Bool = false, fullDate: String, reader: UserId? = nil,
+        threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil
     ) {
+        if let threadBox {
+            boxView().configure(threadBox.box, content: threadBox.content, time: threadBox.time)
+        }
+        self.threadBox?.isHidden = threadBox == nil
+        // Off before on: both at once can't be satisfied.
+        let (off, on) = threadBox == nil ? (textAboveBox, textBottom) : (textBottom, textAboveBox)
+        off?.isActive = false
+        on?.isActive = true
+        needsDisplay = true
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
-        icon.image = NSImage(
-            systemSymbolName: Self.symbol(message.kind), accessibilityDescription: nil)
+        let shown = NoticeIcon.of(message, reader: reader)
+        if shown != shownIcon {
+            shownIcon = shown
+            icon.image = shown.image
+            icon.contentTintColor = shown.color
+            iconWidth?.constant = shown.size
+            iconHeight?.constant = shown.size
+        }
         text.show(Self.line(notice, time: time, fullDate: fullDate))
     }
 
@@ -112,21 +146,60 @@ final class NoticeCell: NSTableCellView {
         return text
     }
 
-    static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
-        followsLine ? lineTop : followsDay ? dayTop : top
+    override func draw(_ dirtyRect: NSRect) {
+        guard let threadBox, !threadBox.isHidden else {
+            return
+        }
+        ThreadBoxView.drawConnector(
+            under: icon.frame, to: threadBox.convert(threadBox.boxFrame, to: self),
+            flipped: isFlipped)
     }
 
-    static func symbol(_ kind: MessageType) -> String {
-        switch kind {
-        case .userJoin: "arrow.right"
-        case .channelPinnedMessage: "pin"
-        case .premiumGuildSubscription, .premiumGuildSubscriptionTier1,
-            .premiumGuildSubscriptionTier2, .premiumGuildSubscriptionTier3:
-            "sparkles"
-        case .call: "phone"
-        case .channelNameChange, .channelIconChange: "pencil"
-        case .threadCreated, .threadStarterMessage: "text.bubble"
-        default: "info.circle"
+    @objc private func threadBoxClicked() {
+        onOpenThread()
+    }
+
+    private func boxView() -> ThreadBoxView {
+        if let threadBox {
+            return threadBox
         }
+        let box = ThreadBoxView()
+        box.target = self
+        box.action = #selector(threadBoxClicked)
+        addSubview(box)
+        box.topInset = Self.boxGap
+        textAboveBox = box.topAnchor.constraint(equalTo: text.bottomAnchor)
+        NSLayoutConstraint.activate([
+            box.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom),
+            box.leadingAnchor.constraint(equalTo: text.leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: text.trailingAnchor),
+        ])
+        threadBox = box
+        return box
+    }
+
+    /// The icon's box (its alignment rect: a symbol's frame adds its insets), from the cell's top
+    /// left.
+    var iconFrame: NSRect? {
+        let frame = icon.alignmentRect(forFrame: icon.frame)
+        return isFlipped
+            ? frame
+            : NSRect(
+                x: frame.minX, y: bounds.height - frame.maxY, width: frame.width,
+                height: frame.height)
+    }
+
+    /// Whether the symbol is drawn no larger than the icon's box.
+    var iconFitsItsFrame: Bool {
+        guard let image = icon.image else {
+            return false
+        }
+        let scale = min(1, icon.bounds.width / image.size.width, icon.bounds.height / image.size.height)
+        return image.size.width * scale <= icon.bounds.width + 0.01
+            && image.size.height * scale <= icon.bounds.height + 0.01
+    }
+
+    static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
+        followsLine ? lineTop : followsDay ? dayTop : top
     }
 }

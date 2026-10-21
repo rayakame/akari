@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+use super::channel::Channel;
 use super::double_option;
 use super::guild::GuildMember;
 use super::int_enum::int_enum;
@@ -72,6 +73,9 @@ pub struct Message {
     /// upgraded.
     #[serde(default, deserialize_with = "default_on_error")]
     pub application: Option<MessageApplication>,
+    /// The thread started from this message, with the user's thread member when joined.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub thread: Option<Box<Channel>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

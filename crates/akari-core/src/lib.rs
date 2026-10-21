@@ -32,7 +32,7 @@ pub(crate) fn ms(duration: std::time::Duration) -> f64 {
     (duration.as_secs_f64() * 10_000.0).round() / 10.0
 }
 
-pub use account::{Account, MessageLoad};
+pub use account::{Account, MessageLoad, ThreadLocation};
 pub use client::{ClientError, DiscordClient, Endpoints};
 pub use error::{JsonError, JsonErrorKind, TransportError, TransportErrorKind};
 pub use load_report::{LoadReport, PageOutcome};

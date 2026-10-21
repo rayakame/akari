@@ -122,6 +122,20 @@ struct NoticeWordingTests {
         ])
     }
 
+    // The apps draw a missed call's icon by the same rule.
+    @Test
+    func aCallIsMissedOnlyOnceItEndedWithoutTheReader() {
+        let reader = me.id
+        let missed = message(.call, call: ended(after: 30, participants: [ray]))
+        let answered = message(
+            .call, call: MessageCall(participants: [ray.id, reader], endedTimestamp: Date()))
+        let running = message(.call, call: MessageCall(participants: [ray.id], endedTimestamp: nil))
+
+        #expect(missed.isMissedCall(by: reader))
+        #expect(!answered.isMissedCall(by: reader))
+        #expect(!running.isMissedCall(by: reader))
+    }
+
     // Akari can't join calls: "Join the call" is strong text without a link.
     @Test
     func aRunningCallOffersToJoin() {

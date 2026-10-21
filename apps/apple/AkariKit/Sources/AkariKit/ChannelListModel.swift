@@ -152,7 +152,10 @@ public final class ChannelListModel {
             muted = Set(store.mutedChannels(ids: rowIds))
         } else if changed != nil {
             // A thread's own mute comes with its channel update.
-            let threads = unread.filter { held[$0]?.isThread == true }
+            var threads = unread.filter { held[$0]?.isThread == true }
+            if let kept = openThread?.id, changed?.contains(kept) == true, !threads.contains(kept) {
+                threads.append(kept)
+            }
             if !threads.isEmpty {
                 muted.subtract(threads)
                 muted.formUnion(store.mutedChannels(ids: threads))

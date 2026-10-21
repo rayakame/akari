@@ -376,15 +376,15 @@ impl Store {
         let read_states = entities.read_states.channels().clone();
         self.read(|inner| {
             inner.state.keep_memberships(&mut entities);
-            inner.state.keep_fetched(&mut entities);
+            inner.state.keep_known_threads(&mut entities);
         });
         let mut derived = Derived::build(&entities, self.now_millis());
         #[cfg(test)]
         Self::park_in(&self.shared.diff_park);
         let diff = self.read(|inner| {
             inner.state.keep_folders(&mut entities);
-            // Fetched since the first pass; the diff mustn't report them removed.
-            for thread in inner.state.keep_fetched(&mut entities) {
+            // Known since the first pass; the diff mustn't report them removed.
+            for thread in inner.state.keep_known_threads(&mut entities) {
                 derived.add_thread(&thread);
             }
             inner.state.ready_diff(&entities, &derived)
@@ -501,6 +501,24 @@ impl Store {
         self.write("thread", |inner, events| {
             inner.state.learn_thread(thread, events)
         })
+    }
+
+    // Discord refuses joining or leaving an archived thread.
+    pub(crate) fn can_change_membership(&self, thread: ChannelId) -> bool {
+        self.read(|inner| {
+            inner
+                .state
+                .channel(thread)
+                .and_then(|channel| channel.thread.as_deref().map(|info| !info.archived))
+                .unwrap_or(false)
+        })
+    }
+
+    // `Some(joined_at)` joins, `None` leaves; a membership the gateway already brought stays.
+    pub(crate) fn set_own_membership(&self, thread: ChannelId, joined_at: Option<Timestamp>) {
+        self.write("thread member", |inner, events| {
+            inner.state.set_own_membership(thread, joined_at, events);
+        });
     }
 
     pub(crate) fn mark_thread_unavailable(&self, parent: ChannelId, thread: ChannelId) {
@@ -945,7 +963,8 @@ impl Store {
         })
     }
 
-    /// The threads the user has joined in a guild.
+    /// The threads the store has in a guild: the joined ones, and those the user hasn't joined
+    /// that messages, THREAD_LIST_SYNC or a fetch brought.
     pub fn threads(&self, guild: GuildId) -> Vec<Arc<Channel>> {
         self.read(|inner| inner.state.threads(guild))
     }
@@ -1003,6 +1022,13 @@ impl Store {
 
     pub fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.read(|inner| inner.state.message(channel, id))
+    }
+
+    /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC, live messages and
+    /// the thread's newest page, kept for the session only; `None` while none is known. A change comes as `MessageUpdated`
+    /// for the rows showing the box.
+    pub fn latest_message(&self, thread: ChannelId) -> Option<Arc<Message>> {
+        self.read(|inner| inner.state.latest_message(thread))
     }
 
     #[cfg(test)]

@@ -129,7 +129,22 @@ a German localization of Akari, a milestone of its own.
 Messages Discord writes itself (someone joined, a message was pinned, a boost, a call, a new
 thread, a renamed channel, and so on) show as one line:
 
-- a muted icon in the avatar column;
+- an icon in the avatar column, centered on the first line, whose shape, color and box size
+  follow the kind (Discord's system-message renderer, read 2026-10-21; Chris's screenshots
+  showed the pin and the poll): a green arrow right for joins, additions, follows,
+  subscriptions, purchases and accepted join requests, a red arrow left for removals and
+  refused or withdrawn requests (16); a green handset for a call, grey and mirrored for a missed
+  one (16); a pencil for renames and icon changes (16); a filled pushpin leaning right for pins
+  (18); a pink gem for boosts (16); a red X, a green check or an amber warning for Discovery
+  (16); the thread symbol for threads (18); stage lines with a person and broadcast arcs, green
+  for a start, muted otherwise, a microphone or a raised hand (24); a ticket for an app upgrade
+  (16); left-aligned bars for a poll result (16); a trash can, a clock with a warning, a person
+  with a minus, a hammer or a check for reports (20); a green speaker for a voice session (24);
+  a green person with a check for an accepted friend request (18). Unless colored, icons are in
+  `channelDefault`; a poll's in `interactiveText`, stage lines' in `textMuted`. *Akari: SF
+  Symbols fitted into Discord's box sizes; threads keep Akari's thread symbol and boosts a
+  plain hexagon (Discord's are its own drawings); AutoMod alerts, which Discord draws as a
+  message from "AutoMod", keep the info symbol until that block comes;*
 - a sentence naming who did what, in `chatTextMuted` (#818289), its actor in `textStrong`
   (#FBFBFB) and medium (observed 2026-10-20 on the thread and pin lines; Akari draws every
   kind's actor so);
@@ -320,6 +335,50 @@ official web client on 2026-10-17 (German and English UI) and from the user's sc
   A starter whose fetch failed, or a cached one whose page failed, shows the "couldn't load" line
   until a later page of the thread fetches it again.
 
+### The thread box
+
+A message a thread started from has a box under it, and so does the "started a thread" line of
+a thread started without a message (observed 2026-10-17, Q21, Q38; the rules and measures from
+Discord's web client, read 2026-10-21, and the user's screenshots of 2026-10-19). A thread
+started from an older message has its box under that message only; its line has none. The box
+shows once Akari has the thread: from the message itself (its page, MESSAGE_CREATE or the
+MESSAGE_UPDATE that starts it), THREAD_LIST_SYNC or THREAD_CREATE, joined or not, archived or
+not. *Akari keeps the thread of a cached message's box in its cache, so a relaunch shows the
+box at once.*
+
+- **First line:** the thread's name, 14 semibold `textStrong`, then 8 and the count in the link
+  color: "1 Message ›", "16 Messages ›", "See Thread ›" at none, "50+ Messages ›" for a thread
+  from before 2022-07-01 with 50 or more (Discord stopped counting there), "100k+ Messages ›".
+  The count starts from Discord's `message_count` and moves with every message and delete in
+  the thread, live.
+- **Second line**, in this order:
+  - an archived (closed) thread: "There are no recent messages in this thread.", no time;
+  - a thread with no messages: "There are no messages in this thread yet.", no time;
+  - no newest message known: "There are no recent messages in this thread." and the time;
+  - else the newest message: a 16 avatar, 8, the author's name (medium, `textStrong` at 64%),
+    4, the text as inline markdown on one line, cut with an ellipsis, links not clickable,
+    hidden spoilers covered; an empty one says "Click to see attachment", "Click to see
+    sticker", "Click to see command" or "Click to see message" (components), a pin line
+    "Message pinned.", in italics; then 8 and the time.
+  - The time is the thread's last message's, else its creation's: "1m ago" under two minutes,
+    "{n}m ago", "{n}h ago", "{n}d ago" below 30 days, ">30d ago" below 360 days, then the long
+    date ("January 20, 2026"), in `textMuted`. *Akari moves it on with the list's timer;
+    Discord redraws it only with the box.*
+- **Measures:** 1 border (#323237 dark), fill (#242429 dark), radius 4, 8 padding inside the
+  border, the two 18-tall lines 2 apart: 56 tall. As wide as its content, at most 480. Its
+  left edge on the text column (72). Its top border 15.5 below the message's last baseline,
+  9.5 below a line's (measured at 2x on the official client, 2026-10-21); its bottom is the
+  message's.
+- **The connector:** from 5 under the avatar's (or the line's icon's) center, 2 wide in the
+  thread spine's color, down and into the box's middle with an 8 outer corner radius, ending 3
+  before the box.
+- **Clicks:** the whole box is one button with the pointing hand; only the count underlines
+  while hovered, the background doesn't change; the author's avatar and name do nothing.
+  Clicking opens the thread. *Akari: full width; the official client opens it beside its
+  parent, which comes with the split view.*
+- *Not built yet:* the content's trailing icons, poll questions as content, voice messages'
+  placeholder, blocked and ignored authors, server nicknames and role colors for the author.
+
 ## Jump to present
 
 - While the list is detached, a bar sits at the bottom of the list, attached above the
@@ -478,9 +537,9 @@ window isn't enough. Akari tells the core which channel the user reads
   nothing until the list is back at the bottom, but it counts: once the list is there, reading
   starts without another click.
 
-A list the session opens on its own (the open channel deleted or hidden, its server gone)
-isn't read until the user clicks. After the Mac sleeps, reading resumes with the first click
-or key press after it wakes. Clicks and key presses count only in the session's window; when
+A list the session opens on its own (the open channel or an open thread's parent deleted or
+hidden, its server gone) isn't read until the user clicks. After the Mac sleeps, reading
+resumes with the first click or key press after it wakes. Clicks and key presses count only in the session's window; when
 it closes, Akari stops watching for them, and watches again once it is back, key and visible.
 Akari tells the core only when the channel changes or the connection dropped, and what the
 list reports while it scrolls reaches the core on the next turn of the main loop, once, with

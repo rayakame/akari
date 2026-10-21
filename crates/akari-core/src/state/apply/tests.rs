@@ -1098,4 +1098,6 @@ fn a_window_opened_before_the_first_ready_survives_it() {
 mod acks;
 mod badges;
 mod read_states;
+mod thread_boxes;
+mod thread_sync;
 mod threads;

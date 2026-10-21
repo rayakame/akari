@@ -281,6 +281,14 @@ pub struct RoleSubscription {
 impl Message {
     /// Discord's `IS_COMPONENTS_V2` message flag.
     pub const IS_COMPONENTS_V2: u64 = 1 << 15;
+    /// Discord's `HAS_THREAD` message flag.
+    pub const HAS_THREAD: u64 = 1 << 5;
+
+    /// A thread was started from this message, or it is the line about a thread started without
+    /// one; either way the thread has this message's ID.
+    pub fn has_thread(&self) -> bool {
+        self.flags & Self::HAS_THREAD != 0
+    }
 
     /// Laid out with Components V2: the message has no content and is made of its components,
     /// which Akari doesn't read yet.

@@ -19,6 +19,7 @@ const CHANNEL: &str = "channels/{}";
 const MESSAGES: &str = "channels/{}/messages";
 const ACK: &str = "channels/{}/messages/{}/ack";
 const ACK_BULK: &str = "read-states/ack-bulk";
+const THREAD_MEMBER: &str = "channels/{}/thread-members/@me";
 const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
 const RATE_LIMIT_RETRIES: u32 = 3;
@@ -332,6 +333,31 @@ impl AccountRest {
             .await
             .map_err(RequestError::from)?;
         serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
+    }
+
+    // Joins or leaves; `location` is already a query value. Answered with 204.
+    pub(crate) async fn thread_member(
+        &self,
+        thread: ChannelId,
+        join: bool,
+        location: &str,
+    ) -> Result<(), RequestError> {
+        let path = format!(
+            "channels/{}/thread-members/@me?location={location}",
+            thread.get()
+        );
+        let (method, verb) = if join {
+            (Method::Post, HttpMethod::POST)
+        } else {
+            (Method::Delete, HttpMethod::DELETE)
+        };
+        let route = RouteKey::new(method, THREAD_MEMBER, thread.get());
+        self.send(route, Waiting::Allowed, || {
+            self.request(verb.clone(), &path)
+        })
+        .await
+        .map_err(RequestError::from)?;
+        Ok(())
     }
 
     pub(crate) async fn ack(

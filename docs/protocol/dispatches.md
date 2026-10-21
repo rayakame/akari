@@ -113,8 +113,14 @@ captures READY.
 
 User accounts "are only synced threads they have been added to"
 ([gateway guild](https://docs.discord.food/gateway/gateway-events#gateway-guild-object)).
-The store keeps the joined threads from READY, whatever THREAD_CREATE brings, and the threads
-the account fetched because a line named them (below).
+The store keeps the joined threads from READY, whatever THREAD_CREATE brings, the active
+threads THREAD_LIST_SYNC brings, the threads messages carry (a message's `thread`, on history
+pages, MESSAGE_CREATE and the MESSAGE_UPDATE that starts one), and the threads the account
+fetched because a line named them (below). Threads the user hasn't joined are never listed or
+counted, and cached only for a cached message's box; a READY or GUILD_CREATE, which lists only
+joined ones, keeps them while their guild and parent stay. A thread a page brings before the
+store knows its guild (the last channel loads while the gateway connects) waits for the guild:
+a cache restore, READY or GUILD_CREATE places it.
 
 **Membership.** `ThreadInfo::member` is the user's membership: its mute (`muted`,
 `mute_config.end_time`) and its notification level from the member's `flags`
@@ -177,17 +183,25 @@ official client fetches such a thread this way isn't observed. READY lists only 
 so a later READY keeps a thread fetched this session while its guild and parent are there, also
 one fetched while the READY was prepared.
 
-**Joining and leaving** (observed 2026-10-17; not sent by Akari yet):
-`POST /channels/{thread}/thread-members/@me?location=…` joins (the docs say PUT; the official
-client sends POST) and `DELETE` on the same path leaves, without a body, answered 204.
-`location` names where the user chose it: `Sidebar Overflow` (the "…" of a thread beside its
-parent), `Toolbar Overflow` (the "…" of a thread opened full width), `Context Menu` (a thread
-row's menu, leave only).
+**Joining and leaving** (observed 2026-10-17): `Account::join_thread` sends
+`POST /channels/{thread}/thread-members/@me?location=…` (the docs say PUT; the official client
+sends POST) and `Account::leave_thread` `DELETE` on the same path, without a body, answered
+204, through the rate limiter. `location` names where the user chose it: `Sidebar Overflow`
+(the "…" of a thread beside its parent), `Toolbar Overflow` (the "…" of a thread opened full
+width), `Context Menu` (a thread's menu). The official client uses `Notifications Bell`,
+`Forum Toolbar`, `Join Voice`, `Change Notification Settings` and `Mark Unread` too (read in its
+code 2026-10-21), for parts Akari doesn't have. An archived thread, or one the store doesn't
+have, is refused before asking. On 204 the store has the thread joined (by the server's clock,
+so it goes to the top) or left, unless the gateway said so first; the members event that
+follows changes nothing visible. The official client waits for that event, except for forum
+posts.
 
 The full thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
-`threads: true`. Akari's guild subscriptions ask for it. The store reads only its `members`, the
-user's own: they refresh the membership, and so the join time, of threads the user already
-joined, and join nothing; its threads aren't kept yet. Losing access to a channel doesn't send THREAD_DELETE for its
+`threads: true`. Akari's guild subscriptions ask for it. The store reads it as the official
+client does (its code, read 2026-10-21): the threads are added or updated as THREAD_CREATE
+would, those it doesn't list stay (no scoped replace), its `members` are the user's own
+memberships and join their threads, and `most_recent_messages` (undocumented; discord.py-self
+reads it too) gives each thread its newest message. Losing access to a channel doesn't send THREAD_DELETE for its
 threads ([threads](https://docs.discord.food/topics/threads)); they stay in the store, no longer
 listed, until the next session.
 
@@ -351,4 +365,6 @@ doesn't bring an event for every active channel.
   without a window: the channel, the message ID, and whether it mentions the current user
   (directly, through a role, or `@everyone`). Each channel's `last_message_id` is already
   tracked; only that event is missing.
-- **THREAD_LIST_SYNC**, which guild subscriptions bring, for the full thread list.
+- **THREAD_LIST_SYNC for forums:** the forum view needs the active set per forum and its
+  `first_messages` from thread search; READY threads' `most_recent_message` isn't read (the
+  sync after the subscription brings them).

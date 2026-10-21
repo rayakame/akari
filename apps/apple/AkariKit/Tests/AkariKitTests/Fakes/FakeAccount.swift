@@ -247,6 +247,26 @@ final class FakeAccount: Account, @unchecked Sendable {
         return true
     }
 
+    // Thrown by the next joins and leaves; without one the store has the thread joined or left.
+    let membershipError = Locked<RequestError?>(nil)
+
+    override func joinThread(threadId: ChannelId, location: ThreadLocation) async throws {
+        log.append(.joinThread(threadId, location))
+        try changeMembership(threadId, joined: true)
+    }
+
+    override func leaveThread(threadId: ChannelId, location: ThreadLocation) async throws {
+        log.append(.leaveThread(threadId, location))
+        try changeMembership(threadId, joined: false)
+    }
+
+    private func changeMembership(_ thread: ChannelId, joined: Bool) throws {
+        if let error = membershipError.current {
+            throw error
+        }
+        fakeStore.update { $0.channels[thread]?.thread?.joined = joined }
+    }
+
     // While set, each cache flush waits for one value here.
     let holdFlushes = Locked(false)
     let flushes = AsyncQueue<Void>()

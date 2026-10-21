@@ -10,7 +10,7 @@ use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
     MemberLists, PresenceStatus, SendError,
 };
-use crate::model::{ChannelId, GuildId, MessageId, MessageType, UserId};
+use crate::model::{ChannelId, GuildId, MessageId, MessageType, Timestamp, UserId};
 use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
 use crate::state::{
     Ack, ConnectionState, Cursor, Learned, LoadKind, LoadTicket, Message, StarterFetch, Store,
@@ -55,6 +55,28 @@ pub enum MessageLoad {
     /// Replaces the window with the messages around `id`, unless a later-placed `Latest` or
     /// `Around` load, or [`Account::supersede_around_loads`], comes first.
     Around { id: MessageId, limit: u8 },
+}
+
+/// Where the user chose to join or leave a thread, which Discord's own client tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ThreadLocation {
+    /// The "…" menu of a thread beside its parent.
+    SidebarOverflow,
+    /// The "…" menu of a thread open full width.
+    ToolbarOverflow,
+    /// A thread row's context menu.
+    ContextMenu,
+}
+
+impl ThreadLocation {
+    fn query(self) -> &'static str {
+        match self {
+            Self::SidebarOverflow => "Sidebar%20Overflow",
+            Self::ToolbarOverflow => "Toolbar%20Overflow",
+            Self::ContextMenu => "Context%20Menu",
+        }
+    }
 }
 
 fn kind_name(kind: LoadKind) -> &'static str {
@@ -491,6 +513,39 @@ impl Shared {
         if let Some(thread) = starter {
             self.fetch_starter(thread);
         }
+    }
+
+    async fn thread_member(
+        &self,
+        thread: ChannelId,
+        join: bool,
+        location: ThreadLocation,
+    ) -> Result<(), RequestError> {
+        if !self.store.can_change_membership(thread) {
+            return Err(RequestError::InvalidRequest);
+        }
+        let changed = self
+            .rest
+            .thread_member(thread, join, location.query())
+            .await;
+        tracing::debug!(
+            thread_id = thread.get(),
+            join,
+            outcome = changed
+                .as_ref()
+                .map_or_else(RequestError::kind, |()| "done"),
+            "thread membership"
+        );
+        if let Err(err) = &changed {
+            self.failed(err);
+        }
+        changed?;
+        let now = self
+            .rest
+            .server_now_millis()
+            .map_or_else(|| self.store.now(), Timestamp::from_unix_millis);
+        self.store.set_own_membership(thread, join.then_some(now));
+        Ok(())
     }
 
     fn view(self: &Arc<Self>, channel: ChannelId) {
@@ -1002,6 +1057,26 @@ impl Account {
             "thread fetched"
         );
         learned.map(|learned| matches!(learned, Learned::Kept))
+    }
+
+    /// Joins the thread. The store has it joined once Discord says yes, without waiting for the
+    /// gateway; a failure changes nothing. An archived thread, or one the store doesn't have, is
+    /// refused with `InvalidRequest` before asking.
+    pub async fn join_thread(
+        &self,
+        thread: ChannelId,
+        location: ThreadLocation,
+    ) -> Result<(), RequestError> {
+        self.shared.thread_member(thread, true, location).await
+    }
+
+    /// Leaves the thread, as [`Account::join_thread`] joins it.
+    pub async fn leave_thread(
+        &self,
+        thread: ChannelId,
+        location: ThreadLocation,
+    ) -> Result<(), RequestError> {
+        self.shared.thread_member(thread, false, location).await
     }
 
     /// The next place among loads and supersedes, for [`Account::load_messages_placed`]. A host

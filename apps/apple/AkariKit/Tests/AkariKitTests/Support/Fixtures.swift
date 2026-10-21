@@ -31,7 +31,7 @@ func thread(_ raw: UInt64, in parent: UInt64, guild: UInt64 = 1, name: String? =
     var thread = channel(raw, guild: guild, kind: .publicThread, name: name, parent: parent)
     thread.thread = ThreadInfo(
         joined: true, archived: false, locked: false, private: false, messageCount: nil,
-        ownerId: nil)
+        ownerId: nil, lastMessageId: nil, createdAt: nil)
     return thread
 }
 
@@ -66,7 +66,7 @@ func message(
     _ raw: UInt64, in channelRaw: UInt64 = 10, by author: User = user(1),
     content: String? = nil, delivery: Delivery = .sent, kind: MessageType = .default,
     reference: MessageReference? = nil, mentions: [User] = [], call: MessageCall? = nil,
-    fields: [EmbedField] = []
+    fields: [EmbedField] = [], hasThread: Bool = false
 ) -> Message {
     let content = content ?? "message \(raw)"
     return Message(
@@ -76,7 +76,7 @@ func message(
         editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
         embedCount: 0, stickerNames: [], componentsV2: false, delivery: delivery,
         formatted: formattedText(content: content), mentionsMe: false, reference: reference,
-        hasThread: false, mentions: mentions, call: call,
+        hasThread: hasThread, mentions: mentions, call: call,
         roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
         embedFields: fields
     )

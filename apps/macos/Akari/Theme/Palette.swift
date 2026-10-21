@@ -20,6 +20,16 @@ enum Palette {
     static let channelDefault = token("channelDefault", dark: "#81828a", light: "#666770")
     // The dark value is Discord's; the light one keeps its 2.06:1 contrast on the light sidebar.
     static let threadSpine = token("threadSpine", dark: "#474850", light: "#aaabb3")
+    // The box under a message with a thread, measured from the user's screenshots (amendment 175).
+    static let threadBoxFill = token("threadBoxFill", dark: "#242429", light: "#ffffff")
+    static let threadBoxBorder = token("threadBoxBorder", dark: "#323237", light: "#e2e2e5")
+    // System lines' icons, from Discord's client: its arrow and call assets carry their colors.
+    static let noticeIn = token("noticeIn", dark: "#3ba55c", light: "#3ba55c")
+    static let noticeOut = token("noticeOut", dark: "#ed4245", light: "#ed4245")
+    static let missedCall = token("missedCall", dark: "#99aab5", light: "#99aab5")
+    static let boost = token("boost", dark: "#ff73fa", light: "#ff73fa")
+    static let warning = token("warning", dark: "#ea9800", light: "#ea9800")
+    static let statusPositive = token("statusPositive", dark: "#3d9e60", light: "#269153")
     static let interactiveText = token("interactiveText", dark: "#abacb2", light: "#595a63")
     static let interactiveTextActive = token(
         "interactiveTextActive", dark: "#fbfbfb", light: "#28282d")
