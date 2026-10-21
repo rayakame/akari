@@ -26,6 +26,7 @@ final class FakeStore: Store, @unchecked Sendable {
         var readStates: [ChannelId: ReadState] = [:]
         var unreadPrivateChannels: [ChannelId] = []
         var starters: [ChannelId: StarterMessage] = [:]
+        var latestMessages: [ChannelId: Message] = [:]
         var unavailableThreads: Set<ChannelId> = []
 
         mutating func add(_ guilds: Guild...) {
@@ -160,6 +161,10 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func threadUnavailable(threadId: ChannelId) -> Bool {
         read(.threadUnavailable(threadId)) { $0.unavailableThreads.contains(threadId) }
+    }
+
+    override func latestMessage(threadId: ChannelId) -> Message? {
+        read(.latestMessage(threadId)) { $0.latestMessages[threadId] }
     }
 
     override func starterMessage(threadId: ChannelId) -> StarterMessage? {

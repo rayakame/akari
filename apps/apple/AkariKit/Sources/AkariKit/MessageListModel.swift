@@ -61,16 +61,20 @@ public final class MessageListModel {
         /// The header's name for `shown`'s author, by the rule system lines name people with:
         /// the global name, else the username.
         public let authorName: String
+        /// The box of the thread started from this message, or that this line is about.
+        public let threadBox: ThreadBox?
 
         public init(
             id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true,
-            noticeContext: Message.NoticeContext = .init(), authorName: String? = nil
+            noticeContext: Message.NoticeContext = .init(), authorName: String? = nil,
+            threadBox: ThreadBox? = nil
         ) {
             self.id = id
             self.message = message
             self.starter = starter
             self.threadLinked = threadLinked
             self.noticeContext = noticeContext
+            self.threadBox = threadBox
             let shown = if case .loaded(let original)? = starter { original } else { message }
             self.authorName = authorName ?? shown.author.displayName
         }
@@ -701,13 +705,15 @@ public final class MessageListModel {
                 store.channel(id: $0) != nil || !store.threadUnavailable(threadId: $0)
             } ?? true,
             noticeContext: noticeContext(for: shown),
-            authorName: shown.fromWebhook ? shown.author.displayName : name(of: shown.author))
+            authorName: shown.fromWebhook ? shown.author.displayName : name(of: shown.author),
+            threadBox: ThreadBox.of(message, in: store, name: name(of:)))
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
         Row(
             id: id, message: message, starter: held.starter, threadLinked: held.threadLinked,
-            noticeContext: held.noticeContext, authorName: held.authorName)
+            noticeContext: held.noticeContext, authorName: held.authorName,
+            threadBox: held.threadBox)
     }
 
     // One rule for headers and system lines; server nicknames come with the member milestone.
