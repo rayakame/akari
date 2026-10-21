@@ -345,6 +345,15 @@ public final class MessageListModel {
         messageJump = MessageJump(messageId: messageId, number: messageJumps)
     }
 
+    // What Escape would do here: load the present, or mark something read.
+    var escapeHasWork: Bool {
+        if !atPresent || store.window(channelId: channelId)?.latest == false {
+            return true
+        }
+        let badge = store.channelBadges(ids: [channelId]).first?.badge
+        return badge.map { $0.unread || $0.mentions > 0 } ?? false
+    }
+
     // A jump landing after the user left would reopen the channel in history, without its scroll.
     func retire() {
         retired = true

@@ -65,6 +65,9 @@ public final class SessionModel {
     }
     /// The split thread's channel, for its header and menu.
     public private(set) var splitChannel: Channel?
+    /// Set when the user opened the split, so its composer takes the focus; the view calls
+    /// `splitFocused()` once it has.
+    public private(set) var focusSplit = false
     /// The last join or leave that failed, until `dismissMembershipError()`.
     public private(set) var membershipError: MembershipError?
     /// The channels the user is reading: the open channel and the split thread, each while its
@@ -104,6 +107,7 @@ public final class SessionModel {
     @ObservationIgnored private var askedSplits: Set<ChannelId> = []
     @ObservationIgnored private var sawReady = false
     @ObservationIgnored private(set) var splitFetch: Task<Void, Never>?
+    @ObservationIgnored private(set) var escaping: Task<Void, Never>?
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
     @ObservationIgnored private var appActive = false
@@ -216,9 +220,17 @@ public final class SessionModel {
         enter(place)
     }
 
-    /// Opening a channel engages the user, also the one already open.
+    /// A row of the channel or DM list. Opening a channel engages the user, also the one
+    /// already open. As in the official client, the open channel's row closes its split, and a
+    /// thread's row closes its channel's split, which the channel forgets.
     public func open(channel id: ChannelId) {
         engage()
+        if id == messages?.channelId {
+            forgetSplit(of: id)
+        }
+        if let thread = store.channel(id: id), thread.isThread, let parent = thread.parentId {
+            forgetSplit(of: parent)
+        }
         show(channel: id)
     }
 
@@ -236,7 +248,8 @@ public final class SessionModel {
                     open(place)
                 }
             }
-            open(channel: channel)
+            engage()
+            show(channel: channel)
         }
     }
 
@@ -265,29 +278,41 @@ public final class SessionModel {
         splits[parent] = id
         rememberSplits()
         syncSplit()
+        focusSplit = split != nil
         updateReading()
     }
 
     /// The split view's X: closes it, and the channel forgets it.
     public func closeSplit() {
-        guard let open = messages?.channelId, splits[open] != nil else {
+        guard let open = messages?.channelId else {
             return
         }
-        splits[open] = nil
-        rememberSplits()
-        syncSplit()
+        forgetSplit(of: open)
         updateReading()
     }
 
-    /// The split view's "Open in Full View": the thread opens full width, and its channel
-    /// forgets the split.
+    /// The split view's "Open in Full View" and its title: the thread opens full width. The
+    /// channel keeps its split, as in the official client, which only navigates there.
     public func openInFullView() {
-        guard let open = messages?.channelId, let thread = split?.channelId else {
+        guard let thread = split?.channelId else {
             return
         }
-        splits[open] = nil
-        rememberSplits()
         go(to: thread)
+    }
+
+    /// The split's composer has the focus the user asked for with `openBeside` or
+    /// `openInSplitView`.
+    public func splitFocused() {
+        focusSplit = false
+    }
+
+    private func forgetSplit(of channel: ChannelId) {
+        guard splits[channel] != nil else {
+            return
+        }
+        splits[channel] = nil
+        rememberSplits()
+        syncSplit()
     }
 
     /// The full view's "Open in Split View" for a thread: its channel opens with the thread
@@ -301,18 +326,27 @@ public final class SessionModel {
         splits[parent] = open
         rememberSplits()
         go(to: parent)
+        focusSplit = split != nil
     }
 
     /// Escape in either list: marks the open channel and the split thread read, ends both new
-    /// messages lines, and loads each present a list doesn't show. Scrolling both to the bottom
-    /// is the view's part.
-    public func escape() async {
+    /// messages lines, and loads each present a list doesn't show; scrolling both to the bottom
+    /// is the view's part. With nothing to mark or load in either, it closes the split instead,
+    /// as the official client does, and returns false: nothing to scroll.
+    @discardableResult public func escape() -> Bool {
         let lists = [messages, split].compactMap { $0 }
-        await withDiscardingTaskGroup { group in
-            for list in lists {
-                group.addTask { await list.escape() }
+        if split != nil, !lists.contains(where: \.escapeHasWork) {
+            closeSplit()
+            return false
+        }
+        escaping = Task {
+            await withDiscardingTaskGroup { group in
+                for list in lists {
+                    group.addTask { await list.escape() }
+                }
             }
         }
+        return true
     }
 
     /// What a thread of the open server, or the split thread, offers in its menus; `nil` for
@@ -659,6 +693,7 @@ public final class SessionModel {
     private func showSplit(_ list: MessageListModel?, channel: Channel? = nil) {
         if split !== list {
             split = list
+            focusSplit = false
         }
         if splitChannel != channel {
             splitChannel = channel

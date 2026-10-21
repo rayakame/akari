@@ -195,12 +195,45 @@ final class SplitViewTests {
             state.windows[id(31)] = window([4], latest: false)
         }
 
-        await session.escape()
+        #expect(session.escape())
+        await finished(session.escaping)
 
         #expect(account.markedRead.current.sorted() == [id(11), id(31)])
         #expect(store.log.calls.contains(.load(id(31), .latest(limit: 50))))
         #expect(session.messages?.newMessagesLine == nil)
         #expect(session.split?.newMessagesLine == nil)
+        session.close()
+    }
+
+    // Q37 and the official client's key handler: with nothing to mark or load in either list,
+    // Escape closes the split.
+    @Test
+    func escapeWithNothingLeftToDoClosesTheSplit() async {
+        let session = inChannel11()
+        await session.openBeside(thread: id(31), from: id(11))
+
+        #expect(!session.escape())
+
+        #expect(session.split == nil)
+        #expect(memory.splits(of: id(1)).isEmpty)
+        #expect(account.markedRead.current.isEmpty)
+        #expect(session.escape(), "without a split Escape always does its part")
+        session.close()
+    }
+
+    @Test(arguments: [11, 31])
+    func escapeWithAnUnreadListKeepsTheSplit(unread: UInt64) async {
+        let session = inChannel11()
+        await session.openBeside(thread: id(31), from: id(11))
+        store.update { state in
+            state.channelBadges[id(unread)] = badge(unread: true)
+        }
+
+        #expect(session.escape())
+        await finished(session.escaping)
+
+        #expect(session.split?.channelId == id(31))
+        #expect(account.markedRead.current.sorted() == [id(11), id(31)])
         session.close()
     }
 
@@ -231,8 +264,10 @@ final class SplitViewTests {
         session.close()
     }
 
+    // Discord's "Open in Full View" (and the split's title) only navigate: the channel keeps
+    // its split.
     @Test
-    func openInFullViewMovesTheThread() async {
+    func openInFullViewMovesTheThreadAndTheChannelKeepsIt() async {
         let session = inChannel11()
         await session.openBeside(thread: id(31), from: id(11))
 
@@ -242,14 +277,88 @@ final class SplitViewTests {
         #expect(session.split == nil)
         #expect(shown(session) == [id(11), id(31), id(12)], "the full view keeps its row")
         session.open(channel: id(11))
-        #expect(session.split == nil, "full view forgets the split")
+        #expect(session.split?.channelId == id(31))
+        session.close()
+    }
+
+    // Opening a thread full width from its row closes and forgets its channel's split.
+    @Test(arguments: [31, 32])
+    func aThreadsRowForgetsItsChannelsSplit(row: UInt64) async {
+        let session = inChannel11(joined: true, listed: true)
+        await session.openBeside(thread: id(31), from: id(11))
+
+        session.open(channel: id(row))
+
+        #expect(session.messages?.channelId == id(row))
+        #expect(session.split == nil)
+        #expect(memory.splits(of: id(1)).isEmpty)
+        session.open(channel: id(11))
+        #expect(session.split == nil)
+        session.close()
+    }
+
+    // A link or mention only navigates, as "Open in Full View" does.
+    @Test
+    func goingToTheSplitThreadKeepsTheSplit() async {
+        let session = inChannel11()
+        await session.openBeside(thread: id(31), from: id(11))
+
+        session.go(to: id(31))
+        session.open(channel: id(11))
+
+        #expect(session.split?.channelId == id(31))
+        session.close()
+    }
+
+    // The channel's plain route closes the split in the official client.
+    @Test
+    func theOpenChannelsRowClosesItsSplit() async {
+        let session = inChannel11()
+        await session.openBeside(thread: id(31), from: id(11))
+
+        session.open(channel: id(11))
+
+        #expect(session.messages?.channelId == id(11))
+        #expect(session.split == nil)
+        #expect(memory.splits(of: id(1)).isEmpty)
+        session.close()
+    }
+
+    @Test
+    func openingBesideAsksForTheSplitsComposer() async {
+        let session = inChannel11()
+        #expect(!session.focusSplit)
+
+        await session.openBeside(thread: id(31), from: id(11))
+        #expect(session.focusSplit)
+        session.splitFocused()
+        #expect(!session.focusSplit)
+        await session.openBeside(thread: id(31), from: id(11))
+        #expect(session.focusSplit, "the open split's own box focuses it too")
+        session.splitFocused()
+        session.open(channel: id(12))
+        session.go(to: id(11))
+        #expect(session.split?.channelId == id(31))
+        #expect(!session.focusSplit, "a split that comes back with its channel doesn't")
+        session.close()
+    }
+
+    @Test
+    func openInSplitViewAsksForTheSplitsComposer() {
+        let session = inChannel11(joined: true, listed: true)
+        session.go(to: id(31))
+
+        session.openInSplitView()
+
+        #expect(session.split?.channelId == id(31))
+        #expect(session.focusSplit)
         session.close()
     }
 
     @Test
     func openInSplitViewOpensTheParentWithTheThread() {
         let session = inChannel11(joined: true, listed: true)
-        session.open(channel: id(31))
+        session.go(to: id(31))
 
         session.openInSplitView()
 
