@@ -1,8 +1,7 @@
 import AkariKit
 import SwiftUI
 
-/// A thread's "…" in the full view's header or the split view's: the items Akari has, in the
-/// official order (D119), and where Discord is told the user chose them (D114).
+// The items in the official order (D119), and the location Discord is told (D114).
 struct ThreadMenu: Equatable {
     enum Item: Equatable {
         case membership(SessionModel.MembershipItem)
@@ -28,8 +27,10 @@ struct ThreadMenu: Equatable {
     let sections: [[Item]]
     let location: ThreadLocation
 
-    static func fullView(membership: SessionModel.MembershipItem) -> Self {
-        Self(sections: [[.membership(membership)], [.openInSplitView]], location: .toolbarOverflow)
+    static func fullView(membership: SessionModel.MembershipItem, splittable: Bool) -> Self {
+        Self(
+            sections: [[.membership(membership)]] + (splittable ? [[.openInSplitView]] : []),
+            location: .toolbarOverflow)
     }
 
     static func splitView(membership: SessionModel.MembershipItem) -> Self {
@@ -37,7 +38,6 @@ struct ThreadMenu: Equatable {
     }
 }
 
-/// The "…" button that opens a `ThreadMenu`, in a header's 32-point button box.
 struct ThreadMenuButton: View {
     let menu: ThreadMenu
     let act: (ThreadMenu.Item) -> Void

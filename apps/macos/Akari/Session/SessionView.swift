@@ -42,14 +42,13 @@ struct SessionView<MessageArea: View>: View {
         }
     }
 
-    // The full view's "…" for the open thread.
     private var threadMenu: ThreadMenu? {
         guard let open = openChannel, open.isThread,
             let item = session.membershipItem(for: open.id)
         else {
             return nil
         }
-        return .fullView(membership: item)
+        return .fullView(membership: item, splittable: openParent?.opensMessageList == true)
     }
 
     private func act(_ item: ThreadMenu.Item, on thread: ChannelId, in menu: ThreadMenu) {
@@ -90,15 +89,17 @@ struct SessionView<MessageArea: View>: View {
     }
 
     // One line under the server and channel headers; it starts where the channel list does, so
-    // resizing the sidebar can't break it. A docked split draws its own, after the gap.
+    // resizing the sidebar can't break it. The split draws its own.
     private func headerLine(pageWidth: CGFloat) -> some View {
-        let docked = session.split != nil && !SplitWidth.floats(in: pageWidth)
+        let shown = splitWidth.shown(in: pageWidth)
+        let trailing: CGFloat =
+            session.split == nil || session.splitChannel == nil
+            ? 0 : SplitWidth.floats(in: pageWidth) ? shown : SplitWidth.gap + shown + 1
         return Rectangle()
             .fill(Color(nsColor: Palette.borderSubtle))
             .frame(height: 1)
             .padding(.leading, hasListHeader ? SidebarWidth.rail + 1 : sidebarWidth)
-            .padding(
-                .trailing, docked ? SplitWidth.gap + splitWidth.shown(in: pageWidth) + 1 : 0)
+            .padding(.trailing, trailing)
             .offset(y: ChannelHeader.height)
             .allowsHitTesting(false)
     }
@@ -120,38 +121,36 @@ struct SessionView<MessageArea: View>: View {
         }
     }
 
-    // The channel, and the thread beside it: docked after a gap, or over the channel when the
-    // page is too narrow for both, as Discord's thread sidebar.
-    @ViewBuilder private func page(width: CGFloat) -> some View {
-        if let split = session.split, let thread = session.splitChannel {
-            let splitShown = splitWidth.shown(in: width)
-            if SplitWidth.floats(in: width) {
-                ZStack(alignment: .trailing) {
-                    channelCard(docked: false)
-                    // Only the shadow is clipped to the page: clipping the card would clip its
-                    // tables' layers.
-                    UnevenRoundedRectangle(topLeadingRadius: SplitCardEdge.radius)
-                        .fill(Color.black)
-                        .shadow(color: .black.opacity(0.52), radius: 20, y: 8)
-                        .frame(width: splitShown)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .clipped()
-                        .allowsHitTesting(false)
-                    splitCard(split, thread: thread, floating: true)
-                        .frame(width: splitShown)
-                }
-            } else {
-                HStack(spacing: 0) {
-                    channelCard(docked: true)
+    // Each card keeps one place in the tree, so opening, closing or floating the split never
+    // rebuilds a list: a docked split's room is held by a clear frame under it.
+    private func page(width: CGFloat) -> some View {
+        let open = session.split.flatMap { split in session.splitChannel.map { (split, $0) } }
+        let floats = SplitWidth.floats(in: width)
+        let shown = splitWidth.shown(in: width)
+        return ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                channelCard(docked: open != nil && !floats)
+                if open != nil, !floats {
                     SplitGap(split: splitWidth, page: width)
-                    splitCard(split, thread: thread, floating: false)
-                        .frame(width: splitShown)
+                    Color.clear.frame(width: shown)
                 }
-                .background(Color(nsColor: Palette.frame), ignoresSafeAreaEdges: [])
             }
-        } else {
-            channelCard(docked: false)
+            if open != nil, floats {
+                // Only the shadow is clipped to the page: clipping a card would clip its tables.
+                UnevenRoundedRectangle(topLeadingRadius: SplitCardEdge.radius)
+                    .fill(Color.black)
+                    .shadow(color: .black.opacity(0.52), radius: 20, y: 8)
+                    .frame(width: shown)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .clipped()
+                    .allowsHitTesting(false)
+            }
+            if let open {
+                splitCard(open.0, thread: open.1, floating: floats)
+                    .frame(width: shown)
+            }
         }
+        .background(Color(nsColor: Palette.frame), ignoresSafeAreaEdges: [])
     }
 
     private func channelCard(docked: Bool) -> some View {
@@ -180,8 +179,6 @@ struct SessionView<MessageArea: View>: View {
             }
     }
 
-    // Discord's pane: a 1 border on its top and sides in the frame's border color (the chat's
-    // background color while it floats), its top-left corner rounded 12 over what lies beneath.
     private func splitCard(
         _ split: MessageListModel, thread: Channel, floating: Bool
     ) -> some View {
@@ -198,7 +195,8 @@ struct SessionView<MessageArea: View>: View {
                 ChannelName(kind: .thread(owner: split.threadOwner), name: thread.name ?? ""))
         }
         .background(Color(nsColor: Palette.chat), ignoresSafeAreaEdges: [])
-        .padding([.top, .horizontal], 1)
+        // The top border lies over the header's first point, as the channel's top line does.
+        .padding(.horizontal, 1)
         .overlay {
             ZStack {
                 CornerCap(corner: .topLeading)
@@ -213,7 +211,6 @@ struct SessionView<MessageArea: View>: View {
         }
     }
 
-    // The split view's "…" for its thread.
     private var splitMenu: ThreadMenu? {
         session.split.flatMap { session.membershipItem(for: $0.channelId) }.map {
             .splitView(membership: $0)

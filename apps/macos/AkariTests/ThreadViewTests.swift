@@ -259,7 +259,7 @@ struct ThreadHeaderTests {
             return count(image, in: 560..<600, where: lit)
         }
         let leave = ThreadMenu.fullView(
-            membership: SessionModel.MembershipItem(joins: false, enabled: true))
+            membership: SessionModel.MembershipItem(joins: false, enabled: true), splittable: true)
 
         #expect(try ink(ChannelHeader(channel: thread, name: "t1", menu: leave)) > 10)
         #expect(try ink(ChannelHeader(channel: thread, name: "t1")) == 0)

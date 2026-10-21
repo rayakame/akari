@@ -29,8 +29,7 @@ final class MessageTableLink {
     weak var composer: ComposerTextView?
 }
 
-// The message tables on screen, the channel's and the split thread's: Escape in either jumps
-// both to the present (Q37).
+// Escape in either pane jumps both tables to the present (Q37).
 @MainActor
 final class PaneTables {
     private let links = NSHashTable<MessageTableLink>.weakObjects()
@@ -57,10 +56,9 @@ struct MessageArea: View {
     // The open channel, as its menu would.
     let markRead: () -> Void
     let markServerRead: () -> Void
-    // Escape for every list on screen; without it, this list's own.
     var tables: PaneTables?
+    // Without it, Escape is this list's own.
     var escape: (() -> Void)?
-    // The split's composer takes the focus only when the user opened the split.
     var autoFocus = true
     var focusNow = false
     var onFocused: () -> Void = {}

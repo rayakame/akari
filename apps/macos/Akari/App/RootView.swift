@@ -127,8 +127,14 @@ struct SessionScreen: View {
                     }
                 },
                 autoFocus: !beside && !session.focusSplit,
-                focusNow: beside && session.focusSplit,
-                onFocused: { [session] in session.splitFocused() })
+                focusNow: beside ? session.focusSplit : session.focusChannel,
+                onFocused: { [session] in
+                    if beside {
+                        session.splitFocused()
+                    } else {
+                        session.channelFocused()
+                    }
+                })
         }
         .background(ReadingSignals.Attach(session: session))
         // A reconnect brings a new session for the same channel; without a new identity its

@@ -2,21 +2,18 @@ import AkariKit
 import AppKit
 import SwiftUI
 
-/// The split view's width, Discord's thread sidebar's (its web client, canary 645444): dragged
-/// widths last until Akari quits, and each launch starts at the default (amendment 160).
+// Discord's thread sidebar's widths; a dragged one lasts until Akari quits (amendment 160).
 @MainActor @Observable
 final class SplitWidth {
     static let standard: CGFloat = 480
     static let minimum: CGFloat = 450
-    /// Discord's widest split is the page less this, so the channel keeps 307 beside the gap.
+    // The channel keeps 307 beside the gap.
     static let reserved: CGFloat = 315
-    /// Between the channel and the split, where the drag handle is.
     static let gap: CGFloat = 8
     static let shared = SplitWidth()
 
     var width = SplitWidth.standard
 
-    /// A page `page` wide too narrow for both shows the split over the channel.
     static func floats(in page: CGFloat) -> Bool {
         page - reserved <= minimum
     }
@@ -29,14 +26,12 @@ final class SplitWidth {
         min(max(width, minimum), max(minimum, page - reserved))
     }
 
-    /// The width after dragging the split's left edge by `distance`, from `start`.
     static func dragged(from start: CGFloat, by distance: CGFloat, in page: CGFloat) -> CGFloat {
         clamped(start - distance, in: page)
     }
 }
 
-/// The gap between the channel and the docked split: dragging it resizes the split. Like
-/// Discord's handle it draws nothing of its own, only the cursor changes.
+// Like Discord's handle it draws nothing; only the cursor changes.
 struct SplitGap: View {
     let split: SplitWidth
     let page: CGFloat
@@ -67,7 +62,6 @@ struct SplitGap: View {
     }
 }
 
-/// A card's 1-wide border on its top and sides, with the top-left corner rounded.
 nonisolated struct SplitCardEdge: Shape {
     static let radius: CGFloat = 12
 
@@ -86,8 +80,7 @@ nonisolated struct SplitCardEdge: Shape {
     }
 }
 
-/// What lies outside a card's rounded corner, filled with the frame's color instead of clipping
-/// the card (which holds the message table).
+// Instead of clipping a card: clipping its AppKit tables drew the card's SF Symbols white.
 nonisolated struct CornerCap: Shape {
     enum Corner {
         case topLeading, topTrailing
@@ -117,7 +110,6 @@ nonisolated struct CornerCap: Shape {
     }
 }
 
-/// The channel's right border beside a docked split, curving into its top.
 nonisolated struct ChannelCardEdge: Shape {
     func path(in rect: CGRect) -> Path {
         let x = rect.maxX - 0.5
@@ -134,8 +126,6 @@ nonisolated struct ChannelCardEdge: Shape {
     }
 }
 
-/// The split view's header (Discord's thread header): the thread's symbol and name, which opens
-/// the thread full width, its "…" and the X.
 struct SplitHeader: View {
     let thread: Channel
     var menu: ThreadMenu?
@@ -210,7 +200,6 @@ private struct FadingTitle: View {
     }
 }
 
-/// A header's 32-point icon button: muted at rest, brighter while hovered, no background.
 struct HeaderIconButton: View {
     static let size: CGFloat = 32
 

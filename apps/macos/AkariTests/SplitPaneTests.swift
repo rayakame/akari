@@ -13,7 +13,7 @@ struct ThreadMenuTests {
     // The official full view's "…": Join or Leave Thread | Jump To Top, Open in Split View | …
     @Test
     func theFullViewsMenuOffersMembershipThenOpenInSplitView() {
-        let menu = ThreadMenu.fullView(membership: leave)
+        let menu = ThreadMenu.fullView(membership: leave, splittable: true)
 
         #expect(menu.sections == [[.membership(leave)], [.openInSplitView]])
         #expect(menu.sections.flatMap { $0 }.map(\.title) == ["Leave Thread", "Open in Split View"])
@@ -28,6 +28,14 @@ struct ThreadMenuTests {
         #expect(menu.sections == [[.membership(join), .openInFullView]])
         #expect(menu.sections.flatMap { $0 }.map(\.title) == ["Join Thread", "Open in Full View"])
         #expect(menu.location == .sidebarOverflow)
+    }
+
+    // A forum's posts have no channel list to open beside.
+    @Test
+    func aThreadOfAForumHasNoOpenInSplitView() {
+        let menu = ThreadMenu.fullView(membership: leave, splittable: false)
+
+        #expect(menu.sections == [[.membership(leave)]])
     }
 
     @Test
@@ -396,23 +404,119 @@ extension SessionScreenTests {
         #expect(focused() == FormattedStore.channelIds[0])
     }
 
-    // With nothing to mark or load, Escape closes the split, as the official client's does.
+    func keyWindow(_ host: NSView, width: CGFloat) -> NSWindow {
+        // A test's window never becomes key on its own.
+        let window = MessageTableTests.KeyWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFrontRegardless()
+        return window
+    }
+
+    func composers(in host: NSView) -> [ComposerTextView] {
+        views(ComposerTextView.self, in: host).sorted { frame(of: $0).minX < frame(of: $1).minX }
+    }
+
+    // With nothing to mark or load, Escape closes the split, as the official client's does, and
+    // the channel's composer takes the focus.
     @Test
     func escapeWithNothingToDoClosesTheSplit() async throws {
         let account = FormattedAccount(contents: ["test"], thread: true)
         let session = await splitSession(account)
         let host = NSHostingView(rootView: SessionScreen(session: session))
-        let window = shownWindow(host)
+        let window = keyWindow(host, width: 1440)
         defer { window.orderOut(nil) }
-        try await waitUntil(host) { views(ComposerTextView.self, in: host).count == 2 }
-        let composer = try #require(views(ComposerTextView.self, in: host).first)
+        try await waitUntil(host) { composers(in: host).count == 2 }
+        let shown = composers(in: host)
+        try #require(shown.count == 2)
+        let (channel, split) = (shown[0], shown[1])
 
         let escape = try #require(escapeKey())
-        composer.currentEvent = { escape }
-        composer.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        split.currentEvent = { escape }
+        split.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
 
         try await waitUntil(host) { tables(in: host).count == 1 }
         #expect(session.split == nil)
         #expect(account.markedRead.withLock { $0 }.isEmpty)
+        try await waitUntil(host) { window.firstResponder === channel }
+    }
+
+    // The channel's list stays the same table at the same place while the split opens, closes
+    // or moves between docked and floating; so does the split's.
+    @Test
+    func theListsKeepTheirTablesAndPlaces() async throws {
+        let account = FormattedAccount(contents: ["test"], thread: true)
+        let session = formattedSession(account)
+        let host = NSHostingView(rootView: SessionScreen(session: session))
+        let window = wideWindow(host, width: 1440)
+        defer { window.orderOut(nil) }
+        try await waitUntil(host) {
+            tables(in: host).count == 1 && tables(in: host)[0].numberOfRows > 20
+        }
+        let channel = try #require(tables(in: host).first)
+        let clip = try #require(channel.enclosingScrollView?.contentView)
+        clip.scroll(to: NSPoint(x: 0, y: 200))
+        channel.enclosingScrollView?.reflectScrolledClipView(clip)
+        let place = clip.bounds.origin.y
+
+        await session.openBeside(thread: FormattedStore.threadId, from: FormattedStore.channelIds[0])
+        try await waitUntil(host) { tables(in: host).count == 2 }
+        #expect(tables(in: host).first === channel)
+        #expect(abs(clip.bounds.origin.y - place) <= 1, "\(clip.bounds.origin.y) \(place)")
+        let split = try #require(tables(in: host).last)
+
+        window.setContentSize(NSSize(width: 1100, height: 600))
+        try await waitUntil(host) { frame(of: split).width < 460 }
+        #expect(tables(in: host).last === split, "floating keeps the split's table")
+        #expect(tables(in: host).first === channel)
+
+        session.closeSplit()
+        try await waitUntil(host) { tables(in: host).count == 1 }
+        #expect(tables(in: host).first === channel)
+        #expect(abs(clip.bounds.origin.y - place) <= 1, "\(clip.bounds.origin.y) \(place)")
+    }
+
+    // The y of the line under the header at `x`, from the window's top: the first row below the
+    // header's middle that isn't the header's background.
+    func headerLine(at x: CGFloat, in host: NSView) throws -> (y: CGFloat, color: NSColor?) {
+        host.layoutSubtreeIfNeeded()
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / host.bounds.width
+        let color = { (y: CGFloat) in
+            rep.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB)
+        }
+        let middle = TitleBar.height + ChannelHeader.height / 2
+        let background = color(middle)
+        let y = try #require(
+            stride(from: middle, through: middle + 40, by: 0.5).first {
+                !same(color($0), background)
+            })
+        return (y, color(y))
+    }
+
+    // One line under both headers, level, whether the split is docked or floats.
+    @Test(arguments: [1440.0, 1100.0])
+    func theHeadersShareOneLine(width: Double) async throws {
+        let account = FormattedAccount(contents: ["test"], thread: true)
+        let session = await splitSession(account)
+        let host = NSHostingView(rootView: SessionScreen(session: session))
+        let window = wideWindow(host, width: width)
+        window.appearance = NSAppearance(named: .darkAqua)
+        defer { window.orderOut(nil) }
+        try await waitUntil(host) { tables(in: host).count == 2 }
+        let shown = tables(in: host)
+        try #require(shown.count == 2)
+
+        // Where both headers draw nothing above their lines: the channel's right end, and the
+        // split's middle (a floating split covers the channel's right end).
+        let channelX = min(frame(of: shown[0]).maxX, frame(of: shown[1]).minX) - 40
+        let channel = try headerLine(at: channelX, in: host)
+        let split = try headerLine(at: frame(of: shown[1]).midX, in: host)
+
+        #expect(channel.y == split.y, "\(channel.y) \(split.y)")
+        #expect(same(channel.color, split.color), "one line, not two")
     }
 }
