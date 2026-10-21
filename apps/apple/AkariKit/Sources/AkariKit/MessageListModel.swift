@@ -345,7 +345,7 @@ public final class MessageListModel {
         messageJump = MessageJump(messageId: messageId, number: messageJumps)
     }
 
-    // What Escape would do here: load the present, or mark something read.
+    // The official client's Escape closes the split when no list has any.
     var escapeHasWork: Bool {
         if !atPresent || store.window(channelId: channelId)?.latest == false {
             return true

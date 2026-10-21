@@ -68,6 +68,9 @@ public final class SessionModel {
     /// Set when the user opened the split, so its composer takes the focus; the view calls
     /// `splitFocused()` once it has.
     public private(set) var focusSplit = false
+    /// Set when the X or Escape closed the split, so the channel's composer takes the focus; the
+    /// view calls `channelFocused()` once it has.
+    public private(set) var focusChannel = false
     /// The last join or leave that failed, until `dismissMembershipError()`.
     public private(set) var membershipError: MembershipError?
     /// The channels the user is reading: the open channel and the split thread, each while its
@@ -284,10 +287,11 @@ public final class SessionModel {
 
     /// The split view's X: closes it, and the channel forgets it.
     public func closeSplit() {
-        guard let open = messages?.channelId else {
+        guard let open = messages?.channelId, split != nil else {
             return
         }
         forgetSplit(of: open)
+        focusChannel = true
         updateReading()
     }
 
@@ -306,6 +310,10 @@ public final class SessionModel {
         focusSplit = false
     }
 
+    public func channelFocused() {
+        focusChannel = false
+    }
+
     private func forgetSplit(of channel: ChannelId) {
         guard splits[channel] != nil else {
             return
@@ -319,7 +327,8 @@ public final class SessionModel {
     /// beside it.
     public func openInSplitView() {
         guard let open = messages?.channelId, let thread = channels?.channel(open),
-            thread.isThread, let parent = thread.parentId
+            thread.isThread, let parent = thread.parentId,
+            store.channel(id: parent)?.opensMessageList == true
         else {
             return
         }
@@ -643,7 +652,12 @@ public final class SessionModel {
             spotToRestore = nil
             restore(spot)
         }
-        forgetSplits(removed: batch.removedChannels)
+        if !batch.ready {
+            forgetSplits(removed: batch.removedChannels)
+        } else if let thread = split?.channelId, batch.removedChannels.contains(thread) {
+            // READY lists only active joined threads: Get Channel says whether it's gone.
+            showSplit(nil)
+        }
         syncSplit()
         if let thread = split?.channelId,
             batch.everythingChanged || batch.channelsChanged.values.contains(where: { $0.contains(thread) })
@@ -657,7 +671,6 @@ public final class SessionModel {
         split?.apply(batch)
     }
 
-    // A deleted channel or thread takes its split along.
     private func forgetSplits(removed: Set<ChannelId>) {
         guard !removed.isEmpty else {
             return
@@ -669,8 +682,6 @@ public final class SessionModel {
         }
     }
 
-    // Shows the thread the open channel keeps beside it, when the store has it. Once READY has
-    // come, a thread it lacks is fetched, once per session.
     private func syncSplit() {
         guard let open = messages?.channelId, let thread = splits[open] else {
             showSplit(nil)
@@ -681,6 +692,7 @@ public final class SessionModel {
         }
         guard let found = store.channel(id: thread), found.isThread, found.parentId == open else {
             showSplit(nil)
+            // Before READY the cache or the gateway may still bring it.
             if sawReady {
                 fetchSplit(thread, of: open)
             }
@@ -700,7 +712,7 @@ public final class SessionModel {
         }
     }
 
-    // Refused or gone drops the split; another failure keeps it for the next launch.
+    // A failed request isn't Discord's answer: the split waits for the next launch.
     private func fetchSplit(_ thread: ChannelId, of parent: ChannelId) {
         guard askedSplits.insert(thread).inserted else {
             return
@@ -880,7 +892,6 @@ public final class SessionModel {
         }
     }
 
-    // The open channel first, then the split thread.
     private func tellReading() {
         let channels = [messages, split].compactMap { $0?.channelId }.filter(reading.contains)
         guard !accountClosed, channels != toldReading || resendReading else {

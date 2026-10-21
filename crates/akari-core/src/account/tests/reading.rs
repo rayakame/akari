@@ -362,7 +362,7 @@ async fn dropping_one_stops_only_its_acks() {
     assert!(badge(&online.account, THREAD).unread);
 }
 
-// A busy channel doesn't hold back the thread's ack, nor the other way round.
+// A busy channel doesn't hold the thread's ack back; each ack names its own channel's message.
 #[tokio::test]
 async fn pacing_stays_per_channel() {
     let mut online = acking(general_read).await;

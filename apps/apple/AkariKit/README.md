@@ -114,12 +114,16 @@ store doesn't have it; nothing opens when Discord refuses it, it's gone or the f
 once the user opened something else or clicked another thread meanwhile. Each channel keeps its
 split thread: opening another channel hides it, coming back reopens it from the store's window,
 and `AccountMemory` keeps the threads per account across launches (one the store lacks after
-READY is fetched; refused or gone drops it). `closeSplit()` and `openInFullView()` forget it,
-`openInSplitView()` opens a full-width thread's channel with the thread beside it, and the
-thread's deletion closes it. The sidebar keeps the channel selected: the split thread never
-gets a kept row. `reading` holds both lists while each is fresh at its bottom; scrolling one
-clearly away stops only that one until the next click or key press. `escape()` marks both read
-and loads each present. A row's `threadLinked` is false for such a line once the thread is unavailable. A
+READY is fetched; refused or gone drops it, also when a new READY no longer lists it).
+`closeSplit()` (the X), a thread's row and the open channel's own row (`open(channel:)`) forget
+it; `openInFullView()` only opens the thread full width, and the channel keeps its split, as in
+the official client; `openInSplitView()` opens a full-width thread's channel with the thread
+beside it; the thread's deletion closes it. `focusSplit` and `focusChannel` ask the view to move
+the focus to the split's or the channel's composer (`splitFocused()`, `channelFocused()`). The
+sidebar keeps the channel selected: the split thread never gets a kept row. `reading` holds both
+lists while each is fresh at its bottom; scrolling one clearly away stops only that one until
+the next click or key press. `escape()` marks both read and loads each present, or, with
+nothing to do in either, closes the split and returns false. A row's `threadLinked` is false for such a line once the thread is unavailable. A
 row's `threadBox` (`ThreadBox`) is the box of the thread started from its message, or that its
 "started a thread" line is about: the name, the count as Discord words it, the second line
 (`Bottom`: the newest message with its author, no recent messages, no messages yet) and the time

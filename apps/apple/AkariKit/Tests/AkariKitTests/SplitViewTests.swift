@@ -118,7 +118,7 @@ final class SplitViewTests {
     }
 
     @Test
-    func bothListsReadAtTheirBottomWhicheverHasFocus() async {
+    func bothListsReadAtTheirBottom() async {
         let session = inChannel11()
         #expect(session.reading == [id(11)])
 
@@ -343,6 +343,27 @@ final class SplitViewTests {
         session.close()
     }
 
+    // A forum's posts have no channel list to open beside.
+    @Test
+    func openInSplitViewNeedsAParentWithAMessageList() {
+        world()
+        store.update { state in
+            state.list(
+                [channel(13, kind: .guildForum), thread(33, in: 13, name: "post"), channel(11)],
+                in: 1)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.go(to: id(33))
+
+        session.openInSplitView()
+
+        #expect(session.messages?.channelId == id(33))
+        #expect(memory.splits(of: id(1)).isEmpty)
+        session.close()
+    }
+
     @Test
     func openInSplitViewAsksForTheSplitsComposer() {
         let session = inChannel11(joined: true, listed: true)
@@ -364,6 +385,27 @@ final class SplitViewTests {
 
         #expect(session.messages?.channelId == id(11))
         #expect(session.split?.channelId == id(31))
+        session.close()
+    }
+
+    // The split's composer goes with it; the channel's takes the focus.
+    @Test
+    func closingTheSplitAsksForTheChannelsComposer() async {
+        let session = inChannel11()
+        await session.openBeside(thread: id(31), from: id(11))
+        #expect(!session.focusChannel)
+
+        session.closeSplit()
+        #expect(session.focusChannel)
+        session.channelFocused()
+        #expect(!session.focusChannel)
+        await session.openBeside(thread: id(31), from: id(11))
+        session.splitFocused()
+        #expect(!session.escape())
+        #expect(session.focusChannel, "Escape closing it does the same")
+        session.channelFocused()
+        session.closeSplit()
+        #expect(!session.focusChannel, "nothing closed")
         session.close()
     }
 
@@ -483,6 +525,30 @@ final class SplitViewTests {
 
         #expect(store.log.calls.contains(.fetchThread(id(11), id(31))))
         #expect(session.split?.channelId == id(31))
+        session.close()
+    }
+
+    // READY lists only active joined threads: one archived meanwhile leaves the store, and
+    // Get Channel decides whether the split stays.
+    @Test
+    func aSplitThreadReadyDropsIsFetchedNotForgotten() async {
+        let session = inChannel11(joined: true, listed: true)
+        await session.openBeside(thread: id(31), from: id(11))
+        var archived = thread(31, in: 11, name: "t1")
+        archived.thread?.archived = true
+        account.fetchedThreads.withLock { $0[id(31)] = archived }
+        store.update { state in
+            state.channels[id(31)] = nil
+            state.channelLists[id(1)] = [id(11), id(12)]
+        }
+
+        session.apply(
+            EventBatch([.ready, .channelRemoved(channelId: id(31), guildId: id(1))]))
+        await finished(session.splitFetch)
+
+        #expect(store.log.calls.contains(.fetchThread(id(11), id(31))))
+        #expect(session.split?.channelId == id(31))
+        #expect(memory.splits(of: id(1)) == [id(11): id(31)])
         session.close()
     }
 
