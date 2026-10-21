@@ -200,7 +200,7 @@ struct ThreadHeaderTests {
             rateLimitPerUser: 0, recipientIds: [],
             thread: ThreadInfo(
                 joined: true, archived: false, locked: false, private: false, messageCount: nil,
-                ownerId: nil))
+                ownerId: nil, lastMessageId: nil, createdAt: nil))
     }
 
     // Where the first strong-white ink starts, across the header's middle: the open channel's
@@ -242,6 +242,25 @@ struct ThreadHeaderTests {
             try interactiveInk(
                 ChannelHeader(channel: thread, name: "t1", parent: parent), in: 40..<(withParent - 30))
                 > 20)
+    }
+
+    // The full view's "…" with Join Thread or Leave Thread (D119); a channel's header has none yet.
+    @Test
+    func aThreadsHeaderHasItsMoreMenu() throws {
+        func ink(_ header: ChannelHeader) throws -> Int {
+            let image = try Rendered(
+                header.background(Color(nsColor: Palette.chat)).ignoresSafeArea(),
+                size: NSSize(width: 600, height: ChannelHeader.height + 1))
+            let lit = { (color: NSColor?) -> Bool in
+                (color?.brightnessComponent ?? 0) > 0.4
+            }
+            return count(image, in: 560..<600, where: lit)
+        }
+        let leave = ChannelHeader.Membership(
+            item: SessionModel.MembershipItem(joins: false, enabled: true), act: {})
+
+        #expect(try ink(ChannelHeader(channel: thread, name: "t1", membership: leave)) > 10)
+        #expect(try ink(ChannelHeader(channel: thread, name: "t1")) == 0)
     }
 
     // The header's link shows the pointing hand through a cursor rect, which can't outlive it.

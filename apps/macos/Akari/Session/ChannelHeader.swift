@@ -4,10 +4,17 @@ import SwiftUI
 struct ChannelHeader: View {
     static let height: CGFloat = 48
 
+    /// A thread's Join Thread or Leave Thread, in the "…" menu.
+    struct Membership {
+        let item: SessionModel.MembershipItem
+        let act: () -> Void
+    }
+
     let channel: Channel?
     let name: String
     var parent: Channel?
     var openParent: () -> Void = {}
+    var membership: Membership?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -46,6 +53,22 @@ struct ChannelHeader: View {
                 }
             }
             Spacer(minLength: 0)
+            if let membership {
+                Menu {
+                    Button(membership.item.title, action: membership.act)
+                        .disabled(!membership.item.enabled)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color(nsColor: Palette.interactiveText))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .padding(.trailing, 8)
+                .help("More")
+                .accessibilityLabel("More")
+            }
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)

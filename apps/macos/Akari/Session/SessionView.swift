@@ -25,6 +25,35 @@ struct SessionView<MessageArea: View>: View {
         }
         .ignoresSafeArea(edges: .top)
         .navigationTitle(windowTitle.text)
+        .alert(
+            session.membershipError?.title ?? "",
+            isPresented: Binding(
+                get: { session.membershipError != nil },
+                set: { if !$0 { session.dismissMembershipError() } }),
+            presenting: session.membershipError
+        ) { _ in
+            Button("OK") { session.dismissMembershipError() }
+        } message: { error in
+            Text(error.message)
+        }
+    }
+
+    // The full view's "…" offers joining or leaving the open thread (Toolbar Overflow).
+    private var membership: ChannelHeader.Membership? {
+        guard let open = openChannel, open.isThread,
+            let item = session.membershipItem(for: open.id)
+        else {
+            return nil
+        }
+        return ChannelHeader.Membership(item: item) { [session] in
+            Task {
+                if item.joins {
+                    await session.join(thread: open.id, from: .toolbarOverflow)
+                } else {
+                    await session.leave(thread: open.id, from: .toolbarOverflow)
+                }
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -79,7 +108,7 @@ struct SessionView<MessageArea: View>: View {
         VStack(spacing: 0) {
             ChannelHeader(
                 channel: openChannel, name: openName, parent: openParent,
-                openParent: session.openParent)
+                openParent: session.openParent, membership: membership)
             if let messages = session.messages {
                 messageArea(messages, channelName)
             } else if session.currentUser == nil {
