@@ -261,6 +261,32 @@ struct ThreadBoxViewTests {
         #expect(actions.calls == ["thread 20 from 10"])
     }
 
+    // A click reaches the box through the window's hit test; performClick skips it.
+    @Test
+    func aClickHitsTheBoxInsideItsBorderAndNowhereElse() throws {
+        let (_, view) = try shown()
+        let root = try #require(list.window.contentView)
+        let hit = { (point: NSPoint) -> NSView? in
+            let inWindow = view.convert(point, to: nil)
+            return root.hitTest(root.superview?.convert(inWindow, from: nil) ?? inWindow)
+        }
+        let box = view.boxFrame
+
+        for inside in [
+            NSPoint(x: box.minX + 1, y: box.minY + 1), NSPoint(x: box.maxX - 1, y: box.minY + 1),
+            NSPoint(x: box.minX + 1, y: box.maxY - 1), NSPoint(x: box.maxX - 1, y: box.maxY - 1),
+            NSPoint(x: box.midX, y: box.midY),
+        ] {
+            #expect(hit(inside) === view, "\(inside) in \(box)")
+        }
+        for outside in [
+            NSPoint(x: box.minX - 1, y: box.midY), NSPoint(x: box.maxX + 1, y: box.midY),
+            NSPoint(x: box.midX, y: box.minY - 1), NSPoint(x: box.midX, y: box.maxY + 1),
+        ] {
+            #expect(hit(outside) !== view, "\(outside) by \(box)")
+        }
+    }
+
     // Discord's --text-link: #4d96ee in its Dark theme (amendment 220).
     @Test
     func theCountIsInTheLinkColor() throws {
