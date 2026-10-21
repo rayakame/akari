@@ -226,7 +226,19 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
         "THREAD_MEMBERS_UPDATE" => {
             parse(json).map(|update| E::ThreadMembersUpdate(Box::new(update)))
         }
-        "THREAD_LIST_SYNC" => parse(json).map(|sync| E::ThreadListSync(Box::new(sync))),
+        "THREAD_LIST_SYNC" => parse(json).map(|sync: ThreadListSync| {
+            // Counts only: whether Discord sends the undocumented latest messages.
+            tracing::debug!(
+                target: "akari_core::dispatches",
+                guild_id = sync.guild_id.map(GuildId::get),
+                channels = sync.channel_ids.as_ref().map(Vec::len),
+                threads = sync.threads.len(),
+                members = sync.members.len(),
+                latest_messages = sync.most_recent_messages.len(),
+                "thread list sync"
+            );
+            E::ThreadListSync(Box::new(sync))
+        }),
         "MESSAGE_CREATE" => parse(json).map(|message| E::MessageCreate(Box::new(message))),
         "MESSAGE_UPDATE" => parse(json).map(|update| E::MessageUpdate(Box::new(update))),
         "MESSAGE_DELETE" => parse(json).map(E::MessageDelete),
