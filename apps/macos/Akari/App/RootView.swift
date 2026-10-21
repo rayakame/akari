@@ -113,7 +113,7 @@ struct SessionScreen: View {
                 messages: messages, name: name, links: links,
                 go: { [session] in session.go(to: $0) },
                 openThread: { [session] thread, parent in
-                    Task { await session.open(thread: thread, from: parent) }
+                    Task { await session.openBeside(thread: thread, from: parent) }
                 },
                 openGuild: { [session] in session.open(.guild($0)) },
                 markRead: { [session] in session.markRead(channel: messages.channelId) },

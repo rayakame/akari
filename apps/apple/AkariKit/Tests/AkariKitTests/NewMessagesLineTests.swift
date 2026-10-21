@@ -294,7 +294,7 @@ struct NewMessagesLineTests {
         store.update { [here] in $0.readStates[here] = readState(4) }
         session.apply(EventBatch([.ready, .connection(state: .online)]))
 
-        #expect(account.readingCalls.current == [here])
+        #expect(account.readingCalls.current == [[here]])
         #expect(list.newMessagesLine == id(5))
         session.close()
     }
@@ -318,7 +318,7 @@ struct NewMessagesLineTests {
         account.readStateAfterReading.withLock { $0 = readState(6) }
         let (session, list) = try connectingSession()
         session.apply(EventBatch([.ready, .connection(state: .online)]))
-        #expect(account.readingCalls.current == [here])
+        #expect(account.readingCalls.current == [[here]])
 
         session.apply(EventBatch([.connection(state: .connecting)]))
         session.apply(EventBatch([.ready]))

@@ -42,9 +42,9 @@ final class ThreadMembershipTests {
     }
 
     @Test
-    func anUnjoinedThreadOpenedFromItsBoxOffersJoining() async {
+    func anUnjoinedThreadOpenFullWidthOffersJoining() async {
         let session = session(joined: false, listed: false)
-        await session.open(thread: id(31), from: id(11))
+        session.go(to: id(31))
 
         #expect(session.messages?.channelId == id(31))
         #expect(
@@ -57,7 +57,7 @@ final class ThreadMembershipTests {
     @Test
     func joiningListsTheThread() async {
         let session = session(joined: false, listed: false)
-        await session.open(thread: id(31), from: id(11))
+        session.go(to: id(31))
 
         await session.join(thread: id(31), from: .toolbarOverflow)
         list(session, threadListed: true)
@@ -119,7 +119,7 @@ final class ThreadMembershipTests {
     @Test
     func aFullThreadSaysSoAsDiscordDoes() async {
         let session = session(joined: false, listed: false)
-        await session.open(thread: id(31), from: id(11))
+        session.go(to: id(31))
         account.membershipError.withLock {
             $0 = .Discord(status: 400, code: 30033, message: "Max number of thread participants")
         }

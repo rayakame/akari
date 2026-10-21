@@ -30,7 +30,7 @@ struct EngagementTests {
             markServerRead: {})
         list.controller.actions = bridge
         list.show(list.page)
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     var bottomClip: BottomClipView? { list.clip as? BottomClipView }
@@ -50,17 +50,17 @@ struct EngagementTests {
     @Test
     func aTrackpadNudgeAtTheBottomReportsNoScrollAway() throws {
         nudge(by: 40)
-        #expect(session.reading == nil, "off the bottom")
+        #expect(session.reading.isEmpty, "off the bottom")
         nudge(by: -10)
         nudge(by: 40)
         try scrollToBottom()
-        #expect(session.reading == channel, "still engaged")
+        #expect(session.reading == [channel], "still engaged")
 
         list.scroll(toRowOf: 120)
         try scrollToBottom()
-        #expect(session.reading == nil, "scrolled clearly away")
+        #expect(session.reading.isEmpty, "scrolled clearly away")
         session.userInteracted()
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     var tallMessage: MessageListModel.Row {
@@ -76,12 +76,12 @@ struct EngagementTests {
         list.show(list.page + [tallMessage])
         nudge(by: 5)
         nudge(by: -3)
-        #expect(session.reading == channel, "still pinned")
+        #expect(session.reading == [channel], "still pinned")
 
         list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
 
         #expect(list.clip.bounds.minY == (try #require(bottomClip)).originRange.upperBound)
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     // A short arrival leaves the list pinned without a scroll when the gesture ends. A nudge that
@@ -99,7 +99,7 @@ struct EngagementTests {
         nudge(by: slack - grown / 2)
 
         #expect(session.messages?.atBottom == false)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
     }
 
     @Test
@@ -113,7 +113,7 @@ struct EngagementTests {
         list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
 
         #expect(session.messages?.atBottom == true)
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     @Test
@@ -134,7 +134,7 @@ struct EngagementTests {
         list.postLiveScroll(NSScrollView.willStartLiveScrollNotification)
         list.show(list.page + [tallMessage])
         nudge(by: 40)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         list.postLiveScroll(NSScrollView.didEndLiveScrollNotification)
 
@@ -147,10 +147,10 @@ struct EngagementTests {
         list.show(MessageTableState(rows: list.page, newMessages: line))
         list.show(MessageTableState(rows: list.page, newMessages: line, unreadJumps: 1))
         #expect(!list.visibleRows.contains(list.table.numberOfRows - 1))
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         list.controller.jumpToPresent(load: false)
 
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 }

@@ -22,7 +22,7 @@ final class ReadingTests {
         }
     }
 
-    var readings: [ChannelId?] { account.readingCalls.current }
+    var readings: [[ChannelId]] { account.readingCalls.current }
 
     func makeSession() -> SessionModel {
         SessionModel(
@@ -38,7 +38,7 @@ final class ReadingTests {
         session.setAppActive(true)
         session.setWindowKey(true)
         session.setWindowVisible(true)
-        #expect(readings == [general])
+        #expect(readings == [[general]])
         return session
     }
 
@@ -62,7 +62,7 @@ final class ReadingTests {
         session.setWindowVisible(true)
         #expect(readings.isEmpty, "no channel open")
         session.open(.guild(id(1)))
-        #expect(session.reading == general)
+        #expect(session.reading == [general])
         let list = try #require(session.messages)
 
         let breaks: [(String, () -> Void, () -> Void)] = [
@@ -74,14 +74,14 @@ final class ReadingTests {
         for (name, leave, comeBack) in breaks {
             leave()
             await settle(session)
-            #expect(session.reading == nil, "\(name)")
+            #expect(session.reading.isEmpty, "\(name)")
             comeBack()
             await settle(session)
-            #expect(session.reading == nil, "\(name), not engaged")
+            #expect(session.reading.isEmpty, "\(name), not engaged")
             session.userInteracted()
-            #expect(session.reading == general, "\(name), engaged again")
+            #expect(session.reading == [general], "\(name), engaged again")
         }
-        #expect(readings == [general, nil, general, nil, general, nil, general, nil, general])
+        #expect(readings == [[general], [], [general], [], [general], [], [general], [], [general]])
         session.close()
     }
 
@@ -100,7 +100,7 @@ final class ReadingTests {
 
         session.apply(EventBatch([.connection(state: .online)]))
 
-        #expect(readings == [general])
+        #expect(readings == [[general]])
         session.close()
     }
 
@@ -109,11 +109,11 @@ final class ReadingTests {
         let session = readingSession()
 
         session.apply(EventBatch([.connection(state: .connecting)]))
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         session.apply(EventBatch([.connection(state: .offline)]))
         session.apply(EventBatch([.connection(state: .online)]))
 
-        #expect(readings == [general, nil, general], "the engagement stays")
+        #expect(readings == [[general], [], [general]], "the engagement stays")
         session.close()
     }
 
@@ -123,11 +123,11 @@ final class ReadingTests {
         let session = readingSession()
 
         session.apply(EventBatch([.connection(state: .connecting), .connection(state: .online)]))
-        #expect(readings == [general, general], "dropped and resumed within one batch")
+        #expect(readings == [[general], [general]], "dropped and resumed within one batch")
 
         session.apply(EventBatch([.connection(state: .connecting)]))
         session.apply(EventBatch([.ready, .connection(state: .online)]))
-        #expect(readings == [general, general, nil, general])
+        #expect(readings == [[general], [general], [], [general]])
 
         store.update { $0.windows[id(11)] = window([1, 2], stale: true) }
         session.apply(
@@ -135,11 +135,11 @@ final class ReadingTests {
                 .connection(state: .connecting), .ready, .messagesStale(channelId: general),
                 .connection(state: .online),
             ]))
-        #expect(session.reading == nil, "not before the list is refreshed")
+        #expect(session.reading.isEmpty, "not before the list is refreshed")
         store.update { $0.windows[id(11)] = window([1, 2]) }
         session.apply(EventBatch([.messagesRefreshed(channelId: general)]))
 
-        #expect(readings == [general, general, nil, general, nil, general])
+        #expect(readings == [[general], [general], [], [general], [], [general]])
         session.close()
     }
 
@@ -169,7 +169,7 @@ final class ReadingTests {
 
         store.update { $0.windows[id(12)] = window([3]) }
         session.apply(EventBatch([.messagesRefreshed(channelId: random)]))
-        #expect(readings == [random])
+        #expect(readings == [[random]])
         session.close()
     }
 
@@ -179,12 +179,12 @@ final class ReadingTests {
         let session = readingSession()
 
         session.open(channel: random)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         store.update { $0.windows[id(12)] = window([3, 4]) }
         session.apply(EventBatch([.messageInserted(channelId: random, messageId: id(4))]))
-        #expect(session.reading == random, "opening engaged it")
-        #expect(readings == [general, nil, random])
+        #expect(session.reading == [random], "opening engaged it")
+        #expect(readings == [[general], [], [random]])
         session.close()
     }
 
@@ -193,11 +193,11 @@ final class ReadingTests {
         let session = readingSession()
         session.setWindowKey(false)
         session.setWindowKey(true)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         session.open(channel: random)
 
-        #expect(readings == [general, nil, random])
+        #expect(readings == [[general], [], [random]])
         session.close()
     }
 
@@ -209,7 +209,7 @@ final class ReadingTests {
         await settle(session)
 
         #expect(session.messages?.atPresentBottom == false)
-        #expect(readings == [general, nil])
+        #expect(readings == [[general], []])
         session.close()
     }
 
@@ -220,11 +220,11 @@ final class ReadingTests {
         await settle(session)
         session.messages?.setAtBottom(true)
         await settle(session)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         session.userInteracted()
 
-        #expect(readings == [general, nil, general])
+        #expect(readings == [[general], [], [general]])
         session.close()
     }
 
@@ -234,12 +234,12 @@ final class ReadingTests {
         let session = readingSession()
         scrollUp(try #require(session.messages))
         session.userInteracted()
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         session.messages?.setAtBottom(true)
         await settle(session)
 
-        #expect(readings == [general, nil, general])
+        #expect(readings == [[general], [], [general]])
         session.close()
     }
 
@@ -251,12 +251,12 @@ final class ReadingTests {
 
         list.setAtBottom(false)
         await settle(session)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         list.userScrolled(by: -300, height: 600)
         list.setAtBottom(true)
         await settle(session)
 
-        #expect(readings == [general, nil, general])
+        #expect(readings == [[general], [], [general]])
         session.close()
     }
 
@@ -273,14 +273,14 @@ final class ReadingTests {
         list.userScrolled(by: 60, height: 600)
         list.setAtBottom(true)
         await settle(session)
-        #expect(readings == [general, nil, general])
+        #expect(readings == [[general], [], [general]])
 
         list.setAtBottom(false)
         await settle(session)
         list.userScrolled(by: 100, height: 600)
         list.setAtBottom(true)
         await settle(session)
-        #expect(readings == [general, nil, general, nil, general], "counted from the bottom")
+        #expect(readings == [[general], [], [general], [], [general]], "counted from the bottom")
         session.close()
     }
 
@@ -295,17 +295,17 @@ final class ReadingTests {
         list.userScrolled(by: 100, height: 600)
         list.setAtBottom(true)
         await settle(session)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         session.userInteracted()
-        #expect(session.reading == general)
+        #expect(session.reading == [general])
 
         list.setAtBottom(false)
         list.userScrolled(by: 50, height: 120)
         list.setAtBottom(true)
         await settle(session)
-        #expect(session.reading == nil, "a short list")
+        #expect(session.reading.isEmpty, "a short list")
 
-        #expect(readings == [general, nil, general, nil])
+        #expect(readings == [[general], [], [general], []])
         session.close()
     }
 
@@ -320,15 +320,15 @@ final class ReadingTests {
             list.setAtBottom(true)
         }
         list.setAtBottom(true)
-        #expect(session.reading == general)
+        #expect(session.reading == [general])
         await settle(session)
-        #expect(readings == [general], "the burst ended where it started")
+        #expect(readings == [[general]], "the burst ended where it started")
 
         list.setAtBottom(false)
-        #expect(session.reading == nil)
-        #expect(readings == [general], "not inside the callback")
+        #expect(session.reading.isEmpty)
+        #expect(readings == [[general]], "not inside the callback")
         await settle(session)
-        #expect(readings == [general, nil])
+        #expect(readings == [[general], []])
         session.close()
     }
 
@@ -338,17 +338,17 @@ final class ReadingTests {
         let session = readingSession()
 
         session.suspend()
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         session.userInteracted()
-        #expect(session.reading == nil, "a click before the offline batch")
+        #expect(session.reading.isEmpty, "a click before the offline batch")
         session.apply(EventBatch([.connection(state: .offline)]))
         session.resume()
         session.apply(
             EventBatch([.connection(state: .connecting), .ready, .connection(state: .online)]))
-        #expect(session.reading == nil, "not before a click or a key")
+        #expect(session.reading.isEmpty, "not before a click or a key")
 
         session.userInteracted()
-        #expect(readings == [general, nil, general])
+        #expect(readings == [[general], [], [general]])
         session.close()
     }
 
@@ -359,7 +359,7 @@ final class ReadingTests {
         session.setAppActive(false)
         session.setWindowKey(false)
 
-        #expect(readings == [general, nil])
+        #expect(readings == [[general], []])
         session.close()
     }
 
@@ -371,10 +371,10 @@ final class ReadingTests {
 
         session.setAppActive(true)
         session.setWindowKey(true)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         session.userInteracted()
-        #expect(readings == [general, nil, general])
+        #expect(readings == [[general], [], [general]])
         session.close()
     }
 
@@ -383,12 +383,12 @@ final class ReadingTests {
         let session = readingSession()
 
         session.setWindowVisible(false)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         session.setWindowVisible(true)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         session.userInteracted()
-        #expect(readings == [general, nil, general])
+        #expect(readings == [[general], [], [general]])
         session.close()
     }
 
@@ -404,7 +404,7 @@ final class ReadingTests {
         store.update { $0.windows[id(11)] = window([1, 2, 4]) }
         session.apply(EventBatch([.messageInserted(channelId: general, messageId: id(4))]))
 
-        #expect(readings == [general])
+        #expect(readings == [[general]])
         session.close()
     }
 
@@ -413,12 +413,12 @@ final class ReadingTests {
         let session = readingSession()
         session.open(.home)
         #expect(session.messages == nil)
-        #expect(readings == [general, nil])
+        #expect(readings == [[general], []])
 
         session.open(.guild(id(1)))
-        #expect(readings == [general, nil, general])
+        #expect(readings == [[general], [], [general]])
         session.close()
-        #expect(readings == [general, nil, general, nil])
+        #expect(readings == [[general], [], [general], []])
     }
 
     // On a 401 AppModel closes the session from onClosed, inside the batch that ended it.
@@ -434,12 +434,12 @@ final class ReadingTests {
         session.setAppActive(true)
         session.setWindowKey(true)
         session.setWindowVisible(true)
-        #expect(readings == [general])
+        #expect(readings == [[general]])
 
         session.apply(EventBatch([.connection(state: .closed(error: .AuthenticationFailed))]))
 
-        #expect(session.reading == nil)
-        #expect(readings == [general])
+        #expect(session.reading.isEmpty)
+        #expect(readings == [[general]])
     }
 
     // Going elsewhere first opens the place's last or first channel; that one isn't read.
@@ -457,11 +457,11 @@ final class ReadingTests {
         let before = readings.count
 
         session.go(to: id(21))
-        #expect(Array(readings.dropFirst(before)) == [id(21)], "not the DM last opened at home")
+        #expect(Array(readings.dropFirst(before)) == [[id(21)]], "not the DM last opened at home")
 
         session.go(to: id(14))
         #expect(
-            Array(readings.dropFirst(before)) == [id(21), id(14)],
+            Array(readings.dropFirst(before)) == [[id(21)], [id(14)]],
             "not the server's first channel")
         session.close()
     }
@@ -478,10 +478,10 @@ final class ReadingTests {
         }
         session.apply(EventBatch([.channelRemoved(channelId: general, guildId: id(1))]))
         #expect(session.messages?.channelId == random)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         session.userInteracted()
-        #expect(readings == [general, nil, random])
+        #expect(readings == [[general], [], [random]])
         session.close()
     }
 
@@ -501,10 +501,10 @@ final class ReadingTests {
         session.apply(EventBatch([.guildRemoved(guildId: id(1))]))
         #expect(session.place == .home)
         #expect(session.messages?.channelId == id(20))
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         session.userInteracted()
-        #expect(Array(readings.dropFirst(before)) == [nil, id(20)])
+        #expect(Array(readings.dropFirst(before)) == [[], [id(20)]])
         session.close()
     }
 
@@ -523,7 +523,7 @@ final class ReadingTests {
         }
         session.apply(EventBatch([.ready, .connection(state: .online)]))
         #expect(session.messages?.channelId == random)
-        #expect(readings == [random])
+        #expect(readings == [[random]])
 
         store.update { state in
             state.channelLists[id(1)] = [id(11)]
@@ -531,10 +531,10 @@ final class ReadingTests {
         }
         session.apply(EventBatch([.channelRemoved(channelId: random, guildId: id(1))]))
         #expect(session.messages?.channelId == general)
-        #expect(session.reading == nil, "replaced on its own")
+        #expect(session.reading.isEmpty, "replaced on its own")
 
         session.userInteracted()
-        #expect(readings == [random, nil, general])
+        #expect(readings == [[random], [], [general]])
         session.close()
     }
 
@@ -557,7 +557,7 @@ final class ReadingTests {
 
         store.update { $0.windows[id(11)] = window([1, 2]) }
         session.apply(EventBatch([.messagesRefreshed(channelId: general)]))
-        #expect(readings == [general])
+        #expect(readings == [[general]])
         session.close()
     }
 
@@ -570,7 +570,7 @@ final class ReadingTests {
         scrollUp(old)
         await settle(session)
 
-        #expect(readings == [general, random])
+        #expect(readings == [[general], [random]])
         session.close()
     }
 }

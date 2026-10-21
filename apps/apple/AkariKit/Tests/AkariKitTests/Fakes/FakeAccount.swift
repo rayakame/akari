@@ -34,7 +34,7 @@ final class FakeAccount: Account, @unchecked Sendable {
     // While set, each send waits for a reply: `nil` succeeds, an error fails it.
     let holdSends = Locked(false)
     let sendReplies = AsyncQueue<RequestError?>()
-    let readingCalls = Locked<[ChannelId?]>([])
+    let readingCalls = Locked<[[ChannelId]]>([])
     let markedRead = Locked<[ChannelId]>([])
     let markedGuildsRead = Locked<[[GuildId]]>([])
     // The read state a mark as read leaves in the store, as akari-core's local ack would.
@@ -80,10 +80,13 @@ final class FakeAccount: Account, @unchecked Sendable {
     }
 
     override func setReading(channelIds: [ChannelId]) {
-        let channelId = channelIds.first
-        readingCalls.withLock { $0.append(channelId) }
-        if let channelId, let state = readStateAfterReading.current {
-            fakeStore.update { $0.readStates[channelId] = state }
+        readingCalls.withLock { $0.append(channelIds) }
+        if let state = readStateAfterReading.current {
+            fakeStore.update { store in
+                for channelId in channelIds {
+                    store.readStates[channelId] = state
+                }
+            }
         }
     }
 

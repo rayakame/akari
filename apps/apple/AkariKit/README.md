@@ -107,16 +107,25 @@ The session replaces `messages` on its own when the open channel is deleted or t
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.
 An open thread that stops being listed (left, closed, or read past its window) stays open,
 as in the official client; only its deletion closes it. `openParent()` opens the open
-thread's channel, for the thread header's link. `open(thread:from:)` opens the thread a
-"started a thread" line names, fetched first when the store doesn't have it; nothing opens when
-Discord refuses it, it's gone or the fetch fails, nor once the user opened something else or
-clicked another line meanwhile. A row's `threadLinked` is false for such a line once the thread is unavailable. A
+thread's channel, for the thread header's link. `openBeside(thread:from:)` opens the thread a
+box or a "started a thread" line in the open channel names beside it, in the split view (`split`,
+with the thread's record in `splitChannel` for its header and menu), fetched first when the
+store doesn't have it; nothing opens when Discord refuses it, it's gone or the fetch fails, nor
+once the user opened something else or clicked another thread meanwhile. Each channel keeps its
+split thread: opening another channel hides it, coming back reopens it from the store's window,
+and `AccountMemory` keeps the threads per account across launches (one the store lacks after
+READY is fetched; refused or gone drops it). `closeSplit()` and `openInFullView()` forget it,
+`openInSplitView()` opens a full-width thread's channel with the thread beside it, and the
+thread's deletion closes it. The sidebar keeps the channel selected: the split thread never
+gets a kept row. `reading` holds both lists while each is fresh at its bottom; scrolling one
+clearly away stops only that one until the next click or key press. `escape()` marks both read
+and loads each present. A row's `threadLinked` is false for such a line once the thread is unavailable. A
 row's `threadBox` (`ThreadBox`) is the box of the thread started from its message, or that its
 "started a thread" line is about: the name, the count as Discord words it, the second line
 (`Bottom`: the newest message with its author, no recent messages, no messages yet) and the time
 it's measured from; `ThreadBox.relativeTime` words that time ("25m ago") and says when it
 changes, `placeholder(for:)` what an empty newest message shows. `membershipItem(for:)` gives a
-thread of the open server's menus Join Thread or Leave Thread (disabled while archived);
+thread of the open server's menus, or the split thread's, Join Thread or Leave Thread (disabled while archived);
 `join(thread:from:)` and `leave(thread:from:)` send the menu's `ThreadLocation`, and a failure
 waits in `membershipError`, in Discord's words, until `dismissMembershipError()`. In a
 thread, a row's `starter` is set for

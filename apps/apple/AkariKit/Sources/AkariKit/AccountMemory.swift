@@ -82,16 +82,43 @@ public struct AccountMemory: Sendable {
         }
     }
 
-    /// Forgets what's kept for the account: its spot, its expanded folders and the hosts its
-    /// links are trusted for.
+    /// The thread open beside each channel in the split view: channel → thread.
+    public func splits(of account: UserId) -> [ChannelId: ChannelId] {
+        let stored = defaults.dictionary(forKey: Self.splitsKey(account)) as? [String: String]
+        var splits: [ChannelId: ChannelId] = [:]
+        for (channel, thread) in stored ?? [:] {
+            if let channel = UInt64(channel), let thread = UInt64(thread) {
+                splits[ChannelId(rawValue: channel)] = ChannelId(rawValue: thread)
+            }
+        }
+        return splits
+    }
+
+    public func remember(splits: [ChannelId: ChannelId], of account: UserId) {
+        if splits.isEmpty {
+            defaults.removeObject(forKey: Self.splitsKey(account))
+        } else {
+            let stored = Dictionary(
+                uniqueKeysWithValues: splits.map { ($0.key.description, $0.value.description) })
+            defaults.set(stored, forKey: Self.splitsKey(account))
+        }
+    }
+
+    /// Forgets what's kept for the account: its spot, its split views, its expanded folders and
+    /// the hosts its links are trusted for.
     public func forget(_ account: UserId) {
         remember(nil, of: account)
+        remember(splits: [:], of: account)
         remember(expandedFolders: [], of: account)
         TrustedLinks.forget(account, in: defaults)
     }
 
     private static func spotKey(_ account: UserId) -> String {
         "lastSpot.\(account.rawValue)"
+    }
+
+    private static func splitsKey(_ account: UserId) -> String {
+        "splits.\(account.rawValue)"
     }
 
     private static func foldersKey(_ account: UserId) -> String {

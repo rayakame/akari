@@ -54,14 +54,24 @@ public final class SessionModel {
         didSet {
             oldValue?.retire()
             channels?.setOpen(messages?.channelId)
+            syncSplit()
         }
     }
+    /// The thread beside the open channel, in the split view. Each channel keeps its own:
+    /// opening another channel hides it, coming back shows it again, and so does a relaunch.
+    /// Like `messages`, a new model loads nothing until the view calls `open()`.
+    public private(set) var split: MessageListModel? {
+        didSet { oldValue?.retire() }
+    }
+    /// The split thread's channel, for its header and menu.
+    public private(set) var splitChannel: Channel?
     /// The last join or leave that failed, until `dismissMembershipError()`.
     public private(set) var membershipError: MembershipError?
-    /// The channel the user is reading: the open channel while the session is online, the app
-    /// active, its window key and visible, the list fresh at the present's bottom and the user
-    /// engaged. The core hears of a change the list reports on the next turn.
-    public private(set) var reading: ChannelId?
+    /// The channels the user is reading: the open channel and the split thread, each while its
+    /// list is fresh at the present's bottom and the user hasn't scrolled clearly away from it,
+    /// and both only while the session is online, the app active, its window key and visible
+    /// and the user engaged. The core hears of a change a list reports on the next turn.
+    public private(set) var reading: Set<ChannelId> = []
     /// What the connection bar says; `nil` while online.
     public var notice: ConnectionNotice? {
         switch connection {
@@ -88,6 +98,12 @@ public final class SessionModel {
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var fetchingThreads: Set<ChannelId> = []
     @ObservationIgnored private var clickedThread: ChannelId?
+    // Each channel's thread in the split view, kept across launches.
+    @ObservationIgnored private var splits: [ChannelId: ChannelId]
+    // Split threads asked for this session because the store lacked them after READY.
+    @ObservationIgnored private var askedSplits: Set<ChannelId> = []
+    @ObservationIgnored private var sawReady = false
+    @ObservationIgnored private(set) var splitFetch: Task<Void, Never>?
     @ObservationIgnored private var spotToRestore: AccountMemory.Spot?
     @ObservationIgnored private var ended = false
     @ObservationIgnored private var appActive = false
@@ -95,11 +111,13 @@ public final class SessionModel {
     @ObservationIgnored private var windowVisible = false
     // The official client acks after a break only once the user clicks or types (D88).
     @ObservationIgnored private var engaged = false
+    // Lists the user scrolled clearly away from: they wait for the next click or key press.
+    @ObservationIgnored private var awayLists: Set<ChannelId> = []
     @ObservationIgnored private var holdingReading = false
     // The core forgets the channel whenever the connection drops; a call that raced the drop
     // may have set it again, so the next derivation is sent whatever it is.
     @ObservationIgnored private var resendReading = false
-    @ObservationIgnored private var toldReading: ChannelId?
+    @ObservationIgnored private var toldReading: [ChannelId] = []
     // On a 401 the core has stopped reading itself, and close() can come inside that batch.
     @ObservationIgnored private var accountClosed = false
     // The list reports from inside the table's scroll callbacks, too often for a call into the
@@ -128,6 +146,7 @@ public final class SessionModel {
         self.drafts = drafts
         self.onClosed = onClosed
         spotToRestore = memory.lastSpot(of: userId)
+        splits = memory.splits(of: userId)
         store = account.store()
         servers = ServerListModel(store: store, account: userId, memory: memory)
         directMessages = DirectMessageListModel(store: store)
@@ -181,7 +200,7 @@ public final class SessionModel {
             messages = list(of: channel)
         }
         // Reopening the last place counts as opening it, also when the cache or READY does.
-        engaged = true
+        engage()
         updateReading()
     }
 
@@ -193,13 +212,13 @@ public final class SessionModel {
     /// A guild opens the channel last opened there, else its first text channel; home opens
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
-        engaged = true
+        engage()
         enter(place)
     }
 
     /// Opening a channel engages the user, also the one already open.
     public func open(channel id: ChannelId) {
-        engaged = true
+        engage()
         show(channel: id)
     }
 
@@ -221,31 +240,86 @@ public final class SessionModel {
         }
     }
 
-    /// A "started a thread" line's link in `parent`: opens the thread, fetched first when the
-    /// store doesn't have it (archived, or never synced). Nothing opens when Discord refuses it,
-    /// it's gone or the fetch fails, nor once the user opened something else or clicked another
-    /// line meanwhile.
-    public func open(thread id: ChannelId, from parent: ChannelId) async {
+    /// The box under a message in the open channel `parent`, or a "started a thread" line's
+    /// thread name there: opens the thread beside the channel, in place of the one there. A
+    /// thread the store doesn't have (archived, or never synced) is fetched first; nothing opens
+    /// when Discord refuses it, it's gone or the fetch fails, nor once the user opened something
+    /// else or clicked another thread meanwhile.
+    public func openBeside(thread id: ChannelId, from parent: ChannelId) async {
+        guard messages?.channelId == parent else {
+            return
+        }
         clickedThread = id
-        guard store.channel(id: id) == nil else {
-            go(to: id)
-            return
+        engage()
+        if store.channel(id: id) == nil {
+            guard fetchingThreads.insert(id).inserted else {
+                return
+            }
+            defer { fetchingThreads.remove(id) }
+            let opened = messages
+            let found = (try? await account.fetchThread(parentId: parent, threadId: id)) ?? false
+            guard found, !ended, clickedThread == id, messages === opened else {
+                return
+            }
         }
-        guard fetchingThreads.insert(id).inserted else {
-            return
-        }
-        defer { fetchingThreads.remove(id) }
-        let opened = messages
-        let found = (try? await account.fetchThread(parentId: parent, threadId: id)) ?? false
-        guard found, !ended, clickedThread == id, messages === opened else {
-            return
-        }
-        go(to: id)
+        splits[parent] = id
+        rememberSplits()
+        syncSplit()
+        updateReading()
     }
 
-    /// What a thread of the open server offers in its menus; `nil` for anything else.
+    /// The split view's X: closes it, and the channel forgets it.
+    public func closeSplit() {
+        guard let open = messages?.channelId, splits[open] != nil else {
+            return
+        }
+        splits[open] = nil
+        rememberSplits()
+        syncSplit()
+        updateReading()
+    }
+
+    /// The split view's "Open in Full View": the thread opens full width, and its channel
+    /// forgets the split.
+    public func openInFullView() {
+        guard let open = messages?.channelId, let thread = split?.channelId else {
+            return
+        }
+        splits[open] = nil
+        rememberSplits()
+        go(to: thread)
+    }
+
+    /// The full view's "Open in Split View" for a thread: its channel opens with the thread
+    /// beside it.
+    public func openInSplitView() {
+        guard let open = messages?.channelId, let thread = channels?.channel(open),
+            thread.isThread, let parent = thread.parentId
+        else {
+            return
+        }
+        splits[parent] = open
+        rememberSplits()
+        go(to: parent)
+    }
+
+    /// Escape in either list: marks the open channel and the split thread read, ends both new
+    /// messages lines, and loads each present a list doesn't show. Scrolling both to the bottom
+    /// is the view's part.
+    public func escape() async {
+        let lists = [messages, split].compactMap { $0 }
+        await withDiscardingTaskGroup { group in
+            for list in lists {
+                group.addTask { await list.escape() }
+            }
+        }
+    }
+
+    /// What a thread of the open server, or the split thread, offers in its menus; `nil` for
+    /// anything else.
     public func membershipItem(for thread: ChannelId) -> MembershipItem? {
-        guard let info = channels?.channel(thread)?.thread else {
+        let shown = channels?.channel(thread) ?? splitChannel.flatMap { $0.id == thread ? $0 : nil }
+        guard let info = shown?.thread else {
             return nil
         }
         return MembershipItem(joins: !info.joined, enabled: !info.archived)
@@ -365,17 +439,18 @@ public final class SessionModel {
         markedRead(guilds: guilds)
     }
 
-    /// Also ends the new messages line when it is the open channel.
+    /// Also ends the new messages line when it is the open channel or the split thread.
     public func markRead(channel: ChannelId) {
         account.markRead(channelId: channel)
-        if channel == messages?.channelId {
-            messages?.endNewMessagesLine()
+        for list in [messages, split] where list?.channelId == channel {
+            list?.endNewMessagesLine()
         }
     }
 
     private func markedRead(guilds: [GuildId]) {
         if case .guild(let open) = place, guilds.contains(open) {
             messages?.endNewMessagesLine()
+            split?.endNewMessagesLine()
         }
     }
 
@@ -413,7 +488,7 @@ public final class SessionModel {
         guard !suspended else {
             return
         }
-        engaged = true
+        engage()
         updateReading()
     }
 
@@ -466,7 +541,7 @@ public final class SessionModel {
     }
 
     func apply(_ batch: EventBatch) {
-        if batch.ready || batch.leftOnline, toldReading != nil {
+        if batch.ready || batch.leftOnline, !toldReading.isEmpty {
             resendReading = true
         }
         // A list that hasn't applied the batch yet, e.g. READY's stale mark, isn't being read.
@@ -476,7 +551,9 @@ public final class SessionModel {
     private func update(with batch: EventBatch) {
         // Before anything here sets the channel as being read, which the core acks at once.
         if batch.ready {
+            sawReady = true
             messages?.newSession()
+            split?.newSession()
         }
         if let state = batch.connection {
             if case .closed(let error) = state {
@@ -532,7 +609,88 @@ public final class SessionModel {
             spotToRestore = nil
             restore(spot)
         }
+        forgetSplits(removed: batch.removedChannels)
+        syncSplit()
+        if let thread = split?.channelId,
+            batch.everythingChanged || batch.channelsChanged.values.contains(where: { $0.contains(thread) })
+        {
+            let read = store.channel(id: thread)
+            if let read, read != splitChannel {
+                splitChannel = read
+            }
+        }
         messages?.apply(batch)
+        split?.apply(batch)
+    }
+
+    // A deleted channel or thread takes its split along.
+    private func forgetSplits(removed: Set<ChannelId>) {
+        guard !removed.isEmpty else {
+            return
+        }
+        let kept = splits.filter { !removed.contains($0.key) && !removed.contains($0.value) }
+        if kept.count != splits.count {
+            splits = kept
+            rememberSplits()
+        }
+    }
+
+    // Shows the thread the open channel keeps beside it, when the store has it. Once READY has
+    // come, a thread it lacks is fetched, once per session.
+    private func syncSplit() {
+        guard let open = messages?.channelId, let thread = splits[open] else {
+            showSplit(nil)
+            return
+        }
+        guard split?.channelId != thread else {
+            return
+        }
+        guard let found = store.channel(id: thread), found.isThread, found.parentId == open else {
+            showSplit(nil)
+            if sawReady {
+                fetchSplit(thread, of: open)
+            }
+            return
+        }
+        openedChannels.insert(thread)
+        showSplit(list(of: thread), channel: found)
+    }
+
+    private func showSplit(_ list: MessageListModel?, channel: Channel? = nil) {
+        if split !== list {
+            split = list
+        }
+        if splitChannel != channel {
+            splitChannel = channel
+        }
+    }
+
+    // Refused or gone drops the split; another failure keeps it for the next launch.
+    private func fetchSplit(_ thread: ChannelId, of parent: ChannelId) {
+        guard askedSplits.insert(thread).inserted else {
+            return
+        }
+        splitFetch = Task { [weak self] in
+            guard let self else {
+                return
+            }
+            guard let found = try? await account.fetchThread(parentId: parent, threadId: thread),
+                !ended
+            else {
+                return
+            }
+            if !found, splits[parent] == thread {
+                splits[parent] = nil
+                rememberSplits()
+            } else if found, messages?.channelId == parent {
+                syncSplit()
+                updateReading()
+            }
+        }
+    }
+
+    private func rememberSplits() {
+        memory.remember(splits: splits, of: userId)
     }
 
     // Once per session: the cache's state shows the last place before READY.
@@ -623,15 +781,20 @@ public final class SessionModel {
         let list = MessageListModel(
             channelId: channel, userId: userId, account: account, store: store, drafts: drafts)
         list.bottomChanged = { [weak self, weak list] scrolledAway in
-            guard let self, let list, list === self.messages else {
+            guard let self, let list, list === self.messages || list === self.split else {
                 return
             }
             if scrolledAway {
-                engaged = false
+                awayLists.insert(list.channelId)
             }
             updateReading(later: true)
         }
         return list
+    }
+
+    private func engage() {
+        engaged = true
+        awayLists.removeAll()
     }
 
     private func readingOnce(_ body: () -> Void) {
@@ -657,13 +820,15 @@ public final class SessionModel {
         let reads =
             connection == .online && !suspended && engaged && appActive && windowKey
             && windowVisible && !ended
-            && messages?.atPresentBottom == true
-        let channel = reads ? messages?.channelId : nil
-        if channel != nil {
-            messages?.readHere = true
+        let lists = [messages, split].compactMap { $0 }.filter { list in
+            reads && list.atPresentBottom && !awayLists.contains(list.channelId)
         }
-        if channel != reading {
-            reading = channel
+        for list in lists {
+            list.readHere = true
+        }
+        let channels = Set(lists.map(\.channelId))
+        if channels != reading {
+            reading = channels
         }
         if !later {
             pendingReading?.cancel()
@@ -680,13 +845,15 @@ public final class SessionModel {
         }
     }
 
+    // The open channel first, then the split thread.
     private func tellReading() {
-        guard !accountClosed, reading != toldReading || resendReading else {
+        let channels = [messages, split].compactMap { $0?.channelId }.filter(reading.contains)
+        guard !accountClosed, channels != toldReading || resendReading else {
             return
         }
         resendReading = false
-        toldReading = reading
-        account.setReading(channelIds: reading.map { [$0] } ?? [])
+        toldReading = channels
+        account.setReading(channelIds: channels)
     }
 
     private static func showsUnread(_ badge: Badge) -> Bool {
