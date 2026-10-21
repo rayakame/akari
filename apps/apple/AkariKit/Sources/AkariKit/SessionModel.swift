@@ -501,11 +501,19 @@ public final class SessionModel {
         let open = messages?.channelId
         // An open thread stays open when it stops being listed, as in the official client.
         let wasListed = open.flatMap(listed).map { !$0.isThread } ?? false
+        // A thread needs its parent's VIEW_CHANNEL; losing it sends no THREAD_DELETE.
+        let parent = open.flatMap { channels?.channel($0) }.flatMap {
+            $0.isThread ? $0.parentId : nil
+        }
+        let parentWasListed = parent.flatMap(listed) != nil
         servers.apply(batch)
         directMessages.apply(batch)
         channels?.apply(batch)
-        // DMs and threads the list doesn't show leave only when removed.
-        if let open, batch.removedChannels.contains(open) || (wasListed && listed(open) == nil) {
+        // DMs and threads the list doesn't show leave when removed, a thread also with its parent.
+        if let open,
+            batch.removedChannels.contains(open) || (wasListed && listed(open) == nil)
+                || (parentWasListed && parent.flatMap(listed) == nil)
+        {
             engaged = false
             if case .guild(let guildId) = place, let list = channels {
                 openListedChannel(in: list, guildId: guildId)

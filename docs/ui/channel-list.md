@@ -164,7 +164,9 @@ Observed in the official web client on 2026-10-17, with the second account and a
 - **The open thread** (opened full width) always has a row. When it stops being listed (the user
   left or closed it, or read it past its window), the row moves to the top of its parent's
   threads and goes when the user opens something else. An unlisted thread opened full width,
-  such as one the user hasn't joined, gets that row too, selected.
+  such as one the user hasn't joined, gets that row too, selected. When its parent leaves the
+  list (the user can't see it any more, nor its threads), the thread gives way as a hidden
+  channel does: the server's last or first channel opens.
 - **In the split view** (a thread beside its parent) the thread has no row of its own and the
   parent stays selected; leaving the thread there removes its row at once. *Akari: the split
   view comes later.*

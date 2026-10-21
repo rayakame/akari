@@ -537,9 +537,9 @@ window isn't enough. Akari tells the core which channel the user reads
   nothing until the list is back at the bottom, but it counts: once the list is there, reading
   starts without another click.
 
-A list the session opens on its own (the open channel deleted or hidden, its server gone)
-isn't read until the user clicks. After the Mac sleeps, reading resumes with the first click
-or key press after it wakes. Clicks and key presses count only in the session's window; when
+A list the session opens on its own (the open channel or an open thread's parent deleted or
+hidden, its server gone) isn't read until the user clicks. After the Mac sleeps, reading
+resumes with the first click or key press after it wakes. Clicks and key presses count only in the session's window; when
 it closes, Akari stops watching for them, and watches again once it is back, key and visible.
 Akari tells the core only when the channel changes or the connection dropped, and what the
 list reports while it scrolls reaches the core on the next turn of the main loop, once, with
