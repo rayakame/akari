@@ -118,6 +118,35 @@ struct ResizeCursorTests {
         cursor.hover(false)
         #expect((pushes, pops) == (2, 2))
     }
+
+    // Escape, the X, a deleted thread or a narrower page take the gap away under the pointer.
+    @Test
+    func aGapThatGoesAwayPopsItsCursor() async throws {
+        var pops = 0
+        let cursor = ResizeCursor(push: {}, pop: { pops += 1 })
+        let host = NSHostingView(
+            rootView: AnyView(
+                SplitGap(split: SplitWidth(), page: 1200, cursor: cursor)
+                    .frame(width: SplitWidth.gap, height: 100)))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+        cursor.hover(true)
+
+        host.rootView = AnyView(EmptyView())
+        let deadline = ContinuousClock.now + .seconds(5)
+        while pops == 0, ContinuousClock.now < deadline {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(pops == 1)
+        #expect(!cursor.pushed)
+    }
 }
 
 @MainActor

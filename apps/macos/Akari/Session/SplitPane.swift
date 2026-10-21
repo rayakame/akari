@@ -66,7 +66,13 @@ struct SplitGap: View {
     let split: SplitWidth
     let page: CGFloat
     @State private var start: CGFloat?
-    @State private var cursor = ResizeCursor()
+    @State private var cursor: ResizeCursor
+
+    init(split: SplitWidth, page: CGFloat, cursor: ResizeCursor = ResizeCursor()) {
+        self.split = split
+        self.page = page
+        _cursor = State(initialValue: cursor)
+    }
 
     var body: some View {
         Color(nsColor: Palette.frame)
