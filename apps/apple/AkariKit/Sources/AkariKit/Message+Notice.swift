@@ -265,11 +265,17 @@ extension Message {
         }
     }
 
+    /// A call that ended without `reader` among its participants.
+    public func isMissedCall(by reader: UserId?) -> Bool {
+        guard let call, call.endedTimestamp != nil else {
+            return false
+        }
+        return !call.participants.contains { $0 == reader }
+    }
+
     private func callParts(_ actor: NoticePart, in context: NoticeContext) -> [NoticePart] {
         let running = call.map { $0.endedTimestamp == nil } ?? false
-        let missed =
-            !running && call.map { !$0.participants.contains { $0 == context.currentUserId } }
-            == true
+        let missed = isMissedCall(by: context.currentUserId)
         let lasted = lastedFor.map { " that lasted \($0)" } ?? ""
         var parts: [NoticePart] =
             missed

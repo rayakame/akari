@@ -5,6 +5,9 @@ final class NoticeCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("notice")
 
     private let icon = NSImageView()
+    private(set) var shownIcon: NoticeIcon?
+    private var iconWidth: NSLayoutConstraint?
+    private var iconHeight: NSLayoutConstraint?
     private let text = MessageTextView()
     // Built for the first line with a box: buttons cost.
     private var threadBox: ThreadBoxView?
@@ -31,8 +34,11 @@ final class NoticeCell: NSTableCellView {
         identifier = Self.identifier
         text.onLink = { [weak self] url in self?.onLink(url) }
         icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.contentTintColor = Palette.textMuted
-        icon.symbolConfiguration = .init(pointSize: 16, weight: .regular)
+        icon.imageScaling = .scaleProportionallyDown
+        let iconWidth = icon.widthAnchor.constraint(equalToConstant: 16)
+        let iconHeight = icon.heightAnchor.constraint(equalToConstant: 16)
+        self.iconWidth = iconWidth
+        self.iconHeight = iconHeight
         addSubview(icon)
         addSubview(text)
         let textTop = text.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
@@ -44,6 +50,8 @@ final class NoticeCell: NSTableCellView {
             textBottom,
             text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leading),
             text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailing),
+            iconWidth,
+            iconHeight,
             icon.centerXAnchor.constraint(equalTo: leadingAnchor, constant: 36),
             icon.centerYAnchor.constraint(equalTo: text.topAnchor, constant: 11),
         ])
@@ -67,7 +75,7 @@ final class NoticeCell: NSTableCellView {
 
     func configure(
         _ message: Message, notice: [Message.NoticePart], time: String, followsDay: Bool = false,
-        followsLine: Bool = false, fullDate: String,
+        followsLine: Bool = false, fullDate: String, reader: UserId? = nil,
         threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil
     ) {
         if let threadBox {
@@ -80,8 +88,14 @@ final class NoticeCell: NSTableCellView {
         on?.isActive = true
         needsDisplay = true
         textTop?.constant = Self.textTop(followsDay: followsDay, followsLine: followsLine)
-        icon.image = NSImage(
-            systemSymbolName: Self.symbol(message.kind), accessibilityDescription: nil)
+        let shown = NoticeIcon.of(message, reader: reader)
+        if shown != shownIcon {
+            shownIcon = shown
+            icon.image = shown.image
+            icon.contentTintColor = shown.color
+            iconWidth?.constant = shown.size
+            iconHeight?.constant = shown.size
+        }
         text.show(Self.line(notice, time: time, fullDate: fullDate))
     }
 
@@ -164,21 +178,28 @@ final class NoticeCell: NSTableCellView {
         return box
     }
 
-    static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
-        followsLine ? lineTop : followsDay ? dayTop : top
+    /// The icon's box (its alignment rect: a symbol's frame adds its insets), from the cell's top
+    /// left.
+    var iconFrame: NSRect? {
+        let frame = icon.alignmentRect(forFrame: icon.frame)
+        return isFlipped
+            ? frame
+            : NSRect(
+                x: frame.minX, y: bounds.height - frame.maxY, width: frame.width,
+                height: frame.height)
     }
 
-    static func symbol(_ kind: MessageType) -> String {
-        switch kind {
-        case .userJoin: "arrow.right"
-        case .channelPinnedMessage: "pin"
-        case .premiumGuildSubscription, .premiumGuildSubscriptionTier1,
-            .premiumGuildSubscriptionTier2, .premiumGuildSubscriptionTier3:
-            "sparkles"
-        case .call: "phone"
-        case .channelNameChange, .channelIconChange: "pencil"
-        case .threadCreated, .threadStarterMessage: "text.bubble"
-        default: "info.circle"
+    /// Whether the symbol is drawn no larger than the icon's box.
+    var iconFitsItsFrame: Bool {
+        guard let image = icon.image else {
+            return false
         }
+        let scale = min(1, icon.bounds.width / image.size.width, icon.bounds.height / image.size.height)
+        return image.size.width * scale <= icon.bounds.width + 0.01
+            && image.size.height * scale <= icon.bounds.height + 0.01
+    }
+
+    static func textTop(followsDay: Bool, followsLine: Bool) -> CGFloat {
+        followsLine ? lineTop : followsDay ? dayTop : top
     }
 }

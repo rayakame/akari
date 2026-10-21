@@ -174,7 +174,9 @@ struct ThreadViewTests {
                 MessageFormat.groupTime(
                     noon, now: berlinTime(2026, 10, 10, 15, 0), calendar: berlin,
                     locale: .autoupdatingCurrent)))
-        #expect(NoticeCell.symbol(.threadStarterMessage) == "text.bubble")
+        #expect(
+            NoticeIcon.of(row(1, at: noon, kind: .threadStarterMessage).message, reader: nil).symbol
+                == "text.bubble")
     }
 
     @Test

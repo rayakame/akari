@@ -982,7 +982,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 cell.onOpenThread = openThread
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
-                    followsLine: followsLine, fullDate: fullDate, threadBox: boxParts(row))
+                    followsLine: followsLine, fullDate: fullDate,
+                    reader: row.noticeContext.currentUserId, threadBox: boxParts(row))
                 return cell
             }
             let cell =

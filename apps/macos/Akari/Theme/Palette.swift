@@ -24,6 +24,13 @@ enum Palette {
     static let threadBoxFill = token("threadBoxFill", dark: "#242429", light: "#ffffff")
     static let threadBoxBorder = token("threadBoxBorder", dark: "#323237", light: "#e2e2e5")
     static let threadBoxLink = token("threadBoxLink", dark: "#5f94e7", light: "#006dd4")
+    // System lines' icons, from Discord's client: its arrow and call assets carry their colors.
+    static let noticeIn = token("noticeIn", dark: "#3ba55c", light: "#3ba55c")
+    static let noticeOut = token("noticeOut", dark: "#ed4245", light: "#ed4245")
+    static let missedCall = token("missedCall", dark: "#99aab5", light: "#99aab5")
+    static let boost = token("boost", dark: "#ff73fa", light: "#ff73fa")
+    static let warning = token("warning", dark: "#ea9800", light: "#ea9800")
+    static let statusPositive = token("statusPositive", dark: "#3d9e60", light: "#269153")
     static let interactiveText = token("interactiveText", dark: "#abacb2", light: "#595a63")
     static let interactiveTextActive = token(
         "interactiveTextActive", dark: "#fbfbfb", light: "#28282d")
