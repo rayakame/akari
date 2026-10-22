@@ -52,6 +52,7 @@ struct MessageArea: View {
     let go: (ChannelId) -> Void
     // A thread and the channel whose line names it.
     let openThread: (ChannelId, ChannelId) -> Void
+    var openThreads: (ChannelId) -> Void = { _ in }
     let openGuild: (GuildId) -> Void
     // The open channel, as its menu would.
     let markRead: () -> Void
@@ -67,7 +68,8 @@ struct MessageArea: View {
     var body: some View {
         let bridge = MessageListBridge(
             messages: messages, link: link, links: links, go: go, openThread: openThread,
-            openGuild: openGuild, markServerRead: markServerRead, escapeAll: escape)
+            openThreads: openThreads, openGuild: openGuild, markServerRead: markServerRead,
+            escapeAll: escape)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
@@ -139,6 +141,7 @@ final class MessageListBridge: MessageListActions {
     let links: LinkFollower
     let go: (ChannelId) -> Void
     let thread: (ChannelId, ChannelId) -> Void
+    let threads: (ChannelId) -> Void
     let guild: (GuildId) -> Void
     let serverRead: () -> Void
     let escapeAll: (() -> Void)?
@@ -147,6 +150,7 @@ final class MessageListBridge: MessageListActions {
         messages: MessageListModel, link: MessageTableLink, links: LinkFollower,
         go: @escaping (ChannelId) -> Void,
         openThread: @escaping (ChannelId, ChannelId) -> Void = { _, _ in },
+        openThreads: @escaping (ChannelId) -> Void = { _ in },
         openGuild: @escaping (GuildId) -> Void = { _ in },
         markServerRead: @escaping () -> Void,
         escapeAll: (() -> Void)? = nil
@@ -156,6 +160,7 @@ final class MessageListBridge: MessageListActions {
         self.links = links
         self.go = go
         thread = openThread
+        threads = openThreads
         guild = openGuild
         serverRead = markServerRead
         self.escapeAll = escapeAll
@@ -233,6 +238,10 @@ final class MessageListBridge: MessageListActions {
 
     func openThread(_ id: ChannelId, from parent: ChannelId) {
         thread(id, parent)
+    }
+
+    func openThreads(of channel: ChannelId) {
+        threads(channel)
     }
 
     func jump(to message: MessageId) {

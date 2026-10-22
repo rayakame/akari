@@ -114,19 +114,19 @@ struct StartedThreadLineTests {
         #expect(underline() == nil)
     }
 
-    // "See all threads" opens the Threads popover, which comes in a later PR.
+    // "See all threads" opens the Threads modal of the line's channel (amendment 251).
     @Test
-    func threadsIsntALinkYet() throws {
+    func threadsOpensTheChannelsThreads() throws {
+        let actions = MessageTableTests.RecordingActions()
+        list.controller.actions = actions
         let (_, text) = try shown()
-        let threads = try index(of: "threads", in: text)
-        let layout = try #require(text.layoutManager)
+        let link = try #require(try attribute(.link, of: "threads", in: text))
+        #expect((link as? URL)?.absoluteString == "akari://threads")
 
-        text.underline(at: try middle(of: "threads", in: text))
+        actions.calls = []
+        text.clicked(onLink: link, at: try index(of: "threads", in: text))
 
-        #expect(try attribute(.link, of: "threads", in: text) == nil)
-        #expect(
-            layout.temporaryAttribute(
-                .underlineStyle, atCharacterIndex: threads, effectiveRange: nil) == nil)
+        #expect(actions.calls == ["threads of 10"])
     }
 
     // Both lines observed draw their actor so (TB3.4); every notice does, in the same gray.

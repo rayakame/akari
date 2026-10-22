@@ -119,6 +119,7 @@ struct SessionScreen: View {
                 openThread: { [session] thread, parent in
                     Task { await session.openBeside(thread: thread, from: parent) }
                 },
+                openThreads: { [session] in session.openThreadBrowser(of: $0, as: .modal) },
                 openGuild: { [session] in session.open(.guild($0)) },
                 markRead: { [session] in session.markRead(channel: messages.channelId) },
                 markServerRead: { [session] in session.markServerRead() },

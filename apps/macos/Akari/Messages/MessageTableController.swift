@@ -428,6 +428,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.openLink(url, masked: false)
             return
         }
+        if url.host() == "threads" {
+            actions?.openThreads(of: row.message.channelId)
+            return
+        }
         guard let value = url.pathComponents.last.flatMap({ UInt64($0) }) else {
             return
         }
