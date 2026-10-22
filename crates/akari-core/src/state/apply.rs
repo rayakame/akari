@@ -742,6 +742,8 @@ impl State {
                     .and_then(model::Nonce::as_u64)
                     .map(MessageId::new);
                 self.put_threads_of(std::slice::from_ref(&message), events);
+                // A message in a thread kept across READY shows it's still there.
+                self.unconfirmed.remove(&channel);
                 let boxed = self.count_created(&message) | self.note_live_latest(&message);
                 if boxed {
                     self.reread_boxes(channel, events);

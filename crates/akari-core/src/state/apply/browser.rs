@@ -79,11 +79,15 @@ impl State {
             {
                 continue;
             }
+            // A READY may have kept it after it was deleted or unarchived meanwhile.
+            if self.unconfirmed.contains(&id) {
+                continue;
+            }
             if info.archived {
                 if cut.is_some_and(|cut| newest(channel) >= cut) {
                     browser.archived.push(channel.clone());
                 }
-            } else if !self.unconfirmed.contains(&id) {
+            } else {
                 if info.joined() {
                     browser.joined.push(channel.clone());
                 } else {
@@ -101,13 +105,18 @@ impl State {
         browser
     }
 
-    pub(crate) fn begin_older_threads(&mut self, parent: ChannelId) -> Option<OlderPage> {
+    pub(crate) fn begin_older_threads(
+        &mut self,
+        parent: ChannelId,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<OlderPage> {
         let generation = self.older_generation;
         let pages = self.older.entry(parent).or_default();
         if !matches!(pages.state, OlderThreads::NotLoaded | OlderThreads::More) {
             return None;
         }
         pages.state = OlderThreads::Loading;
+        events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
         Some(OlderPage {
             offset: pages.offset,
             generation,
@@ -127,6 +136,7 @@ impl State {
         if page.generation != self.older_generation {
             return;
         }
+        events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
         let pages = self.older.entry(parent).or_default();
         if found.is_none() {
             pages.state = OlderThreads::Failed;
@@ -144,9 +154,36 @@ impl State {
         };
     }
 
-    pub(crate) fn fail_older_threads(&mut self, parent: ChannelId, page: OlderPage) {
+    pub(crate) fn fail_older_threads(
+        &mut self,
+        parent: ChannelId,
+        page: OlderPage,
+        events: &mut Vec<StoreEvent>,
+    ) {
         if page.generation == self.older_generation {
             self.older.entry(parent).or_default().state = OlderThreads::Failed;
+            events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
+        }
+    }
+
+    // The request was dropped before Discord answered: the page can be asked for again.
+    pub(crate) fn abandon_older_threads(
+        &mut self,
+        parent: ChannelId,
+        page: OlderPage,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if page.generation != self.older_generation {
+            return;
+        }
+        let pages = self.older.entry(parent).or_default();
+        if pages.state == OlderThreads::Loading {
+            pages.state = if pages.offset == 0 {
+                OlderThreads::NotLoaded
+            } else {
+                OlderThreads::More
+            };
+            events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
         }
     }
 

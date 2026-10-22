@@ -68,6 +68,11 @@ pub enum StoreEvent {
         parent_id: ChannelId,
         thread_id: ChannelId,
     },
+    /// Loading the channel's archived threads moved on: a page began, came, failed or was given
+    /// up. Read [`Store::thread_browser`](super::Store::thread_browser) again.
+    OlderThreadsChanged {
+        parent_id: ChannelId,
+    },
     /// Discord refused the thread a line in the guild names, or it is gone: see
     /// [`Store::thread_unavailable`](super::Store::thread_unavailable).
     ThreadUnavailable {

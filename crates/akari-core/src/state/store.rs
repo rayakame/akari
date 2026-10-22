@@ -500,8 +500,8 @@ impl Store {
     }
 
     pub(crate) fn begin_older_threads(&self, parent: ChannelId) -> Option<OlderPage> {
-        self.write("older threads", |inner, _| {
-            inner.state.begin_older_threads(parent)
+        self.write("older threads", |inner, events| {
+            inner.state.begin_older_threads(parent, events)
         })
     }
 
@@ -519,8 +519,14 @@ impl Store {
     }
 
     pub(crate) fn fail_older_threads(&self, parent: ChannelId, page: OlderPage) {
-        self.write("older threads", |inner, _| {
-            inner.state.fail_older_threads(parent, page);
+        self.write("older threads", |inner, events| {
+            inner.state.fail_older_threads(parent, page, events);
+        });
+    }
+
+    pub(crate) fn abandon_older_threads(&self, parent: ChannelId, page: OlderPage) {
+        self.write("older threads", |inner, events| {
+            inner.state.abandon_older_threads(parent, page, events);
         });
     }
 

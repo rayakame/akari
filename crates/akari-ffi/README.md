@@ -102,8 +102,9 @@ failure or Discord's "not indexed yet" until the next connection. `Account.searc
 name)` returns Discord's first 25 matches by name, active and archived, in its order (`None`
 while Discord hasn't indexed the channel), and keeps them in the store. `ThreadActivity {
 guild_id, parent_id, thread_id }` comes when a thread's newest or latest message changes, so a
-browser reorders; its threads' `ChannelAdded`, `ChannelUpdated` and `ChannelRemoved` say the
-rest.
+browser reorders, `OlderThreadsChanged { parent_id }` when its archived pages move on (began,
+came, failed, given up); its threads' `ChannelAdded`, `ChannelUpdated` and `ChannelRemoved` say
+the rest.
 
 Acks: `set_reading(channel_ids)` names the channels the user is reading at their newest
 messages: none, one, or two in the split view (a channel and the thread beside it; further ones

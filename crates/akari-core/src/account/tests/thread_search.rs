@@ -228,3 +228,25 @@ async fn a_failed_search_is_an_error() {
             .is_err()
     );
 }
+
+// A Rust caller can drop the request, e.g. in a select! or a timeout.
+#[tokio::test]
+async fn a_dropped_page_request_can_ask_again() {
+    let slow = found(Vec::new(), false).set_delay(Duration::from_millis(500));
+    let online = online_answering(vec![slow, found(vec![thread(OLD_A, true)], false)]).await;
+
+    let dropped = timeout(
+        Duration::from_millis(50),
+        online.account.load_older_threads(general()),
+    )
+    .await;
+    assert!(
+        dropped.is_err(),
+        "the first request should still be waiting"
+    );
+    assert_eq!(online.older(), OlderThreads::NotLoaded);
+
+    online.account.load_older_threads(general()).await.unwrap();
+
+    assert_eq!(online.archived(), vec![OLD_A]);
+}

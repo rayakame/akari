@@ -62,7 +62,9 @@ fn sections(state: &State) -> (Vec<u64>, Vec<u64>, Vec<u64>) {
 
 fn load(state: &mut State, threads: Vec<Value>, has_more: bool) -> Vec<String> {
     let parent = Snowflake::new(GENERAL);
-    let started = state.begin_older_threads(parent).expect("a page can load");
+    let started = state
+        .begin_older_threads(parent, &mut Vec::new())
+        .expect("a page can load");
     let mut events = Vec::new();
     state.finish_older_threads(parent, started, page(threads, has_more), &mut events);
     events.iter().map(describe).collect()
@@ -390,7 +392,7 @@ fn ready_clears_the_pages() {
 fn a_page_ready_overtook_keeps_its_threads_but_not_its_place() {
     let mut state = ready_state();
     let parent = Snowflake::new(GENERAL);
-    let started = state.begin_older_threads(parent).unwrap();
+    let started = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
     apply(&mut state, "READY", ready_value());
 
     state.finish_older_threads(
@@ -412,10 +414,10 @@ fn only_one_page_loads_at_a_time_and_none_after_the_last() {
     let mut state = ready_state();
     let parent = Snowflake::new(GENERAL);
 
-    let first = state.begin_older_threads(parent).unwrap();
+    let first = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
     assert_eq!(first.offset, 0);
     assert_eq!(browser(&state).older, OlderThreads::Loading);
-    assert!(state.begin_older_threads(parent).is_none());
+    assert!(state.begin_older_threads(parent, &mut Vec::new()).is_none());
 
     state.finish_older_threads(
         parent,
@@ -426,28 +428,30 @@ fn only_one_page_loads_at_a_time_and_none_after_the_last() {
         ),
         &mut Vec::new(),
     );
-    let second = state.begin_older_threads(parent).unwrap();
+    let second = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
     assert_eq!(second.offset, 25);
     state.finish_older_threads(parent, second, page(Vec::new(), false), &mut Vec::new());
 
-    assert!(state.begin_older_threads(parent).is_none());
+    assert!(state.begin_older_threads(parent, &mut Vec::new()).is_none());
 }
 
 #[test]
 fn a_failed_or_unindexed_page_fails_the_section() {
     let parent = Snowflake::new(GENERAL);
     let mut failed = with_old_threads();
-    let started = failed.begin_older_threads(parent).unwrap();
-    failed.fail_older_threads(parent, started);
+    let started = failed.begin_older_threads(parent, &mut Vec::new()).unwrap();
+    failed.fail_older_threads(parent, started, &mut Vec::new());
 
     let mut unindexed = with_old_threads();
-    let started = unindexed.begin_older_threads(parent).unwrap();
+    let started = unindexed
+        .begin_older_threads(parent, &mut Vec::new())
+        .unwrap();
     unindexed.finish_older_threads(parent, started, not_indexed(), &mut Vec::new());
 
     for state in [&mut failed, &mut unindexed] {
         assert_eq!(browser(state).older, OlderThreads::Failed);
         assert!(sections(state).2.is_empty());
-        assert!(state.begin_older_threads(parent).is_none());
+        assert!(state.begin_older_threads(parent, &mut Vec::new()).is_none());
     }
 }
 
@@ -610,5 +614,85 @@ fn a_threads_starter_message_is_thread_activity_too() {
     assert!(
         events.contains(&format!("ThreadActivity({GENERAL}, {THREAD})")),
         "{events:?}"
+    );
+}
+
+// Deleted or unarchived while Akari was away: a page after the READY would bring it again.
+#[test]
+fn archived_threads_kept_by_ready_wait_for_a_page_too() {
+    let mut state = with_old_threads();
+    apply(&mut state, "READY", ready_value());
+
+    load(
+        &mut state,
+        vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+        false,
+    );
+
+    assert_eq!(sections(&state).2, vec![OLD_X]);
+}
+
+#[test]
+fn a_live_message_confirms_a_kept_thread() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        thread_object(ACTIVE_A, Some(400_000_000_000_000_040), false),
+    );
+    apply(&mut state, "READY", ready_value());
+
+    let mut message = message(400_000_000_000_000_062, ACTIVE_A);
+    message.as_object_mut().unwrap().remove("guild_id");
+    apply(&mut state, "MESSAGE_CREATE", message);
+
+    assert_eq!(sections(&state).1, vec![ACTIVE_A]);
+}
+
+#[test]
+fn every_change_of_a_channels_pages_is_reported() {
+    let mut state = ready_state();
+    let parent = Snowflake::new(GENERAL);
+    let changed = format!("OlderThreadsChanged({GENERAL})");
+
+    let mut events = Vec::new();
+    let first = state.begin_older_threads(parent, &mut events).unwrap();
+    assert_eq!(
+        events.iter().map(describe).collect::<Vec<_>>(),
+        vec![changed.clone()]
+    );
+
+    let mut events = Vec::new();
+    state.finish_older_threads(parent, first, page(Vec::new(), true), &mut events);
+    assert!(
+        events.iter().map(describe).any(|event| event == changed),
+        "{events:?}"
+    );
+
+    let second = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+    let mut events = Vec::new();
+    state.fail_older_threads(parent, second, &mut events);
+    assert_eq!(
+        events.iter().map(describe).collect::<Vec<_>>(),
+        vec![changed]
+    );
+}
+
+#[test]
+fn an_abandoned_page_can_be_asked_for_again() {
+    let mut state = ready_state();
+    let parent = Snowflake::new(GENERAL);
+    let first = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+    state.finish_older_threads(parent, first, page(Vec::new(), true), &mut Vec::new());
+    let second = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+
+    state.abandon_older_threads(parent, second, &mut Vec::new());
+
+    assert_eq!(browser(&state).older, OlderThreads::More);
+    assert_eq!(
+        state
+            .begin_older_threads(parent, &mut Vec::new())
+            .map(|page| page.offset),
+        Some(25)
     );
 }

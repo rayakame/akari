@@ -159,8 +159,9 @@ impl Store {
 
     /// What a channel's Threads browser lists, as Discord's client shows it: the active threads
     /// the user can see, joined or not, and the archived ones `Account::load_older_threads`
-    /// reached, each the newest message first. `ThreadActivity`, `ChannelAdded`,
-    /// `ChannelUpdated` and `ChannelRemoved` for its threads say when to read it again.
+    /// reached, each the newest message first. `ThreadActivity`, `OlderThreadsChanged`,
+    /// `ChannelAdded`, `ChannelUpdated` and `ChannelRemoved` for its threads say when to read it
+    /// again.
     pub fn thread_browser(&self, parent_id: ChannelId) -> ThreadBrowser {
         self.core.thread_browser(parent_id).into()
     }

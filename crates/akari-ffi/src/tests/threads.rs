@@ -675,3 +675,21 @@ async fn thread_activity_reaches_the_subscription() {
     }));
     account.close();
 }
+
+#[tokio::test]
+async fn a_page_of_older_threads_reaches_the_subscription() {
+    let (account, _server, _ws) = searching(json!({
+        "threads": [archived_thread(OLD)], "members": [], "has_more": false, "total_results": 1
+    }))
+    .await;
+    let subscription = account.store().subscribe();
+
+    account.load_older_threads(GENERAL).await.unwrap();
+    let events = events_until(&subscription, |event| {
+        matches!(event, StoreEvent::OlderThreadsChanged { .. })
+    })
+    .await;
+
+    assert!(events.contains(&StoreEvent::OlderThreadsChanged { parent_id: GENERAL }));
+    account.close();
+}

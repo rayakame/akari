@@ -142,6 +142,11 @@ pub enum StoreEvent {
         parent_id: ChannelId,
         thread_id: ChannelId,
     },
+    /// Loading `parent_id`'s archived threads moved on (a page began, came or failed): read
+    /// `Store::thread_browser` again.
+    OlderThreadsChanged {
+        parent_id: ChannelId,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -253,6 +258,7 @@ impl StoreEvent {
                 parent_id,
                 thread_id,
             },
+            E::OlderThreadsChanged { parent_id } => Self::OlderThreadsChanged { parent_id },
             E::ChannelAdded(channel) => Self::ChannelAdded {
                 channel_id: channel.id,
                 guild_id: channel.guild_id,

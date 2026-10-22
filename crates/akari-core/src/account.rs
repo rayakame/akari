@@ -79,6 +79,21 @@ impl ThreadLocation {
     }
 }
 
+// A page of archived threads asked for and not settled: dropping the request gives it up.
+struct PendingPage<'a> {
+    store: &'a Store,
+    parent: ChannelId,
+    page: Option<crate::state::OlderPage>,
+}
+
+impl Drop for PendingPage<'_> {
+    fn drop(&mut self) {
+        if let Some(page) = self.page.take() {
+            self.store.abandon_older_threads(self.parent, page);
+        }
+    }
+}
+
 fn kind_name(kind: LoadKind) -> &'static str {
     match kind {
         LoadKind::Latest => "latest",
@@ -1080,6 +1095,11 @@ impl Account {
         let Some(page) = shared.store.begin_older_threads(parent) else {
             return Ok(());
         };
+        let mut pending = PendingPage {
+            store: &shared.store,
+            parent,
+            page: Some(page),
+        };
         let query = format!(
             "archived=true&sort_by=last_message_time&sort_order=desc&limit={OLDER_PAGE}\
              &tag_setting=match_some&offset={}",
@@ -1095,6 +1115,7 @@ impl Account {
                     more = results.has_more,
                     "archived threads loaded"
                 );
+                pending.page = None;
                 shared.store.finish_older_threads(parent, page, results);
                 Ok(())
             }
@@ -1107,6 +1128,7 @@ impl Account {
                     "archived threads failed"
                 );
                 shared.failed(&err);
+                pending.page = None;
                 shared.store.fail_older_threads(parent, page);
                 Err(err)
             }
