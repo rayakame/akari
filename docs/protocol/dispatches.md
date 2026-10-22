@@ -181,7 +181,10 @@ again on the next click. An answer for a thread the gateway brought meanwhile ch
 The request is logged at `akari_core::load` (the thread's ID and the outcome). Whether the
 official client fetches such a thread this way isn't observed. READY lists only joined threads,
 so a later READY keeps a thread fetched this session while its guild and parent are there, also
-one fetched while the READY was prepared.
+one fetched while the READY was prepared. `Account::check_thread` asks the same even when the
+store has the thread: for a split view remembered from an earlier session, which the cache may
+have kept after the thread was deleted or hidden. A 403 or 404 then also drops the thread from
+the store, with `ChannelRemoved`, as THREAD_DELETE would.
 
 **Joining and leaving** (observed 2026-10-17): `Account::join_thread` sends
 `POST /channels/{thread}/thread-members/@me?location=…` (the docs say PUT; the official client

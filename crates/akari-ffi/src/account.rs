@@ -69,13 +69,14 @@ impl Account {
         self.core.view_channel(channel_id);
     }
 
-    /// The channel the user is reading at its newest messages, or `None`. While set, the
-    /// channel is acked up to the newest message its list shows at the present, and again as
-    /// that list grows, paced. Hosts set it only while the user is engaged with the channel at
-    /// the bottom of its list. A dropped connection clears it: set it again once online and the
-    /// list is refreshed.
-    pub fn set_reading(&self, channel_id: Option<ChannelId>) {
-        self.core.set_reading(channel_id);
+    /// The channels the user is reading at their newest messages, at most two (a channel and
+    /// the thread beside it); further ones are ignored, and an empty list reads none. Each is
+    /// acked up to the newest message its list shows at the present, and again as that list
+    /// grows, paced per channel. Hosts name a channel only while the user is engaged with it at
+    /// the bottom of its list. A dropped connection clears them: set them again once online and
+    /// the lists are refreshed.
+    pub fn set_reading(&self, channel_ids: Vec<ChannelId>) {
+        self.core.set_reading(&channel_ids);
     }
 
     /// Marks the channel read now (Escape, the context menu).
@@ -127,6 +128,23 @@ impl Account {
         let core = self.core.clone();
         run(self.runtime, async move {
             core.fetch_thread(parent_id, thread_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Asks Discord about a thread the store may already have, e.g. a split view remembered from
+    /// an earlier session: like `fetch_thread`, but it asks even then. Returns whether the store
+    /// has it now; when Discord refuses it or it is gone, the store also drops it
+    /// (`ChannelRemoved`).
+    pub async fn check_thread(
+        &self,
+        parent_id: ChannelId,
+        thread_id: ChannelId,
+    ) -> Result<bool, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.check_thread(parent_id, thread_id).await
         })
         .await
         .map_err(Into::into)

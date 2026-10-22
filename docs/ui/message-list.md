@@ -154,8 +154,9 @@ thread, a renamed channel, and so on) show as one line:
 **A new thread** posts "Ray started a thread: t2. See all threads." in the channel (observed
 2026-10-17 and 2026-10-19): "Ray", "t2" and "threads" in `textStrong` (#FBFBFB) and medium, the
 rest in `chatTextMuted` (#818289), all three links with the pointing hand and an underline while
-the pointer is over them. The thread's name opens the thread, "threads" the channel's Threads
-popover, and "Ray" the profile (**unverified**). *Akari: the name opens the thread full width.
+the pointer is over them. The thread's name opens the thread beside the channel, in the split
+view ([layout.md](layout.md#split-view)), "threads" the channel's Threads popover, and "Ray"
+the profile (**unverified**). *Akari: the name opens the split view.
 A thread Akari doesn't have, such as one archived since, is fetched first
 ([dispatches.md](../protocol/dispatches.md#threads)); if Discord refuses it or it's gone, the
 name stays strong text without the link. "Ray" and "threads" are drawn the same but aren't
@@ -374,8 +375,9 @@ box at once.*
   before the box.
 - **Clicks:** the whole box is one button with the pointing hand; only the count underlines
   while hovered, the background doesn't change; the author's avatar and name do nothing.
-  Clicking opens the thread. *Akari: full width; the official client opens it beside its
-  parent, which comes with the split view.*
+  Clicking opens the thread beside the channel, in the split view
+  ([layout.md](layout.md#split-view)); another box replaces the thread there, and the box of
+  the thread already there keeps it.
 - *Not built yet:* the content's trailing icons, poll questions as content, voice messages'
   placeholder, blocked and ignored authors, server nicknames and role colors for the author.
 
@@ -515,8 +517,10 @@ Akari's bar:
 
 What the official client showed (Q12d-f above, 2026-10-15): after a break it acks only on a
 click or key press in the client; scrolling back down, focusing the browser or restoring the
-window isn't enough. Akari tells the core which channel the user reads
-([read-states.md](../protocol/read-states.md#how-akari-acks)) only while all of these hold:
+window isn't enough. In the split view it reads both lists at once, whichever was clicked last
+(observed 2026-10-17). Akari tells the core which channels the user reads
+([read-states.md](../protocol/read-states.md#how-akari-acks)): the open channel, and the split
+thread beside it, each only while all of these hold:
 
 - the session is online, and the list's refresh after READY is in (the list isn't stale).
   The core stops reading whenever the connection drops, a resume included, and Akari sets the
@@ -525,7 +529,8 @@ window isn't enough. Akari tells the core which channel the user reads
 - the list is at the present and scrolled to its bottom;
 - the user is engaged: opening the channel (also the one already open), reopening the last
   place at launch, a click or a key press in the window; scroll-wheel events don't engage.
-  Scrolling clearly away from the bottom ends it: the user's own scrolls toward older
+  Scrolling clearly away from the bottom ends it for that list (the other one in the split
+  view keeps reading): the user's own scrolls toward older
   messages, counted from the bottom, add up to more than 48 or a quarter of the list's visible
   height, whichever is larger. That is looser than the 2 that keep the list at the bottom
   ([Layout](#layout)): a shorter scroll or a trackpad's bounce only pauses reading until the
@@ -538,10 +543,12 @@ window isn't enough. Akari tells the core which channel the user reads
   starts without another click.
 
 A list the session opens on its own (the open channel or an open thread's parent deleted or
-hidden, its server gone) isn't read until the user clicks. After the Mac sleeps, reading
+hidden, its server gone), or a split thread it shows on its own after READY (a remembered
+thread Discord answered for after a relaunch, a batch bringing it), isn't read until the user
+clicks or presses a key. After the Mac sleeps, reading
 resumes with the first click or key press after it wakes. Clicks and key presses count only in the session's window; when
 it closes, Akari stops watching for them, and watches again once it is back, key and visible.
-Akari tells the core only when the channel changes or the connection dropped, and what the
+Akari tells the core only when the channels change or the connection dropped, and what a
 list reports while it scrolls reaches the core on the next turn of the main loop, once, with
 the last value.
 

@@ -345,6 +345,16 @@ public final class MessageListModel {
         messageJump = MessageJump(messageId: messageId, number: messageJumps)
     }
 
+    // The official client's Escape closes the split when neither list has any, scrolled up or
+    // with a line too (amendment 248).
+    var escapeHasWork: Bool {
+        if !atPresent || store.window(channelId: channelId)?.latest == false {
+            return true
+        }
+        let badge = store.channelBadges(ids: [channelId]).first?.badge
+        return badge.map { $0.unread || $0.mentions > 0 } ?? false
+    }
+
     // A jump landing after the user left would reopen the channel in history, without its scroll.
     func retire() {
         retired = true

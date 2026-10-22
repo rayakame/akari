@@ -6,6 +6,7 @@ struct SessionView<MessageArea: View>: View {
     var warning: AppModel.Warning?
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
+    var splitWidth = SplitWidth.shared
     @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
 
@@ -17,11 +18,14 @@ struct SessionView<MessageArea: View>: View {
             if warning == .tokenNotSaved, let warning {
                 WarningLine(text: warning.text, dismiss: dismissWarning)
             }
-            HStack(spacing: 0) {
-                sidebar.frame(width: sidebarWidth)
-                page
+            GeometryReader { geometry in
+                let pageWidth = geometry.size.width - sidebarWidth
+                HStack(spacing: 0) {
+                    sidebar.frame(width: sidebarWidth)
+                    page(width: pageWidth)
+                }
+                .overlay(alignment: .topLeading) { headerLine(pageWidth: pageWidth) }
             }
-            .overlay(alignment: .topLeading) { headerLine }
         }
         .ignoresSafeArea(edges: .top)
         .navigationTitle(windowTitle.text)
@@ -38,21 +42,29 @@ struct SessionView<MessageArea: View>: View {
         }
     }
 
-    // The full view's "…" offers joining or leaving the open thread (Toolbar Overflow).
-    private var membership: ChannelHeader.Membership? {
+    private var threadMenu: ThreadMenu? {
         guard let open = openChannel, open.isThread,
             let item = session.membershipItem(for: open.id)
         else {
             return nil
         }
-        return ChannelHeader.Membership(item: item) { [session] in
-            Task {
-                if item.joins {
-                    await session.join(thread: open.id, from: .toolbarOverflow)
+        return .fullView(membership: item, splittable: openParent?.opensMessageList == true)
+    }
+
+    private func act(_ item: ThreadMenu.Item, on thread: ChannelId, in menu: ThreadMenu) {
+        switch item {
+        case .membership(let membership):
+            Task { [session] in
+                if membership.joins {
+                    await session.join(thread: thread, from: menu.location)
                 } else {
-                    await session.leave(thread: open.id, from: .toolbarOverflow)
+                    await session.leave(thread: thread, from: menu.location)
                 }
             }
+        case .openInSplitView:
+            session.openInSplitView()
+        case .openInFullView:
+            session.openInFullView()
         }
     }
 
@@ -77,12 +89,17 @@ struct SessionView<MessageArea: View>: View {
     }
 
     // One line under the server and channel headers; it starts where the channel list does, so
-    // resizing the sidebar can't break it.
-    private var headerLine: some View {
-        Rectangle()
+    // resizing the sidebar can't break it. The split draws its own.
+    private func headerLine(pageWidth: CGFloat) -> some View {
+        let shown = splitWidth.shown(in: pageWidth)
+        let trailing: CGFloat =
+            session.split == nil || session.splitChannel == nil
+            ? 0 : SplitWidth.floats(in: pageWidth) ? shown : SplitWidth.gap + shown + 1
+        return Rectangle()
             .fill(Color(nsColor: Palette.borderSubtle))
             .frame(height: 1)
             .padding(.leading, hasListHeader ? SidebarWidth.rail + 1 : sidebarWidth)
+            .padding(.trailing, trailing)
             .offset(y: ChannelHeader.height)
             .allowsHitTesting(false)
     }
@@ -104,11 +121,110 @@ struct SessionView<MessageArea: View>: View {
         }
     }
 
-    private var page: some View {
+    // Each card keeps one place in the tree, so opening, closing or floating the split never
+    // rebuilds a list: a docked split's room is held by a clear frame under it.
+    private func page(width: CGFloat) -> some View {
+        let open = session.split.flatMap { split in session.splitChannel.map { (split, $0) } }
+        let floats = SplitWidth.floats(in: width)
+        let shown = splitWidth.shown(in: width)
+        return ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                channelCard(docked: open != nil && !floats)
+                if open != nil, !floats {
+                    SplitGap(split: splitWidth, page: width)
+                    Color.clear.frame(width: shown)
+                }
+            }
+            if open != nil, floats {
+                // Only the shadow is clipped to the page: clipping a card would clip its tables.
+                UnevenRoundedRectangle(topLeadingRadius: SplitCardEdge.radius)
+                    .fill(Color.black)
+                    .shadow(color: .black.opacity(0.52), radius: 20, y: 8)
+                    .frame(width: shown)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .clipped()
+                    .allowsHitTesting(false)
+            }
+            if let open {
+                splitCard(open.0, thread: open.1, floating: floats)
+                    .frame(width: shown)
+            }
+        }
+        .background(Color(nsColor: Palette.frame), ignoresSafeAreaEdges: [])
+    }
+
+    private func channelCard(docked: Bool) -> some View {
+        main
+            // A background reaches into the title bar by default, over the strip.
+            .background(Color(nsColor: Palette.chat), ignoresSafeAreaEdges: [])
+            // The top edge of the list's frame runs on over the page, in the same color: the
+            // official line is one color across the window, so it's laid over the frame's.
+            .overlay(alignment: .top) {
+                // Not a background: that would reach up into the title bar, over the title.
+                ZStack {
+                    Color(nsColor: Palette.frame)
+                    Color(nsColor: Palette.frameBorder)
+                }
+                .frame(height: 1)
+            }
+            .overlay {
+                if docked {
+                    ZStack {
+                        CornerCap(corner: .topTrailing).fill(Color(nsColor: Palette.frame))
+                        ChannelCardEdge().stroke(Color(nsColor: Palette.frame), lineWidth: 1)
+                        ChannelCardEdge().stroke(Color(nsColor: Palette.frameBorder), lineWidth: 1)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+    }
+
+    private func splitCard(
+        _ split: MessageListModel, thread: Channel, floating: Bool
+    ) -> some View {
+        VStack(spacing: 0) {
+            SplitHeader(
+                thread: thread, menu: splitMenu,
+                act: { item in
+                    if let menu = splitMenu {
+                        act(item, on: thread.id, in: menu)
+                    }
+                }, openFullView: session.openInFullView, close: session.closeSplit)
+            messageArea(
+                split,
+                ChannelName(kind: .thread(owner: split.threadOwner), name: thread.name ?? ""))
+        }
+        .background(Color(nsColor: Palette.chat), ignoresSafeAreaEdges: [])
+        // The top border lies over the header's first point, as the channel's top line does.
+        .padding(.horizontal, 1)
+        .overlay {
+            ZStack {
+                CornerCap(corner: .topLeading)
+                    .fill(Color(nsColor: floating ? Palette.chat : Palette.frame))
+                SplitCardEdge().stroke(Color(nsColor: Palette.frame), lineWidth: 1)
+                SplitCardEdge()
+                    .stroke(
+                        Color(nsColor: floating ? Palette.chat : Palette.frameBorder),
+                        lineWidth: 1)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var splitMenu: ThreadMenu? {
+        .splitView(of: session)
+    }
+
+    private var main: some View {
         VStack(spacing: 0) {
             ChannelHeader(
                 channel: openChannel, name: openName, parent: openParent,
-                openParent: session.openParent, membership: membership)
+                openParent: session.openParent, menu: threadMenu
+            ) { item in
+                if let open = openChannel, let menu = threadMenu {
+                    act(item, on: open.id, in: menu)
+                }
+            }
             if let messages = session.messages {
                 messageArea(messages, channelName)
             } else if session.currentUser == nil {
@@ -119,18 +235,7 @@ struct SessionView<MessageArea: View>: View {
                 EmptyState(text: "No text channels you can see here")
             }
         }
-        // A background reaches into the title bar by default, over the strip.
-        .background(Color(nsColor: Palette.chat), ignoresSafeAreaEdges: [])
-        // The top edge of the list's frame runs on over the page, in the same color: the
-        // official line is one color across the window, so it's laid over the frame's.
-        .overlay(alignment: .top) {
-            // Not a background: that would reach up into the title bar, over the title.
-            ZStack {
-                Color(nsColor: Palette.frame)
-                Color(nsColor: Palette.frameBorder)
-            }
-            .frame(height: 1)
-        }
+        .frame(maxWidth: .infinity)
     }
 
     private var windowTitle: WindowTitle {

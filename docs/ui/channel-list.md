@@ -167,9 +167,12 @@ Observed in the official web client on 2026-10-17, with the second account and a
   such as one the user hasn't joined, gets that row too, selected. When its parent leaves the
   list (the user can't see it any more, nor its threads), the thread gives way as a hidden
   channel does: the server's last or first channel opens.
-- **In the split view** (a thread beside its parent) the thread has no row of its own and the
-  parent stays selected; leaving the thread there removes its row at once. *Akari: the split
-  view comes later.*
+- **In the split view** (a thread beside its parent, [layout.md](layout.md#split-view)) the
+  thread has no row of its own and the parent stays selected, whether the thread is joined or
+  not; a joined thread keeps its ordinary listed row, never highlighted. Leaving the thread
+  there removes its row at once (observed 2026-10-17). A thread's row opens it full width and
+  closes its channel's split for good, and so does clicking the open channel's own row
+  (Discord's web client, read 2026-10-21; the second inferred from its router).
 - **The row's menu:** Mark As Read (disabled when read) | Leave Thread, Copy Link |
   Mute Thread ›, Notification Settings › | Copy Thread ID. The official client's thread menu
   offers Join Thread instead for a thread the user isn't in, such as the open one's row.

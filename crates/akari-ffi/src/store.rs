@@ -230,8 +230,8 @@ impl Store {
         messages
     }
 
-    /// Whether `Account.fetch_thread` found this session that the user can't see the thread, or
-    /// that it is gone.
+    /// Whether `Account.fetch_thread` or `check_thread` found this session that the user can't
+    /// see the thread, or that it is gone.
     pub fn thread_unavailable(&self, thread_id: ChannelId) -> bool {
         self.core.thread_unavailable(thread_id)
     }

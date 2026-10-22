@@ -71,9 +71,9 @@ final class ReadingSignalsTests {
     func aScrollWheelEventDoesntEngageWhileAMouseDownDoes() throws {
         let signals = signals()
         let channel = try #require(session.messages?.channelId)
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
         leaveAndComeBack()
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         let wheel = try #require(
             CGEvent(
@@ -81,11 +81,11 @@ final class ReadingSignalsTests {
                 wheel2: 0, wheel3: 0
             ).flatMap(NSEvent.init(cgEvent:)))
         signals.handle(wheel)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         #expect(!ReadingSignals.engages(wheel.type))
 
         signals.handle(try click(in: window))
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     @Test
@@ -98,7 +98,7 @@ final class ReadingSignalsTests {
             backing: .buffered, defer: false)
 
         signals.handle(try click(in: other))
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
 
         let key = try #require(
             NSEvent.keyEvent(
@@ -106,7 +106,7 @@ final class ReadingSignalsTests {
                 windowNumber: window.windowNumber, context: nil, characters: "a",
                 charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0))
         signals.handle(key)
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     @Test
@@ -116,16 +116,16 @@ final class ReadingSignalsTests {
 
         visible = false
         center.post(name: NSWindow.didMiniaturizeNotification, object: window)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         visible = true
         center.post(name: NSWindow.didDeminiaturizeNotification, object: window)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         signals.handle(try click(in: window))
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
 
         visible = false
         center.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
     }
 
     @Test
@@ -136,7 +136,7 @@ final class ReadingSignalsTests {
 
         center.post(name: NSWindow.didResignKeyNotification, object: NSWindow())
 
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     // Another user's session takes the screen, and the user comes back to theirs.
@@ -146,12 +146,12 @@ final class ReadingSignalsTests {
         let channel = try #require(session.messages?.channelId)
 
         workspace.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         workspace.post(name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
-        #expect(session.reading == nil, "not before a click or a key")
+        #expect(session.reading.isEmpty, "not before a click or a key")
 
         signals.handle(try click(in: window))
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     // Events the app dispatches reach the monitor before any window.
@@ -167,13 +167,13 @@ final class ReadingSignalsTests {
         leaveAndComeBack()
         NSApp.sendEvent(try rightClick(in: other))
         NSApp.sendEvent(try keyDown(in: other))
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         NSApp.sendEvent(try rightClick(in: window))
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
 
         leaveAndComeBack()
         NSApp.sendEvent(try keyDown(in: window))
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     @Test
@@ -184,7 +184,7 @@ final class ReadingSignalsTests {
         center.post(name: NSWindow.willCloseNotification, object: window)
         #expect(!signals.isMonitoring)
         NSApp.sendEvent(try rightClick(in: window))
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
     }
 
     // SwiftUI can keep the session's view while its window is closed and opened again.
@@ -202,9 +202,9 @@ final class ReadingSignalsTests {
         center.post(name: NSWindow.didBecomeKeyNotification, object: window)
         #expect(signals.isMonitoring)
 
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
         NSApp.sendEvent(try rightClick(in: window))
-        #expect(session.reading == channel)
+        #expect(session.reading == [channel])
     }
 
     // The test host is never active, so the session's inputs are set by hand.
@@ -222,11 +222,11 @@ final class ReadingSignalsTests {
         window.contentView?.addSubview(attach)
         disengage()
         NSApp.sendEvent(try rightClick(in: window))
-        #expect(session.reading == channel, "the monitor is in")
+        #expect(session.reading == [channel], "the monitor is in")
 
         attach.removeFromSuperview()
         disengage()
         NSApp.sendEvent(try rightClick(in: window))
-        #expect(session.reading == nil)
+        #expect(session.reading.isEmpty)
     }
 }

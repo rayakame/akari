@@ -12,6 +12,10 @@ struct ComposerView: View {
     var onShiftEscape: () -> Void = {}
     var onShiftPageUp: () -> Void = {}
     var onAttach: (ComposerTextView) -> Void = { _ in }
+    // Off for the split's composer: it takes the focus only when the user opened the split.
+    var autoFocus = true
+    var focusNow = false
+    var onFocused: () -> Void = {}
     @State private var height: CGFloat = 56
 
     var body: some View {
@@ -23,7 +27,7 @@ struct ComposerView: View {
                     Task { await composer.submit(willSend: onSend) }
                 },
                 onEscape: onEscape, onShiftEscape: onShiftEscape, onShiftPageUp: onShiftPageUp,
-                onAttach: onAttach
+                onAttach: onAttach, autoFocus: autoFocus, focusNow: focusNow, onFocused: onFocused
             )
             // Room for the counter at the right edge.
             .padding(.trailing, composer.remaining == nil ? 0 : 48)
@@ -76,6 +80,9 @@ struct ComposerField: NSViewRepresentable {
     var onShiftEscape: () -> Void = {}
     var onShiftPageUp: () -> Void = {}
     var onAttach: (ComposerTextView) -> Void = { _ in }
+    var autoFocus = true
+    var focusNow = false
+    var onFocused: () -> Void = {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -104,6 +111,7 @@ struct ComposerField: NSViewRepresentable {
         textView.onShiftEscape = onShiftEscape
         textView.onShiftPageUp = onShiftPageUp
         context.coordinator.measure()
+        context.coordinator.focusIfAsked()
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -130,13 +138,40 @@ struct ComposerField: NSViewRepresentable {
         func attach(_ textView: ComposerTextView) {
             self.textView = textView
             textView.delegate = self
-            textView.onWindow = { [weak self] in self?.focusWhenKey() }
-            focusWhenKey()
+            textView.onWindow = { [weak self] in
+                guard let self else {
+                    return
+                }
+                if parent.autoFocus {
+                    focusWhenKey()
+                }
+                focusIfAsked()
+            }
+            if parent.autoFocus {
+                focusWhenKey()
+            }
             // The height depends on the width, which the view only gets in layout.
             textView.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(
                 self, selector: #selector(resized), name: NSView.frameDidChangeNotification,
                 object: textView)
+        }
+
+        private var focusAsked = false
+
+        // Once per request; the session is told after this view update.
+        func focusIfAsked() {
+            guard parent.focusNow else {
+                focusAsked = false
+                return
+            }
+            guard !focusAsked, textView?.window != nil else {
+                return
+            }
+            focusAsked = true
+            focusWhenKey()
+            let focused = parent.onFocused
+            DispatchQueue.main.async { focused() }
         }
 
         // A channel's composer takes focus when it opens, as in the official client; at launch

@@ -442,6 +442,43 @@ async fn an_unavailable_thread_reaches_the_subscription_and_the_read() {
     loaded.account.close();
 }
 
+// A split view the host remembers from an earlier session, deleted meanwhile.
+#[tokio::test]
+async fn a_checked_thread_discord_refuses_leaves_the_store() {
+    let server = MockServer::start().await;
+    Mock::given(path(format!("/api/v9/channels/{}", THREAD.get())))
+        .respond_with(
+            ResponseTemplate::new(404).set_body_json(json!({"code": 10003, "message": "Unknown"})),
+        )
+        .mount(&server)
+        .await;
+    let gateway = FakeGateway::start().await;
+    let account = gateway
+        .client_with_api(&format!("{}/api/v9/", server.uri()))
+        .account(token("t"), USER)
+        .unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let _ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    assert!(account.store().channel(THREAD).is_some());
+
+    let found = account.check_thread(GENERAL, THREAD).await.unwrap();
+
+    assert!(!found);
+    assert!(account.store().channel(THREAD).is_none());
+    assert!(account.store().thread_unavailable(THREAD));
+    let events = events_until(&subscription, |event| {
+        matches!(event, StoreEvent::ChannelRemoved { .. })
+    })
+    .await;
+    assert!(events.contains(&StoreEvent::ChannelRemoved {
+        channel_id: THREAD,
+        guild_id: Some(GUILD),
+    }));
+    account.close();
+}
+
 #[tokio::test]
 async fn the_latest_message_read_gives_the_threads_newest() {
     let mut newest = page_message(400_000_000_000_000_033, THREAD);

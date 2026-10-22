@@ -129,8 +129,8 @@ pub enum StoreEvent {
         guild_id: GuildId,
         thread_id: ChannelId,
     },
-    /// Discord refused a thread `Account.fetch_thread` asked for, or it is gone: lines that name
-    /// it stop linking it.
+    /// Discord refused a thread `Account.fetch_thread` or `check_thread` asked for, or it is
+    /// gone: lines that name it stop linking it.
     ThreadUnavailable {
         guild_id: GuildId,
         thread_id: ChannelId,

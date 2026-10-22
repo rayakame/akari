@@ -8,17 +8,24 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     let formattedStore: FormattedStore
 
     // `locked`: 1001 is a locked thread under 1002, where the user can't send. `pinned`: each
-    // channel's newest message is the line for pinning its message with this number.
+    // channel's newest message is the line for pinning its message with this number. `thread`:
+    // the store also has 1003, a thread under 1001 the user hasn't joined, for the split view;
+    // without `threadState` its record has no thread state. `unread`: every channel's badge
+    // shows unread.
     init(
         contents: [String], formattedEvery: Int = 3, slowmode: Slowmode? = nil,
         mentioned: Bool = false, readUpTo: UInt64? = nil, locked: Bool = false,
-        pinned: UInt64? = nil
+        pinned: UInt64? = nil, thread: Bool = false, threadState: Bool = true,
+        unread: Bool = false
     ) {
         formattedStore = FormattedStore(
             contents: contents, formattedEvery: formattedEvery, slowmode: slowmode,
-            mentioned: mentioned, readUpTo: readUpTo, locked: locked, pinned: pinned)
+            mentioned: mentioned, readUpTo: readUpTo, locked: locked, pinned: pinned,
+            thread: thread, threadState: threadState, unread: unread)
         super.init(noHandle: NoHandle())
     }
+
+    let markedRead = OSAllocatedUnfairLock<[ChannelId]>(initialState: [])
 
     required init(unsafeFromHandle handle: UInt64) {
         fatalError("a fake has no Rust object")
@@ -37,13 +44,24 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     override func reservePlacing() -> UInt64 { 0 }
     override func viewChannel(channelId: ChannelId) {}
     override func supersedeAroundLoads(channelId: ChannelId) {}
-    override func setReading(channelId: ChannelId?) {}
-    override func markRead(channelId: ChannelId) {}
+    override func setReading(channelIds: [ChannelId]) {}
+    override func markRead(channelId: ChannelId) {
+        markedRead.withLock { $0.append(channelId) }
+    }
+
     override func markGuildsRead(guildIds: [GuildId]) {}
+    override func fetchThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
+        formattedStore.channel(id: threadId) != nil
+    }
+
+    override func checkThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
+        formattedStore.channel(id: threadId) != nil
+    }
 }
 
 nonisolated final class FormattedStore: Store, @unchecked Sendable {
     static let channelIds = [ChannelId(rawValue: 1001), ChannelId(rawValue: 1002)]
+    static let threadId = ChannelId(rawValue: 1003)
 
     private let contents: [String]
     private let formattedEvery: Int
@@ -53,11 +71,15 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     private let readUpTo: UInt64?
     private let locked: Bool
     private let pinned: UInt64?
+    private let thread: Bool
+    private let threadState: Bool
+    private let unread: Bool
     private let counts = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
 
     init(
         contents: [String], formattedEvery: Int, slowmode: Slowmode?, mentioned: Bool,
-        readUpTo: UInt64?, locked: Bool = false, pinned: UInt64? = nil
+        readUpTo: UInt64?, locked: Bool = false, pinned: UInt64? = nil, thread: Bool = false,
+        threadState: Bool = true, unread: Bool = false
     ) {
         self.contents = contents
         self.formattedEvery = formattedEvery
@@ -66,6 +88,9 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         self.readUpTo = readUpTo
         self.locked = locked
         self.pinned = pinned
+        self.thread = thread
+        self.threadState = threadState
+        self.unread = unread
         super.init(noHandle: NoHandle())
     }
 
@@ -137,7 +162,23 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         []
     }
 
+    private func has(_ id: ChannelId) -> Bool {
+        Self.channelIds.contains(id) || (thread && id == Self.threadId)
+    }
+
     override func channel(id: ChannelId) -> Channel? {
+        if thread && id == Self.threadId {
+            return Channel(
+                id: id, kind: .publicThread, guildId: GuildId(rawValue: 1),
+                parentId: Self.channelIds[0], name: "t1", position: 0, topic: nil, nsfw: false,
+                rateLimitPerUser: 0, recipientIds: [],
+                thread: threadState
+                    ? ThreadInfo(
+                        joined: false, archived: false, locked: false, private: false,
+                        messageCount: 40, ownerId: UserId(rawValue: 2), lastMessageId: nil,
+                        createdAt: nil)
+                    : nil)
+        }
         guard Self.channelIds.contains(id) else {
             return nil
         }
@@ -160,11 +201,15 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     }
 
     override func permissions(channelId: ChannelId) -> Permissions? {
-        locked && channelId == Self.channelIds[0] ? [.viewChannel, .readMessageHistory] : nil
+        if locked && channelId == Self.channelIds[0] {
+            return [.viewChannel, .readMessageHistory]
+        }
+        // The split view's composers can take the focus only where the user may send.
+        return thread ? [.viewChannel, .sendMessages, .readMessageHistory] : nil
     }
 
     override func window(channelId: ChannelId) -> MessageWindow? {
-        guard Self.channelIds.contains(channelId) else {
+        guard has(channelId) else {
             return nil
         }
         let count = counts.withLock { $0[channelId.rawValue, default: 40] }
@@ -211,7 +256,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     }
 
     override func channelBadges(ids: [ChannelId]) -> [ChannelBadge] {
-        ids.map { ChannelBadge(channelId: $0, badge: Badge(unread: false, mentions: 0)) }
+        ids.map { ChannelBadge(channelId: $0, badge: Badge(unread: unread, mentions: 0)) }
     }
 
     override func guildBadges(ids: [GuildId]) -> [GuildBadge] {

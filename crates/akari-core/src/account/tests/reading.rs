@@ -184,7 +184,7 @@ async fn reading_an_unread_channel_acks_it() {
     showing(&online, &[NEWEST]).await;
     let account = &online.account;
 
-    account.set_reading(Some(general()));
+    account.set_reading(&[general()]);
 
     assert_eq!(badge(account, GENERAL), Badge::default());
     assert_eq!(handed(account), [paced(GENERAL, NEWEST)]);
@@ -196,7 +196,7 @@ async fn reading_a_read_channel_sends_nothing() {
     let online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
 
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
 
     assert_eq!(handed(&online.account), []);
     assert!(posted(&online.server).await.is_empty());
@@ -206,7 +206,7 @@ async fn reading_a_read_channel_sends_nothing() {
 async fn a_message_arriving_while_reading_is_acked() {
     let mut online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
 
     online.connection.send(message(2, NEWEST + 1)).await;
     let events = sync(&mut online.connection, &online.subscription, 3).await;
@@ -242,7 +242,7 @@ async fn reading_a_channel_whose_newest_message_was_deleted_acks_it() {
     assert!(badge(&online.account, GENERAL).unread);
     showing(&online, &[NEWEST]).await;
 
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
 
     assert_eq!(badge(&online.account, GENERAL), Badge::default());
     assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
@@ -256,8 +256,8 @@ async fn reading_a_channel_whose_newest_message_was_deleted_acks_it() {
 async fn a_message_arriving_after_reading_stopped_isnt() {
     let mut online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
-    online.account.set_reading(Some(general()));
-    online.account.set_reading(None);
+    online.account.set_reading(&[general()]);
+    online.account.set_reading(&[]);
 
     online.connection.send(message(2, NEWEST + 1)).await;
     sync(&mut online.connection, &online.subscription, 3).await;
@@ -270,11 +270,11 @@ async fn a_message_arriving_after_reading_stopped_isnt() {
 async fn switching_channels_stops_the_old_one() {
     let mut online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
     online.connection.send(message(2, NEWEST + 1)).await;
     sync(&mut online.connection, &online.subscription, 3).await;
 
-    online.account.set_reading(Some(id(THREAD)));
+    online.account.set_reading(&[id(THREAD)]);
     online.connection.send(message(4, NEWEST + 2)).await;
     sync(&mut online.connection, &online.subscription, 5).await;
 
@@ -286,10 +286,238 @@ async fn switching_channels_stops_the_old_one() {
     );
 }
 
+const THREAD_MESSAGES: &str = "/api/v9/channels/300000000000000020/messages";
+
+fn thread_message(seq: u64, message_id: u64) -> Value {
+    let mut created = message(seq, message_id);
+    created["d"]["channel_id"] = THREAD.to_string().into();
+    created
+}
+
+// The thread's list, loaded at the present.
+async fn showing_thread(online: &Online, ids: &[u64]) {
+    let mut messages = page(ids);
+    for message in messages.as_array_mut().unwrap() {
+        message["channel_id"] = THREAD.to_string().into();
+    }
+    Mock::given(method("GET"))
+        .and(path(THREAD_MESSAGES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(messages))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    online
+        .account
+        .load_messages(id(THREAD), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap();
+}
+
+// The split view: a channel and the thread beside it.
+#[tokio::test]
+async fn two_read_channels_are_each_acked() {
+    let mut online = acking(thread_unread).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+
+    online.account.set_reading(&[general(), id(THREAD)]);
+
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+    assert_eq!(badge(&online.account, THREAD), Badge::default());
+    assert_eq!(
+        handed(&online.account),
+        [paced(GENERAL, NEWEST), paced(THREAD, THREAD_NEWEST)]
+    );
+    online.connection.send(message(2, NEWEST + 1)).await;
+    online
+        .connection
+        .send(thread_message(3, THREAD_NEWEST + 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 4).await;
+    assert_eq!(
+        handed(&online.account)[2..],
+        [paced(GENERAL, NEWEST + 1), paced(THREAD, THREAD_NEWEST + 1)]
+    );
+    assert!(!badge(&online.account, GENERAL).unread);
+    assert!(!badge(&online.account, THREAD).unread);
+}
+
+#[tokio::test]
+async fn dropping_one_stops_only_its_acks() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+    online.account.set_reading(&[general(), id(THREAD)]);
+
+    online.account.set_reading(&[general()]);
+    online.connection.send(message(2, NEWEST + 1)).await;
+    online
+        .connection
+        .send(thread_message(3, THREAD_NEWEST + 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 4).await;
+
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
+    assert!(badge(&online.account, THREAD).unread);
+}
+
+// General stays busy past the thread's lull: the thread's ack goes while general's still waits.
+#[tokio::test]
+async fn pacing_stays_per_channel() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+    online.account.set_reading(&[general(), id(THREAD)]);
+
+    online
+        .connection
+        .send(thread_message(2, THREAD_NEWEST + 1))
+        .await;
+    // A message every half second for three seconds, each one moving general's lull.
+    for n in 1..=6 {
+        let seq = 1 + 2 * n;
+        online.connection.send(message(seq, NEWEST + n)).await;
+        sync(&mut online.connection, &online.subscription, seq + 1).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    let busy: Vec<Sent> = posted(&online.server).await.iter().map(sent_as).collect();
+    assert_eq!(busy, [Sent::Ack(THREAD, THREAD_NEWEST + 1)]);
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [
+            Sent::Ack(THREAD, THREAD_NEWEST + 1),
+            Sent::Ack(GENERAL, NEWEST + 6)
+        ]
+    );
+}
+
+// The thread scrolled away and back: the channel was read all along, so marking it unread on
+// another device meanwhile stands until it grows.
+#[tokio::test]
+async fn a_channel_still_read_isnt_read_again_when_the_other_changes() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+    online.account.set_reading(&[general(), id(THREAD)]);
+    online
+        .connection
+        .send(dispatch(
+            2,
+            "MESSAGE_ACK",
+            json!({"channel_id": GENERAL.to_string(), "message_id": (NEWEST - 1).to_string(),
+                   "manual": true, "mention_count": 0, "version": 5}),
+        ))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert!(badge(&online.account, GENERAL).unread);
+
+    online.account.set_reading(&[general()]);
+    online.account.set_reading(&[general(), id(THREAD)]);
+
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+    online.connection.send(message(4, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 5).await;
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
+}
+
+#[tokio::test]
+async fn a_channel_set_again_after_a_break_is_read() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+    online.account.set_reading(&[general(), id(THREAD)]);
+    online.account.set_reading(&[general()]);
+    online
+        .connection
+        .send(thread_message(2, THREAD_NEWEST + 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert_eq!(handed(&online.account), []);
+
+    online.account.set_reading(&[general(), id(THREAD)]);
+
+    assert_eq!(handed(&online.account), [paced(THREAD, THREAD_NEWEST + 1)]);
+}
+
+#[tokio::test]
+async fn a_dropped_connection_clears_both() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+    mock_page(&online.server, ("limit", "100"), page(&[NEWEST])).await;
+    let mut refreshed = page(&[THREAD_NEWEST]);
+    refreshed[0]["channel_id"] = THREAD.to_string().into();
+    Mock::given(method("GET"))
+        .and(path(THREAD_MESSAGES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(refreshed))
+        .mount(&online.server)
+        .await;
+    online.account.set_reading(&[general(), id(THREAD)]);
+
+    let mut fresh = new_session(&mut online, |_| {}).await;
+    events_until(
+        &online.subscription,
+        &format!("MessagesRefreshed({GENERAL})"),
+    )
+    .await;
+    events_until(
+        &online.subscription,
+        &format!("MessagesRefreshed({THREAD})"),
+    )
+    .await;
+    fresh.send(message(2, NEWEST + 1)).await;
+    fresh.send(thread_message(3, THREAD_NEWEST + 1)).await;
+    sync(&mut fresh, &online.subscription, 4).await;
+
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+    assert!(badge(&online.account, THREAD).unread);
+    online.account.set_reading(&[general(), id(THREAD)]);
+    assert_eq!(
+        handed(&online.account),
+        [paced(GENERAL, NEWEST + 1), paced(THREAD, THREAD_NEWEST + 1)]
+    );
+}
+
+#[tokio::test]
+async fn channels_past_the_second_are_ignored() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+
+    online
+        .account
+        .set_reading(&[general(), general(), id(THREAD), id(QUIET)]);
+    online.connection.send(message(2, NEWEST + 1)).await;
+    online
+        .connection
+        .send(thread_message(3, THREAD_NEWEST + 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 4).await;
+
+    assert_eq!(
+        handed(&online.account),
+        [paced(GENERAL, NEWEST + 1), paced(THREAD, THREAD_NEWEST + 1)],
+        "a duplicate counts once"
+    );
+    online
+        .account
+        .set_reading(&[general(), id(QUIET), id(THREAD)]);
+    online
+        .connection
+        .send(thread_message(5, THREAD_NEWEST + 2))
+        .await;
+    sync(&mut online.connection, &online.subscription, 6).await;
+    assert_eq!(handed(&online.account).len(), 2, "the third isn't read");
+}
+
 #[tokio::test]
 async fn a_history_load_while_reading_is_acked() {
     let online = acking(general_read).await;
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
     mock_page(
         &online.server,
         ("limit", "50"),
@@ -435,7 +663,7 @@ async fn mark_guilds_read_on_a_read_guild_sends_nothing() {
 async fn a_message_ack_from_elsewhere_sends_nothing() {
     let mut online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
 
     online
         .connection
@@ -519,14 +747,14 @@ async fn ready_acks_nothing_for_a_channel_read_before_it() {
         .load_messages(general(), MessageLoad::Latest { limit: 50 })
         .await
         .unwrap();
-    account.set_reading(Some(general()));
+    account.set_reading(&[general()]);
 
     let _connection = online(&mut fake, &account).await;
     events_until(&subscription, "Online").await;
 
     assert_eq!(handed(&account), []);
     assert!(badge(&account, GENERAL).unread);
-    account.set_reading(Some(general()));
+    account.set_reading(&[general()]);
     assert_eq!(handed(&account), [paced(GENERAL, NEWEST)]);
 }
 
@@ -540,7 +768,7 @@ async fn the_core_stops_reading_when_the_connection_drops() {
         page(&[NEWEST, NEWEST + 1, NEWEST + 2]),
     )
     .await;
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
 
     let mut fresh = new_session(&mut online, |ready| {
         ready["guilds"][0]["channels"][1]["last_message_id"] = (NEWEST + 2).to_string().into();
@@ -556,7 +784,7 @@ async fn the_core_stops_reading_when_the_connection_drops() {
 
     assert_eq!(handed(&online.account), []);
     assert!(badge(&online.account, GENERAL).unread);
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
     assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 3)]);
 }
 
@@ -564,7 +792,7 @@ async fn the_core_stops_reading_when_the_connection_drops() {
 async fn disconnecting_stops_reading() {
     let mut online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
 
     online.account.disconnect();
     assert_eq!(online.connection.client_close_code().await, Some(4000));
@@ -577,7 +805,7 @@ async fn disconnecting_stops_reading() {
     sync(&mut resumed, &online.subscription, 4).await;
 
     assert_eq!(handed(&online.account), []);
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
     assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
 }
 
@@ -609,7 +837,7 @@ async fn a_401_on_an_ack_closes_the_account() {
 async fn closing_the_account_stops_the_sender() {
     let online = acking(thread_unread).await;
     showing(&online, &[NEWEST]).await;
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
     assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST)]);
     assert_eq!(pending(&online.account), 1);
 
@@ -1063,7 +1291,7 @@ async fn the_started_a_thread_line_is_read_and_acked_like_a_message() {
         .await
         .unwrap();
 
-    online.account.set_reading(Some(general()));
+    online.account.set_reading(&[general()]);
 
     assert_eq!(badge(&online.account, GENERAL), Badge::default());
     assert_eq!(

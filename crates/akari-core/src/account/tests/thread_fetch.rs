@@ -219,3 +219,114 @@ async fn a_thread_in_a_guild_the_store_lacks_stays_to_be_fetched() {
 
     assert!(!online.account.store().thread_unavailable(archived_id()));
 }
+
+const KNOWN_PATH: &str = "/api/v9/channels/300000000000000020";
+
+impl Online {
+    async fn answer_for_known(&self, answer: ResponseTemplate) {
+        Mock::given(method("GET"))
+            .and(path(KNOWN_PATH))
+            .respond_with(answer)
+            .mount(&self.server)
+            .await;
+    }
+
+    async fn check_known(&self) -> Result<bool, RequestError> {
+        self.account
+            .check_thread(general(), Snowflake::new(KNOWN))
+            .await
+    }
+}
+
+fn known(member: bool) -> Value {
+    let mut thread = archived(member);
+    thread["id"] = KNOWN.to_string().into();
+    thread["thread_metadata"]["archived"] = false.into();
+    thread
+}
+
+// A host's remembered thread may be one the cache kept from an earlier session.
+#[tokio::test]
+async fn checking_a_thread_the_store_has_asks_discord() {
+    let online = online_answering(ResponseTemplate::new(200).set_body_json(archived(false))).await;
+    online
+        .answer_for_known(ResponseTemplate::new(200).set_body_json(known(true)))
+        .await;
+
+    assert!(online.check_known().await.unwrap());
+
+    assert_eq!(online.requests_to(KNOWN_PATH).await, 1);
+    assert!(
+        online
+            .account
+            .store()
+            .channel(Snowflake::new(KNOWN))
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn checking_a_deleted_thread_removes_it() {
+    let online = online_answering(ResponseTemplate::new(200).set_body_json(archived(false))).await;
+    online.answer_for_known(refused(404, 10003)).await;
+
+    assert!(!online.check_known().await.unwrap());
+
+    assert!(
+        online
+            .account
+            .store()
+            .thread_unavailable(Snowflake::new(KNOWN))
+    );
+    assert!(
+        online
+            .account
+            .store()
+            .channel(Snowflake::new(KNOWN))
+            .is_none()
+    );
+    online.event("ChannelRemoved").await;
+}
+
+#[tokio::test]
+async fn checking_a_thread_the_user_cant_see_removes_it() {
+    let online = online_answering(ResponseTemplate::new(200).set_body_json(archived(false))).await;
+    online.answer_for_known(refused(403, 50001)).await;
+
+    assert!(!online.check_known().await.unwrap());
+
+    assert!(
+        online
+            .account
+            .store()
+            .channel(Snowflake::new(KNOWN))
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn checking_an_unknown_thread_fetches_it() {
+    let online = online_answering(ResponseTemplate::new(200).set_body_json(archived(false))).await;
+
+    assert!(
+        online
+            .account
+            .check_thread(general(), archived_id())
+            .await
+            .unwrap()
+    );
+
+    assert!(online.account.store().channel(archived_id()).is_some());
+}
+
+#[tokio::test]
+async fn an_unavailable_thread_is_not_checked_again() {
+    let online = online_answering(ResponseTemplate::new(200).set_body_json(archived(false))).await;
+    online.answer_for_known(refused(404, 10003)).await;
+
+    let _ = online.check_known().await;
+    let again = online.check_known().await;
+
+    assert!(!again.unwrap());
+    assert_eq!(online.requests_to(KNOWN_PATH).await, 1);
+}

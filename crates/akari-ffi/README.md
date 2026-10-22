@@ -80,7 +80,10 @@ settles, `MessageUpdated` names that first message.
 the store has it now. When Discord refuses it or it is gone, `Store.thread_unavailable(thread_id)`
 says so for the session, and `StoreEvent::ThreadUnavailable { guild_id, thread_id }` tells the
 lists of the parent's guild to read the lines that name it again. A later READY keeps a thread
-fetched this session, and every thread the user hasn't joined.
+fetched this session, and every thread the user hasn't joined. `Account.check_thread(parent_id,
+thread_id)` asks even when the store has the thread (a split view remembered from an earlier
+session, which the cache may have kept after it was deleted); when Discord refuses it or it is
+gone, the store also drops it, with `ChannelRemoved`.
 
 `Account.join_thread(thread_id, location)` and `leave_thread(thread_id, location)` join and
 leave, telling Discord where the user chose it (`ThreadLocation`: `SidebarOverflow`,
@@ -88,16 +91,17 @@ leave, telling Discord where the user chose it (`ThreadLocation`: `SidebarOverfl
 comes as `ChannelUpdated`. An archived thread, or one the store doesn't have, fails with
 `InvalidRequest` before asking.
 
-Acks: `set_reading(channel_id)` names the channel the user is reading at its newest messages
-(or `None`), `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request
+Acks: `set_reading(channel_ids)` names the channels the user is reading at their newest
+messages: none, one, or two in the split view (a channel and the thread beside it; further ones
+are ignored). `mark_read(channel_id)` and `mark_guilds_read(guild_ids)` mark read on request
 (Escape, context menus). All three return at once, and the core sends the acks in the
 background. `mark_read` and `mark_guilds_read` clear the badges at once: the events fire before
-Discord answers. `set_reading(Some)` clears them only when the channel's list, at the present
-and not stale, shows messages past the read position (or the channel has mentions), and only
-up to the newest message it shows; it reads again as that list grows. `set_reading(None)`
-clears nothing. The core stops reading on its own when the connection drops, on `disconnect()`
-and when the account closes: set the channel again once the session is online and its list is
-refreshed. An ack Discord refuses can bring a channel's badge back (`BadgeChanged`). The host
+Discord answers. `set_reading` clears a channel's only when its list, at the present and not
+stale, shows messages past the read position (or the channel has mentions), and only up to the
+newest message it shows; it reads again as that list grows. An empty list clears nothing. The
+core stops reading on its own when the connection drops, on `disconnect()` and when the account
+closes: set the channels again once the session is online and their lists are refreshed. An ack
+Discord refuses can bring a channel's badge back (`BadgeChanged`). The host
 decides when the user is reading; the core never infers it
 ([read-states.md](../../docs/protocol/read-states.md#how-akari-acks)).
 

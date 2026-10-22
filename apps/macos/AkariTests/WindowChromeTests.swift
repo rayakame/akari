@@ -96,7 +96,7 @@ nonisolated private final class EmptyAccount: Account, @unchecked Sendable {
         EmptyStore()
     }
 
-    override func setReading(channelId: ChannelId?) {}
+    override func setReading(channelIds: [ChannelId]) {}
     override func markRead(channelId: ChannelId) {}
     override func markGuildsRead(guildIds: [GuildId]) {}
 }

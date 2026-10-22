@@ -88,18 +88,21 @@ struct SessionScreen: View {
     var warning: AppModel.Warning?
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
+    let splitWidth: SplitWidth
     // Trusted hosts are the account's (D65).
     @State private var links: LinkFollower
+    @State private var tables = PaneTables()
 
     init(
         session: SessionModel, warning: AppModel.Warning? = nil,
         dismissWarning: @escaping () -> Void = {}, reconnect: @escaping () -> Void = {},
-        links: LinkFollower? = nil
+        links: LinkFollower? = nil, splitWidth: SplitWidth = .shared
     ) {
         self.session = session
         self.warning = warning
         self.dismissWarning = dismissWarning
         self.reconnect = reconnect
+        self.splitWidth = splitWidth
         _links = State(
             initialValue: links ?? LinkFollower(trusted: session.trustedLinks()))
     }
@@ -107,17 +110,33 @@ struct SessionScreen: View {
     var body: some View {
         SessionView(
             session: session, warning: warning, dismissWarning: dismissWarning,
-            reconnect: reconnect
+            reconnect: reconnect, splitWidth: splitWidth
         ) { messages, name in
+            let beside = messages === session.split
             MessageArea(
                 messages: messages, name: name, links: links,
                 go: { [session] in session.go(to: $0) },
                 openThread: { [session] thread, parent in
-                    Task { await session.open(thread: thread, from: parent) }
+                    Task { await session.openBeside(thread: thread, from: parent) }
                 },
                 openGuild: { [session] in session.open(.guild($0)) },
                 markRead: { [session] in session.markRead(channel: messages.channelId) },
-                markServerRead: { [session] in session.markServerRead() })
+                markServerRead: { [session] in session.markServerRead() },
+                tables: tables,
+                escape: { [session, tables] in
+                    if session.escape() {
+                        tables.jumpToPresent()
+                    }
+                },
+                autoFocus: !beside && !session.focusSplit,
+                focusNow: beside ? session.focusSplit : session.focusChannel,
+                onFocused: { [session] in
+                    if beside {
+                        session.splitFocused()
+                    } else {
+                        session.channelFocused()
+                    }
+                })
         }
         .background(ReadingSignals.Attach(session: session))
         // A reconnect brings a new session for the same channel; without a new identity its

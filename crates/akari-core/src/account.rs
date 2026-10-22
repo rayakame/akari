@@ -319,10 +319,10 @@ impl Shared {
                 let storing = Instant::now();
                 {
                     let _gate = self.acks.gate();
-                    let (outcome, ack) = self.store.finish_load(ticket, messages, reached_end);
+                    let (outcome, acks) = self.store.finish_load(ticket, messages, reached_end);
                     report.outcome = outcome;
                     report.store = storing.elapsed();
-                    self.ack_reading(ack);
+                    self.ack_reading(acks);
                 }
                 (report.prepare, report.prepared) = prepared;
                 log_page(channel, ticket.kind, &report);
@@ -486,8 +486,8 @@ impl Shared {
     }
 
     // While the user follows a channel, its acks go out paced, like the official client's.
-    fn ack_reading(&self, ack: Option<Ack>) {
-        if let Some(ack) = ack {
+    fn ack_reading(&self, acks: Vec<Ack>) {
+        for ack in acks {
             self.acks.want(ack, Pace::Paced);
         }
     }
@@ -508,8 +508,8 @@ impl Shared {
             }
             _ => None,
         };
-        let ack = on_event(&self.store, event, connecting);
-        self.ack_reading(ack);
+        let acks = on_event(&self.store, event, connecting);
+        self.ack_reading(acks);
         if let Some(thread) = starter {
             self.fetch_starter(thread);
         }
@@ -963,15 +963,16 @@ impl Account {
         self.shared.view(channel);
     }
 
-    /// The channel the user is reading at its newest messages, or `None`. While set, the
-    /// channel is acked up to the newest message its list shows at the present, and again as
-    /// that list grows, paced. Hosts set it only while the user is engaged with the channel at
-    /// the bottom of its list. A dropped connection clears it: set it again once online and the
-    /// list is refreshed.
-    pub fn set_reading(&self, channel: Option<ChannelId>) {
+    /// The channels the user is reading at their newest messages, at most two (a channel and
+    /// the thread beside it); further ones are ignored, and an empty slice reads none. Each is
+    /// acked up to the newest message its list shows at the present, and again as that list
+    /// grows, paced per channel. Hosts name a channel only while the user is engaged with it at
+    /// the bottom of its list. A dropped connection clears them: set them again once online and
+    /// the lists are refreshed.
+    pub fn set_reading(&self, channels: &[ChannelId]) {
         let _gate = self.shared.acks.gate();
-        let ack = self.shared.store.set_reading(channel);
-        self.shared.ack_reading(ack);
+        let acks = self.shared.store.set_reading(channels);
+        self.shared.ack_reading(acks);
     }
 
     /// Marks the channel read now (Escape, the context menu).
@@ -1025,10 +1026,21 @@ impl Account {
         parent: ChannelId,
         thread: ChannelId,
     ) -> Result<bool, RequestError> {
-        let shared = &self.shared;
-        if shared.store.channel(thread).is_some() {
+        if self.shared.store.channel(thread).is_some() {
             return Ok(true);
         }
+        self.check_thread(parent, thread).await
+    }
+
+    /// Asks Discord about a thread the store may already have, e.g. one a host remembers from an
+    /// earlier session: like [`Account::fetch_thread`], but it asks even then, and a 403 or 404
+    /// also removes the thread from the store, as THREAD_DELETE would.
+    pub async fn check_thread(
+        &self,
+        parent: ChannelId,
+        thread: ChannelId,
+    ) -> Result<bool, RequestError> {
+        let shared = &self.shared;
         if shared.store.thread_unavailable(thread) {
             return Ok(false);
         }
@@ -1348,7 +1360,7 @@ async fn pump(mut finish: Finish) {
 
 // Queued events mustn't make a disconnected account look connected. disconnect() idles the
 // gateway before it takes the store's lock, so `connecting` checked under that lock sees it.
-fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool) -> Option<Ack> {
+fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool) -> Vec<Ack> {
     match event {
         ConnectionEvent::Dispatch(event) => {
             let ready = matches!(event, DispatchEvent::Ready(_) | DispatchEvent::Resumed);
@@ -1361,10 +1373,10 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
         ConnectionEvent::Reconnecting { .. } => {
             store.stop_reading();
             store.set_connection_if(ConnectionState::Connecting, connecting);
-            None
+            Vec::new()
         }
         #[cfg(feature = "capture")]
-        ConnectionEvent::CapturedReady(_) => None,
+        ConnectionEvent::CapturedReady(_) => Vec::new(),
     }
 }
 

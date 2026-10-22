@@ -107,16 +107,38 @@ The session replaces `messages` on its own when the open channel is deleted or t
 no longer see it, and a new `MessageListModel` loads nothing until the view calls `open()`.
 An open thread that stops being listed (left, closed, or read past its window) stays open,
 as in the official client; only its deletion closes it. `openParent()` opens the open
-thread's channel, for the thread header's link. `open(thread:from:)` opens the thread a
-"started a thread" line names, fetched first when the store doesn't have it; nothing opens when
-Discord refuses it, it's gone or the fetch fails, nor once the user opened something else or
-clicked another line meanwhile. A row's `threadLinked` is false for such a line once the thread is unavailable. A
+thread's channel, for the thread header's link. `openBeside(thread:from:)` opens the thread a
+box or a "started a thread" line in the open channel names beside it, in the split view (`split`,
+with the thread's record in `splitChannel` for its header and menu), fetched first when the
+store doesn't have it; nothing opens when Discord refuses it, it's gone or the fetch fails, nor
+once the user opened something else or clicked another thread meanwhile. Each channel keeps its
+split thread: opening another channel hides it, coming back reopens it from the store's window,
+and `AccountMemory` keeps the threads per account, with each channel's server, across launches.
+After READY a remembered thread READY didn't list as joined is checked once per session with
+`Account.checkThread` (the cache keeps unjoined threads, deleted ones too); refused or gone
+drops it, a failed request keeps it for the next launch, and an answer for a server the store
+lacks is asked again. One request per thread runs at a time, which a box click shares. A
+server the user leaves (not one down for an outage) takes its splits, at once or at the next
+READY. `closeSplit()` (the X), a thread's row and the open channel's own row (`open(channel:)`)
+forget it; `openInFullView()` only opens the thread full width, and the channel keeps its
+split, as in the official client; `openInSplitView()` opens a full-width thread's channel with
+the thread beside it; the thread's deletion closes it, and so does losing it: a private thread
+the user is no longer a member of (without Manage Threads), or a thread whose channel they can
+no longer see, which Discord announces with no THREAD_DELETE. `focusSplit` and `focusChannel` ask
+the view to move the focus to the split's or the channel's composer (`splitFocused()`,
+`channelFocused()`). The sidebar keeps the channel selected: the split thread never gets a kept
+row. `reading` holds both lists while each is fresh at its bottom; scrolling one clearly away
+stops only that one until the next click or key press, and so does a split the session shows on
+its own (after a request or a batch, not with its channel or the user's click). `escape()` marks
+both read, ends both lines and loads each present, or, with nothing to load or mark read in
+either (as the official client's key handler, also with a list scrolled up), ends both lines,
+closes the split and returns false. A row's `threadLinked` is false for such a line once the thread is unavailable. A
 row's `threadBox` (`ThreadBox`) is the box of the thread started from its message, or that its
 "started a thread" line is about: the name, the count as Discord words it, the second line
 (`Bottom`: the newest message with its author, no recent messages, no messages yet) and the time
 it's measured from; `ThreadBox.relativeTime` words that time ("25m ago") and says when it
 changes, `placeholder(for:)` what an empty newest message shows. `membershipItem(for:)` gives a
-thread of the open server's menus Join Thread or Leave Thread (disabled while archived);
+thread of the open server's menus, or the split thread's, Join Thread or Leave Thread (disabled while archived);
 `join(thread:from:)` and `leave(thread:from:)` send the menu's `ThreadLocation`, and a failure
 waits in `membershipError`, in Discord's words, until `dismissMembershipError()`. In a
 thread, a row's `starter` is set for
