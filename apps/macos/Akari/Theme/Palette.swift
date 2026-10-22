@@ -32,6 +32,8 @@ enum Palette {
     // Discord's shadow-border: a ring just outside a popout.
     static let shadowBorder = token(
         "shadowBorder", dark: "#ffffff", light: "#000000", alpha: (0.08, 0.08))
+    static let backgroundModNormal = token(
+        "backgroundModNormal", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.2))
     static let backgroundModMuted = token(
         "backgroundModMuted", dark: "#97979f", light: "#97979f", alpha: (0.08, 0.08))
     static let threadBoxBorder = token("threadBoxBorder", dark: "#323237", light: "#e2e2e5")

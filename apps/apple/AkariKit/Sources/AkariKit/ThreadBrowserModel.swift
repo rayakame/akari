@@ -253,4 +253,12 @@ public struct ThreadPeek: Equatable, Sendable, Identifiable {
     public let owner: User?
     /// Its newest message, else when it was created.
     public let time: Date
+
+    public init(id: ChannelId, name: String, ownerId: UserId?, owner: User?, time: Date) {
+        self.id = id
+        self.name = name
+        self.ownerId = ownerId
+        self.owner = owner
+        self.time = time
+    }
 }

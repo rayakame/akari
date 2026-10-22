@@ -91,7 +91,8 @@ struct ThreadBrowserModal: View {
     let area: CGSize
 
     static let backdrop = 0.72
-    static let radius: CGFloat = 8
+    // Discord's radius-md.
+    static let radius: CGFloat = 12
 
     var body: some View {
         let size = ThreadBrowserLayout.modalSize(

@@ -9,6 +9,7 @@ struct SessionView<MessageArea: View>: View {
     var splitWidth = SplitWidth.shared
     @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
+    @State private var hover = ThreadsHover()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,13 @@ struct SessionView<MessageArea: View>: View {
                 }
             }
         }
+        .overlayPreferenceValue(PeekRowBounds.self) { anchor in
+            GeometryReader { proxy in
+                if let channel = hover.channel, let anchor {
+                    moreActiveThreads(of: channel, beside: proxy[anchor])
+                }
+            }
+        }
         .ignoresSafeArea(edges: .top)
         .navigationTitle(windowTitle.text)
         .alert(
@@ -65,6 +73,26 @@ struct SessionView<MessageArea: View>: View {
             return nil
         }
         return .fullView(membership: item, splittable: openParent?.opensMessageList == true)
+    }
+
+    @ViewBuilder
+    private func moreActiveThreads(of channel: ChannelId, beside row: CGRect) -> some View {
+        let peeks = session.moreActiveThreads(of: channel)
+        if !peeks.isEmpty {
+            MoreActiveThreadsPopout(
+                peeks: peeks,
+                open: { thread, beside in
+                    hover.dismiss()
+                    Task { await session.open(browsed: thread, beside: beside) }
+                },
+                seeAllThreads: {
+                    hover.dismiss()
+                    session.openThreadBrowser(of: channel, as: .modal)
+                }
+            )
+            .onHover { hover.hoverPopout($0) }
+            .offset(x: row.maxX + MoreActiveThreadsPopout.spacing, y: row.minY)
+        }
     }
 
     private var threadsButton: ThreadsButton? {
@@ -147,7 +175,8 @@ struct SessionView<MessageArea: View>: View {
             if let channels = session.channels {
                 ChannelSidebar(
                     session: session, list: channels, collapsed: session.collapsed,
-                    guildName: session.servers.guilds.first { $0.id == guildId }?.name ?? "")
+                    guildName: session.servers.guilds.first { $0.id == guildId }?.name ?? "",
+                    hover: hover)
             }
         }
     }
