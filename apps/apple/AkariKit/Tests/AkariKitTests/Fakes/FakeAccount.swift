@@ -229,22 +229,41 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.discard(channelId, pendingId))
     }
 
-    // The threads a fetch finds, put into the store as akari-core would; Discord refuses the rest.
+    // The threads a fetch or check finds, put into the store as akari-core would; Discord refuses
+    // the rest, which also leave the store.
     let fetchedThreads = Locked<[ChannelId: Channel]>([:])
+    // Found, but in a guild the store doesn't have: akari-core answers false without refusing.
+    let unplacedThreads = Locked<Set<ChannelId>>([])
     let threadFetchError = Locked<RequestError?>(nil)
-    // While set, each thread fetch waits for one value here.
+    // While set, each thread fetch or check waits for one value here.
     let holdThreadFetches = Locked(false)
     let threadFetches = AsyncQueue<Void>()
 
     override func fetchThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
         log.append(.fetchThread(parentId, threadId))
+        return try await askForThread(threadId)
+    }
+
+    override func checkThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
+        log.append(.checkThread(parentId, threadId))
+        return try await askForThread(threadId)
+    }
+
+    private func askForThread(_ threadId: ChannelId) async throws -> Bool {
         if holdThreadFetches.current {
             _ = await threadFetches.next()
         }
         if let error = threadFetchError.current {
             throw error
         }
+        if unplacedThreads.current.contains(threadId) {
+            return false
+        }
         guard let thread = fetchedThreads.current[threadId] else {
+            fakeStore.update { state in
+                state.unavailableThreads.insert(threadId)
+                state.channels[threadId] = nil
+            }
             return false
         }
         fakeStore.update { $0.channels[threadId] = thread }

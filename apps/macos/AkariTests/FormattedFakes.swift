@@ -51,6 +51,10 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
     override func fetchThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
         formattedStore.channel(id: threadId) != nil
     }
+
+    override func checkThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
+        formattedStore.channel(id: threadId) != nil
+    }
 }
 
 nonisolated final class FormattedStore: Store, @unchecked Sendable {

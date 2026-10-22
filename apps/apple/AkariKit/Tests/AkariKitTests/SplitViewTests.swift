@@ -42,6 +42,10 @@ final class SplitViewTests {
         }
     }
 
+    func split(_ thread: UInt64, guild: UInt64 = 1) -> AccountMemory.Split {
+        AccountMemory.Split(thread: id(thread), guild: id(guild))
+    }
+
     func makeSession() -> SessionModel {
         SessionModel(userId: id(1), account: account, memory: memory) { _ in }
     }
@@ -413,7 +417,7 @@ final class SplitViewTests {
     func closingTheSplitForgetsIt() async {
         let session = inChannel11()
         await session.openBeside(thread: id(31), from: id(11))
-        #expect(memory.splits(of: id(1)) == [id(11): id(31)])
+        #expect(memory.splits(of: id(1)) == [id(11): split(31)])
 
         session.closeSplit()
 
@@ -492,9 +496,9 @@ final class SplitViewTests {
 
     @Test
     func theSplitSurvivesARelaunch() async {
-        world()
+        world(joined: true, listed: true)
         memory.remember(.init(place: .guild(id(1)), channel: id(11)), of: id(1))
-        memory.remember(splits: [id(11): id(31)], of: id(1))
+        memory.remember(splits: [id(11): split(31)], of: id(1))
         let session = makeSession()
         session.start()
 
@@ -503,7 +507,7 @@ final class SplitViewTests {
 
         #expect(session.messages?.channelId == id(11))
         #expect(session.split?.channelId == id(31))
-        #expect(!store.log.calls.contains(.fetchThread(id(11), id(31))))
+        #expect(!store.log.calls.contains(.checkThread(id(11), id(31))))
         session.close()
     }
 
@@ -515,7 +519,7 @@ final class SplitViewTests {
         }
         account.fetchedThreads.withLock { $0[id(31)] = thread(31, in: 11) }
         memory.remember(.init(place: .guild(id(1)), channel: id(11)), of: id(1))
-        memory.remember(splits: [id(11): id(31)], of: id(1))
+        memory.remember(splits: [id(11): split(31)], of: id(1))
         let session = makeSession()
         session.start()
 
@@ -523,7 +527,7 @@ final class SplitViewTests {
         await subscription.batches.pulled(2)
         await finished(session.splitFetch)
 
-        #expect(store.log.calls.contains(.fetchThread(id(11), id(31))))
+        #expect(store.log.calls.contains(.checkThread(id(11), id(31))))
         #expect(session.split?.channelId == id(31))
         session.close()
     }
@@ -546,9 +550,9 @@ final class SplitViewTests {
             EventBatch([.ready, .channelRemoved(channelId: id(31), guildId: id(1))]))
         await finished(session.splitFetch)
 
-        #expect(store.log.calls.contains(.fetchThread(id(11), id(31))))
+        #expect(store.log.calls.contains(.checkThread(id(11), id(31))))
         #expect(session.split?.channelId == id(31))
-        #expect(memory.splits(of: id(1)) == [id(11): id(31)])
+        #expect(memory.splits(of: id(1)) == [id(11): split(31)])
         session.close()
     }
 
@@ -556,7 +560,7 @@ final class SplitViewTests {
     func aSplitThreadGoneAtLaunchIsDropped() async {
         world()
         memory.remember(.init(place: .guild(id(1)), channel: id(11)), of: id(1))
-        memory.remember(splits: [id(11): id(33), id(12): id(34)], of: id(1))
+        memory.remember(splits: [id(11): split(33), id(12): split(34)], of: id(1))
         let session = makeSession()
         session.start()
 
@@ -564,9 +568,9 @@ final class SplitViewTests {
         await subscription.batches.pulled(2)
         await finished(session.splitFetch)
 
-        #expect(store.log.calls.contains(.fetchThread(id(11), id(33))))
+        #expect(store.log.calls.contains(.checkThread(id(11), id(33))))
         #expect(session.split == nil)
-        #expect(memory.splits(of: id(1)) == [id(12): id(34)])
+        #expect(memory.splits(of: id(1)) == [id(12): split(34)])
         session.close()
     }
 
@@ -575,7 +579,7 @@ final class SplitViewTests {
         world()
         account.threadFetchError.withLock { $0 = .Network(kind: .connect) }
         memory.remember(.init(place: .guild(id(1)), channel: id(11)), of: id(1))
-        memory.remember(splits: [id(11): id(33)], of: id(1))
+        memory.remember(splits: [id(11): split(33)], of: id(1))
         let session = makeSession()
         session.start()
 
@@ -584,11 +588,11 @@ final class SplitViewTests {
         await finished(session.splitFetch)
 
         #expect(session.split == nil)
-        #expect(memory.splits(of: id(1)) == [id(11): id(33)])
+        #expect(memory.splits(of: id(1)) == [id(11): split(33)])
         subscription.send(.channelUpdated(channelId: id(11), guildId: id(1)))
         await subscription.batches.pulled(3)
         #expect(
-            store.log.calls.filter { $0 == .fetchThread(id(11), id(33)) }.count == 1,
+            store.log.calls.filter { $0 == .checkThread(id(11), id(33)) }.count == 1,
             "once per session")
         session.close()
     }

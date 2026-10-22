@@ -18,6 +18,8 @@ struct EventBatch {
     var badgesChanged: [GuildId?: Set<ChannelId>] = [:]
     var guildBadgesChanged: Set<GuildId> = []
     var removedChannels: Set<ChannelId> = []
+    // Left or deleted, not down for an outage.
+    var removedGuilds: Set<GuildId> = []
     var windowsChanged: Set<ChannelId> = []
     var updatedMessages: [ChannelId: Set<MessageId>] = [:]
     // Confirmed message ID → the pending ID it replaced.
@@ -42,9 +44,13 @@ struct EventBatch {
                 currentUserChanged = true
             case .userUpdated(let user):
                 usersChanged.insert(user)
-            case .guildAdded(let guild), .guildRemoved(let guild), .guildUnavailable(let guild):
+            case .guildAdded(let guild), .guildUnavailable(let guild):
                 guildsChanged.insert(guild)
                 guildListChanged = true
+            case .guildRemoved(let guild):
+                guildsChanged.insert(guild)
+                guildListChanged = true
+                removedGuilds.insert(guild)
             case .guildUpdated(let guild):
                 guildsChanged.insert(guild)
             case .currentMemberUpdated(let guild):

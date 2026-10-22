@@ -82,24 +82,41 @@ public struct AccountMemory: Sendable {
         }
     }
 
-    /// The thread open beside each channel in the split view: channel → thread.
-    public func splits(of account: UserId) -> [ChannelId: ChannelId] {
-        let stored = defaults.dictionary(forKey: Self.splitsKey(account)) as? [String: String]
-        var splits: [ChannelId: ChannelId] = [:]
-        for (channel, thread) in stored ?? [:] {
-            if let channel = UInt64(channel), let thread = UInt64(thread) {
-                splits[ChannelId(rawValue: channel)] = ChannelId(rawValue: thread)
+    /// A channel's thread in the split view, and the channel's server.
+    public struct Split: Hashable, Sendable {
+        public let thread: ChannelId
+        public let guild: GuildId
+
+        public init(thread: ChannelId, guild: GuildId) {
+            self.thread = thread
+            self.guild = guild
+        }
+    }
+
+    /// The thread open beside each channel in the split view, by channel.
+    public func splits(of account: UserId) -> [ChannelId: Split] {
+        let stored = defaults.dictionary(forKey: Self.splitsKey(account)) as? [String: [String]]
+        var splits: [ChannelId: Split] = [:]
+        for (channel, ids) in stored ?? [:] {
+            guard let channel = UInt64(channel), ids.count == 2, let thread = UInt64(ids[0]),
+                let guild = UInt64(ids[1])
+            else {
+                continue
             }
+            splits[ChannelId(rawValue: channel)] = Split(
+                thread: ChannelId(rawValue: thread), guild: GuildId(rawValue: guild))
         }
         return splits
     }
 
-    public func remember(splits: [ChannelId: ChannelId], of account: UserId) {
+    public func remember(splits: [ChannelId: Split], of account: UserId) {
         if splits.isEmpty {
             defaults.removeObject(forKey: Self.splitsKey(account))
         } else {
             let stored = Dictionary(
-                uniqueKeysWithValues: splits.map { ($0.key.description, $0.value.description) })
+                uniqueKeysWithValues: splits.map { channel, split in
+                    (channel.description, [split.thread.description, split.guild.description])
+                })
             defaults.set(stored, forKey: Self.splitsKey(account))
         }
     }

@@ -35,14 +35,17 @@ struct AccountMemoryTests {
         #expect(later.lastSpot(of: UserId(rawValue: 1)) == nil)
     }
 
-    // The thread beside each channel in the split view, IDs only.
+    // The thread beside each channel in the split view and the channel's server, IDs only.
     @Test
     func splitsArePerAccountAndForgotten() {
         let defaults = MemoryDefaults()
         let memory = AccountMemory(defaults: defaults)
         let splits = [
-            ChannelId(rawValue: 11): ChannelId(rawValue: 31),
-            ChannelId(rawValue: 18_446_744_073_709_551_615): ChannelId(rawValue: 32),
+            ChannelId(rawValue: 11): AccountMemory.Split(
+                thread: ChannelId(rawValue: 31), guild: GuildId(rawValue: 1)),
+            ChannelId(rawValue: 18_446_744_073_709_551_615): AccountMemory.Split(
+                thread: ChannelId(rawValue: 32),
+                guild: GuildId(rawValue: 18_446_744_073_709_551_614)),
         ]
 
         memory.remember(splits: splits, of: UserId(rawValue: 1))

@@ -596,9 +596,14 @@ final class SessionModelTests {
 
         let first = Task { await session.openBeside(thread: id(32), from: id(11)) }
         await account.threadFetches.pulled(1)
-        await session.openBeside(thread: id(32), from: id(11))
+        let second = Task { await session.openBeside(thread: id(32), from: id(11)) }
+        for _ in 0..<5 {
+            await Task.yield()
+        }
+        account.threadFetches.send(())
         account.threadFetches.send(())
         await first.value
+        await second.value
 
         #expect(store.log.calls.filter { $0 == .fetchThread(id(11), id(32)) }.count == 1)
         #expect(session.split?.channelId == id(32))

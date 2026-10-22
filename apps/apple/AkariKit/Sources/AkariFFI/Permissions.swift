@@ -16,5 +16,6 @@ public struct Permissions: OptionSet, Hashable, Sendable {
     public static let readMessageHistory = Permissions(rawValue: 1 << 16)
     public static let mentionEveryone = Permissions(rawValue: 1 << 17)
     public static let changeNickname = Permissions(rawValue: 1 << 26)
+    public static let manageThreads = Permissions(rawValue: 1 << 34)
     public static let sendMessagesInThreads = Permissions(rawValue: 1 << 38)
 }
