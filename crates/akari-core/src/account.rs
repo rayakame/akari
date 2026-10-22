@@ -1026,10 +1026,21 @@ impl Account {
         parent: ChannelId,
         thread: ChannelId,
     ) -> Result<bool, RequestError> {
-        let shared = &self.shared;
-        if shared.store.channel(thread).is_some() {
+        if self.shared.store.channel(thread).is_some() {
             return Ok(true);
         }
+        self.check_thread(parent, thread).await
+    }
+
+    /// Asks Discord about a thread the store may already have, e.g. one a host remembers from an
+    /// earlier session: like [`Account::fetch_thread`], but it asks even then, and a 403 or 404
+    /// also removes the thread from the store, as THREAD_DELETE would.
+    pub async fn check_thread(
+        &self,
+        parent: ChannelId,
+        thread: ChannelId,
+    ) -> Result<bool, RequestError> {
+        let shared = &self.shared;
         if shared.store.thread_unavailable(thread) {
             return Ok(false);
         }

@@ -133,6 +133,23 @@ impl Account {
         .map_err(Into::into)
     }
 
+    /// Asks Discord about a thread the store may already have, e.g. a split view remembered from
+    /// an earlier session: like `fetch_thread`, but it asks even then. Returns whether the store
+    /// has it now; when Discord refuses it or it is gone, the store also drops it
+    /// (`ChannelRemoved`).
+    pub async fn check_thread(
+        &self,
+        parent_id: ChannelId,
+        thread_id: ChannelId,
+    ) -> Result<bool, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.check_thread(parent_id, thread_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
     /// Joins the thread; the store has it joined once Discord says yes. `InvalidRequest` for an
     /// archived thread or one the store doesn't have, before asking.
     pub async fn join_thread(

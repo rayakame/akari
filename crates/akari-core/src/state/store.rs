@@ -925,8 +925,9 @@ impl Store {
         self.read(|inner| inner.state.channel(id))
     }
 
-    /// Whether [`Account::fetch_thread`](crate::Account::fetch_thread) found this session that
-    /// the user can't see the thread, or that it is gone.
+    /// Whether [`Account::fetch_thread`](crate::Account::fetch_thread) or
+    /// [`Account::check_thread`](crate::Account::check_thread) found this session that the user
+    /// can't see the thread, or that it is gone.
     pub fn thread_unavailable(&self, thread: ChannelId) -> bool {
         self.read(|inner| inner.state.thread_unavailable(thread))
     }

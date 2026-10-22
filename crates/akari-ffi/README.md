@@ -80,7 +80,10 @@ settles, `MessageUpdated` names that first message.
 the store has it now. When Discord refuses it or it is gone, `Store.thread_unavailable(thread_id)`
 says so for the session, and `StoreEvent::ThreadUnavailable { guild_id, thread_id }` tells the
 lists of the parent's guild to read the lines that name it again. A later READY keeps a thread
-fetched this session, and every thread the user hasn't joined.
+fetched this session, and every thread the user hasn't joined. `Account.check_thread(parent_id,
+thread_id)` asks even when the store has the thread (a split view remembered from an earlier
+session, which the cache may have kept after it was deleted); when Discord refuses it or it is
+gone, the store also drops it, with `ChannelRemoved`.
 
 `Account.join_thread(thread_id, location)` and `leave_thread(thread_id, location)` join and
 leave, telling Discord where the user chose it (`ThreadLocation`: `SidebarOverflow`,
