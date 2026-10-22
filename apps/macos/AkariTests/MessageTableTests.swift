@@ -470,21 +470,11 @@ struct MessageTableTests {
         NotificationCenter.default.post(name: name, object: controller.scrollView)
     }
 
-    // Positive scrolls up. Without a gesture phase it scrolls as a mouse wheel does, on a later
-    // pass of the run loop; offscreen, phased trackpad events don't scroll at all.
-    func scrollWheel(by pixels: Int32) async throws {
-        let event = try #require(
-            CGEvent(
-                scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: pixels,
-                wheel2: 0, wheel3: 0))
-        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
-        let clip = controller.scrollView.contentView
-        let start = clip.bounds.origin
-        controller.scrollView.scrollWheel(with: try #require(NSEvent(cgEvent: event)))
-        for _ in 0..<40 where clip.bounds.origin == start {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        try await Task.sleep(for: .milliseconds(200))
+    // Where a wheel's step ends (NSClipView's constrained _scrollTo), positive up. AppKit applies
+    // a view's first wheel event on the display's next frame, which a locked screen never draws.
+    func wheel(by pixels: CGFloat) {
+        table.scroll(NSPoint(x: 0, y: clip.bounds.minY - pixels))
+        window.layoutIfNeeded()
     }
 
     @Test
@@ -940,24 +930,24 @@ struct MessageTableTests {
     }
 
     @Test
-    func theListBouncesOnlyVerticallyAndAWheelLandsOnTheBottom() async throws {
+    func theListBouncesOnlyVerticallyAndAWheelLandsOnTheBottom() {
         var rows = messages(80, longText: true)
         show(rows)
         let scrollView = controller.scrollView
         #expect(scrollView.verticalScrollElasticity == .automatic)
         #expect(scrollView.horizontalScrollElasticity == .none)
-        let clip = scrollView.contentView
         let bottom = clip.bounds.origin
 
-        try await scrollWheel(by: 80)
-        #expect(clip.bounds.origin.y < bottom.y)
-        try await scrollWheel(by: -300)
+        wheel(by: 80)
+        #expect(clip.bounds.origin.y == bottom.y - 80)
+        wheel(by: -300)
         #expect(clip.bounds.origin == bottom)
 
         rows += messages(1, from: 81)
         show(rows)
         window.layoutIfNeeded()
         #expect(visibleRows.contains(table.numberOfRows - 1))
+        #expect(controller.isPinnedToBottom)
     }
 
     @Test
