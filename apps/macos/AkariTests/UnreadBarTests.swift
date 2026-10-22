@@ -65,7 +65,12 @@ struct UnreadBarTests {
         list.show(MessageTableState(rows: list.page, newMessages: line))
         #expect(await reported() == false, "above the view at the bottom")
 
+        // AppKit's display cycle can lay the window out on any pass of the run loop; here it does.
+        list.table.needsLayout = true
+        list.window.layoutIfNeeded()
         screen.shows = false
+        // Measured while shown, so it still arrives.
+        await list.controller.lineReport?.value
         let reports = actions.linesOnScreen.count
         list.scroll(toRowOf: 145)
         _ = await reported()
