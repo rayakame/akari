@@ -155,12 +155,12 @@ thread, a renamed channel, and so on) show as one line:
 2026-10-17 and 2026-10-19): "Ray", "t2" and "threads" in `textStrong` (#FBFBFB) and medium, the
 rest in `chatTextMuted` (#818289), all three links with the pointing hand and an underline while
 the pointer is over them. The thread's name opens the thread beside the channel, in the split
-view ([layout.md](layout.md#split-view)), "threads" the channel's Threads popover, and "Ray"
-the profile (**unverified**). *Akari: the name opens the split view.
-A thread Akari doesn't have, such as one archived since, is fetched first
-([dispatches.md](../protocol/dispatches.md#threads)); if Discord refuses it or it's gone, the
-name stays strong text without the link. "Ray" and "threads" are drawn the same but aren't
-links yet: Akari has no profiles and no Threads popover.*
+view ([layout.md](layout.md#split-view)), "threads" the channel's Threads modal
+([thread-browser.md](thread-browser.md)), and "Ray" the profile (**unverified**). *Akari: the
+name opens the split view and "threads" the modal. A thread Akari doesn't have, such as one
+archived since, is fetched first ([dispatches.md](../protocol/dispatches.md#threads)); if
+Discord refuses it or it's gone, the name stays strong text without the link. "Ray" is drawn
+the same but isn't a link yet: Akari has no profiles.*
 
 **A pinned message** posts "Ray pinned a message to this channel. See all pinned messages."
 (observed 2026-10-20, in German "Ray hat eine Nachricht an diesen Kanal angepinnt. Alle

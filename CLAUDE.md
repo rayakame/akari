@@ -41,7 +41,9 @@ reads (paced per channel, one request at a time, "now" message IDs from Discord'
 Mac's; threads with their flag) and marks channels and servers read, in bulk chunks; it fetches a
 thread's starter message when Discord leaves it out, and a thread a "started a thread" line names
 that the store doesn't have; it keeps the threads THREAD_LIST_SYNC and messages bring, each
-thread's live message count and newest message for its box, and joins and leaves threads;
+thread's live message count and newest message for its box, and joins and leaves threads; for
+a channel's Threads browser it lists the active threads, loads the archived ones page by page and
+searches threads by name;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, and show where a channel's unread state and mentions come from. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
@@ -57,7 +59,8 @@ opens with its header ("# channel › thread"), its start and starter message, a
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
 its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message
 with a thread has the thread's box (count, newest message, time), which opens it, and a thread's
-"…" and row menu join and leave it; it shows
+"…" and row menu join and leave it; the header's Threads button, "See all threads" and the
+channel list's "More Active Threads" show a channel's threads (the popout, the modal); it shows
 the
 connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent

@@ -132,6 +132,8 @@ row's was not observed. *Akari: disables both when nothing is unread.*
 ## Threads
 
 Observed in the official web client on 2026-10-17, with the second account and a test server.
+A text or announcement channel with active threads the list doesn't show offers them in "More
+Active Threads" when the pointer rests on its row ([thread-browser.md](thread-browser.md#more-active-threads)).
 
 - **Which threads:** those the user joined, under their parent channel, while they aren't
   closed and are inside their "Hide After Inactivity" window, or are unread or have a mention.
