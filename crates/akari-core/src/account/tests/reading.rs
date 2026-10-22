@@ -362,7 +362,7 @@ async fn dropping_one_stops_only_its_acks() {
     assert!(badge(&online.account, THREAD).unread);
 }
 
-// A busy channel doesn't hold the thread's ack back; each ack names its own channel's message.
+// General stays busy past the thread's lull: the thread's ack goes while general's still waits.
 #[tokio::test]
 async fn pacing_stays_per_channel() {
     let mut online = acking(general_read).await;
@@ -374,32 +374,72 @@ async fn pacing_stays_per_channel() {
         .connection
         .send(thread_message(2, THREAD_NEWEST + 1))
         .await;
-    online.connection.send(message(3, NEWEST + 1)).await;
-    online.connection.send(message(4, NEWEST + 2)).await;
-    sync(&mut online.connection, &online.subscription, 5).await;
-
-    let deadline = std::time::Instant::now() + WAIT;
-    let acks = loop {
-        let acks = sent(&online.server, 2).await;
-        let done = acks.contains(&Sent::Ack(THREAD, THREAD_NEWEST + 1))
-            && acks.contains(&Sent::Ack(GENERAL, NEWEST + 2));
-        if done || std::time::Instant::now() > deadline {
-            break acks;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    };
-    assert!(
-        acks.contains(&Sent::Ack(THREAD, THREAD_NEWEST + 1))
-            && acks.contains(&Sent::Ack(GENERAL, NEWEST + 2)),
-        "{acks:?}"
-    );
-    for ack in &acks {
-        let Sent::Ack(channel, message) = ack else {
-            panic!("{acks:?}");
-        };
-        let thread = (THREAD_NEWEST..THREAD_NEWEST + 2).contains(message);
-        assert_eq!(*channel == THREAD, thread, "{acks:?}");
+    // A message every half second for three seconds, each one moving general's lull.
+    for n in 1..=6 {
+        let seq = 1 + 2 * n;
+        online.connection.send(message(seq, NEWEST + n)).await;
+        sync(&mut online.connection, &online.subscription, seq + 1).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
+
+    let busy: Vec<Sent> = posted(&online.server).await.iter().map(sent_as).collect();
+    assert_eq!(busy, [Sent::Ack(THREAD, THREAD_NEWEST + 1)]);
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [
+            Sent::Ack(THREAD, THREAD_NEWEST + 1),
+            Sent::Ack(GENERAL, NEWEST + 6)
+        ]
+    );
+}
+
+// The thread scrolled away and back: the channel was read all along, so marking it unread on
+// another device meanwhile stands until it grows.
+#[tokio::test]
+async fn a_channel_still_read_isnt_read_again_when_the_other_changes() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+    online.account.set_reading(&[general(), id(THREAD)]);
+    online
+        .connection
+        .send(dispatch(
+            2,
+            "MESSAGE_ACK",
+            json!({"channel_id": GENERAL.to_string(), "message_id": (NEWEST - 1).to_string(),
+                   "manual": true, "mention_count": 0, "version": 5}),
+        ))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert!(badge(&online.account, GENERAL).unread);
+
+    online.account.set_reading(&[general()]);
+    online.account.set_reading(&[general(), id(THREAD)]);
+
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+    online.connection.send(message(4, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 5).await;
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
+}
+
+#[tokio::test]
+async fn a_channel_set_again_after_a_break_is_read() {
+    let mut online = acking(general_read).await;
+    showing(&online, &[NEWEST]).await;
+    showing_thread(&online, &[THREAD_NEWEST]).await;
+    online.account.set_reading(&[general(), id(THREAD)]);
+    online.account.set_reading(&[general()]);
+    online
+        .connection
+        .send(thread_message(2, THREAD_NEWEST + 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert_eq!(handed(&online.account), []);
+
+    online.account.set_reading(&[general(), id(THREAD)]);
+
+    assert_eq!(handed(&online.account), [paced(THREAD, THREAD_NEWEST + 1)]);
 }
 
 #[tokio::test]

@@ -355,9 +355,8 @@ pub(crate) struct State {
     restored: bool,
     windows: Windows,
     cooldowns: Cooldowns,
-    // The channels the user is reading (a channel and the thread beside it), each with the newest
-    // row its list showed after the last write.
-    reading: Vec<(ChannelId, Option<MessageId>)>,
+    // The channels the user is reading: a channel and the thread beside it.
+    reading: Vec<reading::Reading>,
     // Their local acks from the latest write, for the account to send.
     due: Vec<Ack>,
     // Channels whose cursor came from an unread update and may be behind Discord's.
@@ -1918,16 +1917,25 @@ impl State {
         if !self.unavailable_threads.insert(thread) {
             return;
         }
-        if let Some(guild_id) = self
+        let guild_id = self
             .entities
             .channels
             .get(&parent)
-            .and_then(|channel| channel.guild_id)
-        {
+            .and_then(|channel| channel.guild_id);
+        if let Some(guild_id) = guild_id {
             events.push(StoreEvent::ThreadUnavailable {
                 guild_id,
                 thread_id: thread,
             });
+        }
+        // Discord says it's gone or hidden; the store may have it from the cache.
+        if self.entities.channels.contains_key(&thread) {
+            let delete = ChannelDelete {
+                id: thread,
+                guild_id,
+                parent_id: Some(parent),
+            };
+            self.channel_delete(delete, events);
         }
     }
 }

@@ -17,6 +17,15 @@ const MENTION_ON_ALL_MESSAGES: u64 = 1 << 5;
 // A channel and the thread beside it in the split view.
 const READING_LIMIT: usize = 2;
 
+// A channel the user is reading, with the newest row its list showed after the last write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Reading {
+    channel: ChannelId,
+    seen: Option<MessageId>,
+    // Read since the last READY: setting it again reads nothing.
+    read: bool,
+}
+
 impl Entities {
     /// The channel's newest message is past where the user stopped reading.
     pub(crate) fn unread(&self, channel: &Channel) -> bool {
@@ -257,28 +266,48 @@ impl State {
                     }))
     }
 
-    // Before the first READY the channels are only remembered. Duplicates count once; past
+    // Before the first READY the channels are only remembered. A channel read since then keeps
+    // its place: only the list growing reads it again. Duplicates count once; past
     // `READING_LIMIT` channels are ignored.
     pub(crate) fn set_reading(
         &mut self,
         channels: &[ChannelId],
         events: &mut Vec<StoreEvent>,
     ) -> Vec<Ack> {
-        self.reading.clear();
+        let before = std::mem::take(&mut self.reading);
         for &channel in channels {
             if self.reading.len() == READING_LIMIT {
                 break;
             }
-            if !self.reading.iter().any(|(read, _)| *read == channel) {
-                self.reading
-                    .push((channel, self.windows.newest_at_present(channel)));
+            if self
+                .reading
+                .iter()
+                .any(|reading| reading.channel == channel)
+            {
+                continue;
+            }
+            let kept = before.iter().find(|reading| reading.channel == channel);
+            self.reading.push(kept.copied().unwrap_or(Reading {
+                channel,
+                seen: self.windows.newest_at_present(channel),
+                read: false,
+            }));
+        }
+        let mut acks = Vec::new();
+        if self.ready {
+            for index in 0..self.reading.len() {
+                let Reading {
+                    channel,
+                    seen,
+                    read,
+                } = self.reading[index];
+                if read {
+                    continue;
+                }
+                self.reading[index].read = true;
+                acks.extend(seen.and_then(|shown| self.read_shown(channel, shown)));
             }
         }
-        let reading = self.reading.clone();
-        let acks = reading
-            .into_iter()
-            .filter_map(|(channel, shown)| self.read_shown(channel, shown?))
-            .collect();
         self.refresh_badges(self.now_millis(), events);
         acks
     }
@@ -287,12 +316,12 @@ impl State {
     // anything else may be past what the list shows, and an ack from elsewhere moves no row.
     pub(super) fn follow_reading(&mut self) {
         for index in 0..self.reading.len() {
-            let (channel, seen) = self.reading[index];
+            let Reading { channel, seen, .. } = self.reading[index];
             let shown = self.windows.newest_at_present(channel);
             if shown == seen {
                 continue;
             }
-            self.reading[index] = (channel, shown);
+            self.reading[index].seen = shown;
             if let Some(newest) = shown.filter(|_| shown > seen)
                 && let Some(ack) = self.read_shown(channel, newest)
             {
@@ -302,11 +331,16 @@ impl State {
         }
     }
 
-    // A READY reads nothing itself: the lists it leaves are read once they grow.
+    // A READY reads nothing itself: the lists it leaves are read once they grow, or once the
+    // host sets them again.
     pub(super) fn follow_ready(&mut self) {
         for index in 0..self.reading.len() {
-            let channel = self.reading[index].0;
-            self.reading[index] = (channel, self.windows.newest_at_present(channel));
+            let channel = self.reading[index].channel;
+            self.reading[index] = Reading {
+                channel,
+                seen: self.windows.newest_at_present(channel),
+                read: false,
+            };
         }
     }
 
