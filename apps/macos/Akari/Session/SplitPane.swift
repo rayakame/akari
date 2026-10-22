@@ -214,7 +214,6 @@ struct SplitHeader: View {
         .padding(.leading, 16)
         .padding(.trailing, 8)
         .frame(height: ChannelHeader.height)
-        .background(Color(nsColor: Palette.chat))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color(nsColor: Palette.borderSubtle))

@@ -688,4 +688,57 @@ extension SessionScreenTests {
         #expect(channel.y == split.y, "\(channel.y) \(split.y)")
         #expect(same(channel.color, split.color), "one line, not two")
     }
+
+    // In the app's window, whose content runs under its transparent title bar: the strip keeps
+    // the frame's color above the split, whose card starts level with the channel's.
+    @Test(arguments: [1440.0, 1100.0])
+    func theTitleStripStaysTheFrameColorAboveTheSplit(width: Double) async throws {
+        let account = FormattedAccount(contents: ["test"], thread: true)
+        let session = await splitSession(account)
+        let host = NSHostingView(rootView: SessionScreen(session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 600),
+            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        window.titlebarAppearsTransparent = true
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        try await waitUntil(host) { tables(in: host).count == 2 }
+        let shown = tables(in: host)
+        try #require(shown.count == 2)
+        let channel = frame(of: try #require(shown[0].enclosingScrollView))
+        let split = frame(of: try #require(shown[1].enclosingScrollView))
+        host.layoutSubtreeIfNeeded()
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / host.bounds.width
+        let color = { (x: CGFloat, y: CGFloat) in
+            rep.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.sRGB)
+        }
+        let frameColor = try Rendered(
+            Color(nsColor: Palette.frame).ignoresSafeArea(), size: NSSize(width: 10, height: 10)
+        ).color(5, 5)
+
+        // Above and below the centered title across the window, through it above the split.
+        let splitLeft = split.minX - 1 - SplitWidth.gap
+        let strip = [0.25, 31.75].flatMap { y in
+            stride(from: 0.25, to: width, by: 0.5).map { (x: $0, y: y) }
+        } + stride(from: splitLeft, to: width, by: 0.5).map { (x: $0, y: 16) }
+        let off = strip.filter { !same(color($0.x, $0.y), frameColor) }
+        #expect(
+            off.isEmpty, "\(off.count) points aren't the frame's, from \(String(describing: off.first))")
+
+        // Down from the strip to the first point that isn't the frame's: each card's top.
+        let top = { (x: CGFloat) in
+            stride(from: 0.25, through: 100, by: 0.5).first { !same(color(x, $0), frameColor) }
+        }
+        let channelTop = top(channel.minX + 40)
+        #expect(channelTop == TitleBar.height + 0.25, "the channel's top at \(channelTop ?? 0)")
+        #expect(top(split.midX) == channelTop, "the split's top at \(top(split.midX) ?? 0)")
+        if width == 1440 {
+            // Inside the rounded top-left corner, outside its arc.
+            #expect(same(color(split.minX + 1, TitleBar.height + 2), frameColor), "the corner")
+        }
+    }
 }
