@@ -351,11 +351,15 @@ public final class SessionModel {
 
     /// Escape in either list: marks the open channel and the split thread read, ends both new
     /// messages lines, and loads each present a list doesn't show; scrolling both to the bottom
-    /// is the view's part. With nothing to mark or load in either, it closes the split instead,
-    /// as the official client does, and returns false: nothing to scroll.
+    /// is the view's part. With nothing to mark or load in either, it ends both lines and closes
+    /// the split instead, as the official client does, also with a list scrolled up, and returns
+    /// false: nothing to scroll.
     @discardableResult public func escape() -> Bool {
         let lists = [messages, split].compactMap { $0 }
         if split != nil, !lists.contains(where: \.escapeHasWork) {
+            for list in lists {
+                list.endNewMessagesLine()
+            }
             closeSplit()
             return false
         }

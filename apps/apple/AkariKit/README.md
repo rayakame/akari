@@ -130,8 +130,9 @@ the view to move the focus to the split's or the channel's composer (`splitFocus
 row. `reading` holds both lists while each is fresh at its bottom; scrolling one clearly away
 stops only that one until the next click or key press, and so does a split the session shows on
 its own (after a request or a batch, not with its channel or the user's click). `escape()` marks
-both read, ends both lines and loads each present, or, with nothing to do in either (both at the
-present's bottom, read, without a line), closes the split and returns false. A row's `threadLinked` is false for such a line once the thread is unavailable. A
+both read, ends both lines and loads each present, or, with nothing to load or mark read in
+either (as the official client's key handler, also with a list scrolled up), ends both lines,
+closes the split and returns false. A row's `threadLinked` is false for such a line once the thread is unavailable. A
 row's `threadBox` (`ThreadBox`) is the box of the thread started from its message, or that its
 "started a thread" line is about: the name, the count as Discord words it, the second line
 (`Bottom`: the newest message with its author, no recent messages, no messages yet) and the time

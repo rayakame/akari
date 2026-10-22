@@ -271,35 +271,47 @@ extension SplitViewTests {
         session.close()
     }
 
-    // The user's rule, not the official client's: its Escape closes the split here.
+    // Discord's key handler (canary 646574, module 92960) counts only what to load or ack: a
+    // scrolled-up list with neither closes the split, without a scroll.
     @Test(arguments: [11, 31])
-    func escapeWithAListScrolledUpKeepsTheSplit(pane: UInt64) async throws {
+    func escapeWithAListScrolledUpAndNothingToDoClosesTheSplit(pane: UInt64) async throws {
         let session = inChannel11()
         await session.openBeside(thread: id(31), from: id(11))
         let list = try #require(pane == 11 ? session.messages : session.split)
 
         list.setAtBottom(false)
 
-        #expect(session.escape())
-        await finished(session.escaping)
-        #expect(session.split?.channelId == id(31))
+        #expect(!session.escape())
+        #expect(session.split == nil)
+        #expect(account.markedRead.current.isEmpty)
         session.close()
     }
 
+    // Its local ack clears both dividers in the press that closes the split.
     @Test
-    func escapeEndsANewMessagesLineBeforeItClosesTheSplit() async {
-        let session = inChannel11()
-        threadUnread()
+    func escapeClearsTheLinesAndClosesTheSplitInOnePress() async throws {
+        world()
+        store.update { state in
+            state.show(message(2, in: 11, by: user(2)), message(4, in: 31, by: user(2)))
+            state.readStates[id(11)] = ReadState(acked: id(1), mentions: 0, estimated: false)
+            state.readStates[id(31)] = ReadState(acked: id(3), mentions: 0, estimated: false)
+        }
+        let session = makeSession()
+        session.start()
+        session.open(.guild(id(1)))
+        session.open(channel: id(11))
         await session.openBeside(thread: id(31), from: id(11))
-        #expect(session.split?.newMessagesLine == id(4))
+        let channel = try #require(session.messages)
+        let thread = try #require(session.split)
+        #expect(channel.newMessagesLine == id(2))
+        #expect(thread.newMessagesLine == id(4))
 
-        #expect(session.escape())
-        await finished(session.escaping)
+        #expect(!session.escape())
 
-        #expect(session.split?.newMessagesLine == nil)
-        #expect(session.split?.channelId == id(31))
-        #expect(!session.escape(), "then nothing is left")
         #expect(session.split == nil)
+        #expect(channel.newMessagesLine == nil)
+        #expect(thread.newMessagesLine == nil)
+        #expect(account.markedRead.current.isEmpty, "nothing unread to ack")
         session.close()
     }
 

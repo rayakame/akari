@@ -345,12 +345,10 @@ public final class MessageListModel {
         messageJump = MessageJump(messageId: messageId, number: messageJumps)
     }
 
-    // With none in either list Escape closes the split. The official client counts only what to
-    // load or ack; the user's rule adds the scroll position and the line (amendment 243).
+    // The official client's Escape closes the split when neither list has any, scrolled up or
+    // with a line too (amendment 248).
     var escapeHasWork: Bool {
-        if !atPresent || !atBottom || newMessagesLine != nil
-            || store.window(channelId: channelId)?.latest == false
-        {
+        if !atPresent || store.window(channelId: channelId)?.latest == false {
             return true
         }
         let badge = store.channelBadges(ids: [channelId]).first?.badge

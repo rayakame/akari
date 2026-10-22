@@ -156,7 +156,8 @@ sidebar, canary 645444, 2026-10-21) and observed 2026-10-17:
 - **Reading:** both lists are read at once, each while it's at its bottom; a split that appears
   on its own (a remembered thread Discord answered for after a relaunch) is read after the next
   click or key press. Escape in either marks both read and jumps both to the present; with
-  nothing left in either, it closes the split
+  nothing newer to load and nothing unread in either, it ends both new messages lines and
+  closes the split, also with a list scrolled up
   ([message-list.md](message-list.md#reading-the-signal-to-ack), [shortcuts.md](shortcuts.md)).
 - No animation: it opens and closes at once. Discord's member list and the split share the
   right side; Akari has no member list yet.

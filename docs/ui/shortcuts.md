@@ -41,10 +41,9 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   sticker preview (the channel's before the thread's), closes a create-thread form, and then runs
   both lists' part: jump if newer messages aren't loaded, ack if unread, and clear the divider
   either way. When neither list jumped or acked and a split is open it closes the split, also
-  with a list scrolled up or a divider just cleared; otherwise every list scrolls to its
-  bottom. *Akari closes the split only when both lists are at the present's bottom, read and
-  without a new messages line: a list scrolled up or still showing its line is scrolled or
-  cleared first (the user's rule, 2026-10-22).*
+  with a list scrolled up or a divider just cleared, and scrolls nothing; otherwise every list
+  scrolls to its bottom. Akari follows that order: with nothing newer to load and nothing
+  unread in either list, one Escape ends both new messages lines and closes the split.
   Shift+Escape, from the same places, marks the open server read, and does nothing at Home
   ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
 - **Only the Escape key.** macOS sends Cmd+. as the same cancel command as Escape; in Akari it
