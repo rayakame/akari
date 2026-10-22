@@ -54,6 +54,9 @@ public final class SessionModel {
         didSet {
             oldValue?.retire()
             channels?.setOpen(messages?.channelId)
+            if oldValue?.channelId != messages?.channelId {
+                threadBrowser = nil
+            }
             syncSplit()
         }
     }
@@ -72,6 +75,9 @@ public final class SessionModel {
     /// Set when the X or Escape closed the split, so the channel's composer takes the focus; the
     /// view calls `channelFocused()` once it has.
     public private(set) var focusChannel = false
+    /// The open Threads browser: the popout under the header's Threads button or the modal "See
+    /// all threads" opens. Opening another channel closes it.
+    public private(set) var threadBrowser: ThreadBrowserModel?
     /// The last join or leave that failed, until `dismissMembershipError()`.
     public private(set) var membershipError: MembershipError?
     /// The channels the user is reading: the open channel and the split thread, each while its
@@ -373,10 +379,82 @@ public final class SessionModel {
         return true
     }
 
+    /// The channel whose threads the header's Threads button browses: the open text or
+    /// announcement channel, or the parent of a thread open full width; `nil` elsewhere (forums,
+    /// voice, DMs), where it doesn't show.
+    public var threadsButtonParent: ChannelId? {
+        guard let open = messages?.channelId, let channels, let shown = channels.channel(open)
+        else {
+            return nil
+        }
+        let browsed = shown.isThread ? shown.parentId.flatMap(channels.channel) : shown
+        guard let browsed, browsed.kind == .guildText || browsed.kind == .guildNews else {
+            return nil
+        }
+        return browsed.id
+    }
+
+    /// Opens `parent`'s Threads browser, in place of one already open.
+    public func openThreadBrowser(of parent: ChannelId, as presentation: ThreadBrowserModel.Presentation) {
+        engage()
+        threadBrowser = ThreadBrowserModel(
+            parentId: parent, presentation: presentation, userId: userId, store: store,
+            account: account)
+    }
+
+    public func closeThreadBrowser() {
+        threadBrowser = nil
+    }
+
+    /// A row of the Threads browser or the channel list's "More Active Threads": closes the
+    /// browser; a click opens the thread full width and closes its channel's split, as a row
+    /// does, and Shift+click opens it beside its channel, going there first.
+    public func open(browsed thread: ChannelId, beside: Bool) async {
+        let parent = threadBrowser?.parentId ?? store.channel(id: thread)?.parentId
+        threadBrowser = nil
+        guard let parent else {
+            return
+        }
+        guard beside else {
+            open(channel: thread)
+            return
+        }
+        if messages?.channelId != parent {
+            go(to: parent)
+        }
+        await openBeside(thread: thread, from: parent)
+    }
+
+    /// The active threads of a channel the list doesn't show (not joined, or joined but past
+    /// their window), the newest message first, at most three: the channel list's "More Active
+    /// Threads" popout.
+    public func moreActiveThreads(of channel: ChannelId) -> [ThreadPeek] {
+        let browser = store.threadBrowser(parentId: channel)
+        let listed = Set(channels?.channels.map(\.id) ?? []).union(messages.map { [$0.channelId] } ?? [])
+        let threads = store.channels(ids: (browser.joined + browser.others).filter { !listed.contains($0) })
+        return threads
+            .sorted { Self.newest($0) > Self.newest($1) }
+            .prefix(3)
+            .map { thread in
+                let owner = thread.thread?.ownerId
+                return ThreadPeek(
+                    id: thread.id, name: thread.name ?? "", ownerId: owner,
+                    owner: owner.flatMap { $0 == userId ? currentUser : store.user(id: $0) },
+                    time: thread.thread.map { ThreadBrowserModel.lastActivity(thread, $0) }
+                        ?? ThreadBox.time(of: thread.id.rawValue))
+            }
+    }
+
+    private static func newest(_ thread: Channel) -> UInt64 {
+        thread.thread?.lastMessageId?.rawValue ?? thread.id.rawValue
+    }
+
     /// What a thread of the open server, or the split thread, offers in its menus; `nil` for
     /// anything else.
     public func membershipItem(for thread: ChannelId) -> MembershipItem? {
-        let shown = channels?.channel(thread) ?? splitChannel.flatMap { $0.id == thread ? $0 : nil }
+        let shown =
+            channels?.channel(thread) ?? splitChannel.flatMap { $0.id == thread ? $0 : nil }
+            ?? threadBrowser?.channel(thread)
         guard let info = shown?.thread else {
             return nil
         }
@@ -691,6 +769,7 @@ public final class SessionModel {
         }
         messages?.apply(batch)
         split?.apply(batch)
+        threadBrowser?.apply(batch)
     }
 
     private func keepSplits(where keep: (ChannelId, AccountMemory.Split) -> Bool) {

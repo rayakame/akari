@@ -140,7 +140,20 @@ it's measured from; `ThreadBox.relativeTime` words that time ("25m ago") and say
 changes, `placeholder(for:)` what an empty newest message shows. `membershipItem(for:)` gives a
 thread of the open server's menus, or the split thread's, Join Thread or Leave Thread (disabled while archived);
 `join(thread:from:)` and `leave(thread:from:)` send the menu's `ThreadLocation`, and a failure
-waits in `membershipError`, in Discord's words, until `dismissMembershipError()`. In a
+waits in `membershipError`, in Discord's words, until `dismissMembershipError()`.
+`threadsButtonParent` is the channel the header's Threads button browses (a text or
+announcement channel, or a thread's parent of those kinds); `openThreadBrowser(of:as:)` opens
+its `ThreadBrowserModel` as the popout or the modal ("See all threads"), which another channel or
+`closeThreadBrowser()` closes. The browser's `sections` are Discord's ("9 joined threads", "2
+other active threads", "older threads", empty ones left out) with rows (name; the newest
+message, "No recent messages", "Started by" with the owner, or "Last active", each with its
+time; faces from the member preview and "+N" or "50+"); `open()` and `loadMore()` load the
+older threads page by page with READ_MESSAGE_HISTORY (`canSearch`); `setQuery(_:)` and
+`submit()` search on Enter, `results` holding the found rows until the field is cleared, a
+failed search changing nothing; `showsSpinner` and `isEmpty` say what shows instead.
+`open(browsed:beside:)` is a row's click (full width, closing the channel's split) or
+Shift+click (beside its channel), and `moreActiveThreads(of:)` the channel list's "More Active
+Threads" (`ThreadPeek`): up to three active threads the list doesn't show. In a
 thread, a row's `starter` is set for
 its first message when it started from one in the channel: the row draws `shown`, the
 parent's message, once loaded; `notice` says it couldn't be loaded; while it's fetched the

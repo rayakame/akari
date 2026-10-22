@@ -18,6 +18,8 @@ struct EventBatch {
     var badgesChanged: [GuildId?: Set<ChannelId>] = [:]
     var guildBadgesChanged: Set<GuildId> = []
     var removedChannels: Set<ChannelId> = []
+    // Channels with a thread whose newest or latest message changed.
+    var threadActivity: Set<ChannelId> = []
     // Left or deleted, not down for an outage.
     var removedGuilds: Set<GuildId> = []
     var windowsChanged: Set<ChannelId> = []
@@ -68,6 +70,8 @@ struct EventBatch {
             case .threadListingChanged(let guild, let thread),
                 .threadUnavailable(let guild, let thread):
                 channelsChanged[guild, default: []].insert(thread)
+            case .threadActivity(_, let parent, _):
+                threadActivity.insert(parent)
             case .channelRemoved(let channel, let guild):
                 channelsChanged[guild, default: []].insert(channel)
                 removedChannels.insert(channel)

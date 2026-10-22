@@ -271,6 +271,33 @@ final class FakeAccount: Account, @unchecked Sendable {
     }
 
     // Thrown by the next joins and leaves; without one the store has the thread joined or left.
+    // What a page of older threads leaves in the store, as akari-core would.
+    let browserAfterOlderLoad = Locked<ThreadBrowser?>(nil)
+    let olderLoadError = Locked<RequestError?>(nil)
+    // A search's answer: Discord's IDs, `nil` while not indexed; an error fails it.
+    let searchReply = Locked<Result<[ChannelId]?, RequestError>>(.success([]))
+    // While set, each search waits here before answering.
+    let holdSearches = Locked(false)
+    let searchEntries = AsyncQueue<Void>()
+
+    override func loadOlderThreads(parentId: ChannelId) async throws {
+        log.append(.loadOlderThreads(parentId))
+        if let error = olderLoadError.current {
+            throw error
+        }
+        if let browser = browserAfterOlderLoad.current {
+            fakeStore.update { $0.threadBrowsers[parentId] = browser }
+        }
+    }
+
+    override func searchThreads(parentId: ChannelId, name: String) async throws -> [ChannelId]? {
+        log.append(.searchThreads(parentId, name))
+        if holdSearches.current {
+            _ = await searchEntries.next()
+        }
+        return try searchReply.current.get()
+    }
+
     let membershipError = Locked<RequestError?>(nil)
 
     override func joinThread(threadId: ChannelId, location: ThreadLocation) async throws {
