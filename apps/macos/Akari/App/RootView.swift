@@ -88,6 +88,7 @@ struct SessionScreen: View {
     var warning: AppModel.Warning?
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
+    let splitWidth: SplitWidth
     // Trusted hosts are the account's (D65).
     @State private var links: LinkFollower
     @State private var tables = PaneTables()
@@ -95,12 +96,13 @@ struct SessionScreen: View {
     init(
         session: SessionModel, warning: AppModel.Warning? = nil,
         dismissWarning: @escaping () -> Void = {}, reconnect: @escaping () -> Void = {},
-        links: LinkFollower? = nil
+        links: LinkFollower? = nil, splitWidth: SplitWidth = .shared
     ) {
         self.session = session
         self.warning = warning
         self.dismissWarning = dismissWarning
         self.reconnect = reconnect
+        self.splitWidth = splitWidth
         _links = State(
             initialValue: links ?? LinkFollower(trusted: session.trustedLinks()))
     }
@@ -108,7 +110,7 @@ struct SessionScreen: View {
     var body: some View {
         SessionView(
             session: session, warning: warning, dismissWarning: dismissWarning,
-            reconnect: reconnect
+            reconnect: reconnect, splitWidth: splitWidth
         ) { messages, name in
             let beside = messages === session.split
             MessageArea(

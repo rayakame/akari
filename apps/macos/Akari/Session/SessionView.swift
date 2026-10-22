@@ -6,8 +6,8 @@ struct SessionView<MessageArea: View>: View {
     var warning: AppModel.Warning?
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
-    @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     var splitWidth = SplitWidth.shared
+    @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
 
     var body: some View {

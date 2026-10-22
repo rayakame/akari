@@ -558,17 +558,16 @@ extension SessionScreenTests {
     }
 
     // Kept until Akari quits: a drag through the gap stores nothing, and each launch starts at
-    // the default.
+    // the default. Its own width: the other screen tests render with the shared one meanwhile.
     @Test(.enabled(if: firstClicks))
     func aDraggedWidthIsNeverStored() async throws {
         let account = FormattedAccount(contents: ["test"], thread: true)
         let session = await splitSession(account)
-        let host = NSHostingView(rootView: SessionScreen(session: session).takingFirstClicks())
+        let split = SplitWidth()
+        let host = NSHostingView(
+            rootView: SessionScreen(session: session, splitWidth: split).takingFirstClicks())
         let window = keyWindow(host, width: 1440)
-        defer {
-            window.orderOut(nil)
-            SplitWidth.shared.width = SplitWidth.standard
-        }
+        defer { window.orderOut(nil) }
         try await waitUntil(host) { tables(in: host).count == 2 }
         let stored = { UserDefaults.standard.dictionaryRepresentation() as NSDictionary }
         let before = stored()
@@ -578,8 +577,8 @@ extension SessionScreenTests {
             let channel = frame(of: try #require(tables(in: host).first?.enclosingScrollView))
             let gap = NSPoint(x: channel.maxX + SplitWidth.gap / 2, y: channel.midY)
             try ResizeCursorTests().drag(in: window, from: gap, by: -40)
-            try await waitUntil(host) { SplitWidth.shared.width == width }
-            #expect(SplitWidth.shared.width == width)
+            try await waitUntil(host) { split.width == width }
+            #expect(split.width == width)
             #expect(stored() == before)
         }
         #expect(SplitWidth().width == SplitWidth.standard)
