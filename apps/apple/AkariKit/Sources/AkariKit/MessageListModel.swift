@@ -346,7 +346,7 @@ public final class MessageListModel {
     }
 
     // With none in either list Escape closes the split. The official client counts only what to
-    // load or ack; the user's rule adds the scroll position and the line (amendment 240).
+    // load or ack; the user's rule adds the scroll position and the line (amendment 243).
     var escapeHasWork: Bool {
         if !atPresent || !atBottom || newMessagesLine != nil
             || store.window(channelId: channelId)?.latest == false

@@ -266,9 +266,8 @@ impl State {
                     }))
     }
 
-    // Before the first READY the channels are only remembered. A channel read since then keeps
-    // its place: only the list growing reads it again. Duplicates count once; past
-    // `READING_LIMIT` channels are ignored.
+    // Before the first READY the channels are only remembered; one already read keeps its place,
+    // so only its list growing reads it again. Past `READING_LIMIT` channels are ignored.
     pub(crate) fn set_reading(
         &mut self,
         channels: &[ChannelId],
