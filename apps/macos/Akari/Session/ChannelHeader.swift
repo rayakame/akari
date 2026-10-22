@@ -8,6 +8,8 @@ struct ChannelHeader: View {
     let name: String
     var parent: Channel?
     var openParent: () -> Void = {}
+    /// The Threads button, where the channel has one.
+    var threads: ThreadsButton?
     /// A thread's "…".
     var menu: ThreadMenu?
     var act: (ThreadMenu.Item) -> Void = { _ in }
@@ -49,6 +51,10 @@ struct ChannelHeader: View {
                 }
             }
             Spacer(minLength: 0)
+            if let threads {
+                threads
+                    .padding(.trailing, menu == nil ? 8 : 0)
+            }
             if let menu {
                 ThreadMenuButton(menu: menu, act: act)
                     .padding(.trailing, 8)

@@ -202,7 +202,8 @@ struct ThreadHeaderTests {
             rateLimitPerUser: 0, recipientIds: [],
             thread: ThreadInfo(
                 joined: true, archived: false, locked: false, private: false, messageCount: nil,
-                ownerId: nil, lastMessageId: nil, createdAt: nil))
+                ownerId: nil, lastMessageId: nil, createdAt: nil, memberCount: nil, memberIdsPreview: [],
+                archivedAt: Date(timeIntervalSince1970: 0)))
     }
 
     // Where the first strong-white ink starts, across the header's middle: the open channel's

@@ -176,7 +176,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                     ? ThreadInfo(
                         joined: false, archived: false, locked: false, private: false,
                         messageCount: 40, ownerId: UserId(rawValue: 2), lastMessageId: nil,
-                        createdAt: nil)
+                        createdAt: nil, memberCount: nil, memberIdsPreview: [],
+                        archivedAt: Date(timeIntervalSince1970: 0))
                     : nil)
         }
         guard Self.channelIds.contains(id) else {
@@ -192,7 +193,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                 ? ThreadInfo(
                     joined: true, archived: false, locked: true, private: false,
                     messageCount: 40, ownerId: UserId(rawValue: 2), lastMessageId: nil,
-                    createdAt: nil)
+                    createdAt: nil, memberCount: nil, memberIdsPreview: [],
+                    archivedAt: Date(timeIntervalSince1970: 0))
                 : nil)
     }
 

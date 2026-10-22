@@ -22,6 +22,18 @@ enum Palette {
     static let threadSpine = token("threadSpine", dark: "#474850", light: "#aaabb3")
     // The box under a message with a thread, measured from the user's screenshots (amendment 175).
     static let threadBoxFill = token("threadBoxFill", dark: "#242429", light: "#ffffff")
+    // Discord's surfaces, for popouts and modals and the cards in them.
+    static let surfaceHigh = token("surfaceHigh", dark: "#242429", light: "#ffffff")
+    static let surfaceHigher = token("surfaceHigher", dark: "#29292e", light: "#ffffff")
+    static let surfaceHighest = token("surfaceHighest", dark: "#2b2e33", light: "#ffffff")
+    static let baseLowest = token("baseLowest", dark: "#121214", light: "#f2f2f5")
+    static let borderNormal = token(
+        "borderNormal", dark: "#97979f", light: "#97979f", alpha: (0.2, 0.4))
+    // Discord's shadow-border: a ring just outside a popout.
+    static let shadowBorder = token(
+        "shadowBorder", dark: "#ffffff", light: "#000000", alpha: (0.08, 0.08))
+    static let backgroundModMuted = token(
+        "backgroundModMuted", dark: "#97979f", light: "#97979f", alpha: (0.08, 0.08))
     static let threadBoxBorder = token("threadBoxBorder", dark: "#323237", light: "#e2e2e5")
     // System lines' icons, from Discord's client: its arrow and call assets carry their colors.
     static let noticeIn = token("noticeIn", dark: "#3ba55c", light: "#3ba55c")

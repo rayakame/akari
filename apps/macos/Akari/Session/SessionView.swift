@@ -27,6 +27,22 @@ struct SessionView<MessageArea: View>: View {
                 .overlay(alignment: .topLeading) { headerLine(pageWidth: pageWidth) }
             }
         }
+        .overlayPreferenceValue(ThreadsButtonBounds.self) { anchor in
+            GeometryReader { proxy in
+                if let browser = session.threadBrowser {
+                    switch browser.presentation {
+                    case .modal:
+                        ThreadBrowserModal(browser: browser, session: session, area: proxy.size)
+                    case .popout:
+                        if let anchor {
+                            ThreadBrowserPopout(
+                                browser: browser, session: session, button: proxy[anchor],
+                                area: proxy.size)
+                        }
+                    }
+                }
+            }
+        }
         .ignoresSafeArea(edges: .top)
         .navigationTitle(windowTitle.text)
         .alert(
@@ -49,6 +65,21 @@ struct SessionView<MessageArea: View>: View {
             return nil
         }
         return .fullView(membership: item, splittable: openParent?.opensMessageList == true)
+    }
+
+    private var threadsButton: ThreadsButton? {
+        session.threadsButtonParent.map { parent in
+            let selected =
+                session.threadBrowser.map { $0.presentation == .popout && $0.parentId == parent }
+                ?? false
+            return ThreadsButton(selected: selected) {
+                if selected {
+                    session.closeThreadBrowser()
+                } else {
+                    session.openThreadBrowser(of: parent, as: .popout)
+                }
+            }
+        }
     }
 
     private func act(_ item: ThreadMenu.Item, on thread: ChannelId, in menu: ThreadMenu) {
@@ -219,7 +250,7 @@ struct SessionView<MessageArea: View>: View {
         VStack(spacing: 0) {
             ChannelHeader(
                 channel: openChannel, name: openName, parent: openParent,
-                openParent: session.openParent, menu: threadMenu
+                openParent: session.openParent, threads: threadsButton, menu: threadMenu
             ) { item in
                 if let open = openChannel, let menu = threadMenu {
                     act(item, on: open.id, in: menu)
