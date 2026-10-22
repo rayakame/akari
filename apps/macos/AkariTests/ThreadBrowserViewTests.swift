@@ -149,18 +149,29 @@ struct ThreadBrowserViewTests {
         #expect(ink(popout, xs: 440...476, ys: 12...36) == nil)
     }
 
+    // Discord's Create Thread button is its brand blue; Akari has none until it creates threads.
     @Test
     func theEmptyStateHasDiscordsWordsAndNoButton() throws {
         store.empty = true
-        let session = store.session()
-        session.openThreadBrowser(of: FakeBrowserStore.parent, as: .popout)
-        let browser = try #require(session.threadBrowser)
+        let image = try rendered()
 
-        #expect(browser.isEmpty)
         #expect(ThreadBrowserView.emptyTitle == "There are no threads.")
         #expect(
             ThreadBrowserView.emptyText
                 == "Stay focused on a conversation with a thread - a temporary text channel.")
+        // The symbol, the title and the text, centered below the header.
+        let drawn = try #require(ink(image, xs: 0...479, ys: 60...440))
+        #expect(abs((drawn.lowerBound + drawn.upperBound) / 2 - 240) <= 8, "\(drawn)")
+        let brand = stride(from: CGFloat(56), to: 651, by: 1).contains { y in
+            stride(from: CGFloat(0), to: 480, by: 1).contains { x in
+                guard let color = image.color(x, y) else {
+                    return false
+                }
+                return color.blueComponent > 0.8 && color.redComponent < 0.5
+                    && color.greenComponent < 0.55
+            }
+        }
+        #expect(!brand)
     }
 }
 

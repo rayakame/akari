@@ -114,6 +114,37 @@ struct ThreadsHoverTests {
     }
 
     @Test
+    func movingToARowWithoutThreadsClosesTheFirstRowsPopout() async {
+        let hover = hover()
+        hover.hover(general, true) { true }
+        await gate.waitStarted(1)
+        await gate.release()
+
+        hover.hover(general, false) { true }
+        hover.hover(ChannelId(rawValue: 12), true) { false }
+        await gate.waitStarted(3)
+        await gate.release()
+
+        #expect(hover.channel == nil)
+    }
+
+    @Test
+    func movingToARowWithThreadsShowsItsOwn() async {
+        let hover = hover()
+        let other = ChannelId(rawValue: 12)
+        hover.hover(general, true) { true }
+        await gate.waitStarted(1)
+        await gate.release()
+
+        hover.hover(general, false) { true }
+        hover.hover(other, true) { true }
+        await gate.waitStarted(3)
+        await gate.release()
+
+        #expect(hover.channel == other)
+    }
+
+    @Test
     func aClickClosesItAtOnce() async {
         let hover = hover()
         hover.hover(general, true) { true }

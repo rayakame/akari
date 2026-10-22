@@ -11,7 +11,10 @@ final class ThreadsHover {
     static let hideDelay: Duration = .milliseconds(250)
 
     private(set) var channel: ChannelId?
-    @ObservationIgnored private var timer: Task<Void, Never>?
+    // Each row has its own: leaving one row for another closes the first row's popout unless
+    // the second shows its own.
+    @ObservationIgnored private var showing: Task<Void, Never>?
+    @ObservationIgnored private var hiding: Task<Void, Never>?
     @ObservationIgnored private var row: ChannelId?
     @ObservationIgnored private var overPopout = false
     @ObservationIgnored private let wait: (Duration) async -> Void
@@ -25,13 +28,18 @@ final class ThreadsHover {
     func hover(_ channel: ChannelId, _ inside: Bool, available: @escaping () -> Bool) {
         if inside {
             row = channel
-            schedule(Self.showDelay) { [weak self] in
+            if channel == self.channel {
+                hiding?.cancel()
+            }
+            showing?.cancel()
+            showing = after(Self.showDelay) { [weak self] in
                 if available() {
                     self?.channel = channel
                 }
             }
         } else if row == channel {
             row = nil
+            showing?.cancel()
             scheduleHide()
         }
     }
@@ -39,7 +47,7 @@ final class ThreadsHover {
     func hoverPopout(_ inside: Bool) {
         overPopout = inside
         if inside {
-            timer?.cancel()
+            hiding?.cancel()
         } else {
             scheduleHide()
         }
@@ -47,25 +55,28 @@ final class ThreadsHover {
 
     /// A click on the row, a row of the popout or "See All".
     func dismiss() {
-        timer?.cancel()
+        showing?.cancel()
+        hiding?.cancel()
         row = nil
         overPopout = false
         channel = nil
     }
 
     private func scheduleHide() {
-        schedule(Self.hideDelay) { [weak self] in
-            guard let self, row == nil, !overPopout else {
+        hiding?.cancel()
+        hiding = after(Self.hideDelay) { [weak self] in
+            guard let self, row != channel, !overPopout else {
                 return
             }
             channel = nil
         }
     }
 
-    private func schedule(_ delay: Duration, _ action: @escaping @MainActor () -> Void) {
-        timer?.cancel()
+    private func after(_ delay: Duration, _ action: @escaping @MainActor () -> Void) -> Task<
+        Void, Never
+    > {
         let wait = self.wait
-        timer = Task { @MainActor in
+        return Task { @MainActor in
             await wait(delay)
             if !Task.isCancelled {
                 action()

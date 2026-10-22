@@ -84,7 +84,8 @@ The first time a channel's browser opens in a connection (with Read Message Hist
 client asks `threads/search` for its archived threads, 25 at a time
 ([dispatches.md](../protocol/dispatches.md#threads)). The next page loads when the list is
 scrolled within 200 of its bottom while Discord has more. Pages stay for the connection, so
-reopening asks nothing. The section shows every archived thread of the channel the client knows,
+reopening asks nothing. *Akari: a browser open when a new connection forgets the pages asks
+again; one opened while another's page loads follows that page.* The section shows every archived thread of the channel the client knows,
 down to the oldest one the pages brought (all once there are no more): a thread archived after
 the page loaded is there when the browser opens again, without a reload (observed). A failed page,
 or Discord's "not indexed yet", leaves the section as it is until the next connection.
@@ -113,5 +114,6 @@ newest message first, each with its owner's face (16), its name, a bullet and it
 tall, 2 apart, radius 4, hovered in `background-mod-normal` with `text-strong`. The popout is
 8 around its content, 272 to 400 wide, radius 12, `surface-high` with a `border-subtle` ring and
 `shadow-high`. A row opens its thread as the browser's do (Shift: beside). It goes 250 ms after
-the pointer leaves the row and the popout; a click on the row closes it at once.
+the pointer leaves the row and the popout (moving to another row closes it unless that row
+shows its own); a click on the row closes it at once.
 *Akari keeps it open while the pointer is on the popout; whether Discord's does is to check.*
