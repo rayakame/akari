@@ -60,6 +60,14 @@ pub enum StoreEvent {
         guild_id: GuildId,
         thread_id: ChannelId,
     },
+    /// A thread's newest message, message count or latest message changed without a
+    /// `ChannelUpdated`: its place in [`Store::thread_browser`](super::Store::thread_browser) and
+    /// its [`latest_message`](super::Store::latest_message) may have changed.
+    ThreadActivity {
+        guild_id: GuildId,
+        parent_id: ChannelId,
+        thread_id: ChannelId,
+    },
     /// Discord refused the thread a line in the guild names, or it is gone: see
     /// [`Store::thread_unavailable`](super::Store::thread_unavailable).
     ThreadUnavailable {

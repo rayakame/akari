@@ -377,6 +377,12 @@ pub(crate) struct State {
     latest: HashMap<ChannelId, Arc<Message>>,
     // Threads messages brought before their guild was known.
     unplaced_threads: HashMap<ChannelId, model::Channel>,
+    // Unjoined threads kept across the last READY that neither the gateway nor a request has
+    // brought since: archived meanwhile, for all the store knows.
+    unconfirmed: HashSet<ChannelId>,
+    // Each channel's pages of archived threads in this connection.
+    older: HashMap<ChannelId, browser::OlderPages>,
+    older_generation: u64,
     clock: Arc<Clock>,
 }
 
@@ -407,6 +413,9 @@ impl State {
             fetched_threads: HashSet::new(),
             latest: HashMap::new(),
             unplaced_threads: HashMap::new(),
+            unconfirmed: HashSet::new(),
+            older: HashMap::new(),
+            older_generation: 0,
             clock,
         }
     }
@@ -552,6 +561,7 @@ impl State {
         // READY's cursors are fresh.
         self.stale_cursors.clear();
         self.follow_ready();
+        self.follow_ready_threads();
         self.place_waiting_threads(events);
         // A guild READY doesn't list won't come in this session.
         self.unplaced_threads.clear();
@@ -732,15 +742,20 @@ impl State {
                     .and_then(model::Nonce::as_u64)
                     .map(MessageId::new);
                 self.put_threads_of(std::slice::from_ref(&message), events);
-                if self.count_created(&message) | self.note_live_latest(&message) {
+                let boxed = self.count_created(&message) | self.note_live_latest(&message);
+                if boxed {
                     self.reread_boxes(channel, events);
                 }
                 self.read_message(&message);
                 self.dirty.channel(channel);
                 let forced = self.forced_through(&message);
                 self.windows.live(*message, &self.entities.users, events);
-                if self.note_message(channel, id, events) && !forced {
+                let moved = self.note_message(channel, id, events);
+                if moved && !forced {
                     self.stale_cursors.remove(&channel);
+                }
+                if moved && !boxed {
+                    self.note_thread_activity(channel, events);
                 }
                 if Some(author) == self.entities.me() {
                     self.note_own_message(channel, nonce);
@@ -852,15 +867,19 @@ impl State {
             self.put_user(user, events);
         }
         let mut channel = Channel::from_wire(channel, None);
+        self.unconfirmed.remove(&channel.id);
         if let Some(known) = self.entities.channels.get(&channel.id) {
             if let Some(last) = known.last_message_id {
                 channel.note_message(last);
             }
-            // An absent member isn't a leave: only a members update or READY says so.
-            if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread)
-                && info.member.is_none()
-            {
-                info.member = before.member;
+            if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread) {
+                // An absent member isn't a leave: only a members update or READY says so.
+                if info.member.is_none() {
+                    info.member = before.member;
+                }
+                if info.member_ids_preview.is_empty() {
+                    info.member_ids_preview = before.member_ids_preview.clone();
+                }
             }
         }
         let newest_before = self
@@ -957,6 +976,7 @@ impl State {
         for user in update.recipients.clone().unwrap_or_default() {
             self.put_user(user, events);
         }
+        self.unconfirmed.remove(&update.id);
         let next = Arc::new(known.patch(update));
         if next != known {
             let id = next.id;
@@ -1108,6 +1128,7 @@ impl State {
         };
         self.windows.drop_channel(removed.id);
         self.latest.remove(&removed.id);
+        self.unconfirmed.remove(&removed.id);
         self.entities.read_states.forget(removed.id);
         self.dirty.channel(removed.id);
         events.push(StoreEvent::ChannelRemoved {
@@ -1122,6 +1143,7 @@ impl State {
             }
             self.windows.drop_channel(thread);
             self.latest.remove(&thread);
+            self.unconfirmed.remove(&thread);
             self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {
@@ -1866,7 +1888,7 @@ impl State {
             return Learned::NotAThread;
         }
         // The gateway's copy is newer than an answer to a request sent before it.
-        if self.entities.channels.contains_key(&id) {
+        if self.entities.channels.contains_key(&id) && !self.unconfirmed.contains(&id) {
             return Learned::Kept;
         }
         self.put_channel(thread, events);
@@ -1949,7 +1971,10 @@ pub(crate) fn wall_millis() -> i64 {
 }
 
 mod boxes;
+mod browser;
 mod reading;
+
+pub(crate) use browser::{OLDER_PAGE, OlderPage};
 
 #[cfg(test)]
 pub(crate) mod tests;

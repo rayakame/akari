@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tokio::sync::{Mutex, Notify, mpsc};
 
-use super::apply::{Derived, Entities, Learned, ReadyDiff, State};
+use super::apply::{Derived, Entities, Learned, OlderPage, ReadyDiff, State};
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
 use super::events::{ConnectionState, StoreEvent};
@@ -13,7 +13,9 @@ use super::order;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
-use super::types::{Channel, CurrentUser, Guild, Member, Message, StarterMessage, User};
+use super::types::{
+    Channel, CurrentUser, Guild, Member, Message, StarterMessage, ThreadBrowser, User,
+};
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{
@@ -497,6 +499,40 @@ impl Store {
         });
     }
 
+    pub(crate) fn begin_older_threads(&self, parent: ChannelId) -> Option<OlderPage> {
+        self.write("older threads", |inner, _| {
+            inner.state.begin_older_threads(parent)
+        })
+    }
+
+    pub(crate) fn finish_older_threads(
+        &self,
+        parent: ChannelId,
+        page: OlderPage,
+        results: model::ThreadSearchResults,
+    ) {
+        self.write("older threads", |inner, events| {
+            inner
+                .state
+                .finish_older_threads(parent, page, results, events);
+        });
+    }
+
+    pub(crate) fn fail_older_threads(&self, parent: ChannelId, page: OlderPage) {
+        self.write("older threads", |inner, _| {
+            inner.state.fail_older_threads(parent, page);
+        });
+    }
+
+    pub(crate) fn keep_found_threads(
+        &self,
+        results: model::ThreadSearchResults,
+    ) -> Option<Vec<ChannelId>> {
+        self.write("found threads", |inner, events| {
+            inner.state.keep_found_threads(results, events)
+        })
+    }
+
     pub(crate) fn learn_thread(&self, thread: model::Channel) -> Learned {
         self.write("thread", |inner, events| {
             inner.state.learn_thread(thread, events)
@@ -969,6 +1005,17 @@ impl Store {
     /// that messages, THREAD_LIST_SYNC or a fetch brought.
     pub fn threads(&self, guild: GuildId) -> Vec<Arc<Channel>> {
         self.read(|inner| inner.state.threads(guild))
+    }
+
+    /// What a channel's Threads browser lists, as Discord's client shows it: the active threads
+    /// the user can see, joined or not, and the archived ones [`Account::load_older_threads`]
+    /// reached, each the newest message first. Active threads are only those the gateway, or a
+    /// request, brought since the last READY; a private thread needs the user's membership or
+    /// Manage Threads.
+    ///
+    /// [`Account::load_older_threads`]: crate::Account::load_older_threads
+    pub fn thread_browser(&self, parent: ChannelId) -> ThreadBrowser {
+        self.read(|inner| inner.state.thread_browser(parent))
     }
 
     /// DMs and group DMs, in no particular order.

@@ -11,7 +11,7 @@ mod user;
 
 pub use channel::{
     Channel, ChannelType, OverwriteType, PermissionOverwrite, ThreadMember, ThreadMetadata,
-    ThreadMuteConfig,
+    ThreadMuteConfig, ThreadSearchResults,
 };
 pub use guild::{
     Guild, GuildMember, MessageNotificationLevel, NsfwLevel, PremiumTier, Role, RoleColors,

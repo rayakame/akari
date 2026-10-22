@@ -1,0 +1,102 @@
+{
+  "threads": [
+    {
+      "id": "300000000000000041",
+      "type": 11,
+      "guild_id": "200000000000000001",
+      "parent_id": "300000000000000002",
+      "owner_id": "100000000000000002",
+      "name": "Old plans",
+      "last_message_id": "300000000000000051",
+      "message_count": 7,
+      "member_count": 3,
+      "rate_limit_per_user": 0,
+      "flags": 0,
+      "member_ids_preview": ["100000000000000002", "100000000000000003"],
+      "total_message_sent": 7,
+      "thread_metadata": {
+        "archived": true,
+        "auto_archive_duration": 60,
+        "archive_timestamp": "2026-10-19T09:00:00.000000+00:00",
+        "locked": false,
+        "create_timestamp": "2026-10-18T09:00:00.000000+00:00"
+      },
+      "owner": {
+        "user": {
+          "id": "100000000000000002",
+          "username": "mira",
+          "global_name": "Mira",
+          "avatar": null,
+          "discriminator": "0",
+          "public_flags": 0
+        },
+        "nick": null,
+        "avatar": null,
+        "roles": [],
+        "joined_at": "2024-01-01T12:00:00.000000+00:00",
+        "deaf": false,
+        "mute": false,
+        "flags": 0
+      }
+    },
+    {
+      "id": "300000000000000042",
+      "type": 11,
+      "guild_id": "200000000000000001",
+      "parent_id": "300000000000000002",
+      "owner_id": "100000000000000004",
+      "name": "Older plans",
+      "last_message_id": null,
+      "message_count": 0,
+      "member_count": 1,
+      "rate_limit_per_user": 0,
+      "flags": 0,
+      "thread_metadata": {
+        "archived": true,
+        "auto_archive_duration": 1440,
+        "archive_timestamp": "2026-10-12T09:00:00.000000+00:00",
+        "locked": false,
+        "create_timestamp": "2026-10-11T09:00:00.000000+00:00"
+      }
+    }
+  ],
+  "members": [
+    {
+      "id": "300000000000000041",
+      "user_id": "100000000000000001",
+      "join_timestamp": "2026-10-18T10:00:00.000000+00:00",
+      "flags": 1,
+      "muted": false,
+      "mute_config": null
+    }
+  ],
+  "has_more": true,
+  "total_results": 30,
+  "most_recent_messages": [
+    {
+      "id": "300000000000000051",
+      "type": 0,
+      "content": "the last word",
+      "channel_id": "300000000000000041",
+      "author": {
+        "id": "100000000000000002",
+        "username": "mira",
+        "global_name": "Mira",
+        "avatar": null,
+        "discriminator": "0",
+        "public_flags": 0
+      },
+      "attachments": [],
+      "embeds": [],
+      "mentions": [],
+      "mention_roles": [],
+      "pinned": false,
+      "mention_everyone": false,
+      "tts": false,
+      "timestamp": "2026-10-18T20:00:00.000000+00:00",
+      "edited_timestamp": null,
+      "flags": 0,
+      "components": []
+    }
+  ]
+}

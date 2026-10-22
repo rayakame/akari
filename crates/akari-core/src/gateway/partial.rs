@@ -91,6 +91,8 @@ pub struct ChannelUpdate {
     pub thread_metadata: Option<ThreadMetadata>,
     pub message_count: Option<u32>,
     pub member_count: Option<u32>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub member_ids_preview: Option<Vec<UserId>>,
     pub flags: Option<u64>,
     pub is_message_request: Option<bool>,
     pub is_spam: Option<bool>,

@@ -10,7 +10,9 @@ use super::types::{
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
 };
-use crate::model::{self, ChannelId, GenericMarker, GuildId, MessageId, Snowflake, Timestamp};
+use crate::model::{
+    self, ChannelId, GenericMarker, GuildId, MessageId, Snowflake, Timestamp, UserId,
+};
 
 fn text(value: String) -> Box<str> {
     value.into_boxed_str()
@@ -188,12 +190,14 @@ impl Channel {
             channel.recipient_ids.into_boxed_slice()
         };
         let member = channel.member.map(ThreadMembership::from_wire);
+        let preview = channel.member_ids_preview.into_boxed_slice();
         let thread = channel.thread_metadata.map(|metadata| {
             Box::new(thread_info(
                 metadata,
                 channel.message_count,
                 channel.member_count,
                 member,
+                preview,
             ))
         });
         Self {
@@ -277,12 +281,29 @@ impl Channel {
                     .or(info.and_then(|info| info.member_count)),
             )
         };
+        let preview = update
+            .member_ids_preview
+            .map(Vec::into_boxed_slice)
+            .or_else(|| {
+                next.thread
+                    .as_deref()
+                    .map(|info| info.member_ids_preview.clone())
+            });
         if let Some(metadata) = update.thread_metadata {
             let (messages, members) = counts(next.thread.as_deref());
             let member = next.thread.as_deref().and_then(|info| info.member);
-            next.thread = Some(Box::new(thread_info(metadata, messages, members, member)));
+            next.thread = Some(Box::new(thread_info(
+                metadata,
+                messages,
+                members,
+                member,
+                preview.unwrap_or_default(),
+            )));
         } else if let Some(info) = next.thread.as_deref_mut() {
             (info.message_count, info.member_count) = counts(Some(info));
+            if let Some(preview) = preview {
+                info.member_ids_preview = preview;
+            }
         }
         next
     }
@@ -293,6 +314,7 @@ fn thread_info(
     message_count: Option<u32>,
     member_count: Option<u32>,
     member: Option<ThreadMembership>,
+    member_ids_preview: Box<[UserId]>,
 ) -> ThreadInfo {
     ThreadInfo {
         member,
@@ -303,6 +325,7 @@ fn thread_info(
         create_timestamp: metadata.create_timestamp,
         message_count,
         member_count,
+        member_ids_preview,
     }
 }
 

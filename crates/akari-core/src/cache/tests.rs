@@ -177,6 +177,7 @@ pub(crate) fn thread(id: u64, guild: u64, parent: u64) -> Channel {
             create_timestamp: Some(time(1_690_000_000_000_001_000)),
             message_count: Some(12),
             member_count: Some(3),
+            member_ids_preview: Box::default(),
         })),
         ..channel(id, Some(guild), "a thread")
     }
