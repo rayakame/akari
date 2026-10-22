@@ -118,14 +118,18 @@ sidebar, canary 645444, 2026-10-21) and observed 2026-10-17:
   (Discord's own split, open while the page loads, comes up at 450: its code clamps the width
   before the page is measured.)
 - **The gap:** 8 of the frame's color between the channel and the split, which is the drag
-  handle: the cursor changes, nothing else. No keyboard resizing.
+  handle: the cursor changes, nothing else, and stays changed for the whole drag, also when the
+  pointer passes the width's limits. No keyboard resizing.
 - **Borders:** the channel gets a 1 right border that curves into its top with a 12 corner; the
   split has a 1 border on its top and sides in the frame border's color and a 12 top-left corner.
   The top-right corner is square.
 - **Too narrow for both** (the page less 315 is 450 or less): the split floats over the
   channel's right side, 450 wide and full height, with a shadow (0 8 40, black at 52%) and its
   border in the chat's color; the channel keeps its full width underneath and there's no handle.
-  *Akari's minimum window with the default sidebar is such a page.*
+  *Akari's minimum window with the default sidebar is such a page.* Whether the official client
+  still acks the channel under a floating split is open (Akari reads both, as when docked; at
+  Akari's minimum window, 940, the split leaves 115 of the channel uncovered with the default
+  sidebar, 58 with the widest and 226 with the narrowest).
 - **Header:** 48 plus its 1 line, like the channel header. 16 padding on the left: the thread
   symbol in a 20 box at 15 (`channelDefault`), 9, then the name in the channel header's style,
   cut off with an 8 fade instead of an ellipsis; clicking the name opens the thread full width.
@@ -134,18 +138,25 @@ sidebar, canary 645444, 2026-10-21) and observed 2026-10-17:
   notification bell (*Akari: later, with thread settings*). No parent before the name.
 - **The "…":** Join Thread or Leave Thread, Open in Full View | Mute Thread, Notification Settings
   | Search, Pins | Copy Link, Copy Thread ID. Joining and leaving there tell Discord "Sidebar
-  Overflow". *Akari: Join or Leave Thread and Open in Full View.* The full view's "…" offers
-  "Open in Split View".
+  Overflow". *Akari: Join or Leave Thread and Open in Full View, only the latter when the
+  thread's record lacks its state.* The full view's "…" offers "Open in Split View".
 - **Inside:** the thread's start, messages, composer and its placeholder (`Message "t1"`) as in
   the full view, same sizes. Opening the split puts the focus in its composer.
 - **Per channel:** each channel keeps its own split. Opening another channel hides it; coming
   back shows it again, also after a relaunch. The X, opening the thread full width from its row,
   clicking the open channel's own row, and Escape with nothing left to do close it for good.
   "Open in Full View" and the name only open the thread full width: back in the channel, the
-  split is there again. Deleting the thread closes it; closing (archiving), locking or leaving the
-  thread doesn't.
-- **Reading:** both lists are read at once, each while it's at its bottom; Escape in either marks
-  both read and jumps both to the present
+  split is there again. Deleting the thread closes it; closing (archiving), locking or leaving a
+  public thread doesn't. Losing the thread closes and forgets it: Discord's split store drops
+  an entry the user can no longer view, which for a private thread means being removed from it
+  or leaving it (without Manage Threads), and for any thread losing its channel's view. *Akari
+  also asks Discord once per launch about a remembered thread READY didn't list as joined (the
+  cache keeps those, deleted ones too) and drops it when Discord says it's gone or hidden.
+  Leaving a server forgets its splits; an outage keeps them.*
+- **Reading:** both lists are read at once, each while it's at its bottom; a split that appears
+  on its own (a remembered thread Discord answered for after a relaunch) is read after the next
+  click or key press. Escape in either marks both read and jumps both to the present; with
+  nothing left in either, it closes the split
   ([message-list.md](message-list.md#reading-the-signal-to-ack), [shortcuts.md](shortcuts.md)).
 - No animation: it opens and closes at once. Discord's member list and the split share the
   right side; Akari has no member list yet.

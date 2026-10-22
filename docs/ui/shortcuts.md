@@ -34,10 +34,17 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   scrolls to the bottom; a jump to the first unread message that is still loading doesn't land
   ([message-list.md](message-list.md#the-new-messages-line-and-the-unread-bar)). It does this
   from the message list and from the composer, through one action. In the split view, Escape in
-  either pane does it for both: both lists are marked read and jump to the present, as in the
-  official client (observed 2026-10-17), and the pane's own composer takes the focus. With
-  nothing to mark read or load in either, Escape closes the split view instead (Discord's key
-  handler, read 2026-10-21).
+  either pane does it for both: both lists are marked read, end their new messages lines and
+  jump to the present, as in the official client (observed 2026-10-17), and the pane's own
+  composer takes the focus. Discord's key handler (canary 646574, module 92960, read
+  2026-10-22) first closes an open layer, then cancels an edit, a reply, a scheduled message or a
+  sticker preview (the channel's before the thread's), closes a create-thread form, and then runs
+  both lists' part: jump if newer messages aren't loaded, ack if unread, and clear the divider
+  either way. When neither list jumped or acked and a split is open it closes the split, also
+  with a list scrolled up or a divider just cleared; otherwise every list scrolls to its
+  bottom. *Akari closes the split only when both lists are at the present's bottom, read and
+  without a new messages line: a list scrolled up or still showing its line is scrolled or
+  cleared first (the user's rule, 2026-10-22).*
   Shift+Escape, from the same places, marks the open server read, and does nothing at Home
   ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
 - **Only the Escape key.** macOS sends Cmd+. as the same cancel command as Escape; in Akari it

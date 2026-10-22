@@ -130,15 +130,18 @@ ack); how the requests share Discord's limits is in [rate-limits.md](rate-limits
 the open channel, and in the split view also the thread beside it, at most two, each acked on
 its own, as the official client acks both panes whichever was clicked last (observed
 2026-10-17). Never for one that merely receives messages, and never in answer to a MESSAGE_ACK
-from elsewhere. The macOS app names a channel only while the session is online, the app is
+from elsewhere. A channel the host names again while it's being read reads nothing new: only
+its list growing does, so the other pane scrolling away and back doesn't ack a channel marked
+unread on another device meanwhile. Since a READY, each channel named counts as new once. The macOS app names a channel only while the session is online, the app is
 active, the window is key and visible, the channel's list is at the present's bottom with its
 refresh after READY in, and the user is engaged: opening the channel, a click or a key press in
 the window engages; the window losing key, the app going inactive, the window being minimized,
 the Mac going to sleep or fast user switching ends it, and scrolling clearly away from one
 list's bottom ends it for that list. After that, coming back to the bottom or the window alone
 doesn't read ([message-list.md](../ui/message-list.md#reading-the-signal-to-ack)). A list the
-session opened on its own (the open channel deleted or hidden, its server gone) isn't read
-until the user clicks.
+session opened on its own (the open channel deleted or hidden, its server gone), or a split
+thread it showed on its own after READY (a relaunch's request answered, a batch bringing the
+thread), isn't read until the user clicks.
 
 **What reading acks.** Up to the newest message the channel's list shows, while that list is at
 the present and not stale, and never "now". Past that row it acks only messages known to be

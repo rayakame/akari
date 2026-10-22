@@ -543,7 +543,9 @@ thread beside it, each only while all of these hold:
   starts without another click.
 
 A list the session opens on its own (the open channel or an open thread's parent deleted or
-hidden, its server gone) isn't read until the user clicks. After the Mac sleeps, reading
+hidden, its server gone), or a split thread it shows on its own after READY (a remembered
+thread Discord answered for after a relaunch, a batch bringing it), isn't read until the user
+clicks or presses a key. After the Mac sleeps, reading
 resumes with the first click or key press after it wakes. Clicks and key presses count only in the session's window; when
 it closes, Akari stops watching for them, and watches again once it is back, key and visible.
 Akari tells the core only when the channels change or the connection dropped, and what a
