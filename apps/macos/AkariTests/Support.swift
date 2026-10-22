@@ -166,3 +166,20 @@ func loadReport(newConnection: Bool = false) -> LoadReport {
         bytes: 48_213, decode: 0.0021, store: 0.0004, received: 50, retries: 0, remaining: 4,
         resetAfter: 1.2, parse: 0.0004, parsed: 50)
 }
+
+// Where `takingFirstClicks()` works.
+nonisolated let firstClicks = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+    OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0))
+
+extension View {
+    // A test's app never becomes active, and SwiftUI takes a click in an inactive app's window
+    // only as its activation.
+    @ViewBuilder
+    func takingFirstClicks() -> some View {
+        if #available(macOS 15.0, *) {
+            allowsWindowActivationEvents(true)
+        } else {
+            self
+        }
+    }
+}

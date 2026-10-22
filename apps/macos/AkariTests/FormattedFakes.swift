@@ -9,17 +9,19 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
 
     // `locked`: 1001 is a locked thread under 1002, where the user can't send. `pinned`: each
     // channel's newest message is the line for pinning its message with this number. `thread`:
-    // the store also has 1003, a thread under 1001 the user hasn't joined, for the split view.
-    // `unread`: every channel's badge shows unread.
+    // the store also has 1003, a thread under 1001 the user hasn't joined, for the split view;
+    // without `threadState` its record has no thread state. `unread`: every channel's badge
+    // shows unread.
     init(
         contents: [String], formattedEvery: Int = 3, slowmode: Slowmode? = nil,
         mentioned: Bool = false, readUpTo: UInt64? = nil, locked: Bool = false,
-        pinned: UInt64? = nil, thread: Bool = false, unread: Bool = false
+        pinned: UInt64? = nil, thread: Bool = false, threadState: Bool = true,
+        unread: Bool = false
     ) {
         formattedStore = FormattedStore(
             contents: contents, formattedEvery: formattedEvery, slowmode: slowmode,
             mentioned: mentioned, readUpTo: readUpTo, locked: locked, pinned: pinned,
-            thread: thread, unread: unread)
+            thread: thread, threadState: threadState, unread: unread)
         super.init(noHandle: NoHandle())
     }
 
@@ -70,13 +72,14 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     private let locked: Bool
     private let pinned: UInt64?
     private let thread: Bool
+    private let threadState: Bool
     private let unread: Bool
     private let counts = OSAllocatedUnfairLock(initialState: [UInt64: UInt64]())
 
     init(
         contents: [String], formattedEvery: Int, slowmode: Slowmode?, mentioned: Bool,
         readUpTo: UInt64?, locked: Bool = false, pinned: UInt64? = nil, thread: Bool = false,
-        unread: Bool = false
+        threadState: Bool = true, unread: Bool = false
     ) {
         self.contents = contents
         self.formattedEvery = formattedEvery
@@ -86,6 +89,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         self.locked = locked
         self.pinned = pinned
         self.thread = thread
+        self.threadState = threadState
         self.unread = unread
         super.init(noHandle: NoHandle())
     }
@@ -168,10 +172,12 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                 id: id, kind: .publicThread, guildId: GuildId(rawValue: 1),
                 parentId: Self.channelIds[0], name: "t1", position: 0, topic: nil, nsfw: false,
                 rateLimitPerUser: 0, recipientIds: [],
-                thread: ThreadInfo(
-                    joined: false, archived: false, locked: false, private: false,
-                    messageCount: 40, ownerId: UserId(rawValue: 2), lastMessageId: nil,
-                    createdAt: nil))
+                thread: threadState
+                    ? ThreadInfo(
+                        joined: false, archived: false, locked: false, private: false,
+                        messageCount: 40, ownerId: UserId(rawValue: 2), lastMessageId: nil,
+                        createdAt: nil)
+                    : nil)
         }
         guard Self.channelIds.contains(id) else {
             return nil

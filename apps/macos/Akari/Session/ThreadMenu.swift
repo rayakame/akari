@@ -33,8 +33,17 @@ struct ThreadMenu: Equatable {
             location: .toolbarOverflow)
     }
 
-    static func splitView(membership: SessionModel.MembershipItem) -> Self {
-        Self(sections: [[.membership(membership), .openInFullView]], location: .sidebarOverflow)
+    // Without the thread's state there's nothing to join or leave, but Open in Full View stays.
+    static func splitView(membership: SessionModel.MembershipItem?) -> Self {
+        Self(
+            sections: [membership.map { [.membership($0)] }.map { $0 + [.openInFullView] }
+                ?? [.openInFullView]],
+            location: .sidebarOverflow)
+    }
+
+    @MainActor
+    static func splitView(of session: SessionModel) -> Self? {
+        session.split.map { .splitView(membership: session.membershipItem(for: $0.channelId)) }
     }
 }
 

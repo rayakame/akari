@@ -212,9 +212,7 @@ struct SessionView<MessageArea: View>: View {
     }
 
     private var splitMenu: ThreadMenu? {
-        session.split.flatMap { session.membershipItem(for: $0.channelId) }.map {
-            .splitView(membership: $0)
-        }
+        .splitView(of: session)
     }
 
     private var main: some View {

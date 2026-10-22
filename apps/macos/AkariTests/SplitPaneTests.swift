@@ -38,6 +38,26 @@ struct ThreadMenuTests {
         #expect(menu.sections == [[.membership(leave)]])
     }
 
+    // A split thread's record can lack the thread's state; Open in Full View needs none.
+    @Test
+    func theSplitsMenuWithoutTheThreadsStateKeepsOpenInFullView() async {
+        let account = FormattedAccount(contents: ["test"], thread: true, threadState: false)
+        let session = SessionModel(
+            userId: UserId(rawValue: 1), account: account,
+            memory: AccountMemory(defaults: MemoryDefaults())
+        ) { _ in }
+        session.start()
+        session.open(.guild(GuildId(rawValue: 1)))
+        session.open(channel: FormattedStore.channelIds[0])
+        await session.openBeside(thread: FormattedStore.threadId, from: FormattedStore.channelIds[0])
+        #expect(session.split?.channelId == FormattedStore.threadId)
+
+        let menu = ThreadMenu.splitView(of: session)
+
+        #expect(menu?.sections == [[.openInFullView]])
+        #expect(menu?.location == .sidebarOverflow)
+    }
+
     @Test
     func anArchivedThreadsMembershipIsDisabledAndTheRestIsnt() {
         let archived = SessionModel.MembershipItem(joins: false, enabled: false)
@@ -80,22 +100,6 @@ struct SplitWidthTests {
         #expect(SplitWidth.dragged(from: 480, by: -900, in: 1200) == CGFloat(885))
     }
 
-    // Kept until Akari quits; each launch starts at the default and nothing is stored.
-    @Test
-    func theWidthIsTheAppsAndNeverStored() {
-        let before = UserDefaults.standard.dictionaryRepresentation().keys.filter {
-            $0.lowercased().contains("split")
-        }
-
-        SplitWidth.shared.width = 500
-        defer { SplitWidth.shared.width = SplitWidth.standard }
-
-        #expect(SplitWidth().width == CGFloat(480))
-        let after = UserDefaults.standard.dictionaryRepresentation().keys.filter {
-            $0.lowercased().contains("split")
-        }
-        #expect(after == before)
-    }
 }
 
 @MainActor
@@ -117,6 +121,93 @@ struct ResizeCursorTests {
         cursor.hover(true)
         cursor.hover(false)
         #expect((pushes, pops) == (2, 2))
+    }
+
+    // Past the width's limits the pointer leaves the gap mid-drag; the cursor stays until the
+    // drag ends.
+    @Test
+    func theCursorStaysForTheWholeDrag() {
+        var pushes = 0
+        var pops = 0
+        let cursor = ResizeCursor(push: { pushes += 1 }, pop: { pops += 1 })
+
+        cursor.hover(true)
+        cursor.drag(true)
+        cursor.hover(false)
+        #expect((pushes, pops) == (1, 0))
+        cursor.hover(true)
+        cursor.drag(false)
+        #expect((pushes, pops) == (1, 0), "still over the gap")
+        cursor.drag(true)
+        cursor.hover(false)
+        cursor.drag(false)
+        #expect((pushes, pops) == (1, 1))
+        cursor.drag(true)
+        cursor.release()
+        #expect((pushes, pops) == (2, 2), "a gap gone mid-drag pops it")
+    }
+
+    // A press, a move and a release as the window gets them; the release waits in the queue
+    // when `release` is false.
+    func drag(in window: NSWindow, from start: NSPoint, by distance: CGFloat, release: Bool = true)
+        throws
+    {
+        let now = ProcessInfo.processInfo.systemUptime
+        let event = { (type: NSEvent.EventType, point: NSPoint, step: Double) in
+            NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: now + step / 100,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 1)
+        }
+        let end = NSPoint(x: start.x + distance, y: start.y)
+        let down = try #require(event(.leftMouseDown, start, 0))
+        for (step, point) in [NSPoint(x: start.x + distance / 2, y: start.y), end].enumerated() {
+            let moved = try #require(event(.leftMouseDragged, point, Double(step + 1)))
+            NSApp.postEvent(moved, atStart: false)
+        }
+        if release {
+            NSApp.postEvent(try #require(event(.leftMouseUp, end, 3)), atStart: false)
+        }
+        window.sendEvent(down)
+    }
+
+    @Test(.enabled(if: firstClicks))
+    func aDragThroughTheGapHoldsTheCursorUntilItsRelease() async throws {
+        var calls: [String] = []
+        let cursor = ResizeCursor(push: { calls.append("push") }, pop: { calls.append("pop") })
+        let split = SplitWidth()
+        let host = NSHostingView(
+            rootView: SplitGap(split: split, page: 1200, cursor: cursor)
+                .frame(width: SplitWidth.gap, height: 100)
+                .frame(width: 100, height: 100, alignment: .leading)
+                .takingFirstClicks())
+        let window = MessageTableTests.KeyWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+
+        try drag(in: window, from: NSPoint(x: 4, y: 50), by: -40, release: false)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while split.width != 520, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(split.width == CGFloat(520))
+        #expect(cursor.pushed, "held with the pointer off the gap")
+
+        let up = try #require(
+            NSEvent.mouseEvent(
+                with: .leftMouseUp, location: NSPoint(x: -36, y: 50), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        NSApp.postEvent(up, atStart: false)
+        while cursor.pushed, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(calls == ["push", "pop"])
     }
 
     // Escape, the X, a deleted thread or a narrower page take the gap away under the pointer.
@@ -464,6 +555,34 @@ extension SessionScreenTests {
         window.contentView = host
         window.orderFrontRegardless()
         return window
+    }
+
+    // Kept until Akari quits: a drag through the gap stores nothing, and each launch starts at
+    // the default.
+    @Test(.enabled(if: firstClicks))
+    func aDraggedWidthIsNeverStored() async throws {
+        let account = FormattedAccount(contents: ["test"], thread: true)
+        let session = await splitSession(account)
+        let host = NSHostingView(rootView: SessionScreen(session: session).takingFirstClicks())
+        let window = keyWindow(host, width: 1440)
+        defer {
+            window.orderOut(nil)
+            SplitWidth.shared.width = SplitWidth.standard
+        }
+        try await waitUntil(host) { tables(in: host).count == 2 }
+        let stored = { UserDefaults.standard.dictionaryRepresentation() as NSDictionary }
+        let before = stored()
+
+        // Two widths: a stored value can't match both.
+        for width in [CGFloat(520), 560] {
+            let channel = frame(of: try #require(tables(in: host).first?.enclosingScrollView))
+            let gap = NSPoint(x: channel.maxX + SplitWidth.gap / 2, y: channel.midY)
+            try ResizeCursorTests().drag(in: window, from: gap, by: -40)
+            try await waitUntil(host) { SplitWidth.shared.width == width }
+            #expect(SplitWidth.shared.width == width)
+            #expect(stored() == before)
+        }
+        #expect(SplitWidth().width == SplitWidth.standard)
     }
 
     func composers(in host: NSView) -> [ComposerTextView] {

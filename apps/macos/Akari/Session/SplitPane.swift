@@ -31,10 +31,13 @@ final class SplitWidth {
     }
 }
 
-// A gap that goes away under the pointer gets no hover's end, so it pops on its way out.
+// A gap that goes away under the pointer gets no hover's end, so it pops on its way out. Past
+// the width's limits a drag leaves the gap, and the cursor stays until the drag ends.
 @MainActor
 final class ResizeCursor {
     private(set) var pushed = false
+    private var hovering = false
+    private var dragging = false
     private let push: () -> Void
     private let pop: () -> Void
 
@@ -47,17 +50,30 @@ final class ResizeCursor {
     }
 
     func hover(_ inside: Bool) {
-        if inside, !pushed {
-            push()
-            pushed = true
-        } else if !inside, pushed {
-            pop()
-            pushed = false
-        }
+        hovering = inside
+        update()
+    }
+
+    func drag(_ active: Bool) {
+        dragging = active
+        update()
     }
 
     func release() {
-        hover(false)
+        hovering = false
+        dragging = false
+        update()
+    }
+
+    private func update() {
+        let wanted = hovering || dragging
+        if wanted, !pushed {
+            push()
+            pushed = true
+        } else if !wanted, pushed {
+            pop()
+            pushed = false
+        }
     }
 }
 
@@ -83,12 +99,18 @@ struct SplitGap: View {
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { drag in
+                        if start == nil {
+                            cursor.drag(true)
+                        }
                         let base = start ?? split.shown(in: page)
                         start = base
                         split.width = SplitWidth.dragged(
                             from: base, by: drag.translation.width, in: page)
                     }
-                    .onEnded { _ in start = nil }
+                    .onEnded { _ in
+                        start = nil
+                        cursor.drag(false)
+                    }
             )
             .accessibilityHidden(true)
     }
