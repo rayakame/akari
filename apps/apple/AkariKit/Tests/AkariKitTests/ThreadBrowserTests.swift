@@ -471,6 +471,21 @@ final class ThreadBrowserTests {
     }
 
     @Test
+    func aSearchResultsRowOffersJoining() async {
+        let session = inChannel11()
+        account.searchReply.withLock { $0 = .success([id(34)]) }
+        let browser = browser(session)
+        browser.setQuery("t4")
+
+        await browser.submit()
+
+        #expect(
+            session.membershipItem(for: id(34))
+                == SessionModel.MembershipItem(joins: true, enabled: true))
+        session.close()
+    }
+
+    @Test
     func anUpdateOfSomeoneTheBrowserShowsRereadsIt() {
         let session = inChannel11()
         edit(32) { $0.memberIdsPreview = [id(2)] }

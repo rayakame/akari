@@ -696,3 +696,30 @@ fn an_abandoned_page_can_be_asked_for_again() {
         Some(25)
     );
 }
+
+// A page asked for before a READY says nothing about the new session.
+#[test]
+fn a_page_ready_overtook_confirms_nothing() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        thread_object(ACTIVE_A, Some(400_000_000_000_000_040), false),
+    );
+    let parent = Snowflake::new(GENERAL);
+    let stale = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+    apply(&mut state, "READY", ready_value());
+
+    state.finish_older_threads(
+        parent,
+        stale,
+        page(
+            vec![thread_object(ACTIVE_A, Some(400_000_000_000_000_040), true)],
+            false,
+        ),
+        &mut Vec::new(),
+    );
+    load(&mut state, Vec::new(), false);
+
+    assert_eq!(sections(&state), (vec![THREAD], vec![], vec![]));
+}

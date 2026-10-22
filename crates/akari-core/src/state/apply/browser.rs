@@ -137,8 +137,24 @@ impl State {
     ) {
         let oldest = results.threads.iter().flatten().map(newest_on_wire).min();
         let more = results.has_more;
+        let stale = page.generation != self.older_generation;
+        // A page asked for before the last READY confirms nothing it brings.
+        let waiting: Vec<ChannelId> = if stale {
+            results
+                .threads
+                .iter()
+                .flatten()
+                .map(|thread| thread.id)
+                .filter(|id| {
+                    self.unconfirmed.contains(id) || !self.entities.channels.contains_key(id)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let found = self.keep_found_threads(results, events);
-        if page.generation != self.older_generation {
+        if stale {
+            self.unconfirmed.extend(waiting);
             return;
         }
         events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });

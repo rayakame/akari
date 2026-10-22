@@ -145,7 +145,7 @@ public final class ThreadBrowserModel {
             return
         }
         resultIds = found
-        results = rows(found)
+        reread()
     }
 
     /// A thread this browser shows, for its row's menu.
