@@ -217,9 +217,10 @@ participants the store knows, as Discord's client does with its own store; Akari
 recipients. Akari can't join calls, so "Join the call" is strong text.*
 
 **Links:** a part links only where Akari has its target: a thread's name, "a message" and a
-poll's title (they jump), an AutoMod alert's channel while the user can see it, and a Discovery
-notice's server. Discord's other links are strong text without the hand until Akari has their
-targets: profiles (every actor and named person), "threads", "pinned messages", "Join the call",
+poll's title (they jump), "threads" (the channel's Threads modal), an AutoMod alert's channel
+while the user can see it, and a Discovery notice's server. Discord's other links are strong
+text without the hand until Akari has their targets: profiles (every actor and named person),
+"pinned messages", "Join the call",
 "Edit Group", a followed channel's server popout, "Server Settings", a subscription's server
 page, a product, and "a voice hangout".
 

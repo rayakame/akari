@@ -499,7 +499,11 @@ impl Store {
         });
     }
 
+    // Read first: a host may ask on every scroll, and a write bumps `changes` for the cache.
     pub(crate) fn begin_older_threads(&self, parent: ChannelId) -> Option<OlderPage> {
+        if !self.read(|inner| inner.state.can_load_older_threads(parent)) {
+            return None;
+        }
         self.write("older threads", |inner, events| {
             inner.state.begin_older_threads(parent, events)
         })

@@ -250,3 +250,15 @@ async fn a_dropped_page_request_can_ask_again() {
 
     assert_eq!(online.archived(), vec![OLD_A]);
 }
+
+// A host may ask on every scroll; a write would make the cache flusher snapshot for nothing.
+#[tokio::test]
+async fn asking_after_the_last_page_writes_nothing() {
+    let online = online_answering(vec![found(vec![thread(OLD_A, true)], false)]).await;
+    online.account.load_older_threads(general()).await.unwrap();
+    let before = online.account.store().changes();
+
+    online.account.load_older_threads(general()).await.unwrap();
+
+    assert_eq!(online.account.store().changes(), before);
+}

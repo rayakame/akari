@@ -105,6 +105,11 @@ impl State {
         browser
     }
 
+    pub(crate) fn can_load_older_threads(&self, parent: ChannelId) -> bool {
+        let pages = self.older.get(&parent).copied().unwrap_or_default();
+        matches!(pages.state, OlderThreads::NotLoaded | OlderThreads::More)
+    }
+
     pub(crate) fn begin_older_threads(
         &mut self,
         parent: ChannelId,
