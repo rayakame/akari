@@ -383,6 +383,120 @@ final class ThreadBrowserTests {
         session.close()
     }
 
+    // MARK: Review fixes
+
+    func loads() -> Int {
+        account.log.actions.filter { $0 == .loadOlderThreads(id(11)) }.count
+    }
+
+    func until(_ condition: () -> Bool) async {
+        for _ in 0..<200 where !condition() {
+            await Task.yield()
+        }
+    }
+
+    // READY forgets the pages; an open browser asks again instead of spinning.
+    @Test
+    func aNewSessionLoadsTheOlderThreadsAgain() async {
+        let session = inChannel11()
+        browse(older: .notLoaded)
+        account.browserAfterOlderLoad.withLock {
+            $0 = ThreadBrowser(joined: [], others: [], archived: [id(34)], older: .all)
+        }
+        let browser = browser(session)
+        await browser.open()
+        #expect(loads() == 1)
+
+        browse(older: .notLoaded)
+        session.apply(EventBatch([.ready]))
+        await until { loads() == 2 }
+
+        #expect(loads() == 2)
+        session.close()
+    }
+
+    // Opened while another browser's page loads: that page's outcome rereads this one.
+    @Test
+    func aBrowserFollowsAPageItDidntAskFor() async {
+        let session = inChannel11()
+        browse(older: .loading)
+        let browser = browser(session)
+        await browser.open()
+        #expect(browser.showsSpinner)
+
+        browse(archived: [34], older: .all)
+        session.apply(EventBatch([.olderThreadsChanged(parentId: id(11))]))
+
+        #expect(browser.sections.map(\.kind) == [.older])
+        #expect(!browser.showsSpinner)
+        session.close()
+    }
+
+    @Test
+    func clearingTheFieldWhileSearchingDropsTheAnswer() async {
+        let session = inChannel11()
+        browse(others: [32])
+        account.searchReply.withLock { $0 = .success([id(31)]) }
+        account.holdSearches.withLock { $0 = true }
+        let browser = browser(session)
+        browser.setQuery("t1")
+
+        async let searched: Void = browser.submit()
+        await account.searchEntries.pulled(1)
+        browser.setQuery("")
+        account.searchEntries.send(())
+        await searched
+
+        #expect(browser.results == nil)
+        #expect(browser.sections.map(\.kind) == [.others])
+        session.close()
+    }
+
+    @Test
+    func changesElsewhereDontRereadTheBrowser() {
+        let session = inChannel11()
+        browse(others: [32])
+        _ = browser(session)
+        store.log.forget()
+
+        session.apply(
+            EventBatch([
+                .channelUpdated(channelId: id(12), guildId: id(1)),
+                .userUpdated(userId: id(9)),
+                .channelRemoved(channelId: id(40), guildId: id(1)),
+            ]))
+
+        #expect(!store.reads.contains(.threadBrowser(id(11))))
+        session.close()
+    }
+
+    @Test
+    func anUpdateOfSomeoneTheBrowserShowsRereadsIt() {
+        let session = inChannel11()
+        edit(32) { $0.memberIdsPreview = [id(2)] }
+        browse(others: [32])
+        let browser = browser(session)
+
+        store.update { $0.users[id(2)] = user(2, name: "Rae") }
+        session.apply(EventBatch([.userUpdated(userId: id(2))]))
+
+        #expect(browser.sections.first?.rows.first?.faces.first?.user?.displayName == "Rae")
+        session.close()
+    }
+
+    @Test
+    func aNewThreadOfTheChannelRereadsIt() {
+        let session = inChannel11()
+        browse(others: [32])
+        let browser = browser(session)
+
+        browse(others: [35, 32])
+        session.apply(EventBatch([.channelAdded(channelId: id(35), guildId: id(1))]))
+
+        #expect(browser.sections.first?.rows.map(\.id) == [id(35), id(32)])
+        session.close()
+    }
+
     // MARK: Live
 
     @Test

@@ -80,7 +80,14 @@ public final class ThreadBrowserModel {
     @ObservationIgnored private let userId: UserId
     @ObservationIgnored private var resultIds: [ChannelId]?
     @ObservationIgnored private var searching = false
+    // Clearing the field makes a search still on its way stale.
+    @ObservationIgnored private var searchGeneration = 0
+    @ObservationIgnored private var opened = false
+    @ObservationIgnored private let guildId: GuildId?
     @ObservationIgnored private var browsedIds: Set<ChannelId> = []
+    @ObservationIgnored private var shownUsers: Set<UserId> = []
+    // Who the rows being built show or name, an owner the store doesn't know yet too.
+    @ObservationIgnored private var rowUsers: Set<UserId> = []
 
     init(
         parentId: ChannelId, presentation: Presentation, userId: UserId, store: Store,
@@ -91,11 +98,14 @@ public final class ThreadBrowserModel {
         self.userId = userId
         self.store = store
         self.account = account
+        guildId = store.channel(id: parentId)?.guildId
         reread()
     }
 
-    /// Loads the first page of older threads, as the official client does on opening.
+    /// Loads the first page of older threads, as the official client does on opening, and again
+    /// whenever the pages are forgotten while the browser shows (a new session).
     public func open() async {
+        opened = true
         await loadMore()
     }
 
@@ -116,6 +126,7 @@ public final class ThreadBrowserModel {
         if text.isEmpty {
             resultIds = nil
             results = nil
+            searchGeneration += 1
         }
     }
 
@@ -127,7 +138,10 @@ public final class ThreadBrowserModel {
         }
         searching = true
         defer { searching = false }
-        guard let found = try? await account.searchThreads(parentId: parentId, name: query) else {
+        let generation = searchGeneration
+        guard let found = try? await account.searchThreads(parentId: parentId, name: query),
+            generation == searchGeneration
+        else {
             return
         }
         resultIds = found
@@ -140,17 +154,36 @@ public final class ThreadBrowserModel {
     }
 
     func apply(_ batch: EventBatch) {
-        let guildId = store.channel(id: parentId)?.guildId
-        let relevant =
-            batch.everythingChanged || batch.threadActivity.contains(parentId)
-            || guildId.map { batch.channelsChanged[$0]?.isEmpty == false } ?? false
-            || !batch.removedChannels.isEmpty || !batch.usersChanged.isEmpty
-            || batch.currentUserChanged
-            || guildId.map { batch.membersChanged.contains($0) || batch.guildsChanged.contains($0) }
-                ?? false
-        if relevant {
+        if batch.everythingChanged || batch.threadBrowsersChanged.contains(parentId)
+            || touches(batch)
+        {
             reread()
         }
+        if opened, older == .notLoaded {
+            Task { await loadMore() }
+        }
+    }
+
+    // A change to the channel, a thread it shows or a new one of the channel's, someone it
+    // shows, or the user's permissions.
+    private func touches(_ batch: EventBatch) -> Bool {
+        guard let guildId else {
+            return false
+        }
+        if batch.membersChanged.contains(guildId) || batch.guildsChanged.contains(guildId)
+            || !batch.removedChannels.isDisjoint(with: browsedIds)
+            || !batch.usersChanged.isDisjoint(with: shownUsers)
+            || (batch.currentUserChanged && shownUsers.contains(userId))
+        {
+            return true
+        }
+        let changed = batch.channelsChanged[guildId] ?? []
+        if changed.contains(parentId) || !changed.isDisjoint(with: browsedIds) {
+            return true
+        }
+        let unknown = changed.subtracting(browsedIds)
+        return !unknown.isEmpty
+            && store.channels(ids: Array(unknown)).contains { $0.parentId == parentId }
     }
 
     private func reread() {
@@ -183,6 +216,8 @@ public final class ThreadBrowserModel {
             }
         }
         browsedIds = Set(browser.joined + browser.others + browser.archived + (resultIds ?? []))
+        shownUsers = rowUsers
+        rowUsers = []
     }
 
     private func rows(_ ids: [ChannelId]) -> [Row] {
@@ -193,9 +228,14 @@ public final class ThreadBrowserModel {
         guard let info = channel.thread else {
             return nil
         }
+        rowUsers.formUnion(info.memberIdsPreview)
+        if let owner = info.ownerId {
+            rowUsers.insert(owner)
+        }
         let subtitle: Row.Subtitle
         if !info.archived {
             if let latest = store.latestMessage(threadId: channel.id) {
+                rowUsers.insert(latest.author.id)
                 subtitle = .latest(
                     latest, authorName: latest.author.displayName,
                     time: ThreadBox.time(of: latest.id.rawValue))
