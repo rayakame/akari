@@ -135,6 +135,13 @@ pub enum StoreEvent {
         guild_id: GuildId,
         thread_id: ChannelId,
     },
+    /// A thread's newest message or latest message changed: its place in
+    /// `Store::thread_browser` of `parent_id` and its `latest_message` may have.
+    ThreadActivity {
+        guild_id: GuildId,
+        parent_id: ChannelId,
+        thread_id: ChannelId,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -235,6 +242,15 @@ impl StoreEvent {
                 thread_id,
             } => Self::ThreadUnavailable {
                 guild_id,
+                thread_id,
+            },
+            E::ThreadActivity {
+                guild_id,
+                parent_id,
+                thread_id,
+            } => Self::ThreadActivity {
+                guild_id,
+                parent_id,
                 thread_id,
             },
             E::ChannelAdded(channel) => Self::ChannelAdded {

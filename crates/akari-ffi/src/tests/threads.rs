@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use akari_core::model::{ChannelId, MessageId, UserId};
 use serde_json::{Value, json};
@@ -12,7 +12,9 @@ use super::fake::{CATEGORY, FakeGateway, GENERAL, GUILD, VOICE, events_until, fi
 use super::gateway::send;
 use super::support::{USER, token};
 use crate::account::{Account, MessageLoad, ThreadLocation};
-use crate::records::{EmbedField, MessageReference, StarterMessage, ThreadInfo};
+use crate::records::{
+    EmbedField, MessageReference, OlderThreads, StarterMessage, ThreadBrowser, ThreadInfo,
+};
 use crate::subscription::StoreEvent;
 
 // READY's thread in GENERAL, its last message 400000000000000030.
@@ -47,6 +49,9 @@ async fn a_threads_record_carries_its_state() {
             owner_id: Some(MIRA),
             last_message_id: Some(MessageId::new(400_000_000_000_000_030)),
             created_at: None,
+            member_count: Some(3),
+            member_ids_preview: Vec::new(),
+            archived_at: SystemTime::UNIX_EPOCH + Duration::from_millis(1_709_281_800_250),
         })
     );
     assert_eq!(
@@ -541,5 +546,132 @@ async fn leaving_and_joining_cross_the_boundary() {
         .await
         .unwrap();
     assert_eq!(joined(), Some(true));
+    account.close();
+}
+
+const SEARCH_PATH: &str = "/api/v9/channels/300000000000000002/threads/search";
+const OLD: ChannelId = ChannelId::new(300_000_000_000_000_041);
+
+async fn searching(answer: Value) -> (Arc<Account>, MockServer, WebSocketStream<TcpStream>) {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(SEARCH_PATH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(answer))
+        .mount(&server)
+        .await;
+    let gateway = FakeGateway::start().await;
+    let account = gateway
+        .client_with_api(&format!("{}/api/v9/", server.uri()))
+        .account(token("t"), USER)
+        .unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    (account, server, ws)
+}
+
+fn archived_thread(id: ChannelId) -> Value {
+    json!({
+        "id": id.get().to_string(), "type": 11, "name": "old plans",
+        "guild_id": GUILD.get().to_string(), "parent_id": GENERAL.get().to_string(),
+        "owner_id": MIRA.get().to_string(), "last_message_id": null,
+        "message_count": 0, "member_count": 2, "rate_limit_per_user": 0, "flags": 0,
+        "member_ids_preview": [MIRA.get().to_string()],
+        "thread_metadata": {"archived": true, "auto_archive_duration": 1440,
+            "archive_timestamp": "2024-03-02T08:30:00.250000+00:00", "locked": false}
+    })
+}
+
+#[tokio::test]
+async fn the_thread_browser_reads_its_sections() {
+    let gateway = FakeGateway::start().await;
+    let account = gateway.client().account(token("t"), USER).unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let _ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+
+    let browser = account.store().thread_browser(GENERAL);
+
+    assert_eq!(
+        browser,
+        ThreadBrowser {
+            joined: vec![THREAD],
+            others: Vec::new(),
+            archived: Vec::new(),
+            older: OlderThreads::NotLoaded,
+        }
+    );
+    account.close();
+}
+
+#[tokio::test]
+async fn older_threads_load_into_the_browser() {
+    let (account, _server, _ws) = searching(json!({
+        "threads": [archived_thread(OLD)], "members": [], "has_more": false, "total_results": 1
+    }))
+    .await;
+
+    account.load_older_threads(GENERAL).await.unwrap();
+
+    let browser = account.store().thread_browser(GENERAL);
+    assert_eq!(browser.archived, vec![OLD]);
+    assert_eq!(browser.older, OlderThreads::All);
+    let thread = account
+        .store()
+        .channel(OLD)
+        .and_then(|channel| channel.thread);
+    assert_eq!(thread.map(|info| info.member_ids_preview), Some(vec![MIRA]));
+    account.close();
+}
+
+#[tokio::test]
+async fn a_search_returns_its_threads_in_order() {
+    let (account, server, _ws) = searching(json!({
+        "threads": [archived_thread(OLD)], "members": [], "has_more": false, "total_results": 1
+    }))
+    .await;
+
+    let found = account
+        .search_threads(GENERAL, "old".to_owned())
+        .await
+        .unwrap();
+
+    assert_eq!(found, Some(vec![OLD]));
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests.last().and_then(|request| request.url.query()),
+        Some("name=old&tag_setting=match_some")
+    );
+    account.close();
+}
+
+#[tokio::test]
+async fn thread_activity_reaches_the_subscription() {
+    let gateway = FakeGateway::start().await;
+    let account = gateway.client().account(token("t"), USER).unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let mut ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+
+    let mut message = page_message(400_000_000_000_000_040, THREAD);
+    message["guild_id"] = GUILD.get().to_string().into();
+    send(
+        &mut ws,
+        json!({"op": 0, "s": 2, "t": "MESSAGE_CREATE", "d": message}),
+    )
+    .await;
+    let events = events_until(&subscription, |event| {
+        matches!(event, StoreEvent::ThreadActivity { .. })
+    })
+    .await;
+
+    assert!(events.contains(&StoreEvent::ThreadActivity {
+        guild_id: GUILD,
+        parent_id: GENERAL,
+        thread_id: THREAD,
+    }));
     account.close();
 }
