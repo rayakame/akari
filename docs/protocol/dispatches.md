@@ -199,6 +199,42 @@ so it goes to the top) or left, unless the gateway said so first; the members ev
 follows changes nothing visible. The official client waits for that event, except for forum
 posts.
 
+**Creating threads** (the official client's code, canary 649224, and Chris's payloads, 2026-10-23):
+`Account::create_thread` sends what the official client sends, on both routes the same four keys in
+this order: `{"name", "type", "auto_archive_duration", "location"}`. `POST
+/channels/{parent}/messages/{message}/threads` starts a thread from a message (the thread gets the
+message's ID; Discord also sends the message's MESSAGE_UPDATE with HAS_THREAD), and `POST
+/channels/{parent}/threads` one without ([Create
+Thread](https://docs.discord.food/resources/channel#create-thread)). `type` is 12 for a private
+thread, else 10 under an announcement channel and 11 under a text channel, on the message route
+too; `auto_archive_duration` is the parent's `default_auto_archive_duration`, else 4320; `location`
+names the entry point (`Message`, `Thread Browser Toolbar`, `Thread Browser Empty State`, `Keyboard
+Shortcut`; the official client also sends `Message Shortcut`, `Plus Button`, `Reply Chain Nudge`
+and `Slash Command`). It never sends `invitable`, `rate_limit_per_user`, `applied_tags` or
+`message`. Akari sends the name trimmed (the official client sends it as typed). What may be
+created is `Store::thread_creation(parent)`: only in text and announcement channels; public threads
+with Create Public Threads and Read Message History, private ones with Create Private Threads and
+only in text channels; a timeout takes both, as every permission but View Channel and Read Message
+History. `Store::can_start_thread(channel, message)` is whether a message may start one: a sent
+user message (types 0, 19, 20, 23, 26, 41, 45, 47, 68), not ephemeral, without HAS_THREAD and
+without a thread of its ID in the store, and the public permission. Anything else, and a name that
+is empty or over 100 code points once trimmed, is refused before asking.
+
+Discord's answer is the thread; the store keeps it as THREAD_CREATE would (joined when it carries
+the user's `member`), unless the gateway's THREAD_CREATE came first. The official client waits for
+that THREAD_CREATE instead, then loads 30 messages, opens the thread and sends the first message as
+an ordinary message. The parent's slowmode also limits creating threads, apart from sending
+messages (`Store::thread_slowmode(parent)`, the official client's `CreateThread` cooldown): a
+created thread starts it for the interval and 100 ms, unless Bypass Slowmode exempts the user;
+Discord's slowmode answer (code 20016) holds it for its `retry_after` and isn't retried (other rate
+limits are waited out as usual), and while it runs Akari asks nothing (the official client posts
+and gets 20016). Refusals: 160006 (the server's active threads) and 160007 (its announcement
+threads) are `TooManyThreads`, 200001 (AutoMod on the name) and 200000 (AutoMod; the official
+client shows nothing for it) `NameBlocked` with Discord's message, 50035 with an error on `name`
+`NameRequired`; everything else, a captcha too, is a `RequestError`. The request is logged with the
+parent's ID, whether it came from a message, the kind, the location and the outcome, never the
+name.
+
 The full thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
 `threads: true`. Akari's guild subscriptions ask for it. The store reads it as the official
 client does (its code, read 2026-10-21): the threads are added or updated as THREAD_CREATE

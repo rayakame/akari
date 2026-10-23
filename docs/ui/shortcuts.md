@@ -18,6 +18,7 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Scroll the messages | Page Up / Page Down (**unverified**) | The list's native scrolling |
 | Jump to the oldest unread message | Shift+Page Up (Shift+Fn+Up on a Mac laptop) (**unverified**) | Done: jumps like a click on the unread bar (below) |
 | Focus the composer | Tab (**unverified**) | Later |
+| Create a thread | Cmd+Shift+Option+N | Done: File > Create Thread, the open channel's New Thread form or the open thread's parent's ([thread-create.md](thread-create.md)) |
 | Enter or exit full screen | Ctrl+Cmd+F, Fn+F, the green button | Done: View > Enter Full Screen (SwiftUI's View menu had none); with the Threads browser open it goes full screen and closes the browser |
 
 Rows marked **unverified** come from community lists, not from Discord's own pages. Escape and
@@ -45,6 +46,9 @@ Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.
   with a list scrolled up or a divider just cleared, and scrolls nothing; otherwise every list
   scrolls to its bottom. Akari follows that order: with nothing newer to load and nothing
   unread in either list, one Escape ends both new messages lines and closes the split.
+  With the New Thread form open, Escape closes it first, from anywhere, and does nothing else:
+  the form's own step comes before the lists' part in Discord's handler (canary 649224), and what
+  was typed stays ([thread-create.md](thread-create.md#closing)).
   Shift+Escape, from the same places, marks the open server read, and does nothing at Home
   ([read-states.md](../protocol/read-states.md#acks-in-the-official-client)).
 - **Only the Escape key.** macOS sends Cmd+. as the same cancel command as Escape; in Akari it
