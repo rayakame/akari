@@ -80,6 +80,8 @@ pub struct ChannelUpdate {
     pub topic: Option<Option<String>>,
     pub nsfw: Option<bool>,
     pub rate_limit_per_user: Option<u32>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub default_auto_archive_duration: Option<u32>,
     #[serde(default, deserialize_with = "double_option")]
     pub last_message_id: Option<Option<Snowflake<GenericMarker>>>,
     pub permission_overwrites: Option<Vec<PermissionOverwrite>>,

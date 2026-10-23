@@ -10,8 +10,10 @@ use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
     MemberLists, PresenceStatus, SendError,
 };
-use crate::model::{ChannelId, GuildId, MessageId, MessageType, Timestamp, UserId};
-use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError, uri_component};
+use crate::model::{ChannelId, ChannelType, GuildId, MessageId, MessageType, Timestamp, UserId};
+use crate::rest::{
+    AccountRest, CreateMessage, CreateThread, Failure, Page, Query, RequestError, uri_component,
+};
 use crate::state::{
     Ack, ConnectionState, Cursor, Learned, LoadKind, LoadTicket, Message, OLDER_PAGE, StarterFetch,
     Store, WindowLimits, message_length,
@@ -20,6 +22,15 @@ use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 use acks::{AckSender, Pace, Refusal};
 
 const REFRESH_LIMIT: u8 = 100;
+// Discord's limit for a thread's name, in code points, and the archive time its client picks
+// when the parent names none.
+const THREAD_NAME_LIMIT: usize = 100;
+const DEFAULT_ARCHIVE_MINUTES: u32 = 4320;
+const MAX_ACTIVE_THREADS: u32 = 160_006;
+const MAX_ANNOUNCEMENT_THREADS: u32 = 160_007;
+const AUTOMOD_BLOCKED_NAME: u32 = 200_001;
+const INVALID_FORM_BODY: u32 = 50035;
+const SLOWMODE: u32 = 20016;
 const JUMP_LIMIT: u8 = 50;
 const REFRESH_RETRIES: u32 = 3;
 // Short in tests, so retries don't slow the suite down.
@@ -77,6 +88,52 @@ impl ThreadLocation {
             Self::ContextMenu => "Context%20Menu",
         }
     }
+}
+
+/// Where the user started creating a thread, which Discord's own client tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CreateThreadLocation {
+    /// A message's context menu.
+    Message,
+    /// The Threads browser's Create button.
+    ThreadBrowserToolbar,
+    /// The Threads browser's "Create Thread" when it lists none.
+    ThreadBrowserEmptyState,
+    /// The shortcut for creating a thread.
+    KeyboardShortcut,
+}
+
+impl CreateThreadLocation {
+    fn words(self) -> &'static str {
+        match self {
+            Self::Message => "Message",
+            Self::ThreadBrowserToolbar => "Thread Browser Toolbar",
+            Self::ThreadBrowserEmptyState => "Thread Browser Empty State",
+            Self::KeyboardShortcut => "Keyboard Shortcut",
+        }
+    }
+}
+
+/// Why [`Account::create_thread`] created nothing.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum CreateThreadError {
+    /// The parent's slowmode for new threads runs; [`Store::thread_slowmode`] says until when.
+    #[error("slowmode: creating threads here has to wait")]
+    Slowmode,
+    /// The server has as many active threads as it may, or announcement threads.
+    #[error("the server has the most active threads it may")]
+    TooManyThreads { announcement: bool },
+    /// AutoMod refused the name; `reason` is Discord's message.
+    #[error("AutoMod refused the name")]
+    NameBlocked { reason: String },
+    /// Discord wants a name.
+    #[error("Discord wants a name")]
+    NameRequired,
+    /// Anything else, also a refusal before asking (`InvalidRequest`) and a captcha.
+    #[error(transparent)]
+    Request(#[from] RequestError),
 }
 
 // A page of archived threads asked for and not settled: dropping the request gives it up.
@@ -528,6 +585,116 @@ impl Shared {
         if let Some(thread) = starter {
             self.fetch_starter(thread);
         }
+    }
+
+    async fn create_thread(
+        &self,
+        parent: ChannelId,
+        message: Option<MessageId>,
+        name: &str,
+        private: bool,
+        location: CreateThreadLocation,
+    ) -> Result<ChannelId, CreateThreadError> {
+        self.rest.usable()?;
+        let name = name.trim();
+        let length = message_length(name);
+        let channel = self
+            .store
+            .channel(parent)
+            .ok_or(RequestError::InvalidRequest)?;
+        let allowed = self.store.thread_creation(parent);
+        let public = if channel.kind == ChannelType::GuildNews {
+            ChannelType::NewsThread
+        } else {
+            ChannelType::PublicThread
+        };
+        let kind = match (message, private) {
+            (Some(message), false) if self.store.can_start_thread(parent, message) => public,
+            (None, false) if allowed.public => public,
+            (None, true) if allowed.private => ChannelType::PrivateThread,
+            _ => return Err(RequestError::InvalidRequest.into()),
+        };
+        if length == 0 || length > THREAD_NAME_LIMIT {
+            return Err(RequestError::InvalidRequest.into());
+        }
+        if self
+            .store
+            .thread_slowmode(parent)
+            .is_some_and(|slowmode| slowmode.until.is_some())
+        {
+            return Err(CreateThreadError::Slowmode);
+        }
+        let body = CreateThread {
+            name: name.to_owned(),
+            kind: kind.into(),
+            auto_archive_duration: channel
+                .default_auto_archive_duration
+                .unwrap_or(DEFAULT_ARCHIVE_MINUTES),
+            location: location.words(),
+        };
+        let answer = self.rest.create_thread(parent, message, &body).await;
+        let created = match answer {
+            Ok(thread) => match self.store.keep_created_thread(thread) {
+                Some(thread) => {
+                    self.store.start_thread_cooldown(parent);
+                    Ok(thread)
+                }
+                None => Err(RequestError::UnexpectedResponse.into()),
+            },
+            Err(Failure::Slowmode(wait)) => Err(self.slowed(parent, wait)),
+            Err(Failure::Api(api)) => Err(match api.code {
+                SLOWMODE => self.slowed(parent, None),
+                MAX_ACTIVE_THREADS => CreateThreadError::TooManyThreads {
+                    announcement: false,
+                },
+                MAX_ANNOUNCEMENT_THREADS => {
+                    CreateThreadError::TooManyThreads { announcement: true }
+                }
+                AUTOMOD_BLOCKED_NAME => CreateThreadError::NameBlocked {
+                    reason: api.message,
+                },
+                INVALID_FORM_BODY if api.field_errors.iter().any(|error| error.path == "name") => {
+                    CreateThreadError::NameRequired
+                }
+                _ => RequestError::from(Failure::Api(api)).into(),
+            }),
+            Err(other) => {
+                let err = RequestError::from(other);
+                self.failed(&err);
+                Err(err.into())
+            }
+        };
+        tracing::debug!(
+            channel_id = parent.get(),
+            from_message = message.is_some(),
+            kind = u16::from(kind),
+            location = location.words(),
+            outcome = match &created {
+                Ok(_) => "created",
+                Err(CreateThreadError::Slowmode) => "slowmode",
+                Err(CreateThreadError::TooManyThreads { .. }) => "too_many_threads",
+                Err(CreateThreadError::NameBlocked { .. }) => "name_blocked",
+                Err(CreateThreadError::NameRequired) => "name_required",
+                Err(CreateThreadError::Request(err)) => err.kind(),
+            },
+            "thread creation"
+        );
+        created
+    }
+
+    // Discord's slowmode answer: its wait, else the parent's whole interval. Without a slowmode
+    // the store knows of, nothing would count down, so it's a plain rate limit.
+    fn slowed(&self, parent: ChannelId, wait: Option<Duration>) -> CreateThreadError {
+        let Some(slowmode) = self
+            .store
+            .thread_slowmode(parent)
+            .filter(|slowmode| !slowmode.exempt)
+        else {
+            return RequestError::RateLimited { retry_after: wait }.into();
+        };
+        self.store
+            .hold_thread_cooldown(parent, wait.unwrap_or(slowmode.interval));
+        CreateThreadError::Slowmode
     }
 
     async fn thread_member(
@@ -1188,6 +1355,26 @@ impl Account {
         location: ThreadLocation,
     ) -> Result<(), RequestError> {
         self.shared.thread_member(thread, false, location).await
+    }
+
+    /// Creates a thread in `parent`, from `message` when given (never private then), as the
+    /// official client does, and returns it: Discord's answer puts it in the store, and the
+    /// parent's slowmode for new threads starts. Refused with `InvalidRequest` before asking: a
+    /// name that is empty or longer than 100 code points once trimmed, a message that can't
+    /// start a thread ([`Store::can_start_thread`]), a kind the user may not create
+    /// ([`Store::thread_creation`]); with `Slowmode` while that slowmode runs. The first message
+    /// is an ordinary send in the thread afterwards.
+    pub async fn create_thread(
+        &self,
+        parent: ChannelId,
+        message: Option<MessageId>,
+        name: &str,
+        private: bool,
+        location: CreateThreadLocation,
+    ) -> Result<ChannelId, CreateThreadError> {
+        self.shared
+            .create_thread(parent, message, name, private, location)
+            .await
     }
 
     /// The next place among loads and supersedes, for [`Account::load_messages_placed`]. A host

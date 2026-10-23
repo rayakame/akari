@@ -14,7 +14,8 @@ use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{
-    Channel, CurrentUser, Guild, Member, Message, StarterMessage, ThreadBrowser, User,
+    Channel, CurrentUser, Guild, Member, Message, StarterMessage, ThreadBrowser, ThreadCreation,
+    User,
 };
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
@@ -1075,6 +1076,52 @@ impl Store {
             inner
                 .state
                 .slowmode(channel, now, Instant::now(), SystemTime::now())
+        })
+    }
+
+    /// Which threads the user may create in `parent`: public ones with Create Public Threads and
+    /// Read Message History, private ones with Create Private Threads and only in text channels.
+    /// None outside text and announcement channels, and none while the user is timed out.
+    pub fn thread_creation(&self, parent: ChannelId) -> ThreadCreation {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.thread_creation(parent, now))
+    }
+
+    /// Whether the user may start a thread from the message: a sent user message of the loaded
+    /// window that has no thread yet, in a channel where they may create public threads.
+    pub fn can_start_thread(&self, channel: ChannelId, message: MessageId) -> bool {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.can_start_thread(channel, message, now))
+    }
+
+    /// The parent's slowmode for creating threads, which Discord counts apart from sending: each
+    /// thread the user creates starts it. `None` without slowmode, as [`Store::slowmode`].
+    pub fn thread_slowmode(&self, parent: ChannelId) -> Option<Slowmode> {
+        let now = self.now_millis();
+        self.read(|inner| {
+            inner
+                .state
+                .thread_slowmode(parent, now, Instant::now(), SystemTime::now())
+        })
+    }
+
+    pub(crate) fn start_thread_cooldown(&self, parent: ChannelId) {
+        let now = self.now_millis();
+        self.write("thread cooldown", |inner, _| {
+            inner.state.start_thread_cooldown(parent, now);
+        });
+    }
+
+    pub(crate) fn hold_thread_cooldown(&self, parent: ChannelId, wait: Duration) {
+        let now = self.now_millis();
+        self.write("thread cooldown", |inner, _| {
+            inner.state.hold_thread_cooldown(parent, wait, now);
+        });
+    }
+
+    pub(crate) fn keep_created_thread(&self, thread: model::Channel) -> Option<ChannelId> {
+        self.write("thread", |inner, events| {
+            inner.state.keep_created_thread(thread, events)
         })
     }
 
