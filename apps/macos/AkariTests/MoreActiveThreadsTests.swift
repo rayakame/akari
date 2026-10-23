@@ -275,16 +275,17 @@ struct MoreActiveThreadsScreenTests {
         let (session, _, window) = await peeking(focus: WindowFocus { keyed.append($0) })
         defer { closeAll(window) }
         await settle { panel(of: window)?.isVisible == true }
-        let panel = try #require(self.panel(of: window))
+        let popout = try #require(panel(of: window))
 
-        #expect(!panel.canBecomeKey)
+        #expect(!popout.canBecomeKey)
         #expect(keyed.isEmpty)
         #expect(window.childWindows?.contains { $0 is ShieldWindow } == false)
         // The row ends 8 before the channel list's edge.
-        let left = panel.frame.minX - window.frame.minX
+        let left = popout.frame.minX - window.frame.minX
         let row = SidebarWidth.stored(in: .standard) - 8
         #expect(abs(left - (row + MoreActiveThreadsPopout.spacing)) <= 1, "\(left)")
-        #expect(panel.frame.height == MoreActiveThreadsPopout.height(threads: session.peekedThreads.count))
+        #expect(
+            popout.frame.height == MoreActiveThreadsPopout.height(threads: session.peekedThreads.count))
     }
 
     @Test

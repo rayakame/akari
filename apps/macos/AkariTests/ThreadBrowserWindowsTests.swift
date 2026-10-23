@@ -155,28 +155,28 @@ final class ThreadBrowserWindowsTests {
     @Test
     func thePopoutIsAKeyPanelOverAShieldOverTheWindow() async throws {
         try await opened(.popout)
-        let shield = try #require(self.shield)
-        let panel = try #require(self.panel)
+        let cover = try #require(self.shield)
+        let browser = try #require(self.panel)
 
-        #expect(shield.frame == window.frame)
-        #expect(!shield.canBecomeKey && !shield.ignoresMouseEvents)
-        #expect(panel.canBecomeKey && !panel.canBecomeMain)
-        let frame = fromTop(panel.frame)
+        #expect(cover.frame == window.frame)
+        #expect(!cover.canBecomeKey && !cover.ignoresMouseEvents)
+        #expect(browser.canBecomeKey && !browser.canBecomeMain)
+        let frame = fromTop(browser.frame)
         #expect(abs(frame.maxX - 1084) <= 1 && abs(frame.minY - 81) <= 1, "\(frame)")
         #expect(frame.width == 480)
-        #expect(keyed.last === panel)
+        #expect(keyed.last === browser)
     }
 
     // 680 wide and 701 tall in an 813 window: 56 above and below, the shield dimming the page.
     @Test
     func theModalIsCenteredOverItsDimmedShield() async throws {
         try await opened(.modal)
-        let shield = try #require(self.shield)
+        let cover = try #require(self.shield)
         let frame = fromTop(try #require(panel).frame)
 
         #expect(abs(frame.minX - 210) <= 1 && abs(frame.minY - 56) <= 1, "\(frame)")
         #expect(frame.width == 680 && frame.height == 701, "\(frame)")
-        let dim = try #require(shield.backgroundColor.usingColorSpace(.sRGB))
+        let dim = try #require(cover.backgroundColor.usingColorSpace(.sRGB))
         #expect(dim.brightnessComponent == 0 && abs(dim.alphaComponent - 0.72) < 0.01)
     }
 
@@ -187,8 +187,8 @@ final class ThreadBrowserWindowsTests {
         _ presentation: ThreadBrowserModel.Presentation
     ) async throws {
         try await opened(presentation)
-        let shield = try #require(self.shield)
-        let panel = try #require(self.panel)
+        let cover = try #require(self.shield)
+        let browser = try #require(self.panel)
 
         // The window server shows what AppKit ordered a moment later.
         try await Task.sleep(for: .milliseconds(300))
@@ -198,19 +198,19 @@ final class ThreadBrowserWindowsTests {
             ("Threads button", screenPoint(fromTop: 1068, 56)),
             ("composer", screenPoint(fromTop: 1050, 790)),
         ] {
-            #expect(topWindow(at: point) === shield, "\(name)")
+            #expect(topWindow(at: point) === cover, "\(name)")
         }
-        let inside = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
-        #expect(topWindow(at: inside) === panel)
+        let inside = NSPoint(x: browser.frame.midX, y: browser.frame.midY)
+        #expect(topWindow(at: inside) === browser)
     }
 
     // A press on the shield closes the browser and goes no further, whichever button.
     @Test(arguments: [NSEvent.EventType.leftMouseDown, .rightMouseDown, .otherMouseDown])
     func aPressOnTheShieldOnlyClosesTheBrowser(_ press: NSEvent.EventType) async throws {
         try await opened(.popout)
-        let shield = try #require(self.shield)
+        let cover = try #require(self.shield)
 
-        shield.sendEvent(try mouse(press, at: screenPoint(fromTop: 150, 120), in: shield))
+        cover.sendEvent(try mouse(press, at: screenPoint(fromTop: 150, 120), in: cover))
 
         try await waitUntil("closed") { closedCleanly }
         #expect(session.messages?.channelId == FakeBrowserStore.parent)
@@ -221,9 +221,9 @@ final class ThreadBrowserWindowsTests {
         async throws
     {
         try await opened(presentation)
-        let panel = try #require(self.panel)
+        let browser = try #require(self.panel)
 
-        panel.sendEvent(try key(53, "\u{1b}", in: panel))
+        browser.sendEvent(try key(53, "\u{1b}", in: browser))
 
         try await waitUntil("closed") { closedCleanly }
     }
@@ -232,20 +232,20 @@ final class ThreadBrowserWindowsTests {
     @Test
     func escapeWhileAnInputMethodComposesLeavesTheBrowserOpen() async throws {
         try await opened(.modal)
-        let panel = try #require(self.panel)
+        let browser = try #require(self.panel)
         let field = try #require(searchField)
-        panel.makeFirstResponder(field)
-        let editor = try #require(panel.firstResponder as? NSTextView)
+        browser.makeFirstResponder(field)
+        let editor = try #require(browser.firstResponder as? NSTextView)
         editor.setMarkedText(
             "か", selectedRange: NSRange(location: 1, length: 0),
             replacementRange: NSRange(location: NSNotFound, length: 0))
-        try #require(editor.hasMarkedText() && panel.firstResponder === editor)
+        try #require(editor.hasMarkedText() && browser.firstResponder === editor)
 
-        panel.sendEvent(try key(53, "\u{1b}", in: panel))
+        browser.sendEvent(try key(53, "\u{1b}", in: browser))
         try await Task.sleep(for: .milliseconds(100))
 
         #expect(session.threadBrowser != nil)
-        #expect(panel.isVisible)
+        #expect(browser.isVisible)
     }
 
     // The browser takes the key while it shows; closed, the window gets it back and the
@@ -253,8 +253,8 @@ final class ThreadBrowserWindowsTests {
     @Test
     func closingGivesTheKeyBackAndTheComposerTheFocus() async throws {
         try await opened(.modal)
-        let panel = try #require(self.panel)
-        #expect(keyed.last === panel)
+        let browser = try #require(self.panel)
+        #expect(keyed.last === browser)
         window.makeFirstResponder(nil)
 
         session.closeThreadBrowser()
@@ -270,25 +270,25 @@ final class ThreadBrowserWindowsTests {
     }
 
     func close(_ closing: Closing) async throws {
-        let panel = try #require(self.panel)
+        let browser = try #require(self.panel)
         switch closing {
         case .escape:
-            panel.sendEvent(try key(53, "\u{1b}", in: panel))
+            browser.sendEvent(try key(53, "\u{1b}", in: browser))
         case .shieldPress:
-            let shield = try #require(self.shield)
-            shield.sendEvent(try mouse(.leftMouseDown, at: screenPoint(fromTop: 20, 400), in: shield))
+            let cover = try #require(self.shield)
+            cover.sendEvent(try mouse(.leftMouseDown, at: screenPoint(fromTop: 20, 400), in: cover))
         case .closeButton:
             // The X: 16 in from the modal's right edge, centered in the header under its 8.
-            let x = NSPoint(x: panel.frame.maxX - 1 - 16 - 16, y: panel.frame.maxY - 1 - 8 - 24)
-            panel.sendEvent(try mouse(.leftMouseDown, at: x, in: panel))
+            let x = NSPoint(x: browser.frame.maxX - 1 - 16 - 16, y: browser.frame.maxY - 1 - 8 - 24)
+            browser.sendEvent(try mouse(.leftMouseDown, at: x, in: browser))
             try await Task.sleep(for: .milliseconds(50))
-            panel.sendEvent(try mouse(.leftMouseUp, at: x, in: panel))
+            browser.sendEvent(try mouse(.leftMouseUp, at: x, in: browser))
         case .row:
             // The first card: 8 + 48 + 8 + 24 + 8 below the modal's top, 16 in.
-            let card = NSPoint(x: panel.frame.minX + 100, y: panel.frame.maxY - 1 - 8 - 48 - 40 - 36)
-            panel.sendEvent(try mouse(.leftMouseDown, at: card, in: panel))
+            let card = NSPoint(x: browser.frame.minX + 100, y: browser.frame.maxY - 1 - 8 - 48 - 40 - 36)
+            browser.sendEvent(try mouse(.leftMouseDown, at: card, in: browser))
             try await Task.sleep(for: .milliseconds(50))
-            panel.sendEvent(try mouse(.leftMouseUp, at: card, in: panel))
+            browser.sendEvent(try mouse(.leftMouseUp, at: card, in: browser))
         case .otherChannel:
             session.open(channel: ChannelId(rawValue: 1_001))
         case .home:
@@ -302,7 +302,7 @@ final class ThreadBrowserWindowsTests {
         case .fullScreen:
             NotificationCenter.default.post(name: NSWindow.willEnterFullScreenNotification, object: window)
         case .commandW:
-            panel.performClose(nil)
+            browser.performClose(nil)
         }
     }
 
@@ -310,14 +310,14 @@ final class ThreadBrowserWindowsTests {
     @Test(arguments: Closing.allCases)
     func everyWayOfClosingLeavesNoWindowBehind(_ closing: Closing) async throws {
         try await opened(.modal)
-        let shield = try #require(self.shield)
-        let panel = try #require(self.panel)
+        let cover = try #require(self.shield)
+        let browser = try #require(self.panel)
 
         try await close(closing)
 
         try await waitUntil("closed") { closedCleanly }
-        #expect(!shield.isVisible && !panel.isVisible, "\(closing)")
-        #expect(shield.parent == nil && panel.parent == nil, "\(closing)")
+        #expect(!cover.isVisible && !browser.isVisible, "\(closing)")
+        #expect(cover.parent == nil && browser.parent == nil, "\(closing)")
     }
 
     // The menu's Close and Minimize go to the key window, the browser's panel: Close closes the
@@ -325,13 +325,13 @@ final class ThreadBrowserWindowsTests {
     @Test
     func theWindowMenuActsOnTheBrowserAndItsWindow() async throws {
         try await opened(.popout)
-        let panel = try #require(self.panel)
+        let browser = try #require(self.panel)
         let close = NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         let minimize = NSMenuItem(
             title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
 
-        #expect(panel.validateUserInterfaceItem(close) && panel.validateUserInterfaceItem(minimize))
-        panel.performMiniaturize(nil)
+        #expect(browser.validateUserInterfaceItem(close) && browser.validateUserInterfaceItem(minimize))
+        browser.performMiniaturize(nil)
         #expect(window.minimized == 1)
     }
 
@@ -339,15 +339,15 @@ final class ThreadBrowserWindowsTests {
     @Test
     func theShieldAndTheModalFollowTheWindowsSize() async throws {
         try await opened(.modal)
-        let shield = try #require(self.shield)
+        let cover = try #require(self.shield)
 
         window.setFrame(NSRect(x: 0, y: 0, width: 1300, height: 900), display: true)
 
         try await waitUntil("followed") {
-            shield.frame == window.frame
+            cover.frame == window.frame
                 && abs(fromTop(panel?.frame ?? .zero).midX - 650) <= 1
         }
-        #expect(shield.frame == window.frame)
+        #expect(cover.frame == window.frame)
     }
 
     @Test(arguments: [ThreadBrowserModel.Presentation.popout, .modal])
@@ -355,10 +355,10 @@ final class ThreadBrowserWindowsTests {
         async throws
     {
         try await opened(presentation)
-        let panel = try #require(self.panel)
+        let browser = try #require(self.panel)
 
-        #expect(panel.accessibilitySubrole() == .dialog)
-        #expect(panel.accessibilityLabel() == "Threads")
+        #expect(browser.accessibilitySubrole() == .dialog)
+        #expect(browser.accessibilityLabel() == "Threads")
         #expect(try #require(shield).isAccessibilityElement() == false)
     }
 
