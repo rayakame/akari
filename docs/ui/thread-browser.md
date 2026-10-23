@@ -24,6 +24,13 @@ the channel list's "More Active Threads". Read from Discord's web client (canary
   (56; observed 680 × 700 in an 812-point window). 8 above the browser and 16 below it, a 1
   border in `border-subtle`, radius 12, `shadow-high`, and an X at the header's end. The X,
   Escape, a click on the dimmed page or a row closes it.
+- **Focus**: both are modal dialogs ("Threads") with a focus lock, and the search field takes the
+  focus when they open. Closing gives the focus back to what had it when it opened, if nothing
+  else took it meanwhile; Discord's typing then goes to the composer. *Akari gives that focus to
+  the channel's composer (a Shift+click's split keeps its own), lets Escape cancel what an input
+  method composes, and while the modal shows drops plain keys meant for anything but a field, so
+  nothing types into the composer behind it. VoiceOver starts in the field, or at the title
+  without one.*
 
 ## The header
 
@@ -43,6 +50,12 @@ One list with up to three sections, each left out with its label when it has no 
    the channel list no longer shows (read, past their "Hide After Inactivity").
 2. **"{n} other active threads"**: the active threads the user hasn't joined.
 3. **"older threads"**: archived threads, loaded 25 at a time (below).
+
+Discord's client knows a connection's active threads from that connection. *Akari's store also
+keeps threads across a reconnect that the new connection didn't list (and the cache's); they
+stay out of the sections until the gateway, a page or a search brings them again, since they
+may have been archived or left meanwhile
+([dispatches.md](../protocol/dispatches.md#threads)).*
 
 Both active sections and the older threads are ordered by their newest message, newest first
 (a thread without one by its own ID), and follow new messages live: a thread whose newest message
@@ -84,7 +97,8 @@ The first time a channel's browser opens in a connection (with Read Message Hist
 client asks `threads/search` for its archived threads, 25 at a time
 ([dispatches.md](../protocol/dispatches.md#threads)). The next page loads when the list is
 scrolled within 200 of its bottom while Discord has more. Pages stay for the connection, so
-reopening asks nothing. *Akari: a browser open when a new connection forgets the pages asks
+reopening asks nothing. Paging by offset can skip a thread that's unarchived between two pages;
+the official client pages the same way. *Akari: a browser open when a new connection forgets the pages asks
 again; one opened while another's page loads follows that page.* The section shows every archived thread of the channel the client knows,
 down to the oldest one the pages brought (all once there are no more): a thread archived after
 the page loaded is there when the browser opens again, without a reload (observed). A failed page,
@@ -93,7 +107,7 @@ or Discord's "not indexed yet", leaves the section as it is until the next conne
 While all three sections are empty and the first page loads, a spinner shows (64 above and
 below). With nothing to show: **"There are no threads."** (20 semibold) and "Stay focused on a
 conversation with a thread - a temporary text channel." (16), centered with 32 around, at least
-400 tall. *Discord shows its illustration above them and a "Create Thread" button below; Akari
+400 tall. *Akari's fits a smaller room, so the header stays in a 500-point window.* *Discord shows its illustration above them and a "Create Thread" button below; Akari
 shows a large thread symbol and no button.*
 
 ## Search
@@ -101,19 +115,25 @@ shows a large thread symbol and no button.*
 Enter searches the field's text: Discord's first 25 matches by name, active and archived, in its
 order, as one list without labels (16 above, 8 below). Without matches, the empty state.
 Editing the text keeps the results until the next Enter; clearing the field brings the sections
-back. A search that fails, or that Discord can't answer yet, changes nothing.
+back. A search that fails, or that Discord can't answer yet, changes nothing. Discord ignores
+Enter while a search runs. *Akari searches the newer text once the running search is answered
+and shows only that answer.*
 
 ## More Active Threads
 
 Resting the pointer on a text or announcement channel's row for 200 ms, when the channel has
 active threads the list doesn't show (not joined, or joined but past their window), opens a
-popout 17 to the right of the row, its top level with the row's: "More Active Threads" (14
+popout 17 to the right of the row, its top level with the row's (Discord's default alignment
+for that side), moved up to stay 12 inside the window's bottom but never above 12 (its position
+layer, module 623646): "More Active Threads" (14
 medium, `text-muted`; 8 above, 8 to the sides, 2 below), up to three of those threads, the
 newest message first, each with its owner's face (16), its name, a bullet and its time in
 `text-muted`, and "See All" with the thread symbol, which opens the modal. Rows are 8 + 18 + 8
 tall, 2 apart, radius 4, hovered in `background-mod-normal` with `text-strong`. The popout is
 8 around its content, 272 to 400 wide, radius 12, `surface-high` with a `border-subtle` ring and
-`shadow-high`. A row opens its thread as the browser's do (Shift: beside). It goes 250 ms after
-the pointer leaves the row and the popout (moving to another row closes it unless that row
-shows its own); a click on the row closes it at once.
+`shadow-high`. A row opens its thread as the browser's do (Shift: beside). Its threads and times
+follow new messages while it shows. It goes 250 ms after the pointer leaves the row and the
+popout (moving to another row closes it unless that row shows its own); a click on the row
+closes it at once, and it goes with its row (another server, a collapsed category). It's a plain
+group, not a dialog: no focus lock, nothing focused.
 *Akari keeps it open while the pointer is on the popout; whether Discord's does is to check.*

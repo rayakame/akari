@@ -213,9 +213,12 @@ listed, until the next session.
 and its archived threads down to the oldest the loaded pages brought, each newest message first.
 Active means this connection's gateway (READY, THREAD_CREATE, THREAD_UPDATE, THREAD_LIST_SYNC)
 or a request brought it unarchived: the official client keeps its active threads per connection,
-while Akari's store keeps unjoined threads across a READY and from the cache, and one of those may
-have been archived meanwhile, so such a thread is in no active section until something brings it
-again. A private thread needs the user's membership or Manage Threads. Threads keep Discord's
+while Akari's store keeps threads across a READY that it didn't list (unjoined ones, joined ones
+Get Channel brought, the cache's), and one of those may have been archived or left meanwhile, so
+such a thread is in no active section until something brings it again. A new connection also
+lets go of unjoined archived threads nothing shows: no window of its own, no box or "started a
+thread" line in its parent's window, not its parent's open browser (`Account::set_browsing`), not
+fetched by Get Channel this session. A private thread needs the user's membership or Manage Threads. Threads keep Discord's
 `member_ids_preview` (not cached); a THREAD_UPDATE without it keeps the known one.
 `ThreadActivity { guild_id, parent_id, thread_id }` reports a thread's newest or latest message
 changing, so an open browser reorders.
@@ -231,8 +234,11 @@ forgets every channel's pages. `Account::search_threads(parent, name)` sends
 archived threads, at most 25, in its order; `None` for a 202. Both go through the rate limiter
 (route `channels/{id}/threads/search`) and keep what they bring: a thread the store lacks, or
 holds unconfirmed, as Discord sends it (else the gateway's copy stays), the response's
-`members` as the user's memberships, each thread's `owner.user` as a user, and the undocumented
-`most_recent_messages` as threads' newest messages. They're logged at `akari_core::load` with
+`members` as the user's memberships of the threads it brought, each thread's `owner.user` as a
+user, and the undocumented `most_recent_messages` as threads' newest messages. An answer to a
+request asked before the last READY confirms nothing and joins nothing, and one whose channel was
+deleted meanwhile keeps nothing. Offset paging can skip a thread unarchived between two pages (the
+rest move up by one); the official client pages the same way. They're logged at `akari_core::load` with
 IDs and counts only. The official client doesn't use the archived-threads routes
 (`threads/archived/public`, `…/private`, `users/@me/threads/archived/private`) for its browser.
 
