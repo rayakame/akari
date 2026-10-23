@@ -162,16 +162,21 @@ names the channel it shows for, `peekedThreads` follows the store.
 place: `openThreadForm(in:from:location:)` (a message's menu, the browser's Create and its empty
 state's "Create Thread", nothing where `threadCreation(in:)` or `canStartThread(from:in:)` allows
 nothing) goes to the channel, closes its split and the browser, and moves the composer's text into
-an empty form; `openThreadFormHere()` is ⌘⇧⌥N (the open channel, or a thread's parent). Each
-channel keeps its form while the session lasts, and the form keeps `name`, `isPrivate` and
-`message` per channel, the name only for the same message. `escape()` closes it before anything
+an empty form; `openThreadFormHere()` is ⌘⇧⌥N (the open channel, or a thread's parent), and
+`canCreateThreadHere` says whether it has a form to open. Each channel has one form model while
+the session lasts, so a late answer reaches what the user sees; opened again for another message
+it follows that one (also while its thread is being created), and it keeps `name`, `isPrivate`
+and `message` per channel, the name only for the same message. It follows its message's edits,
+and a deleted message leaves a form for a thread without one, both texts kept. A form whose
+channel no longer allows its thread closes, keeping what's typed. `escape()` closes it before anything
 else, keeping what's typed; `closeThreadForm()` does the same and `discardThreadForm()` forgets it
 (the X, once the user said so; `hasText` says whether to ask). `submitThreadForm()` checks the
 fields (`nameError`, "Thread Name is required" without a message; `messageError`, "Starter Message
 is required." or too long), creates the thread with the name typed, else the message's
 (`ThreadName.derived(from:)`, Discord's rule; "Thread" without text), shows it beside the channel
 with its composer focused unless the user went elsewhere meanwhile, and sends the first message
-there; a refusal keeps everything and leaves `alert` (Discord's dialogs) or a name error. The form's
+there; a refusal keeps everything and leaves `alert` (Discord's dialogs, and "Thread may exist"
+when the answer was lost) or a name error. The form's
 `privateMode` follows the permissions (`enabled`, `privateOnly`, `disabled`, never from a message),
 `slowmode` is the parent's for new threads. Someone else's thread from the form's message turns the
 form into that thread, its message the thread's draft. In a

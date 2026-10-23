@@ -39,11 +39,20 @@ public final class ThreadFormModel {
     /// Discord's limit for a name.
     public static let nameLimit = 100
 
+    /// What a create took from the form at Enter.
+    struct Created {
+        let thread: ChannelId
+        let firstMessage: String
+        let name: String
+        let source: MessageId?
+        let location: CreateThreadLocation
+    }
+
     public let parentId: ChannelId
-    /// The message the thread starts from, shown above the fields; `nil` for a thread without
-    /// one.
-    public let source: Message?
-    public let location: CreateThreadLocation
+    /// The message the thread starts from, shown above the fields, as it is now; `nil` for a
+    /// thread without one, also once the message is deleted.
+    public private(set) var source: Message?
+    public private(set) var location: CreateThreadLocation
     /// Line breaks become spaces, and it stops at 100 characters, as Discord's field does.
     public var name: String {
         didSet {
@@ -159,10 +168,53 @@ public final class ThreadFormModel {
         alert = nil
     }
 
-    /// Checks what's typed and creates the thread; returns it with the first message as typed
-    /// then, or `nil` when nothing was created (the fields' errors or `alert` say why, and
-    /// everything typed stays).
-    func create() async -> (thread: ChannelId, firstMessage: String)? {
+    /// Opened again: for another message the name starts over, the rest stays.
+    func retarget(source: Message?, location: CreateThreadLocation) {
+        if source?.id != self.source?.id {
+            name = ""
+            drafts.forms[parentId, default: .init()].source = source?.id
+        }
+        self.source = source
+        self.location = location
+        readPrivateMode()
+    }
+
+    /// The source message as edited.
+    func follow(_ message: Message) {
+        if message.id == source?.id {
+            source = message
+        }
+    }
+
+    /// The source message is gone: the form stays, for a thread without it.
+    func dropSource() {
+        guard source != nil else {
+            return
+        }
+        source = nil
+        drafts.forms[parentId, default: .init()].source = nil
+        readPrivateMode()
+    }
+
+    /// What a create sent leaves the form, when the form went on to another message meanwhile.
+    func consume(_ created: Created) {
+        if message.trimmingCharacters(in: .whitespacesAndNewlines) == created.firstMessage {
+            message = ""
+        }
+        if !created.name.isEmpty, name.trimmingCharacters(in: .whitespacesAndNewlines) == created.name {
+            name = ""
+        }
+    }
+
+    /// Whether the permissions still allow this form's thread.
+    var allowed: Bool {
+        let creation = store.threadCreation(parentId: parentId)
+        return source == nil ? creation.public || creation.private : creation.public
+    }
+
+    /// Checks what's typed and creates the thread; returns what it took, or `nil` when nothing
+    /// was created (the fields' errors or `alert` say why, and everything typed stays).
+    func create() async -> Created? {
         guard !submitting else {
             return nil
         }
@@ -187,23 +239,37 @@ public final class ThreadFormModel {
         }
         submitting = true
         defer { submitting = false }
+        let (source, location) = (self.source?.id, self.location)
         do {
             let thread = try await account.createThread(
-                parentId: parentId, messageId: source?.id,
+                parentId: parentId, messageId: source,
                 name: typed.isEmpty ? (derivedName.isEmpty ? "Thread" : derivedName) : typed,
                 isPrivate: createsPrivate,
                 location: location)
             slowmode = store.threadSlowmode(parentId: parentId)
-            return (thread, content)
+            return Created(
+                thread: thread, firstMessage: content, name: typed, source: source,
+                location: location)
         } catch {
             slowmode = store.threadSlowmode(parentId: parentId)
-            refused(error as? CreateThreadError)
+            refused(error as? CreateThreadError, from: source)
             return nil
         }
     }
 
+    // UNKNOWN_MESSAGE.
+    private static let unknownMessage: UInt32 = 10008
+
     func clearDrafts() {
         drafts.forms[parentId] = nil
+    }
+
+    /// The X: nothing typed is left.
+    func clear() {
+        name = ""
+        isPrivate = false
+        message = ""
+        clearDrafts()
     }
 
     func apply(_ batch: EventBatch) {
@@ -223,10 +289,21 @@ public final class ThreadFormModel {
         }
     }
 
-    private func refused(_ error: CreateThreadError?) {
+    private func refused(_ error: CreateThreadError?, from source: MessageId?) {
         switch error {
         case .Slowmode?:
             break
+        case .Request(.Discord(_, Self.unknownMessage, _))? where source != nil && source == self.source?.id:
+            // Deleted where Akari didn't see it: a thread without it is still the user's to make.
+            dropSource()
+            if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                nameError = Self.nameRequired
+            }
+        case .MaybeCreated?:
+            alert = Alert(
+                title: "Thread may exist",
+                message: "Discord didn't confirm the thread, but it may have been created: "
+                    + "check the channel list before trying again.")
         case .TooManyThreads(let announcement)?:
             alert = Alert(
                 title: "Cannot create thread",

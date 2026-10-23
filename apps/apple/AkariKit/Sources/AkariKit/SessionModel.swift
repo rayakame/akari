@@ -59,6 +59,7 @@ public final class SessionModel {
             }
             syncSplit()
             syncForm()
+            updateCreateHere()
         }
     }
     /// The thread beside the open channel, in the split view. Each channel keeps its own:
@@ -78,6 +79,9 @@ public final class SessionModel {
     /// Set when a form opened, so its first field takes the focus; the view calls
     /// `threadFormFocused()` once it has.
     public private(set) var focusThreadForm = false
+    /// Whether ⌘⇧⌥N has a form to open: the open channel's, or the open thread's parent's,
+    /// where the user may create a thread.
+    public private(set) var canCreateThreadHere = false
     /// Set when the user opened the split, so its composer takes the focus; the view calls
     /// `splitFocused()` once it has.
     public private(set) var focusSplit = false
@@ -134,8 +138,10 @@ public final class SessionModel {
     @ObservationIgnored private var splits: [ChannelId: AccountMemory.Split]
     // Split threads Discord answered for, or the user opened, since this session's READY.
     @ObservationIgnored private var checkedSplits: Set<ChannelId> = []
-    // Each channel's form: the message it starts from and where the user opened it.
-    @ObservationIgnored private var forms: [ChannelId: FormEntry] = [:]
+    // Each channel's form for its lifetime, so a late answer reaches the one the user sees; those
+    // in `shownForms` are open in their channel's slot.
+    @ObservationIgnored private var formModels: [ChannelId: ThreadFormModel] = [:]
+    @ObservationIgnored private var shownForms: Set<ChannelId> = []
     // Forms whose thread is being created: someone else's thread can't take them over.
     @ObservationIgnored private var creating: Set<ChannelId> = []
     // One Get Channel per thread at a time: a box click shares the launch's.
@@ -263,7 +269,7 @@ public final class SessionModel {
         engage()
         if id == messages?.channelId {
             forgetSplit(of: id)
-            forms[id] = nil
+            shownForms.remove(id)
             syncForm()
         }
         if let thread = store.channel(id: id), thread.isThread, let parent = thread.parentId {
@@ -318,7 +324,7 @@ public final class SessionModel {
             splits[parent] = .init(thread: id, guild: guild)
             rememberSplits()
         }
-        forms[parent] = nil
+        shownForms.remove(parent)
         syncForm()
         syncSplit()
         focusSplit = split != nil
@@ -382,7 +388,7 @@ public final class SessionModel {
             return
         }
         splits[parent] = .init(thread: open, guild: guild)
-        forms[parent] = nil
+        shownForms.remove(parent)
         if sawReady {
             checkedSplits.insert(open)
         }
@@ -431,7 +437,9 @@ public final class SessionModel {
 
     /// Opens the "New Thread" form of `parent`, going there first, in place of its split: from
     /// `message` when given. The channel composer's text moves into an empty form's message, and
-    /// an open Threads browser closes. Nothing opens where the user may create no thread.
+    /// an open Threads browser closes. Nothing opens where the user may create no thread. The
+    /// channel's form stays the same: opened for another message it follows that one, also while
+    /// its thread is being created.
     public func openThreadForm(
         in parent: ChannelId, from message: MessageId? = nil, location: CreateThreadLocation
     ) {
@@ -443,6 +451,8 @@ public final class SessionModel {
             return
         }
         engage()
+        // A box click still fetching its thread is overtaken.
+        clickedThread = nil
         threadBrowser = nil
         if messages?.channelId != parent {
             go(to: parent)
@@ -454,7 +464,14 @@ public final class SessionModel {
         guard message == nil || source != nil else {
             return
         }
-        forms[parent] = FormEntry(source: source, location: location)
+        if let form = formModels[parent] {
+            form.retarget(source: source, location: location)
+        } else {
+            formModels[parent] = ThreadFormModel(
+                parentId: parent, source: source, location: location, account: account,
+                store: store, drafts: drafts)
+        }
+        shownForms.insert(parent)
         forgetSplit(of: parent)
         syncForm()
         if let form = threadForm, form.message.isEmpty, let composer = messages?.composer,
@@ -480,7 +497,7 @@ public final class SessionModel {
         guard let form = threadForm else {
             return
         }
-        forms[form.parentId] = nil
+        shownForms.remove(form.parentId)
         syncForm()
         focusChannel = true
         updateReading()
@@ -488,7 +505,13 @@ public final class SessionModel {
 
     /// The form's X, once the user said so: closes it and forgets what's typed.
     public func discardThreadForm() {
-        threadForm?.clearDrafts()
+        guard let form = threadForm else {
+            return
+        }
+        form.clear()
+        if !creating.contains(form.parentId) {
+            formModels[form.parentId] = nil
+        }
         closeThreadForm()
     }
 
@@ -497,8 +520,9 @@ public final class SessionModel {
     }
 
     /// Enter in the form: creates the thread, then shows it beside its channel with its
-    /// composer focused, unless the user went elsewhere meanwhile, and sends the first message
-    /// there. Nothing is created while a field says what's missing or a dialog why it failed.
+    /// composer focused, unless the user went elsewhere, closed the form or opened it for another
+    /// message meanwhile, and sends the first message there. Nothing is created while a field
+    /// says what's missing or a dialog why it failed.
     public func submitThreadForm() async {
         guard let form = threadForm, !creating.contains(form.parentId) else {
             return
@@ -507,14 +531,21 @@ public final class SessionModel {
         creating.insert(parent)
         let created = await form.create()
         creating.remove(parent)
-        guard let (thread, content) = created else {
+        guard let created else {
             takeOverForms(onItsOwn: true)
             return
         }
-        form.clearDrafts()
-        // Closed or replaced meanwhile, the slot is the user's again.
-        let shown = forms[parent] != nil
-        forms[parent] = nil
+        // The later action wins: a form opened for another message stays, without what went out.
+        let retargeted = form.source?.id != created.source || form.location != created.location
+        let shown = shownForms.contains(parent) && !retargeted
+        if retargeted {
+            form.consume(created)
+        } else {
+            form.clearDrafts()
+            formModels[parent] = nil
+            shownForms.remove(parent)
+        }
+        let thread = created.thread
         if shown, messages?.channelId == parent, let guild = store.channel(id: parent)?.guildId {
             splits[parent] = .init(thread: thread, guild: guild)
             if sawReady {
@@ -528,7 +559,7 @@ public final class SessionModel {
             focusSplit = split?.channelId == thread
         }
         updateReading()
-        await sendFirstMessage(content, in: thread)
+        await sendFirstMessage(created.firstMessage, in: thread)
     }
 
     // A failed send stays in the thread, with Retry; one the core refused keeps its text.
@@ -549,31 +580,58 @@ public final class SessionModel {
     }
 
     private func syncForm() {
-        guard let open = messages?.channelId, let entry = forms[open] else {
-            if threadForm != nil {
-                threadForm = nil
-                focusThreadForm = false
+        let shown = messages.flatMap { list in
+            shownForms.contains(list.channelId) ? formModels[list.channelId] : nil
+        }
+        if threadForm !== shown {
+            threadForm = shown
+        }
+        if shown == nil {
+            focusThreadForm = false
+        }
+    }
+
+    // Each form follows its message's edits and lets go of it once deleted; a form whose
+    // channel no longer allows its thread closes, keeping what's typed.
+    private func followForms(_ batch: EventBatch) {
+        for (channel, form) in formModels {
+            guard let source = form.source?.id else {
+                continue
             }
-            return
+            if batch.deletedMessages[channel]?.contains(source) == true {
+                form.dropSource()
+            } else if batch.updatedMessages[channel]?.contains(source) == true,
+                let edited = store.messages(channelId: channel, ids: [source]).first
+            {
+                form.follow(edited)
+            }
         }
-        // A form whose thread is being created stays the one that sends its first message.
-        if let form = threadForm, form.parentId == open,
-            creating.contains(open)
-                || (form.source?.id == entry.source?.id && form.location == entry.location)
-        {
-            return
+        let permissions =
+            batch.everythingChanged || !batch.guildsChanged.isEmpty
+            || !batch.membersChanged.isEmpty || !batch.channelsChanged.isEmpty
+        if permissions {
+            for channel in shownForms where formModels[channel]?.allowed != true {
+                shownForms.remove(channel)
+            }
         }
-        threadForm = ThreadFormModel(
-            parentId: open, source: entry.source, location: entry.location, account: account,
-            store: store, drafts: drafts)
+    }
+
+    private func updateCreateHere() {
+        let allowed = threadsButtonParent.map { parent in
+            let creation = store.threadCreation(parentId: parent)
+            return creation.public || creation.private
+        } ?? false
+        if allowed != canCreateThreadHere {
+            canCreateThreadHere = allowed
+        }
     }
 
     // Someone's thread from a form's message: the form turns into that thread, its message the
     // thread's draft, as in the official client.
     private func takeOverForms(onItsOwn: Bool) {
         var changed = false
-        for (channel, entry) in forms where !creating.contains(channel) {
-            guard let source = entry.source?.id,
+        for (channel, form) in formModels where !creating.contains(channel) {
+            guard let source = form.source?.id,
                 let thread = store.channel(id: ChannelId(rawValue: source.rawValue)),
                 thread.isThread, thread.parentId == channel, let guild = thread.guildId
             else {
@@ -584,7 +642,8 @@ public final class SessionModel {
                 drafts[thread.id] = typed
             }
             drafts.forms[channel] = nil
-            forms[channel] = nil
+            formModels[channel] = nil
+            shownForms.remove(channel)
             splits[channel] = .init(thread: thread.id, guild: guild)
             if sawReady {
                 checkedSplits.insert(thread.id)
@@ -958,7 +1017,9 @@ public final class SessionModel {
         }
         // A split shown after READY came from a batch or Discord's answer, not the user.
         let onItsOwn = sawReady && !batch.ready
-        forms = forms.filter { !batch.removedChannels.contains($0.key) }
+        formModels = formModels.filter { !batch.removedChannels.contains($0.key) }
+        shownForms.subtract(batch.removedChannels)
+        followForms(batch)
         if !batch.channelsChanged.isEmpty || batch.everythingChanged {
             takeOverForms(onItsOwn: onItsOwn)
         }
@@ -997,9 +1058,12 @@ public final class SessionModel {
             }
         }
         syncForm()
+        updateCreateHere()
         messages?.apply(batch)
         split?.apply(batch)
-        threadForm?.apply(batch)
+        for form in formModels.values {
+            form.apply(batch)
+        }
         threadBrowser?.apply(batch)
         if let peeked {
             let threads = moreActiveThreads(of: peeked)
@@ -1309,11 +1373,6 @@ public final class SessionModel {
     }
 }
 
-// The message is kept as it was when the form opened: the window may let it go.
-struct FormEntry {
-    let source: Message?
-    let location: CreateThreadLocation
-}
 
 // A Sendable holder, so the model's nonisolated deinit can cancel the loop.
 final class EventLoop: Sendable {

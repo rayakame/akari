@@ -25,6 +25,7 @@ struct EventBatch {
     var removedGuilds: Set<GuildId> = []
     var windowsChanged: Set<ChannelId> = []
     var updatedMessages: [ChannelId: Set<MessageId>] = [:]
+    var deletedMessages: [ChannelId: Set<MessageId>] = [:]
     // Confirmed message ID → the pending ID it replaced.
     var confirmed: [ChannelId: [MessageId: MessageId]] = [:]
 
@@ -76,7 +77,10 @@ struct EventBatch {
             case .channelRemoved(let channel, let guild):
                 channelsChanged[guild, default: []].insert(channel)
                 removedChannels.insert(channel)
-            case .messageInserted(let channel, _), .messageDeleted(let channel, _),
+            case .messageDeleted(let channel, let message):
+                windowsChanged.insert(channel)
+                deletedMessages[channel, default: []].insert(message)
+            case .messageInserted(let channel, _),
                 .messagesLoaded(let channel, _, _), .messagesTrimmed(let channel, _, _),
                 .messagesStale(let channel), .messagesRefreshed(let channel),
                 .messagesCleared(let channel):

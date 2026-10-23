@@ -110,12 +110,13 @@ final class ThreadFormTests {
     }
 
     @Test
-    func escapeClosesTheFormFirstAndKeepsWhatsTyped() {
+    func escapeClosesTheFormFirstAndKeepsWhatsTyped() async {
         let session = inChannel11()
         session.openThreadForm(in: id(11), location: .threadBrowserToolbar)
         session.threadForm?.message = "first"
 
         #expect(session.escape() == false)
+        await finished(session.escaping)
 
         #expect(session.threadForm == nil)
         #expect(account.markedRead.current.isEmpty)
@@ -619,7 +620,8 @@ final class ThreadFormTests {
         await submitting.value
 
         #expect(session.split?.channelId == id(31))
-        #expect(!session.focusSplit || session.split?.channelId == id(31))
+        #expect(memory.splits(of: id(1))[id(11)]?.thread == id(31))
+        #expect(session.threadForm == nil)
         #expect(calls.contains(.send(id(41), "first")))
         session.close()
     }
@@ -667,6 +669,180 @@ final class ThreadFormTests {
         session.userInteracted()
         #expect(session.reading.contains(id(2)))
         session.close()
+    }
+
+    @Test
+    func anEditedSourceMessageShowsAndNamesTheFormLive() {
+        let session = inChannel11()
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+        let form = session.threadForm
+
+        store.update { $0.show(message(2, in: 11, by: user(2), content: "ganz neuer text")) }
+        session.apply(EventBatch([.messageUpdated(channelId: id(11), messageId: id(2))]))
+
+        #expect(session.threadForm === form)
+        #expect(session.threadForm?.source?.content == "ganz neuer text")
+        #expect(session.threadForm?.namePlaceholder == "ganz neuer text")
+        session.close()
+    }
+
+    // The user's work stays: both texts, and a thread without the message.
+    @Test
+    func aDeletedSourceMessageLeavesAFormWithoutItKeepingBothTexts() async {
+        let session = inChannel11()
+        created(41)
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+        session.threadForm?.name = "plans"
+        session.threadForm?.message = "first"
+
+        store.update { state in
+            state.windows[id(11)] = window([1])
+            state.messages[id(2)] = nil
+        }
+        session.apply(EventBatch([.messageDeleted(channelId: id(11), messageId: id(2))]))
+
+        #expect(session.threadForm?.source == nil)
+        #expect(session.threadForm?.nameLabel == "Thread Name")
+        #expect(session.threadForm?.name == "plans")
+        #expect(session.threadForm?.message == "first")
+        #expect(session.threadForm?.privateMode == .enabled)
+        await session.submitThreadForm()
+        #expect(creates == [.createThread(id(11), nil, "plans", isPrivate: false, .message)])
+        session.close()
+    }
+
+    @Test
+    func aSourceDiscordNoLongerKnowsLeavesAFormWithoutIt() async {
+        let session = inChannel11()
+        account.createReply.withLock {
+            $0 = .failure(.Request(error: .Discord(status: 404, code: 10008, message: "Unknown Message")))
+        }
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+        session.threadForm?.message = "first"
+
+        await session.submitThreadForm()
+
+        #expect(session.threadForm?.source == nil)
+        #expect(session.threadForm?.message == "first")
+        #expect(session.threadForm?.nameError == "Thread Name is required")
+        #expect(session.threadForm?.alert == nil)
+        session.close()
+    }
+
+    @Test
+    func losingThePermissionClosesTheFormKeepingWhatsTyped() {
+        let session = inChannel11()
+        session.openThreadForm(in: id(11), location: .threadBrowserToolbar)
+        session.threadForm?.message = "first"
+
+        store.update { $0.threadCreations[id(11)] = ThreadCreation(public: false, private: false) }
+        session.apply(EventBatch([.currentMemberUpdated(guildId: id(1))]))
+        #expect(session.threadForm == nil)
+
+        store.update { $0.threadCreations[id(11)] = ThreadCreation(public: true, private: true) }
+        session.apply(EventBatch([.channelUpdated(channelId: id(11), guildId: id(1))]))
+        #expect(session.threadForm == nil, "it doesn't come back on its own")
+        session.openThreadForm(in: id(11), location: .threadBrowserToolbar)
+        #expect(session.threadForm?.message == "first")
+        session.close()
+    }
+
+    @Test
+    func aMessageFormClosesWhenOnlyPrivateThreadsAreLeft() {
+        let session = inChannel11()
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+
+        store.update { $0.threadCreations[id(11)] = ThreadCreation(public: false, private: true) }
+        session.apply(EventBatch([.channelUpdated(channelId: id(11), guildId: id(1))]))
+
+        #expect(session.threadForm == nil)
+        session.close()
+    }
+
+    @Test
+    func aRefusalAfterAChannelSwitchWaitsForTheUsersReturn() async {
+        let session = inChannel11()
+        account.createReply.withLock { $0 = .failure(.TooManyThreads(announcement: false)) }
+        account.holdCreates.withLock { $0 = true }
+        session.openThreadForm(in: id(11), location: .threadBrowserToolbar)
+        session.threadForm?.name = "plans"
+        session.threadForm?.message = "first"
+        let form = session.threadForm
+
+        let submitting = Task { await session.submitThreadForm() }
+        await waitFor { !self.creates.isEmpty }
+        session.open(channel: id(12))
+        account.createReplies.send(())
+        await submitting.value
+        session.open(channel: id(11))
+
+        #expect(session.threadForm === form)
+        #expect(session.threadForm?.alert?.title == "Cannot create thread")
+        #expect(session.threadForm?.message == "first")
+        session.close()
+    }
+
+    // The later action wins: the form follows the new message, the first message still goes.
+    @Test
+    func reopeningFromAnotherMessageDuringACreateRetargetsTheForm() async {
+        let session = inChannel11()
+        created(2)
+        account.holdCreates.withLock { $0 = true }
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+        session.threadForm?.message = "first"
+        let form = session.threadForm
+
+        let submitting = Task { await session.submitThreadForm() }
+        await waitFor { !self.creates.isEmpty }
+        session.openThreadForm(in: id(11), from: id(1), location: .message)
+        #expect(session.threadForm === form)
+        #expect(session.threadForm?.source?.id == id(1))
+        account.createReplies.send(())
+        await submitting.value
+
+        #expect(session.threadForm?.source?.id == id(1))
+        #expect(session.threadForm?.message == "", "it went out as the first message")
+        #expect(session.split == nil)
+        #expect(calls.contains(.send(id(2), "first")))
+        session.close()
+    }
+
+    @Test
+    func aLateBoxFetchDoesntReplaceAFormOpenedMeanwhile() async {
+        let session = inChannel11()
+        account.holdThreadFetches.withLock { $0 = true }
+        account.fetchedThreads.withLock { $0[id(77)] = thread(77, in: 11, name: "late") }
+
+        let clicking = Task { await session.openBeside(thread: id(77), from: id(11)) }
+        await waitFor { self.calls.contains(.fetchThread(id(11), id(77))) }
+        session.openThreadFormHere()
+        account.threadFetches.send(())
+        await clicking.value
+
+        #expect(session.threadForm != nil)
+        #expect(session.split == nil)
+        session.close()
+    }
+
+    @Test
+    func createThreadHereFollowsTheOpenChannelAndItsPermissions() {
+        let session = inChannel11()
+        #expect(session.canCreateThreadHere)
+
+        session.go(to: id(31))
+        #expect(session.canCreateThreadHere, "a thread's parent")
+        store.update { $0.threadCreations[id(11)] = ThreadCreation(public: false, private: false) }
+        session.apply(EventBatch([.channelUpdated(channelId: id(11), guildId: id(1))]))
+        #expect(!session.canCreateThreadHere)
+        session.close()
+    }
+
+    @Test
+    func aCreateThatMayHaveHappenedSaysTheThreadMayExist() async {
+        let form = await refused(.MaybeCreated)
+        #expect(form?.alert?.title == "Thread may exist")
+        #expect(form?.alert?.message.contains("check the channel list") == true)
+        #expect(form?.message == "first")
     }
 
     func waitFor(_ condition: @escaping () -> Bool) async {
