@@ -48,7 +48,8 @@ view on the right instead ([below](#split-view)).
 
 Akari keeps the native macOS title bar and makes it transparent over a 32 pt strip, so
 dragging, double-click to zoom, full screen and the traffic lights behave like every other Mac
-app. The native title is hidden and Akari draws its own centered one; the window's title is
+app. *SwiftUI gives this window's View menu no Enter Full Screen, so Akari adds it (Ctrl+Cmd+F),
+acting on the session's window from anywhere, the Threads browser's panel included.* The native title is hidden and Akari draws its own centered one; the window's title is
 still set to the same text, so the Window menu, Mission Control and VoiceOver read it.
 
 ## Server rail

@@ -47,7 +47,9 @@ shadow*). A click outside it, Escape,
   goes to the composer. *Akari's panel is the key window while it shows (the session's stays the
   main one, its title bar active), so typing, Tab and Shift+Tab stay in it and nothing reaches
   the composer; Escape closes it unless an input method composes, the menu's Close (Cmd+W) closes
-  it and Minimize (Cmd+M) minimizes the session's window. On closing, the session's window takes
+  it; the Window menu's other commands (Fill, Center, Move & Resize, Zoom, Minimize, full
+  screen) act on the session's window with the browser open: the panel hands them on, and the
+  browser follows the window, or closes when it's minimized or goes full screen. On closing, the session's window takes
   the key back and the channel's composer the focus (a Shift+click's split keeps its own). The
   channel stays read behind it: the panel's key, clicks and keys count as the window's. VoiceOver
   meets a dialog named "Threads" and starts in the field, or at the title without one.*
@@ -171,5 +173,6 @@ group, not a dialog: no focus lock, nothing focused.
 *Akari keeps it open while the pointer is on the popout; whether Discord's does is to check. It's
 a borderless panel of its own beside the row, attached to the session's window, without a shield
 and never key (the list keeps its hover and the composer its focus); it takes its first click,
-shows the arrow over its rows (a window that's never key gets no cursor rects; Discord shows the
-pointer), and goes with the app going to the background or the window closing, too.*
+shows the pointing hand over its rows and "See All" (from its own tracking, as a window that's
+never key gets no cursor rects), and goes with the app going to the background or the window
+closing, too.*

@@ -270,9 +270,10 @@ line's end and over a blank line included (Chris, 2026-10-23: Akari showed the I
 message's empty area). *One authority decides it for the whole list (`MessageTableController`):
 the table's own tracking area, which hit-tests what's under the pointer on every move, scroll and
 update and when the window takes the key back; the text views and thread boxes track nothing and
-set no cursor of their own (NSTextView's own cursor area is dropped; its tooltips' stays). The
-bars over the list (the unread bar, the jump bar, the locked banner, the status strip) show the
-arrow, where Discord's bars show the pointer (D126). Hover follows the same authority: the row,
+set no cursor of their own (NSTextView's own cursor area is dropped; its tooltips' stays). Over
+the bars over the list it shows what they say: the pointing hand over the unread bar and the jump
+bar's button, which click, the arrow over the locked banner and the status strip, which don't
+(Chris, 2026-10-23: anything clickable shows the hand). Hover follows the same authority: the row,
 the box and a link's underline. Over a window above the list (the Threads browser's shield, More
 Active Threads) the list does nothing.* A click on a link follows it even when the link is inside
 a selection (a double click on it selects its word), where a text view would start dragging the
