@@ -77,7 +77,17 @@ public final class SessionModel {
     public private(set) var focusChannel = false
     /// The open Threads browser: the popout under the header's Threads button or the modal "See
     /// all threads" opens. Opening another channel closes it.
-    public private(set) var threadBrowser: ThreadBrowserModel?
+    public private(set) var threadBrowser: ThreadBrowserModel? {
+        didSet {
+            if oldValue?.parentId != threadBrowser?.parentId {
+                account.setBrowsing(parentId: threadBrowser?.parentId)
+            }
+        }
+    }
+    /// The channel list's "More Active Threads" popout's threads, following the store while
+    /// `peek(at:)` names a channel; empty otherwise.
+    public private(set) var peekedThreads: [ThreadPeek] = []
+    @ObservationIgnored private var peeked: ChannelId?
     /// The last join or leave that failed, until `dismissMembershipError()`.
     public private(set) var membershipError: MembershipError?
     /// The channels the user is reading: the open channel and the split thread, each while its
@@ -445,6 +455,12 @@ public final class SessionModel {
             }
     }
 
+    /// The channel whose "More Active Threads" shows, `nil` once it closes.
+    public func peek(at channel: ChannelId?) {
+        peeked = channel
+        peekedThreads = channel.map(moreActiveThreads(of:)) ?? []
+    }
+
     private static func newest(_ thread: Channel) -> UInt64 {
         thread.thread?.lastMessageId?.rawValue ?? thread.id.rawValue
     }
@@ -770,6 +786,12 @@ public final class SessionModel {
         messages?.apply(batch)
         split?.apply(batch)
         threadBrowser?.apply(batch)
+        if let peeked {
+            let threads = moreActiveThreads(of: peeked)
+            if threads != peekedThreads {
+                peekedThreads = threads
+            }
+        }
     }
 
     private func keepSplits(where keep: (ChannelId, AccountMemory.Split) -> Bool) {

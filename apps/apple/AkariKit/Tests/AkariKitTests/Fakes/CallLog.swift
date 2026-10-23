@@ -22,6 +22,7 @@ final class CallLog: Sendable {
         case leaveThread(ChannelId, ThreadLocation)
         case loadOlderThreads(ChannelId)
         case searchThreads(ChannelId, String)
+        case setBrowsing(ChannelId?)
         case flushCache
     }
 

@@ -79,7 +79,8 @@ public final class ThreadBrowserModel {
     @ObservationIgnored private let account: Account
     @ObservationIgnored private let userId: UserId
     @ObservationIgnored private var resultIds: [ChannelId]?
-    @ObservationIgnored private var searching = false
+    @ObservationIgnored private var searchingFor: String?
+    @ObservationIgnored private var nextSearch: String?
     // Clearing the field makes a search still on its way stale.
     @ObservationIgnored private var searchGeneration = 0
     @ObservationIgnored private var opened = false
@@ -103,10 +104,13 @@ public final class ThreadBrowserModel {
     }
 
     /// Loads the first page of older threads, as the official client does on opening, and again
-    /// whenever the pages are forgotten while the browser shows (a new session).
+    /// whenever the pages are forgotten while the browser shows (a new session). The pages stay
+    /// for the connection, so opening again asks nothing.
     public func open() async {
         opened = true
-        await loadMore()
+        if older == .notLoaded {
+            await loadMore()
+        }
     }
 
     /// The view calls it when the list's bottom comes within 200 points.
@@ -126,26 +130,40 @@ public final class ThreadBrowserModel {
         if text.isEmpty {
             resultIds = nil
             results = nil
+            nextSearch = nil
             searchGeneration += 1
         }
     }
 
-    /// Enter: searches by name, one search at a time. A failed search, or one Discord can't
-    /// answer yet, changes nothing.
+    /// Enter: searches by name, one search at a time. Enter with other text while one runs
+    /// searches that text once it's answered, and only the last answer shows. A failed search, or
+    /// one Discord can't answer yet, changes nothing.
     public func submit() async {
-        guard !query.isEmpty, !searching else {
+        guard !query.isEmpty else {
             return
         }
-        searching = true
-        defer { searching = false }
-        let generation = searchGeneration
-        guard let found = try? await account.searchThreads(parentId: parentId, name: query),
-            generation == searchGeneration
-        else {
+        if let running = searchingFor {
+            nextSearch = query == running ? nil : query
             return
         }
-        resultIds = found
-        reread()
+        var text = query
+        while true {
+            let generation = searchGeneration
+            searchingFor = text
+            let found = try? await account.searchThreads(parentId: parentId, name: text)
+            if let next = nextSearch {
+                nextSearch = nil
+                text = next
+                continue
+            }
+            searchingFor = nil
+            guard let found, generation == searchGeneration else {
+                return
+            }
+            resultIds = found
+            reread()
+            return
+        }
     }
 
     /// A thread this browser shows, for its row's menu.

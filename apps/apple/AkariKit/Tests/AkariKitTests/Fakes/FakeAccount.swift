@@ -276,6 +276,8 @@ final class FakeAccount: Account, @unchecked Sendable {
     let olderLoadError = Locked<RequestError?>(nil)
     // A search's answer: Discord's IDs, `nil` while not indexed; an error fails it.
     let searchReply = Locked<Result<[ChannelId]?, RequestError>>(.success([]))
+    // Answers for particular names, before `searchReply`.
+    let searchReplies = Locked<[String: [ChannelId]]>([:])
     // While set, each search waits here before answering.
     let holdSearches = Locked(false)
     let searchEntries = AsyncQueue<Void>()
@@ -295,7 +297,14 @@ final class FakeAccount: Account, @unchecked Sendable {
         if holdSearches.current {
             _ = await searchEntries.next()
         }
+        if let reply = searchReplies.current[name] {
+            return reply
+        }
         return try searchReply.current.get()
+    }
+
+    override func setBrowsing(parentId: ChannelId?) {
+        log.append(.setBrowsing(parentId))
     }
 
     let membershipError = Locked<RequestError?>(nil)

@@ -367,7 +367,7 @@ final class ThreadBrowserTests {
     }
 
     @Test
-    func aSecondEnterWhileSearchingAsksOnce() async {
+    func aSecondEnterWithTheSameTextWhileSearchingAsksOnce() async {
         let session = inChannel11()
         account.holdSearches.withLock { $0 = true }
         let browser = browser(session)
@@ -380,6 +380,32 @@ final class ThreadBrowserTests {
         await first
 
         #expect(account.log.actions.filter { $0 == .searchThreads(id(11), "t1") }.count == 1)
+        session.close()
+    }
+
+    // Discord drops an Enter while a search runs; Akari searches the latest text after it.
+    @Test
+    func theLatestTextWinsOverASearchStillRunning() async {
+        let session = inChannel11()
+        account.searchReplies.withLock { $0 = ["t1": [id(31)], "t2": [id(32)]] }
+        account.holdSearches.withLock { $0 = true }
+        let browser = browser(session)
+        browser.setQuery("t1")
+
+        async let first: Void = browser.submit()
+        await account.searchEntries.pulled(1)
+        browser.setQuery("t2")
+        await browser.submit()
+        account.searchEntries.send(())
+        await account.searchEntries.pulled(2)
+        account.searchEntries.send(())
+        await first
+
+        let searches = account.log.actions.filter {
+            if case .searchThreads = $0 { true } else { false }
+        }
+        #expect(searches == [.searchThreads(id(11), "t1"), .searchThreads(id(11), "t2")])
+        #expect(rowIds(browser.results) == [id(32)])
         session.close()
     }
 
@@ -509,6 +535,44 @@ final class ThreadBrowserTests {
         session.apply(EventBatch([.channelAdded(channelId: id(35), guildId: id(1))]))
 
         #expect(browser.sections.first?.rows.map(\.id) == [id(35), id(32)])
+        session.close()
+    }
+
+    @Test
+    func clearingTheFieldDropsASearchWaitingItsTurn() async {
+        let session = inChannel11()
+        account.searchReplies.withLock { $0 = ["t1": [id(31)], "t2": [id(32)]] }
+        account.holdSearches.withLock { $0 = true }
+        let browser = browser(session)
+        browser.setQuery("t1")
+
+        async let first: Void = browser.submit()
+        await account.searchEntries.pulled(1)
+        browser.setQuery("t2")
+        await browser.submit()
+        browser.setQuery("")
+        account.holdSearches.withLock { $0 = false }
+        account.searchEntries.send(())
+        await first
+
+        #expect(!account.log.actions.contains(.searchThreads(id(11), "t2")))
+        #expect(browser.results == nil)
+        session.close()
+    }
+
+    // MARK: Second review
+
+    // The pages stay for the connection: opening again asks for nothing.
+    @Test
+    func reopeningWithAPageLoadedAsksNothing() async {
+        let session = inChannel11()
+        browse(archived: [34], older: .more)
+        let browser = browser(session)
+
+        await browser.open()
+
+        #expect(loads() == 0)
+        #expect(browser.sections.map(\.kind) == [.older])
         session.close()
     }
 
@@ -700,6 +764,43 @@ final class ThreadBrowserSessionTests {
         #expect(
             session.membershipItem(for: id(33))
                 == SessionModel.MembershipItem(joins: true, enabled: true))
+        session.close()
+    }
+
+    @Test
+    func theCoreHearsWhichChannelsBrowserIsOpen() async {
+        let session = inChannel11()
+
+        session.openThreadBrowser(of: id(11), as: .popout)
+        session.openThreadBrowser(of: id(11), as: .modal)
+        session.closeThreadBrowser()
+        session.openThreadBrowser(of: id(11), as: .popout)
+        await session.open(browsed: id(33), beside: false)
+
+        let browsing = account.log.actions.filter {
+            if case .setBrowsing = $0 { true } else { false }
+        }
+        #expect(browsing == [
+            .setBrowsing(id(11)), .setBrowsing(nil), .setBrowsing(id(11)), .setBrowsing(nil),
+        ])
+        session.close()
+    }
+
+    // Shown, the popout follows new messages as the browser does.
+    @Test
+    func thePeekedThreadsFollowTheStore() {
+        let session = inChannel11()
+        session.peek(at: id(11))
+        #expect(session.peekedThreads.map(\.id) == [id(35), id(34), id(33)])
+
+        store.update { state in
+            state.channels[id(32)]?.thread?.lastMessageId = id(300)
+        }
+        session.apply(EventBatch([.threadActivity(guildId: id(1), parentId: id(11), threadId: id(32))]))
+        #expect(session.peekedThreads.map(\.id) == [id(32), id(35), id(34)])
+
+        session.peek(at: nil)
+        #expect(session.peekedThreads.isEmpty)
         session.close()
     }
 
