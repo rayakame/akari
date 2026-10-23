@@ -685,11 +685,17 @@ async fn a_page_of_older_threads_reaches_the_subscription() {
     let subscription = account.store().subscribe();
 
     account.load_older_threads(GENERAL).await.unwrap();
-    let events = events_until(&subscription, |event| {
-        matches!(event, StoreEvent::OlderThreadsChanged { .. })
-    })
-    .await;
+    let changed = StoreEvent::OlderThreadsChanged { parent_id: GENERAL };
+    let mut events = Vec::new();
+    // The page's start, then its end.
+    while events.iter().filter(|event| **event == changed).count() < 2 {
+        events.extend(events_until(&subscription, |event| *event == changed).await);
+    }
 
-    assert!(events.contains(&StoreEvent::OlderThreadsChanged { parent_id: GENERAL }));
+    let added = events.iter().position(
+        |event| matches!(event, StoreEvent::ChannelAdded { channel_id, .. } if *channel_id == OLD),
+    );
+    let finished = events.iter().rposition(|event| *event == changed);
+    assert!(added.is_some() && added < finished, "{events:?}");
     account.close();
 }

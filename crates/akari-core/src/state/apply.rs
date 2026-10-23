@@ -45,6 +45,8 @@ pub(crate) struct Entities {
     pub(crate) read_states: ReadStates,
     // Threads READY or GUILD_CREATE listed without the user's member, joined with a default one.
     pub(crate) memberless: HashSet<ChannelId>,
+    // Threads the store kept across READY or GUILD_CREATE without their listing them.
+    pub(crate) kept_threads: HashSet<ChannelId>,
 }
 
 impl Entities {
@@ -382,7 +384,11 @@ pub(crate) struct State {
     unconfirmed: HashSet<ChannelId>,
     // Each channel's pages of archived threads in this connection.
     older: HashMap<ChannelId, browser::OlderPages>,
-    older_generation: u64,
+    // READYs so far: an answer to a request asked before the last one says nothing about this
+    // connection.
+    generation: u64,
+    // The channel whose Threads browser is open.
+    browsing: Option<ChannelId>,
     clock: Arc<Clock>,
 }
 
@@ -415,7 +421,8 @@ impl State {
             unplaced_threads: HashMap::new(),
             unconfirmed: HashSet::new(),
             older: HashMap::new(),
-            older_generation: 0,
+            generation: 0,
+            browsing: None,
             clock,
         }
     }
@@ -1131,6 +1138,7 @@ impl State {
         self.windows.drop_channel(removed.id);
         self.latest.remove(&removed.id);
         self.unconfirmed.remove(&removed.id);
+        self.older.remove(&removed.id);
         self.entities.read_states.forget(removed.id);
         self.dirty.channel(removed.id);
         events.push(StoreEvent::ChannelRemoved {
@@ -1903,8 +1911,9 @@ impl State {
     }
 
     // READY lists only the joined, active threads, so it says nothing about the unjoined ones the
-    // store has (from messages, syncs or Get Channel) nor about one fetched this session; they
-    // stay while their guild and parent do. Returns the threads it put into `next`.
+    // store has (from messages, syncs, pages or Get Channel) nor about one fetched this session;
+    // they stay while their guild and parent do, an unjoined archived one while something shows
+    // it. Returns the threads it put into `next`.
     pub(crate) fn keep_known_threads(&self, next: &mut Entities) -> Vec<Arc<Channel>> {
         let mut kept = Vec::new();
         for thread in self.entities.channels.values() {
@@ -1912,6 +1921,14 @@ impl State {
                 continue;
             };
             if info.joined() && !self.fetched_threads.contains(&thread.id) {
+                continue;
+            }
+            // Pages and searches bring many: only what still shows one keeps it.
+            if !info.joined()
+                && info.archived
+                && !self.fetched_threads.contains(&thread.id)
+                && !self.shows(thread)
+            {
                 continue;
             }
             let placed = thread
@@ -1922,6 +1939,7 @@ impl State {
                     .is_some_and(|parent| next.channels.contains_key(&parent));
             if placed && !next.channels.contains_key(&thread.id) {
                 next.channels.insert(thread.id, thread.clone());
+                next.kept_threads.insert(thread.id);
                 kept.push(thread.clone());
             }
         }

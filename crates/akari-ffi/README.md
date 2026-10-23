@@ -94,7 +94,7 @@ comes as `ChannelUpdated`. An archived thread, or one the store doesn't have, fa
 
 `Store.thread_browser(parent_id)` is what a channel's Threads browser lists: the active threads
 the user joined and those it hasn't (only ones this connection's gateway, or a request, brought:
-an unjoined thread kept across a READY may have been archived meanwhile), and the archived ones
+a thread kept across a READY may have been archived or left meanwhile), and the archived ones
 the loaded pages reach, each the newest message first, with `older: OlderThreads` (`NotLoaded`,
 `Loading`, `More`, `All`, `Failed`). `Account.load_older_threads(parent_id)` loads the next page
 of 25 as Discord's client asks for it; nothing while one loads, after the last, or after a
@@ -104,7 +104,10 @@ while Discord hasn't indexed the channel), and keeps them in the store. `ThreadA
 guild_id, parent_id, thread_id }` comes when a thread's newest or latest message changes, so a
 browser reorders, `OlderThreadsChanged { parent_id }` when its archived pages move on (began,
 came, failed, given up); its threads' `ChannelAdded`, `ChannelUpdated` and `ChannelRemoved` say
-the rest.
+the rest. `Account.set_browsing(parent_id)` names the channel whose browser is open (`None` once
+it closes): a new connection lets go of the unjoined archived threads nothing shows (no window,
+box or "started a thread" line), but not the open browser's. A page or search asked before a
+READY confirms and joins nothing.
 
 Acks: `set_reading(channel_ids)` names the channels the user is reading at their newest
 messages: none, one, or two in the split view (a channel and the thread beside it; further ones
@@ -173,7 +176,8 @@ read.
   `StoreSubscription.next`) are polled directly.
 - Sync methods are cheap. A store read takes one read lock, and akari-core warns when a
   write holds the lock for more than 4 ms. `connect`, `disconnect`, `close` and
-  `view_channel`, `set_reading`, `mark_read` and `mark_guilds_read` only signal.
+  `view_channel`, `set_reading`, `set_browsing`, `mark_read` and `mark_guilds_read` only
+  signal.
 - The host's `TokenStore` runs on a blocking thread, never on the main thread or a runtime
   worker, so it may block or show a dialog.
 - Markdown is parsed on the runtime where it can be: each account registers its documents as

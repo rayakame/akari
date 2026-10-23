@@ -470,6 +470,7 @@ fn a_page_doesnt_override_the_gateways_copy() {
             vec![thread_object(ACTIVE_A, Some(400_000_000_000_000_040), true)],
             false,
         ),
+        state.generation(),
         &mut events,
     );
 
@@ -492,6 +493,7 @@ fn a_page_replaces_an_unconfirmed_copy() {
             vec![thread_object(ACTIVE_A, Some(400_000_000_000_000_040), true)],
             false,
         ),
+        state.generation(),
         &mut Vec::new(),
     );
 
@@ -508,17 +510,19 @@ fn found_threads_keep_their_members_owners_and_latest_messages() {
         "../../../../tests/fixtures/thread_search.json"
     ))
     .unwrap();
+    // Discord's order, not the IDs'.
+    results.threads.as_mut().unwrap().reverse();
     // A user READY didn't bring.
-    let owner = results.threads.as_mut().unwrap()[0].owner.as_mut().unwrap();
+    let owner = results.threads.as_mut().unwrap()[1].owner.as_mut().unwrap();
     owner.user.as_mut().unwrap().id = Snowflake::new(100_000_000_000_000_009);
 
-    let found = state.keep_found_threads(results, &mut Vec::new());
+    let found = state.keep_found_threads(results, state.generation(), &mut Vec::new());
 
     assert_eq!(
         found,
         Some(vec![
-            Snowflake::new(300_000_000_000_000_041),
-            Snowflake::new(300_000_000_000_000_042)
+            Snowflake::new(300_000_000_000_000_042),
+            Snowflake::new(300_000_000_000_000_041)
         ])
     );
     let first = state
@@ -552,7 +556,7 @@ fn an_unindexed_search_finds_nothing() {
     let mut state = ready_state();
 
     assert_eq!(
-        state.keep_found_threads(not_indexed(), &mut Vec::new()),
+        state.keep_found_threads(not_indexed(), state.generation(), &mut Vec::new()),
         None
     );
 }
@@ -722,4 +726,257 @@ fn a_page_ready_overtook_confirms_nothing() {
     load(&mut state, Vec::new(), false);
 
     assert_eq!(sections(&state), (vec![THREAD], vec![], vec![]));
+}
+
+fn joined_member(thread: u64) -> Value {
+    json!({
+        "id": thread.to_string(), "user_id": ME.to_string(),
+        "join_timestamp": "2026-10-18T10:00:00.000000+00:00",
+        "flags": 1, "muted": false, "mute_config": null
+    })
+}
+
+fn page_with_members(threads: Vec<Value>, members: Vec<Value>) -> ThreadSearchResults {
+    results(&json!({
+        "threads": threads, "members": members, "has_more": false,
+        "total_results": 0, "most_recent_messages": []
+    }))
+}
+
+fn joined(state: &State, thread: u64) -> Option<bool> {
+    state
+        .channel(Snowflake::new(thread))
+        .and_then(|channel| channel.thread.as_deref().map(ThreadInfo::joined))
+}
+
+fn wire_thread(thread: &Value) -> model::Channel {
+    serde_json::from_str(&thread.to_string()).unwrap()
+}
+
+// Get Channel brought it, then the user joined: READY lists it only if it's still active and
+// joined.
+#[test]
+fn a_joined_thread_ready_didnt_list_is_unconfirmed_too() {
+    let mut state = ready_state();
+    state.learn_thread(
+        wire_thread(&thread_object(
+            ACTIVE_A,
+            Some(400_000_000_000_000_040),
+            false,
+        )),
+        &mut Vec::new(),
+    );
+    let mut join = joined_member(ACTIVE_A);
+    join["guild_id"] = G1.to_string().into();
+    apply(&mut state, "THREAD_MEMBER_UPDATE", join);
+    assert_eq!(sections(&state).0, vec![ACTIVE_A, THREAD]);
+
+    apply(&mut state, "READY", ready_value());
+
+    assert!(state.channel(Snowflake::new(ACTIVE_A)).is_some());
+    assert_eq!(sections(&state).0, vec![THREAD]);
+}
+
+// THREAD_MEMBERS_UPDATE came while the page was on its way.
+#[test]
+fn a_page_doesnt_rejoin_a_thread_the_gateway_left() {
+    let mut state = ready_state();
+    let parent = Snowflake::new(GENERAL);
+    let started = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+    apply(
+        &mut state,
+        "THREAD_MEMBERS_UPDATE",
+        json!({"id": THREAD.to_string(), "guild_id": G1.to_string(), "member_count": 1,
+               "removed_member_ids": [ME.to_string()]}),
+    );
+    assert_eq!(joined(&state, THREAD), Some(false));
+
+    state.finish_older_threads(
+        parent,
+        started,
+        page_with_members(
+            vec![thread_object(THREAD, Some(400_000_000_000_000_030), true)],
+            vec![joined_member(THREAD)],
+        ),
+        &mut Vec::new(),
+    );
+
+    assert_eq!(joined(&state, THREAD), Some(false));
+}
+
+#[test]
+fn a_page_ready_overtook_joins_nothing() {
+    let mut state = ready_state();
+    let parent = Snowflake::new(GENERAL);
+    let stale = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+    apply(&mut state, "READY", ready_value());
+
+    state.finish_older_threads(
+        parent,
+        stale,
+        page_with_members(
+            vec![thread_object(OLD_X, Some(400_000_000_000_000_015), false)],
+            vec![joined_member(OLD_X)],
+        ),
+        &mut Vec::new(),
+    );
+
+    assert_eq!(joined(&state, OLD_X), Some(false));
+}
+
+#[test]
+fn a_search_ready_overtook_confirms_and_joins_nothing() {
+    let mut state = ready_state();
+    let asked = state.generation();
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        thread_object(ACTIVE_A, Some(400_000_000_000_000_040), false),
+    );
+    apply(&mut state, "READY", ready_value());
+
+    let found = state.keep_found_threads(
+        page_with_members(
+            vec![thread_object(
+                ACTIVE_A,
+                Some(400_000_000_000_000_040),
+                false,
+            )],
+            vec![joined_member(ACTIVE_A)],
+        ),
+        asked,
+        &mut Vec::new(),
+    );
+
+    assert_eq!(found, Some(vec![Snowflake::new(ACTIVE_A)]));
+    assert_eq!(sections(&state), (vec![THREAD], vec![], vec![]));
+    assert_eq!(joined(&state, ACTIVE_A), Some(false));
+}
+
+#[test]
+fn found_threads_nothing_shows_go_at_ready() {
+    let mut state = ready_state();
+    load(
+        &mut state,
+        vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+        false,
+    );
+
+    let events = apply(&mut state, "READY", ready_value());
+
+    assert!(state.channel(Snowflake::new(OLD_X)).is_none());
+    assert!(
+        events.contains(&format!("ChannelRemoved({OLD_X})")),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn an_unjoined_archived_thread_its_window_shows_stays() {
+    let mut state = ready_state();
+    load(
+        &mut state,
+        vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+        false,
+    );
+    state.view_channel(Snowflake::new(OLD_X), &mut Vec::new());
+
+    apply(&mut state, "READY", ready_value());
+
+    assert!(state.channel(Snowflake::new(OLD_X)).is_some());
+}
+
+#[test]
+fn an_unjoined_archived_thread_its_box_or_line_shows_stays() {
+    let mut state = viewing_general();
+    load(
+        &mut state,
+        vec![
+            thread_object(OLD_X, Some(400_000_000_000_000_015), true),
+            thread_object(OLD_Y, Some(400_000_000_000_000_014), true),
+            thread_object(OLD_Z, Some(400_000_000_000_000_013), true),
+        ],
+        false,
+    );
+    let mut starter = message(OLD_X, GENERAL);
+    starter["flags"] = 32.into();
+    apply(&mut state, "MESSAGE_CREATE", starter);
+    let mut line = message(400_000_000_000_000_070, GENERAL);
+    line["type"] = 18.into();
+    line["message_reference"] =
+        json!({"channel_id": OLD_Y.to_string(), "guild_id": G1.to_string()});
+    apply(&mut state, "MESSAGE_CREATE", line);
+
+    apply(&mut state, "READY", ready_value());
+
+    assert!(state.channel(Snowflake::new(OLD_X)).is_some());
+    assert!(state.channel(Snowflake::new(OLD_Y)).is_some());
+    assert!(state.channel(Snowflake::new(OLD_Z)).is_none());
+}
+
+#[test]
+fn the_open_browsers_threads_stay_at_ready() {
+    let mut state = ready_state();
+    load(
+        &mut state,
+        vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+        false,
+    );
+    state.set_browsing(Some(Snowflake::new(GENERAL)));
+
+    apply(&mut state, "READY", ready_value());
+    assert!(state.channel(Snowflake::new(OLD_X)).is_some());
+
+    state.set_browsing(None);
+    apply(&mut state, "READY", ready_value());
+    assert!(state.channel(Snowflake::new(OLD_X)).is_none());
+}
+
+#[test]
+fn a_page_after_its_parent_was_deleted_brings_nothing() {
+    let mut state = ready_state();
+    let parent = Snowflake::new(GENERAL);
+    let started = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+    apply(
+        &mut state,
+        "CHANNEL_DELETE",
+        json!({"id": GENERAL.to_string(), "guild_id": G1.to_string(), "type": 0}),
+    );
+
+    let mut events = Vec::new();
+    state.finish_older_threads(
+        parent,
+        started,
+        page(
+            vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+            true,
+        ),
+        &mut events,
+    );
+
+    assert!(state.channel(Snowflake::new(OLD_X)).is_none());
+    assert!(!state.older.contains_key(&parent));
+    assert!(events.is_empty(), "{events:?}");
+}
+
+#[test]
+fn a_search_after_its_parent_was_deleted_brings_nothing() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "CHANNEL_DELETE",
+        json!({"id": GENERAL.to_string(), "guild_id": G1.to_string(), "type": 0}),
+    );
+
+    let found = state.keep_found_threads(
+        page(
+            vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+            false,
+        ),
+        state.generation(),
+        &mut Vec::new(),
+    );
+
+    assert_eq!(found, Some(Vec::new()));
+    assert!(state.channel(Snowflake::new(OLD_X)).is_none());
 }

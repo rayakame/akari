@@ -162,6 +162,13 @@ impl Account {
         .map_err(Into::into)
     }
 
+    /// The channel whose Threads browser is open, `None` once it closes. A new connection lets
+    /// go of unjoined archived threads nothing shows (no window, box or "started a thread"
+    /// line); the open browser's stay.
+    pub fn set_browsing(&self, parent_id: Option<ChannelId>) {
+        self.core.set_browsing(parent_id);
+    }
+
     /// Searches `parent_id`'s threads, active and archived, by name, as the official client
     /// does on Enter: Discord's first 25 matches in its order, kept in the store. `None` while
     /// Discord hasn't indexed the channel yet.

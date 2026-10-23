@@ -203,6 +203,7 @@ pub(crate) fn entities() -> Entities {
         settings: Default::default(),
         read_states: Default::default(),
         memberless: Default::default(),
+        kept_threads: Default::default(),
     }
 }
 
@@ -876,6 +877,7 @@ fn rebuilt(entities: &Entities) -> Entities {
         },
         read_states: entities.read_states.clone(),
         memberless: entities.memberless.clone(),
+        kept_threads: entities.kept_threads.clone(),
     }
 }
 

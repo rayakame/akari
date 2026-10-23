@@ -8,6 +8,7 @@ const SEARCH_PATH: &str = "/api/v9/channels/300000000000000002/threads/search";
 const FIRST_PAGE: &str = "archived=true&sort_by=last_message_time&sort_order=desc&limit=25&tag_setting=match_some&offset=0";
 const OLD_A: u64 = 300_000_000_000_000_041;
 const OLD_B: u64 = 300_000_000_000_000_042;
+const OLD_C: u64 = 300_000_000_000_000_043;
 
 fn thread(id: u64, archived: bool) -> Value {
     json!({
@@ -186,7 +187,11 @@ async fn a_search_asks_with_the_encoded_name() {
 #[tokio::test]
 async fn a_search_returns_discords_order_and_keeps_the_threads() {
     let online = online_answering(vec![found(
-        vec![thread(OLD_A, true), thread(OLD_B, false)],
+        vec![
+            thread(OLD_B, false),
+            thread(OLD_C, true),
+            thread(OLD_A, true),
+        ],
         false,
     )])
     .await;
@@ -195,7 +200,11 @@ async fn a_search_returns_discords_order_and_keeps_the_threads() {
 
     assert_eq!(
         found.unwrap(),
-        Some(vec![Snowflake::new(OLD_A), Snowflake::new(OLD_B)])
+        Some(vec![
+            Snowflake::new(OLD_B),
+            Snowflake::new(OLD_C),
+            Snowflake::new(OLD_A)
+        ])
     );
     assert!(
         online
@@ -261,4 +270,52 @@ async fn asking_after_the_last_page_writes_nothing() {
     online.account.load_older_threads(general()).await.unwrap();
 
     assert_eq!(online.account.store().changes(), before);
+}
+
+// Asked in one session, answered in the next: the answer says nothing about the new one.
+#[tokio::test]
+async fn a_search_a_new_session_overtook_confirms_and_joins_nothing() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let answer = json!({
+        "threads": [thread(OLD_A, false)],
+        "members": [{"id": OLD_A.to_string(), "user_id": "100000000000000001",
+                     "join_timestamp": "2026-10-18T10:00:00.000000+00:00", "flags": 1,
+                     "muted": false, "mute_config": null}],
+        "has_more": false, "total_results": 1
+    });
+    Mock::given(method("GET"))
+        .and(path(SEARCH_PATH))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(answer)
+                .set_delay(Duration::from_secs(2)),
+        )
+        .mount(&server)
+        .await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    connection
+        .send(json!({"op": 0, "s": 2, "t": "THREAD_CREATE", "d": thread(OLD_A, false)}))
+        .await;
+    while !next(&subscription)
+        .await
+        .is_some_and(|event| event.starts_with("ChannelAdded"))
+    {}
+
+    // The search reads the session on its first poll, before the reconnect starts.
+    let (found, _fresh) = tokio::join!(account.search_threads(general(), "plans"), async {
+        let fresh = reconnect_with_a_new_session(&mut fake, &mut connection).await;
+        events_until(&subscription, "Online").await;
+        fresh
+    });
+    let found = found.unwrap();
+
+    assert_eq!(found, Some(vec![Snowflake::new(OLD_A)]));
+    let browser = account.store().thread_browser(general());
+    assert!(
+        browser.others.is_empty() && browser.joined.iter().all(|thread| thread.id.get() != OLD_A)
+    );
 }

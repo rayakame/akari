@@ -1,4 +1,5 @@
 use std::cmp::Reverse;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::State;
@@ -105,6 +106,14 @@ impl State {
         browser
     }
 
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub(crate) fn set_browsing(&mut self, parent: Option<ChannelId>) {
+        self.browsing = parent;
+    }
+
     pub(crate) fn can_load_older_threads(&self, parent: ChannelId) -> bool {
         let pages = self.older.get(&parent).copied().unwrap_or_default();
         matches!(pages.state, OlderThreads::NotLoaded | OlderThreads::More)
@@ -115,7 +124,7 @@ impl State {
         parent: ChannelId,
         events: &mut Vec<StoreEvent>,
     ) -> Option<OlderPage> {
-        let generation = self.older_generation;
+        let generation = self.generation;
         let pages = self.older.entry(parent).or_default();
         if !matches!(pages.state, OlderThreads::NotLoaded | OlderThreads::More) {
             return None;
@@ -137,28 +146,15 @@ impl State {
     ) {
         let oldest = results.threads.iter().flatten().map(newest_on_wire).min();
         let more = results.has_more;
-        let stale = page.generation != self.older_generation;
-        // A page asked for before the last READY confirms nothing it brings.
-        let waiting: Vec<ChannelId> = if stale {
-            results
-                .threads
-                .iter()
-                .flatten()
-                .map(|thread| thread.id)
-                .filter(|id| {
-                    self.unconfirmed.contains(id) || !self.entities.channels.contains_key(id)
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let found = self.keep_found_threads(results, events);
-        if stale {
-            self.unconfirmed.extend(waiting);
+        let found = self.keep_found_threads(results, page.generation, events);
+        if page.generation != self.generation {
             return;
         }
+        // Gone when its channel was deleted meanwhile.
+        let Some(pages) = self.older.get_mut(&parent) else {
+            return;
+        };
         events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
-        let pages = self.older.entry(parent).or_default();
         if found.is_none() {
             pages.state = OlderThreads::Failed;
             return;
@@ -181,8 +177,10 @@ impl State {
         page: OlderPage,
         events: &mut Vec<StoreEvent>,
     ) {
-        if page.generation == self.older_generation {
-            self.older.entry(parent).or_default().state = OlderThreads::Failed;
+        if page.generation == self.generation
+            && let Some(pages) = self.older.get_mut(&parent)
+        {
+            pages.state = OlderThreads::Failed;
             events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
         }
     }
@@ -194,10 +192,12 @@ impl State {
         page: OlderPage,
         events: &mut Vec<StoreEvent>,
     ) {
-        if page.generation != self.older_generation {
+        if page.generation != self.generation {
             return;
         }
-        let pages = self.older.entry(parent).or_default();
+        let Some(pages) = self.older.get_mut(&parent) else {
+            return;
+        };
         if pages.state == OlderThreads::Loading {
             pages.state = if pages.offset == 0 {
                 OlderThreads::NotLoaded
@@ -209,30 +209,47 @@ impl State {
     }
 
     // Keeps what a thread search brought: a thread the store lacks or holds unconfirmed as
-    // Discord sends it, else the gateway's copy; the user's members; owners; latest messages.
+    // Discord sends it, else the gateway's copy; owners; latest messages; the user's members of
+    // the threads it brought. An answer asked before the last READY confirms and joins nothing.
     // `None` when Discord hadn't indexed the channel. The IDs are the search's order.
     pub(crate) fn keep_found_threads(
         &mut self,
         results: ThreadSearchResults,
+        asked: u64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<Vec<ChannelId>> {
         let threads = results.threads?;
+        let stale = asked != self.generation;
         let mut found = Vec::with_capacity(threads.len());
+        let mut brought = HashSet::new();
         for mut thread in threads {
+            // Its parent was deleted while the answer was on its way.
+            if !thread
+                .parent_id
+                .is_some_and(|parent| self.entities.channels.contains_key(&parent))
+            {
+                continue;
+            }
             if let Some(user) = thread.owner.take().and_then(|owner| owner.user) {
                 self.put_user(user, events);
             }
             let id = thread.id;
             if !self.entities.channels.contains_key(&id) || self.unconfirmed.contains(&id) {
                 self.put_thread(thread, events);
+                if !self.entities.channels.contains_key(&id) {
+                    continue;
+                }
+                if stale {
+                    self.unconfirmed.insert(id);
+                } else {
+                    brought.insert(id);
+                }
             }
-            if self.entities.channels.contains_key(&id) {
-                found.push(id);
-            }
+            found.push(id);
         }
         let me = self.entities.me();
         for member in results.members {
-            let Some(thread) = member.id else {
+            let Some(thread) = member.id.filter(|thread| brought.contains(thread)) else {
                 continue;
             };
             if member.user_id.is_none_or(|user| Some(user) == me) {
@@ -252,17 +269,23 @@ impl State {
         Some(found)
     }
 
-    // A READY lists the joined threads; the unjoined ones the store keeps may be stale.
+    // An unjoined archived thread shows in its own messages, its box, its "started a thread"
+    // line or its parent's open Threads browser.
+    pub(super) fn shows(&self, thread: &Channel) -> bool {
+        let Some(parent) = thread.parent_id else {
+            return false;
+        };
+        self.browsing == Some(parent)
+            || self.windows.has(thread.id)
+            || self.windows.box_row(parent, thread.id).is_some()
+            || self.windows.names_thread(parent, thread.id)
+    }
+
+    // A READY lists the joined, active threads: the ones the store kept besides may be stale.
     pub(super) fn follow_ready_threads(&mut self) {
-        self.unconfirmed = self
-            .entities
-            .channels
-            .values()
-            .filter(|channel| channel.thread.as_deref().is_some_and(|info| !info.joined()))
-            .map(|channel| channel.id)
-            .collect();
+        self.unconfirmed = std::mem::take(&mut self.entities.kept_threads);
         self.older.clear();
-        self.older_generation += 1;
+        self.generation += 1;
     }
 }
 

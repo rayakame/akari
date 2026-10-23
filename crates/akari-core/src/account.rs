@@ -1135,6 +1135,13 @@ impl Account {
         }
     }
 
+    /// The channel whose Threads browser is open, `None` once it closes. A new connection lets
+    /// go of unjoined archived threads nothing shows (no window, box or "started a thread" line);
+    /// the open browser's stay.
+    pub fn set_browsing(&self, parent: Option<ChannelId>) {
+        self.shared.store.set_browsing(parent);
+    }
+
     /// Searches `parent`'s threads, active and archived, by name, as the official client does
     /// when the user presses Enter: Discord's first 25 matches in its order, kept in the store.
     /// `None` while Discord hasn't indexed the channel yet.
@@ -1144,6 +1151,7 @@ impl Account {
         name: &str,
     ) -> Result<Option<Vec<ChannelId>>, RequestError> {
         let shared = &self.shared;
+        let asked = shared.store.generation();
         let query = format!("name={}&tag_setting=match_some", uri_component(name));
         let results = match shared.rest.search_threads(parent, &query).await {
             Ok(results) => results,
@@ -1152,7 +1160,7 @@ impl Account {
                 return Err(err);
             }
         };
-        let found = shared.store.keep_found_threads(results);
+        let found = shared.store.keep_found_threads(results, asked);
         tracing::debug!(
             target: "akari_core::load",
             channel_id = parent.get(),

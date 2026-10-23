@@ -641,6 +641,23 @@ impl Windows {
             .cloned()
     }
 
+    pub(crate) fn has(&self, channel: ChannelId) -> bool {
+        self.windows.contains_key(&channel)
+    }
+
+    // A loaded "started a thread" line of `parent` names `thread`.
+    pub(crate) fn names_thread(&self, parent: ChannelId, thread: ChannelId) -> bool {
+        self.windows.get(&parent).is_some_and(|window| {
+            window.messages.iter().any(|message| {
+                message.kind == MessageType::ThreadCreated
+                    && message
+                        .reference
+                        .as_deref()
+                        .is_some_and(|reference| reference.channel_id == Some(thread))
+            })
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn held(&self, channel: ChannelId) -> Vec<Arc<Message>> {
         self.windows

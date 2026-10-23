@@ -534,13 +534,23 @@ impl Store {
         });
     }
 
+    // The connection a search is asked in, for `keep_found_threads`.
+    pub(crate) fn generation(&self) -> u64 {
+        self.read(|inner| inner.state.generation())
+    }
+
     pub(crate) fn keep_found_threads(
         &self,
         results: model::ThreadSearchResults,
+        asked: u64,
     ) -> Option<Vec<ChannelId>> {
         self.write("found threads", |inner, events| {
-            inner.state.keep_found_threads(results, events)
+            inner.state.keep_found_threads(results, asked, events)
         })
+    }
+
+    pub(crate) fn set_browsing(&self, parent: Option<ChannelId>) {
+        self.write("browsing", |inner, _| inner.state.set_browsing(parent));
     }
 
     pub(crate) fn learn_thread(&self, thread: model::Channel) -> Learned {
