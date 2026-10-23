@@ -381,7 +381,6 @@ impl AccountRest {
         Ok(())
     }
 
-    // From `message` when given, else in the channel.
     pub(crate) async fn create_thread(
         &self,
         parent: ChannelId,

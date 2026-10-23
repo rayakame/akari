@@ -2,7 +2,6 @@
 @MainActor
 final class Drafts {
     private var texts: [ChannelId: String] = [:]
-    // Each channel's "New Thread" form.
     var forms: [ChannelId: ThreadFormDraft] = [:]
 
     subscript(channel: ChannelId) -> String {
