@@ -445,3 +445,16 @@ fn a_channel_keeps_its_default_archive_duration() {
     assert_eq!(duration(&state), Some(60));
     assert_eq!(duration(&ready_state()), None);
 }
+
+// Listed in the same write, as THREAD_CREATE and Get Channel's answer list theirs.
+#[test]
+fn a_created_thread_is_listed_at_once() {
+    let mut state = owner_state();
+    // Just created: inside its window.
+    let mut thread = thread_with_id(PLAIN, "mine");
+    thread["thread_metadata"]["archive_timestamp"] = "2999-01-01T00:00:00+00:00".into();
+
+    state.keep_created_thread(answer(thread), &mut Vec::new());
+
+    assert!(state.listed(Snowflake::new(PLAIN)));
+}

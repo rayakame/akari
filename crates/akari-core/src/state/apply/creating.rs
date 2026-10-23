@@ -118,6 +118,10 @@ impl State {
         if !self.entities.channels.contains_key(&id) {
             self.put_channel(thread, events);
         }
-        self.entities.channels.contains_key(&id).then_some(id)
+        let kept = self.entities.channels.contains_key(&id).then_some(id);
+        if kept.is_some() {
+            self.settle(self.now_millis(), events);
+        }
+        kept
     }
 }
