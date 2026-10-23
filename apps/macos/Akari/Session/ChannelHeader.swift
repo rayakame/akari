@@ -26,7 +26,7 @@ struct ChannelHeader: View {
                             .lineLimit(1)
                     }
                     .buttonStyle(.plain)
-                    .background(PointingHandArea())
+                    .background(CursorArea(.pointingHand))
                     .accessibilityLabel(parent.name ?? "")
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))

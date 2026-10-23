@@ -3,7 +3,7 @@ import AppKit
 
 /// The box under a message a thread started from, or under the line about a thread started
 /// without one: Discord's measures, one button that opens the thread.
-final class ThreadBoxView: NSButton {
+final class ThreadBoxView: NSButton, BehindShields {
     static let height: CGFloat = 56
     static let maxWidth: CGFloat = 480
     private static let border: CGFloat = 1
@@ -108,8 +108,15 @@ final class ThreadBoxView: NSButton {
         return boxFrame.contains(convert(point, from: superview)) ? self : nil
     }
 
+    /// Its pointing hand's rect: none while a popout or modal is in front.
+    var cursorRect: NSRect? {
+        isBehindShield ? nil : boxFrame
+    }
+
     override func resetCursorRects() {
-        addCursorRect(boxFrame, cursor: .pointingHand)
+        if let cursorRect {
+            addCursorRect(cursorRect, cursor: .pointingHand)
+        }
     }
 
     override func updateTrackingAreas() {
@@ -124,7 +131,7 @@ final class ThreadBoxView: NSButton {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        hovered = true
+        hovered = !isBehindShield
     }
 
     override func mouseExited(with event: NSEvent) {

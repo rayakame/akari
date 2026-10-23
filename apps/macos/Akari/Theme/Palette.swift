@@ -51,6 +51,14 @@ enum Palette {
         "hoverBackground", dark: "#97979f", light: "#97979f", alpha: (0.12, 0.12))
     static let selectedBackground = token(
         "selectedBackground", dark: "#97979f", light: "#97979f", alpha: (0.20, 0.24))
+    // Discord's icon-only buttons (a modal's X): hovered and pressed fills, and the border both
+    // draw.
+    static let iconOnlyHover = token(
+        "iconOnlyHover", dark: "#97979f", light: "#97979f", alpha: (0.161, 0.161))
+    static let iconOnlyPressed = token(
+        "iconOnlyPressed", dark: "#97979f", light: "#97979f", alpha: (0.2, 0.239))
+    static let iconOnlyBorder = token(
+        "iconOnlyBorder", dark: "#97979f", light: "#97979f", alpha: (0.039, 0.2))
     static let inputBackground = token(
         "inputBackground", dark: "#000000", light: "#000000", alpha: (0.12, 0.02))
     static let danger = token("danger", dark: "#f23f43", light: "#da373c")

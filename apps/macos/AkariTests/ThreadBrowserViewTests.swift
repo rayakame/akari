@@ -349,41 +349,69 @@ struct ThreadBrowserScreenTests {
 @MainActor
 struct ThreadBrowserEventsTests {
     final class Calls {
-        var outside = 0
-        var escape = 0
+        var closes = 0
+        var tabs = 0
     }
 
-    func watcher(_ calls: Calls, inside: [CGRect]) -> (ThreadBrowserEvents.Watcher, NSWindow) {
+    func watcher(_ calls: Calls, modal: Bool = false) -> (ThreadBrowserEvents.Watcher, NSWindow) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
             backing: .buffered, defer: false)
         let watcher = ThreadBrowserEvents.Watcher(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         window.contentView = watcher
-        watcher.inside = inside
-        watcher.onOutside = { calls.outside += 1 }
-        watcher.onEscape = { calls.escape += 1 }
+        watcher.modal = modal
+        watcher.close = { calls.closes += 1 }
+        watcher.onTab = { calls.tabs += 1 }
         return (watcher, window)
     }
 
-    // `y` from the top, as the watcher's space measures it.
-    func click(_ x: CGFloat, _ y: CGFloat, in window: NSWindow) -> NSEvent {
+    func mouse(_ type: NSEvent.EventType, in window: NSWindow) -> NSEvent {
         NSEvent.mouseEvent(
-            with: .leftMouseDown, location: NSPoint(x: x, y: 300 - y), modifierFlags: [],
-            timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-            clickCount: 1, pressure: 1)!
+            with: type, location: NSPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+            pressure: 1)!
+    }
+
+    // Discord's popout closes when a press outside it is released; its modal on a left click.
+    @Test
+    func thePopoutClosesOnTheReleaseOfAnyPressAndTheModalOnALeftClick() {
+        let calls = Calls()
+        let (popout, window) = watcher(calls)
+        popout.mouseDown(with: mouse(.leftMouseDown, in: window))
+        #expect(calls.closes == 0)
+        popout.mouseUp(with: mouse(.leftMouseUp, in: window))
+        #expect(calls.closes == 1)
+        popout.rightMouseDown(with: mouse(.rightMouseDown, in: window))
+        popout.rightMouseUp(with: mouse(.rightMouseUp, in: window))
+        #expect(calls.closes == 2)
+
+        let modalCalls = Calls()
+        let (modal, modalWindow) = watcher(modalCalls, modal: true)
+        modal.rightMouseDown(with: mouse(.rightMouseDown, in: modalWindow))
+        modal.rightMouseUp(with: mouse(.rightMouseUp, in: modalWindow))
+        #expect(modalCalls.closes == 0)
+        modal.mouseDown(with: mouse(.leftMouseDown, in: modalWindow))
+        modal.mouseUp(with: mouse(.leftMouseUp, in: modalWindow))
+        #expect(modalCalls.closes == 1)
+    }
+
+    // A release with no press on the shield, as after a click that opened the browser.
+    @Test
+    func aReleaseAloneClosesNothing() {
+        let calls = Calls()
+        let (popout, window) = watcher(calls)
+
+        popout.mouseUp(with: mouse(.leftMouseUp, in: window))
+
+        #expect(calls.closes == 0)
     }
 
     @Test
-    func aClickOutsideClosesAndStillReachesItsTarget() {
-        let calls = Calls()
-        let (watcher, window) = watcher(calls, inside: [CGRect(x: 100, y: 50, width: 200, height: 100)])
+    func theShieldTakesEveryPointInsideItsBounds() {
+        let (watcher, _) = watcher(Calls())
 
-        let outside = click(20, 20, in: window)
-        #expect(watcher.handle(outside) === outside)
-        #expect(calls.outside == 1)
-
-        _ = watcher.handle(click(150, 100, in: window))
-        #expect(calls.outside == 1)
+        #expect(watcher.hitTest(NSPoint(x: 20, y: 20)) === watcher)
+        #expect(watcher.hitTest(NSPoint(x: 420, y: 20)) == nil)
     }
 
     func key(_ code: UInt16, _ characters: String, in window: NSWindow, _ modifiers: NSEvent.ModifierFlags = [])
@@ -415,13 +443,13 @@ struct ThreadBrowserEventsTests {
     func escapeWhileTheInputMethodComposesIsTheInputMethods() throws {
         let calls = Calls()
         let (watcher, window, composer) = composing()
-        watcher.onEscape = { calls.escape += 1 }
+        watcher.close = { calls.closes += 1 }
         composer.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         #expect(composer.hasMarkedText())
 
         let escape = try key(53, "\u{1b}", in: window)
         #expect(watcher.handle(escape) === escape)
-        #expect(calls.escape == 0)
+        #expect(calls.closes == 0)
     }
 
     // Discord's focus lock gives the focus back when nothing else took it; in Akari that's the
@@ -478,19 +506,26 @@ struct ThreadBrowserEventsTests {
     @Test
     func escapeClosesAndGoesNoFurtherButOtherKeysPass() throws {
         let calls = Calls()
-        let (watcher, window) = watcher(calls, inside: [])
-        func key(_ code: UInt16, _ characters: String) throws -> NSEvent {
-            try #require(
-                NSEvent.keyEvent(
-                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                    windowNumber: window.windowNumber, context: nil, characters: characters,
-                    charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
-        }
+        let (watcher, window) = watcher(calls)
 
-        #expect(watcher.handle(try key(53, "\u{1b}")) == nil)
-        #expect(calls.escape == 1)
-        let a = try key(0, "a")
+        #expect(watcher.handle(try key(53, "\u{1b}", in: window)) == nil)
+        #expect(calls.closes == 1)
+        let a = try key(0, "a", in: window)
         #expect(watcher.handle(a) === a)
-        #expect(calls.escape == 1)
+        #expect(calls.closes == 1)
+    }
+
+    // Tab and Shift+Tab ask for the field and go no further; Cmd+Tab isn't the app's.
+    @Test
+    func tabAsksForTheFieldAndGoesNoFurther() throws {
+        let calls = Calls()
+        let (watcher, window) = watcher(calls)
+
+        #expect(watcher.handle(try key(48, "\t", in: window)) == nil)
+        #expect(watcher.handle(try key(48, "\t", in: window, .shift)) == nil)
+        #expect(calls.tabs == 2)
+        let switching = try key(48, "\t", in: window, .command)
+        #expect(watcher.handle(switching) === switching)
+        #expect(calls.tabs == 2)
     }
 }

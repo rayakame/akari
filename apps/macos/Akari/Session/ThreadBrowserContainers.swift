@@ -29,6 +29,7 @@ struct ThreadsButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+        .background(CursorArea(.pointingHand))
         .anchorPreference(key: ThreadsButtonBounds.self, value: .bounds) { $0 }
         .help(Self.label)
         .accessibilityLabel(Self.label)
@@ -42,13 +43,14 @@ struct ThreadsButton: View {
 
 /// The popout under the Threads button: its right edge on the button's, its top under the
 /// header's line, 35% of the window wide (480–600), as tall as its list (400 to 80% of the
-/// window). A click outside it, the button again or Escape closes it.
+/// window). A click outside it (on the button too) or Escape closes it.
 struct ThreadBrowserPopout: View {
     let browser: ThreadBrowserModel
     let session: SessionModel
     /// The button, in the space `area` is measured in.
     let button: CGRect
     let area: CGSize
+    @State private var fieldRequests = 0
 
     // 8 below the button's 32 box, and past the header's line.
     static let gap: CGFloat = 9
@@ -61,9 +63,9 @@ struct ThreadBrowserPopout: View {
         let frame = Self.frame(button: button, width: width, height: height)
         ZStack(alignment: .topLeading) {
             ThreadBrowserEvents(
-                inside: [frame, button], onOutside: session.closeThreadBrowser,
-                onEscape: session.closeThreadBrowser, onFocusFree: session.refocusChannel)
-            ThreadBrowserView(browser: browser, session: session)
+                close: session.closeThreadBrowser, onTab: { fieldRequests += 1 },
+                onFocusFree: session.refocusChannel)
+            ThreadBrowserView(browser: browser, session: session, fieldRequests: fieldRequests)
                 .frame(width: width, height: height)
                 .background(Color(nsColor: Palette.surfaceHigh))
                 .clipShape(RoundedRectangle(cornerRadius: Self.radius))
@@ -90,6 +92,7 @@ struct ThreadBrowserModal: View {
     let browser: ThreadBrowserModel
     let session: SessionModel
     let area: CGSize
+    @State private var fieldRequests = 0
 
     static let backdrop = 0.72
     // Discord's radius-md.
@@ -99,14 +102,13 @@ struct ThreadBrowserModal: View {
         let size = ThreadBrowserLayout.modalSize(
             list: ThreadBrowserLayout.listHeight(browser), window: area)
         ZStack {
-            ThreadBrowserEvents(
-                inside: [], onOutside: nil, onEscape: session.closeThreadBrowser, modal: true,
-                onFocusFree: session.refocusChannel)
             Color.black.opacity(Self.backdrop)
-                .contentShape(Rectangle())
-                .onTapGesture { session.closeThreadBrowser() }
+                .allowsHitTesting(false)
                 .accessibilityHidden(true)
-            ThreadBrowserView(browser: browser, session: session)
+            ThreadBrowserEvents(
+                close: session.closeThreadBrowser, modal: true, onTab: { fieldRequests += 1 },
+                onFocusFree: session.refocusChannel)
+            ThreadBrowserView(browser: browser, session: session, fieldRequests: fieldRequests)
                 .padding(.top, 8)
                 .padding(.bottom, 16)
                 .frame(width: size.width - 2, height: size.height - 2)
@@ -133,15 +135,15 @@ extension View {
     }
 }
 
-/// Watches the window's clicks and keys while a browser shows: a click outside `inside` (in this
-/// view's space) calls `onOutside` and still reaches what it hit, as a click outside Discord's
-/// popouts does; Escape calls `onEscape` and goes no further; a modal keeps typing from what's
-/// behind it. Once it's closed, `onFocusFree` gets the focus nothing else took.
+/// The shield under a browser, with its keys: a click outside the popout closes it, a click on
+/// the modal's dimmed page closes the modal, and neither reaches what's behind. Escape closes
+/// either and goes no further; Tab stays inside, as in Discord's focus lock; a modal keeps typing
+/// from what's behind it. Once it's closed, `onFocusFree` gets the focus nothing else took.
 struct ThreadBrowserEvents: NSViewRepresentable {
-    let inside: [CGRect]
-    let onOutside: (() -> Void)?
-    let onEscape: () -> Void
+    let close: () -> Void
     var modal = false
+    /// Tab or Shift+Tab: the browser's field takes the focus, its only stop.
+    var onTab: () -> Void = {}
     var onFocusFree: () -> Void = {}
 
     func makeNSView(context: Context) -> Watcher {
@@ -149,10 +151,9 @@ struct ThreadBrowserEvents: NSViewRepresentable {
     }
 
     func updateNSView(_ watcher: Watcher, context: Context) {
-        watcher.inside = inside
-        watcher.onOutside = onOutside
-        watcher.onEscape = onEscape
+        watcher.close = close
         watcher.modal = modal
+        watcher.onTab = onTab
         watcher.onFocusFree = onFocusFree
     }
 
@@ -160,17 +161,13 @@ struct ThreadBrowserEvents: NSViewRepresentable {
         watcher.stop()
     }
 
-    final class Watcher: NSView {
-        var inside: [CGRect] = []
-        var onOutside: (() -> Void)?
-        var onEscape: () -> Void = {}
+    final class Watcher: PointerShield {
+        var close: () -> Void = {}
         var modal = false
+        var onTab: () -> Void = {}
         var onFocusFree: () -> Void = {}
         private var monitor: Any?
-
-        override var isFlipped: Bool { true }
-
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        private var pressed = false
 
         override func viewWillMove(toWindow newWindow: NSWindow?) {
             if newWindow == nil, let window {
@@ -185,9 +182,7 @@ struct ThreadBrowserEvents: NSViewRepresentable {
             guard window != nil else {
                 return
             }
-            monitor = NSEvent.addLocalMonitorForEvents(
-                matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
-            ) { [weak self] event in
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 self?.handle(event) ?? event
             }
         }
@@ -199,8 +194,42 @@ struct ThreadBrowserEvents: NSViewRepresentable {
             monitor = nil
         }
 
-        // The Escape key's code on every layout.
+        // Discord's popouts close on the release of a press outside them, whichever button;
+        // its modals on a click on the dimmed page.
+        override func mouseDown(with event: NSEvent) {
+            pressed = true
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            pressed = !modal
+        }
+
+        override func otherMouseDown(with event: NSEvent) {
+            pressed = !modal
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            release(event)
+        }
+
+        override func rightMouseUp(with event: NSEvent) {
+            release(event)
+        }
+
+        override func otherMouseUp(with event: NSEvent) {
+            release(event)
+        }
+
+        private func release(_ event: NSEvent) {
+            defer { pressed = false }
+            if pressed, !modal || isShielded(at: event.locationInWindow) {
+                close()
+            }
+        }
+
+        // The Escape and Tab keys' codes on every layout.
         private static let escape: UInt16 = 53
+        private static let tab: UInt16 = 48
 
         private static func isField(_ responder: NSResponder?) -> Bool {
             (responder as? NSTextView)?.isFieldEditor == true
@@ -223,28 +252,25 @@ struct ThreadBrowserEvents: NSViewRepresentable {
         }
 
         func handle(_ event: NSEvent) -> NSEvent? {
-            guard event.window === window else {
+            guard event.window === window, event.type == .keyDown else {
                 return event
             }
-            if event.type == .keyDown {
-                if event.keyCode == Self.escape {
-                    // The input method's, to cancel what it composes.
-                    if let text = window?.firstResponder as? NSTextView, text.hasMarkedText() {
-                        return event
-                    }
-                    onEscape()
-                    return nil
+            if event.keyCode == Self.escape {
+                // The input method's, to cancel what it composes.
+                if let text = window?.firstResponder as? NSTextView, text.hasMarkedText() {
+                    return event
                 }
-                if modal, !event.modifierFlags.contains(.command),
-                    !Self.isField(window?.firstResponder)
-                {
-                    return nil
-                }
-                return event
+                close()
+                return nil
             }
-            let point = convert(event.locationInWindow, from: nil)
-            if let onOutside, !inside.contains(where: { $0.contains(point) }) {
-                onOutside()
+            if event.keyCode == Self.tab, !event.modifierFlags.contains(.command) {
+                onTab()
+                return nil
+            }
+            if modal, !event.modifierFlags.contains(.command),
+                !Self.isField(window?.firstResponder)
+            {
+                return nil
             }
             return event
         }

@@ -1216,6 +1216,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let center = NotificationCenter.default
         center.addObserver(
+            self, selector: #selector(shieldChanged), name: PointerShield.changed, object: nil)
+        center.addObserver(
             self, selector: #selector(liveScrollStarted),
             name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
         center.addObserver(
@@ -1347,7 +1349,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func updateHover() {
         var row = -1
-        if let location = pointer() {
+        if let location = pointer(), !tableView.isBehindShield {
             let point = tableView.convert(location, from: nil)
             if tableView.visibleRect.contains(point) {
                 row = tableView.row(at: point)
@@ -1366,6 +1368,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         for index in visible.location..<(visible.location + visible.length) {
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
             (cell as? MessageCell)?.isHovered = index == row
+        }
+    }
+
+    // A popout or modal came or went in front of a still pointer.
+    @objc private func shieldChanged(_ notification: Notification) {
+        if notification.object as? NSWindow === tableView.window {
+            updateHover()
         }
     }
 
@@ -1506,7 +1515,7 @@ final class BottomClipView: NSClipView {
 }
 
 // NSTableView re-anchors the scroll position inside its layout, so pinning comes after it.
-class MessageTableView: NSTableView {
+class MessageTableView: NSTableView, BehindShields {
     var didLayout: (() -> Void)?
     var onEscape: (() -> Void)?
     var onShiftEscape: (() -> Void)?
@@ -1553,6 +1562,14 @@ class MessageTableView: NSTableView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         windowChanged?()
+    }
+
+    override var acceptsFirstResponder: Bool {
+        super.acceptsFirstResponder && !isBehindShield
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        !isBehindShield && super.becomeFirstResponder()
     }
 
     override func layout() {

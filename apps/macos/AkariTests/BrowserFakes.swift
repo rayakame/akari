@@ -18,12 +18,17 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     var extra = 0
     /// Discord has more older threads to give.
     var more = false
+    /// #new shows Ray's "hello", "Ray started a thread: b1. See all threads." and the user's
+    /// "test", and the user may send there.
+    var lines = false
+    /// Pages and searches never answer.
+    var holdsLoads = false
     private(set) var account: BrowserAccount?
 
     @MainActor
     func session() -> SessionModel {
-        let store = BrowserStore(empty: empty, extra: extra, more: more)
-        let account = BrowserAccount(store: store)
+        let store = BrowserStore(empty: empty, extra: extra, more: more, lines: lines)
+        let account = BrowserAccount(store: store, holdsLoads: holdsLoads)
         self.account = account
         let session = SessionModel(
             userId: Self.me, account: account,
@@ -45,9 +50,11 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
 
 nonisolated final class BrowserAccount: Account, @unchecked Sendable {
     private let browserStore: BrowserStore
+    private let holdsLoads: Bool
 
-    init(store: BrowserStore) {
+    init(store: BrowserStore, holdsLoads: Bool = false) {
         browserStore = store
+        self.holdsLoads = holdsLoads
         super.init(noHandle: NoHandle())
     }
 
@@ -66,9 +73,17 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
 
     override func loadOlderThreads(parentId: ChannelId) async throws {
         olderLoads.withLock { $0 += 1 }
+        if holdsLoads {
+            try await Task.sleep(for: .seconds(60))
+        }
     }
     override func setBrowsing(parentId: ChannelId?) {}
-    override func searchThreads(parentId: ChannelId, name: String) async throws -> [ChannelId]? { [] }
+    override func searchThreads(parentId: ChannelId, name: String) async throws -> [ChannelId]? {
+        if holdsLoads {
+            try await Task.sleep(for: .seconds(60))
+        }
+        return []
+    }
     override func reservePlacing() -> UInt64 { 0 }
     override func viewChannel(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
@@ -77,12 +92,17 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
 nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private let empty: Bool
     private let more: Bool
+    private let lines: Bool
     private let channelsById: [ChannelId: Channel]
     private let joined: [ChannelId]
+    static let lineIds = (1...3).map {
+        MessageId(rawValue: FakeBrowserStore.snowflake(FakeBrowserStore.now - 3600) + $0)
+    }
 
-    init(empty: Bool, extra: Int = 0, more: Bool = false) {
+    init(empty: Bool, extra: Int = 0, more: Bool = false, lines: Bool = false) {
         self.empty = empty
         self.more = more
+        self.lines = lines
         var channels: [ChannelId: Channel] = [
             FakeBrowserStore.parent: Channel(
                 id: FakeBrowserStore.parent, kind: .guildText, guildId: FakeBrowserStore.guild,
@@ -153,7 +173,9 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     override func channels(ids: [ChannelId]) -> [Channel] { ids.compactMap { channelsById[$0] } }
 
     override func permissions(channelId: ChannelId) -> Permissions? {
-        [.viewChannel, .readMessageHistory]
+        lines
+            ? [.viewChannel, .readMessageHistory, .sendMessages]
+            : [.viewChannel, .readMessageHistory]
     }
 
     override func guildSettings(guildId: GuildId?) -> GuildSettings {
@@ -163,7 +185,40 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     }
 
     override func mutedChannels(ids: [ChannelId]) -> [ChannelId] { [] }
-    override func window(channelId: ChannelId) -> MessageWindow? { nil }
+    override func window(channelId: ChannelId) -> MessageWindow? {
+        guard lines, channelId == FakeBrowserStore.parent else {
+            return nil
+        }
+        return MessageWindow(
+            messageIds: Self.lineIds, pendingIds: [], latest: true, oldest: true, stale: false)
+    }
+
+    override func messages(channelId: ChannelId, ids: [MessageId]) -> [Message] {
+        ids.compactMap { id in
+            guard let index = Self.lineIds.firstIndex(of: id) else {
+                return nil
+            }
+            let (author, kind, content): (UserId, MessageType, String) =
+                switch index {
+                case 0: (FakeBrowserStore.ray, .default, "hello")
+                case 1: (FakeBrowserStore.ray, .threadCreated, "b1")
+                default: (FakeBrowserStore.me, .default, "test")
+                }
+            return Message(
+                id: id, channelId: channelId, kind: kind, author: user(author),
+                fromWebhook: false, content: content,
+                timestamp: FakeBrowserStore.date(id.rawValue), editedTimestamp: nil,
+                pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
+                stickerNames: [], componentsV2: false, delivery: .sent,
+                formatted: formattedText(content: content), mentionsMe: false,
+                reference: kind == .threadCreated
+                    ? MessageReference(
+                        messageId: nil, channelId: joined.first, guildId: FakeBrowserStore.guild)
+                    : nil,
+                hasThread: false, mentions: [], call: nil, roleSubscription: nil,
+                purchasedProduct: nil, actor: nil, applicationName: nil, embedFields: [])
+        }
+    }
     override func messageLengthLimit() -> UInt32 { 2000 }
     override func slowmode(channelId: ChannelId) -> Slowmode? { nil }
 

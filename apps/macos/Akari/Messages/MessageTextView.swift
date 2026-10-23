@@ -2,7 +2,7 @@ import AppKit
 
 /// Selectable, not editable, laid out by TextKit 1: a message's body, and the other text Discord
 /// lets the user select (a notice, a channel's start, a message's files).
-final class MessageTextView: NSTextView {
+final class MessageTextView: NSTextView, BehindShields {
     private var measuredWidth: CGFloat = -1
     private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
     private var linkElements: [LinkElement]?
@@ -224,7 +224,22 @@ final class MessageTextView: NSTextView {
             onLink(url)
             return
         }
+        // NSTextView would start dragging the selection; a browser follows the link.
+        if event.clickCount == 1, let index = character(at: point),
+            textStorage?.attribute(.link, at: index, effectiveRange: nil) != nil,
+            selectedRanges.contains(where: { NSLocationInRange(index, $0.rangeValue) })
+        {
+            setSelectedRange(NSRange(location: index, length: 0))
+        }
         super.mouseDown(with: event)
+    }
+
+    override var acceptsFirstResponder: Bool {
+        super.acceptsFirstResponder && !isBehindShield
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        !isBehindShield && super.becomeFirstResponder()
     }
 
     override func updateTrackingAreas() {
@@ -258,8 +273,21 @@ final class MessageTextView: NSTextView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard !isBehindShield else {
+            underline(at: nil)
+            return
+        }
         super.mouseMoved(with: event)
-        underline(at: convert(event.locationInWindow, from: nil))
+        let point = convert(event.locationInWindow, from: nil)
+        underline(at: point)
+        cursor(at: point).set()
+    }
+
+    // NSTextView's sets the I-beam anywhere in the view.
+    override func cursorUpdate(with event: NSEvent) {
+        if !isBehindShield {
+            cursor(at: convert(event.locationInWindow, from: nil)).set()
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -284,6 +312,19 @@ final class MessageTextView: NSTextView {
     }
 
     private func hoverLink(at point: NSPoint) -> NSRange? {
+        guard let index = character(at: point), let storage = textStorage else {
+            return nil
+        }
+        var range = NSRange()
+        guard storage.attribute(Self.underlinesOnHover, at: index, effectiveRange: &range) != nil
+        else {
+            return nil
+        }
+        return range
+    }
+
+    // The character whose glyph is under `point`, in this view's coordinates.
+    private func character(at point: NSPoint) -> Int? {
         guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0
         else {
             return nil
@@ -295,19 +336,54 @@ final class MessageTextView: NSTextView {
         guard glyphRect.contains(inside) else {
             return nil
         }
-        var range = NSRange()
-        let index = layoutManager.characterIndexForGlyph(at: glyph)
-        guard storage.attribute(Self.underlinesOnHover, at: index, effectiveRange: &range) != nil
-        else {
-            return nil
+        return layoutManager.characterIndexForGlyph(at: glyph)
+    }
+
+    /// What the pointer shows at `point`, in this view's coordinates, as over Discord's message
+    /// text: the pointing hand over a link or a hidden block, the I-beam over text, the arrow
+    /// around it.
+    func cursor(at point: NSPoint) -> NSCursor {
+        cursorAreas.last { $0.rect.contains(point) }?.cursor ?? .arrow
+    }
+
+    /// Each line's text runs, links apart, and the hidden blocks' covers, in this view's
+    /// coordinates; later ones lie over earlier ones.
+    var cursorAreas: [(rect: NSRect, cursor: NSCursor)] {
+        var areas: [(rect: NSRect, cursor: NSCursor)] = []
+        if let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 {
+            let origin = textContainerOrigin
+            let glyphs = layoutManager.glyphRange(for: textContainer)
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { _, used, _, line, _ in
+                let characters = layoutManager.characterRange(
+                    forGlyphRange: line, actualGlyphRange: nil)
+                storage.enumerateAttribute(.link, in: characters) { link, range, _ in
+                    let run = layoutManager.glyphRange(
+                        forCharacterRange: range, actualCharacterRange: nil)
+                    let glyphs = layoutManager.boundingRect(forGlyphRange: run, in: textContainer)
+                    let left = max(glyphs.minX, used.minX)
+                    let right = min(glyphs.maxX, used.maxX)
+                    guard right > left else {
+                        return
+                    }
+                    let rect = NSRect(
+                        x: left, y: used.minY, width: right - left, height: used.height)
+                    areas.append(
+                        (rect.offsetBy(dx: origin.x, dy: origin.y),
+                            link == nil ? .iBeam : .pointingHand))
+                }
+            }
         }
-        return range
+        return areas + decorations.covers.map { ($0, .pointingHand) }
+    }
+
+    /// The cursor rects: none while a popout or modal is in front.
+    var shownCursorAreas: [(rect: NSRect, cursor: NSCursor)] {
+        isBehindShield ? [] : cursorAreas
     }
 
     override func resetCursorRects() {
-        super.resetCursorRects()
-        for rect in decorations.covers {
-            addCursorRect(rect, cursor: .pointingHand)
+        for area in shownCursorAreas {
+            addCursorRect(area.rect, cursor: area.cursor)
         }
     }
 

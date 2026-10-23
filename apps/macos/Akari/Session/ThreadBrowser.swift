@@ -10,7 +10,7 @@ enum ThreadBrowserLayout {
     static let titleGap: CGFloat = 8
     static let dividerGap: CGFloat = 16
     static let closeGap: CGFloat = 8
-    static let closeBox: CGFloat = 24
+    static let closeBox: CGFloat = 32
     static let labelHeight: CGFloat = 24
     static let labelGap: CGFloat = 8
     static let cardHeight: CGFloat = 72
@@ -88,10 +88,13 @@ struct ThreadBrowserView: View {
     let session: SessionModel
     /// Fixed for tests; otherwise the times follow the clock.
     var now: Date?
+    /// Each change gives the search field the focus.
+    var fieldRequests = 0
 
     var body: some View {
         VStack(spacing: 0) {
-            ThreadBrowserHeader(browser: browser, close: session.closeThreadBrowser)
+            ThreadBrowserHeader(
+                browser: browser, close: session.closeThreadBrowser, fieldRequests: fieldRequests)
             // Never taller than the room left: the header stays in a small window.
             content
                 .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
@@ -175,6 +178,7 @@ struct ThreadBrowserView: View {
 struct ThreadBrowserHeader: View {
     let browser: ThreadBrowserModel
     let close: () -> Void
+    var fieldRequests = 0
     @State private var query = ""
     // VoiceOver starts here when there's no field to start in.
     @AccessibilityFocusState private var titleSpoken: Bool
@@ -202,22 +206,13 @@ struct ThreadBrowserHeader: View {
                         .fill(Color(nsColor: Palette.borderSubtle))
                         .frame(width: 1, height: 24)
                         .padding(.horizontal, ThreadBrowserLayout.dividerGap)
-                    ThreadSearchField(query: $query, submit: submit)
+                    ThreadSearchField(query: $query, submit: submit, requests: fieldRequests)
                         .frame(width: searchWidth(in: proxy.size.width))
                 }
                 Spacer(minLength: 0)
                 if browser.presentation == .modal {
-                    Button(action: close) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color(nsColor: Palette.interactiveText))
-                            .frame(width: ThreadBrowserLayout.closeBox, height: ThreadBrowserLayout.closeBox)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.leading, ThreadBrowserLayout.closeGap)
-                    .help("Close")
-                    .accessibilityLabel("Close")
+                    ModalCloseButton(action: close)
+                        .padding(.leading, ThreadBrowserLayout.closeGap)
                 }
             }
             .padding(.horizontal, ThreadBrowserLayout.inset)
@@ -261,6 +256,8 @@ struct ThreadBrowserHeader: View {
 struct ThreadSearchField: View {
     @Binding var query: String
     let submit: () -> Void
+    /// Each change takes the focus.
+    var requests = 0
     @FocusState private var focused: Bool
     @AccessibilityFocusState private var spoken: Bool
 
@@ -281,16 +278,9 @@ struct ThreadSearchField: View {
             .accessibilityFocused($spoken)
             .onSubmit(submit)
             .accessibilityLabel(ThreadBrowserView.placeholder)
+            .background(CursorArea(.iBeam))
             if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(nsColor: Palette.textMuted))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear")
+                SearchClearButton { query = "" }
             }
         }
         .padding(.horizontal, 10)
@@ -305,6 +295,88 @@ struct ThreadSearchField: View {
         .onAppear {
             focused = true
             spoken = true
+        }
+        .onChange(of: requests) { focused = true }
+    }
+}
+
+/// The search field's X: brighter while hovered, as Discord's.
+struct SearchClearButton: View {
+    let clear: () -> Void
+    /// Fixed for tests; otherwise the pointer's.
+    var hovered: Bool?
+    @State private var pointerOver = false
+
+    var body: some View {
+        Button(action: clear) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(
+                    Color(
+                        nsColor: hovered ?? pointerOver
+                            ? Palette.interactiveTextActive : Palette.interactiveText))
+        }
+        .buttonStyle(.plain)
+        .onHover { pointerOver = $0 }
+        .background(CursorArea(.pointingHand))
+        .accessibilityLabel("Clear")
+    }
+}
+
+/// A modal's X, Discord's icon-only button: a 32 square, radius 8, filled while hovered or
+/// pressed.
+struct ModalCloseButton: View {
+    enum Look {
+        case idle
+        case hovered
+        case pressed
+    }
+
+    let action: () -> Void
+    /// Fixed for tests; otherwise the pointer's.
+    var look: Look?
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 14, weight: .semibold))
+        }
+        .buttonStyle(Style(look: look, hovered: hovered))
+        .onHover { hovered = $0 }
+        .background(CursorArea(.pointingHand))
+        .help("Close")
+        .accessibilityLabel("Close")
+    }
+
+    private struct Style: ButtonStyle {
+        let look: Look?
+        let hovered: Bool
+
+        static let radius: CGFloat = 8
+
+        func makeBody(configuration: Configuration) -> some View {
+            let look = look ?? (configuration.isPressed ? .pressed : hovered ? .hovered : .idle)
+            let shape = RoundedRectangle(cornerRadius: Self.radius)
+            let glyph = look == .idle ? Palette.interactiveText : Palette.interactiveTextActive
+            return configuration.label
+                .foregroundStyle(Color(nsColor: glyph))
+                .frame(width: ThreadBrowserLayout.closeBox, height: ThreadBrowserLayout.closeBox)
+                .background(fill(look), in: shape)
+                .overlay {
+                    if look != .idle {
+                        shape.strokeBorder(Color(nsColor: Palette.iconOnlyBorder), lineWidth: 1)
+                    }
+                }
+                .contentShape(shape)
+        }
+
+        private func fill(_ look: Look) -> Color {
+            switch look {
+            case .idle: .clear
+            case .hovered: Color(nsColor: Palette.iconOnlyHover)
+            case .pressed: Color(nsColor: Palette.iconOnlyPressed)
+            }
         }
     }
 }
@@ -348,7 +420,7 @@ struct ThreadBrowserCard: View {
         .contentShape(RoundedRectangle(cornerRadius: Self.radius))
         .onHover { hovered = $0 }
         .onTapGesture { open(NSEvent.modifierFlags.contains(.shift)) }
-        .background(PointingHandArea())
+        .background(CursorArea(.pointingHand))
         .padding(.bottom, ThreadBrowserLayout.cardGap)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)

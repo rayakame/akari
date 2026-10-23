@@ -197,7 +197,7 @@ struct PeekRow: View {
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
         .onTapGesture { click(NSEvent.modifierFlags.contains(.shift)) }
-        .background(PointingHandArea())
+        .background(CursorArea(.pointingHand))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
     }
