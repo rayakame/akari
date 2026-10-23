@@ -49,6 +49,14 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
+    // Nothing to create here.
+    override func threadCreation(parentId: ChannelId) -> ThreadCreation {
+        ThreadCreation(public: false, private: false)
+    }
+
+    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }
+    override func threadSlowmode(parentId: ChannelId) -> Slowmode? { nil }
+
     private func person(_ raw: UInt64) -> User {
         User(
             id: UserId(rawValue: raw), username: "user\(raw)", globalName: nil,

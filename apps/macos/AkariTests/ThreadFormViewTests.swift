@@ -275,6 +275,8 @@ struct ThreadFormFieldTests {
         let (window, field) = try hosted(session)
         window.makeFirstResponder(field)
         session.threadForm?.name = "kept"
+        let escape = try #require(escapeKey())
+        (field as? NameTextField)?.currentEvent = { escape }
 
         (field.currentEditor() as? NSTextView)?.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
 
@@ -469,5 +471,211 @@ struct ThreadFormFocusTests {
         #expect(!session.focusThreadForm)
         #expect((window.firstResponder as? NSTextView)?.delegate === field)
         window.close()
+    }
+}
+
+// The form in the session's window, beside a channel's real table: its keys and cursors.
+@MainActor
+struct ThreadFormKeysTests {
+    let screen = SessionScreenTests()
+
+    func shown(width: CGFloat = 1100) async throws -> (SessionModel, FormattedAccount, NSHostingView<SessionScreen>, NSWindow) {
+        let account = FormattedAccount(contents: ["test", "short"])
+        let session = screen.formattedSession(account)
+        session.openThreadForm(in: FormattedStore.channelIds[0], location: .keyboardShortcut)
+        let host = NSHostingView(rootView: SessionScreen(session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFrontRegardless()
+        try await screen.waitUntil(host) {
+            !screen.views(MessageTableView.self, in: host).isEmpty
+                && !ThreadFormFieldTests.fields(in: host).isEmpty
+                && screen.views(ComposerTextView.self, in: host).count == 2
+        }
+        return (session, account, host, window)
+    }
+
+    func formComposer(_ host: NSView) throws -> ComposerTextView {
+        // The form's is the right one.
+        try #require(
+            screen.views(ComposerTextView.self, in: host).max {
+                $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX
+            })
+    }
+
+    func nameField(_ host: NSView) throws -> NameTextField {
+        try #require(ThreadFormFieldTests.fields(in: host).first as? NameTextField)
+    }
+
+    @Test(arguments: [false, true])
+    func escapeClosesTheFormFromEitherField(inName: Bool) async throws {
+        let (session, _, host, window) = try await shown()
+        defer { window.close() }
+        let escape = try #require(escapeKey())
+        if inName {
+            let field = try nameField(host)
+            window.makeFirstResponder(field)
+            field.currentEvent = { escape }
+            (field.currentEditor() as? NSTextView)?.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        } else {
+            let composer = try formComposer(host)
+            composer.currentEvent = { escape }
+            composer.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        }
+
+        #expect(session.threadForm == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func shiftEscapeMarksTheServerReadAndKeepsTheForm(inName: Bool) async throws {
+        let (session, account, host, window) = try await shown()
+        defer { window.close() }
+        let shiftEscape = try #require(escapeKey(.shift))
+        if inName {
+            let field = try nameField(host)
+            window.makeFirstResponder(field)
+            field.currentEvent = { shiftEscape }
+            (field.currentEditor() as? NSTextView)?.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        } else {
+            let composer = try formComposer(host)
+            composer.currentEvent = { shiftEscape }
+            composer.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        }
+
+        #expect(session.threadForm != nil)
+        #expect(account.markedGuildsRead.withLock { $0 } == [[GuildId(rawValue: 1)]])
+    }
+
+    @Test(arguments: [false, true])
+    func commandPeriodDoesNothing(inName: Bool) async throws {
+        let (session, account, host, window) = try await shown()
+        defer { window.close() }
+        let period = try #require(periodKey(.command))
+        if inName {
+            let field = try nameField(host)
+            window.makeFirstResponder(field)
+            field.currentEvent = { period }
+            (field.currentEditor() as? NSTextView)?.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        } else {
+            let composer = try formComposer(host)
+            composer.currentEvent = { period }
+            composer.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        }
+
+        #expect(session.threadForm != nil)
+        #expect(account.markedGuildsRead.withLock { $0 }.isEmpty)
+    }
+
+    @Test
+    func returnDuringCompositionInTheNameCommitsAndCreatesNothing() async throws {
+        let (session, _, host, window) = try await shown()
+        defer { window.close() }
+        let field = try nameField(host)
+        window.makeFirstResponder(field)
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        editor.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(session.threadForm?.messageError == nil, "nothing was submitted")
+    }
+
+    @Test
+    func theNameFieldIsNamedByItsLabel() async throws {
+        let (_, _, host, window) = try await shown()
+        defer { window.close() }
+
+        #expect(try nameField(host).accessibilityLabel() == "Thread Name")
+    }
+
+    // At 1000 the page is too narrow for both: the form floats over the channel's table.
+    @Test
+    func overAFloatingFormTheListShowsTheIBeamOverItsFields() async throws {
+        let (_, _, host, window) = try await shown(width: 1000)
+        defer { window.close() }
+        let table = try #require(screen.views(MessageTableView.self, in: host).first)
+        let field = try nameField(host)
+        let overField = field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil)
+        let inField = field.convert(NSPoint(x: field.bounds.minX + 2, y: field.bounds.midY), to: nil)
+        #expect(table.convert(table.visibleRect, to: nil).contains(overField), "it floats over the list")
+
+        #expect(table.cursor(at: overField) == .iBeam)
+        #expect(table.cursor(at: inField) == .iBeam)
+        // Its card's empty space shows the arrow, not a message's I-beam under it.
+        let header = field.convert(NSPoint(x: field.bounds.midX, y: -60), to: nil)
+        if table.convert(table.visibleRect, to: nil).contains(header) {
+            #expect(table.cursor(at: header) == .arrow)
+        }
+    }
+}
+
+@MainActor
+struct ThreadFormPreviewTests {
+    // Ray's long message from #new as the source, in a 500-point window less the title bar.
+    func rendered(lines: Int, height: CGFloat = 468) throws -> (SessionModel, ThreadFormModel, NSHostingView<some View>, NSWindow) {
+        let fakes = FakeBrowserStore()
+        fakes.lines = true
+        fakes.creation = ThreadCreation(public: true, private: true)
+        fakes.longFirstLine = lines
+        let session = fakes.session()
+        session.open(channel: FakeBrowserStore.parent)
+        session.openThreadForm(in: FakeBrowserStore.parent, from: BrowserStore.lineIds[0], location: .message)
+        let form = try #require(session.threadForm)
+        let host = NSHostingView(
+            rootView: ThreadFormView(form: form, session: session).frame(width: 480, height: height))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: height), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        return (session, form, host, window)
+    }
+
+    @Test
+    func aTallMessageScrollsAndTheNameAndItsErrorStayVisible() async throws {
+        let (session, form, host, window) = try rendered(lines: 40)
+        defer { window.close() }
+        await session.submitThreadForm()
+        form.message = ""
+        host.layoutSubtreeIfNeeded()
+        let field = try #require(ThreadFormFieldTests.fields(in: host).first)
+        let frame = field.convert(field.bounds, to: host)
+
+        #expect(host.bounds.contains(frame), "\(frame) in \(host.bounds)")
+        #expect(frame.minY > 49 && frame.maxY < host.bounds.height - 64)
+    }
+
+    @Test
+    func theComposerGrowsToHalfTheFormAtMost() async throws {
+        let (_, form, host, window) = try rendered(lines: 1)
+        defer { window.close() }
+        form.message = Array(repeating: "line", count: 60).joined(separator: "\n")
+        for _ in 0..<40 {
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let composer = try #require(SessionScreenTests().views(ComposerTextView.self, in: host).first)
+        let scroll = try #require(composer.enclosingScrollView)
+
+        #expect(scroll.frame.height > 100)
+        #expect(scroll.frame.height <= host.bounds.height / 2 + 1, "\(scroll.frame.height)")
+    }
+
+    @Test
+    func thePreviewsTextShowsTheIBeam() throws {
+        let (_, _, host, window) = try rendered(lines: 1)
+        defer { window.close() }
+        let preview = try #require(SessionScreenTests().views(MessagePreviewView.self, in: host).first)
+        let text = try #require(SessionScreenTests().views(MessageTextView.self, in: preview).first { !$0.string.isEmpty })
+        let glyph = text.convert(NSPoint(x: 4, y: text.bounds.midY), to: nil)
+        let past = text.convert(NSPoint(x: text.bounds.maxX - 2, y: text.bounds.midY), to: nil)
+
+        #expect(preview.cursor(at: glyph) == .iBeam)
+        #expect(preview.cursor(at: past) == .arrow)
     }
 }

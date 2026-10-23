@@ -26,13 +26,15 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     /// What the user may create in #new; Ray's "hello" (the first line) can start a thread.
     var creation = ThreadCreation(public: false, private: false)
     var threadSlowmode: Slowmode?
+    /// Ray's "hello" says it `longFirstLine` times, a line each.
+    var longFirstLine = 1
     private(set) var account: BrowserAccount?
 
     @MainActor
     func session() -> SessionModel {
         let store = BrowserStore(
             empty: empty, extra: extra, more: more, lines: lines, creation: creation,
-            threadSlowmode: threadSlowmode)
+            threadSlowmode: threadSlowmode, longFirstLine: longFirstLine)
         let account = BrowserAccount(store: store, holdsLoads: holdsLoads)
         self.account = account
         let session = SessionModel(
@@ -110,6 +112,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private let lines: Bool
     private let creation: ThreadCreation
     private let slowmode: Slowmode?
+    private let longFirstLine: Int
     private let channelsById: [ChannelId: Channel]
     private let joined: [ChannelId]
     static let lineIds = (1...3).map {
@@ -119,8 +122,9 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     init(
         empty: Bool, extra: Int = 0, more: Bool = false, lines: Bool = false,
         creation: ThreadCreation = ThreadCreation(public: false, private: false),
-        threadSlowmode: Slowmode? = nil
+        threadSlowmode: Slowmode? = nil, longFirstLine: Int = 1
     ) {
+        self.longFirstLine = longFirstLine
         self.empty = empty
         self.more = more
         self.lines = lines
@@ -233,7 +237,11 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
             }
             let (author, kind, content): (UserId, MessageType, String) =
                 switch index {
-                case 0: (FakeBrowserStore.ray, .default, "hello")
+                case 0:
+                    (
+                        FakeBrowserStore.ray, .default,
+                        Array(repeating: "hello", count: longFirstLine).joined(separator: "\n")
+                    )
                 case 1: (FakeBrowserStore.ray, .threadCreated, "b1")
                 default: (FakeBrowserStore.me, .default, "test")
                 }

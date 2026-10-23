@@ -16,6 +16,8 @@ enum ThreadFormLayout {
     static let checkbox: CGFloat = 20
     static let checkboxGap: CGFloat = 12
     static let previewBottom: CGFloat = 24
+    // Of the form's height, so a tall message leaves room for the name.
+    static let previewShare: CGFloat = 0.4
     static let stripHeight: CGFloat = 24
 }
 
@@ -30,32 +32,41 @@ struct ThreadFormView: View {
     @State private var asking = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Each dialog on a view of its own: two on one view can lose one.
-            ThreadFormHeader(close: close)
-                .alert(Self.closeQuestion, isPresented: $asking) {
-                    Button("Exit", role: .destructive) { session.discardThreadForm() }
-                    Button("Back to editing", role: .cancel) {}
-                } message: {
-                    Text(Self.closeDetail)
-                }
-            GeometryReader { proxy in
-                ScrollView(.vertical) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Spacer(minLength: 0)
-                        fields
-                            .padding(ThreadFormLayout.margin)
-                        if let source = form.source {
-                            MessagePreview(message: source)
-                                .padding(.bottom, ThreadFormLayout.previewBottom)
-                        }
+        GeometryReader { card in
+            VStack(spacing: 0) {
+                // Each dialog on a view of its own: two on one view can lose one.
+                ThreadFormHeader(close: close)
+                    .alert(Self.closeQuestion, isPresented: $asking) {
+                        Button("Exit", role: .destructive) { session.discardThreadForm() }
+                        Button("Back to editing", role: .cancel) {}
+                    } message: {
+                        Text(Self.closeDetail)
                     }
-                    .frame(width: proxy.size.width)
-                    .frame(minHeight: proxy.size.height, alignment: .bottom)
+                GeometryReader { proxy in
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Spacer(minLength: 0)
+                            fields
+                                .padding(ThreadFormLayout.margin)
+                        }
+                        .frame(width: proxy.size.width)
+                        .frame(minHeight: proxy.size.height, alignment: .bottom)
+                    }
+                    .defaultScrollAnchor(.bottom)
                 }
-                .defaultScrollAnchor(.bottom)
+                if let source = form.source {
+                    // A tall one scrolls, so the name and its error stay in view.
+                    ScrollView(.vertical) {
+                        MessagePreview(message: source)
+                    }
+                    .frame(
+                        height: min(
+                            MessagePreview.height(of: source, width: card.size.width),
+                            card.size.height * ThreadFormLayout.previewShare))
+                    .padding(.bottom, ThreadFormLayout.previewBottom)
+                }
+                submitArea(composerHeight: card.size.height / 2)
             }
-            submitArea
         }
         .alert(
             form.alert?.title ?? "",
@@ -98,10 +109,11 @@ struct ThreadFormView: View {
         VStack(alignment: .leading, spacing: 0) {
             ThreadFormLabel(text: form.nameLabel)
             ThreadNameField(
-                text: Bindable(form).name, placeholder: form.namePlaceholder,
-                failed: form.nameError != nil, focusNow: session.focusThreadForm,
-                onFocused: session.threadFormFocused, submit: submit,
-                escape: { session.escape() })
+                text: Bindable(form).name, label: form.nameLabel,
+                placeholder: form.namePlaceholder, failed: form.nameError != nil,
+                focusNow: session.focusThreadForm, onFocused: session.threadFormFocused,
+                submit: submit, escape: { session.escape() },
+                shiftEscape: session.markServerRead)
             if let error = form.nameError {
                 ThreadFormNote(text: error, error: true)
             }
@@ -121,7 +133,7 @@ struct ThreadFormView: View {
         }
     }
 
-    private var submitArea: some View {
+    private func submitArea(composerHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if let error = form.messageError {
                 ThreadStarterError(text: error)
@@ -130,8 +142,8 @@ struct ThreadFormView: View {
                 ThreadFormStrip(slowmode: slowmode)
             }
             ThreadFormComposer(
-                form: form, submit: submit, escape: { session.escape() },
-                markServerRead: session.markServerRead)
+                form: form, maxHeight: composerHeight, submit: submit,
+                escape: { session.escape() }, markServerRead: session.markServerRead)
         }
     }
 }
@@ -294,6 +306,8 @@ struct ThreadFormStrip: View {
 /// placeholder and a red border while the message is missing.
 struct ThreadFormComposer: View {
     let form: ThreadFormModel
+    // The channel composer's rule: half of the room at most.
+    let maxHeight: CGFloat
     let submit: () -> Void
     let escape: () -> Void
     let markServerRead: () -> Void
@@ -302,7 +316,7 @@ struct ThreadFormComposer: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             ComposerField(
-                text: Bindable(form).message, enabled: true, maxHeight: 300, height: $height,
+                text: Bindable(form).message, enabled: true, maxHeight: maxHeight, height: $height,
                 onSubmit: submit, onEscape: escape, onShiftEscape: markServerRead,
                 autoFocus: false)
                 .padding(.trailing, form.remaining == nil ? 0 : 48)
@@ -366,7 +380,9 @@ struct ThreadFormCheckbox: View {
         .onHover { hovered = $0 }
         .background(CursorArea(enabled ? .pointingHand : .arrow))
         .accessibilityRepresentation {
-            Toggle(label, isOn: $isOn).disabled(!enabled)
+            Toggle(ThreadFormModel.privateLabel, isOn: $isOn)
+                .disabled(!enabled)
+                .help(label)
         }
     }
 
@@ -403,12 +419,14 @@ struct ThreadFormCheckbox: View {
 /// closes it.
 struct ThreadNameField: View {
     @Binding var text: String
+    let label: String
     let placeholder: String
     let failed: Bool
     var focusNow = false
     var onFocused: () -> Void = {}
     let submit: () -> Void
     let escape: () -> Void
+    let shiftEscape: () -> Void
     @State private var editing = false
 
     var body: some View {
@@ -466,7 +484,7 @@ struct ThreadNameField: View {
                 attributes: [
                     .font: TypeScale.formText.nsFont, .foregroundColor: Palette.textMuted,
                 ])
-            textField.setAccessibilityLabel(field.placeholder)
+            textField.setAccessibilityLabel(field.label)
             context.coordinator.focusIfAsked()
         }
 
@@ -529,7 +547,17 @@ struct ThreadNameField: View {
                     guard !textView.hasMarkedText() else {
                         return false
                     }
-                    parent.field.escape()
+                    // As the composer: Cmd+. arrives as the same command and does nothing.
+                    guard let event = (control as? NameTextField)?.currentEvent(),
+                        event.isEscapeKey
+                    else {
+                        return true
+                    }
+                    if event.modifierFlags.contains(.shift) {
+                        parent.field.shiftEscape()
+                    } else {
+                        parent.field.escape()
+                    }
                     return true
                 default:
                     return false
@@ -541,6 +569,7 @@ struct ThreadNameField: View {
 
 final class NameTextField: NSTextField {
     var onWindow: () -> Void = {}
+    var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -553,34 +582,100 @@ struct MessagePreview: NSViewRepresentable {
     let message: Message
     var now = Date()
 
-    func makeNSView(context: Context) -> MessageCell {
-        MessageCell()
+    func makeNSView(context: Context) -> MessagePreviewView {
+        MessagePreviewView()
     }
 
-    func updateNSView(_ cell: MessageCell, context: Context) {
+    func updateNSView(_ view: MessagePreviewView, context: Context) {
         let calendar = Calendar.current
         let locale = Locale.current
-        cell.configure(
-            message, body: text, startsGroup: true,
+        view.cell.configure(
+            message, body: Self.text(message, now: now), startsGroup: true,
             groupTime: MessageFormat.groupTime(
                 message.timestamp, now: now, calendar: calendar, locale: locale),
             shortTime: MessageFormat.shortTime(message.timestamp, calendar: calendar, locale: locale),
             fullDate: MessageFormat.fullDate(message.timestamp, calendar: calendar, locale: locale))
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MessageCell, context: Context)
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MessagePreviewView, context: Context)
         -> CGSize?
     {
         let width = proposal.width ?? SplitWidth.standard
-        return CGSize(
-            width: width,
-            height: MessageCell.height(message, body: text, startsGroup: true, width: width))
+        return CGSize(width: width, height: Self.height(of: message, width: width))
     }
 
-    private var text: NSAttributedString {
+    static func height(of message: Message, width: CGFloat) -> CGFloat {
+        MessageCell.height(message, body: text(message, now: Date()), startsGroup: true, width: width)
+    }
+
+    private static func text(_ message: Message, now: Date) -> NSAttributedString {
         MessageText.build(
             message, revealed: [], now: now,
             times: TimestampText(locale: .current, timeZone: .current, calendar: .current)
         ).text
+    }
+}
+
+/// The preview's cell with a pointer of its own, as no list tracks it: the I-beam over its text,
+/// the hand over a link, the arrow elsewhere.
+final class MessagePreviewView: NSView, CursorAuthority {
+    let cell = MessageCell()
+    private var tracking: NSTrackingArea?
+
+    init() {
+        super.init(frame: .zero)
+        addSubview(cell)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        cell.frame = bounds
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking {
+            removeTrackingArea(tracking)
+        }
+        let tracking = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+            owner: self)
+        addTrackingArea(tracking)
+        self.tracking = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        cursor(at: event.locationInWindow)?.set()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        cursor(at: event.locationInWindow)?.set()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if let window {
+            CursorArea.cursor(at: event.locationInWindow, in: window).set()
+        }
+    }
+
+    func cursor(at point: NSPoint) -> NSCursor? {
+        guard let superview, bounds.contains(convert(point, from: nil)),
+            let hit = hitTest(superview.convert(point, from: nil))
+        else {
+            return nil
+        }
+        var view: NSView? = hit
+        while let current = view, current !== self {
+            if let text = current as? MessageTextView {
+                return text.cursor(at: text.convert(point, from: nil))
+            }
+            view = current.superview
+        }
+        return .arrow
     }
 }

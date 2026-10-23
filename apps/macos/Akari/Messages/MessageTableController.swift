@@ -1402,9 +1402,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let hit = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
         guard let hit, hit.isDescendant(of: tableView) else {
-            // A bar over the list: the hand where it clicks.
+            // A bar over the list, or a floating split's card: what lies there decides.
             let window = content.window
-            return (nil, window.flatMap { CursorArea.Area.cursor(at: location, in: $0) } ?? .arrow)
+            return (nil, window.map { CursorArea.cursor(at: location, in: $0) } ?? .arrow)
         }
         var view: NSView? = hit
         while let current = view, current !== tableView {

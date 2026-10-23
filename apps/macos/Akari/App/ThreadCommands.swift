@@ -5,14 +5,20 @@ import SwiftUI
 struct ThreadCommands: Commands {
     let app: AppModel?
 
+    private var session: SessionModel? {
+        if case .session(let session) = app?.screen {
+            return session
+        }
+        return nil
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("Create Thread") {
-                if case .session(let session) = app?.screen {
-                    session.openThreadFormHere()
-                }
+                session?.openThreadFormHere()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift, .option])
+            .disabled(session?.canCreateThreadHere != true)
         }
     }
 }
