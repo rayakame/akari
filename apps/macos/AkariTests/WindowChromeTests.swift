@@ -109,4 +109,12 @@ nonisolated private final class EmptyStore: Store, @unchecked Sendable {
     required init(unsafeFromHandle handle: UInt64) {
         fatalError("a fake has no Rust object")
     }
+
+    // Nothing to create here.
+    override func threadCreation(parentId: ChannelId) -> ThreadCreation {
+        ThreadCreation(public: false, private: false)
+    }
+
+    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }
+    override func threadSlowmode(parentId: ChannelId) -> Slowmode? { nil }
 }

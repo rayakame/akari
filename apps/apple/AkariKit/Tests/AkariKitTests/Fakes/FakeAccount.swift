@@ -326,6 +326,31 @@ final class FakeAccount: Account, @unchecked Sendable {
         fakeStore.update { $0.channels[thread]?.thread?.joined = joined }
     }
 
+    // What a create answers: the new thread, which lands in the store as the core's answer would
+    // put it, or an error. While `holdCreates` is set, each create waits for a reply first.
+    let createReply = Locked<Result<Channel, CreateThreadError>?>(nil)
+    let holdCreates = Locked(false)
+    let createReplies = AsyncQueue<Void>()
+
+    override func createThread(
+        parentId: ChannelId, messageId: MessageId?, name: String, isPrivate: Bool,
+        location: CreateThreadLocation
+    ) async throws -> ChannelId {
+        log.append(.createThread(parentId, messageId, name, isPrivate: isPrivate, location))
+        if holdCreates.current {
+            _ = await createReplies.next()
+        }
+        switch createReply.current {
+        case .success(let thread):
+            fakeStore.update { $0.channels[thread.id] = thread }
+            return thread.id
+        case .failure(let error):
+            throw error
+        case nil:
+            throw CreateThreadError.Request(error: .InvalidRequest)
+        }
+    }
+
     // While set, each cache flush waits for one value here.
     let holdFlushes = Locked(false)
     let flushes = AsyncQueue<Void>()

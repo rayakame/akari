@@ -44,12 +44,15 @@ pub(crate) struct ResponseLimits {
     pub(crate) limited: bool,
     pub(crate) global: bool,
     pub(crate) retry_after: Option<Duration>,
+    // A 429's Discord error code, e.g. 20016 for slowmode.
+    pub(crate) code: Option<u32>,
 }
 
 #[derive(Deserialize)]
 struct LimitedBody {
     retry_after: Option<f64>,
     global: Option<bool>,
+    code: Option<u32>,
 }
 
 fn seconds(value: f64) -> Option<Duration> {
@@ -84,6 +87,7 @@ impl ResponseLimits {
             limited,
             global,
             retry_after,
+            code: body.as_ref().and_then(|body| body.code),
         }
     }
 }

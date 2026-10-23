@@ -178,6 +178,7 @@ async fn live_messages_cross_as_ids_and_read_as_records() {
         Some("image/png")
     );
     assert_eq!(message.embed_count, 1);
+    assert_eq!(message.embed_title.as_deref(), Some("A link"));
     assert_eq!(message.delivery, Delivery::Sent);
     assert!(!message.components_v2);
     assert!(message.timestamp < SystemTime::now());

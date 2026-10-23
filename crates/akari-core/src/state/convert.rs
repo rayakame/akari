@@ -210,6 +210,7 @@ impl Channel {
             topic: optional_text(channel.topic),
             nsfw: channel.nsfw,
             rate_limit_per_user: channel.rate_limit_per_user.unwrap_or(0),
+            default_auto_archive_duration: channel.default_auto_archive_duration,
             last_message_id: channel.last_message_id,
             permission_overwrites: list(channel.permission_overwrites, overwrite),
             recipients,
@@ -255,6 +256,9 @@ impl Channel {
         next.rate_limit_per_user = update
             .rate_limit_per_user
             .unwrap_or(next.rate_limit_per_user);
+        next.default_auto_archive_duration = update
+            .default_auto_archive_duration
+            .or(next.default_auto_archive_duration);
         if let Some(Some(id)) = update.last_message_id {
             next.note_message(id);
         }

@@ -353,6 +353,10 @@ official web client on 2026-10-17 (German and English UI) and from the user's sc
   A starter whose fetch failed, or a cached one whose page failed, shows the "couldn't load" line
   until a later page of the thread fetches it again.
 
+**A message's menu** offers "Create Thread" first where the message can start a thread (a sent
+user message without one, and the permission), then a separator and "Copy Text"
+([thread-create.md](thread-create.md#where-it-starts)).
+
 ### The thread box
 
 A message a thread started from has a box under it, and so does the "started a thread" line of

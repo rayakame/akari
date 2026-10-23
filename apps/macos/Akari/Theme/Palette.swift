@@ -36,6 +36,18 @@ enum Palette {
         "shadowBorder", dark: "#ffffff", light: "#000000", alpha: (0.08, 0.08))
     static let backgroundModNormal = token(
         "backgroundModNormal", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.2))
+    static let backgroundModStrong = token(
+        "backgroundModStrong", dark: "#97979f", light: "#97979f", alpha: (0.2, 0.239))
+    // Discord's checkbox, unchecked, and while hovered.
+    static let checkboxBorder = token(
+        "checkboxBorder", dark: "#97979f", light: "#85858c", alpha: (0.64, 1))
+    static let checkboxBorderHover = token(
+        "checkboxBorderHover", dark: "#97979f", light: "#5c5c66", alpha: (0.8, 1))
+    // A field with an error: rgba(209, 46, 56, 0.04) under the error border.
+    static let inputErrorTint = token(
+        "inputErrorTint", dark: "#d12e38", light: "#d12e38", alpha: (0.04, 0.04))
+    static let brandHover = NSColor(hex: "#4452bb")
+    static let brandPressed = NSColor(hex: "#3a48a3")
     static let backgroundModMuted = token(
         "backgroundModMuted", dark: "#97979f", light: "#97979f", alpha: (0.08, 0.08))
     static let threadBoxBorder = token("threadBoxBorder", dark: "#323237", light: "#e2e2e5")

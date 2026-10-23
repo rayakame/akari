@@ -335,6 +335,8 @@ pub(super) struct ChannelRow {
     nsfw: bool,
     rate_limit_per_user: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    default_auto_archive_duration: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     last_message_id: Option<u64>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     permission_overwrites: Vec<OverwriteRow>,
@@ -364,6 +366,7 @@ impl From<&Channel> for ChannelRow {
             topic: channel.topic.clone(),
             nsfw: channel.nsfw,
             rate_limit_per_user: channel.rate_limit_per_user,
+            default_auto_archive_duration: channel.default_auto_archive_duration,
             last_message_id: id(channel.last_message_id),
             permission_overwrites: channel
                 .permission_overwrites
@@ -412,6 +415,7 @@ impl ChannelRow {
             topic: self.topic,
             nsfw: self.nsfw,
             rate_limit_per_user: self.rate_limit_per_user,
+            default_auto_archive_duration: self.default_auto_archive_duration,
             last_message_id: snowflake(self.last_message_id),
             permission_overwrites: self
                 .permission_overwrites

@@ -357,6 +357,8 @@ pub(crate) struct State {
     restored: bool,
     windows: Windows,
     cooldowns: Cooldowns,
+    // Creating threads has a cooldown of its own in the parent (Discord's CreateThread slowmode).
+    thread_cooldowns: Cooldowns,
     // The channels the user is reading: a channel and the thread beside it.
     reading: Vec<reading::Reading>,
     // Their local acks from the latest write, for the account to send.
@@ -409,6 +411,7 @@ impl State {
             restored: false,
             windows: Windows::new(limits),
             cooldowns: Cooldowns::default(),
+            thread_cooldowns: Cooldowns::default(),
             reading: Vec::new(),
             due: Vec::new(),
             stale_cursors: HashSet::new(),
@@ -2000,6 +2003,7 @@ pub(crate) fn wall_millis() -> i64 {
 
 mod boxes;
 mod browser;
+mod creating;
 mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};

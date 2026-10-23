@@ -163,7 +163,7 @@ struct SessionView<MessageArea: View>: View {
     private func headerLine(pageWidth: CGFloat) -> some View {
         let shown = splitWidth.shown(in: pageWidth)
         let trailing: CGFloat =
-            session.split == nil || session.splitChannel == nil
+            slot == nil
             ? 0 : SplitWidth.floats(in: pageWidth) ? shown : SplitWidth.gap + shown + 1
         return Rectangle()
             .fill(Color(nsColor: Palette.borderSubtle))
@@ -192,10 +192,23 @@ struct SessionView<MessageArea: View>: View {
         }
     }
 
+    // What the split view's slot shows: a thread, or the channel's "New Thread" form.
+    private enum Slot {
+        case split(MessageListModel, Channel)
+        case form(ThreadFormModel)
+    }
+
+    private var slot: Slot? {
+        if let form = session.threadForm {
+            return .form(form)
+        }
+        return session.split.flatMap { split in session.splitChannel.map { .split(split, $0) } }
+    }
+
     // Each card keeps one place in the tree, so opening, closing or floating the split never
     // rebuilds a list: a docked split's room is held by a clear frame under it.
     private func page(width: CGFloat) -> some View {
-        let open = session.split.flatMap { split in session.splitChannel.map { (split, $0) } }
+        let open = slot
         let floats = SplitWidth.floats(in: width)
         let shown = splitWidth.shown(in: width)
         return ZStack(alignment: .trailing) {
@@ -216,9 +229,18 @@ struct SessionView<MessageArea: View>: View {
                     .clipped()
                     .allowsHitTesting(false)
             }
-            if let open {
-                splitCard(open.0, thread: open.1, floating: floats)
+            switch open {
+            case .split(let split, let thread)?:
+                splitCard(split, thread: thread, floating: floats)
                     .frame(width: shown)
+            case .form(let form)?:
+                slotCard(floating: floats) {
+                    ThreadFormView(form: form, session: session)
+                }
+                .id(ObjectIdentifier(form))
+                .frame(width: shown)
+            case nil:
+                EmptyView()
             }
         }
         .background(Color(nsColor: Palette.frame), ignoresSafeAreaEdges: [])
@@ -253,18 +275,26 @@ struct SessionView<MessageArea: View>: View {
     private func splitCard(
         _ split: MessageListModel, thread: Channel, floating: Bool
     ) -> some View {
-        VStack(spacing: 0) {
-            SplitHeader(
-                thread: thread, menu: splitMenu,
-                act: { item in
-                    if let menu = splitMenu {
-                        act(item, on: thread.id, in: menu)
-                    }
-                }, openFullView: session.openInFullView, close: session.closeSplit)
-            messageArea(
-                split,
-                ChannelName(kind: .thread(owner: split.threadOwner), name: thread.name ?? ""))
+        slotCard(floating: floating) {
+            VStack(spacing: 0) {
+                SplitHeader(
+                    thread: thread, menu: splitMenu,
+                    act: { item in
+                        if let menu = splitMenu {
+                            act(item, on: thread.id, in: menu)
+                        }
+                    }, openFullView: session.openInFullView, close: session.closeSplit)
+                messageArea(
+                    split,
+                    ChannelName(kind: .thread(owner: split.threadOwner), name: thread.name ?? ""))
+            }
         }
+    }
+
+    private func slotCard<Content: View>(
+        floating: Bool, @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
         .background(Color(nsColor: Palette.chat), ignoresSafeAreaEdges: [])
         // The top border lies over the header's first point, as the channel's top line does.
         .padding(.horizontal, 1)

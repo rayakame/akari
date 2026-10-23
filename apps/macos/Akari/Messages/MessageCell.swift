@@ -26,6 +26,8 @@ final class MessageCell: NSTableCellView {
     // Built for the first message with a thread, as the failed line is: buttons cost.
     private var threadBox: ThreadBoxView?
     var onOpenThread: () -> Void = {}
+    // What "Create Thread" does for this message, asked when the menu opens; nil leaves it out.
+    var threadAction: () -> (() -> Void)? = { nil }
     // Built for the first failed message: its buttons cost a layout pass each.
     private var failed: FailedLine?
     var onRetry: () -> Void = {}
@@ -107,7 +109,7 @@ final class MessageCell: NSTableCellView {
             return nil
         }
         let menu = NSMenu()
-        for item in MessageMenu.items(for: message) {
+        for item in MessageMenu.items(for: message, createThread: threadAction()) {
             menu.addItem(item)
         }
         return menu
@@ -339,7 +341,10 @@ final class MessageCell: NSTableCellView {
     private func build() {
         content.onLink = { [weak self] url in self?.onLink(url) }
         content.messageMenu = { [weak self] in
-            self?.message.map { MessageMenu.items(for: $0) } ?? []
+            guard let self, let message else {
+                return []
+            }
+            return MessageMenu.items(for: message, createThread: threadAction())
         }
         avatar.translatesAutoresizingMaskIntoConstraints = false
         reply.attributedStringValue = CellText.symbolLine(

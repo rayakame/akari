@@ -35,4 +35,12 @@ protocol MessageListActions: AnyObject {
     func openGuild(_ id: GuildId)
     // A masked link may ask first (D65).
     func openLink(_ url: URL, masked: Bool)
+    // A message's "Create Thread": whether it shows, and the form it opens.
+    func canCreateThread(from message: MessageId) -> Bool
+    func createThread(from message: MessageId)
+}
+
+extension MessageListActions {
+    func canCreateThread(from message: MessageId) -> Bool { false }
+    func createThread(from message: MessageId) {}
 }

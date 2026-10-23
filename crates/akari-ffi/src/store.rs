@@ -9,7 +9,7 @@ use crate::names::Names;
 use crate::records::{
     Badge, Channel, ChannelBadge, ConnectionState, ContentStats, Guild, GuildBadge, GuildSettings,
     Message, MessageWindow, ReadState, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
-    User,
+    ThreadCreation, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -201,6 +201,24 @@ impl Store {
     /// DMs and group DMs, and for unknown channels.
     pub fn slowmode(&self, channel_id: ChannelId) -> Option<Slowmode> {
         self.core.slowmode(channel_id).map(Slowmode::from)
+    }
+
+    /// Which threads the user may create in `parent_id`: none outside text and announcement
+    /// channels, private ones only in text channels, none while timed out.
+    pub fn thread_creation(&self, parent_id: ChannelId) -> ThreadCreation {
+        self.core.thread_creation(parent_id).into()
+    }
+
+    /// Whether the user may start a thread from the message: a sent user message of the loaded
+    /// window without a thread, where they may create public threads.
+    pub fn can_start_thread(&self, channel_id: ChannelId, message_id: MessageId) -> bool {
+        self.core.can_start_thread(channel_id, message_id)
+    }
+
+    /// The parent's slowmode for creating threads, apart from sending: each created thread
+    /// starts it. `None` without slowmode.
+    pub fn thread_slowmode(&self, parent_id: ChannelId) -> Option<Slowmode> {
+        self.core.thread_slowmode(parent_id).map(Slowmode::from)
     }
 
     /// The message IDs and state of a viewed channel; `None` if it isn't viewed.

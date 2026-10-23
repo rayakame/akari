@@ -1108,5 +1108,6 @@ mod badges;
 mod read_states;
 mod thread_boxes;
 mod thread_browser;
+mod thread_create;
 mod thread_sync;
 mod threads;

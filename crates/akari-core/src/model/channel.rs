@@ -28,6 +28,9 @@ pub struct Channel {
     pub last_pin_timestamp: Option<Timestamp>,
     /// Slowmode in seconds.
     pub rate_limit_per_user: Option<u32>,
+    /// Minutes of inactivity the official client preselects for a new thread here.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub default_auto_archive_duration: Option<u32>,
     pub bitrate: Option<u32>,
     pub user_limit: Option<u32>,
     /// DM and group DM recipients, without the current user.
