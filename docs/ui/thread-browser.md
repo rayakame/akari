@@ -3,7 +3,8 @@
 What a text or announcement channel's threads look like when the user asks for all of them:
 the popout under the channel header's Threads button, the modal "See all threads" opens, and
 the channel list's "More Active Threads". Read from Discord's web client (canary 646904,
-2026-10-22) and observed in the official client on 2026-10-22.
+2026-10-22; buttons and the click trap from canary 648857, 2026-10-23) and observed in the
+official client on 2026-10-22 and 2026-10-23.
 
 ## Where it opens
 
@@ -14,23 +15,35 @@ the channel list's "More Active Threads". Read from Discord's web client (canary
 - **The popout** hangs under the button: its right edge on the button's, its top just under the
   header's line. It's 35% of the window wide, at least 480 and at most 600, and as tall as its
   list, at least 400 and at most 80% of the window (observed: 480 × 651 in an 813-point
-  window). Radius 8, Discord's `shadow-border` ring and `shadow-high`. A click outside it (which
-  still reaches what it hit), Escape, the button or a row closes it; so does opening another
-  channel.
+  window). Radius 8, Discord's `shadow-border` ring and `shadow-high`. A click outside it, Escape,
+  the button or a row closes it; so does opening another channel. Discord's Threads popout has a
+  click trap: a layer over the whole window under it takes every press outside it, the button's
+  too, and the popout closes when that press is released, whichever button; nothing behind gets
+  the click, the hover or the wheel (observed 2026-10-23: the official client only closes it).
 - **The modal**: "threads" in a "started a thread" line ("See all threads.") and "See All" in
   the channel list's popout open the same browser centered over the window, the page dimmed
   (black at about 72%). It's 680 wide (less 48 than the window when that's narrower) and as tall
   as its list, but it stops as far from the window's top and bottom as Discord's top bar plus 24
   (56; observed 680 × 700 in an 812-point window). 8 above the browser and 16 below it, a 1
   border in `border-subtle`, radius 12, `shadow-high`, and an X at the header's end. The X,
-  Escape, a click on the dimmed page or a row closes it.
+  Escape, a click on the dimmed page (press and release on it, the left button) or a row closes
+  it. The dimmed page covers the whole window: nothing behind reacts to the pointer.
+- **Nothing behind either reacts**: no hover, no cursor change, no click, no wheel, no focus.
+  *Akari lays a shield over the window under each (`PointerShield`): it takes the clicks and the
+  wheel and shows the arrow, and while it's up the message list, its links and thread boxes and
+  the composer hover nothing, set no cursor and take no focus (a composer with the focus gives it
+  up). SwiftUI's rows behind it (channels, servers, header buttons) don't hover since the shield
+  is what's hit.*
 - **Focus**: both are modal dialogs ("Threads") with a focus lock, and the search field takes the
-  focus when they open. Closing gives the focus back to what had it when it opened, if nothing
-  else took it meanwhile; Discord's typing then goes to the composer. *Akari gives that focus to
-  the channel's composer (a Shift+click's split keeps its own), lets Escape cancel what an input
-  method composes, and while the modal shows drops plain keys meant for anything but a field, so
-  nothing types into the composer behind it. VoiceOver starts in the field, or at the title
-  without one.*
+  focus when they open; Tab and Shift+Tab move only among what's inside. Closing gives the focus
+  back to what had it when it opened, if nothing else took it meanwhile; Discord's typing then
+  goes to the composer. *Akari gives that focus to the channel's composer (a Shift+click's split
+  keeps its own), lets Escape cancel what an input method composes, keeps Tab and Shift+Tab in
+  the field, its only stop (Discord's X, Create button and cards are stops too; macOS's SwiftUI
+  buttons aren't without Full Keyboard Access), and while the modal shows drops plain keys meant
+  for anything but a field (Chris, 2026-10-23: Tab took the focus to the composer behind the
+  modal, and the letters after it too). VoiceOver starts in the field, or at the title without
+  one.*
 
 ## The header
 
@@ -41,6 +54,17 @@ when the user can read the channel's history. Discord's field and the spacer aft
 room left (measured: 236 in the popout, 315 in the modal, beside Discord's Create button), so
 its width is half of the room plus 107.5. Discord's "Create" button and the modal's X follow;
 *Akari has no Create button until it can create threads (the next PR).*
+
+Only the field's input shows the I-beam (its border, the magnifier and the gaps show the arrow);
+its clear button, while there's text, is `icon-subtle` (#ABACB2 dark, #595A63 light) and
+`icon-strong` while hovered, with the pointing hand. The modal's X is Discord's design-system
+icon-only button (size sm): a 32 square (30 and a 1 border) with radius 8, 8 after the spacer;
+idle a 16 glyph in `control-icon-only-icon-default` (#ABACB2, light #595A63) on nothing; hovered
+a fill of rgba(151, 151, 159, 0.161) (#36363C on the modal's #242429; Chris's screenshot
+#36363B), a 1 border of 0.039 (light 0.2) and the glyph `icon-strong` (#FBFBFB, light #28282D);
+pressed a fill of 0.2 (light 0.239); the pointing hand. The header's and the split's icon buttons
+(Threads, More, the split's X) change their glyph's color only (`icon-muted` #96979E, hovered
+`icon-subtle`, selected `icon-strong`) and show the pointing hand.
 
 ## The list
 

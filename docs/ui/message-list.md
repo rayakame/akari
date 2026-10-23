@@ -263,6 +263,15 @@ selectable texts are all text views like a message's, so they select alike, and 
 click or drag never changes their font, color or baseline (a selectable label's field editor
 would).*
 
+The pointer shows what a web page's text shows: the I-beam over the text itself (each line's
+glyphs, its full line height), the pointing hand over links, mentions and hidden spoilers, and
+the arrow everywhere else in the row, after a short line's end and over a blank line included
+(Chris, 2026-10-23: Akari showed the I-beam over a message's empty area). A click on a link
+follows it even when the link is inside a selection (a double click on it selects its word),
+where a text view would start dragging the selection. While a popout or modal is open, nothing in
+the list or the composer reacts to the pointer: no hover, no cursor, no focus (see
+[thread-browser.md](thread-browser.md)).
+
 ## Loading history
 
 - The list holds up to 200 messages of a channel. Beyond the loaded messages, while older ones
