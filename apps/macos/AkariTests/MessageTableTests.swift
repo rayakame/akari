@@ -1217,6 +1217,45 @@ struct MessageTableTests {
         func openLink(_ url: URL, masked: Bool) {
             calls.append("link \(url.absoluteString)\(masked ? " masked" : "")")
         }
+
+        var startsThreads: Set<UInt64> = []
+
+        func canCreateThread(from message: MessageId) -> Bool {
+            startsThreads.contains(message.rawValue)
+        }
+
+        func createThread(from message: MessageId) {
+            calls.append("create thread from \(message.rawValue)")
+        }
+    }
+
+    func rightClick() throws -> NSEvent {
+        try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+
+    // Asked when the menu opens: a thread started meanwhile takes the item away.
+    @Test
+    func aMessageThatCanStartAThreadOffersCreateThreadFirst() throws {
+        let actions = RecordingActions()
+        actions.startsThreads = [1]
+        controller.actions = actions
+        show([row(1, at: noon), row(2, at: noon + 10)])
+
+        let menu = try #require(try cell(of: 1).menu(for: try rightClick()))
+        #expect(menu.items.map(\.title) == ["Create Thread", "", "Copy Text"])
+        menu.performActionForItem(at: 0)
+        #expect(actions.calls.contains("create thread from 1"))
+        let other = try #require(try cell(of: 2).menu(for: try rightClick()))
+        #expect(other.items.map(\.title) == ["Copy Text"])
+        actions.startsThreads = []
+        let later = try #require(try cell(of: 1).menu(for: try rightClick()))
+        #expect(later.items.map(\.title) == ["Copy Text"])
+        let text = try #require(messageText(in: try cell(of: 2)))
+        actions.startsThreads = [2]
+        #expect(text.menu(for: try rightClick())?.items.first?.title == "Create Thread")
     }
 
     func contentColor(of raw: UInt64, text: String) throws -> NSColor? {
