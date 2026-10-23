@@ -119,4 +119,11 @@ nonisolated enum TypeScale {
     static let browserText = TextStyle(14, line: 18)
     static let emptyTitle = TextStyle(20, .semibold, line: 24)
     static let emptyText = TextStyle(16, line: 20)
+    // The New Thread form: text-md/medium titles and labels, text-md fields, text-xs notes,
+    // text-sm/medium for the starter's error and the small button.
+    static let formTitle = TextStyle(16, .medium, line: 20)
+    static let formText = TextStyle(16, line: 20)
+    static let formNote = TextStyle(12, line: 16)
+    static let formAlert = TextStyle(14, .medium, line: 18)
+    static let formStrip = TextStyle(12, .medium, line: 16)
 }

@@ -355,9 +355,9 @@ public final class SessionModel {
     }
 
     /// The channel's composer takes the focus again, e.g. when the Threads browser closed and
-    /// nothing else took it, unless the split's asked for it; see `focusChannel`.
+    /// nothing else took it, unless the split's or a form's asked for it; see `focusChannel`.
     public func refocusChannel() {
-        if !focusSplit {
+        if !focusSplit, !focusThreadForm {
             focusChannel = true
         }
     }

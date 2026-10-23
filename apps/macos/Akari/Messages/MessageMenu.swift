@@ -1,18 +1,28 @@
 import AkariKit
 import AppKit
 
-/// What a message's context menu offers.
+/// What a message's context menu offers, in the official client's order: "Create Thread" closes
+/// the Reply and Forward group, "Copy Text" opens the next.
 enum MessageMenu {
-    static func items(for message: Message, pasteboard: NSPasteboard = .general) -> [NSMenuItem] {
-        guard !message.content.isEmpty else {
-            return []
+    static func items(
+        for message: Message, createThread: (() -> Void)? = nil,
+        pasteboard: NSPasteboard = .general
+    ) -> [NSMenuItem] {
+        var items: [NSMenuItem] = []
+        if let createThread {
+            items.append(item("Create Thread", run: createThread))
         }
-        return [
-            item("Copy Text") {
-                pasteboard.clearContents()
-                pasteboard.setString(message.content, forType: .string)
+        if !message.content.isEmpty {
+            if !items.isEmpty {
+                items.append(.separator())
             }
-        ]
+            items.append(
+                item("Copy Text") {
+                    pasteboard.clearContents()
+                    pasteboard.setString(message.content, forType: .string)
+                })
+        }
+        return items
     }
 
     private static func item(_ title: String, run: @escaping () -> Void) -> NSMenuItem {

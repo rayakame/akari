@@ -1004,6 +1004,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.onOpenThread = openThread
+            cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
             cell.configure(
                 message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
@@ -1029,6 +1030,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     // The box's newest message is built once per change, like the body; its time each time.
+    private func threadAction(for message: MessageId) -> (() -> Void)? {
+        guard let actions, actions.canCreateThread(from: message) else {
+            return nil
+        }
+        return { [weak actions] in actions?.createThread(from: message) }
+    }
+
     private func boxParts(
         _ row: MessageListModel.Row
     ) -> (box: ThreadBox, content: NSAttributedString?, time: String?)? {

@@ -26,6 +26,7 @@ struct AkariApp: App {
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             AccountCommands(app: launch.app)
+            ThreadCommands(app: launch.app)
             ThemeCommands()
             FullScreenCommands()
         }

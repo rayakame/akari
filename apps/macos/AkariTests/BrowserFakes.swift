@@ -23,11 +23,16 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     var lines = false
     /// Pages and searches never answer.
     var holdsLoads = false
+    /// What the user may create in #new; Ray's "hello" (the first line) can start a thread.
+    var creation = ThreadCreation(public: false, private: false)
+    var threadSlowmode: Slowmode?
     private(set) var account: BrowserAccount?
 
     @MainActor
     func session() -> SessionModel {
-        let store = BrowserStore(empty: empty, extra: extra, more: more, lines: lines)
+        let store = BrowserStore(
+            empty: empty, extra: extra, more: more, lines: lines, creation: creation,
+            threadSlowmode: threadSlowmode)
         let account = BrowserAccount(store: store, holdsLoads: holdsLoads)
         self.account = account
         let session = SessionModel(
@@ -78,6 +83,16 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
         }
     }
     override func setBrowsing(parentId: ChannelId?) {}
+    let created = OSAllocatedUnfairLock<[String]>(initialState: [])
+
+    // Nothing is created: the form stays as it is.
+    override func createThread(
+        parentId: ChannelId, messageId: MessageId?, name: String, isPrivate: Bool,
+        location: CreateThreadLocation
+    ) async throws -> ChannelId {
+        created.withLock { $0.append(name) }
+        throw CreateThreadError.Slowmode
+    }
     override func searchThreads(parentId: ChannelId, name: String) async throws -> [ChannelId]? {
         if holdsLoads {
             try await Task.sleep(for: .seconds(60))
@@ -93,16 +108,24 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private let empty: Bool
     private let more: Bool
     private let lines: Bool
+    private let creation: ThreadCreation
+    private let slowmode: Slowmode?
     private let channelsById: [ChannelId: Channel]
     private let joined: [ChannelId]
     static let lineIds = (1...3).map {
         MessageId(rawValue: FakeBrowserStore.snowflake(FakeBrowserStore.now - 3600) + $0)
     }
 
-    init(empty: Bool, extra: Int = 0, more: Bool = false, lines: Bool = false) {
+    init(
+        empty: Bool, extra: Int = 0, more: Bool = false, lines: Bool = false,
+        creation: ThreadCreation = ThreadCreation(public: false, private: false),
+        threadSlowmode: Slowmode? = nil
+    ) {
         self.empty = empty
         self.more = more
         self.lines = lines
+        self.creation = creation
+        slowmode = threadSlowmode
         var channels: [ChannelId: Channel] = [
             FakeBrowserStore.parent: Channel(
                 id: FakeBrowserStore.parent, kind: .guildText, guildId: FakeBrowserStore.guild,
@@ -135,6 +158,16 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     required init(unsafeFromHandle handle: UInt64) {
         fatalError("a fake has no Rust object")
     }
+
+    override func threadCreation(parentId: ChannelId) -> ThreadCreation {
+        parentId == FakeBrowserStore.parent ? creation : ThreadCreation(public: false, private: false)
+    }
+
+    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool {
+        creation.public && messageId == Self.lineIds[0]
+    }
+
+    override func threadSlowmode(parentId: ChannelId) -> Slowmode? { slowmode }
 
     override func threadBrowser(parentId: ChannelId) -> ThreadBrowser {
         ThreadBrowser(
