@@ -1236,6 +1236,23 @@ struct MessageTableTests {
                 windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     }
 
+    // SwiftUI makes new actions on any update, also while the menu is open.
+    @Test
+    func createThreadReachesTheActionsOfTheMomentItsChosen() throws {
+        let opened = RecordingActions()
+        opened.startsThreads = [1]
+        controller.actions = opened
+        show([row(1, at: noon)])
+        let menu = try #require(try cell(of: 1).menu(for: try rightClick()))
+
+        let current = RecordingActions()
+        controller.actions = current
+        menu.performActionForItem(at: 0)
+
+        #expect(current.calls.contains("create thread from 1"))
+        #expect(!opened.calls.contains("create thread from 1"))
+    }
+
     // Asked when the menu opens: a thread started meanwhile takes the item away.
     @Test
     func aMessageThatCanStartAThreadOffersCreateThreadFirst() throws {

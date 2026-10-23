@@ -441,3 +441,33 @@ struct ThreadFormSlotTests {
         #expect(!red(with, 1400 - SplitWidth.standard + 4))
     }
 }
+
+@MainActor
+struct ThreadFormFocusTests {
+    // The form's field is made before it has a window; joining one still gives it the focus.
+    @Test
+    func theNameFieldTakesTheFocusOnceInItsWindow() async throws {
+        let fakes = FakeBrowserStore()
+        fakes.creation = ThreadCreation(public: true, private: true)
+        let session = fakes.session()
+        session.open(channel: FakeBrowserStore.parent)
+        session.openThreadForm(in: FakeBrowserStore.parent, location: .threadBrowserToolbar)
+        let form = try #require(session.threadForm)
+        let host = NSHostingView(rootView: ThreadFormView(form: form, session: session))
+        host.frame = NSRect(x: 0, y: 0, width: 480, height: 700)
+        host.layoutSubtreeIfNeeded()
+        let window = NSWindow(
+            contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+
+        window.contentView = host
+        for _ in 0..<100 where session.focusThreadForm {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        let field = try #require(ThreadFormFieldTests.fields(in: host).first)
+        #expect(!session.focusThreadForm)
+        #expect((window.firstResponder as? NSTextView)?.delegate === field)
+        window.close()
+    }
+}

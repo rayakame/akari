@@ -437,8 +437,11 @@ struct ThreadNameField: View {
             Coordinator(self)
         }
 
-        func makeNSView(context: Context) -> NSTextField {
-            let textField = NSTextField()
+        func makeNSView(context: Context) -> NameTextField {
+            let textField = NameTextField()
+            textField.onWindow = { [weak coordinator = context.coordinator] in
+                coordinator?.focusIfAsked()
+            }
             textField.isBordered = false
             textField.drawsBackground = false
             textField.focusRingType = .none
@@ -449,10 +452,11 @@ struct ThreadNameField: View {
             textField.cell?.wraps = false
             textField.delegate = context.coordinator
             textField.stringValue = field.text
+            context.coordinator.textField = textField
             return textField
         }
 
-        func updateNSView(_ textField: NSTextField, context: Context) {
+        func updateNSView(_ textField: NameTextField, context: Context) {
             context.coordinator.parent = self
             if textField.stringValue != field.text {
                 textField.stringValue = field.text
@@ -463,22 +467,36 @@ struct ThreadNameField: View {
                     .font: TypeScale.formText.nsFont, .foregroundColor: Palette.textMuted,
                 ])
             textField.setAccessibilityLabel(field.placeholder)
-            if field.focusNow, let window = textField.window {
+            context.coordinator.focusIfAsked()
+        }
+
+        final class Coordinator: NSObject, NSTextFieldDelegate {
+            var parent: Representable
+            weak var textField: NSTextField?
+            private var focusAsked = false
+
+            init(_ parent: Representable) {
+                self.parent = parent
+            }
+
+            // Once per request, also when the field joins its window after the request.
+            func focusIfAsked() {
+                guard parent.field.focusNow else {
+                    focusAsked = false
+                    return
+                }
+                guard !focusAsked, let textField, let window = textField.window else {
+                    return
+                }
+                focusAsked = true
+                let focused = parent.field.onFocused
                 DispatchQueue.main.async { [weak textField] in
                     guard let textField, textField.window === window else {
                         return
                     }
                     window.makeFirstResponder(textField)
-                    field.onFocused()
+                    focused()
                 }
-            }
-        }
-
-        final class Coordinator: NSObject, NSTextFieldDelegate {
-            var parent: Representable
-
-            init(_ parent: Representable) {
-                self.parent = parent
             }
 
             func controlTextDidChange(_ notification: Notification) {
@@ -518,6 +536,15 @@ struct ThreadNameField: View {
                 }
             }
         }
+    }
+}
+
+final class NameTextField: NSTextField {
+    var onWindow: () -> Void = {}
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindow()
     }
 }
 

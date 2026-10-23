@@ -1029,14 +1029,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return built.text
     }
 
-    // The box's newest message is built once per change, like the body; its time each time.
     private func threadAction(for message: MessageId) -> (() -> Void)? {
         guard let actions, actions.canCreateThread(from: message) else {
             return nil
         }
-        return { [weak actions] in actions?.createThread(from: message) }
+        return { [weak self] in self?.actions?.createThread(from: message) }
     }
 
+    // The box's newest message is built once per change, like the body; its time each time.
     private func boxParts(
         _ row: MessageListModel.Row
     ) -> (box: ThreadBox, content: NSAttributedString?, time: String?)? {
