@@ -98,6 +98,25 @@ struct ThreadBrowserViewTests {
             .color(5, 5)
     }
 
+    // The rows `ys` with ink between `xs`, in points.
+    func inkRows(_ image: Rendered, xs: ClosedRange<CGFloat>, ys: ClosedRange<CGFloat>)
+        -> ClosedRange<CGFloat>?
+    {
+        let background = image.color(xs.lowerBound, ys.lowerBound)
+        let rows = stride(from: ys.lowerBound, through: ys.upperBound, by: 0.5).filter { y in
+            stride(from: xs.lowerBound, through: xs.upperBound, by: 1).contains { x in
+                guard let color = image.color(x, y), let background else {
+                    return false
+                }
+                return abs(color.brightnessComponent - background.brightnessComponent) > 0.15
+            }
+        }
+        guard let first = rows.first, let last = rows.last else {
+            return nil
+        }
+        return first...last
+    }
+
     // The header's line is its last point; the first label's box is 8...32 below it, its text
     // centered at 68; cards start at 88, 168 and so on, 16 in from each side.
     @Test
@@ -149,6 +168,41 @@ struct ThreadBrowserViewTests {
         #expect(ink(popout, xs: 440...476, ys: 12...36) == nil)
     }
 
+    // The smallest window (500 high) leaves the popout 400 and the modal's browser 362: the empty
+    // state's 400 mustn't push the header out, nor anything taller than the room.
+    @Test(arguments: [
+        (ThreadBrowserModel.Presentation.popout, NSSize(width: 480, height: 400)),
+        (ThreadBrowserModel.Presentation.modal, NSSize(width: 678, height: 362)),
+        (ThreadBrowserModel.Presentation.modal, NSSize(width: 678, height: 250)),
+    ])
+    func theHeaderStaysWhenTheEmptyStateHasLittleRoom(
+        presentation: ThreadBrowserModel.Presentation, size: NSSize
+    ) throws {
+        store.empty = true
+        let image = try rendered(presentation, size: size)
+
+        let line = try #require(image.firstChange(at: size.width - 10, below: 20))
+        #expect(abs(CGFloat(line) / image.scale - 47) <= 0.5, "line at \(line)")
+        let field = try #require(image.firstChange(at: 300, below: 2))
+        #expect(abs(CGFloat(field) / image.scale - 8) <= 1, "field's top at \(field)")
+        if presentation == .modal {
+            #expect(ink(image, xs: (size.width - 48)...(size.width - 4), ys: 12...36) != nil)
+        }
+        // The symbol and the words, centered in the room below the header as in a tall browser.
+        guard size.height >= 300 else {
+            return
+        }
+        let tall = try rendered(presentation, size: NSSize(width: size.width, height: 651))
+        let offset = { (image: Rendered, height: CGFloat) throws -> CGFloat in
+            let drawn = try #require(
+                inkRows(image, xs: 0...(size.width - 1), ys: 49...(height - 1)))
+            return (drawn.lowerBound + drawn.upperBound) / 2 - (48 + height) / 2
+        }
+        let small = try offset(image, size.height)
+        let reference = try offset(tall, 651)
+        #expect(abs(small - reference) <= 2, "\(small) vs \(reference)")
+    }
+
     // Discord's Create Thread button is its brand blue; Akari has none until it creates threads.
     @Test
     func theEmptyStateHasDiscordsWordsAndNoButton() throws {
@@ -172,6 +226,73 @@ struct ThreadBrowserViewTests {
             }
         }
         #expect(!brand)
+    }
+}
+
+// The browser live in a window, for what changes after it shows.
+@MainActor
+struct ThreadBrowserLiveTests {
+    let store = FakeBrowserStore()
+
+    func settle(until done: () -> Bool = { false }) async {
+        let deadline = ContinuousClock.now + .milliseconds(500)
+        repeat {
+            try? await Task.sleep(for: .milliseconds(10))
+        } while !done() && ContinuousClock.now < deadline
+    }
+
+    func host(_ session: SessionModel) throws -> (NSWindow, NSHostingView<AnyView>) {
+        let browser = try #require(session.threadBrowser)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 651),
+            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        let host = NSHostingView(
+            rootView: AnyView(
+                ThreadBrowserView(browser: browser, session: session, now: FakeBrowserStore.now)
+                    .frame(width: 480, height: 651)
+                    .ignoresSafeArea()))
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        return (window, host)
+    }
+
+    func scrollView(in view: NSView) -> NSScrollView? {
+        if let scroll = view as? NSScrollView {
+            return scroll
+        }
+        return view.subviews.lazy.compactMap(scrollView(in:)).first
+    }
+
+    // How far the list's bottom is below what shows.
+    func scroll(_ scroll: NSScrollView, leaving remaining: CGFloat) throws {
+        let document = try #require(scroll.documentView)
+        let end = document.frame.height - scroll.contentView.bounds.height
+        let y = document.isFlipped ? end - remaining : remaining
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    // Discord loads the next page once the list's bottom comes within 200 of what shows.
+    @Test
+    func theNextPageLoadsWithin200OfTheListsBottom() async throws {
+        store.extra = 21
+        store.more = true
+        let session = store.session()
+        session.openThreadBrowser(of: FakeBrowserStore.parent, as: .popout)
+        let (window, host) = try host(session)
+        let loads = { store.account?.olderLoads.withLock { $0 } ?? 0 }
+        let list = try #require(scrollView(in: host))
+        await settle()
+        #expect(loads() == 0)
+
+        try scroll(list, leaving: 260)
+        await settle()
+        #expect(loads() == 0)
+
+        try scroll(list, leaving: 150)
+        await settle { loads() > 0 }
+        #expect(loads() == 1)
+        withExtendedLifetime(window) {}
     }
 }
 
@@ -263,6 +384,95 @@ struct ThreadBrowserEventsTests {
 
         _ = watcher.handle(click(150, 100, in: window))
         #expect(calls.outside == 1)
+    }
+
+    func key(_ code: UInt16, _ characters: String, in window: NSWindow, _ modifiers: NSEvent.ModifierFlags = [])
+        throws -> NSEvent
+    {
+        try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+    }
+
+    // A window with the composer focused and the watcher over it, as when the browser opens.
+    func composing() -> (ThreadBrowserEvents.Watcher, NSWindow, NSTextView) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        window.contentView = content
+        let composer = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+        content.addSubview(composer)
+        window.makeFirstResponder(composer)
+        let watcher = ThreadBrowserEvents.Watcher(frame: content.bounds)
+        content.addSubview(watcher)
+        return (watcher, window, composer)
+    }
+
+    @Test
+    func escapeWhileTheInputMethodComposesIsTheInputMethods() throws {
+        let calls = Calls()
+        let (watcher, window, composer) = composing()
+        watcher.onEscape = { calls.escape += 1 }
+        composer.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(composer.hasMarkedText())
+
+        let escape = try key(53, "\u{1b}", in: window)
+        #expect(watcher.handle(escape) === escape)
+        #expect(calls.escape == 0)
+    }
+
+    // Discord's focus lock gives the focus back when nothing else took it; in Akari that's the
+    // channel's composer, where Discord's typing goes too.
+    @Test
+    func closingHandsTheFocusOnWhenNothingElseTookIt() async throws {
+        let (watcher, window, _) = composing()
+        var handedOn = 0
+        watcher.onFocusFree = { handedOn += 1 }
+        let field = NSTextField(frame: NSRect(x: 0, y: 200, width: 200, height: 24))
+        window.contentView?.addSubview(field)
+        window.makeFirstResponder(field)
+
+        field.removeFromSuperview()
+        watcher.removeFromSuperview()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(handedOn == 1)
+    }
+
+    @Test
+    func closingLeavesTheFocusWhereAClickPutIt() async throws {
+        let (watcher, window, _) = composing()
+        var handedOn = 0
+        watcher.onFocusFree = { handedOn += 1 }
+        let other = NSTextView(frame: NSRect(x: 0, y: 100, width: 400, height: 40))
+        window.contentView?.addSubview(other)
+
+        window.makeFirstResponder(other)
+        watcher.removeFromSuperview()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(handedOn == 0)
+        #expect(window.firstResponder === other)
+    }
+
+    // Keys meant for the modal's field never reach the composer behind it.
+    @Test
+    func theModalKeepsKeysFromTheComposerBehindIt() throws {
+        let (watcher, window, _) = composing()
+        watcher.modal = true
+
+        #expect(watcher.handle(try key(0, "a", in: window)) == nil)
+        let copy = try key(8, "c", in: window, .command)
+        #expect(watcher.handle(copy) === copy)
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 200, width: 200, height: 24))
+        window.contentView?.addSubview(field)
+        window.makeFirstResponder(field)
+        let typed = try key(0, "a", in: window)
+        #expect(watcher.handle(typed) === typed)
     }
 
     @Test

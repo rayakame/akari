@@ -14,12 +14,19 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     static let names = ["b1", "b4", "b2", "t13", "t2", "t3", "t6", "t5", "t1"]
 
     var empty = false
+    /// Joined threads after the nine.
+    var extra = 0
+    /// Discord has more older threads to give.
+    var more = false
+    private(set) var account: BrowserAccount?
 
     @MainActor
     func session() -> SessionModel {
-        let store = BrowserStore(empty: empty)
+        let store = BrowserStore(empty: empty, extra: extra, more: more)
+        let account = BrowserAccount(store: store)
+        self.account = account
         let session = SessionModel(
-            userId: Self.me, account: BrowserAccount(store: store),
+            userId: Self.me, account: account,
             memory: AccountMemory(defaults: MemoryDefaults())
         ) { _ in }
         session.open(.guild(Self.guild))
@@ -55,7 +62,12 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
         nil
     }
     override func supersedeAroundLoads(channelId: ChannelId) {}
-    override func loadOlderThreads(parentId: ChannelId) async throws {}
+    let olderLoads = OSAllocatedUnfairLock(initialState: 0)
+
+    override func loadOlderThreads(parentId: ChannelId) async throws {
+        olderLoads.withLock { $0 += 1 }
+    }
+    override func setBrowsing(parentId: ChannelId?) {}
     override func searchThreads(parentId: ChannelId, name: String) async throws -> [ChannelId]? { [] }
     override func reservePlacing() -> UInt64 { 0 }
     override func viewChannel(channelId: ChannelId) {}
@@ -64,11 +76,13 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
 
 nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private let empty: Bool
+    private let more: Bool
     private let channelsById: [ChannelId: Channel]
     private let joined: [ChannelId]
 
-    init(empty: Bool) {
+    init(empty: Bool, extra: Int = 0, more: Bool = false) {
         self.empty = empty
+        self.more = more
         var channels: [ChannelId: Channel] = [
             FakeBrowserStore.parent: Channel(
                 id: FakeBrowserStore.parent, kind: .guildText, guildId: FakeBrowserStore.guild,
@@ -76,7 +90,8 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
                 rateLimitPerUser: 0, recipientIds: [], thread: nil)
         ]
         var joined: [ChannelId] = []
-        for (index, name) in FakeBrowserStore.names.enumerated() {
+        let names = FakeBrowserStore.names + (0..<extra).map { "x\($0)" }
+        for (index, name) in names.enumerated() {
             let id = ChannelId(rawValue: 1_000 + UInt64(index))
             let last = FakeBrowserStore.now - TimeInterval(index == 0 ? 6 * 3600 : 86_400 * index)
             channels[id] = Channel(
@@ -103,7 +118,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
 
     override func threadBrowser(parentId: ChannelId) -> ThreadBrowser {
         ThreadBrowser(
-            joined: empty ? [] : joined, others: [], archived: [], older: .all)
+            joined: empty ? [] : joined, others: [], archived: [], older: more ? .more : .all)
     }
 
     override func latestMessage(threadId: ChannelId) -> Message? {

@@ -7,9 +7,9 @@ struct SessionView<MessageArea: View>: View {
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
     var splitWidth = SplitWidth.shared
+    @State var hover = ThreadsHover()
     @ViewBuilder let messageArea: (MessageListModel, ChannelName) -> MessageArea
     @State private var sidebarWidth = SidebarWidth.stored(in: .standard)
-    @State private var hover = ThreadsHover()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,10 +47,11 @@ struct SessionView<MessageArea: View>: View {
         .overlayPreferenceValue(PeekRowBounds.self) { anchor in
             GeometryReader { proxy in
                 if let channel = hover.channel, let anchor {
-                    moreActiveThreads(of: channel, beside: proxy[anchor])
+                    moreActiveThreads(of: channel, beside: proxy[anchor], area: proxy.size.height)
                 }
             }
         }
+        .onChange(of: hover.channel, initial: true) { _, channel in session.peek(at: channel) }
         .ignoresSafeArea(edges: .top)
         .navigationTitle(windowTitle.text)
         .alert(
@@ -76,8 +77,10 @@ struct SessionView<MessageArea: View>: View {
     }
 
     @ViewBuilder
-    private func moreActiveThreads(of channel: ChannelId, beside row: CGRect) -> some View {
-        let peeks = session.moreActiveThreads(of: channel)
+    private func moreActiveThreads(of channel: ChannelId, beside row: CGRect, area: CGFloat)
+        -> some View
+    {
+        let peeks = session.peekedThreads
         if !peeks.isEmpty {
             MoreActiveThreadsPopout(
                 peeks: peeks,
@@ -91,7 +94,11 @@ struct SessionView<MessageArea: View>: View {
                 }
             )
             .onHover { hover.hoverPopout($0) }
-            .offset(x: row.maxX + MoreActiveThreadsPopout.spacing, y: row.minY)
+            .offset(
+                x: row.maxX + MoreActiveThreadsPopout.spacing,
+                y: MoreActiveThreadsPopout.top(
+                    row: row, height: MoreActiveThreadsPopout.height(threads: peeks.count),
+                    area: area))
         }
     }
 

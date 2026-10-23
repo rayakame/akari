@@ -18,6 +18,8 @@ enum ThreadBrowserLayout {
     static let resultsTop: CGFloat = 16
     static let resultsBottom: CGFloat = 8
     static let emptyHeight: CGFloat = 400
+    // Discord loads the next page within 200 of the list's bottom.
+    static let loadDistance: CGFloat = 200
     static let spinnerMargin: CGFloat = 64
     static let minHeight: CGFloat = 400
     static let popoutMinWidth: CGFloat = 480
@@ -90,8 +92,10 @@ struct ThreadBrowserView: View {
     var body: some View {
         VStack(spacing: 0) {
             ThreadBrowserHeader(browser: browser, close: session.closeThreadBrowser)
+            // Never taller than the room left: the header stays in a small window.
             content
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
+                .clipped()
         }
         .task(id: browser.parentId) { await browser.open() }
     }
@@ -129,15 +133,15 @@ struct ThreadBrowserView: View {
                             card(row)
                         }
                     }
-                    if browser.older == .more {
-                        // Discord loads the next page within 200 of the list's bottom.
-                        Color.clear
-                            .frame(height: 1)
-                            .padding(.top, -200)
-                            .onAppear { Task { await browser.loadMore() } }
-                    }
                 }
                 .padding(.horizontal, ThreadBrowserLayout.inset)
+                .background {
+                    ScrollEnd(distance: ThreadBrowserLayout.loadDistance) {
+                        if browser.older == .more {
+                            Task { await browser.loadMore() }
+                        }
+                    }
+                }
             }
         }
     }
@@ -172,6 +176,8 @@ struct ThreadBrowserHeader: View {
     let browser: ThreadBrowserModel
     let close: () -> Void
     @State private var query = ""
+    // VoiceOver starts here when there's no field to start in.
+    @AccessibilityFocusState private var titleSpoken: Bool
 
     private static let title = "Threads"
 
@@ -189,6 +195,8 @@ struct ThreadBrowserHeader: View {
                     .lineLimit(1)
                     .fixedSize()
                     .padding(.leading, ThreadBrowserLayout.titleGap)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($titleSpoken)
                 if browser.canSearch {
                     Rectangle()
                         .fill(Color(nsColor: Palette.borderSubtle))
@@ -224,6 +232,11 @@ struct ThreadBrowserHeader: View {
         }
         .padding(.bottom, 1)
         .onChange(of: query) { _, text in browser.setQuery(text) }
+        .onAppear {
+            if !browser.canSearch {
+                titleSpoken = true
+            }
+        }
     }
 
     private func submit() {
@@ -249,6 +262,7 @@ struct ThreadSearchField: View {
     @Binding var query: String
     let submit: () -> Void
     @FocusState private var focused: Bool
+    @AccessibilityFocusState private var spoken: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -264,6 +278,7 @@ struct ThreadSearchField: View {
             .font(TypeScale.browserText.font)
             .foregroundStyle(Color(nsColor: Palette.textDefault))
             .focused($focused)
+            .accessibilityFocused($spoken)
             .onSubmit(submit)
             .accessibilityLabel(ThreadBrowserView.placeholder)
             if !query.isEmpty {
@@ -287,7 +302,10 @@ struct ThreadSearchField: View {
                     Color(nsColor: focused ? Palette.brand : Palette.borderSubtle),
                     lineWidth: focused ? 2 : 1)
         }
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            spoken = true
+        }
     }
 }
 
@@ -505,6 +523,67 @@ struct ThreadBrowserEmptyState: View {
                 .multilineTextAlignment(.center)
         }
         .padding(32)
-        .frame(maxWidth: .infinity, minHeight: ThreadBrowserLayout.emptyHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Calls `near` while the enclosing scroll view's bottom is within `distance` of what shows, as it
+/// scrolls and as its content changes.
+struct ScrollEnd: NSViewRepresentable {
+    let distance: CGFloat
+    let near: () -> Void
+
+    func makeNSView(context: Context) -> Probe {
+        Probe()
+    }
+
+    func updateNSView(_ probe: Probe, context: Context) {
+        probe.distance = distance
+        probe.near = near
+        probe.check()
+    }
+
+    static func dismantleNSView(_ probe: Probe, coordinator: ()) {
+        probe.stop()
+    }
+
+    final class Probe: NSView {
+        var distance: CGFloat = 0
+        var near: () -> Void = {}
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil, let clip = enclosingScrollView?.contentView else {
+                return
+            }
+            clip.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification,
+                object: clip)
+            check()
+        }
+
+        func stop() {
+            NotificationCenter.default.removeObserver(
+                self, name: NSView.boundsDidChangeNotification, object: nil)
+        }
+
+        @objc private func scrolled(_ notification: Notification) {
+            check()
+        }
+
+        func check() {
+            guard let scroll = enclosingScrollView, let document = scroll.documentView else {
+                return
+            }
+            let shown = scroll.contentView.bounds
+            let below = document.isFlipped ? document.frame.height - shown.maxY : shown.minY
+            if below <= distance {
+                near()
+            }
+        }
     }
 }

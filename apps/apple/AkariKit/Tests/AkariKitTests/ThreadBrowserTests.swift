@@ -786,6 +786,31 @@ final class ThreadBrowserSessionTests {
         session.close()
     }
 
+    @Test
+    func theChannelsComposerCanTakeTheFocusBack() {
+        let session = inChannel11()
+        session.channelFocused()
+
+        session.refocusChannel()
+
+        #expect(session.focusChannel)
+        session.close()
+    }
+
+    // A Shift+click's split asked for the focus first.
+    @Test
+    func theSplitsComposerKeepsTheFocusItAskedFor() async {
+        let session = inChannel11()
+        session.channelFocused()
+        await session.open(browsed: id(33), beside: true)
+        #expect(session.focusSplit)
+
+        session.refocusChannel()
+
+        #expect(!session.focusChannel)
+        session.close()
+    }
+
     // Shown, the popout follows new messages as the browser does.
     @Test
     func thePeekedThreadsFollowTheStore() {

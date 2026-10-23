@@ -337,6 +337,14 @@ public final class SessionModel {
         focusChannel = false
     }
 
+    /// The channel's composer takes the focus again, e.g. when the Threads browser closed and
+    /// nothing else took it, unless the split's asked for it; see `focusChannel`.
+    public func refocusChannel() {
+        if !focusSplit {
+            focusChannel = true
+        }
+    }
+
     private func forgetSplit(of channel: ChannelId) {
         guard splits[channel] != nil else {
             return

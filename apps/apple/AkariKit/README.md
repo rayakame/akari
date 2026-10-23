@@ -145,7 +145,8 @@ waits in `membershipError`, in Discord's words, until `dismissMembershipError()`
 announcement channel, or a thread's parent of those kinds); `openThreadBrowser(of:as:)` opens
 its `ThreadBrowserModel` as the popout or the modal ("See all threads"), which another channel or
 `closeThreadBrowser()` closes; the core hears which channel's browser is open
-(`Account.set_browsing`), so a reconnect keeps its threads. The browser's `sections` are Discord's ("9 joined threads", "2
+(`Account.set_browsing`), so a reconnect keeps its threads, and `refocusChannel()` gives the
+channel's composer the focus a closed browser leaves (not over a split's). The browser's `sections` are Discord's ("9 joined threads", "2
 other active threads", "older threads", empty ones left out) with rows (name; the newest
 message, "No recent messages", "Started by" with the owner, or "Last active", each with its
 time; faces from the member preview and "+N" or "50+"); `open()` loads the first page of

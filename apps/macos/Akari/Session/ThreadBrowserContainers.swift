@@ -62,7 +62,7 @@ struct ThreadBrowserPopout: View {
         ZStack(alignment: .topLeading) {
             ThreadBrowserEvents(
                 inside: [frame, button], onOutside: session.closeThreadBrowser,
-                onEscape: session.closeThreadBrowser)
+                onEscape: session.closeThreadBrowser, onFocusFree: session.refocusChannel)
             ThreadBrowserView(browser: browser, session: session)
                 .frame(width: width, height: height)
                 .background(Color(nsColor: Palette.surfaceHigh))
@@ -73,6 +73,7 @@ struct ThreadBrowserPopout: View {
                         .padding(-0.5)
                 }
                 .shadow(color: .black.opacity(0.24), radius: 12, y: 12)
+                .threadBrowserDialog()
                 .offset(x: frame.minX, y: frame.minY)
         }
         .frame(width: area.width, height: area.height, alignment: .topLeading)
@@ -98,7 +99,9 @@ struct ThreadBrowserModal: View {
         let size = ThreadBrowserLayout.modalSize(
             list: ThreadBrowserLayout.listHeight(browser), window: area)
         ZStack {
-            ThreadBrowserEvents(inside: [], onOutside: nil, onEscape: session.closeThreadBrowser)
+            ThreadBrowserEvents(
+                inside: [], onOutside: nil, onEscape: session.closeThreadBrowser, modal: true,
+                onFocusFree: session.refocusChannel)
             Color.black.opacity(Self.backdrop)
                 .contentShape(Rectangle())
                 .onTapGesture { session.closeThreadBrowser() }
@@ -115,18 +118,31 @@ struct ThreadBrowserModal: View {
                         .strokeBorder(Color(nsColor: Palette.borderSubtle), lineWidth: 1)
                 }
                 .shadow(color: .black.opacity(0.24), radius: 12, y: 12)
+                .threadBrowserDialog()
         }
         .frame(width: area.width, height: area.height)
     }
 }
 
-/// Watches the window's clicks and Escape while a browser shows: a click outside `inside`
-/// (in this view's space) calls `onOutside` and still reaches what it hit, as a click outside
-/// Discord's popouts does; Escape calls `onEscape` and goes no further.
+extension View {
+    /// As Discord's: a modal dialog named "Threads", which VoiceOver stays inside.
+    func threadBrowserDialog() -> some View {
+        accessibilityElement(children: .contain)
+            .accessibilityLabel(ThreadsButton.label)
+            .accessibilityAddTraits(.isModal)
+    }
+}
+
+/// Watches the window's clicks and keys while a browser shows: a click outside `inside` (in this
+/// view's space) calls `onOutside` and still reaches what it hit, as a click outside Discord's
+/// popouts does; Escape calls `onEscape` and goes no further; a modal keeps typing from what's
+/// behind it. Once it's closed, `onFocusFree` gets the focus nothing else took.
 struct ThreadBrowserEvents: NSViewRepresentable {
     let inside: [CGRect]
     let onOutside: (() -> Void)?
     let onEscape: () -> Void
+    var modal = false
+    var onFocusFree: () -> Void = {}
 
     func makeNSView(context: Context) -> Watcher {
         Watcher()
@@ -136,6 +152,8 @@ struct ThreadBrowserEvents: NSViewRepresentable {
         watcher.inside = inside
         watcher.onOutside = onOutside
         watcher.onEscape = onEscape
+        watcher.modal = modal
+        watcher.onFocusFree = onFocusFree
     }
 
     static func dismantleNSView(_ watcher: Watcher, coordinator: ()) {
@@ -146,11 +164,20 @@ struct ThreadBrowserEvents: NSViewRepresentable {
         var inside: [CGRect] = []
         var onOutside: (() -> Void)?
         var onEscape: () -> Void = {}
+        var modal = false
+        var onFocusFree: () -> Void = {}
         private var monitor: Any?
 
         override var isFlipped: Bool { true }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil, let window {
+                handFocusOn(in: window)
+            }
+            super.viewWillMove(toWindow: newWindow)
+        }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -175,16 +202,45 @@ struct ThreadBrowserEvents: NSViewRepresentable {
         // The Escape key's code on every layout.
         private static let escape: UInt16 = 53
 
+        private static func isField(_ responder: NSResponder?) -> Bool {
+            (responder as? NSTextView)?.isFieldEditor == true
+        }
+
+        // The field's focus falls back to the window unless the closing click took it. A closing
+        // window may be deallocating, so it's looked up by number, never referenced.
+        private func handFocusOn(in window: NSWindow) {
+            let free = onFocusFree
+            let number = window.windowNumber
+            Task { @MainActor in
+                guard let window = NSApp.window(withWindowNumber: number) else {
+                    return
+                }
+                let current = window.firstResponder
+                if current === window || (current as? NSView)?.window !== window {
+                    free()
+                }
+            }
+        }
+
         func handle(_ event: NSEvent) -> NSEvent? {
             guard event.window === window else {
                 return event
             }
             if event.type == .keyDown {
-                guard event.keyCode == Self.escape else {
-                    return event
+                if event.keyCode == Self.escape {
+                    // The input method's, to cancel what it composes.
+                    if let text = window?.firstResponder as? NSTextView, text.hasMarkedText() {
+                        return event
+                    }
+                    onEscape()
+                    return nil
                 }
-                onEscape()
-                return nil
+                if modal, !event.modifierFlags.contains(.command),
+                    !Self.isField(window?.firstResponder)
+                {
+                    return nil
+                }
+                return event
             }
             let point = convert(event.locationInWindow, from: nil)
             if let onOutside, !inside.contains(where: { $0.contains(point) }) {

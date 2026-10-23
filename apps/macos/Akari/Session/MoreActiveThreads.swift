@@ -53,6 +53,14 @@ final class ThreadsHover {
         }
     }
 
+    /// The row left the list (another server, a collapsed category, a channel no longer listed):
+    /// no pointer will leave it.
+    func rowGone(_ channel: ChannelId) {
+        if row == channel || self.channel == channel {
+            dismiss()
+        }
+    }
+
     /// A click on the row, a row of the popout or "See All".
     func dismiss() {
         showing?.cancel()
@@ -96,11 +104,25 @@ struct PeekRowBounds: PreferenceKey {
 
 /// "More Active Threads": up to three threads, each with its owner's face, name and time, and
 /// "See All", which opens the channel's Threads modal. 17 to the right of the row, its top level
-/// with the row's.
+/// with the row's while the window has room.
 struct MoreActiveThreadsPopout: View {
     static let spacing: CGFloat = 17
     static let title = "More Active Threads"
     static let seeAll = "See All"
+
+    /// 8 around, the title's 8 + 18 + 2, then the threads and "See All", 34 each and 2 apart.
+    static func height(threads: Int) -> CGFloat {
+        8 + 28 + CGFloat(threads + 1) * 34 + CGFloat(threads) * 2 + 8
+    }
+
+    /// Discord's position layer aligns it with the row's top and moves it up to stay 12 inside
+    /// the window's bottom, though never above 12.
+    static func top(row: CGRect, height: CGFloat, area: CGFloat) -> CGFloat {
+        guard row.minY >= 0 else {
+            return 0
+        }
+        return row.minY + height + 12 > area ? max(12, area - 12 - height) : row.minY
+    }
 
     let peeks: [ThreadPeek]
     var now: Date?
