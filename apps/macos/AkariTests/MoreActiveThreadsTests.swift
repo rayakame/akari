@@ -275,7 +275,7 @@ struct MoreActiveThreadsScreenTests {
         let (session, _, window) = await peeking(focus: WindowFocus { keyed.append($0) })
         defer { closeAll(window) }
         await settle { panel(of: window)?.isVisible == true }
-        let panel = try #require(panel(of: window))
+        let panel = try #require(self.panel(of: window))
 
         #expect(!panel.canBecomeKey)
         #expect(keyed.isEmpty)

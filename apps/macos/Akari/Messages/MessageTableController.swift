@@ -1358,8 +1358,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // The list's one pointer authority: the hovered row, the thread box and hover link under the
     // pointer, and the cursor, from what's there now. Nothing in the rows tracks the pointer.
     private func updatePointer() {
-        updateHover()
         let location = pointer()
+        updateHover(at: location)
         let target = location.flatMap(target(at:))
         let text = target?.view as? MessageTextView
         if underlinedText !== text {
@@ -1408,9 +1408,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return (nil, .arrow)
     }
 
-    private func updateHover() {
+    private func updateHover(at location: NSPoint?) {
         var row = -1
-        if let location = pointer() {
+        if let location {
             let point = tableView.convert(location, from: nil)
             if tableView.visibleRect.contains(point) {
                 row = tableView.row(at: point)

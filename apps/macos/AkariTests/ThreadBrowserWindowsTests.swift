@@ -155,8 +155,8 @@ final class ThreadBrowserWindowsTests {
     @Test
     func thePopoutIsAKeyPanelOverAShieldOverTheWindow() async throws {
         try await opened(.popout)
-        let shield = try #require(shield)
-        let panel = try #require(panel)
+        let shield = try #require(self.shield)
+        let panel = try #require(self.panel)
 
         #expect(shield.frame == window.frame)
         #expect(!shield.canBecomeKey && !shield.ignoresMouseEvents)
@@ -171,7 +171,7 @@ final class ThreadBrowserWindowsTests {
     @Test
     func theModalIsCenteredOverItsDimmedShield() async throws {
         try await opened(.modal)
-        let shield = try #require(shield)
+        let shield = try #require(self.shield)
         let frame = fromTop(try #require(panel).frame)
 
         #expect(abs(frame.minX - 210) <= 1 && abs(frame.minY - 56) <= 1, "\(frame)")
@@ -187,8 +187,8 @@ final class ThreadBrowserWindowsTests {
         _ presentation: ThreadBrowserModel.Presentation
     ) async throws {
         try await opened(presentation)
-        let shield = try #require(shield)
-        let panel = try #require(panel)
+        let shield = try #require(self.shield)
+        let panel = try #require(self.panel)
 
         // The window server shows what AppKit ordered a moment later.
         try await Task.sleep(for: .milliseconds(300))
@@ -208,7 +208,7 @@ final class ThreadBrowserWindowsTests {
     @Test(arguments: [NSEvent.EventType.leftMouseDown, .rightMouseDown, .otherMouseDown])
     func aPressOnTheShieldOnlyClosesTheBrowser(_ press: NSEvent.EventType) async throws {
         try await opened(.popout)
-        let shield = try #require(shield)
+        let shield = try #require(self.shield)
 
         shield.sendEvent(try mouse(press, at: screenPoint(fromTop: 150, 120), in: shield))
 
@@ -221,7 +221,7 @@ final class ThreadBrowserWindowsTests {
         async throws
     {
         try await opened(presentation)
-        let panel = try #require(panel)
+        let panel = try #require(self.panel)
 
         panel.sendEvent(try key(53, "\u{1b}", in: panel))
 
@@ -232,7 +232,7 @@ final class ThreadBrowserWindowsTests {
     @Test
     func escapeWhileAnInputMethodComposesLeavesTheBrowserOpen() async throws {
         try await opened(.modal)
-        let panel = try #require(panel)
+        let panel = try #require(self.panel)
         let field = try #require(searchField)
         panel.makeFirstResponder(field)
         let editor = try #require(panel.firstResponder as? NSTextView)
@@ -253,7 +253,7 @@ final class ThreadBrowserWindowsTests {
     @Test
     func closingGivesTheKeyBackAndTheComposerTheFocus() async throws {
         try await opened(.modal)
-        let panel = try #require(panel)
+        let panel = try #require(self.panel)
         #expect(keyed.last === panel)
         window.makeFirstResponder(nil)
 
@@ -270,12 +270,12 @@ final class ThreadBrowserWindowsTests {
     }
 
     func close(_ closing: Closing) async throws {
-        let panel = try #require(panel)
+        let panel = try #require(self.panel)
         switch closing {
         case .escape:
             panel.sendEvent(try key(53, "\u{1b}", in: panel))
         case .shieldPress:
-            let shield = try #require(shield)
+            let shield = try #require(self.shield)
             shield.sendEvent(try mouse(.leftMouseDown, at: screenPoint(fromTop: 20, 400), in: shield))
         case .closeButton:
             // The X: 16 in from the modal's right edge, centered in the header under its 8.
@@ -310,8 +310,8 @@ final class ThreadBrowserWindowsTests {
     @Test(arguments: Closing.allCases)
     func everyWayOfClosingLeavesNoWindowBehind(_ closing: Closing) async throws {
         try await opened(.modal)
-        let shield = try #require(shield)
-        let panel = try #require(panel)
+        let shield = try #require(self.shield)
+        let panel = try #require(self.panel)
 
         try await close(closing)
 
@@ -325,7 +325,7 @@ final class ThreadBrowserWindowsTests {
     @Test
     func theWindowMenuActsOnTheBrowserAndItsWindow() async throws {
         try await opened(.popout)
-        let panel = try #require(panel)
+        let panel = try #require(self.panel)
         let close = NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         let minimize = NSMenuItem(
             title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
@@ -339,7 +339,7 @@ final class ThreadBrowserWindowsTests {
     @Test
     func theShieldAndTheModalFollowTheWindowsSize() async throws {
         try await opened(.modal)
-        let shield = try #require(shield)
+        let shield = try #require(self.shield)
 
         window.setFrame(NSRect(x: 0, y: 0, width: 1300, height: 900), display: true)
 
@@ -355,7 +355,7 @@ final class ThreadBrowserWindowsTests {
         async throws
     {
         try await opened(presentation)
-        let panel = try #require(panel)
+        let panel = try #require(self.panel)
 
         #expect(panel.accessibilitySubrole() == .dialog)
         #expect(panel.accessibilityLabel() == "Threads")
