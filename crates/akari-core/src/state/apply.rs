@@ -389,6 +389,7 @@ pub(crate) struct State {
     generation: u64,
     // The channel whose Threads browser is open.
     browsing: Option<ChannelId>,
+    page_tickets: u64,
     clock: Arc<Clock>,
 }
 
@@ -423,6 +424,7 @@ impl State {
             older: HashMap::new(),
             generation: 0,
             browsing: None,
+            page_tickets: 0,
             clock,
         }
     }

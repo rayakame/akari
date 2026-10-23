@@ -13,8 +13,7 @@ pub(crate) const OLDER_PAGE: u32 = 25;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OlderPage {
     pub(crate) offset: u32,
-    // The READY it was asked in; a later one clears the pages.
-    generation: u64,
+    ticket: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +22,9 @@ pub(super) struct OlderPages {
     offset: u32,
     // The oldest thread the pages brought, by `newest`.
     oldest: Option<u64>,
+    // The last page asked for. READY and GUILD_CREATE start the pages over, so an answer whose
+    // ticket isn't this one belongs to pages that are gone.
+    ticket: u64,
 }
 
 impl Default for OlderPages {
@@ -31,6 +33,7 @@ impl Default for OlderPages {
             state: OlderThreads::NotLoaded,
             offset: 0,
             oldest: None,
+            ticket: 0,
         }
     }
 }
@@ -124,16 +127,17 @@ impl State {
         parent: ChannelId,
         events: &mut Vec<StoreEvent>,
     ) -> Option<OlderPage> {
-        let generation = self.generation;
         let pages = self.older.entry(parent).or_default();
         if !matches!(pages.state, OlderThreads::NotLoaded | OlderThreads::More) {
             return None;
         }
+        self.page_tickets += 1;
         pages.state = OlderThreads::Loading;
+        pages.ticket = self.page_tickets;
         events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
         Some(OlderPage {
             offset: pages.offset,
-            generation,
+            ticket: pages.ticket,
         })
     }
 
@@ -146,11 +150,11 @@ impl State {
     ) {
         let oldest = results.threads.iter().flatten().map(newest_on_wire).min();
         let more = results.has_more;
-        let found = self.keep_found_threads(results, page.generation, events);
-        if page.generation != self.generation {
+        let current = self.is_current(parent, page);
+        let found = self.keep_threads_found(results, current, events);
+        if !current {
             return;
         }
-        // Gone when its channel was deleted meanwhile.
         let Some(pages) = self.older.get_mut(&parent) else {
             return;
         };
@@ -177,7 +181,7 @@ impl State {
         page: OlderPage,
         events: &mut Vec<StoreEvent>,
     ) {
-        if page.generation == self.generation
+        if self.is_current(parent, page)
             && let Some(pages) = self.older.get_mut(&parent)
         {
             pages.state = OlderThreads::Failed;
@@ -192,7 +196,7 @@ impl State {
         page: OlderPage,
         events: &mut Vec<StoreEvent>,
     ) {
-        if page.generation != self.generation {
+        if !self.is_current(parent, page) {
             return;
         }
         let Some(pages) = self.older.get_mut(&parent) else {
@@ -218,8 +222,24 @@ impl State {
         asked: u64,
         events: &mut Vec<StoreEvent>,
     ) -> Option<Vec<ChannelId>> {
+        self.keep_threads_found(results, asked == self.generation, events)
+    }
+
+    // A page whose channel's pages started over (or were dropped) since it was asked for.
+    fn is_current(&self, parent: ChannelId, page: OlderPage) -> bool {
+        self.older
+            .get(&parent)
+            .is_some_and(|pages| pages.ticket == page.ticket)
+    }
+
+    fn keep_threads_found(
+        &mut self,
+        results: ThreadSearchResults,
+        current: bool,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<Vec<ChannelId>> {
         let threads = results.threads?;
-        let stale = asked != self.generation;
+        let stale = !current;
         let mut found = Vec::with_capacity(threads.len());
         let mut brought = HashSet::new();
         for mut thread in threads {

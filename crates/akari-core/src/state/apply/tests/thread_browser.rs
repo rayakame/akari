@@ -1091,3 +1091,37 @@ fn a_thread_a_guild_create_drops_leaves_nothing_unconfirmed() {
     assert!(state.channel(Snowflake::new(OLD_X)).is_none());
     assert!(!state.unconfirmed.contains(&Snowflake::new(OLD_X)));
 }
+
+// GUILD_CREATE started the pages over while a page was on its way, and the browser asked again.
+#[test]
+fn a_page_from_before_a_guild_create_leaves_the_new_one_alone() {
+    let mut state = ready_state();
+    let parent = Snowflake::new(GENERAL);
+    let old = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+    apply(&mut state, "GUILD_CREATE", guild_create_g1());
+    let new = state.begin_older_threads(parent, &mut Vec::new()).unwrap();
+
+    state.finish_older_threads(
+        parent,
+        old,
+        page(
+            vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+            false,
+        ),
+        &mut Vec::new(),
+    );
+    assert_eq!(browser(&state).older, OlderThreads::Loading);
+    assert!(state.unconfirmed.contains(&Snowflake::new(OLD_X)));
+    state.fail_older_threads(parent, old, &mut Vec::new());
+    state.abandon_older_threads(parent, old, &mut Vec::new());
+    assert_eq!(browser(&state).older, OlderThreads::Loading);
+
+    state.finish_older_threads(parent, new, page(Vec::new(), true), &mut Vec::new());
+    assert_eq!(browser(&state).older, OlderThreads::More);
+    assert_eq!(
+        state
+            .begin_older_threads(parent, &mut Vec::new())
+            .map(|page| page.offset),
+        Some(25)
+    );
+}
