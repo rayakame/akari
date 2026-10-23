@@ -326,6 +326,9 @@ pub struct Message {
     pub application_name: Option<String>,
     /// A poll result's or an AutoMod alert's first embed's fields, which their lines read.
     pub embed_fields: Vec<EmbedField>,
+    /// The first embed's title, which names a thread started from the message.
+    #[uniffi(default = None)]
+    pub embed_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -443,6 +446,11 @@ impl Message {
                     value: field.value.to_string(),
                 })
                 .collect(),
+            embed_title: message
+                .embeds
+                .first()
+                .and_then(|embed| embed.title.as_deref())
+                .map(str::to_owned),
         }
     }
 }
