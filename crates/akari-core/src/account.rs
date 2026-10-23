@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cache::{CacheThread, DiskCache, Flusher};
+use crate::error::TransportErrorKind;
 use crate::gateway::session::Timing;
 use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
@@ -91,6 +92,18 @@ impl ThreadLocation {
     }
 }
 
+// A failure after the request left: Discord may have created the thread behind it.
+fn maybe_created(err: &RequestError) -> bool {
+    match err {
+        RequestError::ServerError { .. } => true,
+        RequestError::Network(err) => !matches!(
+            err.kind(),
+            TransportErrorKind::Connect | TransportErrorKind::Tls
+        ),
+        _ => false,
+    }
+}
+
 /// Where the user started creating a thread, which Discord's own client tells it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -132,6 +145,10 @@ pub enum CreateThreadError {
     /// Discord wants a name.
     #[error("Discord wants a name")]
     NameRequired,
+    /// The request went out but its answer was lost or didn't read as the thread: it may exist
+    /// already. The parent's slowmode for new threads starts as if it did.
+    #[error("the thread may have been created")]
+    MaybeCreated,
     /// Anything else, also a refusal before asking (`InvalidRequest`) and a captcha.
     #[error(transparent)]
     Request(#[from] RequestError),
@@ -635,13 +652,12 @@ impl Shared {
         };
         let answer = self.rest.create_thread(parent, message, &body).await;
         let created = match answer {
-            Ok(thread) => match self.store.keep_created_thread(thread) {
-                Some(thread) => {
-                    self.store.start_thread_cooldown(parent);
-                    Ok(thread)
-                }
-                None => Err(RequestError::UnexpectedResponse.into()),
-            },
+            Ok(thread) => {
+                self.store.start_thread_cooldown(parent);
+                thread
+                    .and_then(|thread| self.store.keep_created_thread(thread))
+                    .ok_or(CreateThreadError::MaybeCreated)
+            }
             Err(Failure::Slowmode(wait)) => Err(self.slowed(parent, wait)),
             Err(Failure::Api(api)) => Err(match api.code {
                 SLOWMODE => self.slowed(parent, None),
@@ -663,7 +679,12 @@ impl Shared {
             Err(other) => {
                 let err = RequestError::from(other);
                 self.failed(&err);
-                Err(err.into())
+                if maybe_created(&err) {
+                    self.store.start_thread_cooldown(parent);
+                    Err(CreateThreadError::MaybeCreated)
+                } else {
+                    Err(err.into())
+                }
             }
         };
         tracing::debug!(
@@ -677,6 +698,7 @@ impl Shared {
                 Err(CreateThreadError::TooManyThreads { .. }) => "too_many_threads",
                 Err(CreateThreadError::NameBlocked { .. }) => "name_blocked",
                 Err(CreateThreadError::NameRequired) => "name_required",
+                Err(CreateThreadError::MaybeCreated) => "maybe_created",
                 Err(CreateThreadError::Request(err)) => err.kind(),
             },
             "thread creation"

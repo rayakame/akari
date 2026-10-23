@@ -818,3 +818,21 @@ async fn a_refused_thread_says_why() {
     );
     account.close();
 }
+
+#[tokio::test]
+async fn a_lost_answer_may_have_created_the_thread() {
+    let (account, _server, _ws) = creating(ResponseTemplate::new(503)).await;
+
+    let created = account
+        .create_thread(
+            GENERAL,
+            None,
+            "t".to_owned(),
+            false,
+            CreateThreadLocation::KeyboardShortcut,
+        )
+        .await;
+
+    assert_eq!(created, Err(CreateThreadError::MaybeCreated));
+    account.close();
+}

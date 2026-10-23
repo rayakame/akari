@@ -291,6 +291,10 @@ pub enum CreateThreadError {
     NameBlocked { reason: String },
     #[error("Discord wants a name")]
     NameRequired,
+    /// The request went out but its answer was lost or didn't read as the thread: it may exist
+    /// already. The parent's slowmode for new threads starts as if it did.
+    #[error("the thread may have been created")]
+    MaybeCreated,
     /// Anything else, also a refusal before asking (`InvalidRequest`) and a captcha.
     #[error("{error}")]
     Request { error: RequestError },
@@ -305,6 +309,7 @@ impl From<akari_core::CreateThreadError> for CreateThreadError {
             E::TooManyThreads { announcement } => Self::TooManyThreads { announcement },
             E::NameBlocked { reason } => Self::NameBlocked { reason },
             E::NameRequired => Self::NameRequired,
+            E::MaybeCreated => Self::MaybeCreated,
             E::Request(error) => Self::Request {
                 error: error.into(),
             },

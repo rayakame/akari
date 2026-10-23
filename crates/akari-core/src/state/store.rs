@@ -1080,8 +1080,9 @@ impl Store {
     }
 
     /// Which threads the user may create in `parent`: public ones with Create Public Threads and
-    /// Read Message History, private ones with Create Private Threads and only in text channels.
-    /// None outside text and announcement channels, and none while the user is timed out.
+    /// Read Message History, private ones with Create Private Threads and only in text channels,
+    /// both only with Send Messages in Threads, as the first message needs it. None outside text
+    /// and announcement channels, and none while the user is timed out.
     pub fn thread_creation(&self, parent: ChannelId) -> ThreadCreation {
         let now = self.now_millis();
         self.read(|inner| inner.state.thread_creation(parent, now))

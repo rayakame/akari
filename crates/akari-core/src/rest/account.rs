@@ -386,7 +386,7 @@ impl AccountRest {
         parent: ChannelId,
         message: Option<MessageId>,
         body: &CreateThread,
-    ) -> Result<model::Channel, Failure> {
+    ) -> Result<Option<model::Channel>, Failure> {
         let (path, route) = match message {
             Some(message) => (
                 format!(
@@ -406,7 +406,8 @@ impl AccountRest {
                 Ok(self.request(HttpMethod::POST, &path)?.json(body))
             })
             .await?;
-        serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse.into())
+        // `None`: Discord said yes in a body that doesn't read as a channel.
+        Ok(serde_json::from_slice(&body).ok())
     }
 
     // `query` is already encoded. A 202 while Discord indexes the channel decodes without

@@ -7,6 +7,7 @@ const VIEW: u64 = 1 << 10;
 const HISTORY: u64 = 1 << 16;
 const PUBLIC: u64 = 1 << 35;
 const PRIVATE: u64 = 1 << 36;
+const IN_THREADS: u64 = 1 << 38;
 const ROLE: u64 = 600;
 const CATEGORY: u64 = 300_000_000_000_000_001;
 const NEWS: u64 = 300_000_000_000_000_004;
@@ -121,20 +122,44 @@ fn the_owner_may_create_public_and_private_threads() {
 #[test]
 fn public_threads_need_create_public_threads_and_read_message_history() {
     assert_eq!(
-        creation(&member_state(VIEW | PUBLIC | HISTORY), GENERAL),
+        creation(&member_state(VIEW | PUBLIC | HISTORY | IN_THREADS), GENERAL),
         ONLY_PUBLIC
     );
-    assert_eq!(creation(&member_state(VIEW | PUBLIC), GENERAL), NONE);
+    assert_eq!(
+        creation(&member_state(VIEW | PUBLIC | IN_THREADS), GENERAL),
+        NONE
+    );
 }
 
 #[test]
 fn private_threads_need_create_private_threads() {
     assert_eq!(
-        creation(&member_state(VIEW | PRIVATE), GENERAL),
+        creation(&member_state(VIEW | PRIVATE | IN_THREADS), GENERAL),
         ONLY_PRIVATE
     );
     assert_eq!(
-        creation(&member_state(VIEW | PUBLIC | PRIVATE | HISTORY), GENERAL),
+        creation(
+            &member_state(VIEW | PUBLIC | PRIVATE | HISTORY | IN_THREADS),
+            GENERAL
+        ),
+        BOTH
+    );
+}
+
+// The first message is required, so without sending in threads no thread could be started.
+#[test]
+fn creating_needs_send_messages_in_threads() {
+    let without = member_state(VIEW | PUBLIC | PRIVATE | HISTORY);
+    assert_eq!(creation(&without, GENERAL), NONE);
+    assert!(!can_start(
+        &with_messages(without, &[plain_message(PLAIN, 0, 0)]),
+        PLAIN
+    ));
+    assert_eq!(
+        creation(
+            &member_state(VIEW | PUBLIC | PRIVATE | HISTORY | IN_THREADS),
+            GENERAL
+        ),
         BOTH
     );
 }
@@ -155,7 +180,7 @@ fn threads_voice_channels_categories_and_dms_have_none() {
 
 #[test]
 fn a_timeout_takes_both() {
-    let all = VIEW | PUBLIC | PRIVATE | HISTORY;
+    let all = VIEW | PUBLIC | PRIVATE | HISTORY | IN_THREADS;
     let timed_out = |until: &str| {
         let until = until.to_owned();
         state_from(&member_ready(all, move |ready| {
@@ -175,7 +200,7 @@ fn a_timeout_takes_both() {
 
 #[test]
 fn a_channel_the_user_cant_view_has_none() {
-    let ready = member_ready(VIEW | PUBLIC | PRIVATE | HISTORY, |ready| {
+    let ready = member_ready(VIEW | PUBLIC | PRIVATE | HISTORY | IN_THREADS, |ready| {
         ready["guilds"][0]["channels"][1]["permission_overwrites"] =
             json!([{"id": ROLE.to_string(), "type": 0, "allow": "0", "deny": VIEW.to_string()}]);
     });
@@ -243,11 +268,14 @@ fn ephemeral_unknown_and_unsent_messages_cant_start_a_thread() {
 fn only_the_public_permission_lets_a_message_start_a_thread() {
     let message = [plain_message(PLAIN, 0, 0)];
     assert!(!can_start(
-        &with_messages(member_state(VIEW | PRIVATE | HISTORY), &message),
+        &with_messages(
+            member_state(VIEW | PRIVATE | HISTORY | IN_THREADS),
+            &message
+        ),
         PLAIN
     ));
     assert!(can_start(
-        &with_messages(member_state(VIEW | PUBLIC | HISTORY), &message),
+        &with_messages(member_state(VIEW | PUBLIC | HISTORY | IN_THREADS), &message),
         PLAIN
     ));
 }
@@ -456,5 +484,63 @@ fn a_created_thread_is_listed_at_once() {
 
     state.keep_created_thread(answer(thread), &mut Vec::new());
 
+    assert!(state.listed(Snowflake::new(PLAIN)));
+}
+
+fn fresh(id: u64, name: &str, member: bool) -> Value {
+    let mut thread = thread_with_id(id, name);
+    thread["thread_metadata"]["archive_timestamp"] = "2999-01-01T00:00:00+00:00".into();
+    if !member {
+        thread.as_object_mut().unwrap().remove("member");
+    }
+    thread
+}
+
+fn joined(state: &State, id: u64) -> bool {
+    state
+        .channel(Snowflake::new(id))
+        .and_then(|channel| channel.thread.as_deref().map(ThreadInfo::joined))
+        .unwrap_or(false)
+}
+
+// Discord's THREAD_CREATE for a new thread carries no member; the answer does.
+#[test]
+fn the_answer_joins_a_thread_create_that_came_first_without_a_member() {
+    let mut state = owner_state();
+    apply(&mut state, "THREAD_CREATE", fresh(PLAIN, "mine", false));
+    assert!(!joined(&state, PLAIN));
+
+    state.keep_created_thread(answer(fresh(PLAIN, "mine", true)), &mut Vec::new());
+
+    assert!(joined(&state, PLAIN));
+    assert!(state.listed(Snowflake::new(PLAIN)));
+}
+
+#[test]
+fn the_answer_joins_a_thread_the_messages_update_brought_first() {
+    let mut state = with_messages(owner_state(), &[plain_message(PLAIN, 0, 0)]);
+    apply(
+        &mut state,
+        "MESSAGE_UPDATE",
+        json!({"id": PLAIN.to_string(), "channel_id": GENERAL.to_string(), "flags": 32,
+            "thread": fresh(PLAIN, "mine", false)}),
+    );
+    assert!(state.channel(Snowflake::new(PLAIN)).is_some());
+    assert!(!joined(&state, PLAIN));
+
+    state.keep_created_thread(answer(fresh(PLAIN, "mine", true)), &mut Vec::new());
+
+    assert!(joined(&state, PLAIN));
+    assert!(state.listed(Snowflake::new(PLAIN)));
+}
+
+#[test]
+fn a_thread_create_without_a_member_after_the_answer_keeps_it_joined() {
+    let mut state = owner_state();
+    state.keep_created_thread(answer(fresh(PLAIN, "mine", true)), &mut Vec::new());
+
+    apply(&mut state, "THREAD_CREATE", fresh(PLAIN, "mine", false));
+
+    assert!(joined(&state, PLAIN));
     assert!(state.listed(Snowflake::new(PLAIN)));
 }

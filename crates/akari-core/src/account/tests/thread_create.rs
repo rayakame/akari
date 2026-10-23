@@ -11,8 +11,8 @@ const NEWS: u64 = 300_000_000_000_000_004;
 const NEWS_THREADS: &str = "/api/v9/channels/300000000000000004/threads";
 const NEW: u64 = 300_000_000_000_000_077;
 const ROLE: &str = "600";
-// View, send and read history, both thread kinds.
-const MEMBER: u64 = (1 << 10) | (1 << 11) | (1 << 16) | (1 << 35) | (1 << 36);
+// View, send (in threads too) and read history, both thread kinds.
+const MEMBER: u64 = (1 << 10) | (1 << 11) | (1 << 16) | (1 << 35) | (1 << 36) | (1 << 38);
 
 struct Online {
     account: Account,
@@ -683,7 +683,7 @@ async fn a_message_no_longer_loaded_is_asked_about() {
 
 #[tokio::test]
 async fn a_server_error_isnt_retried_so_nothing_is_created_twice() {
-    let online = owner().await;
+    let online = member(MEMBER, 30).await;
     online.answer(THREADS, ResponseTemplate::new(502)).await;
 
     let created = online
@@ -696,11 +696,64 @@ async fn a_server_error_isnt_retried_so_nothing_is_created_twice() {
         )
         .await;
 
-    assert!(matches!(
-        created,
-        Err(CreateThreadError::Request(RequestError::ServerError {
-            status: 502
-        }))
-    ));
+    // It may have been created behind the error: the cooldown starts as if it was.
+    assert!(matches!(created, Err(CreateThreadError::MaybeCreated)));
     assert_eq!(online.requests().await.len(), 1);
+    assert!(online.cooldown().is_some());
+}
+
+#[tokio::test]
+async fn an_answer_that_doesnt_read_as_a_thread_may_have_created_it() {
+    let mut text_channel = created(NEW, GENERAL, 11);
+    text_channel["type"] = 0.into();
+    for answer in [
+        ResponseTemplate::new(201).set_body_string("not json"),
+        ResponseTemplate::new(201).set_body_json(text_channel),
+    ] {
+        let online = member(MEMBER, 30).await;
+        online.answer(THREADS, answer).await;
+
+        let created = online
+            .create(
+                GENERAL,
+                None,
+                "t",
+                false,
+                CreateThreadLocation::KeyboardShortcut,
+            )
+            .await;
+
+        assert!(matches!(created, Err(CreateThreadError::MaybeCreated)));
+        assert!(online.cooldown().is_some());
+    }
+}
+
+#[test]
+fn only_failures_after_the_request_left_may_have_created_it() {
+    use crate::error::{TransportError, TransportErrorKind};
+    let network = |kind| RequestError::Network(TransportError::new(kind, "test"));
+
+    assert!(super::super::maybe_created(&RequestError::ServerError {
+        status: 500
+    }));
+    assert!(super::super::maybe_created(&network(
+        TransportErrorKind::Timeout
+    )));
+    assert!(super::super::maybe_created(&network(
+        TransportErrorKind::Protocol
+    )));
+    assert!(!super::super::maybe_created(&network(
+        TransportErrorKind::Connect
+    )));
+    assert!(!super::super::maybe_created(&network(
+        TransportErrorKind::Tls
+    )));
+    assert!(!super::super::maybe_created(&RequestError::RateLimited {
+        retry_after: None
+    }));
+    assert!(!super::super::maybe_created(&RequestError::Discord {
+        status: 403,
+        code: 50013,
+        message: String::new()
+    }));
 }

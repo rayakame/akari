@@ -4,7 +4,7 @@ use super::State;
 use crate::model::{self, ChannelId, ChannelType, MessageId, Permissions};
 use crate::state::events::StoreEvent;
 use crate::state::send::Slowmode;
-use crate::state::types::{Delivery, ThreadCreation};
+use crate::state::types::{Delivery, ThreadCreation, ThreadMembership};
 
 // The kinds Discord's client lets a thread start from: a user's message, reply or command and a
 // few more that render as one (module 406704).
@@ -22,7 +22,11 @@ impl State {
         if !text && channel.kind != ChannelType::GuildNews {
             return ThreadCreation::default();
         }
-        let Some(permissions) = self.permissions(parent, now_millis) else {
+        // The first message is required: without sending in threads, Akari offers no thread.
+        let Some(permissions) = self
+            .permissions(parent, now_millis)
+            .filter(|permissions| permissions.contains(Permissions::SEND_MESSAGES_IN_THREADS))
+        else {
             return ThreadCreation::default();
         };
         ThreadCreation {
@@ -115,8 +119,21 @@ impl State {
         ) {
             return None;
         }
-        if !self.entities.channels.contains_key(&id) {
-            self.put_channel(thread, events);
+        let unjoined = self.entities.channels.get(&id).map(|known| {
+            known
+                .thread
+                .as_deref()
+                .is_some_and(|info| info.member.is_none())
+        });
+        match unjoined {
+            None => self.put_channel(thread, events),
+            // MESSAGE_UPDATE's `thread` and a new thread's THREAD_CREATE come without the member.
+            Some(true) => {
+                if let Some(member) = thread.member {
+                    self.set_membership(id, Some(ThreadMembership::from_wire(member)), events);
+                }
+            }
+            Some(false) => {}
         }
         let kept = self.entities.channels.contains_key(&id).then_some(id);
         if kept.is_some() {
