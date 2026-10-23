@@ -1196,6 +1196,7 @@ impl State {
         }
         self.dirty.guild(Some(id));
         let after = after.clone();
+        self.follow_guild_threads(id, &mut next, events);
         match self.entities.guilds.get(&id).cloned() {
             Some(before) => {
                 if before != after {
@@ -1214,6 +1215,7 @@ impl State {
                     self.entities.read_states.forget(*id);
                     self.windows.drop_channel(*id);
                     self.latest.remove(id);
+                    self.unconfirmed.remove(id);
                 }
             }
             None => events.push(StoreEvent::GuildAdded(after)),
@@ -1319,11 +1321,15 @@ impl State {
         let windows = &mut self.windows;
         let threads = &mut self.threads;
         let latest = &mut self.latest;
+        let older = &mut self.older;
+        let unconfirmed = &mut self.unconfirmed;
         self.entities.channels.retain(|channel_id, channel| {
             let keep = channel.guild_id != Some(id);
             if !keep {
                 windows.drop_channel(*channel_id);
                 latest.remove(channel_id);
+                older.remove(channel_id);
+                unconfirmed.remove(channel_id);
                 threads.remove(channel);
             }
             keep

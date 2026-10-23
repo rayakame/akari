@@ -980,3 +980,114 @@ fn a_search_after_its_parent_was_deleted_brings_nothing() {
     assert_eq!(found, Some(Vec::new()));
     assert!(state.channel(Snowflake::new(OLD_X)).is_none());
 }
+
+// READY's guild as GUILD_CREATE sends it.
+fn guild_create_g1() -> Value {
+    ready_value()["guilds"][0].clone()
+}
+
+// The pages said nothing about the guild's threads once it was gone.
+#[test]
+fn a_guild_back_from_an_outage_loads_its_older_threads_again() {
+    let mut state = ready_state();
+    load(
+        &mut state,
+        vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+        false,
+    );
+    apply(
+        &mut state,
+        "GUILD_DELETE",
+        json!({"id": G1.to_string(), "unavailable": true}),
+    );
+
+    apply(&mut state, "GUILD_CREATE", guild_create_g1());
+
+    assert_eq!(browser(&state).older, OlderThreads::NotLoaded);
+}
+
+#[test]
+fn a_guild_gone_leaves_no_pages_or_unconfirmed_threads_behind() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        thread_object(ACTIVE_A, Some(400_000_000_000_000_040), false),
+    );
+    apply(&mut state, "READY", ready_value());
+    load(&mut state, Vec::new(), false);
+    assert!(state.unconfirmed.contains(&Snowflake::new(ACTIVE_A)));
+
+    apply(
+        &mut state,
+        "GUILD_DELETE",
+        json!({"id": G1.to_string(), "unavailable": true}),
+    );
+
+    assert!(state.unconfirmed.is_empty());
+    assert!(state.older.is_empty());
+}
+
+// GUILD_CREATE lists the guild's joined, active threads as READY does.
+#[test]
+fn a_repeated_guild_create_starts_the_pages_again_and_confirms_what_it_lists() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        thread_object(ACTIVE_A, Some(400_000_000_000_000_040), false),
+    );
+    apply(&mut state, "READY", ready_value());
+    load(&mut state, Vec::new(), false);
+    let mut guild = guild_create_g1();
+    guild["threads"].as_array_mut().unwrap().push(thread_object(
+        ACTIVE_A,
+        Some(400_000_000_000_000_040),
+        false,
+    ));
+
+    let events = apply(&mut state, "GUILD_CREATE", guild);
+
+    assert_eq!(browser(&state).older, OlderThreads::NotLoaded);
+    assert!(
+        events.contains(&format!("OlderThreadsChanged({GENERAL})")),
+        "{events:?}"
+    );
+    // Listed without the user's member, so joined with a default one.
+    assert_eq!(sections(&state).0, vec![ACTIVE_A, THREAD]);
+}
+
+#[test]
+fn threads_a_guild_create_kept_without_listing_them_wait_too() {
+    let mut state = ready_state();
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        thread_object(ACTIVE_A, Some(400_000_000_000_000_040), false),
+    );
+    assert_eq!(sections(&state).1, vec![ACTIVE_A]);
+
+    apply(&mut state, "GUILD_CREATE", guild_create_g1());
+
+    assert!(state.channel(Snowflake::new(ACTIVE_A)).is_some());
+    assert!(sections(&state).1.is_empty());
+}
+
+#[test]
+fn a_thread_a_guild_create_drops_leaves_nothing_unconfirmed() {
+    let mut state = ready_state();
+    load(
+        &mut state,
+        vec![thread_object(OLD_X, Some(400_000_000_000_000_015), true)],
+        false,
+    );
+    state.set_browsing(Some(Snowflake::new(GENERAL)));
+    apply(&mut state, "READY", ready_value());
+    assert!(state.unconfirmed.contains(&Snowflake::new(OLD_X)));
+    state.set_browsing(None);
+
+    apply(&mut state, "GUILD_CREATE", guild_create_g1());
+
+    assert!(state.channel(Snowflake::new(OLD_X)).is_none());
+    assert!(!state.unconfirmed.contains(&Snowflake::new(OLD_X)));
+}

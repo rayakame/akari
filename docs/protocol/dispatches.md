@@ -215,7 +215,9 @@ Active means this connection's gateway (READY, THREAD_CREATE, THREAD_UPDATE, THR
 or a request brought it unarchived: the official client keeps its active threads per connection,
 while Akari's store keeps threads across a READY that it didn't list (unjoined ones, joined ones
 Get Channel brought, the cache's), and one of those may have been archived or left meanwhile, so
-such a thread is in no active section until something brings it again. A new connection also
+such a thread is in no active section until something brings it again. GUILD_CREATE does the
+same for its guild (a guild back from an outage, or sent again): what it lists is confirmed, what
+the store kept besides waits, and the guild's channels' pages start over. A new connection also
 lets go of unjoined archived threads nothing shows: no window of its own, no box or "started a
 thread" line in its parent's window, not its parent's open browser (`Account::set_browsing`), not
 fetched by Get Channel this session. A private thread needs the user's membership or Manage Threads. Threads keep Discord's

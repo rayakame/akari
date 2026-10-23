@@ -2,8 +2,8 @@ use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::State;
-use crate::model::{self, ChannelId, ChannelType, Permissions, ThreadSearchResults};
+use super::{Entities, State};
+use crate::model::{self, ChannelId, ChannelType, GuildId, Permissions, ThreadSearchResults};
 use crate::state::{Channel, OlderThreads, StoreEvent, ThreadBrowser};
 
 /// How many archived threads a page asks for, as the official client does.
@@ -279,6 +279,40 @@ impl State {
             || self.windows.has(thread.id)
             || self.windows.box_row(parent, thread.id).is_some()
             || self.windows.names_thread(parent, thread.id)
+    }
+
+    // GUILD_CREATE lists a guild's joined, active threads as READY does: what it lists is
+    // confirmed, what the store kept besides may be stale, and the guild's pages start again.
+    pub(super) fn follow_guild_threads(
+        &mut self,
+        guild: GuildId,
+        next: &mut Entities,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let kept = std::mem::take(&mut next.kept_threads);
+        for channel in next.channels.keys() {
+            if kept.contains(channel) {
+                self.unconfirmed.insert(*channel);
+            } else {
+                self.unconfirmed.remove(channel);
+            }
+        }
+        let channels = &self.entities.channels;
+        let parents: Vec<ChannelId> = self
+            .older
+            .keys()
+            .filter(|parent| {
+                next.channels.contains_key(parent)
+                    || channels
+                        .get(parent)
+                        .is_some_and(|channel| channel.guild_id == Some(guild))
+            })
+            .copied()
+            .collect();
+        for parent in parents {
+            self.older.remove(&parent);
+            events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
+        }
     }
 
     // A READY lists the joined, active threads: the ones the store kept besides may be stale.
