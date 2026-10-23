@@ -140,7 +140,7 @@ struct ThreadBrowserViewTests {
 
     // Discord's cards are background-surface-higher, hovered background-surface-highest: on its
     // dark theme neutral-76 (#28282D) and neutral-73 (#2C2D32), on light neutral-1 (white), with
-    // borders of #97979F at 0.122 and 0.2 (light 0.278 and 0.4). Chris measured #28282D, #2C2D32
+    // borders of #97979F at 31/255 and 0.2 (light 71/255 and 0.4). Chris measured #28282D, #2C2D32
     // and a hovered border of #414249.
     @Test(arguments: [
         (NSAppearance.Name.darkAqua, "#28282d", "#2c2d32"), (.aqua, "#ffffff", "#ffffff"),
@@ -163,7 +163,8 @@ struct ThreadBrowserViewTests {
 
         #expect(same(try drawn(Palette.surfaceHigher), try drawn(NSColor(hex: normal))))
         #expect(same(try drawn(Palette.surfaceHighest), try drawn(NSColor(hex: hovered))))
-        let alpha: (subtle: CGFloat, normal: CGFloat) = appearance == .darkAqua ? (0.122, 0.2) : (0.278, 0.4)
+        let alpha: (subtle: CGFloat, normal: CGFloat) =
+            appearance == .darkAqua ? (31 / 255, 0.2) : (71 / 255, 0.4)
         #expect(
             same(
                 try over(Palette.borderNormal, on: Palette.surfaceHighest),

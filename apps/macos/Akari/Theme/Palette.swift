@@ -7,8 +7,9 @@ enum Palette {
     static let card = token("card", dark: "#28282d", light: "#ffffff")
     static let frameBorder = token(
         "frameBorder", dark: "#97979f", light: "#97979f", alpha: (0.12, 0.28))
+    // Discord's 31/255 and 71/255.
     static let borderSubtle = token(
-        "borderSubtle", dark: "#97979f", light: "#97979f", alpha: (0.12, 0.28))
+        "borderSubtle", dark: "#97979f", light: "#97979f", alpha: (31 / 255, 71 / 255))
     static let borderMuted = token(
         "borderMuted", dark: "#97979f", light: "#97979f", alpha: (0.04, 0.20))
     static let textDefault = token("textDefault", dark: "#efeff1", light: "#2e2e34")
