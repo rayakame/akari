@@ -1105,6 +1105,11 @@ impl Store {
         })
     }
 
+    pub(crate) fn may_start_thread(&self, channel: ChannelId, message: MessageId) -> bool {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.may_start_thread(channel, message, now))
+    }
+
     pub(crate) fn start_thread_cooldown(&self, parent: ChannelId) {
         let now = self.now_millis();
         self.write("thread cooldown", |inner, _| {

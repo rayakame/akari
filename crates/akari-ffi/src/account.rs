@@ -217,8 +217,8 @@ impl Account {
     /// Creates a thread in `parent_id`, from `message_id` when given (never private then), and
     /// returns it once the store has it; the parent's slowmode for new threads starts. Refused
     /// with `InvalidRequest` before asking: a name empty or over 100 characters once trimmed, a
-    /// message that can't start a thread, a kind the user may not create; with `Slowmode` while
-    /// that slowmode runs. The first message is an ordinary send in the thread afterwards.
+    /// loaded message that can't start a thread, a kind the user may not create; with `Slowmode`
+    /// while that slowmode runs. The first message is an ordinary send in the thread afterwards.
     pub async fn create_thread(
         &self,
         parent_id: ChannelId,

@@ -564,7 +564,8 @@ impl AccountRest {
                     }
                     .into());
                 }
-                502 | 504 if waits && server_errors == 0 => {
+                // A create may have happened behind a 502 or 504; asking again could make two.
+                502 | 504 if waits && !creates && server_errors == 0 => {
                     server_errors += 1;
                     report.retries += 1;
                     tokio::time::sleep(self.retry_delay).await;

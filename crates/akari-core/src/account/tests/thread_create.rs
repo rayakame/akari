@@ -354,15 +354,10 @@ async fn what_discord_would_refuse_is_refused_before_asking() {
             .create(GENERAL, None, &"x".repeat(101), false, location)
             .await
     ));
-    // Already has a thread; not loaded; a thread from a message is never private.
+    // Already has a thread; a thread from a message is never private.
     assert!(refused(
         online
             .create(GENERAL, Some(SOURCE), "t", false, location)
-            .await
-    ));
-    assert!(refused(
-        online
-            .create(GENERAL, Some(SOURCE + 1), "t", false, location)
             .await
     ));
     assert!(refused(
@@ -658,4 +653,54 @@ async fn a_refusal_starts_no_cooldown() {
         .await;
 
     assert_eq!(online.cooldown(), None);
+}
+
+// A message the window let go of meanwhile (a jump, a trim) is Discord's to judge.
+#[tokio::test]
+async fn a_message_no_longer_loaded_is_asked_about() {
+    let online = owner().await;
+    let route = "/api/v9/channels/300000000000000002/messages/400000000000000006/threads";
+    online
+        .answer(
+            route,
+            ResponseTemplate::new(201).set_body_json(created(SOURCE + 1, GENERAL, 11)),
+        )
+        .await;
+
+    let thread = online
+        .create(
+            GENERAL,
+            Some(SOURCE + 1),
+            "t",
+            false,
+            CreateThreadLocation::Message,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(thread, Snowflake::new(SOURCE + 1));
+}
+
+#[tokio::test]
+async fn a_server_error_isnt_retried_so_nothing_is_created_twice() {
+    let online = owner().await;
+    online.answer(THREADS, ResponseTemplate::new(502)).await;
+
+    let created = online
+        .create(
+            GENERAL,
+            None,
+            "t",
+            false,
+            CreateThreadLocation::KeyboardShortcut,
+        )
+        .await;
+
+    assert!(matches!(
+        created,
+        Err(CreateThreadError::Request(RequestError::ServerError {
+            status: 502
+        }))
+    ));
+    assert_eq!(online.requests().await.len(), 1);
 }

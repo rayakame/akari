@@ -218,7 +218,9 @@ only in text channels; a timeout takes both, as every permission but View Channe
 History. `Store::can_start_thread(channel, message)` is whether a message may start one: a sent
 user message (types 0, 19, 20, 23, 26, 41, 45, 47, 68), not ephemeral, without HAS_THREAD and
 without a thread of its ID in the store, and the public permission. Anything else, and a name that
-is empty or over 100 code points once trimmed, is refused before asking.
+is empty or over 100 code points once trimmed, is refused before asking; a message the window let
+go of since (a jump, a trim) needs only the permission, and Discord decides. A create is never
+asked again after a 502 or 504 (it may have happened); other requests are, once.
 
 Discord's answer is the thread; the store keeps it as THREAD_CREATE would (joined when it carries
 the user's `member`), unless the gateway's THREAD_CREATE came first. The official client waits for

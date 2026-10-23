@@ -50,6 +50,20 @@ impl State {
             && self.thread_creation(channel, now_millis).public
     }
 
+    // A message the window let go of since the form opened (a jump, a trim) is Discord's to judge.
+    pub(crate) fn may_start_thread(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        now_millis: i64,
+    ) -> bool {
+        if self.message(channel, message).is_some() {
+            return self.can_start_thread(channel, message, now_millis);
+        }
+        self.thread_creation(channel, now_millis).public
+            && !self.entities.channels.contains_key(&message.cast())
+    }
+
     pub(crate) fn thread_slowmode(
         &self,
         parent: ChannelId,

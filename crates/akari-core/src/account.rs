@@ -610,7 +610,7 @@ impl Shared {
             ChannelType::PublicThread
         };
         let kind = match (message, private) {
-            (Some(message), false) if self.store.can_start_thread(parent, message) => public,
+            (Some(message), false) if self.store.may_start_thread(parent, message) => public,
             (None, false) if allowed.public => public,
             (None, true) if allowed.private => ChannelType::PrivateThread,
             _ => return Err(RequestError::InvalidRequest.into()),
@@ -1362,8 +1362,8 @@ impl Account {
     /// Creates a thread in `parent`, from `message` when given (never private then), as the
     /// official client does, and returns it: Discord's answer puts it in the store, and the
     /// parent's slowmode for new threads starts. Refused with `InvalidRequest` before asking: a
-    /// name that is empty or longer than 100 code points once trimmed, a message that can't
-    /// start a thread ([`Store::can_start_thread`]), a kind the user may not create
+    /// name that is empty or longer than 100 code points once trimmed, a loaded message that
+    /// can't start a thread ([`Store::can_start_thread`]), a kind the user may not create
     /// ([`Store::thread_creation`]); with `Slowmode` while that slowmode runs. The first message
     /// is an ordinary send in the thread afterwards.
     pub async fn create_thread(
