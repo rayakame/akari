@@ -157,7 +157,24 @@ search changing nothing; `showsSpinner` and `isEmpty` say what shows instead.
 `open(browsed:beside:)` is a row's click (full width, closing the channel's split) or
 Shift+click (beside its channel), and `moreActiveThreads(of:)` the channel list's "More Active
 Threads" (`ThreadPeek`): up to three active threads the list doesn't show; while `peek(at:)`
-names the channel it shows for, `peekedThreads` follows the store. In a
+names the channel it shows for, `peekedThreads` follows the store.
+`threadForm` is the open channel's "New Thread" form (`ThreadFormModel`), in the split view's
+place: `openThreadForm(in:from:location:)` (a message's menu, the browser's Create and its empty
+state's "Create Thread", nothing where `threadCreation(in:)` or `canStartThread(from:in:)` allows
+nothing) goes to the channel, closes its split and the browser, and moves the composer's text into
+an empty form; `openThreadFormHere()` is ⌘⇧⌥N (the open channel, or a thread's parent). Each
+channel keeps its form while the session lasts, and the form keeps `name`, `isPrivate` and
+`message` per channel, the name only for the same message. `escape()` closes it before anything
+else, keeping what's typed; `closeThreadForm()` does the same and `discardThreadForm()` forgets it
+(the X, once the user said so; `hasText` says whether to ask). `submitThreadForm()` checks the
+fields (`nameError`, "Thread Name is required" without a message; `messageError`, "Starter Message
+is required." or too long), creates the thread with the name typed, else the message's
+(`ThreadName.derived(from:)`, Discord's rule; "Thread" without text), shows it beside the channel
+with its composer focused unless the user went elsewhere meanwhile, and sends the first message
+there; a refusal keeps everything and leaves `alert` (Discord's dialogs) or a name error. The form's
+`privateMode` follows the permissions (`enabled`, `privateOnly`, `disabled`, never from a message),
+`slowmode` is the parent's for new threads. Someone else's thread from the form's message turns the
+form into that thread, its message the thread's draft. In a
 thread, a row's `starter` is set for
 its first message when it started from one in the channel: the row draws `shown`, the
 parent's message, once loaded; `notice` says it couldn't be loaded; while it's fetched the
