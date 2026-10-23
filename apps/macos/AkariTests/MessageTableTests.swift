@@ -1202,6 +1202,10 @@ struct MessageTableTests {
             calls.append("thread \(id.rawValue) from \(parent.rawValue)")
         }
 
+        func openThreads(of channel: ChannelId) {
+            calls.append("threads of \(channel.rawValue)")
+        }
+
         func jump(to message: MessageId) {
             calls.append("jump to \(message.rawValue)")
         }

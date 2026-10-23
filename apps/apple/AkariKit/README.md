@@ -140,7 +140,24 @@ it's measured from; `ThreadBox.relativeTime` words that time ("25m ago") and say
 changes, `placeholder(for:)` what an empty newest message shows. `membershipItem(for:)` gives a
 thread of the open server's menus, or the split thread's, Join Thread or Leave Thread (disabled while archived);
 `join(thread:from:)` and `leave(thread:from:)` send the menu's `ThreadLocation`, and a failure
-waits in `membershipError`, in Discord's words, until `dismissMembershipError()`. In a
+waits in `membershipError`, in Discord's words, until `dismissMembershipError()`.
+`threadsButtonParent` is the channel the header's Threads button browses (a text or
+announcement channel, or a thread's parent of those kinds); `openThreadBrowser(of:as:)` opens
+its `ThreadBrowserModel` as the popout or the modal ("See all threads"), which another channel or
+`closeThreadBrowser()` closes; the core hears which channel's browser is open
+(`Account.set_browsing`), so a reconnect keeps its threads, and `refocusChannel()` gives the
+channel's composer the focus a closed browser leaves (not over a split's). The browser's `sections` are Discord's ("9 joined threads", "2
+other active threads", "older threads", empty ones left out) with rows (name; the newest
+message, "No recent messages", "Started by" with the owner, or "Last active", each with its
+time; faces from the member preview and "+N" or "50+"); `open()` loads the first page of
+older threads (only while none is loaded) and `loadMore()` the next, with READ_MESSAGE_HISTORY
+(`canSearch`); `setQuery(_:)` and `submit()` search on Enter, the latest text winning over a
+search still running, `results` holding the found rows until the field is cleared, a failed
+search changing nothing; `showsSpinner` and `isEmpty` say what shows instead.
+`open(browsed:beside:)` is a row's click (full width, closing the channel's split) or
+Shift+click (beside its channel), and `moreActiveThreads(of:)` the channel list's "More Active
+Threads" (`ThreadPeek`): up to three active threads the list doesn't show; while `peek(at:)`
+names the channel it shows for, `peekedThreads` follows the store. In a
 thread, a row's `starter` is set for
 its first message when it started from one in the channel: the row draws `shown`, the
 parent's message, once loaded; `notice` says it couldn't be loaded; while it's fetched the

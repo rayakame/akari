@@ -212,6 +212,7 @@ mod tests {
                 create_timestamp: None,
                 message_count: None,
                 member_count: None,
+                member_ids_preview: Box::default(),
             })),
             ..channel(Vec::new())
         }

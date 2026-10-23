@@ -31,7 +31,8 @@ func thread(_ raw: UInt64, in parent: UInt64, guild: UInt64 = 1, name: String? =
     var thread = channel(raw, guild: guild, kind: .publicThread, name: name, parent: parent)
     thread.thread = ThreadInfo(
         joined: true, archived: false, locked: false, private: false, messageCount: nil,
-        ownerId: nil, lastMessageId: nil, createdAt: nil)
+        ownerId: nil, lastMessageId: nil, createdAt: nil, memberCount: nil, memberIdsPreview: [],
+        archivedAt: Date(timeIntervalSince1970: 1_700_000_000))
     return thread
 }
 

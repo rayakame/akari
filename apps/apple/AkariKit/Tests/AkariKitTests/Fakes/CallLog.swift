@@ -20,6 +20,9 @@ final class CallLog: Sendable {
         case checkThread(ChannelId, ChannelId)
         case joinThread(ChannelId, ThreadLocation)
         case leaveThread(ChannelId, ThreadLocation)
+        case loadOlderThreads(ChannelId)
+        case searchThreads(ChannelId, String)
+        case setBrowsing(ChannelId?)
         case flushCache
     }
 
@@ -42,6 +45,7 @@ final class CallLog: Sendable {
         case messages(ChannelId, [MessageId])
         case starterMessage(ChannelId)
         case latestMessage(ChannelId)
+        case threadBrowser(ChannelId)
         case threadUnavailable(ChannelId)
         case messageLengthLimit
         case slowmode(ChannelId)

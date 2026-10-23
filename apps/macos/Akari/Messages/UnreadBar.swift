@@ -39,6 +39,7 @@ struct UnreadBar: View {
         .foregroundStyle(.white)
         .frame(height: Self.height)
         .background(Color(nsColor: Palette.brand), in: RoundedRectangle(cornerRadius: 8))
+        .background(CursorArea(.pointingHand))
         .padding(.horizontal, 16)
         .padding(.top, Self.margin)
         // Not on a recount: VoiceOver would repeat the bar with every new message. Not from

@@ -45,6 +45,8 @@ pub(crate) struct Entities {
     pub(crate) read_states: ReadStates,
     // Threads READY or GUILD_CREATE listed without the user's member, joined with a default one.
     pub(crate) memberless: HashSet<ChannelId>,
+    // Threads the store kept across READY or GUILD_CREATE without their listing them.
+    pub(crate) kept_threads: HashSet<ChannelId>,
 }
 
 impl Entities {
@@ -377,6 +379,17 @@ pub(crate) struct State {
     latest: HashMap<ChannelId, Arc<Message>>,
     // Threads messages brought before their guild was known.
     unplaced_threads: HashMap<ChannelId, model::Channel>,
+    // Unjoined threads kept across the last READY that neither the gateway nor a request has
+    // brought since: archived meanwhile, for all the store knows.
+    unconfirmed: HashSet<ChannelId>,
+    // Each channel's pages of archived threads in this connection.
+    older: HashMap<ChannelId, browser::OlderPages>,
+    // READYs so far: an answer to a request asked before the last one says nothing about this
+    // connection.
+    generation: u64,
+    // The channel whose Threads browser is open.
+    browsing: Option<ChannelId>,
+    page_tickets: u64,
     clock: Arc<Clock>,
 }
 
@@ -407,6 +420,11 @@ impl State {
             fetched_threads: HashSet::new(),
             latest: HashMap::new(),
             unplaced_threads: HashMap::new(),
+            unconfirmed: HashSet::new(),
+            older: HashMap::new(),
+            generation: 0,
+            browsing: None,
+            page_tickets: 0,
             clock,
         }
     }
@@ -552,6 +570,7 @@ impl State {
         // READY's cursors are fresh.
         self.stale_cursors.clear();
         self.follow_ready();
+        self.follow_ready_threads();
         self.place_waiting_threads(events);
         // A guild READY doesn't list won't come in this session.
         self.unplaced_threads.clear();
@@ -732,15 +751,22 @@ impl State {
                     .and_then(model::Nonce::as_u64)
                     .map(MessageId::new);
                 self.put_threads_of(std::slice::from_ref(&message), events);
-                if self.count_created(&message) | self.note_live_latest(&message) {
+                // A message in a thread kept across READY shows it's still there.
+                self.unconfirmed.remove(&channel);
+                let boxed = self.count_created(&message) | self.note_live_latest(&message);
+                if boxed {
                     self.reread_boxes(channel, events);
                 }
                 self.read_message(&message);
                 self.dirty.channel(channel);
                 let forced = self.forced_through(&message);
                 self.windows.live(*message, &self.entities.users, events);
-                if self.note_message(channel, id, events) && !forced {
+                let moved = self.note_message(channel, id, events);
+                if moved && !forced {
                     self.stale_cursors.remove(&channel);
+                }
+                if moved && !boxed {
+                    self.note_thread_activity(channel, events);
                 }
                 if Some(author) == self.entities.me() {
                     self.note_own_message(channel, nonce);
@@ -852,15 +878,19 @@ impl State {
             self.put_user(user, events);
         }
         let mut channel = Channel::from_wire(channel, None);
+        self.unconfirmed.remove(&channel.id);
         if let Some(known) = self.entities.channels.get(&channel.id) {
             if let Some(last) = known.last_message_id {
                 channel.note_message(last);
             }
-            // An absent member isn't a leave: only a members update or READY says so.
-            if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread)
-                && info.member.is_none()
-            {
-                info.member = before.member;
+            if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread) {
+                // An absent member isn't a leave: only a members update or READY says so.
+                if info.member.is_none() {
+                    info.member = before.member;
+                }
+                if info.member_ids_preview.is_empty() {
+                    info.member_ids_preview = before.member_ids_preview.clone();
+                }
             }
         }
         let newest_before = self
@@ -957,6 +987,7 @@ impl State {
         for user in update.recipients.clone().unwrap_or_default() {
             self.put_user(user, events);
         }
+        self.unconfirmed.remove(&update.id);
         let next = Arc::new(known.patch(update));
         if next != known {
             let id = next.id;
@@ -1108,6 +1139,8 @@ impl State {
         };
         self.windows.drop_channel(removed.id);
         self.latest.remove(&removed.id);
+        self.unconfirmed.remove(&removed.id);
+        self.older.remove(&removed.id);
         self.entities.read_states.forget(removed.id);
         self.dirty.channel(removed.id);
         events.push(StoreEvent::ChannelRemoved {
@@ -1122,6 +1155,7 @@ impl State {
             }
             self.windows.drop_channel(thread);
             self.latest.remove(&thread);
+            self.unconfirmed.remove(&thread);
             self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {
@@ -1164,6 +1198,7 @@ impl State {
         }
         self.dirty.guild(Some(id));
         let after = after.clone();
+        self.follow_guild_threads(id, &mut next, events);
         match self.entities.guilds.get(&id).cloned() {
             Some(before) => {
                 if before != after {
@@ -1182,6 +1217,7 @@ impl State {
                     self.entities.read_states.forget(*id);
                     self.windows.drop_channel(*id);
                     self.latest.remove(id);
+                    self.unconfirmed.remove(id);
                 }
             }
             None => events.push(StoreEvent::GuildAdded(after)),
@@ -1287,11 +1323,15 @@ impl State {
         let windows = &mut self.windows;
         let threads = &mut self.threads;
         let latest = &mut self.latest;
+        let older = &mut self.older;
+        let unconfirmed = &mut self.unconfirmed;
         self.entities.channels.retain(|channel_id, channel| {
             let keep = channel.guild_id != Some(id);
             if !keep {
                 windows.drop_channel(*channel_id);
                 latest.remove(channel_id);
+                older.remove(channel_id);
+                unconfirmed.remove(channel_id);
                 threads.remove(channel);
             }
             keep
@@ -1866,7 +1906,7 @@ impl State {
             return Learned::NotAThread;
         }
         // The gateway's copy is newer than an answer to a request sent before it.
-        if self.entities.channels.contains_key(&id) {
+        if self.entities.channels.contains_key(&id) && !self.unconfirmed.contains(&id) {
             return Learned::Kept;
         }
         self.put_channel(thread, events);
@@ -1879,8 +1919,9 @@ impl State {
     }
 
     // READY lists only the joined, active threads, so it says nothing about the unjoined ones the
-    // store has (from messages, syncs or Get Channel) nor about one fetched this session; they
-    // stay while their guild and parent do. Returns the threads it put into `next`.
+    // store has (from messages, syncs, pages or Get Channel) nor about one fetched this session;
+    // they stay while their guild and parent do, an unjoined archived one while something shows
+    // it. Returns the threads it put into `next`.
     pub(crate) fn keep_known_threads(&self, next: &mut Entities) -> Vec<Arc<Channel>> {
         let mut kept = Vec::new();
         for thread in self.entities.channels.values() {
@@ -1888,6 +1929,14 @@ impl State {
                 continue;
             };
             if info.joined() && !self.fetched_threads.contains(&thread.id) {
+                continue;
+            }
+            // Pages and searches bring many: only what still shows one keeps it.
+            if !info.joined()
+                && info.archived
+                && !self.fetched_threads.contains(&thread.id)
+                && !self.shows(thread)
+            {
                 continue;
             }
             let placed = thread
@@ -1898,6 +1947,7 @@ impl State {
                     .is_some_and(|parent| next.channels.contains_key(&parent));
             if placed && !next.channels.contains_key(&thread.id) {
                 next.channels.insert(thread.id, thread.clone());
+                next.kept_threads.insert(thread.id);
                 kept.push(thread.clone());
             }
         }
@@ -1949,7 +1999,10 @@ pub(crate) fn wall_millis() -> i64 {
 }
 
 mod boxes;
+mod browser;
 mod reading;
+
+pub(crate) use browser::{OLDER_PAGE, OlderPage};
 
 #[cfg(test)]
 pub(crate) mod tests;

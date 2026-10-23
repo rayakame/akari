@@ -48,7 +48,8 @@ view on the right instead ([below](#split-view)).
 
 Akari keeps the native macOS title bar and makes it transparent over a 32 pt strip, so
 dragging, double-click to zoom, full screen and the traffic lights behave like every other Mac
-app. The native title is hidden and Akari draws its own centered one; the window's title is
+app. *SwiftUI gives this window's View menu no Enter Full Screen, so Akari adds it (Ctrl+Cmd+F),
+acting on the session's window from anywhere, the Threads browser's panel included.* The native title is hidden and Akari draws its own centered one; the window's title is
 still set to the same text, so the Window menu, Mission Control and VoiceOver read it.
 
 ## Server rail
@@ -90,9 +91,10 @@ The rail and the channel list together form the sidebar.
   members, "…" and a search field on the right. Its "…" for a thread: Join Thread or Leave
   Thread | Jump To Top, Open in Split View | Copy Link, Copy Thread ID (observed 2026-10-17).
   *Akari: the channel's name in `interactiveText` at the header's size with the pointing hand,
-  the chevron 11 semibold `textMuted`; not measured yet. Of the buttons only "…", for threads,
-  with Join Thread or Leave Thread (disabled while the thread is archived); the other items
-  come later. A join or leave that fails shows Discord's alert: "Cannot join thread" / "This
+  the chevron 11 semibold `textMuted`; not measured yet. Of the buttons only Threads (text and
+  announcement channels and their threads, [thread-browser.md](thread-browser.md)) and "…", for
+  threads, with Join Thread or Leave Thread (disabled while the thread is archived); the other
+  items come later. Each is a 32 box, the last 16 from the header's right edge. A join or leave that fails shows Discord's alert: "Cannot join thread" / "This
   thread has reached the maximum possible number of members." when it's full, else "Error" /
   "An error occurred, please try again."*
 

@@ -18,6 +18,7 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Scroll the messages | Page Up / Page Down (**unverified**) | The list's native scrolling |
 | Jump to the oldest unread message | Shift+Page Up (Shift+Fn+Up on a Mac laptop) (**unverified**) | Done: jumps like a click on the unread bar (below) |
 | Focus the composer | Tab (**unverified**) | Later |
+| Enter or exit full screen | Ctrl+Cmd+F, Fn+F, the green button | Done: View > Enter Full Screen (SwiftUI's View menu had none); with the Threads browser open it goes full screen and closes the browser |
 
 Rows marked **unverified** come from community lists, not from Discord's own pages. Escape and
 Shift+Escape were confirmed in the web client on a Mac on 2026-10-15.

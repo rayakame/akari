@@ -441,6 +441,7 @@ impl ChannelRow {
                     create_timestamp: thread.create_timestamp.map(timestamp),
                     message_count: thread.message_count,
                     member_count: thread.member_count,
+                    member_ids_preview: Box::default(),
                 })
             }),
             flags: self.flags,

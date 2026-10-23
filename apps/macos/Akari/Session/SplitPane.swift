@@ -200,7 +200,7 @@ struct SplitHeader: View {
                 FadingTitle(text: thread.name ?? "")
             }
             .buttonStyle(.plain)
-            .background(PointingHandArea())
+            .background(CursorArea(.pointingHand))
             .accessibilityLabel(thread.name ?? "")
             .padding(.trailing, 8)
             HStack(spacing: 8) {
@@ -272,6 +272,7 @@ struct HeaderIconButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+        .background(CursorArea(.pointingHand))
         .help(label)
         .accessibilityLabel(label)
     }

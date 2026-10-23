@@ -20,7 +20,11 @@ time, which opens the thread beside it), the split view (`SplitPane.swift`: the 
 right of its channel, docked after a draggable gap or floating over a narrow page, with its own
 header, list and composer; `docs/ui/layout.md`), the thread header's and the split's "…"
 (`ThreadMenu`: Join Thread or Leave Thread, Open in Split View or Open in Full View) and a
-thread row's menu, and the composer (a locked thread's banner). Images, attachments, reactions,
+thread row's menu, the Threads browser (`ThreadBrowser.swift`, `ThreadBrowserContainers.swift`:
+the header's Threads button and its popout, the "See all threads" modal, and the channel list's
+"More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
+`ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), and the
+composer (a locked thread's banner). Images, attachments, reactions,
 replies, voice, notifications and settings come later.
 
 ## Messages and the composer

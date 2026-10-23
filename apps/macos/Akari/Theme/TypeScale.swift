@@ -113,4 +113,10 @@ nonisolated enum TypeScale {
     static let sheetTitle = TextStyle(17, .semibold)
     static let fieldLabel = TextStyle(12, .bold)
     static let button = TextStyle(16, .medium)
+    // Discord's heading-md, text-sm and the consolidated section label, in the Threads browser.
+    static let browserTitle = TextStyle(16, .semibold, line: 20)
+    static let browserLabel = TextStyle(14, .medium)
+    static let browserText = TextStyle(14, line: 18)
+    static let emptyTitle = TextStyle(20, .semibold, line: 24)
+    static let emptyText = TextStyle(16, line: 20)
 }

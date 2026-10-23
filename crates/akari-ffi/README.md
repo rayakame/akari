@@ -54,7 +54,8 @@ read state, and `GuildBadgeChanged { guild_id }` that guild's badge and its fold
 `channel_list(guild_id)` puts each channel's listed threads right after it, the last joined
 first: those the user joined that aren't archived and are inside their "Hide After Inactivity"
 window, unread, or with a mention. A thread's `Channel` carries `thread: ThreadInfo` (joined,
-archived, locked, private, its message count, owner, newest message ID and creation time). The
+archived, locked, private, its message count, owner, newest message ID, creation time, member
+count, a preview of its member IDs and when it was last archived). The
 count moves with every message in the thread without `ChannelUpdated`: `MessageUpdated` for
 the row that shows the thread's box (the message with `has_thread` and the thread's ID) says
 when to read it again, and so does a change of the thread's newest message,
@@ -90,6 +91,23 @@ leave, telling Discord where the user chose it (`ThreadLocation`: `SidebarOverfl
 `ToolbarOverflow`, `ContextMenu`); the store has it joined or left once Discord says yes, which
 comes as `ChannelUpdated`. An archived thread, or one the store doesn't have, fails with
 `InvalidRequest` before asking.
+
+`Store.thread_browser(parent_id)` is what a channel's Threads browser lists: the active threads
+the user joined and those it hasn't (only ones this connection's gateway, or a request, brought:
+a thread kept across a READY may have been archived or left meanwhile), and the archived ones
+the loaded pages reach, each the newest message first, with `older: OlderThreads` (`NotLoaded`,
+`Loading`, `More`, `All`, `Failed`). `Account.load_older_threads(parent_id)` loads the next page
+of 25 as Discord's client asks for it; nothing while one loads, after the last, or after a
+failure or Discord's "not indexed yet" until the next connection. `Account.search_threads(parent_id,
+name)` returns Discord's first 25 matches by name, active and archived, in its order (`None`
+while Discord hasn't indexed the channel), and keeps them in the store. `ThreadActivity {
+guild_id, parent_id, thread_id }` comes when a thread's newest or latest message changes, so a
+browser reorders, `OlderThreadsChanged { parent_id }` when its archived pages move on (began,
+came, failed, given up); its threads' `ChannelAdded`, `ChannelUpdated` and `ChannelRemoved` say
+the rest. `Account.set_browsing(parent_id)` names the channel whose browser is open (`None` once
+it closes): a new connection lets go of the unjoined archived threads nothing shows (no window,
+box or "started a thread" line), but not the open browser's. A page or search asked before a
+READY confirms and joins nothing.
 
 Acks: `set_reading(channel_ids)` names the channels the user is reading at their newest
 messages: none, one, or two in the split view (a channel and the thread beside it; further ones
@@ -158,7 +176,8 @@ read.
   `StoreSubscription.next`) are polled directly.
 - Sync methods are cheap. A store read takes one read lock, and akari-core warns when a
   write holds the lock for more than 4 ms. `connect`, `disconnect`, `close` and
-  `view_channel`, `set_reading`, `mark_read` and `mark_guilds_read` only signal.
+  `view_channel`, `set_reading`, `set_browsing`, `mark_read` and `mark_guilds_read` only
+  signal.
 - The host's `TokenStore` runs on a blocking thread, never on the main thread or a runtime
   worker, so it may block or show a dialog.
 - Markdown is parsed on the runtime where it can be: each account registers its documents as

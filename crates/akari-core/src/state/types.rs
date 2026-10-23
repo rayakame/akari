@@ -177,6 +177,8 @@ pub struct ThreadInfo {
     pub create_timestamp: Option<Timestamp>,
     pub message_count: Option<u32>,
     pub member_count: Option<u32>,
+    /// Some of its members, as Discord picks them; not kept in the disk cache.
+    pub member_ids_preview: Box<[UserId]>,
 }
 
 impl ThreadInfo {
@@ -184,6 +186,34 @@ impl ThreadInfo {
     pub fn joined(&self) -> bool {
         self.member.is_some()
     }
+}
+
+/// What a channel's Threads browser lists: see [`Store::thread_browser`](super::Store::thread_browser).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ThreadBrowser {
+    /// Active threads the user joined, the newest message first.
+    pub joined: Vec<Arc<Channel>>,
+    /// Active threads the user hasn't joined, the newest message first.
+    pub others: Vec<Arc<Channel>>,
+    /// Archived threads, the newest message first, down to the oldest one the loaded pages
+    /// brought; all of them once Discord said there are no more.
+    pub archived: Vec<Arc<Channel>>,
+    pub older: OlderThreads,
+}
+
+/// Where loading a channel's archived threads stands in this connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OlderThreads {
+    NotLoaded,
+    Loading,
+    /// Discord has more after the loaded pages.
+    More,
+    All,
+    /// A page failed, or Discord hadn't indexed the channel: nothing more until the next
+    /// connection.
+    Failed,
 }
 
 /// The current user's membership of a thread.

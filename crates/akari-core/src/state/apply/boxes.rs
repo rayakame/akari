@@ -200,6 +200,7 @@ impl State {
 
     // The parent's row that shows the thread's box: the message the thread started from, or the
     // line about a thread started without one.
+    // The thread's box, and its place and line in a Threads browser.
     pub(super) fn reread_boxes(&self, thread: ChannelId, events: &mut Vec<StoreEvent>) {
         let Some(parent) = self
             .entities
@@ -211,6 +212,18 @@ impl State {
         };
         if let Some(row) = self.windows.box_row(parent, thread) {
             events.push(StoreEvent::MessageUpdated(row));
+        }
+        self.note_thread_activity(thread, events);
+    }
+
+    pub(super) fn note_thread_activity(&self, thread: ChannelId, events: &mut Vec<StoreEvent>) {
+        if let Some(event) = self
+            .entities
+            .channels
+            .get(&thread)
+            .and_then(super::browser::thread_activity)
+        {
+            events.push(event);
         }
     }
 }

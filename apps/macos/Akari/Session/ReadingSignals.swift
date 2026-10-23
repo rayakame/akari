@@ -3,7 +3,8 @@ import AppKit
 import SwiftUI
 
 // What the session's reading needs from AppKit: the app active, the window key and on screen,
-// and the user's clicks and key presses in that window.
+// and the user's clicks and key presses in that window. The Threads browser's panel, attached
+// above it and key while it shows, counts as the window.
 final class ReadingSignals: NSObject {
     // Scrolling isn't an interaction: the official client doesn't ack on it (D88).
     static let mask: NSEvent.EventTypeMask = [
@@ -24,7 +25,7 @@ final class ReadingSignals: NSObject {
         session: SessionModel, window: NSWindow, center: NotificationCenter = .default,
         workspace: NotificationCenter = NSWorkspace.shared.notificationCenter,
         isActive: @escaping @MainActor () -> Bool = { NSApp.isActive },
-        isKey: @escaping @MainActor (NSWindow) -> Bool = { $0.isKeyWindow },
+        isKey: @escaping @MainActor (NSWindow) -> Bool = { $0.holdsKey },
         isVisible: @escaping @MainActor (NSWindow) -> Bool = MessageTableController.isOnScreen,
         monitors: Bool = false
     ) {
@@ -42,11 +43,13 @@ final class ReadingSignals: NSObject {
             center.addObserver(self, selector: #selector(changed), name: name, object: nil)
         }
         for name in [
-            NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
             NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification,
             NSWindow.didChangeOcclusionStateNotification,
         ] {
             center.addObserver(self, selector: #selector(changed), name: name, object: window)
+        }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            center.addObserver(self, selector: #selector(keyChanged), name: name, object: nil)
         }
         center.addObserver(
             self, selector: #selector(windowWillClose), name: NSWindow.willCloseNotification,
@@ -87,7 +90,9 @@ final class ReadingSignals: NSObject {
     }
 
     func handle(_ event: NSEvent) {
-        guard Self.engages(event.type), let window, event.windowNumber == window.windowNumber
+        guard Self.engages(event.type), let window,
+            NSApp.window(withWindowNumber: event.windowNumber)?.isFamily(of: window) == true
+                || event.windowNumber == window.windowNumber
         else {
             return
         }
@@ -104,6 +109,12 @@ final class ReadingSignals: NSObject {
         // A closed window can come back with this view still in it.
         if monitors, monitor == nil, isKey(window), isVisible(window) {
             startMonitoring()
+        }
+    }
+
+    @objc private func keyChanged(_ notification: Notification) {
+        if let window, (notification.object as? NSWindow)?.isFamily(of: window) == true {
+            changed()
         }
     }
 

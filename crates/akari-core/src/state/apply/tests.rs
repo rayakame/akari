@@ -82,6 +82,14 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::ThreadListingChanged { thread_id, .. } => {
             format!("ThreadListingChanged({})", thread_id.get())
         }
+        StoreEvent::ThreadActivity {
+            parent_id,
+            thread_id,
+            ..
+        } => format!("ThreadActivity({}, {})", parent_id.get(), thread_id.get()),
+        StoreEvent::OlderThreadsChanged { parent_id } => {
+            format!("OlderThreadsChanged({})", parent_id.get())
+        }
         other => format!("{other:?}"),
     }
 }
@@ -1099,5 +1107,6 @@ mod acks;
 mod badges;
 mod read_states;
 mod thread_boxes;
+mod thread_browser;
 mod thread_sync;
 mod threads;

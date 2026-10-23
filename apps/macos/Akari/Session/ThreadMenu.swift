@@ -77,6 +77,7 @@ struct ThreadMenuButton: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .onHover { hovered = $0 }
+        .background(CursorArea(.pointingHand))
         .help("More")
         .accessibilityLabel("More")
     }

@@ -5,7 +5,7 @@ use akari_core::model::{
     GuildMember, Message, MessageNotificationLevel, MessageReferenceType, MessageType, Nonce,
     NsfwLevel, OverwriteType, PartialEmoji, PermissionOverwrite, Permissions, PremiumTier,
     PremiumType, ReactionCountDetails, Role, RoleColors, RoleMarker, Snowflake, StickerFormatType,
-    Timestamp, User, UserMarker,
+    ThreadSearchResults, Timestamp, User, UserMarker,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -709,4 +709,71 @@ fn a_messages_application_parses_its_name() {
 
     assert_eq!(message.application.unwrap().name, "Akari Bot");
     assert_eq!(malformed.application, None);
+}
+
+const MIRA: u64 = 100_000_000_000_000_002;
+const JUN: u64 = 100_000_000_000_000_003;
+
+fn search_fixture(edit: impl FnOnce(&mut Value)) -> String {
+    let mut value: Value = parse(include_str!("fixtures/thread_search.json"));
+    edit(&mut value);
+    value.to_string()
+}
+
+#[test]
+fn thread_search_results_decode() {
+    let results: ThreadSearchResults = parse(include_str!("fixtures/thread_search.json"));
+
+    let threads = results.threads.expect("an indexed answer has threads");
+    assert_eq!(threads.len(), 2);
+    assert_eq!(
+        threads[0].member_ids_preview,
+        vec![Snowflake::new(MIRA), Snowflake::new(JUN)]
+    );
+    let owner = threads[0]
+        .owner
+        .as_ref()
+        .and_then(|owner| owner.user.as_ref())
+        .expect("the owner's user");
+    assert_eq!(owner.id, Snowflake::new(MIRA));
+    assert!(threads[1].owner.is_none());
+    assert!(threads[1].member_ids_preview.is_empty());
+    assert_eq!(results.members.len(), 1);
+    assert!(results.has_more);
+    assert_eq!(results.total_results, Some(30));
+    assert_eq!(results.most_recent_messages.len(), 1);
+}
+
+#[test]
+fn a_search_body_without_threads_is_not_indexed() {
+    let results: ThreadSearchResults = parse(
+        r#"{"message":"Index not yet available. Try again later","code":110000,"documents_indexed":0,"retry_after":2}"#,
+    );
+
+    assert!(results.threads.is_none());
+    assert!(!results.has_more);
+    assert!(results.members.is_empty());
+}
+
+#[test]
+fn a_search_in_another_shape_still_decodes() {
+    let drifted = search_fixture(|value| {
+        let thread = value["threads"][0].clone();
+        let message = value["most_recent_messages"][0].clone();
+        value["threads"] = json!([{"id": "bad"}, thread]);
+        value["threads"][1]["member_ids_preview"] = json!({"changed": "shape"});
+        value["threads"][1]["owner"] = json!("someone");
+        value["members"] = json!([3, value["members"][0].clone()]);
+        value["most_recent_messages"] = json!([{"content": 3}, message]);
+        value["total_results"] = json!("many");
+    });
+    let results: ThreadSearchResults = parse(&drifted);
+
+    let threads = results.threads.expect("threads");
+    assert_eq!(threads.len(), 1);
+    assert!(threads[0].member_ids_preview.is_empty());
+    assert!(threads[0].owner.is_none());
+    assert_eq!(results.members.len(), 1);
+    assert_eq!(results.most_recent_messages.len(), 1);
+    assert_eq!(results.total_results, None);
 }

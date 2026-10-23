@@ -18,6 +18,9 @@ struct EventBatch {
     var badgesChanged: [GuildId?: Set<ChannelId>] = [:]
     var guildBadgesChanged: Set<GuildId> = []
     var removedChannels: Set<ChannelId> = []
+    // Channels whose Threads browser changed: a thread's newest or latest message, or the
+    // archived pages.
+    var threadBrowsersChanged: Set<ChannelId> = []
     // Left or deleted, not down for an outage.
     var removedGuilds: Set<GuildId> = []
     var windowsChanged: Set<ChannelId> = []
@@ -68,6 +71,8 @@ struct EventBatch {
             case .threadListingChanged(let guild, let thread),
                 .threadUnavailable(let guild, let thread):
                 channelsChanged[guild, default: []].insert(thread)
+            case .threadActivity(_, let parent, _), .olderThreadsChanged(let parent):
+                threadBrowsersChanged.insert(parent)
             case .channelRemoved(let channel, let guild):
                 channelsChanged[guild, default: []].insert(channel)
                 removedChannels.insert(channel)

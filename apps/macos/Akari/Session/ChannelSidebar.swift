@@ -6,6 +6,7 @@ struct ChannelSidebar: View {
     let list: ChannelListModel
     let collapsed: CollapsedCategories
     let guildName: String
+    var hover: ThreadsHover?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,10 +47,18 @@ struct ChannelSidebar: View {
                         } else {
                             ChannelRow(
                                 channel: channel, selected: channel.id == open, muted: muted,
-                                badge: list.badge(of: channel.id)
+                                badge: list.badge(of: channel.id),
+                                peeking: hover?.channel == channel.id,
+                                hovering: peeks(channel) ? { inside in
+                                    hover?.hover(channel.id, inside) {
+                                        !session.moreActiveThreads(of: channel.id).isEmpty
+                                    }
+                                } : nil
                             ) {
+                                hover?.dismiss()
                                 session.open(channel: channel.id)
                             }
+                            .onDisappear { hover?.rowGone(channel.id) }
                             .markReadMenu(enabled: session.canMarkRead(channel: channel.id)) {
                                 session.markRead(channel: channel.id)
                             }
@@ -59,6 +68,11 @@ struct ChannelSidebar: View {
                 .padding(.bottom, 72)
             }
         }
+    }
+
+    // Text and announcement channels show their other active threads on hover.
+    private func peeks(_ channel: Channel) -> Bool {
+        hover != nil && (channel.kind == .guildText || channel.kind == .guildNews)
     }
 
     // A row's menu says "Context Menu" to Discord, as the official client's does.
@@ -138,6 +152,9 @@ struct ChannelRow: View {
     let selected: Bool
     let muted: Bool
     var badge = Badge(unread: false, mentions: 0)
+    /// "More Active Threads" shows beside this row.
+    var peeking = false
+    var hovering: ((Bool) -> Void)?
     let open: () -> Void
     @State private var hovered = false
     @Environment(\.colorScheme) private var colorScheme
@@ -177,7 +194,11 @@ struct ChannelRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovered = $0 }
+        .onHover { inside in
+            hovered = inside
+            hovering?(inside)
+        }
+        .anchorPreference(key: PeekRowBounds.self, value: .bounds) { peeking ? $0 : nil }
         .help(
             channel.opensMessageList
                 ? channel.topic ?? "" : ChannelSymbols.unsupported(channel.kind)

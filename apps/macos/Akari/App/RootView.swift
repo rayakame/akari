@@ -89,6 +89,7 @@ struct SessionScreen: View {
     var dismissWarning: () -> Void = {}
     var reconnect: () -> Void = {}
     let splitWidth: SplitWidth
+    let hover: ThreadsHover
     // Trusted hosts are the account's (D65).
     @State private var links: LinkFollower
     @State private var tables = PaneTables()
@@ -96,13 +97,15 @@ struct SessionScreen: View {
     init(
         session: SessionModel, warning: AppModel.Warning? = nil,
         dismissWarning: @escaping () -> Void = {}, reconnect: @escaping () -> Void = {},
-        links: LinkFollower? = nil, splitWidth: SplitWidth = .shared
+        links: LinkFollower? = nil, splitWidth: SplitWidth = .shared,
+        hover: ThreadsHover = ThreadsHover()
     ) {
         self.session = session
         self.warning = warning
         self.dismissWarning = dismissWarning
         self.reconnect = reconnect
         self.splitWidth = splitWidth
+        self.hover = hover
         _links = State(
             initialValue: links ?? LinkFollower(trusted: session.trustedLinks()))
     }
@@ -110,7 +113,7 @@ struct SessionScreen: View {
     var body: some View {
         SessionView(
             session: session, warning: warning, dismissWarning: dismissWarning,
-            reconnect: reconnect, splitWidth: splitWidth
+            reconnect: reconnect, splitWidth: splitWidth, hover: hover
         ) { messages, name in
             let beside = messages === session.split
             MessageArea(
@@ -119,6 +122,7 @@ struct SessionScreen: View {
                 openThread: { [session] thread, parent in
                     Task { await session.openBeside(thread: thread, from: parent) }
                 },
+                openThreads: { [session] in session.openThreadBrowser(of: $0, as: .modal) },
                 openGuild: { [session] in session.open(.guild($0)) },
                 markRead: { [session] in session.markRead(channel: messages.channelId) },
                 markServerRead: { [session] in session.markServerRead() },

@@ -20,6 +20,7 @@ const MESSAGES: &str = "channels/{}/messages";
 const ACK: &str = "channels/{}/messages/{}/ack";
 const ACK_BULK: &str = "read-states/ack-bulk";
 const THREAD_MEMBER: &str = "channels/{}/thread-members/@me";
+const THREAD_SEARCH: &str = "channels/{}/threads/search";
 const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
 const RATE_LIMIT_RETRIES: u32 = 3;
@@ -360,6 +361,24 @@ impl AccountRest {
         Ok(())
     }
 
+    // `query` is already encoded. A 202 while Discord indexes the channel decodes without
+    // threads.
+    pub(crate) async fn search_threads(
+        &self,
+        channel: ChannelId,
+        query: &str,
+    ) -> Result<model::ThreadSearchResults, RequestError> {
+        let path = format!("channels/{}/threads/search?{query}", channel.get());
+        let route = RouteKey::new(Method::Get, THREAD_SEARCH, channel.get());
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Allowed, || {
+                self.request(HttpMethod::GET, &path)
+            })
+            .await
+            .map_err(RequestError::from)?;
+        serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
+    }
+
     pub(crate) async fn ack(
         &self,
         channel: ChannelId,
@@ -502,6 +521,19 @@ impl AccountRest {
             }
         }
     }
+}
+
+// As JavaScript's encodeURIComponent, which the official client's requests use.
+pub(crate) fn uri_component(text: &str) -> String {
+    let mut encoded = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 // An ack's `last_viewed`: days since the Discord epoch, rounded up like the official client.

@@ -13,7 +13,8 @@ struct ThreadRowTests {
         nsfw: false, rateLimitPerUser: 0, recipientIds: [],
         thread: ThreadInfo(
             joined: true, archived: false, locked: false, private: false, messageCount: nil,
-            ownerId: nil, lastMessageId: nil, createdAt: nil))
+            ownerId: nil, lastMessageId: nil, createdAt: nil, memberCount: nil, memberIdsPreview: [],
+            archivedAt: Date(timeIntervalSince1970: 0)))
 
     // Without the title bar's safe area, so points are the row's own.
     func render<Row: View>(_ row: Row) throws -> Rendered {

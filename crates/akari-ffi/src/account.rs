@@ -150,6 +150,41 @@ impl Account {
         .map_err(Into::into)
     }
 
+    /// Loads the next page of `parent_id`'s archived threads into `Store::thread_browser`, as
+    /// the official client's Threads browser does: 25 at a time. Nothing is asked while a page
+    /// loads, after the last one, or after a failure until the next connection.
+    pub async fn load_older_threads(&self, parent_id: ChannelId) -> Result<(), RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.load_older_threads(parent_id).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// The channel whose Threads browser is open, `None` once it closes. A new connection lets
+    /// go of unjoined archived threads nothing shows (no window, box or "started a thread"
+    /// line); the open browser's stay.
+    pub fn set_browsing(&self, parent_id: Option<ChannelId>) {
+        self.core.set_browsing(parent_id);
+    }
+
+    /// Searches `parent_id`'s threads, active and archived, by name, as the official client
+    /// does on Enter: Discord's first 25 matches in its order, kept in the store. `None` while
+    /// Discord hasn't indexed the channel yet.
+    pub async fn search_threads(
+        &self,
+        parent_id: ChannelId,
+        name: String,
+    ) -> Result<Option<Vec<ChannelId>>, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.search_threads(parent_id, &name).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
     /// Joins the thread; the store has it joined once Discord says yes. `InvalidRequest` for an
     /// archived thread or one the store doesn't have, before asking.
     pub async fn join_thread(

@@ -679,9 +679,10 @@ extension SessionScreenTests {
         let shown = tables(in: host)
         try #require(shown.count == 2)
 
-        // Where both headers draw nothing above their lines: the channel's right end, and the
-        // split's middle (a floating split covers the channel's right end).
-        let channelX = min(frame(of: shown[0]).maxX, frame(of: shown[1]).minX) - 40
+        // Where both headers draw nothing above their lines: the channel's right end, left of
+        // its Threads button, and the split's middle (a floating split covers the channel's
+        // right end).
+        let channelX = min(frame(of: shown[0]).maxX, frame(of: shown[1]).minX) - 80
         let channel = try headerLine(at: channelX, in: host)
         let split = try headerLine(at: frame(of: shown[1]).midX, in: host)
 

@@ -27,6 +27,7 @@ final class FakeStore: Store, @unchecked Sendable {
         var unreadPrivateChannels: [ChannelId] = []
         var starters: [ChannelId: StarterMessage] = [:]
         var latestMessages: [ChannelId: Message] = [:]
+        var threadBrowsers: [ChannelId: ThreadBrowser] = [:]
         var unavailableThreads: Set<ChannelId> = []
 
         mutating func add(_ guilds: Guild...) {
@@ -165,6 +166,13 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func latestMessage(threadId: ChannelId) -> Message? {
         read(.latestMessage(threadId)) { $0.latestMessages[threadId] }
+    }
+
+    override func threadBrowser(parentId: ChannelId) -> ThreadBrowser {
+        read(.threadBrowser(parentId)) { state in
+            state.threadBrowsers[parentId]
+                ?? ThreadBrowser(joined: [], others: [], archived: [], older: .notLoaded)
+        }
     }
 
     override func starterMessage(threadId: ChannelId) -> StarterMessage? {

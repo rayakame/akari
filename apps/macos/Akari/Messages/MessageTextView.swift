@@ -10,8 +10,6 @@ final class MessageTextView: NSTextView {
     /// On a link Discord underlines while the pointer is over it.
     static let underlinesOnHover = NSAttributedString.Key("akari.underlinesOnHover")
     private var underlined: NSRange?
-    // Only text with such links watches the pointer.
-    private var hoverArea: NSTrackingArea?
     // The message's own items, above the text's.
     var messageMenu: () -> [NSMenuItem] = { [] }
     let decorations = MessageDecorations()
@@ -34,8 +32,8 @@ final class MessageTextView: NSTextView {
         importsGraphics = false
         allowsUndo = false
         textContainerInset = .zero
-        // Links keep their own colors: pills are links too.
-        linkTextAttributes = [.cursor: NSCursor.pointingHand]
+        // Links keep their own colors: pills are links too. The list sets the cursor.
+        linkTextAttributes = [:]
         if #available(macOS 15.0, *) {
             writingToolsBehavior = .none
         }
@@ -85,7 +83,6 @@ final class MessageTextView: NSTextView {
         underline(at: nil)
         storage.setAttributedString(text)
         linkElements = nil
-        trackHover()
         selectedRanges = kept ?? [NSValue(range: NSRange(location: 0, length: 0))]
         invalidateIntrinsicContentSize()
         updateDecorations()
@@ -121,7 +118,6 @@ final class MessageTextView: NSTextView {
     private func updateDecorations() {
         let shapes = (layoutManager as? MessageLayoutManager)?.blocks() ?? []
         decorations.show(shapes, at: textContainerOrigin)
-        window?.invalidateCursorRects(for: self)
     }
 
     // The table routes Akari's own links and asks before masked ones; super would open them.
@@ -224,48 +220,31 @@ final class MessageTextView: NSTextView {
             onLink(url)
             return
         }
+        // NSTextView would start dragging the selection; a browser follows the link.
+        if event.clickCount == 1, let index = character(at: point),
+            textStorage?.attribute(.link, at: index, effectiveRange: nil) != nil,
+            selectedRanges.contains(where: { NSLocationInRange(index, $0.rangeValue) })
+        {
+            setSelectedRange(NSRange(location: index, length: 0))
+        }
         super.mouseDown(with: event)
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackHover()
-    }
-
-    private func trackHover() {
-        var hovers = false
-        if let storage = textStorage, storage.length > 0 {
-            storage.enumerateAttribute(
-                Self.underlinesOnHover, in: NSRange(location: 0, length: storage.length)
-            ) { value, _, stop in
-                hovers = value != nil
-                stop.pointee = ObjCBool(hovers)
-            }
-        }
-        if hovers == (hoverArea != nil) {
+    // The list sets the cursor for its rows (MessageTableController): NSTextView's own area
+    // would set the I-beam anywhere in the view and race its neighbours'. Its tooltips' stays.
+    override func addTrackingArea(_ area: NSTrackingArea) {
+        if area.owner === self, area.options.contains(.cursorUpdate) {
             return
         }
-        if let hoverArea {
-            removeTrackingArea(hoverArea)
-            self.hoverArea = nil
-        } else {
-            let area = NSTrackingArea(
-                rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow,
-                    .inVisibleRect], owner: self)
-            addTrackingArea(area)
-            hoverArea = area
-        }
+        super.addTrackingArea(area)
     }
 
-    override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        underline(at: convert(event.locationInWindow, from: nil))
-    }
+    override func cursorUpdate(with event: NSEvent) {}
 
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        underline(at: nil)
-    }
+    // A first responder gets mouse moves in a window that wants them; NSTextView's set the I-beam.
+    override func mouseMoved(with event: NSEvent) {}
+
+    override func resetCursorRects() {}
 
     /// Underlines the hover link under `point`, in this view's coordinates; `nil` takes it away.
     func underline(at point: NSPoint?) {
@@ -284,6 +263,19 @@ final class MessageTextView: NSTextView {
     }
 
     private func hoverLink(at point: NSPoint) -> NSRange? {
+        guard let index = character(at: point), let storage = textStorage else {
+            return nil
+        }
+        var range = NSRange()
+        guard storage.attribute(Self.underlinesOnHover, at: index, effectiveRange: &range) != nil
+        else {
+            return nil
+        }
+        return range
+    }
+
+    // The character whose glyph is under `point`, in this view's coordinates.
+    private func character(at point: NSPoint) -> Int? {
         guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0
         else {
             return nil
@@ -295,20 +287,44 @@ final class MessageTextView: NSTextView {
         guard glyphRect.contains(inside) else {
             return nil
         }
-        var range = NSRange()
-        let index = layoutManager.characterIndexForGlyph(at: glyph)
-        guard storage.attribute(Self.underlinesOnHover, at: index, effectiveRange: &range) != nil
-        else {
-            return nil
-        }
-        return range
+        return layoutManager.characterIndexForGlyph(at: glyph)
     }
 
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        for rect in decorations.covers {
-            addCursorRect(rect, cursor: .pointingHand)
+    /// What the pointer shows at `point`, in this view's coordinates, as over Discord's message
+    /// text: the pointing hand over a link or a hidden block, the I-beam over text, the arrow
+    /// around it.
+    func cursor(at point: NSPoint) -> NSCursor {
+        cursorAreas.last { $0.rect.contains(point) }?.cursor ?? .arrow
+    }
+
+    // Each line's text runs, links apart, and the hidden blocks' covers, in this view's
+    // coordinates; later ones lie over earlier ones.
+    private var cursorAreas: [(rect: NSRect, cursor: NSCursor)] {
+        var areas: [(rect: NSRect, cursor: NSCursor)] = []
+        if let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 {
+            let origin = textContainerOrigin
+            let glyphs = layoutManager.glyphRange(for: textContainer)
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { _, used, _, line, _ in
+                let characters = layoutManager.characterRange(
+                    forGlyphRange: line, actualGlyphRange: nil)
+                storage.enumerateAttribute(.link, in: characters) { link, range, _ in
+                    let run = layoutManager.glyphRange(
+                        forCharacterRange: range, actualCharacterRange: nil)
+                    let glyphs = layoutManager.boundingRect(forGlyphRange: run, in: textContainer)
+                    let left = max(glyphs.minX, used.minX)
+                    let right = min(glyphs.maxX, used.maxX)
+                    guard right > left else {
+                        return
+                    }
+                    let rect = NSRect(
+                        x: left, y: used.minY, width: right - left, height: used.height)
+                    areas.append(
+                        (rect.offsetBy(dx: origin.x, dy: origin.y),
+                            link == nil ? .iBeam : .pointingHand))
+                }
+            }
         }
+        return areas + decorations.covers.map { ($0, .pointingHand) }
     }
 
     override func accessibilityValue() -> String? {

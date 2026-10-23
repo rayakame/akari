@@ -109,8 +109,10 @@ final class NoticeCell: NSTableCellView {
             switch part {
             case .text(let text):
                 line.append(CellText.body(text, color: gray))
-            case .actor(let name), .strong(let name), .threads(let name), .pins(let name):
+            case .actor(let name), .strong(let name), .pins(let name):
                 line.append(Self.name(name, link: nil))
+            case .threads(let name):
+                line.append(Self.name(name, link: "akari://threads"))
             case .thread(let name, let id):
                 line.append(Self.name(name, link: id.map { "akari://thread/\($0.rawValue)" }))
             case .message(let name, let id):

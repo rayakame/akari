@@ -28,6 +28,7 @@ final class ThreadBoxView: NSButton {
     var topInset: CGFloat = 0 {
         didSet { invalidateIntrinsicContentSize() }
     }
+    /// The list sets it while the pointer is over the box.
     var hovered = false {
         didSet {
             if hovered != oldValue {
@@ -35,7 +36,6 @@ final class ThreadBoxView: NSButton {
             }
         }
     }
-    private var hoverArea: NSTrackingArea?
 
     init() {
         super.init(frame: .zero)
@@ -65,11 +65,9 @@ final class ThreadBoxView: NSButton {
         self.box = box
         self.content = content
         self.time = time
-        // A reused cell's box may be elsewhere now; the pointer's next move says.
+        // A reused cell's box may be elsewhere now; the list says after its update.
         hovered = false
         needsDisplay = true
-        window?.invalidateCursorRects(for: self)
-        updateTrackingAreas()
     }
 
     /// The box itself, within the view.
@@ -108,28 +106,6 @@ final class ThreadBoxView: NSButton {
         return boxFrame.contains(convert(point, from: superview)) ? self : nil
     }
 
-    override func resetCursorRects() {
-        addCursorRect(boxFrame, cursor: .pointingHand)
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea {
-            removeTrackingArea(hoverArea)
-        }
-        let area = NSTrackingArea(
-            rect: boxFrame, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)
-        addTrackingArea(area)
-        hoverArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        hovered = true
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hovered = false
-    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard box != nil else {

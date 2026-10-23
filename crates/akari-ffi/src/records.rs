@@ -204,6 +204,55 @@ pub struct ThreadInfo {
     pub last_message_id: Option<MessageId>,
     /// `None` for threads created before 2022-01-09.
     pub created_at: Option<SystemTime>,
+    pub member_count: Option<u32>,
+    /// Some of its members, as Discord picks them, for a row of faces; empty for a thread
+    /// restored from the disk cache until Discord sends it again.
+    pub member_ids_preview: Vec<UserId>,
+    /// When it was last archived or unarchived.
+    pub archived_at: SystemTime,
+}
+
+/// What a channel's Threads browser lists: see `Store::thread_browser`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ThreadBrowser {
+    /// Active threads the user joined, the newest message first.
+    pub joined: Vec<ChannelId>,
+    /// Active threads the user hasn't joined, the newest message first.
+    pub others: Vec<ChannelId>,
+    /// Archived threads the loaded pages reach, the newest message first.
+    pub archived: Vec<ChannelId>,
+    pub older: OlderThreads,
+}
+
+/// Where loading a channel's archived threads stands in this connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum OlderThreads {
+    NotLoaded,
+    Loading,
+    /// Discord has more: `Account::load_older_threads` loads the next page.
+    More,
+    All,
+    /// Nothing more until the next connection.
+    Failed,
+}
+
+impl From<state::ThreadBrowser> for ThreadBrowser {
+    fn from(browser: state::ThreadBrowser) -> Self {
+        let ids =
+            |threads: Vec<Arc<state::Channel>>| threads.iter().map(|thread| thread.id).collect();
+        Self {
+            joined: ids(browser.joined),
+            others: ids(browser.others),
+            archived: ids(browser.archived),
+            older: match browser.older {
+                state::OlderThreads::NotLoaded => OlderThreads::NotLoaded,
+                state::OlderThreads::Loading => OlderThreads::Loading,
+                state::OlderThreads::More => OlderThreads::More,
+                state::OlderThreads::All => OlderThreads::All,
+                _ => OlderThreads::Failed,
+            },
+        }
+    }
 }
 
 impl From<&state::Channel> for Channel {
@@ -228,6 +277,9 @@ impl From<&state::Channel> for Channel {
                 owner_id: channel.owner_id,
                 last_message_id: channel.last_message_id.map(|id| id.cast()),
                 created_at: info.create_timestamp.map(system_time),
+                member_count: info.member_count,
+                member_ids_preview: info.member_ids_preview.to_vec(),
+                archived_at: system_time(info.archive_timestamp),
             }),
         }
     }

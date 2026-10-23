@@ -177,6 +177,7 @@ pub(crate) fn thread(id: u64, guild: u64, parent: u64) -> Channel {
             create_timestamp: Some(time(1_690_000_000_000_001_000)),
             message_count: Some(12),
             member_count: Some(3),
+            member_ids_preview: Box::default(),
         })),
         ..channel(id, Some(guild), "a thread")
     }
@@ -202,6 +203,7 @@ pub(crate) fn entities() -> Entities {
         settings: Default::default(),
         read_states: Default::default(),
         memberless: Default::default(),
+        kept_threads: Default::default(),
     }
 }
 
@@ -875,6 +877,7 @@ fn rebuilt(entities: &Entities) -> Entities {
         },
         read_states: entities.read_states.clone(),
         memberless: entities.memberless.clone(),
+        kept_threads: entities.kept_threads.clone(),
     }
 }
 

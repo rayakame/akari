@@ -11,10 +11,10 @@ use crate::gateway::{
     MemberLists, PresenceStatus, SendError,
 };
 use crate::model::{ChannelId, GuildId, MessageId, MessageType, Timestamp, UserId};
-use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError};
+use crate::rest::{AccountRest, CreateMessage, Page, Query, RequestError, uri_component};
 use crate::state::{
-    Ack, ConnectionState, Cursor, Learned, LoadKind, LoadTicket, Message, StarterFetch, Store,
-    WindowLimits, message_length,
+    Ack, ConnectionState, Cursor, Learned, LoadKind, LoadTicket, Message, OLDER_PAGE, StarterFetch,
+    Store, WindowLimits, message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 use acks::{AckSender, Pace, Refusal};
@@ -75,6 +75,21 @@ impl ThreadLocation {
             Self::SidebarOverflow => "Sidebar%20Overflow",
             Self::ToolbarOverflow => "Toolbar%20Overflow",
             Self::ContextMenu => "Context%20Menu",
+        }
+    }
+}
+
+// A page of archived threads asked for and not settled: dropping the request gives it up.
+struct PendingPage<'a> {
+    store: &'a Store,
+    parent: ChannelId,
+    page: Option<crate::state::OlderPage>,
+}
+
+impl Drop for PendingPage<'_> {
+    fn drop(&mut self) {
+        if let Some(page) = self.page.take() {
+            self.store.abandon_older_threads(self.parent, page);
         }
     }
 }
@@ -1069,6 +1084,90 @@ impl Account {
             "thread fetched"
         );
         learned.map(|learned| matches!(learned, Learned::Kept))
+    }
+
+    /// Loads the next page of `parent`'s archived threads into the store, as the official
+    /// client's Threads browser does: 25 at a time, the newest message first, see
+    /// [`Store::thread_browser`]. Nothing is asked while a page loads, after the last one, or
+    /// after a failure or Discord's "not indexed yet" until the next connection.
+    pub async fn load_older_threads(&self, parent: ChannelId) -> Result<(), RequestError> {
+        let shared = &self.shared;
+        let Some(page) = shared.store.begin_older_threads(parent) else {
+            return Ok(());
+        };
+        let mut pending = PendingPage {
+            store: &shared.store,
+            parent,
+            page: Some(page),
+        };
+        let query = format!(
+            "archived=true&sort_by=last_message_time&sort_order=desc&limit={OLDER_PAGE}\
+             &tag_setting=match_some&offset={}",
+            page.offset
+        );
+        match shared.rest.search_threads(parent, &query).await {
+            Ok(results) => {
+                tracing::debug!(
+                    target: "akari_core::load",
+                    channel_id = parent.get(),
+                    offset = page.offset,
+                    threads = results.threads.as_ref().map(Vec::len),
+                    more = results.has_more,
+                    "archived threads loaded"
+                );
+                pending.page = None;
+                shared.store.finish_older_threads(parent, page, results);
+                Ok(())
+            }
+            Err(err) => {
+                tracing::debug!(
+                    target: "akari_core::load",
+                    channel_id = parent.get(),
+                    offset = page.offset,
+                    outcome = err.kind(),
+                    "archived threads failed"
+                );
+                shared.failed(&err);
+                pending.page = None;
+                shared.store.fail_older_threads(parent, page);
+                Err(err)
+            }
+        }
+    }
+
+    /// The channel whose Threads browser is open, `None` once it closes. A new connection lets
+    /// go of unjoined archived threads nothing shows (no window, box or "started a thread" line);
+    /// the open browser's stay.
+    pub fn set_browsing(&self, parent: Option<ChannelId>) {
+        self.shared.store.set_browsing(parent);
+    }
+
+    /// Searches `parent`'s threads, active and archived, by name, as the official client does
+    /// when the user presses Enter: Discord's first 25 matches in its order, kept in the store.
+    /// `None` while Discord hasn't indexed the channel yet.
+    pub async fn search_threads(
+        &self,
+        parent: ChannelId,
+        name: &str,
+    ) -> Result<Option<Vec<ChannelId>>, RequestError> {
+        let shared = &self.shared;
+        let asked = shared.store.generation();
+        let query = format!("name={}&tag_setting=match_some", uri_component(name));
+        let results = match shared.rest.search_threads(parent, &query).await {
+            Ok(results) => results,
+            Err(err) => {
+                shared.failed(&err);
+                return Err(err);
+            }
+        };
+        let found = shared.store.keep_found_threads(results, asked);
+        tracing::debug!(
+            target: "akari_core::load",
+            channel_id = parent.get(),
+            found = found.as_ref().map(Vec::len),
+            "threads searched"
+        );
+        Ok(found)
     }
 
     /// Joins the thread. The store has it joined once Discord says yes, without waiting for the

@@ -99,6 +99,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var ownChanges = 0
     private var lastClipOrigin = NSPoint.zero
     private var hovered: MessageTimeline.ItemId?
+    private weak var underlinedText: MessageTextView?
+    private weak var hoveredBox: ThreadBoxView?
     // Paging posts willStart and didLive but no didEnd, so a live scroll also ends when its
     // notifications stop.
     private var liveScrollEnded = true
@@ -162,7 +164,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         self.notifications = notifications
         self.pointer =
             pointer ?? { [weak tableView] in
-                guard let window = tableView?.window, window.isKeyWindow else {
+                // Not under a window above it: the browser's shield, More Active Threads.
+                guard let window = tableView?.window, window.isKeyWindow,
+                    NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0)
+                        == window.windowNumber
+                else {
                     return nil
                 }
                 return window.mouseLocationOutsideOfEventStream
@@ -428,6 +434,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.openLink(url, masked: false)
             return
         }
+        if url.host() == "threads" {
+            actions?.openThreads(of: row.message.channelId)
+            return
+        }
         guard let value = url.pathComponents.last.flatMap({ UInt64($0) }) else {
             return
         }
@@ -633,7 +643,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         // can come a frame later: that frame showed them out of place.
         tableView.layoutSubtreeIfNeeded()
         logFills(fills, changes: changes)
-        updateHover()
+        updatePointer()
     }
 
     // The table measures new rows only when asked for spans from the top and answers estimates
@@ -808,7 +818,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         // As in apply: inside a SwiftUI update the table's own layout can come a frame later.
         tableView.layoutSubtreeIfNeeded()
-        updateHover()
+        updatePointer()
     }
 
     // Without rows the placeholders stand in for the latest page.
@@ -846,7 +856,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     func pointerMoved() {
-        updateHover()
+        updatePointer()
     }
 
     // Fingers resting past an edge post nothing, yet the gesture still holds the list.
@@ -1098,7 +1108,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         // The scroll view takes the new style on the same notification; hover waits for it.
         Task { @MainActor [weak self] in
-            self?.updateHover()
+            self?.updatePointer()
         }
     }
 
@@ -1208,9 +1218,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             self?.actions?.jumpToUnread()
         }
         tableView.pointerMoved = { [weak self] in
-            self?.updateHover()
+            self?.updatePointer()
         }
+        tableView.cursorAt = { [weak self] in self?.cursor(at: $0) }
         let center = NotificationCenter.default
+        // The browser's panel takes the key and gives it back over a still pointer.
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            center.addObserver(self, selector: #selector(keyChanged), name: name, object: nil)
+        }
         center.addObserver(
             self, selector: #selector(liveScrollStarted),
             name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
@@ -1341,9 +1356,64 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         settle()
     }
 
-    private func updateHover() {
+    // The list's one pointer authority: the hovered row, the thread box and hover link under the
+    // pointer, and the cursor, from what's there now. Nothing in the rows tracks the pointer.
+    private func updatePointer() {
+        let location = pointer()
+        updateHover(at: location)
+        let target = location.flatMap(target(at:))
+        let text = target?.view as? MessageTextView
+        if underlinedText !== text {
+            underlinedText?.underline(at: nil)
+        }
+        if let text, let location {
+            text.underline(at: text.convert(location, from: nil))
+        }
+        underlinedText = text
+        let box = target?.view as? ThreadBoxView
+        if hoveredBox !== box {
+            hoveredBox?.hovered = false
+        }
+        box?.hovered = true
+        hoveredBox = box
+        target?.cursor.set()
+    }
+
+    /// The cursor the list shows at `location` (window coordinates): the I-beam over a message's
+    /// text, the pointing hand over a link, a thread box or a button, the arrow elsewhere, over
+    /// what lies over the list too; `nil` outside it.
+    func cursor(at location: NSPoint) -> NSCursor? {
+        target(at: location)?.cursor
+    }
+
+    private func target(at location: NSPoint) -> (view: NSView?, cursor: NSCursor)? {
+        guard tableView.visibleRect.contains(tableView.convert(location, from: nil)),
+            let content = tableView.window?.contentView
+        else {
+            return nil
+        }
+        let hit = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
+        guard let hit, hit.isDescendant(of: tableView) else {
+            // A bar over the list: the hand where it clicks.
+            let window = content.window
+            return (nil, window.flatMap { CursorArea.Area.cursor(at: location, in: $0) } ?? .arrow)
+        }
+        var view: NSView? = hit
+        while let current = view, current !== tableView {
+            if let text = current as? MessageTextView {
+                return (text, text.cursor(at: text.convert(location, from: nil)))
+            }
+            if let button = current as? NSButton, button.isEnabled {
+                return (button, .pointingHand)
+            }
+            view = current.superview
+        }
+        return (nil, .arrow)
+    }
+
+    private func updateHover(at location: NSPoint?) {
         var row = -1
-        if let location = pointer() {
+        if let location {
             let point = tableView.convert(location, from: nil)
             if tableView.visibleRect.contains(point) {
                 row = tableView.row(at: point)
@@ -1365,6 +1435,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
     }
 
+    @objc private func keyChanged(_ notification: Notification) {
+        if let window = tableView.window,
+            (notification.object as? NSWindow)?.isFamily(of: window) == true
+        {
+            updatePointer()
+        }
+    }
+
     @objc private func clipMoved(_ notification: Notification) {
         let origin = scrollView.contentView.bounds.origin
         defer { lastClipOrigin = origin }
@@ -1375,7 +1453,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 + "\(ScrollLog.name(scrollView.verticalScrollElasticity)) live \(isLiveScrolling) "
                 + "own \(ownChanges > 0) layout \(tableView.isLayingOut)")
         // Content moves under a still pointer on every scroll, the controller's own included.
-        updateHover()
+        updatePointer()
         updateRelativeTimer()
         // The table re-anchors inside its own layout; that isn't the user scrolling either.
         guard ownChanges == 0, !tableView.isLayingOut, origin != lastClipOrigin else {
@@ -1502,13 +1580,18 @@ final class BottomClipView: NSClipView {
 }
 
 // NSTableView re-anchors the scroll position inside its layout, so pinning comes after it.
-class MessageTableView: NSTableView {
+class MessageTableView: NSTableView, CursorAuthority {
     var didLayout: (() -> Void)?
     var onEscape: (() -> Void)?
     var onShiftEscape: (() -> Void)?
     var onShiftPageUp: (() -> Void)?
     var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
     var pointerMoved: (() -> Void)?
+    var cursorAt: ((NSPoint) -> NSCursor?)?
+
+    func cursor(at point: NSPoint) -> NSCursor? {
+        cursorAt?(point)
+    }
     var windowChanged: (() -> Void)?
     private(set) var isLayingOut = false
 
@@ -1551,6 +1634,7 @@ class MessageTableView: NSTableView {
         windowChanged?()
     }
 
+
     override func layout() {
         isLayingOut = true
         super.layout()
@@ -1566,8 +1650,15 @@ class MessageTableView: NSTableView {
         addTrackingArea(
             NSTrackingArea(
                 rect: .zero,
-                options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                options: [
+                    .mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow,
+                    .inVisibleRect,
+                ],
                 owner: self))
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        pointerMoved?()
     }
 
     override func mouseMoved(with event: NSEvent) {

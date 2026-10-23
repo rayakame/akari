@@ -1,11 +1,13 @@
 use serde::Deserialize;
 
+use super::guild::GuildMember;
 use super::int_enum::int_enum;
+use super::message::Message;
 use super::permissions::Permissions;
 use super::snowflake::{ChannelMarker, GenericMarker, GuildMarker, Snowflake, UserMarker};
 use super::timestamp::Timestamp;
 use super::user::User;
-use crate::lenient::default_on_error;
+use crate::lenient::{default_on_error, skip_invalid, skip_invalid_option};
 
 /// A guild channel, thread, DM or group DM. Which fields are set depends on `kind`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -46,12 +48,37 @@ pub struct Channel {
     pub member: Option<ThreadMember>,
     pub message_count: Option<u32>,
     pub member_count: Option<u32>,
+    /// Some of a thread's members.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub member_ids_preview: Vec<Snowflake<UserMarker>>,
+    /// A thread's owner; only thread search sends it.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub owner: Option<Box<GuildMember>>,
     #[serde(default)]
     pub is_message_request: bool,
     #[serde(default)]
     pub is_spam: bool,
     #[serde(default)]
     pub flags: u64,
+}
+
+/// Search Threads' answer. Discord answers 202 without `threads` while it hasn't indexed the
+/// channel yet.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[non_exhaustive]
+pub struct ThreadSearchResults {
+    #[serde(default, deserialize_with = "skip_invalid_option")]
+    pub threads: Option<Vec<Channel>>,
+    /// The current user's members of the threads it joined.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub members: Vec<ThreadMember>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub has_more: bool,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub total_results: Option<u32>,
+    /// The newest message of each thread that has one; undocumented, read by Discord's client.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub most_recent_messages: Vec<Message>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

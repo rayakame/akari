@@ -135,6 +135,18 @@ pub enum StoreEvent {
         guild_id: GuildId,
         thread_id: ChannelId,
     },
+    /// A thread's newest message or latest message changed: its place in
+    /// `Store::thread_browser` of `parent_id` and its `latest_message` may have.
+    ThreadActivity {
+        guild_id: GuildId,
+        parent_id: ChannelId,
+        thread_id: ChannelId,
+    },
+    /// Loading `parent_id`'s archived threads moved on (a page began, came or failed): read
+    /// `Store::thread_browser` again.
+    OlderThreadsChanged {
+        parent_id: ChannelId,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -237,6 +249,16 @@ impl StoreEvent {
                 guild_id,
                 thread_id,
             },
+            E::ThreadActivity {
+                guild_id,
+                parent_id,
+                thread_id,
+            } => Self::ThreadActivity {
+                guild_id,
+                parent_id,
+                thread_id,
+            },
+            E::OlderThreadsChanged { parent_id } => Self::OlderThreadsChanged { parent_id },
             E::ChannelAdded(channel) => Self::ChannelAdded {
                 channel_id: channel.id,
                 guild_id: channel.guild_id,

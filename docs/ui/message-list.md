@@ -155,12 +155,12 @@ thread, a renamed channel, and so on) show as one line:
 2026-10-17 and 2026-10-19): "Ray", "t2" and "threads" in `textStrong` (#FBFBFB) and medium, the
 rest in `chatTextMuted` (#818289), all three links with the pointing hand and an underline while
 the pointer is over them. The thread's name opens the thread beside the channel, in the split
-view ([layout.md](layout.md#split-view)), "threads" the channel's Threads popover, and "Ray"
-the profile (**unverified**). *Akari: the name opens the split view.
-A thread Akari doesn't have, such as one archived since, is fetched first
-([dispatches.md](../protocol/dispatches.md#threads)); if Discord refuses it or it's gone, the
-name stays strong text without the link. "Ray" and "threads" are drawn the same but aren't
-links yet: Akari has no profiles and no Threads popover.*
+view ([layout.md](layout.md#split-view)), "threads" the channel's Threads modal
+([thread-browser.md](thread-browser.md)), and "Ray" the profile (**unverified**). *Akari: the
+name opens the split view and "threads" the modal. A thread Akari doesn't have, such as one
+archived since, is fetched first ([dispatches.md](../protocol/dispatches.md#threads)); if
+Discord refuses it or it's gone, the name stays strong text without the link. "Ray" is drawn
+the same but isn't a link yet: Akari has no profiles.*
 
 **A pinned message** posts "Ray pinned a message to this channel. See all pinned messages."
 (observed 2026-10-20, in German "Ray hat eine Nachricht an diesen Kanal angepinnt. Alle
@@ -217,9 +217,10 @@ participants the store knows, as Discord's client does with its own store; Akari
 recipients. Akari can't join calls, so "Join the call" is strong text.*
 
 **Links:** a part links only where Akari has its target: a thread's name, "a message" and a
-poll's title (they jump), an AutoMod alert's channel while the user can see it, and a Discovery
-notice's server. Discord's other links are strong text without the hand until Akari has their
-targets: profiles (every actor and named person), "threads", "pinned messages", "Join the call",
+poll's title (they jump), "threads" (the channel's Threads modal), an AutoMod alert's channel
+while the user can see it, and a Discovery notice's server. Discord's other links are strong
+text without the hand until Akari has their targets: profiles (every actor and named person),
+"pinned messages", "Join the call",
 "Edit Group", a followed channel's server popout, "Server Settings", a subscription's server
 page, a product, and "a voice hangout".
 
@@ -261,6 +262,22 @@ text; names, times, day dividers and the reply line can't be selected. *Akari: t
 selectable texts are all text views like a message's, so they select alike, and a click, double
 click or drag never changes their font, color or baseline (a selectable label's field editor
 would).*
+
+The pointer shows what a web page's text shows: the I-beam over the text itself (each line's
+glyphs, its full line height), the pointing hand over links, mentions, hidden spoilers, a thread's
+box and buttons (Retry, Delete, Try again), and the arrow everywhere else in the row, after a short
+line's end and over a blank line included (Chris, 2026-10-23: Akari showed the I-beam over a
+message's empty area). *One authority decides it for the whole list (`MessageTableController`):
+the table's own tracking area, which hit-tests what's under the pointer on every move, scroll and
+update and when the window takes the key back; the text views and thread boxes track nothing and
+set no cursor of their own (NSTextView's own cursor area is dropped; its tooltips' stays). Over
+the bars over the list it shows what they say: the pointing hand over the unread bar and the jump
+bar's button, which click, the arrow over the locked banner and the status strip, which don't
+(Chris, 2026-10-23: anything clickable shows the hand). Hover follows the same authority: the row,
+the box and a link's underline. Over a window above the list (the Threads browser's shield, More
+Active Threads) the list does nothing.* A click on a link follows it even when the link is inside
+a selection (a double click on it selects its word), where a text view would start dragging the
+selection.
 
 ## Loading history
 
