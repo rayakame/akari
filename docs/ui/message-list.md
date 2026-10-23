@@ -264,13 +264,19 @@ click or drag never changes their font, color or baseline (a selectable label's 
 would).*
 
 The pointer shows what a web page's text shows: the I-beam over the text itself (each line's
-glyphs, its full line height), the pointing hand over links, mentions and hidden spoilers, and
-the arrow everywhere else in the row, after a short line's end and over a blank line included
-(Chris, 2026-10-23: Akari showed the I-beam over a message's empty area). A click on a link
-follows it even when the link is inside a selection (a double click on it selects its word),
-where a text view would start dragging the selection. While a popout or modal is open, nothing in
-the list or the composer reacts to the pointer: no hover, no cursor, no focus (see
-[thread-browser.md](thread-browser.md)).
+glyphs, its full line height), the pointing hand over links, mentions, hidden spoilers, a thread's
+box and buttons (Retry, Delete, Try again), and the arrow everywhere else in the row, after a short
+line's end and over a blank line included (Chris, 2026-10-23: Akari showed the I-beam over a
+message's empty area). *One authority decides it for the whole list (`MessageTableController`):
+the table's own tracking area, which hit-tests what's under the pointer on every move, scroll and
+update and when the window takes the key back; the text views and thread boxes track nothing and
+set no cursor of their own (NSTextView's own cursor area is dropped; its tooltips' stays). The
+bars over the list (the unread bar, the jump bar, the locked banner, the status strip) show the
+arrow, where Discord's bars show the pointer (D126). Hover follows the same authority: the row,
+the box and a link's underline. Over a window above the list (the Threads browser's shield, More
+Active Threads) the list does nothing.* A click on a link follows it even when the link is inside
+a selection (a double click on it selects its word), where a text view would start dragging the
+selection.
 
 ## Loading history
 

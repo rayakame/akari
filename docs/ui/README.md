@@ -22,6 +22,7 @@ app can mirror it and Discord users can switch with zero relearning.
 - [channel-list.md](channel-list.md): categories, channel rows, and the DM list at home
 - [thread-browser.md](thread-browser.md): a channel's threads: the header's Threads popout, the
   "See all threads" modal, their sections, search and older threads, and "More Active Threads"
+- [cursors.md](cursors.md): which cursor shows where, and the one authority for each region
 - [message-list.md](message-list.md): message layout, the grouping rule, times, day dividers,
   system messages, loading history, the channel's start, jump to present, edits and deletes
 - [markdown.md](markdown.md): message formatting: Discord's markdown, mentions and tokens, and

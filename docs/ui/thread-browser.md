@@ -15,7 +15,8 @@ official client on 2026-10-22 and 2026-10-23.
 - **The popout** hangs under the button: its right edge on the button's, its top just under the
   header's line. It's 35% of the window wide, at least 480 and at most 600, and as tall as its
   list, at least 400 and at most 80% of the window (observed: 480 × 651 in an 813-point
-  window). Radius 8, Discord's `shadow-border` ring and `shadow-high`. A click outside it, Escape,
+  window). Radius 8, Discord's `shadow-border` ring and `shadow-high` (*Akari: the window's
+shadow*). A click outside it, Escape,
   the button or a row closes it; so does opening another channel. Discord's Threads popout has a
   click trap: a layer over the whole window under it takes every press outside it, the button's
   too, and the popout closes when that press is released, whichever button; nothing behind gets
@@ -29,21 +30,27 @@ official client on 2026-10-22 and 2026-10-23.
   Escape, a click on the dimmed page (press and release on it, the left button) or a row closes
   it. The dimmed page covers the whole window: nothing behind reacts to the pointer.
 - **Nothing behind either reacts**: no hover, no cursor change, no click, no wheel, no focus.
-  *Akari lays a shield over the window under each (`PointerShield`): it takes the clicks and the
-  wheel and shows the arrow, and while it's up the message list, its links and thread boxes and
-  the composer hover nothing, set no cursor and take no focus (a composer with the focus gives it
-  up). SwiftUI's rows behind it (channels, servers, header buttons) don't hover since the shield
-  is what's hit.*
+  *Akari shows both as windows of their own, attached to the session's window so they move with
+  it (`ChildWindows`): the browser's borderless panel over a shield, a borderless window over the
+  whole session window (the title bar too) that's clear for the popout and the dimmed page for
+  the modal. Every mouse event outside the browser goes to the shield, the window server sends
+  nothing to the covered window, and a press on the shield closes the browser and goes no further,
+  whichever button; the shield shows the arrow and swallows the wheel. Both follow the window's
+  size; entering or leaving full screen, minimizing or closing the window, and the app going to
+  the background close the browser, as do Escape, the X, a row, and another channel or server.
+  This departs from Discord in two details (D126): both close on the press, any button (Discord's
+  popout on the release, its modal on a left click), and the window's buttons and title bar are
+  under the shield while either shows.*
 - **Focus**: both are modal dialogs ("Threads") with a focus lock, and the search field takes the
   focus when they open; Tab and Shift+Tab move only among what's inside. Closing gives the focus
   back to what had it when it opened, if nothing else took it meanwhile; Discord's typing then
-  goes to the composer. *Akari gives that focus to the channel's composer (a Shift+click's split
-  keeps its own), lets Escape cancel what an input method composes, keeps Tab and Shift+Tab in
-  the field, its only stop (Discord's X, Create button and cards are stops too; macOS's SwiftUI
-  buttons aren't without Full Keyboard Access), and while the modal shows drops plain keys meant
-  for anything but a field (Chris, 2026-10-23: Tab took the focus to the composer behind the
-  modal, and the letters after it too). VoiceOver starts in the field, or at the title without
-  one.*
+  goes to the composer. *Akari's panel is the key window while it shows (the session's stays the
+  main one, its title bar active), so typing, Tab and Shift+Tab stay in it and nothing reaches
+  the composer; Escape closes it unless an input method composes, the menu's Close (Cmd+W) closes
+  it and Minimize (Cmd+M) minimizes the session's window. On closing, the session's window takes
+  the key back and the channel's composer the focus (a Shift+click's split keeps its own). The
+  channel stays read behind it: the panel's key, clicks and keys count as the window's. VoiceOver
+  meets a dialog named "Threads" and starts in the field, or at the title without one.*
 
 ## The header
 
@@ -55,9 +62,10 @@ room left (measured: 236 in the popout, 315 in the modal, beside Discord's Creat
 its width is half of the room plus 107.5. Discord's "Create" button and the modal's X follow;
 *Akari has no Create button until it can create threads (the next PR).*
 
-Only the field's input shows the I-beam (its border, the magnifier and the gaps show the arrow);
-its clear button, while there's text, is `icon-subtle` (#ABACB2 dark, #595A63 light) and
-`icon-strong` while hovered, with the pointing hand. The modal's X is Discord's design-system
+The field is AppKit's own text field in the key panel: the I-beam over its input, editing,
+selection and the input method are the system's. Its magnifier is `icon-strong` (#FBFBFB dark,
+#28282D light); its clear button, while there's text, is `icon-subtle` (#ABACB2 dark, #595A63
+light) and `icon-strong` while hovered, with the pointing hand. The modal's X is Discord's design-system
 icon-only button (size sm): a 32 square (30 and a 1 border) with radius 8, 8 after the spacer;
 idle a 16 glyph in `control-icon-only-icon-default` (#ABACB2, light #595A63) on nothing; hovered
 a fill of rgba(151, 151, 159, 0.161) (#36363C on the modal's #242429; Chris's screenshot
@@ -160,4 +168,8 @@ follow new messages while it shows. It goes 250 ms after the pointer leaves the 
 popout (moving to another row closes it unless that row shows its own); a click on the row
 closes it at once, and it goes with its row (another server, a collapsed category). It's a plain
 group, not a dialog: no focus lock, nothing focused.
-*Akari keeps it open while the pointer is on the popout; whether Discord's does is to check.*
+*Akari keeps it open while the pointer is on the popout; whether Discord's does is to check. It's
+a borderless panel of its own beside the row, attached to the session's window, without a shield
+and never key (the list keeps its hover and the composer its focus); it takes its first click,
+shows the arrow over its rows (a window that's never key gets no cursor rects; Discord shows the
+pointer), and goes with the app going to the background or the window closing, too.*

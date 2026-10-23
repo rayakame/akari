@@ -22,7 +22,8 @@ header, list and composer; `docs/ui/layout.md`), the thread header's and the spl
 (`ThreadMenu`: Join Thread or Leave Thread, Open in Split View or Open in Full View) and a
 thread row's menu, the Threads browser (`ThreadBrowser.swift`, `ThreadBrowserContainers.swift`:
 the header's Threads button and its popout, the "See all threads" modal, and the channel list's
-"More Active Threads" in `MoreActiveThreads.swift`; `docs/ui/thread-browser.md`), and the
+"More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
+`ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), and the
 composer (a locked thread's banner). Images, attachments, reactions,
 replies, voice, notifications and settings come later.
 
