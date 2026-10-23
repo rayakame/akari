@@ -5,23 +5,6 @@ import Testing
 
 @testable import Akari
 
-// A shield over the window, as a popout or modal raises one.
-@MainActor
-func raiseShield(in window: NSWindow) async throws -> PointerShield {
-    let content = try #require(window.contentView)
-    let shield = PointerShield(frame: content.bounds)
-    content.addSubview(shield)
-    // It tells the window's views on the next turn.
-    try await Task.sleep(for: .milliseconds(20))
-    return shield
-}
-
-@MainActor
-func lowerShield(_ shield: PointerShield) async throws {
-    shield.removeFromSuperview()
-    try await Task.sleep(for: .milliseconds(20))
-}
-
 @MainActor
 func pointerEvent(_ type: NSEvent.EventType, at point: NSPoint, in view: NSView) throws -> NSEvent
 {
@@ -39,9 +22,9 @@ func pointerEvent(_ type: NSEvent.EventType, at point: NSPoint, in view: NSView)
             context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
 }
 
-// Discord's message text is a web page's: the I-beam over the text itself, the pointing hand over
-// links, the arrow over the rest of the row (Chris: the I-beam showed over a message's empty
-// area).
+// What a message's text shows the pointer, as over a web page's text: the I-beam over the text
+// itself, the pointing hand over links, the arrow around it (Chris: the I-beam showed over a
+// message's empty area). The list asks; the text view sets nothing itself.
 @MainActor
 struct MessageCursorTests {
     let texts = MessageTextViewTests()
@@ -83,194 +66,215 @@ struct MessageCursorTests {
         #expect(view.cursor(at: NSPoint(x: last.maxX + 40, y: last.midY)) == .arrow)
     }
 
-    // NSTextView's own rect is its whole visible area; Akari's cover the text and links only.
+    // NSTextView's own cursor area would set the I-beam anywhere in the view, and race its
+    // neighbours' between rows; only its tooltips' area stays.
     @Test
-    func theCursorRectsCoverTheTextAndItsLinks() throws {
-        let view = linked()
-        let areas = view.shownCursorAreas
-        let word = try middle("short", in: view)
-        let at = { (point: NSPoint) in areas.last { $0.rect.contains(point) }?.cursor }
-
-        #expect(at(word) == .iBeam)
-        #expect(at(try middle("link", in: view)) == .pointingHand)
-        #expect(at(NSPoint(x: 350, y: word.y)) == nil)
-    }
-
-    // The pointer coming into the view shows what's under it, not NSTextView's I-beam everywhere.
-    @Test
-    func comingInShowsTheCursorForThePoint() throws {
+    func theTextViewSetsNoCursorItself() throws {
         let view = linked()
         let word = try middle("short", in: view)
+        let cursor = NSTrackingArea(
+            rect: .zero, options: [.cursorUpdate, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner: view)
+        let tips = NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: view)
 
-        NSCursor.iBeam.set()
-        let after = NSPoint(x: 350, y: word.y)
-        view.cursorUpdate(with: try pointerEvent(.cursorUpdate, at: after, in: view))
-        #expect(NSCursor.current == .arrow)
+        view.addTrackingArea(cursor)
+        view.addTrackingArea(tips)
 
-        view.mouseMoved(with: try pointerEvent(.mouseMoved, at: word, in: view))
-        #expect(NSCursor.current == .iBeam)
-        let link = try middle("link", in: view)
-        view.mouseMoved(with: try pointerEvent(.mouseMoved, at: link, in: view))
-        #expect(NSCursor.current == .pointingHand)
-    }
-
-    // Chris: with a popout or the modal open, the messages behind still showed the I-beam.
-    @Test
-    func behindAShieldTheTextChangesNoCursorAndTakesNoFocus() async throws {
-        let view = linked()
-        let word = try middle("short", in: view)
-        let window = try #require(view.window)
-        _ = try await raiseShield(in: window)
-
+        #expect(!view.trackingAreas.contains(cursor))
+        #expect(view.trackingAreas.contains(tips))
         NSCursor.arrow.set()
         view.cursorUpdate(with: try pointerEvent(.cursorUpdate, at: word, in: view))
-        let link = try middle("link", in: view)
-        view.mouseMoved(with: try pointerEvent(.mouseMoved, at: link, in: view))
-
+        view.mouseMoved(with: try pointerEvent(.mouseMoved, at: word, in: view))
         #expect(NSCursor.current == .arrow)
-        #expect(view.shownCursorAreas.isEmpty)
-        #expect(!view.acceptsFirstResponder)
-        // The window takes the focus the view refuses, and says yes.
-        window.makeFirstResponder(view)
-        #expect(window.firstResponder !== view)
-    }
-
-    @Test
-    func aTextWithTheFocusGivesItUpWhenAShieldRises() async throws {
-        let view = linked()
-        let window = try #require(view.window)
-        #expect(window.makeFirstResponder(view))
-
-        let shield = try await raiseShield(in: window)
-
-        #expect(window.firstResponder !== view)
-        try await lowerShield(shield)
-        window.makeFirstResponder(view)
-        #expect(window.firstResponder === view)
-    }
-
-    @Test
-    func behindAShieldALinkGetsNoUnderline() async throws {
-        let text = NSMutableAttributedString(
-            attributedString: CellText.body("See all threads.", color: .labelColor))
-        text.addAttributes(
-            [.link: URL(string: "akari://threads")!, MessageTextView.underlinesOnHover: true],
-            range: NSRange(location: 8, length: 7))
-        let view = texts.shown(text, width: 400)
-        let threads = try middle("threads", in: view)
-        let index = (view.string as NSString).range(of: "threads").location
-        let underlined = {
-            view.layoutManager?.temporaryAttribute(
-                .underlineStyle, atCharacterIndex: index, effectiveRange: nil) != nil
-        }
-        let window = try #require(view.window)
-
-        let shield = try await raiseShield(in: window)
-        view.mouseMoved(with: try pointerEvent(.mouseMoved, at: threads, in: view))
-        #expect(!underlined())
-
-        try await lowerShield(shield)
-        view.mouseMoved(with: try pointerEvent(.mouseMoved, at: threads, in: view))
-        #expect(underlined())
     }
 }
 
-// Behind a popout or modal, nothing in the message list hovers (Chris: the rows still lit up).
+// The message list's one cursor authority: its own tracking area, and what's under the pointer
+// decides, on every move, scroll and update; nothing in its rows sets the cursor.
 @MainActor
-struct HoverBehindShieldTests {
+struct ListCursorTests {
     let list = MessageTableTests()
 
-    @Test
-    func noRowHoversWhileAShieldIsUpAndTheHoverComesBackAfter() async throws {
-        list.show(list.messages(20))
-        list.pointer.location = NSPoint(x: 300, y: 200)
-        list.controller.pointerMoved()
-        let under = list.hoveredRows
-        try #require(!under.isEmpty)
+    // Ray's link, Mira's short line, a message with a thread's box, a failed one with Retry.
+    func shown() {
+        list.show([
+            row(1, by: author(2, "Ray"), at: list.noon, content: "see https://example.com now"),
+            row(2, by: author(3), at: list.noon + 600, content: "short"),
+            row(
+                3, by: author(2, "Ray"), at: list.noon + 1200, content: "test", hasThread: true,
+                threadBox: ThreadBox(
+                    threadId: ChannelId(rawValue: 20), name: "t1", link: "16 Messages ›",
+                    bottom: .noRecentMessages, time: list.noon)),
+            row(4, at: list.noon + 1800, delivery: .failed),
+        ])
+    }
 
-        let shield = try await raiseShield(in: list.window)
-        #expect(list.hoveredRows.isEmpty, "gone without the pointer moving")
-        list.controller.pointerMoved()
-        #expect(list.hoveredRows.isEmpty)
+    func text(of raw: UInt64) throws -> MessageTextView {
+        try #require(list.messageTexts(in: try list.cell(of: raw)).first)
+    }
 
-        try await lowerShield(shield)
-        #expect(list.hoveredRows == under)
+    // `part` of message `raw`'s text, in window coordinates.
+    func point(of part: String, in raw: UInt64) throws -> NSPoint {
+        let view = try text(of: raw)
+        let rect = try glyphs(of: part, in: view, within: view)
+        return view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    }
+
+    func box(in raw: UInt64 = 3) throws -> ThreadBoxView {
+        try #require(ThreadBoxViewTests.boxView(in: try list.cell(of: raw)))
+    }
+
+    func center(of view: NSView, in rect: NSRect? = nil) -> NSPoint {
+        let rect = rect ?? view.bounds
+        return view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    }
+
+    func retry() throws -> NSButton {
+        let cell = try list.cell(of: 4)
+        func buttons(_ view: NSView) -> [NSButton] {
+            ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+        }
+        return try #require(buttons(cell).first { $0.title == "Retry" })
     }
 
     @Test
-    func aThreadBoxDoesntHoverBehindAShield() async throws {
-        let boxes = ThreadBoxViewTests()
-        let (_, box) = try boxes.shown()
-        let window = try #require(box.window)
-        #expect(box.cursorRect == box.boxFrame)
+    func itPicksTheCursorForWhatsUnderThePointer() throws {
+        shown()
+        let short = try point(of: "short", in: 2)
 
-        let shield = try await raiseShield(in: window)
-        box.mouseEntered(with: try pointerEvent(.mouseEntered, at: .zero, in: box))
+        #expect(list.controller.cursor(at: short) == .iBeam)
+        #expect(list.controller.cursor(at: NSPoint(x: short.x + 300, y: short.y)) == .arrow)
+        #expect(list.controller.cursor(at: try point(of: "example", in: 1)) == .pointingHand)
+        let box = try box()
+        #expect(list.controller.cursor(at: center(of: box, in: box.boxFrame)) == .pointingHand)
+        #expect(list.controller.cursor(at: center(of: try retry())) == .pointingHand)
+        // The space before a group belongs to no message.
+        let second = list.table.rect(ofRow: list.index(of: 2))
+        let gap = list.table.convert(NSPoint(x: 300, y: second.minY + 4), to: nil)
+        #expect(list.controller.cursor(at: gap) == .arrow)
+        #expect(list.controller.cursor(at: NSPoint(x: -20, y: short.y)) == nil)
+    }
+
+    @Test
+    func itSetsTheCursorOnEveryMoveBetweenRows() throws {
+        shown()
+        let short = try point(of: "short", in: 2)
+        let points = [
+            short, NSPoint(x: short.x + 300, y: short.y), try point(of: "example", in: 1), short,
+            center(of: try retry()),
+        ]
+
+        for point in points {
+            list.pointer.location = point
+            list.controller.pointerMoved()
+            #expect(NSCursor.current == list.controller.cursor(at: point), "\(point)")
+        }
+    }
+
+    // A still pointer, the list moving under it: the cursor follows what's now there.
+    @Test
+    func scrollingUnderAStillPointerSetsTheCursorForWhatsNowThere() throws {
+        list.show(list.messages(80, longText: true))
+        let clip = list.controller.scrollView.contentView
+        let still = NSPoint(x: 200, y: 200)
+        list.pointer.location = still
+        list.controller.pointerMoved()
+        var seen: Set<String> = []
+
+        for distance in stride(from: CGFloat(7), through: 700, by: 7) {
+            clip.scroll(to: NSPoint(x: 0, y: clip.bounds.minY - 7))
+            list.controller.scrollView.reflectScrolledClipView(clip)
+            list.window.layoutIfNeeded()
+            let wanted = list.controller.cursor(at: still)
+            #expect(NSCursor.current == wanted, "\(distance)")
+            seen.insert(wanted == .iBeam ? "text" : "other")
+        }
+        #expect(seen == ["text", "other"], "the pointer saw text and the space around it")
+    }
+
+    @Test
+    func rowsArrivingUnderAStillPointerSetTheCursor() throws {
+        list.show([row(1, at: list.noon, content: "first")])
+        let below = list.table.convert(NSPoint(x: 120, y: list.table.bounds.maxY - 30), to: nil)
+        list.pointer.location = below
+        list.controller.pointerMoved()
+
+        list.show(list.messages(30, longText: true))
+
+        #expect(NSCursor.current == list.controller.cursor(at: below))
+    }
+
+    // The list underlines the hover link under the pointer and lights the thread box under it.
+    @Test
+    func itUnderlinesTheLinkAndHoversTheBoxUnderThePointer() throws {
+        list.show([
+            row(
+                1, by: author(2, "Ray"), at: list.noon, kind: .threadCreated, content: "t2",
+                reference: MessageReference(
+                    messageId: nil, channelId: ChannelId(rawValue: 20),
+                    guildId: GuildId(rawValue: 1))),
+            row(
+                3, by: author(2, "Ray"), at: list.noon + 1200, content: "test", hasThread: true,
+                threadBox: ThreadBox(
+                    threadId: ChannelId(rawValue: 21), name: "t1", link: "16 Messages ›",
+                    bottom: .noRecentMessages, time: list.noon)),
+        ])
+        let line = try text(of: 1)
+        let threads = try point(of: "threads", in: 1)
+        let index = (line.string as NSString).range(of: "threads").location
+        let underlined = {
+            line.layoutManager?.temporaryAttribute(
+                .underlineStyle, atCharacterIndex: index, effectiveRange: nil) != nil
+        }
+        let box = try box()
+
+        list.pointer.location = threads
+        list.controller.pointerMoved()
+        #expect(underlined())
         #expect(!box.hovered)
-        #expect(box.cursorRect == nil)
 
-        try await lowerShield(shield)
-        box.mouseEntered(with: try pointerEvent(.mouseEntered, at: .zero, in: box))
+        list.pointer.location = center(of: box, in: box.boxFrame)
+        list.controller.pointerMoved()
+        #expect(!underlined())
         #expect(box.hovered)
+
+        list.pointer.location = nil
+        list.controller.pointerMoved()
+        #expect(!box.hovered)
     }
-}
 
-@MainActor
-struct ComposerBehindShieldTests {
+    // The box sets no cursor and tracks no pointer of its own.
     @Test
-    func theComposerShowsNoIBeamTakesNoFocusAndGivesItUp() async throws {
-        let composer = ComposerTextViewTests()
-        let window = composer.window
-        let text = composer.textView
-        #expect(window.firstResponder === text)
+    func theThreadBoxLeavesThePointerToTheList() throws {
+        shown()
+        let box = try box()
 
-        let shield = try await raiseShield(in: window)
-        #expect(window.firstResponder !== text)
-        window.makeFirstResponder(text)
-        #expect(window.firstResponder !== text)
-        text.takeFocus()
-        #expect(window.firstResponder !== text)
+        #expect(box.trackingAreas.isEmpty)
         NSCursor.arrow.set()
-        let inside = NSPoint(x: 20, y: 20)
-        text.cursorUpdate(with: try pointerEvent(.cursorUpdate, at: inside, in: text))
+        box.mouseEntered(with: try pointerEvent(.mouseEntered, at: .zero, in: box))
         #expect(NSCursor.current == .arrow)
-
-        try await lowerShield(shield)
-        text.takeFocus()
-        #expect(window.firstResponder === text)
-    }
-}
-
-// A cursor area that may be behind a shield or in front of it (a card's in the popout).
-@MainActor
-struct CursorAreaTests {
-    let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
-        backing: .buffered, defer: false)
-
-    func area(_ cursor: NSCursor) -> CursorArea.Area {
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
-        window.contentView = content
-        let area = CursorArea.Area(frame: NSRect(x: 20, y: 20, width: 100, height: 40))
-        area.cursor = cursor
-        content.addSubview(area)
-        return area
+        #expect(!box.hovered)
     }
 
+    // The bars over the list (unread, jump, locked, the status strip) show the arrow, even
+    // over a message's text.
     @Test
-    func anAreaBehindAShieldShowsNothingAndOneInFrontOfItShowsItsCursor() async throws {
-        let behind = area(.pointingHand)
-        #expect(behind.shownRect == behind.bounds)
+    func whatLiesOverTheListShowsTheArrow() throws {
+        shown()
+        let short = try point(of: "short", in: 2)
+        let scroll = list.controller.scrollView
+        let bar = NSView(frame: NSRect(x: 0, y: 0, width: scroll.bounds.width, height: 0))
+        let over = scroll.convert(short, from: nil)
+        bar.frame = NSRect(x: 0, y: over.y - 15, width: scroll.bounds.width, height: 30)
+        scroll.addSubview(bar)
 
-        let shield = try await raiseShield(in: window)
-        #expect(behind.shownRect == nil)
-
-        // A card above the shield takes the clicks; its area lets them through to it.
-        let card = NSView(frame: NSRect(x: 200, y: 20, width: 150, height: 60))
-        window.contentView?.addSubview(card, positioned: .above, relativeTo: shield)
-        let inFront = CursorArea.Area(frame: NSRect(x: 10, y: 10, width: 100, height: 40))
-        inFront.cursor = .iBeam
-        card.addSubview(inFront)
-        #expect(inFront.shownRect == inFront.bounds)
+        #expect(list.controller.cursor(at: short) == .arrow)
+        list.pointer.location = short
+        NSCursor.iBeam.set()
+        list.controller.pointerMoved()
+        #expect(NSCursor.current == .arrow)
     }
 }
+

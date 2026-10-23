@@ -159,6 +159,23 @@ struct ThreadBrowserViewTests {
         #expect(abs(CGFloat(field) / image.scale - 8) <= 1, "field's top at \(field)")
     }
 
+    // Discord's magnifier is icon-strong (#FBFBFB on dark), not the placeholder's gray.
+    @Test
+    func theMagnifierIsDiscordsIconStrong() throws {
+        let image = try rendered()
+        let field = try #require(image.firstChange(at: 300, below: 2))
+        let top = CGFloat(field) / image.scale
+        var brightest: CGFloat = 0
+        for x in stride(from: CGFloat(125), through: 175, by: 0.5) {
+            for y in stride(from: top + 4, through: top + 28, by: 0.5) {
+                brightest = max(brightest, image.color(x, y)?.brightnessComponent ?? 0)
+            }
+        }
+        let strong = try #require(try drawn(Palette.interactiveTextActive))
+
+        #expect(abs(brightest - strong.brightnessComponent) < 0.04, "\(brightest)")
+    }
+
     @Test
     func theModalHasACloseButtonAndThePopoutNone() throws {
         let modal = try rendered(.modal, size: NSSize(width: 680, height: 700))
@@ -293,239 +310,5 @@ struct ThreadBrowserLiveTests {
         await settle { loads() > 0 }
         #expect(loads() == 1)
         withExtendedLifetime(window) {}
-    }
-}
-
-@MainActor
-struct ThreadBrowserScreenTests {
-    let store = FakeBrowserStore()
-
-    // The app's window: a transparent title bar over the full-size content, 1100 × 813.
-    func screen(_ presentation: ThreadBrowserModel.Presentation) async throws -> Rendered {
-        let session = store.session()
-        session.open(channel: FakeBrowserStore.parent)
-        session.openThreadBrowser(of: FakeBrowserStore.parent, as: presentation)
-        return try Rendered(
-            SessionScreen(session: session, splitWidth: SplitWidth()),
-            size: NSSize(width: 1100, height: 813))
-    }
-
-    func drawn(_ token: NSColor) throws -> NSColor? {
-        try Rendered(Color(nsColor: token).ignoresSafeArea(), size: NSSize(width: 10, height: 10))
-            .color(5, 5)
-    }
-
-    // The header's button is a 32 box 16 from the page's right edge, as the thread's "…" is,
-    // 8 below the header's top (the title bar's 32): the popout's right edge is 1084, its top
-    // 32 + 40 + 9 = 81.
-    @Test
-    func thePopoutHangsUnderTheThreadsButtonRightAligned() async throws {
-        let image = try await screen(.popout)
-        let fill = try drawn(Palette.surfaceHigh)
-
-        let right = (900..<1100).last { same(image.color(CGFloat($0), 200), fill) }
-        #expect(right.map { abs(CGFloat($0) + 1 - 1084) <= 1 } == true, "right \(String(describing: right))")
-        let top = (60..<120).first { same(image.color(1000, CGFloat($0)), fill) }
-        #expect(top.map { abs(CGFloat($0) - 81) <= 1 } == true, "top \(String(describing: top))")
-        let left = (500..<700).first { same(image.color(CGFloat($0), 200), fill) }
-        #expect(left.map { abs(CGFloat($0) - 604) <= 1 } == true, "left \(String(describing: left))")
-    }
-
-    // 680 wide and 701 tall in an 813 window: 56 above and below, the page dimmed around it.
-    @Test
-    func theModalSitsInTheMiddleOfTheDimmedWindow() async throws {
-        let image = try await screen(.modal)
-        let fill = try drawn(Palette.surfaceHigh)
-
-        let left = (0..<550).first { same(image.color(CGFloat($0), 400), fill) }
-        #expect(left.map { abs(CGFloat($0) - 211) <= 1.5 } == true, "left \(String(describing: left))")
-        let top = (0..<200).first { same(image.color(550, CGFloat($0)), fill) }
-        #expect(top.map { abs(CGFloat($0) - 57) <= 1.5 } == true, "top \(String(describing: top))")
-        let dimmed = try #require(image.color(20, 400))
-        #expect(dimmed.brightnessComponent < 0.05, "\(dimmed)")
-    }
-}
-
-@MainActor
-struct ThreadBrowserEventsTests {
-    final class Calls {
-        var closes = 0
-        var tabs = 0
-    }
-
-    func watcher(_ calls: Calls, modal: Bool = false) -> (ThreadBrowserEvents.Watcher, NSWindow) {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
-            backing: .buffered, defer: false)
-        let watcher = ThreadBrowserEvents.Watcher(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
-        window.contentView = watcher
-        watcher.modal = modal
-        watcher.close = { calls.closes += 1 }
-        watcher.onTab = { calls.tabs += 1 }
-        return (watcher, window)
-    }
-
-    func mouse(_ type: NSEvent.EventType, in window: NSWindow) -> NSEvent {
-        NSEvent.mouseEvent(
-            with: type, location: NSPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0,
-            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
-            pressure: 1)!
-    }
-
-    // Discord's popout closes when a press outside it is released; its modal on a left click.
-    @Test
-    func thePopoutClosesOnTheReleaseOfAnyPressAndTheModalOnALeftClick() {
-        let calls = Calls()
-        let (popout, window) = watcher(calls)
-        popout.mouseDown(with: mouse(.leftMouseDown, in: window))
-        #expect(calls.closes == 0)
-        popout.mouseUp(with: mouse(.leftMouseUp, in: window))
-        #expect(calls.closes == 1)
-        popout.rightMouseDown(with: mouse(.rightMouseDown, in: window))
-        popout.rightMouseUp(with: mouse(.rightMouseUp, in: window))
-        #expect(calls.closes == 2)
-
-        let modalCalls = Calls()
-        let (modal, modalWindow) = watcher(modalCalls, modal: true)
-        modal.rightMouseDown(with: mouse(.rightMouseDown, in: modalWindow))
-        modal.rightMouseUp(with: mouse(.rightMouseUp, in: modalWindow))
-        #expect(modalCalls.closes == 0)
-        modal.mouseDown(with: mouse(.leftMouseDown, in: modalWindow))
-        modal.mouseUp(with: mouse(.leftMouseUp, in: modalWindow))
-        #expect(modalCalls.closes == 1)
-    }
-
-    // A release with no press on the shield, as after a click that opened the browser.
-    @Test
-    func aReleaseAloneClosesNothing() {
-        let calls = Calls()
-        let (popout, window) = watcher(calls)
-
-        popout.mouseUp(with: mouse(.leftMouseUp, in: window))
-
-        #expect(calls.closes == 0)
-    }
-
-    @Test
-    func theShieldTakesEveryPointInsideItsBounds() {
-        let (watcher, _) = watcher(Calls())
-
-        #expect(watcher.hitTest(NSPoint(x: 20, y: 20)) === watcher)
-        #expect(watcher.hitTest(NSPoint(x: 420, y: 20)) == nil)
-    }
-
-    func key(_ code: UInt16, _ characters: String, in window: NSWindow, _ modifiers: NSEvent.ModifierFlags = [])
-        throws -> NSEvent
-    {
-        try #require(
-            NSEvent.keyEvent(
-                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
-                windowNumber: window.windowNumber, context: nil, characters: characters,
-                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
-    }
-
-    // A window with the composer focused and the watcher over it, as when the browser opens.
-    func composing() -> (ThreadBrowserEvents.Watcher, NSWindow, NSTextView) {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
-            backing: .buffered, defer: false)
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
-        window.contentView = content
-        let composer = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
-        content.addSubview(composer)
-        window.makeFirstResponder(composer)
-        let watcher = ThreadBrowserEvents.Watcher(frame: content.bounds)
-        content.addSubview(watcher)
-        return (watcher, window, composer)
-    }
-
-    @Test
-    func escapeWhileTheInputMethodComposesIsTheInputMethods() throws {
-        let calls = Calls()
-        let (watcher, window, composer) = composing()
-        watcher.close = { calls.closes += 1 }
-        composer.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
-        #expect(composer.hasMarkedText())
-
-        let escape = try key(53, "\u{1b}", in: window)
-        #expect(watcher.handle(escape) === escape)
-        #expect(calls.closes == 0)
-    }
-
-    // Discord's focus lock gives the focus back when nothing else took it; in Akari that's the
-    // channel's composer, where Discord's typing goes too.
-    @Test
-    func closingHandsTheFocusOnWhenNothingElseTookIt() async throws {
-        let (watcher, window, _) = composing()
-        var handedOn = 0
-        watcher.onFocusFree = { handedOn += 1 }
-        let field = NSTextField(frame: NSRect(x: 0, y: 200, width: 200, height: 24))
-        window.contentView?.addSubview(field)
-        window.makeFirstResponder(field)
-
-        field.removeFromSuperview()
-        watcher.removeFromSuperview()
-        try? await Task.sleep(for: .milliseconds(50))
-
-        #expect(handedOn == 1)
-    }
-
-    @Test
-    func closingLeavesTheFocusWhereAClickPutIt() async throws {
-        let (watcher, window, _) = composing()
-        var handedOn = 0
-        watcher.onFocusFree = { handedOn += 1 }
-        let other = NSTextView(frame: NSRect(x: 0, y: 100, width: 400, height: 40))
-        window.contentView?.addSubview(other)
-
-        window.makeFirstResponder(other)
-        watcher.removeFromSuperview()
-        try? await Task.sleep(for: .milliseconds(50))
-
-        #expect(handedOn == 0)
-        #expect(window.firstResponder === other)
-    }
-
-    // Keys meant for the modal's field never reach the composer behind it.
-    @Test
-    func theModalKeepsKeysFromTheComposerBehindIt() throws {
-        let (watcher, window, _) = composing()
-        watcher.modal = true
-
-        #expect(watcher.handle(try key(0, "a", in: window)) == nil)
-        let copy = try key(8, "c", in: window, .command)
-        #expect(watcher.handle(copy) === copy)
-
-        let field = NSTextField(frame: NSRect(x: 0, y: 200, width: 200, height: 24))
-        window.contentView?.addSubview(field)
-        window.makeFirstResponder(field)
-        let typed = try key(0, "a", in: window)
-        #expect(watcher.handle(typed) === typed)
-    }
-
-    @Test
-    func escapeClosesAndGoesNoFurtherButOtherKeysPass() throws {
-        let calls = Calls()
-        let (watcher, window) = watcher(calls)
-
-        #expect(watcher.handle(try key(53, "\u{1b}", in: window)) == nil)
-        #expect(calls.closes == 1)
-        let a = try key(0, "a", in: window)
-        #expect(watcher.handle(a) === a)
-        #expect(calls.closes == 1)
-    }
-
-    // Tab and Shift+Tab ask for the field and go no further; Cmd+Tab isn't the app's.
-    @Test
-    func tabAsksForTheFieldAndGoesNoFurther() throws {
-        let calls = Calls()
-        let (watcher, window) = watcher(calls)
-
-        #expect(watcher.handle(try key(48, "\t", in: window)) == nil)
-        #expect(watcher.handle(try key(48, "\t", in: window, .shift)) == nil)
-        #expect(calls.tabs == 2)
-        let switching = try key(48, "\t", in: window, .command)
-        #expect(watcher.handle(switching) === switching)
-        #expect(calls.tabs == 2)
     }
 }

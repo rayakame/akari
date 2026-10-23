@@ -3,7 +3,7 @@ import AppKit
 
 /// The box under a message a thread started from, or under the line about a thread started
 /// without one: Discord's measures, one button that opens the thread.
-final class ThreadBoxView: NSButton, BehindShields {
+final class ThreadBoxView: NSButton {
     static let height: CGFloat = 56
     static let maxWidth: CGFloat = 480
     private static let border: CGFloat = 1
@@ -28,6 +28,7 @@ final class ThreadBoxView: NSButton, BehindShields {
     var topInset: CGFloat = 0 {
         didSet { invalidateIntrinsicContentSize() }
     }
+    /// The list sets it while the pointer is over the box.
     var hovered = false {
         didSet {
             if hovered != oldValue {
@@ -35,7 +36,6 @@ final class ThreadBoxView: NSButton, BehindShields {
             }
         }
     }
-    private var hoverArea: NSTrackingArea?
 
     init() {
         super.init(frame: .zero)
@@ -65,11 +65,9 @@ final class ThreadBoxView: NSButton, BehindShields {
         self.box = box
         self.content = content
         self.time = time
-        // A reused cell's box may be elsewhere now; the pointer's next move says.
+        // A reused cell's box may be elsewhere now; the list says after its update.
         hovered = false
         needsDisplay = true
-        window?.invalidateCursorRects(for: self)
-        updateTrackingAreas()
     }
 
     /// The box itself, within the view.
@@ -108,35 +106,6 @@ final class ThreadBoxView: NSButton, BehindShields {
         return boxFrame.contains(convert(point, from: superview)) ? self : nil
     }
 
-    /// Its pointing hand's rect: none while a popout or modal is in front.
-    var cursorRect: NSRect? {
-        isBehindShield ? nil : boxFrame
-    }
-
-    override func resetCursorRects() {
-        if let cursorRect {
-            addCursorRect(cursorRect, cursor: .pointingHand)
-        }
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea {
-            removeTrackingArea(hoverArea)
-        }
-        let area = NSTrackingArea(
-            rect: boxFrame, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)
-        addTrackingArea(area)
-        hoverArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        hovered = !isBehindShield
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hovered = false
-    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard box != nil else {

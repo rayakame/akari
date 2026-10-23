@@ -75,7 +75,7 @@ struct PinnedMessageLineTests {
     @Test
     func aMessageShowsThePointerAndAnUnderlineOnHover() throws {
         let (_, text) = try shown()
-        #expect(text.linkTextAttributes?[.cursor] as? NSCursor == NSCursor.pointingHand)
+        #expect(text.cursor(at: try middle(of: "a message", in: text)) == .pointingHand)
         let layout = try #require(text.layoutManager)
         let underline = { (part: String) in
             layout.temporaryAttribute(

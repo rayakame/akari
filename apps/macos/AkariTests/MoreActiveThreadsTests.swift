@@ -235,16 +235,20 @@ struct MoreActiveThreadsScreenTests {
         } while !done() && ContinuousClock.now < deadline
     }
 
-    // #new's nine joined threads aren't listed; the popout shows over #new's row.
-    func peeking() async -> (SessionModel, ThreadsHover, NSWindow) {
+    // #new's nine joined threads aren't listed; the popout shows beside #new's row.
+    func peeking(focus: WindowFocus = WindowFocus()) async -> (SessionModel, ThreadsHover, NSWindow)
+    {
         let session = store.session()
         session.open(channel: FakeBrowserStore.parent)
         let hover = ThreadsHover(wait: { [gate] in await gate.wait($0) })
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 813),
             styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(
-            rootView: SessionScreen(session: session, splitWidth: SplitWidth(), hover: hover))
+            rootView: SessionScreen(session: session, splitWidth: SplitWidth(), hover: hover)
+                .environment(\.windowFocus, focus))
+        window.orderFrontRegardless()
         window.contentView?.layoutSubtreeIfNeeded()
         hover.hover(FakeBrowserStore.parent, true) { true }
         await gate.waitStarted(1)
@@ -252,25 +256,70 @@ struct MoreActiveThreadsScreenTests {
         return (session, hover, window)
     }
 
+    func panel(of window: NSWindow) -> ContainerPanel? {
+        window.childWindows?.compactMap { $0 as? ContainerPanel }.first
+    }
+
+    func closeAll(_ window: NSWindow) {
+        for child in window.childWindows ?? [] {
+            child.orderOut(nil)
+        }
+        window.orderOut(nil)
+    }
+
+    // A panel of its own beside the row, 17 right of the channel list, never key and with no
+    // shield: the list and the messages keep their hover.
+    @Test
+    func itIsAPanelBesideTheRowThatNeverTakesTheKey() async throws {
+        var keyed: [NSWindow] = []
+        let (session, _, window) = await peeking(focus: WindowFocus { keyed.append($0) })
+        defer { closeAll(window) }
+        await settle { panel(of: window)?.isVisible == true }
+        let panel = try #require(panel(of: window))
+
+        #expect(!panel.canBecomeKey)
+        #expect(keyed.isEmpty)
+        #expect(window.childWindows?.contains { $0 is ShieldWindow } == false)
+        // The row ends 8 before the channel list's edge.
+        let left = panel.frame.minX - window.frame.minX
+        let row = SidebarWidth.stored(in: .standard) - 8
+        #expect(abs(left - (row + MoreActiveThreadsPopout.spacing)) <= 1, "\(left)")
+        #expect(panel.frame.height == MoreActiveThreadsPopout.height(threads: session.peekedThreads.count))
+    }
+
+    @Test
+    func theAppGoingToTheBackgroundTakesThePopoutAlong() async throws {
+        let (_, hover, window) = await peeking()
+        defer { closeAll(window) }
+        await settle { panel(of: window)?.isVisible == true }
+
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+        await settle { hover.channel == nil && (window.childWindows ?? []).isEmpty }
+
+        #expect(hover.channel == nil)
+        #expect((window.childWindows ?? []).isEmpty)
+    }
+
     @Test
     func theShownPopoutsThreadsComeFromTheSession() async {
         let (session, _, window) = await peeking()
+        defer { closeAll(window) }
 
         await settle { !session.peekedThreads.isEmpty }
 
         #expect(session.peekedThreads.count == 3)
-        withExtendedLifetime(window) {}
     }
 
     @Test
     func goingHomeTakesThePopoutAlong() async {
         let (session, hover, window) = await peeking()
+        defer { closeAll(window) }
         #expect(hover.channel == FakeBrowserStore.parent)
 
         session.open(.home)
-        await settle { hover.channel == nil }
+        await settle { hover.channel == nil && (window.childWindows ?? []).isEmpty }
 
         #expect(hover.channel == nil)
-        withExtendedLifetime(window) {}
+        #expect((window.childWindows ?? []).isEmpty)
     }
 }

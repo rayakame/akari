@@ -230,3 +230,63 @@ final class ReadingSignalsTests {
         #expect(session.reading.isEmpty)
     }
 }
+
+// The Threads browser is a panel attached above the session's window, key while it shows: the
+// channel stays read behind it, as behind Discord's popout, and what the user does in it counts.
+@MainActor
+struct ReadingBesideTheBrowserTests {
+    final class KeyPanel: NSPanel {
+        override var isKeyWindow: Bool { true }
+    }
+
+    func windows() -> (NSWindow, NSWindow, NSPanel) {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        let shield = NSPanel(
+            contentRect: window.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        let panel = KeyPanel(
+            contentRect: NSRect(x: 40, y: 40, width: 100, height: 100), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.addChildWindow(shield, ordered: .above)
+        shield.addChildWindow(panel, ordered: .above)
+        return (window, shield, panel)
+    }
+
+    @Test
+    func aPanelAttachedAboveTheWindowIsOfItsFamily() {
+        let (window, shield, panel) = windows()
+        let other = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 50, height: 50), styleMask: [.titled],
+            backing: .buffered, defer: false)
+
+        #expect(panel.isFamily(of: window) && shield.isFamily(of: window) && window.isFamily(of: window))
+        #expect(!other.isFamily(of: window) && !window.isFamily(of: panel))
+    }
+
+    // The window goes behind another app's; the user comes back to the browser's panel.
+    @Test
+    func thePanelsKeyAndClicksAreTheWindows() throws {
+        let tests = ReadingSignalsTests()
+        let (window, _, panel) = windows()
+        let center = NotificationCenter()
+        var (active, key) = (true, true)
+        let signals = ReadingSignals(
+            session: tests.session, window: window, center: center, workspace: NotificationCenter(),
+            isActive: { active }, isKey: { _ in key }, isVisible: { _ in true })
+        let channel = try #require(tests.session.messages?.channelId)
+
+        (active, key) = (false, false)
+        center.post(name: NSApplication.didResignActiveNotification, object: nil)
+        center.post(name: NSWindow.didResignKeyNotification, object: window)
+        #expect(tests.session.reading.isEmpty)
+        (active, key) = (true, true)
+        center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        center.post(name: NSWindow.didBecomeKeyNotification, object: panel)
+        #expect(tests.session.reading.isEmpty, "not before a click or a key")
+
+        signals.handle(try tests.rightClick(in: panel))
+
+        #expect(tests.session.reading == [channel])
+    }
+}

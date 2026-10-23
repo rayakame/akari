@@ -30,24 +30,27 @@ struct SessionView<MessageArea: View>: View {
         }
         .overlayPreferenceValue(ThreadsButtonBounds.self) { anchor in
             GeometryReader { proxy in
-                if let browser = session.threadBrowser {
-                    switch browser.presentation {
-                    case .modal:
-                        ThreadBrowserModal(browser: browser, session: session, area: proxy.size)
-                    case .popout:
-                        if let anchor {
-                            ThreadBrowserPopout(
-                                browser: browser, session: session, button: proxy[anchor],
-                                area: proxy.size)
-                        }
-                    }
+                if let browser = session.threadBrowser,
+                    let frame = ThreadBrowserPlacement.frame(
+                        of: browser, button: anchor.map { proxy[$0] }, area: proxy.size)
+                {
+                    ChildWindowsHost(
+                        content: AnyView(
+                            ThreadBrowserPanel(browser: browser, session: session, size: frame.size)),
+                        frame: frame, browser: true, dimmed: browser.presentation == .modal,
+                        label: ThreadsButton.label, onClose: session.closeThreadBrowser,
+                        refocus: session.refocusChannel
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .id(ObjectIdentifier(browser))
                 }
             }
         }
         .overlayPreferenceValue(PeekRowBounds.self) { anchor in
             GeometryReader { proxy in
-                if let channel = hover.channel, let anchor {
-                    moreActiveThreads(of: channel, beside: proxy[anchor], area: proxy.size.height)
+                if let channel = hover.channel, let anchor, !session.peekedThreads.isEmpty {
+                    moreActiveThreads(of: channel, beside: proxy[anchor], area: proxy.size)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
                 }
             }
         }
@@ -76,30 +79,31 @@ struct SessionView<MessageArea: View>: View {
         return .fullView(membership: item, splittable: openParent?.opensMessageList == true)
     }
 
-    @ViewBuilder
-    private func moreActiveThreads(of channel: ChannelId, beside row: CGRect, area: CGFloat)
+    // A panel of its own beside the row, never key; the hover's timers close it.
+    private func moreActiveThreads(of channel: ChannelId, beside row: CGRect, area: CGSize)
         -> some View
     {
         let peeks = session.peekedThreads
-        if !peeks.isEmpty {
-            MoreActiveThreadsPopout(
-                peeks: peeks,
-                open: { thread, beside in
-                    hover.dismiss()
-                    Task { await session.open(browsed: thread, beside: beside) }
-                },
-                seeAllThreads: {
-                    hover.dismiss()
-                    session.openThreadBrowser(of: channel, as: .modal)
-                }
-            )
-            .onHover { hover.hoverPopout($0) }
-            .offset(
-                x: row.maxX + MoreActiveThreadsPopout.spacing,
-                y: MoreActiveThreadsPopout.top(
-                    row: row, height: MoreActiveThreadsPopout.height(threads: peeks.count),
-                    area: area))
-        }
+        let height = MoreActiveThreadsPopout.height(threads: peeks.count)
+        let frame = CGRect(
+            x: row.maxX + MoreActiveThreadsPopout.spacing,
+            y: MoreActiveThreadsPopout.top(row: row, height: height, area: area.height),
+            width: MoreActiveThreadsPopout.minWidth, height: height)
+        let popout = MoreActiveThreadsPopout(
+            peeks: peeks,
+            open: { thread, beside in
+                hover.dismiss()
+                Task { await session.open(browsed: thread, beside: beside) }
+            },
+            seeAllThreads: {
+                hover.dismiss()
+                session.openThreadBrowser(of: channel, as: .modal)
+            }
+        )
+        .onHover { hover.hoverPopout($0) }
+        .firstClicks()
+        return ChildWindowsHost(
+            content: AnyView(popout), frame: frame, fitsWidth: true, onClose: hover.dismiss)
     }
 
     private var threadsButton: ThreadsButton? {

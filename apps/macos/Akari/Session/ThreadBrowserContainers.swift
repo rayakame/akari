@@ -41,238 +41,87 @@ struct ThreadsButton: View {
     }
 }
 
-/// The popout under the Threads button: its right edge on the button's, its top under the
-/// header's line, 35% of the window wide (480–600), as tall as its list (400 to 80% of the
-/// window). A click outside it (on the button too) or Escape closes it.
-struct ThreadBrowserPopout: View {
-    let browser: ThreadBrowserModel
-    let session: SessionModel
-    /// The button, in the space `area` is measured in.
-    let button: CGRect
-    let area: CGSize
-    @State private var fieldRequests = 0
-
+/// Where the browser's panel goes, in the session's space: the popout under the Threads button,
+/// its right edge on the button's and its top under the header's line, 35% of the window wide
+/// (480–600), as tall as its list (400 to 80% of the window); the modal centered, 680 wide,
+/// 56 from the window's top and bottom when the list is long.
+enum ThreadBrowserPlacement {
     // 8 below the button's 32 box, and past the header's line.
     static let gap: CGFloat = 9
-    static let radius: CGFloat = 8
 
-    var body: some View {
+    static func popout(button: CGRect, list: CGFloat, area: CGSize) -> CGRect {
         let width = ThreadBrowserLayout.popoutWidth(window: area.width)
-        let height = ThreadBrowserLayout.popoutHeight(
-            list: ThreadBrowserLayout.listHeight(browser), window: area.height)
-        let frame = Self.frame(button: button, width: width, height: height)
-        ZStack(alignment: .topLeading) {
-            ThreadBrowserEvents(
-                close: session.closeThreadBrowser, onTab: { fieldRequests += 1 },
-                onFocusFree: session.refocusChannel)
-            ThreadBrowserView(browser: browser, session: session, fieldRequests: fieldRequests)
-                .frame(width: width, height: height)
-                .background(Color(nsColor: Palette.surfaceHigh))
-                .clipShape(RoundedRectangle(cornerRadius: Self.radius))
-                .overlay {
-                    RoundedRectangle(cornerRadius: Self.radius + 1)
-                        .stroke(Color(nsColor: Palette.shadowBorder), lineWidth: 1)
-                        .padding(-0.5)
-                }
-                .shadow(color: .black.opacity(0.24), radius: 12, y: 12)
-                .threadBrowserDialog()
-                .offset(x: frame.minX, y: frame.minY)
-        }
-        .frame(width: area.width, height: area.height, alignment: .topLeading)
+        let height = ThreadBrowserLayout.popoutHeight(list: list, window: area.height)
+        return CGRect(x: button.maxX - width, y: button.maxY + gap, width: width, height: height)
     }
 
-    static func frame(button: CGRect, width: CGFloat, height: CGFloat) -> CGRect {
-        CGRect(x: button.maxX - width, y: button.maxY + gap, width: width, height: height)
+    static func modal(list: CGFloat, area: CGSize) -> CGRect {
+        let size = ThreadBrowserLayout.modalSize(list: list, window: area)
+        return CGRect(
+            x: ((area.width - size.width) / 2).rounded(), y: ((area.height - size.height) / 2).rounded(),
+            width: size.width, height: size.height)
+    }
+
+    @MainActor
+    static func frame(of browser: ThreadBrowserModel, button: CGRect?, area: CGSize) -> CGRect? {
+        let list = ThreadBrowserLayout.listHeight(browser)
+        switch browser.presentation {
+        case .modal: return modal(list: list, area: area)
+        case .popout: return button.map { popout(button: $0, list: list, area: area) }
+        }
     }
 }
 
-/// "See all threads": the browser centered over the dimmed window, with its X. The X, Escape or
-/// a click on the dimmed page closes it.
-struct ThreadBrowserModal: View {
+/// The browser in its panel: the popout's or the modal's look; the modal's X, Escape or a press
+/// outside it closes either.
+struct ThreadBrowserPanel: View {
     let browser: ThreadBrowserModel
     let session: SessionModel
-    let area: CGSize
-    @State private var fieldRequests = 0
+    let size: CGSize
 
-    static let backdrop = 0.72
-    // Discord's radius-md.
-    static let radius: CGFloat = 12
+    // The popout's and Discord's radius-md for the modal.
+    static let popoutRadius: CGFloat = 8
+    static let modalRadius: CGFloat = 12
 
     var body: some View {
-        let size = ThreadBrowserLayout.modalSize(
-            list: ThreadBrowserLayout.listHeight(browser), window: area)
-        ZStack {
-            Color.black.opacity(Self.backdrop)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            ThreadBrowserEvents(
-                close: session.closeThreadBrowser, modal: true, onTab: { fieldRequests += 1 },
-                onFocusFree: session.refocusChannel)
-            ThreadBrowserView(browser: browser, session: session, fieldRequests: fieldRequests)
-                .padding(.top, 8)
-                .padding(.bottom, 16)
-                .frame(width: size.width - 2, height: size.height - 2)
-                .background(Color(nsColor: Palette.surfaceHigh))
-                .clipShape(RoundedRectangle(cornerRadius: Self.radius))
-                .padding(1)
-                .overlay {
-                    RoundedRectangle(cornerRadius: Self.radius + 1)
-                        .strokeBorder(Color(nsColor: Palette.borderSubtle), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.24), radius: 12, y: 12)
-                .threadBrowserDialog()
+        Group {
+            switch browser.presentation {
+            case .popout:
+                ThreadBrowserView(browser: browser, session: session)
+                    .frame(width: size.width, height: size.height)
+                    .background(Color(nsColor: Palette.surfaceHigh))
+                    .clipShape(RoundedRectangle(cornerRadius: Self.popoutRadius))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Self.popoutRadius)
+                            .strokeBorder(Color(nsColor: Palette.shadowBorder), lineWidth: 1)
+                    }
+            case .modal:
+                ThreadBrowserView(browser: browser, session: session)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+                    .frame(width: size.width - 2, height: size.height - 2)
+                    .background(Color(nsColor: Palette.surfaceHigh))
+                    .clipShape(RoundedRectangle(cornerRadius: Self.modalRadius))
+                    .padding(1)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Self.modalRadius + 1)
+                            .strokeBorder(Color(nsColor: Palette.borderSubtle), lineWidth: 1)
+                    }
+            }
         }
-        .frame(width: area.width, height: area.height)
+        .accessibilityElement(children: .contain)
+        .firstClicks()
     }
 }
 
 extension View {
-    /// As Discord's: a modal dialog named "Threads", which VoiceOver stays inside.
-    func threadBrowserDialog() -> some View {
-        accessibilityElement(children: .contain)
-            .accessibilityLabel(ThreadsButton.label)
-            .accessibilityAddTraits(.isModal)
-    }
-}
-
-/// The shield under a browser, with its keys: a click outside the popout closes it, a click on
-/// the modal's dimmed page closes the modal, and neither reaches what's behind. Escape closes
-/// either and goes no further; Tab stays inside, as in Discord's focus lock; a modal keeps typing
-/// from what's behind it. Once it's closed, `onFocusFree` gets the focus nothing else took.
-struct ThreadBrowserEvents: NSViewRepresentable {
-    let close: () -> Void
-    var modal = false
-    /// Tab or Shift+Tab: the browser's field takes the focus, its only stop.
-    var onTab: () -> Void = {}
-    var onFocusFree: () -> Void = {}
-
-    func makeNSView(context: Context) -> Watcher {
-        Watcher()
-    }
-
-    func updateNSView(_ watcher: Watcher, context: Context) {
-        watcher.close = close
-        watcher.modal = modal
-        watcher.onTab = onTab
-        watcher.onFocusFree = onFocusFree
-    }
-
-    static func dismantleNSView(_ watcher: Watcher, coordinator: ()) {
-        watcher.stop()
-    }
-
-    final class Watcher: PointerShield {
-        var close: () -> Void = {}
-        var modal = false
-        var onTab: () -> Void = {}
-        var onFocusFree: () -> Void = {}
-        private var monitor: Any?
-        private var pressed = false
-
-        override func viewWillMove(toWindow newWindow: NSWindow?) {
-            if newWindow == nil, let window {
-                handFocusOn(in: window)
-            }
-            super.viewWillMove(toWindow: newWindow)
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            stop()
-            guard window != nil else {
-                return
-            }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                self?.handle(event) ?? event
-            }
-        }
-
-        func stop() {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-            }
-            monitor = nil
-        }
-
-        // Discord's popouts close on the release of a press outside them, whichever button;
-        // its modals on a click on the dimmed page.
-        override func mouseDown(with event: NSEvent) {
-            pressed = true
-        }
-
-        override func rightMouseDown(with event: NSEvent) {
-            pressed = !modal
-        }
-
-        override func otherMouseDown(with event: NSEvent) {
-            pressed = !modal
-        }
-
-        override func mouseUp(with event: NSEvent) {
-            release(event)
-        }
-
-        override func rightMouseUp(with event: NSEvent) {
-            release(event)
-        }
-
-        override func otherMouseUp(with event: NSEvent) {
-            release(event)
-        }
-
-        private func release(_ event: NSEvent) {
-            defer { pressed = false }
-            if pressed, !modal || isShielded(at: event.locationInWindow) {
-                close()
-            }
-        }
-
-        // The Escape and Tab keys' codes on every layout.
-        private static let escape: UInt16 = 53
-        private static let tab: UInt16 = 48
-
-        private static func isField(_ responder: NSResponder?) -> Bool {
-            (responder as? NSTextView)?.isFieldEditor == true
-        }
-
-        // The field's focus falls back to the window unless the closing click took it. A closing
-        // window may be deallocating, so it's looked up by number, never referenced.
-        private func handFocusOn(in window: NSWindow) {
-            let free = onFocusFree
-            let number = window.windowNumber
-            Task { @MainActor in
-                guard let window = NSApp.window(withWindowNumber: number) else {
-                    return
-                }
-                let current = window.firstResponder
-                if current === window || (current as? NSView)?.window !== window {
-                    free()
-                }
-            }
-        }
-
-        func handle(_ event: NSEvent) -> NSEvent? {
-            guard event.window === window, event.type == .keyDown else {
-                return event
-            }
-            if event.keyCode == Self.escape {
-                // The input method's, to cancel what it composes.
-                if let text = window?.firstResponder as? NSTextView, text.hasMarkedText() {
-                    return event
-                }
-                close()
-                return nil
-            }
-            if event.keyCode == Self.tab, !event.modifierFlags.contains(.command) {
-                onTab()
-                return nil
-            }
-            if modal, !event.modifierFlags.contains(.command),
-                !Self.isField(window?.firstResponder)
-            {
-                return nil
-            }
-            return event
+    /// A panel that isn't key yet, or never is, takes its first click as a click.
+    @ViewBuilder
+    func firstClicks() -> some View {
+        if #available(macOS 15.0, *) {
+            allowsWindowActivationEvents(true)
+        } else {
+            self
         }
     }
 }

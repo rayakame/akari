@@ -88,13 +88,10 @@ struct ThreadBrowserView: View {
     let session: SessionModel
     /// Fixed for tests; otherwise the times follow the clock.
     var now: Date?
-    /// Each change gives the search field the focus.
-    var fieldRequests = 0
 
     var body: some View {
         VStack(spacing: 0) {
-            ThreadBrowserHeader(
-                browser: browser, close: session.closeThreadBrowser, fieldRequests: fieldRequests)
+            ThreadBrowserHeader(browser: browser, close: session.closeThreadBrowser)
             // Never taller than the room left: the header stays in a small window.
             content
                 .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
@@ -178,7 +175,6 @@ struct ThreadBrowserView: View {
 struct ThreadBrowserHeader: View {
     let browser: ThreadBrowserModel
     let close: () -> Void
-    var fieldRequests = 0
     @State private var query = ""
     // VoiceOver starts here when there's no field to start in.
     @AccessibilityFocusState private var titleSpoken: Bool
@@ -206,7 +202,7 @@ struct ThreadBrowserHeader: View {
                         .fill(Color(nsColor: Palette.borderSubtle))
                         .frame(width: 1, height: 24)
                         .padding(.horizontal, ThreadBrowserLayout.dividerGap)
-                    ThreadSearchField(query: $query, submit: submit, requests: fieldRequests)
+                    ThreadSearchField(query: $query, submit: submit)
                         .frame(width: searchWidth(in: proxy.size.width))
                 }
                 Spacer(minLength: 0)
@@ -256,8 +252,6 @@ struct ThreadBrowserHeader: View {
 struct ThreadSearchField: View {
     @Binding var query: String
     let submit: () -> Void
-    /// Each change takes the focus.
-    var requests = 0
     @FocusState private var focused: Bool
     @AccessibilityFocusState private var spoken: Bool
 
@@ -265,7 +259,7 @@ struct ThreadSearchField: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color(nsColor: Palette.textMuted))
+                .foregroundStyle(Color(nsColor: Palette.interactiveTextActive))
             TextField(
                 "", text: $query,
                 prompt: Text(ThreadBrowserView.placeholder)
@@ -278,7 +272,6 @@ struct ThreadSearchField: View {
             .accessibilityFocused($spoken)
             .onSubmit(submit)
             .accessibilityLabel(ThreadBrowserView.placeholder)
-            .background(CursorArea(.iBeam))
             if !query.isEmpty {
                 SearchClearButton { query = "" }
             }
@@ -296,7 +289,6 @@ struct ThreadSearchField: View {
             focused = true
             spoken = true
         }
-        .onChange(of: requests) { focused = true }
     }
 }
 

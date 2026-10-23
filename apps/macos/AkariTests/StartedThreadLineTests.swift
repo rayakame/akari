@@ -64,12 +64,11 @@ struct StartedThreadLineTests {
         #expect(actions.calls == ["thread 20 from 10"])
     }
 
-    // A configure adds or drops only the hover area; NSTextView's own areas stay as they were.
+    // The list tracks the pointer for its rows; a configure adds no tracking area.
     @Test
     func showingTheLineAgainLeavesTheTextViewsTrackingAreasAlone() throws {
         let (_, text) = try shown()
         let before = text.trackingAreas.map(ObjectIdentifier.init)
-        try #require(!before.isEmpty)
 
         text.show(try #require(text.textStorage?.copy() as? NSAttributedString))
 
@@ -88,7 +87,7 @@ struct StartedThreadLineTests {
     @Test
     func theLinksShowThePointerAndAnUnderlineOnHover() throws {
         let (cell, text) = try shown()
-        #expect(text.linkTextAttributes?[.cursor] as? NSCursor == NSCursor.pointingHand)
+        #expect(text.cursor(at: try middle(of: "t2", in: text)) == .pointingHand)
         let name = try index(of: "t2", in: text)
         let layout = try #require(text.layoutManager)
         let underline = {

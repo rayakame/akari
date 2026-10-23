@@ -2,7 +2,7 @@ import AppKit
 
 /// Selectable, not editable, laid out by TextKit 1: a message's body, and the other text Discord
 /// lets the user select (a notice, a channel's start, a message's files).
-final class MessageTextView: NSTextView, BehindShields {
+final class MessageTextView: NSTextView {
     private var measuredWidth: CGFloat = -1
     private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
     private var linkElements: [LinkElement]?
@@ -10,8 +10,6 @@ final class MessageTextView: NSTextView, BehindShields {
     /// On a link Discord underlines while the pointer is over it.
     static let underlinesOnHover = NSAttributedString.Key("akari.underlinesOnHover")
     private var underlined: NSRange?
-    // Only text with such links watches the pointer.
-    private var hoverArea: NSTrackingArea?
     // The message's own items, above the text's.
     var messageMenu: () -> [NSMenuItem] = { [] }
     let decorations = MessageDecorations()
@@ -34,8 +32,8 @@ final class MessageTextView: NSTextView, BehindShields {
         importsGraphics = false
         allowsUndo = false
         textContainerInset = .zero
-        // Links keep their own colors: pills are links too.
-        linkTextAttributes = [.cursor: NSCursor.pointingHand]
+        // Links keep their own colors: pills are links too. The list sets the cursor.
+        linkTextAttributes = [:]
         if #available(macOS 15.0, *) {
             writingToolsBehavior = .none
         }
@@ -85,7 +83,6 @@ final class MessageTextView: NSTextView, BehindShields {
         underline(at: nil)
         storage.setAttributedString(text)
         linkElements = nil
-        trackHover()
         selectedRanges = kept ?? [NSValue(range: NSRange(location: 0, length: 0))]
         invalidateIntrinsicContentSize()
         updateDecorations()
@@ -121,7 +118,6 @@ final class MessageTextView: NSTextView, BehindShields {
     private func updateDecorations() {
         let shapes = (layoutManager as? MessageLayoutManager)?.blocks() ?? []
         decorations.show(shapes, at: textContainerOrigin)
-        window?.invalidateCursorRects(for: self)
     }
 
     // The table routes Akari's own links and asks before masked ones; super would open them.
@@ -234,66 +230,21 @@ final class MessageTextView: NSTextView, BehindShields {
         super.mouseDown(with: event)
     }
 
-    override var acceptsFirstResponder: Bool {
-        super.acceptsFirstResponder && !isBehindShield
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        !isBehindShield && super.becomeFirstResponder()
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackHover()
-    }
-
-    private func trackHover() {
-        var hovers = false
-        if let storage = textStorage, storage.length > 0 {
-            storage.enumerateAttribute(
-                Self.underlinesOnHover, in: NSRange(location: 0, length: storage.length)
-            ) { value, _, stop in
-                hovers = value != nil
-                stop.pointee = ObjCBool(hovers)
-            }
-        }
-        if hovers == (hoverArea != nil) {
+    // The list sets the cursor for its rows (MessageTableController): NSTextView's own area
+    // would set the I-beam anywhere in the view and race its neighbours'. Its tooltips' stays.
+    override func addTrackingArea(_ area: NSTrackingArea) {
+        if area.owner === self, area.options.contains(.cursorUpdate) {
             return
         }
-        if let hoverArea {
-            removeTrackingArea(hoverArea)
-            self.hoverArea = nil
-        } else {
-            let area = NSTrackingArea(
-                rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow,
-                    .inVisibleRect], owner: self)
-            addTrackingArea(area)
-            hoverArea = area
-        }
+        super.addTrackingArea(area)
     }
 
-    override func mouseMoved(with event: NSEvent) {
-        guard !isBehindShield else {
-            underline(at: nil)
-            return
-        }
-        super.mouseMoved(with: event)
-        let point = convert(event.locationInWindow, from: nil)
-        underline(at: point)
-        cursor(at: point).set()
-    }
+    override func cursorUpdate(with event: NSEvent) {}
 
-    // NSTextView's sets the I-beam anywhere in the view.
-    override func cursorUpdate(with event: NSEvent) {
-        if !isBehindShield {
-            cursor(at: convert(event.locationInWindow, from: nil)).set()
-        }
-    }
+    // A first responder gets mouse moves in a window that wants them; NSTextView's set the I-beam.
+    override func mouseMoved(with event: NSEvent) {}
 
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        underline(at: nil)
-    }
+    override func resetCursorRects() {}
 
     /// Underlines the hover link under `point`, in this view's coordinates; `nil` takes it away.
     func underline(at point: NSPoint?) {
@@ -346,9 +297,9 @@ final class MessageTextView: NSTextView, BehindShields {
         cursorAreas.last { $0.rect.contains(point) }?.cursor ?? .arrow
     }
 
-    /// Each line's text runs, links apart, and the hidden blocks' covers, in this view's
-    /// coordinates; later ones lie over earlier ones.
-    var cursorAreas: [(rect: NSRect, cursor: NSCursor)] {
+    // Each line's text runs, links apart, and the hidden blocks' covers, in this view's
+    // coordinates; later ones lie over earlier ones.
+    private var cursorAreas: [(rect: NSRect, cursor: NSCursor)] {
         var areas: [(rect: NSRect, cursor: NSCursor)] = []
         if let layoutManager, let textContainer, let storage = textStorage, storage.length > 0 {
             let origin = textContainerOrigin
@@ -374,17 +325,6 @@ final class MessageTextView: NSTextView, BehindShields {
             }
         }
         return areas + decorations.covers.map { ($0, .pointingHand) }
-    }
-
-    /// The cursor rects: none while a popout or modal is in front.
-    var shownCursorAreas: [(rect: NSRect, cursor: NSCursor)] {
-        isBehindShield ? [] : cursorAreas
-    }
-
-    override func resetCursorRects() {
-        for area in shownCursorAreas {
-            addCursorRect(area.rect, cursor: area.cursor)
-        }
     }
 
     override func accessibilityValue() -> String? {

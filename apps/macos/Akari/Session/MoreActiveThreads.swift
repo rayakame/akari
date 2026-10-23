@@ -107,6 +107,7 @@ struct PeekRowBounds: PreferenceKey {
 /// with the row's while the window has room.
 struct MoreActiveThreadsPopout: View {
     static let spacing: CGFloat = 17
+    static let minWidth: CGFloat = 272
     static let title = "More Active Threads"
     static let seeAll = "See All"
 
@@ -147,14 +148,13 @@ struct MoreActiveThreadsPopout: View {
             }
         }
         .padding(8)
-        .frame(minWidth: 272, maxWidth: 400, alignment: .leading)
+        .frame(minWidth: Self.minWidth, maxWidth: 400, alignment: .leading)
         .fixedSize()
         .background(Color(nsColor: Palette.surfaceHigh), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color(nsColor: Palette.borderSubtle), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.24), radius: 12, y: 12)
     }
 }
 
@@ -197,7 +197,6 @@ struct PeekRow: View {
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
         .onTapGesture { click(NSEvent.modifierFlags.contains(.shift)) }
-        .background(CursorArea(.pointingHand))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
     }

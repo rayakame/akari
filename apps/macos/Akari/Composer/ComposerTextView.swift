@@ -3,7 +3,7 @@ import AppKit
 
 // Return, Shift+Return, input-method composition and an empty Up arrow need AppKit's key
 // commands; SwiftUI's text editors can't tell them apart.
-final class ComposerTextView: NSTextView, BehindShields {
+final class ComposerTextView: NSTextView {
     static let lineHeight = TypeScale.body.line
     static let insets = NSSize(width: 16, height: 17)
     static let font = TypeScale.body.nsFont
@@ -72,32 +72,7 @@ final class ComposerTextView: NSTextView, BehindShields {
         onWindow()
     }
 
-    override var acceptsFirstResponder: Bool {
-        super.acceptsFirstResponder && !isBehindShield
-    }
-
-    override func cursorUpdate(with event: NSEvent) {
-        if !isBehindShield {
-            super.cursorUpdate(with: event)
-        }
-    }
-
-    override func resetCursorRects() {
-        if !isBehindShield {
-            super.resetCursorRects()
-        }
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        if !isBehindShield {
-            super.mouseMoved(with: event)
-        }
-    }
-
     override func becomeFirstResponder() -> Bool {
-        guard !isBehindShield else {
-            return false
-        }
         let became = super.becomeFirstResponder()
         if became {
             LaunchLog.mark("composer focused")
@@ -105,11 +80,9 @@ final class ComposerTextView: NSTextView, BehindShields {
         return became
     }
 
-    /// Becomes first responder unless the user is selecting message text that's still shown, or a
-    /// popout or modal is in front.
+    /// Becomes first responder unless the user is selecting message text that's still shown.
     func takeFocus() {
-        // A refusal would hand the focus of a popout's or modal's field to the window.
-        guard let window, isEditable, !isBehindShield else {
+        guard let window, isEditable else {
             return
         }
         if let editor = window.firstResponder as? NSTextView, editor !== self, editor.isFieldEditor,

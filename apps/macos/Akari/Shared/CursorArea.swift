@@ -13,16 +13,8 @@ struct CursorArea: NSViewRepresentable {
     final class Area: NSView {
         var cursor = NSCursor.pointingHand
 
-        /// Its bounds, unless a popout or modal's shield is over it.
-        var shownRect: NSRect? {
-            let center = convert(NSPoint(x: bounds.midX, y: bounds.midY), to: nil)
-            return isShielded(at: center) ? nil : bounds
-        }
-
         override func resetCursorRects() {
-            if let shownRect {
-                addCursorRect(shownRect, cursor: cursor)
-            }
+            addCursorRect(bounds, cursor: cursor)
         }
 
         // Clicks go to what it lies under.
