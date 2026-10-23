@@ -159,9 +159,10 @@ public final class ThreadFormModel {
         alert = nil
     }
 
-    /// Checks what's typed and creates the thread; returns it, or `nil` when nothing was
-    /// created (the fields' errors or `alert` say why, and everything typed stays).
-    func create() async -> ChannelId? {
+    /// Checks what's typed and creates the thread; returns it with the first message as typed
+    /// then, or `nil` when nothing was created (the fields' errors or `alert` say why, and
+    /// everything typed stays).
+    func create() async -> (thread: ChannelId, firstMessage: String)? {
         guard !submitting else {
             return nil
         }
@@ -193,17 +194,12 @@ public final class ThreadFormModel {
                 isPrivate: createsPrivate,
                 location: location)
             slowmode = store.threadSlowmode(parentId: parentId)
-            return thread
+            return (thread, content)
         } catch {
             slowmode = store.threadSlowmode(parentId: parentId)
             refused(error as? CreateThreadError)
             return nil
         }
-    }
-
-    /// The first message as sent: trimmed.
-    var firstMessage: String {
-        message.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func clearDrafts() {

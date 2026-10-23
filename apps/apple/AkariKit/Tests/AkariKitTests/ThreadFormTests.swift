@@ -577,6 +577,98 @@ final class ThreadFormTests {
         session.close()
     }
 
+    @Test
+    func aMessageFormKeepsItsMessageWhenTheWindowLetsItGo() async {
+        let session = inChannel11()
+        created(2)
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+        let form = session.threadForm
+        session.threadForm?.name = "about two"
+        session.threadForm?.message = "first"
+
+        store.update { state in
+            state.windows[id(11)] = window([1])
+            state.messages[id(2)] = nil
+        }
+        session.apply(EventBatch([.messagesTrimmed(channelId: id(11), first: id(1), last: id(1))]))
+        #expect(session.threadForm === form)
+        session.open(channel: id(12))
+        session.open(channel: id(11))
+        #expect(session.threadForm?.source?.id == id(2))
+        #expect(session.threadForm?.name == "about two")
+        await session.submitThreadForm()
+
+        #expect(creates == [.createThread(id(11), id(2), "about two", isPrivate: false, .message)])
+        session.close()
+    }
+
+    @Test
+    func aFormClosedWhileItsThreadIsCreatedOpensNothing() async {
+        let session = inChannel11()
+        created(41)
+        account.holdCreates.withLock { $0 = true }
+        session.openThreadForm(in: id(11), location: .threadBrowserToolbar)
+        session.threadForm?.name = "plans"
+        session.threadForm?.message = "first"
+
+        let submitting = Task { await session.submitThreadForm() }
+        await waitFor { !self.creates.isEmpty }
+        session.closeThreadForm()
+        await session.openBeside(thread: id(31), from: id(11))
+        account.createReplies.send(())
+        await submitting.value
+
+        #expect(session.split?.channelId == id(31))
+        #expect(!session.focusSplit || session.split?.channelId == id(31))
+        #expect(calls.contains(.send(id(41), "first")))
+        session.close()
+    }
+
+    @Test
+    func theFirstMessageIsWhatWasTypedAtEnter() async {
+        let session = inChannel11()
+        created(41)
+        account.holdCreates.withLock { $0 = true }
+        session.openThreadForm(in: id(11), location: .threadBrowserToolbar)
+        session.threadForm?.name = "plans"
+        session.threadForm?.message = "first"
+        let form = session.threadForm
+
+        let submitting = Task { await session.submitThreadForm() }
+        await waitFor { !self.creates.isEmpty }
+        session.threadForm?.message = "changed"
+        session.openThreadFormHere()
+        #expect(session.threadForm === form, "a request keeps its form")
+        account.createReplies.send(())
+        await submitting.value
+
+        #expect(calls.contains(.send(id(41), "first")))
+        session.close()
+    }
+
+    @Test
+    func someoneElsesThreadIsntReadUntilTheUserActs() async {
+        let session = inChannel11()
+        session.apply(EventBatch([.ready]))
+        session.setAppActive(true)
+        session.setWindowKey(true)
+        session.setWindowVisible(true)
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+
+        store.update { state in
+            state.channels[id(2)] = thread(2, in: 11, name: "theirs")
+            state.windows[id(2)] = window([])
+        }
+        added(session, 2)
+        await finished(session.pendingReading)
+
+        #expect(session.split?.channelId == id(2))
+        #expect(!session.reading.contains(id(2)))
+        session.userInteracted()
+        #expect(session.reading.contains(id(2)))
+        session.close()
+    }
+
     func waitFor(_ condition: @escaping () -> Bool) async {
         for _ in 0..<500 where !condition() {
             try? await Task.sleep(for: .milliseconds(5))
