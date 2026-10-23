@@ -28,6 +28,7 @@ const THREAD_NAME_LIMIT: usize = 100;
 const DEFAULT_ARCHIVE_MINUTES: u32 = 4320;
 const MAX_ACTIVE_THREADS: u32 = 160_006;
 const MAX_ANNOUNCEMENT_THREADS: u32 = 160_007;
+const AUTOMOD_BLOCKED: u32 = 200_000;
 const AUTOMOD_BLOCKED_NAME: u32 = 200_001;
 const INVALID_FORM_BODY: u32 = 50035;
 const SLOWMODE: u32 = 20016;
@@ -125,7 +126,7 @@ pub enum CreateThreadError {
     /// The server has as many active threads as it may, or announcement threads.
     #[error("the server has the most active threads it may")]
     TooManyThreads { announcement: bool },
-    /// AutoMod refused the name; `reason` is Discord's message.
+    /// AutoMod refused the name (200001) or the thread (200000); `reason` is Discord's message.
     #[error("AutoMod refused the name")]
     NameBlocked { reason: String },
     /// Discord wants a name.
@@ -650,7 +651,8 @@ impl Shared {
                 MAX_ANNOUNCEMENT_THREADS => {
                     CreateThreadError::TooManyThreads { announcement: true }
                 }
-                AUTOMOD_BLOCKED_NAME => CreateThreadError::NameBlocked {
+                // The official client shows nothing for 200000; its reason belongs with the name.
+                AUTOMOD_BLOCKED | AUTOMOD_BLOCKED_NAME => CreateThreadError::NameBlocked {
                     reason: api.message,
                 },
                 INVALID_FORM_BODY if api.field_errors.iter().any(|error| error.path == "name") => {

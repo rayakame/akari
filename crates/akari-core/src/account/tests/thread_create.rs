@@ -554,6 +554,10 @@ async fn discords_refusals_say_what_was_refused() {
                 {"name": {"_errors": [{"code": "BASE_TYPE_REQUIRED", "message": "This field is required"}]}}}),
         ),
         (
+            400,
+            json!({"code": 200_000, "message": "Blocked by AutoMod."}),
+        ),
+        (
             403,
             json!({"code": 50013, "message": "Missing Permissions"}),
         ),
@@ -590,8 +594,12 @@ async fn discords_refusals_say_what_was_refused() {
         matches!(&outcomes[2], CreateThreadError::NameBlocked { reason } if reason == "This name isn't allowed here.")
     );
     assert!(matches!(outcomes[3], CreateThreadError::NameRequired));
+    // The official client shows nothing for 200000.
+    assert!(
+        matches!(&outcomes[4], CreateThreadError::NameBlocked { reason } if reason == "Blocked by AutoMod.")
+    );
     assert!(matches!(
-        outcomes[4],
+        outcomes[5],
         CreateThreadError::Request(RequestError::Discord { code: 50013, .. })
     ));
 }

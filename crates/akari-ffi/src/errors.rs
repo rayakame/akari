@@ -286,7 +286,7 @@ pub enum CreateThreadError {
     /// The server has as many active threads as it may, or announcement threads.
     #[error("the server has the most active threads it may")]
     TooManyThreads { announcement: bool },
-    /// AutoMod refused the name; `reason` is Discord's message.
+    /// AutoMod refused the name or the thread; `reason` is Discord's message.
     #[error("AutoMod refused the name")]
     NameBlocked { reason: String },
     #[error("Discord wants a name")]
