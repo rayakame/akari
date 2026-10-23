@@ -549,7 +549,9 @@ public final class SessionModel {
             }
             return
         }
-        if let form = threadForm, form.parentId == open, form.source?.id == entry.source {
+        if let form = threadForm, form.parentId == open, form.source?.id == entry.source,
+            form.location == entry.location
+        {
             return
         }
         let source = entry.source.flatMap { store.messages(channelId: open, ids: [$0]).first }

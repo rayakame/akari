@@ -31,7 +31,14 @@ struct ThreadFormView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Each dialog on a view of its own: two on one view can lose one.
             ThreadFormHeader(close: close)
+                .alert(Self.closeQuestion, isPresented: $asking) {
+                    Button("Exit", role: .destructive) { session.discardThreadForm() }
+                    Button("Back to editing", role: .cancel) {}
+                } message: {
+                    Text(Self.closeDetail)
+                }
             GeometryReader { proxy in
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -49,12 +56,6 @@ struct ThreadFormView: View {
                 .defaultScrollAnchor(.bottom)
             }
             submitArea
-        }
-        .alert(Self.closeQuestion, isPresented: $asking) {
-            Button("Exit", role: .destructive) { session.discardThreadForm() }
-            Button("Back to editing", role: .cancel) {}
-        } message: {
-            Text(Self.closeDetail)
         }
         .alert(
             form.alert?.title ?? "",

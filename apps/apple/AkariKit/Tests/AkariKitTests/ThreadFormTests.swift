@@ -185,6 +185,22 @@ final class ThreadFormTests {
     }
 
     @Test
+    func reopenedFromAnotherPlaceItTellsDiscordThatPlace() async {
+        let session = inChannel11()
+        created(41)
+        session.openThreadForm(in: id(11), location: .threadBrowserToolbar)
+        session.threadForm?.name = "plans"
+        session.threadForm?.message = "first"
+
+        session.openThreadFormHere()
+        await session.submitThreadForm()
+
+        #expect(
+            creates == [.createThread(id(11), nil, "plans", isPrivate: false, .keyboardShortcut)])
+        session.close()
+    }
+
+    @Test
     func theOpenChannelsRowClosesItsForm() {
         let session = inChannel11()
         session.openThreadForm(in: id(11), location: .threadBrowserToolbar)
