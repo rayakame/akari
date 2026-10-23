@@ -243,47 +243,47 @@ everything else, a captcha too, is a `RequestError`. The request is logged with 
 whether it came from a message, the kind, the location and the outcome, never the name.
 
 The full thread list comes through THREAD_LIST_SYNC once the client subscribes to a guild with
-`threads: true`. Akari's guild subscriptions ask for it. The store reads it as the official client
-does (its code, read 2026-10-21): the threads are added or updated as THREAD_CREATE would, those it
-doesn't list stay (no scoped replace), its `members` are the user's own memberships and join their
-threads, and `most_recent_messages` (undocumented; discord.py-self reads it too) gives each thread
-its newest message. Losing access to a channel doesn't send THREAD_DELETE for its threads
-([threads](https://docs.discord.food/topics/threads)); they stay in the store, no longer listed,
-until the next session.
+`threads: true`. Akari's guild subscriptions ask for it. The store reads it as the official
+client does (its code, read 2026-10-21): the threads are added or updated as THREAD_CREATE
+would, those it doesn't list stay (no scoped replace), its `members` are the user's own
+memberships and join their threads, and `most_recent_messages` (undocumented; discord.py-self
+reads it too) gives each thread its newest message. Losing access to a channel doesn't send THREAD_DELETE for its
+threads ([threads](https://docs.discord.food/topics/threads)); they stay in the store, no longer
+listed, until the next session.
 
 **A channel's Threads browser** ([thread-browser.md](../ui/thread-browser.md)) reads
-`Store::thread_browser(parent)`: the channel's active threads the user can see, joined and not, and
-its archived threads down to the oldest the loaded pages brought, each newest message first. Active
-means this connection's gateway (READY, THREAD_CREATE, THREAD_UPDATE, THREAD_LIST_SYNC) or a
-request brought it unarchived: the official client keeps its active threads per connection, while
-Akari's store keeps threads across a READY that it didn't list (unjoined ones, joined ones Get
-Channel brought, the cache's), and one of those may have been archived or left meanwhile, so such a
-thread is in no active section until something brings it again. GUILD_CREATE does the same for its
-guild (a guild back from an outage, or sent again): what it lists is confirmed, what the store kept
-besides waits, and the guild's channels' pages start over. A new connection also lets go of
-unjoined archived threads nothing shows: no window of its own, no box or "started a thread" line in
-its parent's window, not its parent's open browser (`Account::set_browsing`), not fetched by Get
-Channel this session. A private thread needs the user's membership or Manage Threads. Threads keep
-Discord's `member_ids_preview` (not cached); a THREAD_UPDATE without it keeps the known one.
+`Store::thread_browser(parent)`: the channel's active threads the user can see, joined and not,
+and its archived threads down to the oldest the loaded pages brought, each newest message first.
+Active means this connection's gateway (READY, THREAD_CREATE, THREAD_UPDATE, THREAD_LIST_SYNC)
+or a request brought it unarchived: the official client keeps its active threads per connection,
+while Akari's store keeps threads across a READY that it didn't list (unjoined ones, joined ones
+Get Channel brought, the cache's), and one of those may have been archived or left meanwhile, so
+such a thread is in no active section until something brings it again. GUILD_CREATE does the
+same for its guild (a guild back from an outage, or sent again): what it lists is confirmed, what
+the store kept besides waits, and the guild's channels' pages start over. A new connection also
+lets go of unjoined archived threads nothing shows: no window of its own, no box or "started a
+thread" line in its parent's window, not its parent's open browser (`Account::set_browsing`), not
+fetched by Get Channel this session. A private thread needs the user's membership or Manage Threads. Threads keep Discord's
+`member_ids_preview` (not cached); a THREAD_UPDATE without it keeps the known one.
 `ThreadActivity { guild_id, parent_id, thread_id }` reports a thread's newest or latest message
 changing, so an open browser reorders.
 
-`Account::load_older_threads(parent)` asks for archived threads as the official client's browser
-does (its code, canary 646904): `GET /channels/{parent}/threads/search?archived=true&sort_by=last_m
-essage_time&sort_order=desc&limit=25&tag_setting=match_some&offset={n}` ([Search
-Threads](https://docs.discord.food/resources/channel#search-threads)), `n` 25 for each page loaded,
-never while one loads, after the last (`has_more` false), or after a failure or a 202 ("Index not
-yet available", a body without `threads`) until the next READY, which forgets every channel's
-pages. `Account::search_threads(parent, name)` sends
+`Account::load_older_threads(parent)` asks for archived threads as the official client's
+browser does (its code, canary 646904):
+`GET /channels/{parent}/threads/search?archived=true&sort_by=last_message_time&sort_order=desc&limit=25&tag_setting=match_some&offset={n}`
+([Search Threads](https://docs.discord.food/resources/channel#search-threads)), `n` 25 for
+each page loaded, never while one loads, after the last (`has_more` false), or after a failure
+or a 202 ("Index not yet available", a body without `threads`) until the next READY, which
+forgets every channel's pages. `Account::search_threads(parent, name)` sends
 `?name={encodeURIComponent(name)}&tag_setting=match_some`: the server's defaults, active and
 archived threads, at most 25, in its order; `None` for a 202. Both go through the rate limiter
-(route `channels/{id}/threads/search`) and keep what they bring: a thread the store lacks, or holds
-unconfirmed, as Discord sends it (else the gateway's copy stays), the response's `members` as the
-user's memberships of the threads it brought, each thread's `owner.user` as a user, and the
-undocumented `most_recent_messages` as threads' newest messages. An answer to a request asked
-before the last READY confirms nothing and joins nothing, and one whose channel was deleted
-meanwhile keeps nothing. Offset paging can skip a thread unarchived between two pages (the rest
-move up by one); the official client pages the same way. They're logged at `akari_core::load` with
+(route `channels/{id}/threads/search`) and keep what they bring: a thread the store lacks, or
+holds unconfirmed, as Discord sends it (else the gateway's copy stays), the response's
+`members` as the user's memberships of the threads it brought, each thread's `owner.user` as a
+user, and the undocumented `most_recent_messages` as threads' newest messages. An answer to a
+request asked before the last READY confirms nothing and joins nothing, and one whose channel was
+deleted meanwhile keeps nothing. Offset paging can skip a thread unarchived between two pages (the
+rest move up by one); the official client pages the same way. They're logged at `akari_core::load` with
 IDs and counts only. The official client doesn't use the archived-threads routes
 (`threads/archived/public`, `…/private`, `users/@me/threads/archived/private`) for its browser.
 
