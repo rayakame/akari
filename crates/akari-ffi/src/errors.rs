@@ -276,6 +276,45 @@ impl From<akari_core::gateway::GatewayError> for GatewayError {
     }
 }
 
+/// Why `Account::create_thread` created nothing.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+#[uniffi::export(Display)]
+pub enum CreateThreadError {
+    /// The parent's slowmode for new threads runs; `Store::thread_slowmode` says until when.
+    #[error("slowmode: creating threads here has to wait")]
+    Slowmode,
+    /// The server has as many active threads as it may, or announcement threads.
+    #[error("the server has the most active threads it may")]
+    TooManyThreads { announcement: bool },
+    /// AutoMod refused the name; `reason` is Discord's message.
+    #[error("AutoMod refused the name")]
+    NameBlocked { reason: String },
+    #[error("Discord wants a name")]
+    NameRequired,
+    /// Anything else, also a refusal before asking (`InvalidRequest`) and a captcha.
+    #[error("{error}")]
+    Request { error: RequestError },
+}
+
+impl From<akari_core::CreateThreadError> for CreateThreadError {
+    fn from(err: akari_core::CreateThreadError) -> Self {
+        use akari_core::CreateThreadError as E;
+
+        match err {
+            E::Slowmode => Self::Slowmode,
+            E::TooManyThreads { announcement } => Self::TooManyThreads { announcement },
+            E::NameBlocked { reason } => Self::NameBlocked { reason },
+            E::NameRequired => Self::NameRequired,
+            E::Request(error) => Self::Request {
+                error: error.into(),
+            },
+            _ => Self::Request {
+                error: RequestError::UnexpectedResponse,
+            },
+        }
+    }
+}
+
 /// A request on behalf of an account that Discord didn't fulfil.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
 #[uniffi::export(Display)]

@@ -506,6 +506,23 @@ pub struct Slowmode {
     pub until: Option<SystemTime>,
 }
 
+/// Which threads the user may create in a channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Record)]
+pub struct ThreadCreation {
+    pub public: bool,
+    /// Only in text channels.
+    pub private: bool,
+}
+
+impl From<state::ThreadCreation> for ThreadCreation {
+    fn from(creation: state::ThreadCreation) -> Self {
+        Self {
+            public: creation.public,
+            private: creation.private,
+        }
+    }
+}
+
 impl From<state::Slowmode> for Slowmode {
     fn from(slowmode: state::Slowmode) -> Self {
         Self {

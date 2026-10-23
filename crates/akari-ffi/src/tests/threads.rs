@@ -11,9 +11,11 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use super::fake::{CATEGORY, FakeGateway, GENERAL, GUILD, VOICE, events_until, fixture, online};
 use super::gateway::send;
 use super::support::{USER, token};
-use crate::account::{Account, MessageLoad, ThreadLocation};
+use crate::account::{Account, CreateThreadLocation, MessageLoad, ThreadLocation};
+use crate::errors::{CreateThreadError, RequestError};
 use crate::records::{
-    EmbedField, MessageReference, OlderThreads, StarterMessage, ThreadBrowser, ThreadInfo,
+    EmbedField, MessageReference, OlderThreads, StarterMessage, ThreadBrowser, ThreadCreation,
+    ThreadInfo,
 };
 use crate::subscription::StoreEvent;
 
@@ -697,5 +699,122 @@ async fn a_page_of_older_threads_reaches_the_subscription() {
     );
     let finished = events.iter().rposition(|event| *event == changed);
     assert!(added.is_some() && added < finished, "{events:?}");
+    account.close();
+}
+
+const THREADS_PATH: &str = "/api/v9/channels/300000000000000002/threads";
+const NEW: ChannelId = ChannelId::new(300_000_000_000_000_077);
+
+async fn creating(
+    answer: ResponseTemplate,
+) -> (Arc<Account>, MockServer, WebSocketStream<TcpStream>) {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(THREADS_PATH))
+        .respond_with(answer)
+        .mount(&server)
+        .await;
+    let gateway = FakeGateway::start().await;
+    let account = gateway
+        .client_with_api(&format!("{}/api/v9/", server.uri()))
+        .account(token("t"), USER)
+        .unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    (account, server, ws)
+}
+
+fn new_thread() -> Value {
+    let mut thread = archived_thread(NEW);
+    thread["thread_metadata"]["archived"] = false.into();
+    thread["owner_id"] = USER.get().to_string().into();
+    thread["member"] = json!({"id": NEW.get().to_string(), "user_id": USER.get().to_string(),
+        "join_timestamp": "2026-10-23T12:00:00.000000+00:00", "flags": 1});
+    thread
+}
+
+#[tokio::test]
+async fn creating_a_thread_returns_it_and_the_store_says_what_may_be_created() {
+    let (account, server, _ws) =
+        creating(ResponseTemplate::new(201).set_body_json(new_thread())).await;
+    let store = account.store();
+    assert_eq!(
+        store.thread_creation(GENERAL),
+        ThreadCreation {
+            public: true,
+            private: true
+        }
+    );
+    assert_eq!(store.thread_creation(VOICE), ThreadCreation::default());
+    assert!(!store.can_start_thread(GENERAL, MessageId::new(400_000_000_000_000_001)));
+
+    let thread = account
+        .create_thread(
+            GENERAL,
+            None,
+            "plans".to_owned(),
+            true,
+            CreateThreadLocation::ThreadBrowserToolbar,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(thread, NEW);
+    assert!(
+        store
+            .channel(NEW)
+            .and_then(|channel| channel.thread)
+            .unwrap()
+            .joined
+    );
+    assert_eq!(store.thread_slowmode(GENERAL), None);
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        String::from_utf8(requests[0].body.clone()).unwrap(),
+        r#"{"name":"plans","type":12,"auto_archive_duration":4320,"location":"Thread Browser Toolbar"}"#
+    );
+    account.close();
+}
+
+#[tokio::test]
+async fn a_refused_thread_says_why() {
+    let (account, _server, _ws) = creating(
+        ResponseTemplate::new(400).set_body_json(
+            json!({"code": 160_007, "message": "Maximum number of active announcement threads reached"}),
+        ),
+    )
+    .await;
+
+    let full = account
+        .create_thread(
+            GENERAL,
+            None,
+            "t".to_owned(),
+            false,
+            CreateThreadLocation::KeyboardShortcut,
+        )
+        .await;
+    let unnamed = account
+        .create_thread(
+            GENERAL,
+            None,
+            " ".to_owned(),
+            false,
+            CreateThreadLocation::Message,
+        )
+        .await;
+
+    assert_eq!(
+        full,
+        Err(CreateThreadError::TooManyThreads { announcement: true })
+    );
+    assert_eq!(
+        unnamed,
+        Err(CreateThreadError::Request {
+            error: RequestError::InvalidRequest
+        })
+    );
     account.close();
 }

@@ -92,6 +92,20 @@ leave, telling Discord where the user chose it (`ThreadLocation`: `SidebarOverfl
 comes as `ChannelUpdated`. An archived thread, or one the store doesn't have, fails with
 `InvalidRequest` before asking.
 
+`Account.create_thread(parent_id, message_id, name, is_private, location)` creates a thread as
+the official client does, from the message when one is given (never private then), telling
+Discord where the user started it (`CreateThreadLocation`: `Message`, `ThreadBrowserToolbar`,
+`ThreadBrowserEmptyState`, `KeyboardShortcut`), and returns its ID once the store has it from
+Discord's answer (`ChannelAdded`); the first message is an ordinary send in the thread. What may
+be created, and from which messages, are `Store.thread_creation(parent_id)` (`ThreadCreation {
+public, private }`) and `Store.can_start_thread(channel_id, message_id)`; anything else fails
+with `CreateThreadError::Request { error: InvalidRequest }` before asking, as does a name that is
+empty or over 100 characters once trimmed. Creating threads has its own slowmode in the parent,
+`Store.thread_slowmode(parent_id)`: each created thread starts it, Discord's slowmode answer
+holds it, and while it runs `create_thread` fails with `Slowmode` without asking. Discord's other
+refusals are `TooManyThreads { announcement }`, `NameBlocked { reason }` (AutoMod) and
+`NameRequired`.
+
 `Store.thread_browser(parent_id)` is what a channel's Threads browser lists: the active threads
 the user joined and those it hasn't (only ones this connection's gateway, or a request, brought:
 a thread kept across a READY may have been archived or left meanwhile), and the archived ones

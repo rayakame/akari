@@ -4,7 +4,7 @@ use akari_core::model::{ChannelId, GuildId, MessageId};
 use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
-use crate::errors::{GatewayError, RequestError};
+use crate::errors::{CreateThreadError, GatewayError, RequestError};
 use crate::records::LoadReport;
 use crate::runtime::run;
 use crate::store::Store;
@@ -214,6 +214,28 @@ impl Account {
         .map_err(Into::into)
     }
 
+    /// Creates a thread in `parent_id`, from `message_id` when given (never private then), and
+    /// returns it once the store has it; the parent's slowmode for new threads starts. Refused
+    /// with `InvalidRequest` before asking: a name empty or over 100 characters once trimmed, a
+    /// message that can't start a thread, a kind the user may not create; with `Slowmode` while
+    /// that slowmode runs. The first message is an ordinary send in the thread afterwards.
+    pub async fn create_thread(
+        &self,
+        parent_id: ChannelId,
+        message_id: Option<MessageId>,
+        name: String,
+        is_private: bool,
+        location: CreateThreadLocation,
+    ) -> Result<ChannelId, CreateThreadError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.create_thread(parent_id, message_id, &name, is_private, location.into())
+                .await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
     /// Drops the pages of `Around` loads running for the channel, so they don't replace its
     /// window: Escape or a mark as read during a jump, where no `Latest` load overtakes them.
     pub fn supersede_around_loads(&self, channel_id: ChannelId) {
@@ -306,6 +328,30 @@ impl From<ThreadLocation> for akari_core::ThreadLocation {
             ThreadLocation::SidebarOverflow => Self::SidebarOverflow,
             ThreadLocation::ToolbarOverflow => Self::ToolbarOverflow,
             ThreadLocation::ContextMenu => Self::ContextMenu,
+        }
+    }
+}
+
+/// Where the user started creating a thread, which Discord's own client tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CreateThreadLocation {
+    /// A message's context menu.
+    Message,
+    /// The Threads browser's Create button.
+    ThreadBrowserToolbar,
+    /// The Threads browser's "Create Thread" when it lists none.
+    ThreadBrowserEmptyState,
+    /// The shortcut for creating a thread.
+    KeyboardShortcut,
+}
+
+impl From<CreateThreadLocation> for akari_core::CreateThreadLocation {
+    fn from(location: CreateThreadLocation) -> Self {
+        match location {
+            CreateThreadLocation::Message => Self::Message,
+            CreateThreadLocation::ThreadBrowserToolbar => Self::ThreadBrowserToolbar,
+            CreateThreadLocation::ThreadBrowserEmptyState => Self::ThreadBrowserEmptyState,
+            CreateThreadLocation::KeyboardShortcut => Self::KeyboardShortcut,
         }
     }
 }
