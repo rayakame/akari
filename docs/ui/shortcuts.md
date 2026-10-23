@@ -18,7 +18,7 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Scroll the messages | Page Up / Page Down (**unverified**) | The list's native scrolling |
 | Jump to the oldest unread message | Shift+Page Up (Shift+Fn+Up on a Mac laptop) (**unverified**) | Done: jumps like a click on the unread bar (below) |
 | Focus the composer | Tab (**unverified**) | Later |
-| Create a thread | Cmd+Shift+Option+N | Done: File > Create Thread, the open channel's New Thread form or the open thread's parent's ([thread-create.md](thread-create.md)) |
+| Create a thread | Cmd+Shift+Option+N | Done: File > Create Thread, the open channel's New Thread form or the open thread's parent's, disabled where there's none ([thread-create.md](thread-create.md)) |
 | Enter or exit full screen | Ctrl+Cmd+F, Fn+F, the green button | Done: View > Enter Full Screen (SwiftUI's View menu had none); with the Threads browser open it goes full screen and closes the browser |
 
 Rows marked **unverified** come from community lists, not from Discord's own pages. Escape and

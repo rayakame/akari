@@ -104,7 +104,8 @@ empty or over 100 characters once trimmed. Creating threads has its own slowmode
 `Store.thread_slowmode(parent_id)`: each created thread starts it, Discord's slowmode answer
 holds it, and while it runs `create_thread` fails with `Slowmode` without asking. Discord's other
 refusals are `TooManyThreads { announcement }`, `NameBlocked { reason }` (AutoMod) and
-`NameRequired`.
+`NameRequired`; `MaybeCreated` says the answer was lost after the request left (the thread may
+exist; the slowmode starts as if it did). Creating needs Send Messages in Threads too.
 
 `Store.thread_browser(parent_id)` is what a channel's Threads browser lists: the active threads
 the user joined and those it hasn't (only ones this connection's gateway, or a request, brought:

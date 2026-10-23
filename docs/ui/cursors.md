@@ -23,7 +23,8 @@ tracking event comes first.
 | The browser's Create and the empty state's Create Thread | Pointing hand | `CursorArea` |
 | The New Thread form: the X, the private checkbox and its label | Pointing hand (the arrow over the disabled checkbox) | `CursorArea` |
 | The form's name field and composer | I-beam | AppKit (an NSTextField and the composer's NSTextView) |
-| The form's source message | Arrow | AppKit's default: no list tracks it |
+| The form's source message | I-beam over its text, pointing hand over a link, arrow elsewhere | Its own tracking area (`MessagePreviewView`), as the list decides for a message |
+| A floating split's card over the channel's list | What lies there | The list asks `CursorArea.cursor(at:in:)` for what isn't its own: an area, another authority, the I-beam over editable text, else the arrow |
 | The shield under the browser | Arrow | Its own tracking area (`ShieldWindow`) |
 | More Active Threads (never key): its rows and "See All" | Pointing hand | `CursorArea` |
 | Everything else: the server rail, the channel and DM lists, the user panel, the title bar, menus, alerts, the login screen (its fields: AppKit's I-beam) | Arrow | AppKit's default |
