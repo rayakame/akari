@@ -15,6 +15,7 @@ struct JumpBar: View {
                 Label("Jump to present", systemImage: "arrow.down")
             }
             .buttonStyle(.plain)
+            .background(CursorArea(.pointingHand))
         }
         .font(TypeScale.jumpBar.font)
         .foregroundStyle(.white)

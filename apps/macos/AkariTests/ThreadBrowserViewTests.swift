@@ -138,6 +138,42 @@ struct ThreadBrowserViewTests {
         #expect(left.map { abs(CGFloat($0) / image.scale - 16) <= 0.5 } == true, "card at \(String(describing: left))")
     }
 
+    // Discord's cards are background-surface-higher, hovered background-surface-highest: on its
+    // dark theme neutral-76 (#28282D) and neutral-73 (#2C2D32), on light neutral-1 (white), with
+    // borders of #97979F at 0.122 and 0.2 (light 0.278 and 0.4). Chris measured #28282D, #2C2D32
+    // and a hovered border of #414249.
+    @Test(arguments: [
+        (NSAppearance.Name.darkAqua, "#28282d", "#2c2d32"), (.aqua, "#ffffff", "#ffffff"),
+    ])
+    func theCardSurfacesAreDiscords(_ appearance: NSAppearance.Name, _ normal: String, _ hovered: String)
+        throws
+    {
+        func drawn(_ color: NSColor) throws -> NSColor? {
+            try Rendered(
+                Color(nsColor: color).ignoresSafeArea(), appearance: appearance,
+                size: NSSize(width: 10, height: 10)
+            ).color(5, 5)
+        }
+        func over(_ border: NSColor, on fill: NSColor) throws -> NSColor? {
+            try Rendered(
+                Color(nsColor: fill).overlay(Color(nsColor: border)).ignoresSafeArea(),
+                appearance: appearance, size: NSSize(width: 10, height: 10)
+            ).color(5, 5)
+        }
+
+        #expect(same(try drawn(Palette.surfaceHigher), try drawn(NSColor(hex: normal))))
+        #expect(same(try drawn(Palette.surfaceHighest), try drawn(NSColor(hex: hovered))))
+        let alpha: (subtle: CGFloat, normal: CGFloat) = appearance == .darkAqua ? (0.122, 0.2) : (0.278, 0.4)
+        #expect(
+            same(
+                try over(Palette.borderNormal, on: Palette.surfaceHighest),
+                try over(NSColor(hex: "#97979f", alpha: alpha.normal), on: NSColor(hex: hovered))))
+        #expect(
+            same(
+                try over(Palette.borderSubtle, on: Palette.surfaceHigher),
+                try over(NSColor(hex: "#97979f", alpha: alpha.subtle), on: NSColor(hex: normal))))
+    }
+
     @Test
     func theCardsDrawDiscordsColors() throws {
         let image = try rendered()

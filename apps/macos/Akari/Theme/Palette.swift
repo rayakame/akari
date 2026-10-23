@@ -24,8 +24,9 @@ enum Palette {
     static let threadBoxFill = token("threadBoxFill", dark: "#242429", light: "#ffffff")
     // Discord's surfaces, for popouts and modals and the cards in them.
     static let surfaceHigh = token("surfaceHigh", dark: "#242429", light: "#ffffff")
-    static let surfaceHigher = token("surfaceHigher", dark: "#29292e", light: "#ffffff")
-    static let surfaceHighest = token("surfaceHighest", dark: "#2b2e33", light: "#ffffff")
+    // Discord's neutral-76 and neutral-73 on its dark theme, white on light.
+    static let surfaceHigher = token("surfaceHigher", dark: "#28282d", light: "#ffffff")
+    static let surfaceHighest = token("surfaceHighest", dark: "#2c2d32", light: "#ffffff")
     static let baseLowest = token("baseLowest", dark: "#121214", light: "#f2f2f5")
     static let borderNormal = token(
         "borderNormal", dark: "#97979f", light: "#97979f", alpha: (0.2, 0.4))

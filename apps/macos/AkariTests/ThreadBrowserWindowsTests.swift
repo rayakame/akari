@@ -13,12 +13,17 @@ final class ThreadBrowserWindowsTests {
     // The session's window says it's key, so its composer takes the focus as the app's does.
     final class KeyWindow: NSWindow {
         var minimized = 0
+        var fullScreens = 0
 
         override var isKeyWindow: Bool { true }
         override var canBecomeKey: Bool { true }
 
         override func performMiniaturize(_ sender: Any?) {
             minimized += 1
+        }
+
+        override func toggleFullScreen(_ sender: Any?) {
+            fullScreens += 1
         }
     }
 
@@ -47,12 +52,16 @@ final class ThreadBrowserWindowsTests {
         window.orderFrontRegardless()
     }
 
+    // A test's instance can go away off the main thread.
     deinit {
-        MainActor.assumeIsolated {
-            for child in window.childWindows ?? [] {
-                child.orderOut(nil)
+        nonisolated(unsafe) let window = window
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                for child in window.childWindows ?? [] {
+                    child.orderOut(nil)
+                }
+                window.orderOut(nil)
             }
-            window.orderOut(nil)
         }
     }
 
@@ -266,7 +275,7 @@ final class ThreadBrowserWindowsTests {
 
     enum Closing: String, CaseIterable, Sendable {
         case escape, shieldPress, closeButton, row, otherChannel, home, windowClose
-        case miniaturize, appDeactivates, fullScreen, commandW
+        case miniaturize, appDeactivates, fullScreen, leavingFullScreen, commandW
     }
 
     func close(_ closing: Closing) async throws {
@@ -301,6 +310,8 @@ final class ThreadBrowserWindowsTests {
             NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
         case .fullScreen:
             NotificationCenter.default.post(name: NSWindow.willEnterFullScreenNotification, object: window)
+        case .leavingFullScreen:
+            NotificationCenter.default.post(name: NSWindow.willExitFullScreenNotification, object: window)
         case .commandW:
             browser.performClose(nil)
         }
@@ -320,19 +331,70 @@ final class ThreadBrowserWindowsTests {
         #expect(cover.parent == nil && browser.parent == nil, "\(closing)")
     }
 
-    // The menu's Close and Minimize go to the key window, the browser's panel: Close closes the
-    // browser, Minimize the session's window.
+    // The menu's Close goes to the key window, the browser's panel: it closes the browser.
     @Test
-    func theWindowMenuActsOnTheBrowserAndItsWindow() async throws {
+    func theWindowMenusCloseClosesTheBrowser() async throws {
         try await opened(.popout)
         let browser = try #require(self.panel)
         let close = NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        let minimize = NSMenuItem(
-            title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
 
-        #expect(browser.validateUserInterfaceItem(close) && browser.validateUserInterfaceItem(minimize))
-        browser.performMiniaturize(nil)
-        #expect(window.minimized == 1)
+        #expect(browser.validateUserInterfaceItem(close))
+        browser.performClose(nil)
+
+        try await waitUntil("closed") { closedCleanly }
+    }
+
+    // With the browser's panel key, the Window menu's commands find it first: Fill, Center,
+    // Move & Resize, Zoom, Minimize and full screen go on to the session's window, with the
+    // browser open (it follows the window, and full screen closes it).
+    @Test
+    func theWindowsCommandsActOnTheSessionWindow() async throws {
+        try await opened(.popout)
+        let browser = try #require(self.panel)
+        let commands =
+            [
+                #selector(NSWindow.performZoom(_:)), #selector(NSWindow.zoom(_:)),
+                #selector(NSWindow.toggleFullScreen(_:)), #selector(NSWindow.performMiniaturize(_:)),
+            ]
+            + ["_zoomFill:", "_zoomCenter:", "_zoomLeft:", "_zoomTopRight:", "_zoomUntile:", "_tileLeft:"]
+            .map(NSSelectorFromString)
+
+        for command in commands {
+            #expect(!browser.responds(to: command), "\(command)")
+            #expect(
+                browser.supplementalTarget(forAction: command, sender: nil) as? NSWindow === window,
+                "\(command)")
+        }
+        #expect(browser.responds(to: #selector(NSWindow.performClose(_:))))
+        #expect(browser.supplementalTarget(forAction: #selector(NSText.copy(_:)), sender: nil) == nil)
+    }
+
+    // ⌃⌘F, as on any Mac app, from the View menu; the browser's panel hands it to its window.
+    @Test
+    func theViewMenuEntersFullScreenWithControlCommandF() async throws {
+        let items = (NSApp.mainMenu?.items ?? []).compactMap(\.submenu).flatMap(\.items)
+        let item = try #require(items.first { $0.title == "Enter Full Screen" })
+        #expect(item.keyEquivalent == "f")
+        #expect(item.keyEquivalentModifierMask == [.control, .command])
+
+        try await opened(.popout)
+        FullScreen.toggle(from: try #require(self.panel))
+        #expect(window.fullScreens == 1)
+        FullScreen.toggle(from: window)
+        #expect(window.fullScreens == 2)
+    }
+
+    // Its own center: AppKit's observers would take the test's window for one in full screen.
+    @Test
+    func theMenusTitleSaysWhatItWillDo() async {
+        let center = NotificationCenter()
+        let state = FullScreen.State(center: center)
+        #expect(state.title == "Enter Full Screen")
+
+        center.post(name: NSWindow.didEnterFullScreenNotification, object: window)
+        #expect(state.title == "Exit Full Screen")
+        center.post(name: NSWindow.didExitFullScreenNotification, object: window)
+        #expect(state.title == "Enter Full Screen")
     }
 
     // The window grows: the shield with it, the modal stays centered.

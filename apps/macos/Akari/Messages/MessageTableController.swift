@@ -1220,6 +1220,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.pointerMoved = { [weak self] in
             self?.updatePointer()
         }
+        tableView.cursorAt = { [weak self] in self?.cursor(at: $0) }
         let center = NotificationCenter.default
         // The browser's panel takes the key and gives it back over a still pointer.
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
@@ -1393,7 +1394,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let hit = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
         guard let hit, hit.isDescendant(of: tableView) else {
-            return (nil, .arrow)
+            // A bar over the list: the hand where it clicks.
+            let window = content.window
+            return (nil, window.flatMap { CursorArea.Area.cursor(at: location, in: $0) } ?? .arrow)
         }
         var view: NSView? = hit
         while let current = view, current !== tableView {
@@ -1577,13 +1580,18 @@ final class BottomClipView: NSClipView {
 }
 
 // NSTableView re-anchors the scroll position inside its layout, so pinning comes after it.
-class MessageTableView: NSTableView {
+class MessageTableView: NSTableView, CursorAuthority {
     var didLayout: (() -> Void)?
     var onEscape: (() -> Void)?
     var onShiftEscape: (() -> Void)?
     var onShiftPageUp: (() -> Void)?
     var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
     var pointerMoved: (() -> Void)?
+    var cursorAt: ((NSPoint) -> NSCursor?)?
+
+    func cursor(at point: NSPoint) -> NSCursor? {
+        cursorAt?(point)
+    }
     var windowChanged: (() -> Void)?
     private(set) var isLayingOut = false
 

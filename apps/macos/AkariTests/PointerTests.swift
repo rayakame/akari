@@ -258,7 +258,24 @@ struct ListCursorTests {
         #expect(!box.hovered)
     }
 
-    // The bars over the list (unread, jump, locked, the status strip) show the arrow, even
+    // A clickable bar over the list (jump, unread) shows the hand, even over a message's text.
+    @Test
+    func aClickableBarOverTheListShowsTheHand() throws {
+        shown()
+        let short = try point(of: "short", in: 2)
+        let scroll = list.controller.scrollView
+        let over = scroll.convert(short, from: nil)
+        // The bar takes the clicks; its area lets them through to it, as SwiftUI's do.
+        let bar = NSView(frame: NSRect(x: 0, y: over.y - 15, width: scroll.bounds.width, height: 30))
+        let hand = CursorArea.Area(frame: bar.bounds)
+        hand.cursor = .pointingHand
+        bar.addSubview(hand)
+        scroll.addSubview(bar)
+
+        #expect(list.controller.cursor(at: short) == .pointingHand)
+    }
+
+    // The bars over the list that don't click (locked, the status strip) show the arrow, even
     // over a message's text.
     @Test
     func whatLiesOverTheListShowsTheArrow() throws {
@@ -278,3 +295,107 @@ struct ListCursorTests {
     }
 }
 
+
+// A cursor area sets its cursor from its own tracking, so it works in a window that isn't key
+// (More Active Threads, a panel before it takes the key); leaving it, the pointer shows what
+// lies there, the message list's choice included.
+@MainActor
+struct CursorAreaTests {
+    let list = ListCursorTests()
+
+    func area(_ cursor: NSCursor, at frame: NSRect, in view: NSView) -> CursorArea.Area {
+        let area = CursorArea.Area(frame: frame)
+        area.cursor = cursor
+        view.addSubview(area)
+        area.updateTrackingAreas()
+        return area
+    }
+
+    func event(_ type: NSEvent.EventType, at location: NSPoint, in window: NSWindow) throws
+        -> NSEvent
+    {
+        try #require(
+            NSEvent.enterExitEvent(
+                with: type, location: location, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0,
+                userData: nil))
+    }
+
+    @Test
+    func anAreaTracksThePointerItselfKeyOrNot() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        let content = try #require(window.contentView)
+        let hand = area(.pointingHand, at: NSRect(x: 20, y: 20, width: 60, height: 30), in: content)
+
+        let tracking = try #require(hand.trackingAreas.first { $0.owner === hand })
+        #expect(tracking.options.contains(.activeInActiveApp))
+        #expect(!tracking.options.contains(.activeInKeyWindow))
+        #expect(tracking.options.isSuperset(of: [.mouseEnteredAndExited, .mouseMoved]))
+        NSCursor.arrow.set()
+        hand.mouseEntered(with: try event(.mouseEntered, at: NSPoint(x: 40, y: 30), in: window))
+        #expect(NSCursor.current == .pointingHand)
+        NSCursor.arrow.set()
+        hand.mouseMoved(with: try event(.mouseEntered, at: NSPoint(x: 41, y: 30), in: window))
+        #expect(NSCursor.current == .pointingHand)
+
+        hand.mouseExited(with: try event(.mouseExited, at: NSPoint(x: 150, y: 80), in: window))
+        #expect(NSCursor.current == .arrow)
+    }
+
+    // Leaving a bar over the list for a message's text: the I-beam, whichever event comes first.
+    @Test
+    func leavingAnAreaOverTheListShowsTheListsChoice() throws {
+        list.shown()
+        let short = try list.point(of: "short", in: 2)
+        let scroll = list.list.controller.scrollView
+        let over = scroll.convert(short, from: nil)
+        let bar = area(
+            .pointingHand, at: NSRect(x: 0, y: over.y + 40, width: scroll.bounds.width, height: 20),
+            in: scroll)
+        let window = list.list.window
+
+        NSCursor.pointingHand.set()
+        bar.mouseExited(with: try event(.mouseExited, at: short, in: window))
+
+        #expect(NSCursor.current == .iBeam)
+    }
+}
+
+// What clicks shows the pointing hand: More Active Threads' rows, the bars over the list.
+@MainActor
+struct ClickableHandTests {
+    func handAreas<Content: View>(in view: Content, size: NSSize) -> [NSRect] {
+        BrowserButtonTests().handAreas(in: view, size: size)
+    }
+
+    @Test
+    func moreActiveThreadsRowsAndSeeAllShowTheHand() {
+        let peek = ThreadPeek(
+            id: ChannelId(rawValue: 1_000), name: "b1", ownerId: nil, owner: nil,
+            time: Date(timeIntervalSince1970: 1_792_700_000))
+        let size = NSSize(width: 300, height: MoreActiveThreadsPopout.height(threads: 1))
+        let areas = handAreas(
+            in: MoreActiveThreadsPopout(peeks: [peek], open: { _, _ in }, seeAllThreads: {})
+                .frame(width: size.width, height: size.height, alignment: .topLeading),
+            size: size)
+
+        // Two rows under the title: the thread and "See All".
+        #expect(areas.count == 2, "\(areas)")
+    }
+
+    // All of the unread bar clicks; of the jump bar, its button at the right.
+    @Test
+    func theUnreadBarAndTheJumpBarsButtonShowTheHand() {
+        let size = NSSize(width: 500, height: 40)
+        let unread = handAreas(
+            in: UnreadBar(text: "3 new messages", jump: {}, markRead: {}), size: size)
+        let jump = handAreas(in: JumpBar(text: "You're reading older messages") {}, size: size)
+
+        #expect(unread.contains { $0.contains(NSPoint(x: 100, y: 22)) }, "\(unread)")
+        #expect(unread.contains { $0.contains(NSPoint(x: 440, y: 22)) }, "\(unread)")
+        #expect(jump.contains { $0.contains(NSPoint(x: 430, y: 18)) }, "\(jump)")
+        #expect(!jump.contains { $0.contains(NSPoint(x: 100, y: 18)) }, "\(jump)")
+    }
+}

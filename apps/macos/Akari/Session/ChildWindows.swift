@@ -52,27 +52,52 @@ final class ContainerPanel: NSPanel {
     override var canBecomeKey: Bool { keyable }
     override var canBecomeMain: Bool { false }
 
-    // The Window menu's Close and Minimize go to the key window, this panel: Close closes it,
-    // Minimize minimizes the session's window, which closes it too.
+    // The Window menu's commands go to the key window, this panel. Close closes it; the others
+    // (Fill, Center, Move & Resize, Zoom, Minimize, full screen) belong to the session's window:
+    // the panel says it can't, and names that window, so AppKit sends them there.
     override func performClose(_ sender: Any?) {
         onEscape()
     }
 
-    override func performMiniaturize(_ sender: Any?) {
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(performClose(_:)) {
+            return keyable
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    private var root: NSWindow? {
         var root: NSWindow = self
         while let parent = root.parent {
             root = parent
         }
-        if root !== self {
-            root.performMiniaturize(sender)
-        }
+        return root === self ? nil : root
     }
 
-    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
-        if item.action == #selector(performClose(_:)) || item.action == #selector(performMiniaturize(_:)) {
-            return keyable
+    nonisolated private static func isWindowCommand(_ action: Selector) -> Bool {
+        let name = NSStringFromSelector(action)
+        return [
+            #selector(NSWindow.performZoom(_:)), #selector(NSWindow.zoom(_:)),
+            #selector(NSWindow.toggleFullScreen(_:)), #selector(NSWindow.performMiniaturize(_:)),
+            #selector(NSWindow.miniaturize(_:)),
+        ].contains(action) || name.hasPrefix("_zoom") || name.hasPrefix("_tile")
+    }
+
+    // AppKit asks on the main thread; anywhere else the panel answers as any window.
+    nonisolated override func responds(to action: Selector!) -> Bool {
+        if let action, Self.isWindowCommand(action), Thread.isMainThread,
+            MainActor.assumeIsolated({ root != nil })
+        {
+            return false
         }
-        return super.validateUserInterfaceItem(item)
+        return super.responds(to: action)
+    }
+
+    override func supplementalTarget(forAction action: Selector, sender: Any?) -> Any? {
+        if Self.isWindowCommand(action), let root {
+            return root
+        }
+        return super.supplementalTarget(forAction: action, sender: sender)
     }
 
     // NSPanel's would close it through performClose; sendEvent already took Escape.
