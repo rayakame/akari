@@ -1229,11 +1229,15 @@ struct MessageTableTests {
         }
     }
 
-    func rightClick() throws -> NSEvent {
-        try #require(
+    // At the middle of message `raw`'s box.
+    func rightClick(on raw: UInt64) throws -> NSEvent {
+        let cell = try #require(try cell(of: raw) as? MessageCell)
+        let point = cell.convert(NSPoint(x: cell.box.midX, y: cell.box.midY), to: nil)
+        return try #require(
             NSEvent.mouseEvent(
-                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
-                windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+                with: .rightMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 1))
     }
 
     // SwiftUI makes new actions on any update, also while the menu is open.
@@ -1243,7 +1247,7 @@ struct MessageTableTests {
         opened.startsThreads = [1]
         controller.actions = opened
         show([row(1, at: noon)])
-        let menu = try #require(try cell(of: 1).menu(for: try rightClick()))
+        let menu = try #require(try cell(of: 1).menu(for: try rightClick(on: 1)))
 
         let current = RecordingActions()
         controller.actions = current
@@ -1261,18 +1265,18 @@ struct MessageTableTests {
         controller.actions = actions
         show([row(1, at: noon), row(2, at: noon + 10)])
 
-        let menu = try #require(try cell(of: 1).menu(for: try rightClick()))
+        let menu = try #require(try cell(of: 1).menu(for: try rightClick(on: 1)))
         #expect(menu.items.map(\.title) == ["Create Thread", "", "Copy Text"])
         menu.performActionForItem(at: 0)
         #expect(actions.calls.contains("create thread from 1"))
-        let other = try #require(try cell(of: 2).menu(for: try rightClick()))
+        let other = try #require(try cell(of: 2).menu(for: try rightClick(on: 2)))
         #expect(other.items.map(\.title) == ["Copy Text"])
         actions.startsThreads = []
-        let later = try #require(try cell(of: 1).menu(for: try rightClick()))
+        let later = try #require(try cell(of: 1).menu(for: try rightClick(on: 1)))
         #expect(later.items.map(\.title) == ["Copy Text"])
         let text = try #require(messageText(in: try cell(of: 2)))
         actions.startsThreads = [2]
-        #expect(text.menu(for: try rightClick())?.items.first?.title == "Create Thread")
+        #expect(text.menu(for: try rightClick(on: 2))?.items.first?.title == "Create Thread")
     }
 
     func contentColor(of raw: UInt64, text: String) throws -> NSColor? {

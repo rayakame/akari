@@ -16,6 +16,10 @@ final class AvatarView: NSView {
         Self.draw(name: name, userId: userId, in: bounds)
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
+    }
+
     static func draw(name: String, userId: UInt64, in rect: NSRect) {
         InitialsAvatar.color(userId).setFill()
         NSBezierPath(ovalIn: rect).fill()

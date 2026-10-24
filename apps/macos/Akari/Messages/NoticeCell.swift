@@ -1,10 +1,10 @@
 import AkariKit
 import AppKit
 
-final class NoticeCell: NSTableCellView {
+final class NoticeCell: NSTableCellView, MessageMenuRow {
     static let identifier = NSUserInterfaceItemIdentifier("notice")
 
-    private let icon = NSImageView()
+    private let icon = RowIcon()
     private(set) var shownIcon: NoticeIcon?
     private var iconWidth: NSLayoutConstraint?
     private var iconHeight: NSLayoutConstraint?
@@ -13,6 +13,9 @@ final class NoticeCell: NSTableCellView {
     private var threadBox: ThreadBoxView?
     var onLink: (URL) -> Void = { _ in }
     var onOpenThread: () -> Void = {}
+    // As a message's: asked when the menu opens, nil leaves "Create Thread" out.
+    var threadAction: () -> (() -> Void)? = { nil }
+    private var message: Message?
     private var textBottom: NSLayoutConstraint?
     private var textAboveBox: NSLayoutConstraint?
     private static let top: CGFloat = 18
@@ -33,6 +36,7 @@ final class NoticeCell: NSTableCellView {
         super.init(frame: .zero)
         identifier = Self.identifier
         text.onLink = { [weak self] url in self?.onLink(url) }
+        text.messageMenu = { [weak self] in self?.menuItems() ?? [] }
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.imageScaling = .scaleProportionallyDown
         let iconWidth = icon.widthAnchor.constraint(equalToConstant: 16)
@@ -97,6 +101,22 @@ final class NoticeCell: NSTableCellView {
             iconHeight?.constant = shown.size
         }
         text.show(Self.line(notice, time: time, fullDate: fullDate))
+        self.message = message
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        messageMenu(for: event)
+    }
+
+    func messageMenu(for event: NSEvent) -> NSMenu? {
+        guard box.contains(convert(event.locationInWindow, from: nil)) else {
+            return nil
+        }
+        return MessageMenu.menu(menuItems())
+    }
+
+    private func menuItems() -> [NSMenuItem] {
+        message.map { MessageMenu.items(for: $0, createThread: threadAction()) } ?? []
     }
 
     // The full date shows over the time only, as Discord's; TextKit keeps its rect in step.
@@ -178,6 +198,12 @@ final class NoticeCell: NSTableCellView {
         ])
         threadBox = box
         return box
+    }
+
+    /// The line's own area, which its menu covers; the space before it belongs to no message.
+    var box: NSRect {
+        // Under the new messages line, whose row is that space, only `lineTop` is left.
+        MessageCell.box(of: self, spacing: (textTop?.constant ?? Self.top) - Self.lineTop)
     }
 
     /// The icon's box (its alignment rect: a symbol's frame adds its insets), from the cell's top

@@ -46,3 +46,64 @@ private final class MenuAction: NSObject {
         action()
     }
 }
+
+/// A row that shows its message's menu (MessageCell, NoticeCell). A Control-click asks only the
+/// view under the pointer for a menu, and a right-click asks it first, so each part of the row
+/// without a menu of its own answers with the row's.
+@MainActor
+protocol MessageMenuRow: NSView {
+    /// The message's menu for a click at the event's location; nil outside the message's box.
+    func messageMenu(for event: NSEvent) -> NSMenu?
+}
+
+extension MessageMenu {
+    static func menu(_ items: [NSMenuItem]) -> NSMenu? {
+        guard !items.isEmpty else {
+            return nil
+        }
+        let menu = NSMenu()
+        for item in items {
+            menu.addItem(item)
+        }
+        return menu
+    }
+}
+
+extension NSView {
+    /// The menu of the message row this view is part of; nil outside one.
+    func rowMessageMenu(for event: NSEvent) -> NSMenu? {
+        var view = superview
+        while let current = view {
+            if let row = current as? MessageMenuRow {
+                return row.messageMenu(for: event)
+            }
+            view = current.superview
+        }
+        return nil
+    }
+}
+
+final class RowLabel: NSTextField {
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
+    }
+}
+
+final class RowStack: NSStackView {
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
+    }
+}
+
+final class RowButton: NSButton {
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
+    }
+}
+
+// An image view takes a right-click without showing the menu it's given: clicks go to the row.
+final class RowIcon: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+}

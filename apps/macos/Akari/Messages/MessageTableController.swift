@@ -990,6 +990,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.onOpenThread = openThread
+                cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
                     followsLine: followsLine, fullDate: fullDate,
