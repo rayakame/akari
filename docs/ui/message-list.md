@@ -355,7 +355,17 @@ official web client on 2026-10-17 (German and English UI) and from the user's sc
 
 **A message's menu** offers "Create Thread" first where the message can start a thread (a sent
 user message without one, and the permission), then a separator and "Copy Text"
-([thread-create.md](thread-create.md#where-it-starts)).
+([thread-create.md](thread-create.md#where-it-starts)). A right-click or Control-click anywhere
+on the message opens it; over the author's name and avatar, Discord opens the user's menu
+instead.
+- *Akari:* the message's whole box opens it: the area hover highlights, from the header with
+  name, time and avatar to the space beside and after the text, a follow-up's lines and the
+  thread box. The space before a group and the scrollbar's gutter belong to no message and open
+  nothing. Over the name and the avatar it's the message's menu until Akari has the user's. A
+  thread's starter shows its parent message's menu. A system line opens one where it has
+  something to offer: "Copy Text" for one with content, such as "started a thread"; a message
+  with nothing to offer opens none. Links have no menu of their own: theirs is the message's,
+  with "Copy" when text is selected.
 
 ### The thread box
 
