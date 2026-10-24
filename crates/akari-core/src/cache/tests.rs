@@ -141,6 +141,7 @@ pub(crate) fn channel(id: u64, guild: Option<u64>, name: &str) -> Channel {
         topic: Some("a topic".into()),
         nsfw: false,
         rate_limit_per_user: 30,
+        default_auto_archive_duration: Some(10080),
         last_message_id: Some(Snowflake::new(id * 1000)),
         permission_overwrites: vec![PermissionOverwrite {
             id: Snowflake::new(guild.unwrap_or(0) + 1),

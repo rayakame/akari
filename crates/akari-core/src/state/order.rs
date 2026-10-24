@@ -134,6 +134,7 @@ mod tests {
             topic: None,
             nsfw: false,
             rate_limit_per_user: 0,
+            default_auto_archive_duration: None,
             permission_overwrites: Box::new([]),
             recipients: Box::new([]),
             icon: None,

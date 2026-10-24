@@ -106,6 +106,9 @@ pub struct Channel {
     pub nsfw: bool,
     /// Slowmode in seconds.
     pub rate_limit_per_user: u32,
+    /// Minutes of inactivity the official client preselects for a new thread here; `None` when
+    /// Discord didn't say.
+    pub default_auto_archive_duration: Option<u32>,
     /// The newest message. Forum and media channels keep their newest post's thread ID here,
     /// so it isn't a `MessageId`. It may be deleted already, and it never moves back.
     pub last_message_id: Option<Snowflake<GenericMarker>>,
@@ -123,6 +126,15 @@ pub struct Channel {
     /// these nor `spam` DMs.
     pub message_request: bool,
     pub spam: bool,
+}
+
+/// Which threads the user may create in a channel, see `Store::thread_creation`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct ThreadCreation {
+    pub public: bool,
+    /// Only in text channels.
+    pub private: bool,
 }
 
 // A forum post pinned to the top of its forum.

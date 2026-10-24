@@ -106,6 +106,10 @@ final class ThreadBoxView: NSButton {
         return boxFrame.contains(convert(point, from: superview)) ? self : nil
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
+    }
+
 
     override func draw(_ dirtyRect: NSRect) {
         guard box != nil else {

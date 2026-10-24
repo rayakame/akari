@@ -61,8 +61,11 @@ symbol in a 24 box, 8, "Threads" (16 semibold), 16, a 1 × 24 divider, 16, then 
 "Search for Thread Name", focused when the browser opens. The divider and the field only show
 when the user can read the channel's history. Discord's field and the spacer after it share the
 room left (measured: 236 in the popout, 315 in the modal, beside Discord's Create button), so
-its width is half of the room plus 107.5. Discord's "Create" button and the modal's X follow;
-*Akari has no Create button until it can create threads (the next PR).*
+its width is half of the room plus 107.5. Discord's "Create" button follows, 8 after the
+spacer, where the user may create a public or a private thread: its small primary button (32
+tall, at least 60 wide, 12 inside, radius 8, 14 medium white on the brand color, darker while
+hovered and pressed); it closes the browser and opens the New Thread form
+([thread-create.md](thread-create.md)). Then the modal's X.
 
 The field is AppKit's own text field in the key panel: the I-beam over its input, editing,
 selection and the input method are the system's. Its magnifier is `icon-strong` (#FBFBFB dark,
@@ -138,11 +141,13 @@ down to the oldest one the pages brought (all once there are no more): a thread 
 the page loaded is there when the browser opens again, without a reload (observed). A failed page,
 or Discord's "not indexed yet", leaves the section as it is until the next connection.
 
-While all three sections are empty and the first page loads, a spinner shows (64 above and
-below). With nothing to show: **"There are no threads."** (20 semibold) and "Stay focused on a
-conversation with a thread - a temporary text channel." (16), centered with 32 around, at least
-400 tall. *Akari's fits a smaller room, so the header stays in a 500-point window.* *Discord shows its illustration above them and a "Create Thread" button below; Akari
-shows a large thread symbol and no button.*
+While all three sections are empty and the first page loads, a spinner shows (64 above and below).
+With nothing to show: **"There are no threads."** (20 semibold) and "Stay focused on a conversation
+with a thread - a temporary text channel." (16), centered with 32 around, at least 400 tall.
+*Akari's fits a smaller room, so the header stays in a 500-point window.* Where the user may create
+a thread, a "Create Thread" button follows 24 below (the medium primary button: 40 tall, at least
+100 wide, 16 inside, 16 medium), which opens the form like Create. *Discord shows its illustration
+above them; Akari shows a large thread symbol.*
 
 ## Search
 

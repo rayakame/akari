@@ -49,7 +49,11 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
         markedRead.withLock { $0.append(channelId) }
     }
 
-    override func markGuildsRead(guildIds: [GuildId]) {}
+    let markedGuildsRead = OSAllocatedUnfairLock<[[GuildId]]>(initialState: [])
+
+    override func markGuildsRead(guildIds: [GuildId]) {
+        markedGuildsRead.withLock { $0.append(guildIds) }
+    }
     override func fetchThread(parentId: ChannelId, threadId: ChannelId) async throws -> Bool {
         formattedStore.channel(id: threadId) != nil
     }
@@ -252,6 +256,14 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     override func messageLengthLimit() -> UInt32 {
         2000
     }
+
+    // Both kinds in the text channels; no message starts one, no cooldown.
+    override func threadCreation(parentId: ChannelId) -> ThreadCreation {
+        ThreadCreation(public: true, private: true)
+    }
+
+    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }
+    override func threadSlowmode(parentId: ChannelId) -> Slowmode? { nil }
 
     override func slowmode(channelId: ChannelId) -> Slowmode? {
         slowmode

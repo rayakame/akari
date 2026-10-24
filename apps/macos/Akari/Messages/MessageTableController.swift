@@ -990,6 +990,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.onOpenThread = openThread
+                cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
                     followsLine: followsLine, fullDate: fullDate,
@@ -1004,6 +1005,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.onOpenThread = openThread
+            cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
             cell.configure(
                 message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
@@ -1026,6 +1028,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         texts[row.id] = (row.shown, revealed, built)
         relativeTimes[row.id] = built.nextChange
         return built.text
+    }
+
+    private func threadAction(for message: MessageId) -> (() -> Void)? {
+        guard let actions, actions.canCreateThread(from: message) else {
+            return nil
+        }
+        return { [weak self] in self?.actions?.createThread(from: message) }
     }
 
     // The box's newest message is built once per change, like the body; its time each time.
@@ -1394,9 +1403,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let hit = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
         guard let hit, hit.isDescendant(of: tableView) else {
-            // A bar over the list: the hand where it clicks.
+            // A bar over the list, or a floating split's card: what lies there decides.
             let window = content.window
-            return (nil, window.flatMap { CursorArea.Area.cursor(at: location, in: $0) } ?? .arrow)
+            return (nil, window.map { CursorArea.cursor(at: location, in: $0) } ?? .arrow)
         }
         var view: NSView? = hit
         while let current = view, current !== tableView {

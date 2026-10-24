@@ -53,6 +53,9 @@ struct MessageArea: View {
     // A thread and the channel whose line names it.
     let openThread: (ChannelId, ChannelId) -> Void
     var openThreads: (ChannelId) -> Void = { _ in }
+    // A message of this list that can start a thread, and its "Create Thread".
+    var canStartThread: (MessageId) -> Bool = { _ in false }
+    var createThread: (MessageId) -> Void = { _ in }
     let openGuild: (GuildId) -> Void
     // The open channel, as its menu would.
     let markRead: () -> Void
@@ -69,7 +72,7 @@ struct MessageArea: View {
         let bridge = MessageListBridge(
             messages: messages, link: link, links: links, go: go, openThread: openThread,
             openThreads: openThreads, openGuild: openGuild, markServerRead: markServerRead,
-            escapeAll: escape)
+            escapeAll: escape, canStartThread: canStartThread, startThread: createThread)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
@@ -145,6 +148,8 @@ final class MessageListBridge: MessageListActions {
     let guild: (GuildId) -> Void
     let serverRead: () -> Void
     let escapeAll: (() -> Void)?
+    let canStartThread: (MessageId) -> Bool
+    let startThread: (MessageId) -> Void
 
     init(
         messages: MessageListModel, link: MessageTableLink, links: LinkFollower,
@@ -153,7 +158,9 @@ final class MessageListBridge: MessageListActions {
         openThreads: @escaping (ChannelId) -> Void = { _ in },
         openGuild: @escaping (GuildId) -> Void = { _ in },
         markServerRead: @escaping () -> Void,
-        escapeAll: (() -> Void)? = nil
+        escapeAll: (() -> Void)? = nil,
+        canStartThread: @escaping (MessageId) -> Bool = { _ in false },
+        startThread: @escaping (MessageId) -> Void = { _ in }
     ) {
         self.messages = messages
         self.link = link
@@ -164,6 +171,8 @@ final class MessageListBridge: MessageListActions {
         guild = openGuild
         serverRead = markServerRead
         self.escapeAll = escapeAll
+        self.canStartThread = canStartThread
+        self.startThread = startThread
     }
 
     func retry(_ message: MessageId) {
@@ -254,5 +263,13 @@ final class MessageListBridge: MessageListActions {
 
     func openLink(_ url: URL, masked: Bool) {
         links.follow(url, masked: masked)
+    }
+
+    func canCreateThread(from message: MessageId) -> Bool {
+        canStartThread(message)
+    }
+
+    func createThread(from message: MessageId) {
+        startThread(message)
     }
 }

@@ -21,6 +21,8 @@ impl Permissions {
     pub const MENTION_EVERYONE: Self = Self(1 << 17);
     pub const CHANGE_NICKNAME: Self = Self(1 << 26);
     pub const MANAGE_THREADS: Self = Self(1 << 34);
+    pub const CREATE_PUBLIC_THREADS: Self = Self(1 << 35);
+    pub const CREATE_PRIVATE_THREADS: Self = Self(1 << 36);
     pub const SEND_MESSAGES_IN_THREADS: Self = Self(1 << 38);
     pub const BYPASS_SLOWMODE: Self = Self(1 << 52);
 

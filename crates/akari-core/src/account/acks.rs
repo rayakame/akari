@@ -856,6 +856,7 @@ async fn send(
                 },
             },
             Err(Failure::Request(err)) => err,
+            Err(other) => RequestError::from(other),
         };
         if matches!(err, RequestError::Unauthorized | RequestError::Closed) {
             log(&request, Outcome::Dropped(&err));

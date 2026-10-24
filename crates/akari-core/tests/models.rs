@@ -183,6 +183,19 @@ fn guild_text_channel_parses() {
             },
         ]
     );
+    assert_eq!(channel.default_auto_archive_duration, Some(10080));
+}
+
+#[test]
+fn a_default_archive_duration_in_another_shape_is_dropped() {
+    let mut value: Value =
+        serde_json::from_str(include_str!("fixtures/channel_guild_text.json")).unwrap();
+    value["default_auto_archive_duration"] = json!("a week");
+
+    let channel: Channel = parse(&value.to_string());
+
+    assert_eq!(channel.default_auto_archive_duration, None);
+    assert_eq!(channel.name.as_deref(), Some("general"));
 }
 
 #[test]

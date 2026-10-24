@@ -186,6 +186,7 @@ mod tests {
             topic: None,
             nsfw: false,
             rate_limit_per_user: 0,
+            default_auto_archive_duration: None,
             last_message_id: None,
             permission_overwrites: overwrites.into_boxed_slice(),
             recipients: Box::new([]),

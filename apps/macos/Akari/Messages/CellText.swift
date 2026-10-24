@@ -4,7 +4,7 @@ enum CellText {
     // Chrome Discord doesn't let the user select. Selectable text goes in a MessageTextView, which
     // a click doesn't redraw as a selectable label's field editor does.
     static func label() -> NSTextField {
-        let label = NSTextField(labelWithString: "")
+        let label = RowLabel(labelWithString: "")
         label.translatesAutoresizingMaskIntoConstraints = false
         label.drawsBackground = false
         label.isBordered = false

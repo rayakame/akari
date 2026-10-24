@@ -72,6 +72,14 @@ enum ThreadBrowserLayout {
         return listHeight(sections: browser.sections.map(\.rows.count))
     }
 
+    // Discord's Create button, 8 after the spacer.
+    static let createGap: CGFloat = 8
+    static let createTitle = "Create"
+    static var createRoom: CGFloat {
+        createGap + BrandButton.width(createTitle, size: .small)
+    }
+
+    /// `free` is the field's and the spacer's room, the Create button's left out.
     static func searchWidth(free: CGFloat) -> CGFloat {
         min(free, (free + searchBasis) / 2)
     }
@@ -91,13 +99,26 @@ struct ThreadBrowserView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ThreadBrowserHeader(browser: browser, close: session.closeThreadBrowser)
+            ThreadBrowserHeader(
+                browser: browser, close: session.closeThreadBrowser,
+                create: create(.threadBrowserToolbar))
             // Never taller than the room left: the header stays in a small window.
             content
                 .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
                 .clipped()
         }
         .task(id: browser.parentId) { await browser.open() }
+    }
+
+    // Where the user may create a thread; the form closes the browser.
+    private func create(_ location: CreateThreadLocation) -> (() -> Void)? {
+        let creation = session.threadCreation(in: browser.parentId)
+        guard creation.public || creation.private else {
+            return nil
+        }
+        return { [session, browser] in
+            session.openThreadForm(in: browser.parentId, location: location)
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -117,7 +138,7 @@ struct ThreadBrowserView: View {
                 .padding(.vertical, ThreadBrowserLayout.spinnerMargin)
                 .frame(maxWidth: .infinity)
         } else if browser.isEmpty {
-            ThreadBrowserEmptyState()
+            ThreadBrowserEmptyState(create: create(.threadBrowserEmptyState))
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -175,6 +196,7 @@ struct ThreadBrowserView: View {
 struct ThreadBrowserHeader: View {
     let browser: ThreadBrowserModel
     let close: () -> Void
+    var create: (() -> Void)?
     @State private var query = ""
     // VoiceOver starts here when there's no field to start in.
     @AccessibilityFocusState private var titleSpoken: Bool
@@ -206,6 +228,10 @@ struct ThreadBrowserHeader: View {
                         .frame(width: searchWidth(in: proxy.size.width))
                 }
                 Spacer(minLength: 0)
+                if let create {
+                    BrandButton(title: ThreadBrowserLayout.createTitle, size: .small, action: create)
+                        .padding(.leading, ThreadBrowserLayout.createGap)
+                }
                 if browser.presentation == .modal {
                     ModalCloseButton(action: close)
                         .padding(.leading, ThreadBrowserLayout.closeGap)
@@ -243,6 +269,9 @@ struct ThreadBrowserHeader: View {
             + ThreadBrowserLayout.titleGap + title + 2 * ThreadBrowserLayout.dividerGap + 1
         if browser.presentation == .modal {
             fixed += ThreadBrowserLayout.closeGap + ThreadBrowserLayout.closeBox
+        }
+        if create != nil {
+            fixed += ThreadBrowserLayout.createRoom
         }
         return ThreadBrowserLayout.searchWidth(free: max(0, width - fixed))
     }
@@ -569,6 +598,10 @@ struct Facepile: View {
 
 /// "There are no threads.", with a symbol where Discord shows its illustration.
 struct ThreadBrowserEmptyState: View {
+    static let createTitle = "Create Thread"
+
+    var create: (() -> Void)?
+
     var body: some View {
         VStack(spacing: 0) {
             Image(systemName: ChannelSymbols.name(for: .publicThread))
@@ -585,6 +618,10 @@ struct ThreadBrowserEmptyState: View {
                 .font(TypeScale.emptyText.font)
                 .foregroundStyle(Color(nsColor: Palette.textDefault))
                 .multilineTextAlignment(.center)
+            if let create {
+                BrandButton(title: Self.createTitle, action: create)
+                    .padding(.top, 24)
+            }
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

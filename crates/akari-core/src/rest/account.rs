@@ -5,7 +5,7 @@ use reqwest::Method as HttpMethod;
 use serde::Serialize;
 
 use super::clock::ServerClock;
-use super::error::RestError;
+use super::error::{ApiError, RestError};
 use super::ratelimit::{Method, Permit, RateLimiter, ResponseLimits, RouteKey};
 use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
@@ -21,6 +21,9 @@ const ACK: &str = "channels/{}/messages/{}/ack";
 const ACK_BULK: &str = "read-states/ack-bulk";
 const THREAD_MEMBER: &str = "channels/{}/thread-members/@me";
 const THREAD_SEARCH: &str = "channels/{}/threads/search";
+const THREADS: &str = "channels/{}/threads";
+const MESSAGE_THREADS: &str = "channels/{}/messages/{}/threads";
+const SLOWMODE: u32 = 20016;
 const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
 const RATE_LIMIT_RETRIES: u32 = 3;
@@ -93,6 +96,9 @@ impl RequestError {
 pub(crate) enum Failure {
     Held(Duration),
     Request(RequestError),
+    // Only for `Waiting::Create`: Discord's slowmode answer, and its other refusals as sent.
+    Slowmode(Option<Duration>),
+    Api(ApiError),
 }
 
 impl From<RequestError> for Failure {
@@ -114,6 +120,8 @@ impl From<Failure> for RequestError {
                 retry_after: Some(wait),
             },
             Failure::Request(err) => err,
+            Failure::Slowmode(retry_after) => Self::RateLimited { retry_after },
+            Failure::Api(api) => RestError::Api(api).into(),
         }
     }
 }
@@ -183,6 +191,16 @@ impl CreateMessage {
     }
 }
 
+// The official client's body, in its order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct CreateThread {
+    pub(crate) name: String,
+    #[serde(rename = "type")]
+    pub(crate) kind: u16,
+    pub(crate) auto_archive_duration: u32,
+    pub(crate) location: &'static str,
+}
+
 #[derive(Serialize)]
 struct Ack {
     // Not the account's token: an old ack token, which the official client sends as null.
@@ -213,6 +231,8 @@ enum Waiting {
     // Waits out rate limits up to MAX_RATE_LIMIT_WAIT, and before retrying a 429, 502 or 504.
     Allowed,
     Never,
+    // As `Allowed`, but slowmode isn't waited out: the UI shows its countdown instead.
+    Create,
 }
 
 #[derive(Debug)]
@@ -361,6 +381,35 @@ impl AccountRest {
         Ok(())
     }
 
+    pub(crate) async fn create_thread(
+        &self,
+        parent: ChannelId,
+        message: Option<MessageId>,
+        body: &CreateThread,
+    ) -> Result<Option<model::Channel>, Failure> {
+        let (path, route) = match message {
+            Some(message) => (
+                format!(
+                    "channels/{}/messages/{}/threads",
+                    parent.get(),
+                    message.get()
+                ),
+                RouteKey::new(Method::Post, MESSAGE_THREADS, parent.get()),
+            ),
+            None => (
+                format!("channels/{}/threads", parent.get()),
+                RouteKey::new(Method::Post, THREADS, parent.get()),
+            ),
+        };
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Create, || {
+                Ok(self.request(HttpMethod::POST, &path)?.json(body))
+            })
+            .await?;
+        // `None`: Discord said yes in a body that doesn't read as a channel.
+        Ok(serde_json::from_slice(&body).ok())
+    }
+
     // `query` is already encoded. A 202 while Discord indexes the channel decodes without
     // threads.
     pub(crate) async fn search_threads(
@@ -448,7 +497,8 @@ impl AccountRest {
         waiting: Waiting,
         build: impl Fn() -> Result<reqwest::RequestBuilder, RequestError>,
     ) -> Result<Exchange, Failure> {
-        let waits = waiting == Waiting::Allowed;
+        let waits = waiting != Waiting::Never;
+        let creates = waiting == Waiting::Create;
         let mut rate_limited = 0;
         let mut server_errors = 0;
         let mut permit: Option<Permit<'_>> = None;
@@ -499,6 +549,9 @@ impl AccountRest {
                     self.unauthorized.store(true, Ordering::Release);
                     return Err(RequestError::Unauthorized.into());
                 }
+                429 if creates && limits.code == Some(SLOWMODE) => {
+                    return Err(Failure::Slowmode(limits.retry_after));
+                }
                 429 if waits
                     && limits.retry_after.is_some()
                     && rate_limited < RATE_LIMIT_RETRIES =>
@@ -512,12 +565,18 @@ impl AccountRest {
                     }
                     .into());
                 }
-                502 | 504 if waits && server_errors == 0 => {
+                // A create may have happened behind a 502 or 504; asking again could make two.
+                502 | 504 if waits && !creates && server_errors == 0 => {
                     server_errors += 1;
                     report.retries += 1;
                     tokio::time::sleep(self.retry_delay).await;
                 }
-                _ => return Err(RestError::from_response(status, &headers, &body).into()),
+                _ => {
+                    return Err(match RestError::from_response(status, &headers, &body) {
+                        RestError::Api(api) if creates && api.status < 500 => Failure::Api(api),
+                        err => err.into(),
+                    });
+                }
             }
         }
     }

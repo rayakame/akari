@@ -29,6 +29,10 @@ final class FakeStore: Store, @unchecked Sendable {
         var latestMessages: [ChannelId: Message] = [:]
         var threadBrowsers: [ChannelId: ThreadBrowser] = [:]
         var unavailableThreads: Set<ChannelId> = []
+        var threadCreations: [ChannelId: ThreadCreation] = [:]
+        // Messages that can start a thread.
+        var startable: Set<MessageId> = []
+        var threadSlowmodes: [ChannelId: Slowmode] = [:]
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -166,6 +170,20 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func latestMessage(threadId: ChannelId) -> Message? {
         read(.latestMessage(threadId)) { $0.latestMessages[threadId] }
+    }
+
+    override func threadCreation(parentId: ChannelId) -> ThreadCreation {
+        read(.threadCreation(parentId)) { state in
+            state.threadCreations[parentId] ?? ThreadCreation(public: false, private: false)
+        }
+    }
+
+    override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool {
+        read(.canStartThread(channelId, messageId)) { $0.startable.contains(messageId) }
+    }
+
+    override func threadSlowmode(parentId: ChannelId) -> Slowmode? {
+        read(.threadSlowmode(parentId)) { $0.threadSlowmodes[parentId] }
     }
 
     override func threadBrowser(parentId: ChannelId) -> ThreadBrowser {

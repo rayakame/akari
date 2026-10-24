@@ -1,7 +1,7 @@
 import AkariKit
 import AppKit
 
-final class MessageCell: NSTableCellView {
+final class MessageCell: NSTableCellView, MessageMenuRow {
     static let identifier = NSUserInterfaceItemIdentifier("message")
 
     private(set) var showsHeader = false
@@ -26,6 +26,8 @@ final class MessageCell: NSTableCellView {
     // Built for the first message with a thread, as the failed line is: buttons cost.
     private var threadBox: ThreadBoxView?
     var onOpenThread: () -> Void = {}
+    // What "Create Thread" does for this message, asked when the menu opens; nil leaves it out.
+    var threadAction: () -> (() -> Void)? = { nil }
     // Built for the first failed message: its buttons cost a layout pass each.
     private var failed: FailedLine?
     var onRetry: () -> Void = {}
@@ -39,7 +41,7 @@ final class MessageCell: NSTableCellView {
             }
         }
     }
-    private let stack = NSStackView()
+    private let stack = RowStack()
     // Discord's flash: the color fades in for 0.2 s, holds to 2 s, then fades out for 0.2 s.
     private let flashView = FlashView()
     let flashLayer = CALayer()
@@ -103,14 +105,14 @@ final class MessageCell: NSTableCellView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let message else {
+        messageMenu(for: event)
+    }
+
+    func messageMenu(for event: NSEvent) -> NSMenu? {
+        guard let message, box.contains(convert(event.locationInWindow, from: nil)) else {
             return nil
         }
-        let menu = NSMenu()
-        for item in MessageMenu.items(for: message) {
-            menu.addItem(item)
-        }
-        return menu
+        return MessageMenu.menu(MessageMenu.items(for: message, createThread: threadAction()))
     }
 
     // The sizing cell measures the body instead of laying it out in its text view.
@@ -268,16 +270,21 @@ final class MessageCell: NSTableCellView {
         flashView.frame = box
     }
 
-    /// The message's own area, which hover and the mention highlight cover.
+    /// The message's own area, which hover, the mention highlight and its menu cover.
     var box: NSRect {
+        Self.box(of: self, spacing: spacing)
+    }
+
+    /// A row's message area: below the space before it, beside the scrollbar's gutter.
+    static func box(of cell: NSView, spacing: CGFloat) -> NSRect {
         // A legacy scroller sits in a gutter of its own beside the list, while it shows.
-        let legacy = enclosingScrollView.map {
+        let legacy = cell.enclosingScrollView.map {
             $0.scrollerStyle == .legacy && $0.verticalScroller?.isHidden == false
         }
-        let gutter = legacy == true ? 0 : Self.scrollbarGutter
+        let gutter = legacy == true ? 0 : scrollbarGutter
         return NSRect(
-            x: 0, y: isFlipped ? spacing : 0, width: max(0, bounds.width - gutter),
-            height: max(0, bounds.height - spacing))
+            x: 0, y: cell.isFlipped ? spacing : 0, width: max(0, cell.bounds.width - gutter),
+            height: max(0, cell.bounds.height - spacing))
     }
 
     /// The avatar's frame from the cell's top left; `nil` while a follow-up hides it.
@@ -339,7 +346,10 @@ final class MessageCell: NSTableCellView {
     private func build() {
         content.onLink = { [weak self] url in self?.onLink(url) }
         content.messageMenu = { [weak self] in
-            self?.message.map { MessageMenu.items(for: $0) } ?? []
+            guard let self, let message else {
+                return []
+            }
+            return MessageMenu.items(for: message, createThread: threadAction())
         }
         avatar.translatesAutoresizingMaskIntoConstraints = false
         reply.attributedStringValue = CellText.symbolLine(
@@ -486,6 +496,10 @@ private final class HeaderRow: NSView {
         self.time.stringValue = time
         self.time.toolTip = fullDate
     }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
+    }
 }
 
 private final class TagLabel: NSTextField {
@@ -510,6 +524,10 @@ private final class TagLabel: NSTextField {
     override var intrinsicContentSize: NSSize {
         let size = super.intrinsicContentSize
         return NSSize(width: size.width + 8, height: size.height + 2)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
     }
 
     override class var cellClass: AnyClass? {
@@ -556,7 +574,7 @@ private final class FailedLine: NSView {
         label.stringValue = "Not sent."
         label.font = TypeScale.detail.nsFont
         label.textColor = Palette.danger
-        let row = NSStackView(views: [label, retry, delete])
+        let row = RowStack(views: [label, retry, delete])
         row.orientation = .horizontal
         row.spacing = 8
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -572,8 +590,12 @@ private final class FailedLine: NSView {
         nil
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
+    }
+
     private static func button(_ title: String) -> NSButton {
-        let button = NSButton(title: title, target: nil, action: nil)
+        let button = RowButton(title: title, target: nil, action: nil)
         button.isBordered = false
         button.attributedTitle = NSAttributedString(
             string: title,

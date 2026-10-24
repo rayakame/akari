@@ -326,6 +326,9 @@ pub struct Message {
     pub application_name: Option<String>,
     /// A poll result's or an AutoMod alert's first embed's fields, which their lines read.
     pub embed_fields: Vec<EmbedField>,
+    /// The first embed's title, which names a thread started from the message.
+    #[uniffi(default = None)]
+    pub embed_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -443,6 +446,11 @@ impl Message {
                     value: field.value.to_string(),
                 })
                 .collect(),
+            embed_title: message
+                .embeds
+                .first()
+                .and_then(|embed| embed.title.as_deref())
+                .map(str::to_owned),
         }
     }
 }
@@ -504,6 +512,23 @@ pub struct Slowmode {
     pub exempt: bool,
     /// When the user may send again; `None` when they may now.
     pub until: Option<SystemTime>,
+}
+
+/// Which threads the user may create in a channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Record)]
+pub struct ThreadCreation {
+    pub public: bool,
+    /// Only in text channels.
+    pub private: bool,
+}
+
+impl From<state::ThreadCreation> for ThreadCreation {
+    fn from(creation: state::ThreadCreation) -> Self {
+        Self {
+            public: creation.public,
+            private: creation.private,
+        }
+    }
 }
 
 impl From<state::Slowmode> for Slowmode {
