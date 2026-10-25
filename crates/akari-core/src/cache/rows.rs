@@ -11,11 +11,12 @@ use crate::model::{
     Permissions, PremiumType, Snowflake, StickerFormatType, Timestamp, UserId,
 };
 use crate::state::{
-    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor,
-    EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings,
-    ImageHash, Member, Message, MessageReference, NotificationLevel, PermissionOverwrite,
-    ReadState, ReferencedMessage, Role, RoleSubscription, Sticker, SystemData, ThreadInfo,
-    ThreadMembership, Unreads, User,
+    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, DisplaySettings, Embed,
+    EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, ExplicitContentFilter,
+    ExplicitContentSettings, FolderEntry, Guild, GuildSettings, ImageHash, Member, Message,
+    MessageReference, NotificationLevel, PermissionOverwrite, ReadState, Redaction,
+    ReferencedMessage, Role, RoleSubscription, SpoilerSetting, Sticker, StickerAnimation,
+    SystemData, ThreadInfo, ThreadMembership, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -1017,6 +1018,116 @@ pub(super) struct FolderRow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<u32>,
     guilds: Vec<u64>,
+}
+
+// Discord's own numbers where it has them (stickers, the filter, redactions); the spoiler
+// setting counts its three words. A value this build doesn't know takes the default.
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub(super) struct DisplayRow {
+    render_spoilers: u8,
+    view_image_descriptions: bool,
+    inline_attachment_media: bool,
+    inline_embed_media: bool,
+    gif_auto_play: bool,
+    render_embeds: bool,
+    animate_emoji: bool,
+    animate_stickers: u8,
+    explicit_content_filter: u8,
+    explicit_content: [u8; 3],
+    gore: [u8; 3],
+    self_harm: [u8; 3],
+}
+
+impl Default for DisplayRow {
+    fn default() -> Self {
+        Self::from(&DisplaySettings::default())
+    }
+}
+
+fn redactions_row(settings: &ExplicitContentSettings) -> [u8; 3] {
+    [settings.guilds, settings.friend_dm, settings.non_friend_dm].map(|redaction| match redaction {
+        Redaction::Show => 1,
+        Redaction::Blur => 2,
+        Redaction::Block => 3,
+        _ => 0,
+    })
+}
+
+fn redactions(row: [u8; 3]) -> ExplicitContentSettings {
+    let redaction = |value: u8| match value {
+        1 => Redaction::Show,
+        2 => Redaction::Blur,
+        3 => Redaction::Block,
+        _ => Redaction::Unset,
+    };
+    ExplicitContentSettings {
+        guilds: redaction(row[0]),
+        friend_dm: redaction(row[1]),
+        non_friend_dm: redaction(row[2]),
+    }
+}
+
+impl From<&DisplaySettings> for DisplayRow {
+    fn from(display: &DisplaySettings) -> Self {
+        Self {
+            render_spoilers: match display.render_spoilers {
+                SpoilerSetting::Always => 0,
+                SpoilerSetting::IfModerator => 2,
+                _ => 1,
+            },
+            view_image_descriptions: display.view_image_descriptions,
+            inline_attachment_media: display.inline_attachment_media,
+            inline_embed_media: display.inline_embed_media,
+            gif_auto_play: display.gif_auto_play,
+            render_embeds: display.render_embeds,
+            animate_emoji: display.animate_emoji,
+            animate_stickers: match display.animate_stickers {
+                StickerAnimation::OnInteraction => 1,
+                StickerAnimation::Never => 2,
+                _ => 0,
+            },
+            explicit_content_filter: match display.explicit_content_filter {
+                ExplicitContentFilter::Disabled => 0,
+                ExplicitContentFilter::All => 2,
+                _ => 1,
+            },
+            explicit_content: redactions_row(&display.explicit_content),
+            gore: redactions_row(&display.gore),
+            self_harm: redactions_row(&display.self_harm),
+        }
+    }
+}
+
+impl From<DisplayRow> for DisplaySettings {
+    fn from(row: DisplayRow) -> Self {
+        Self {
+            render_spoilers: match row.render_spoilers {
+                0 => SpoilerSetting::Always,
+                2 => SpoilerSetting::IfModerator,
+                _ => SpoilerSetting::OnClick,
+            },
+            view_image_descriptions: row.view_image_descriptions,
+            inline_attachment_media: row.inline_attachment_media,
+            inline_embed_media: row.inline_embed_media,
+            gif_auto_play: row.gif_auto_play,
+            render_embeds: row.render_embeds,
+            animate_emoji: row.animate_emoji,
+            animate_stickers: match row.animate_stickers {
+                1 => StickerAnimation::OnInteraction,
+                2 => StickerAnimation::Never,
+                _ => StickerAnimation::Always,
+            },
+            explicit_content_filter: match row.explicit_content_filter {
+                0 => ExplicitContentFilter::Disabled,
+                2 => ExplicitContentFilter::All,
+                _ => ExplicitContentFilter::NonFriends,
+            },
+            explicit_content: redactions(row.explicit_content),
+            gore: redactions(row.gore),
+            self_harm: redactions(row.self_harm),
+        }
+    }
 }
 
 impl From<&FolderEntry> for FolderRow {

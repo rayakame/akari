@@ -12,7 +12,7 @@ use super::permissions::compute;
 use super::read_states::{Ack, ReadStates};
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
-    GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
+    DisplaySettings, GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
 };
 use super::threads::ThreadIndex;
 use super::types::{
@@ -666,6 +666,9 @@ impl State {
         if old.server_list() != next.server_list() {
             events.push(StoreEvent::ServerListChanged);
         }
+        if old.settings.display != next.settings.display {
+            events.push(StoreEvent::DisplaySettingsChanged);
+        }
         let settings: BTreeSet<Option<GuildId>> = [&old.settings.guilds, &next.settings.guilds]
             .into_iter()
             .flat_map(HashMap::keys)
@@ -812,8 +815,10 @@ impl State {
                 }
             }
             E::UserSettingsProtoUpdate(update) => {
-                self.tracking_server_list(events, |state, _| {
-                    state.entities.settings.apply_proto(*update);
+                self.tracking_server_list(events, |state, events| {
+                    if state.entities.settings.apply_proto(*update) {
+                        events.push(StoreEvent::DisplaySettingsChanged);
+                    }
                 });
             }
             E::NotificationSettingsUpdate(settings) => {
@@ -1642,6 +1647,10 @@ impl State {
             .guild(guild)
             .cloned()
             .unwrap_or_default()
+    }
+
+    pub(crate) fn display_settings(&self) -> DisplaySettings {
+        self.entities.settings.display
     }
 
     pub(crate) fn channel_muted_at(&self, channel: ChannelId, now: Timestamp) -> bool {

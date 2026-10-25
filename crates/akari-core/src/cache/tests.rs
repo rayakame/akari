@@ -13,11 +13,12 @@ use crate::model::{
 };
 use crate::state::apply::Entities;
 use crate::state::{
-    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor,
-    EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings,
-    ImageHash, Member, Message, MessageReference, NotificationLevel, PermissionOverwrite,
-    ReferencedMessage, Role, RoleSubscription, Sticker, SystemData, ThreadInfo, ThreadMembership,
-    Unreads, User, UserSettings,
+    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, DisplaySettings, Embed,
+    EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, ExplicitContentSettings,
+    FolderEntry, Guild, GuildSettings, ImageHash, Member, Message, MessageReference,
+    NotificationLevel, PermissionOverwrite, Redaction, ReferencedMessage, Role, RoleSubscription,
+    SpoilerSetting, Sticker, StickerAnimation, SystemData, ThreadInfo, ThreadMembership, Unreads,
+    User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -370,6 +371,7 @@ fn write_entities(cache: &mut Cache, entities: &Entities) {
             }
             writer.put_folders(entities.settings.folders.as_deref())?;
             writer.put_notification_flags(entities.settings.notification_flags)?;
+            writer.put_display_settings(&entities.settings.display)?;
             Ok(())
         })
         .unwrap();
@@ -395,6 +397,17 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
         ..ChannelSettings::default()
     };
     entities.settings = UserSettings {
+        display: DisplaySettings {
+            gif_auto_play: false,
+            animate_stickers: StickerAnimation::OnInteraction,
+            render_spoilers: SpoilerSetting::Always,
+            explicit_content: ExplicitContentSettings {
+                guilds: Redaction::Show,
+                friend_dm: Redaction::Blur,
+                non_friend_dm: Redaction::Block,
+            },
+            ..DisplaySettings::default()
+        },
         folders: Some(Arc::from(vec![
             FolderEntry {
                 id: Some(7),

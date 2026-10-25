@@ -162,6 +162,120 @@ impl GuildSettings {
     }
 }
 
+/// How media shows and animates, from the user's settings (`text_and_images`); Discord's
+/// defaults where the user set nothing. `DisplaySettingsChanged` says to read it again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct DisplaySettings {
+    pub render_spoilers: SpoilerSetting,
+    /// Show the ALT button on media with a description.
+    pub view_image_descriptions: bool,
+    /// Show attachments' media inline.
+    pub inline_attachment_media: bool,
+    /// Show linked media inline.
+    pub inline_embed_media: bool,
+    /// Play GIFs while the app is focused.
+    pub gif_auto_play: bool,
+    pub render_embeds: bool,
+    pub animate_emoji: bool,
+    pub animate_stickers: StickerAnimation,
+    pub explicit_content_filter: ExplicitContentFilter,
+    pub explicit_content: ExplicitContentSettings,
+    pub gore: ExplicitContentSettings,
+    pub self_harm: ExplicitContentSettings,
+}
+
+/// When spoilers are shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SpoilerSetting {
+    Always,
+    /// Discord's default.
+    OnClick,
+    /// Always for those with Manage Messages.
+    IfModerator,
+}
+
+/// When stickers animate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum StickerAnimation {
+    /// Discord's default.
+    Always,
+    /// While the message is hovered.
+    OnInteraction,
+    Never,
+}
+
+/// The legacy explicit content filter, which decides the per-context defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ExplicitContentFilter {
+    Disabled,
+    /// Discord's default.
+    NonFriends,
+    All,
+}
+
+/// How flagged media is shown in each context; `Unset` leaves it to the filter's defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct ExplicitContentSettings {
+    pub guilds: Redaction,
+    pub friend_dm: Redaction,
+    pub non_friend_dm: Redaction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum Redaction {
+    Unset,
+    Show,
+    Blur,
+    Block,
+}
+
+impl From<state::DisplaySettings> for DisplaySettings {
+    fn from(display: state::DisplaySettings) -> Self {
+        let redactions = |settings: state::ExplicitContentSettings| ExplicitContentSettings {
+            guilds: settings.guilds.into(),
+            friend_dm: settings.friend_dm.into(),
+            non_friend_dm: settings.non_friend_dm.into(),
+        };
+        Self {
+            render_spoilers: match display.render_spoilers {
+                state::SpoilerSetting::Always => SpoilerSetting::Always,
+                state::SpoilerSetting::IfModerator => SpoilerSetting::IfModerator,
+                _ => SpoilerSetting::OnClick,
+            },
+            view_image_descriptions: display.view_image_descriptions,
+            inline_attachment_media: display.inline_attachment_media,
+            inline_embed_media: display.inline_embed_media,
+            gif_auto_play: display.gif_auto_play,
+            render_embeds: display.render_embeds,
+            animate_emoji: display.animate_emoji,
+            animate_stickers: match display.animate_stickers {
+                state::StickerAnimation::OnInteraction => StickerAnimation::OnInteraction,
+                state::StickerAnimation::Never => StickerAnimation::Never,
+                _ => StickerAnimation::Always,
+            },
+            explicit_content_filter: match display.explicit_content_filter {
+                state::ExplicitContentFilter::Disabled => ExplicitContentFilter::Disabled,
+                state::ExplicitContentFilter::All => ExplicitContentFilter::All,
+                _ => ExplicitContentFilter::NonFriends,
+            },
+            explicit_content: redactions(display.explicit_content),
+            gore: redactions(display.gore),
+            self_harm: redactions(display.self_harm),
+        }
+    }
+}
+
+impl From<state::Redaction> for Redaction {
+    fn from(redaction: state::Redaction) -> Self {
+        match redaction {
+            state::Redaction::Show => Self::Show,
+            state::Redaction::Blur => Self::Blur,
+            state::Redaction::Block => Self::Block,
+            _ => Self::Unset,
+        }
+    }
+}
+
 /// A guild channel, category, thread, DM or group DM.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Channel {

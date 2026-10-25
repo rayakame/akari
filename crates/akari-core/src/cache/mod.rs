@@ -19,16 +19,16 @@ use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 pub(crate) use self::caches::Caches;
 pub(crate) use self::flusher::Flusher;
 use self::rows::{
-    ChannelRow, CurrentUserRow, FolderRow, GuildRow, GuildSettingsRow, MemberRow, MessageRow,
-    ReadStateRow, UserRow,
+    ChannelRow, CurrentUserRow, DisplayRow, FolderRow, GuildRow, GuildSettingsRow, MemberRow,
+    MessageRow, ReadStateRow, UserRow,
 };
 pub(crate) use self::snapshot::Snapshot;
 pub(crate) use self::thread::CacheThread;
 use crate::model::{ChannelId, GuildId, Snowflake, UserId};
 use crate::state::apply::Entities;
 use crate::state::{
-    Channel, CurrentUser, Delivery, FolderEntry, Guild, GuildSettings, Member, Message, ReadState,
-    User,
+    Channel, CurrentUser, Delivery, DisplaySettings, FolderEntry, Guild, GuildSettings, Member,
+    Message, ReadState, User,
 };
 
 const LOG: &str = "akari_core::cache";
@@ -46,6 +46,7 @@ pub(crate) struct DiskCache {
 const DM_SETTINGS: u64 = 0;
 const FOLDERS: &str = "folders";
 const NOTIFICATION_FLAGS: &str = "notification_flags";
+const DISPLAY: &str = "display";
 
 pub(crate) fn file(directory: &Path, user: UserId) -> PathBuf {
     directory.join(format!("{}.sqlite", user.get()))
@@ -301,6 +302,9 @@ impl Cache {
                 NOTIFICATION_FLAGS => serde_json::from_str::<u64>(&data)
                     .ok()
                     .map(|flags| settings.notification_flags = flags),
+                DISPLAY => serde_json::from_str::<DisplayRow>(&data)
+                    .ok()
+                    .map(|row| settings.display = row.into()),
                 _ => Some(()),
             };
             if read.is_none() {
@@ -549,6 +553,13 @@ impl Writer<'_> {
 
     pub(crate) fn put_notification_flags(&mut self, flags: u64) -> rusqlite::Result<()> {
         self.put_user_setting(NOTIFICATION_FLAGS, flags.to_string())
+    }
+
+    pub(crate) fn put_display_settings(
+        &mut self,
+        display: &DisplaySettings,
+    ) -> rusqlite::Result<()> {
+        self.put_user_setting(DISPLAY, json(&DisplayRow::from(display))?)
     }
 
     fn put_user_setting(&mut self, key: &str, data: String) -> rusqlite::Result<()> {
