@@ -1,4 +1,4 @@
-use akari_core::model::{ChannelId, ChannelType, GuildId, MessageId, RoleId, UserId};
+use akari_core::model::{ChannelId, ChannelType, EmojiId, GuildId, MessageId, RoleId, UserId};
 use akari_core::state;
 use akari_markdown::utf16::Utf16Map;
 use akari_markdown::{
@@ -6,6 +6,7 @@ use akari_markdown::{
     Style,
 };
 
+use crate::images::ImageKey;
 use crate::names::Names;
 
 /// A message's content as Discord formats it. Offsets are UTF-16 code units into `content`.
@@ -110,6 +111,8 @@ pub enum SpanKind {
         name: String,
         id: u64,
         animated: bool,
+        /// The image to show in the text, animated when `animated` says so.
+        key: ImageKey,
     },
     Timestamp {
         seconds: i64,
@@ -314,6 +317,10 @@ fn span_kind(
             name: text(name),
             id,
             animated,
+            key: ImageKey::Emoji {
+                emoji_id: EmojiId::new(id),
+                animated,
+            },
         },
         InlineKind::Timestamp { seconds, style } => SpanKind::Timestamp {
             seconds,

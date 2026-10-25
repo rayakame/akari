@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use akari_core::model::{ChannelId, ChannelType, MessageId, RoleId, UserId};
+use akari_core::model::{
+    ChannelId, ChannelType, EmojiId, MessageId, RoleId, StickerFormatType, StickerId, UserId,
+};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
@@ -14,8 +16,9 @@ use crate::formatted::{
     ChannelLink, FormattedText, GuildNavigation, MentionName, SpanKind, TextBlockKind,
     TextContainer, TextSpan, TimestampStyle, formatted_text,
 };
+use crate::images::ImageKey;
 use crate::names::Names;
-use crate::records::Message;
+use crate::records::{Message, Sticker};
 
 const MESSAGES: &str = "/api/v9/channels/300000000000000002/messages";
 const MIRA: UserId = UserId::new(100_000_000_000_000_002);
@@ -85,6 +88,10 @@ fn every_span_kind_crosses() {
             name: "wave".to_owned(),
             id: 5,
             animated: true,
+            key: ImageKey::Emoji {
+                emoji_id: EmojiId::new(5),
+                animated: true,
+            },
         },
         SpanKind::Timestamp {
             seconds: 1_800_000_000,
@@ -500,5 +507,40 @@ async fn messages_carry_mentions_me() {
         .collect();
     assert_eq!(flags, [true, false]);
     assert_eq!(loaded.messages[1].author.id, MIRA);
+    loaded.account.close();
+}
+
+#[tokio::test]
+async fn stickers_cross_with_their_keys() {
+    let mut message = page_message(400_000_000_000_000_012, "", json!([]));
+    message["sticker_items"] = json!([
+        {"id": "700000000000000001", "name": "wave", "format_type": 2},
+        {"id": "700000000000000002", "name": "dance", "format_type": 3}
+    ]);
+    let loaded = loaded(vec![message], |_| {}).await;
+
+    assert_eq!(
+        loaded.messages[0].stickers,
+        vec![
+            Sticker {
+                id: StickerId::new(700_000_000_000_000_001),
+                name: "wave".to_owned(),
+                format: StickerFormatType::Apng,
+                key: ImageKey::Sticker {
+                    sticker_id: StickerId::new(700_000_000_000_000_001),
+                    format: StickerFormatType::Apng,
+                },
+            },
+            Sticker {
+                id: StickerId::new(700_000_000_000_000_002),
+                name: "dance".to_owned(),
+                format: StickerFormatType::Lottie,
+                key: ImageKey::Sticker {
+                    sticker_id: StickerId::new(700_000_000_000_000_002),
+                    format: StickerFormatType::Lottie,
+                },
+            },
+        ]
+    );
     loaded.account.close();
 }

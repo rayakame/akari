@@ -3,7 +3,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::document::InlineKind;
 use crate::parse::{Node, Piece};
 
-const MAX_JUMBO: usize = 27;
+const MAX_JUMBO: usize = 30;
 
 // Longer than any emoji in the list (a test checks), so the search looks no further.
 pub(crate) const MAX_EMOJI_LEN: usize = 64;

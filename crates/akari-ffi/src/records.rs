@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use akari_core::model::{
-    AttachmentId, ChannelId, ChannelType, GuildId, MessageId, MessageType, Timestamp, UserId,
+    AttachmentId, ChannelId, ChannelType, GuildId, MessageId, MessageType, StickerFormatType,
+    StickerId, Timestamp, UserId,
 };
 use akari_core::state;
 
@@ -428,7 +429,7 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
     /// Embeds aren't rendered yet; the count is enough for a placeholder.
     pub embed_count: u32,
-    pub sticker_names: Vec<String>,
+    pub stickers: Vec<Sticker>,
     /// Laid out with Components V2, which Akari can't show yet; such a message has no content.
     pub components_v2: bool,
     pub delivery: Delivery,
@@ -520,11 +521,7 @@ impl Message {
             mention_everyone: message.mention_everyone,
             attachments: message.attachments.iter().map(Attachment::from).collect(),
             embed_count: u32::try_from(message.embeds.len()).unwrap_or(u32::MAX),
-            sticker_names: message
-                .stickers
-                .iter()
-                .map(|sticker| sticker.name.to_string())
-                .collect(),
+            stickers: message.stickers.iter().map(Sticker::from).collect(),
             components_v2: message.uses_components_v2(),
             delivery: message.delivery.into(),
             formatted,
@@ -608,6 +605,29 @@ impl From<&state::Attachment> for Attachment {
             filename: attachment.filename.to_string(),
             content_type: attachment.content_type.as_deref().map(str::to_owned),
             size: attachment.size,
+        }
+    }
+}
+
+/// A sticker a message carries; `key` is its image (a Lottie sticker has no image Akari shows).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Sticker {
+    pub id: StickerId,
+    pub name: String,
+    pub format: StickerFormatType,
+    pub key: ImageKey,
+}
+
+impl From<&state::Sticker> for Sticker {
+    fn from(sticker: &state::Sticker) -> Self {
+        Self {
+            id: sticker.id,
+            name: sticker.name.to_string(),
+            format: sticker.format,
+            key: ImageKey::Sticker {
+                sticker_id: sticker.id,
+                format: sticker.format,
+            },
         }
     }
 }

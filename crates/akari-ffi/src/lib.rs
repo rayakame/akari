@@ -43,7 +43,8 @@ pub use login::{
 pub use records::{
     Attachment, Channel, ConnectionState, ContentStats, Delivery, DisplaySettings,
     ExplicitContentFilter, ExplicitContentSettings, Guild, Message, MessageReference,
-    MessageWindow, Redaction, Slowmode, SpoilerSetting, StarterMessage, StickerAnimation, User,
+    MessageWindow, Redaction, Slowmode, SpoilerSetting, StarterMessage, Sticker, StickerAnimation,
+    User,
 };
 pub use store::{Store, message_length};
 pub use subscription::{StoreEvent, StoreSubscription};

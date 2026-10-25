@@ -32,7 +32,7 @@ style that starts there: `*> a*` is an italic quote.
 | Navigation | `<id:customize>` and friends | a link into the server's pages | a pill in Akari's words (Channels & Roles, Browse Channels, Server Guide, Linked Roles); a click does nothing yet |
 | Escapes | `\*` | the character | the character |
 
-A message of 1 to 27 emoji (Unicode or custom) and whitespace, nothing else, shows them large
+A message of 1 to 30 emoji (Unicode or custom) and whitespace, nothing else, shows them large
 (jumbo). Akari shows Unicode emoji at 48 on 56; a message with a custom emoji isn't jumbo until
 custom emoji are images.
 
