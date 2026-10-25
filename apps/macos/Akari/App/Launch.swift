@@ -40,12 +40,20 @@ enum Launch {
         if cache == nil {
             LaunchLog.mark("cache unavailable")
         }
+        let images = CacheDirectory.makeImages(
+            bundle: Bundle.main.bundleIdentifier ?? "app.akari.Akari")
+        if images == nil {
+            LaunchLog.mark("images unavailable")
+        }
+        // Which form animations are asked in on this Mac; GIF, the safe one, until it's known.
+        Task { await AnimatedFormatProbe.install() }
         do {
             let client = try DiscordClient(
                 host: .current,
                 tokenStore: KeychainTokenStore(
                     service: tokenService(for: Bundle.main.bundleIdentifier)),
-                cacheDirectory: cache?.path(percentEncoded: false))
+                cacheDirectory: cache?.path(percentEncoded: false),
+                imageDirectory: images?.path(percentEncoded: false))
             LaunchLog.mark("client created")
             return .running(AppModel(client: client))
         } catch {

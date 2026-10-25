@@ -17,7 +17,20 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             hoverTime.isHidden = !isHovered || showsHeader
         }
     }
-    private let avatar = AvatarView()
+    private let avatar = ImageLayerView()
+    /// Where the avatar comes from; the controller sets it with the state.
+    var images: ImageCache? {
+        get { avatar.images }
+        set {
+            avatar.images = newValue
+            threadBox?.images = newValue
+        }
+    }
+    /// The list's say: the group is hovered and the policy lets the avatar play.
+    var animatesAvatar: Bool {
+        get { avatar.animates }
+        set { avatar.animates = newValue }
+    }
     private let reply = CellText.label()
     private let header = HeaderRow()
     private let hoverTime = CellText.label()
@@ -136,8 +149,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         avatarBottom?.isActive = startsGroup
         top?.constant = startsGroup ? spacing + Self.groupInset : Self.continuationTop
         bottom?.constant = -(startsGroup ? Self.groupBottom : Self.continuationBottom)
-        avatar.name = name
-        avatar.userId = message.author.id.rawValue
+        avatar.show(ImageLayerView.Content(key: message.author.avatar))
         header.show(
             name: name, tagged: message.author.bot || message.fromWebhook,
             time: groupTime, fullDate: fullDate)
@@ -333,6 +345,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             return threadBox
         }
         let box = ThreadBoxView()
+        box.images = images
         box.topInset = Self.boxGap - Self.spacing
         box.target = self
         box.action = #selector(threadBoxClicked)
@@ -352,6 +365,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             return MessageMenu.items(for: message, createThread: threadAction())
         }
         avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatar.placeholder = .disc
+        avatar.cornerRadius = Self.avatarSize / 2
         reply.attributedStringValue = CellText.symbolLine(
             "arrowshape.turn.up.left", "Replying to an earlier message")
         hoverTime.font = TypeScale.hoverTime.nsFont

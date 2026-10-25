@@ -24,8 +24,25 @@ thread row's menu, the Threads browser (`ThreadBrowser.swift`, `ThreadBrowserCon
 the header's Threads button and its popout, the "See all threads" modal, and the channel list's
 "More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
 `ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), and the
-composer (a locked thread's banner). Images, attachments, reactions,
-replies, voice, notifications and settings come later.
+composer (a locked thread's banner), and avatars and icons in every place (`docs/ui/images.md`).
+Attachments, embeds, reactions, replies, voice, notifications and settings come later.
+
+## Images
+
+- `ImageLayerView` (`Shared/`) shows one image as a layer: it asks the session's `ImageCache`
+  at the box's pixels on the window's backing scale, sets the decoded bitmap as contents on
+  whole backing pixels (1:1, never resampled), clips with the layer, cancels its ask when the
+  box shows something else or leaves the window, asks again when the scale changes, and plays
+  the animated form through AkariKit's `FramePlayer` while its owner says so. It draws nothing
+  and tracks no pointer. `RemoteImage` wraps it for SwiftUI (`UserAvatar`, `ConversationAvatar`,
+  the rail's `GuildIcon`), fed through the environment (`imageEnvironment(session)`: the cache,
+  the motion policy and whether the window is key and the app active).
+- The message list's cells get the cache with the table's state; the controller's hover
+  decides which group's header avatar plays, by the policy, as it decides the cursor.
+- A loading or failed avatar shows the `avatarPlaceholder` disc; servers keep their initials
+  under their icon. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).
+- `ReadingSignals` also feeds the system's Reduce Motion to the session, and `Launch` runs
+  AkariKit's `AnimatedFormatProbe` once (WebP or GIF for animations on this Mac).
 
 ## Messages and the composer
 

@@ -89,6 +89,23 @@ final class SessionModelTests {
         session.close()
     }
 
+    // Animations need the window key and the app active; views read one flag.
+    @Test
+    func focusedIsTheWindowKeyAndTheAppActive() {
+        let session = makeSession()
+        #expect(!session.focused)
+
+        session.setAppActive(true)
+        #expect(!session.focused)
+        session.setWindowKey(true)
+        #expect(session.focused)
+        session.setAppActive(false)
+        #expect(!session.focused)
+        session.setAppActive(true)
+        session.setWindowKey(false)
+        #expect(!session.focused)
+    }
+
     @Test
     func theSessionsImagesAskTheAccount() async throws {
         let session = makeSession()

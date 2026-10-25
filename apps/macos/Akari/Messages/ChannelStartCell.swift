@@ -1,3 +1,4 @@
+import AkariKit
 import AppKit
 
 // Above a channel's first message, as the official client welcomes it; its edit button waits for
@@ -99,6 +100,12 @@ final class ChannelStartCell: NSTableCellView {
         return (height + bottom).rounded(.up)
     }
 
+    /// Where a DM's avatar comes from.
+    var images: ImageCache? {
+        get { icon.avatar.images }
+        set { icon.avatar.images = newValue }
+    }
+
     // `room`: what overlays the list's top, such as a locked thread's banner.
     func show(_ start: ChannelStart?, room: CGFloat = 0) {
         isHidden = start == nil
@@ -145,15 +152,47 @@ final class StartIcon: NSView {
         didSet {
             if icon != oldValue {
                 needsDisplay = true
+                updateAvatar()
             }
         }
     }
+    let avatar = ImageLayerView()
     private static let symbolSize: CGFloat = 36
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        avatar.placeholder = .disc
+        avatar.isHidden = true
+        addSubview(avatar)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        avatar.frame = bounds
+        avatar.cornerRadius = bounds.width / 2
+    }
+
+    private func updateAvatar() {
+        switch icon {
+        case .avatar(let key):
+            avatar.isHidden = false
+            // No key yet (the store doesn't know the person): the disc alone.
+            avatar.show(key.map { ImageLayerView.Content(key: $0) })
+            avatar.placeholder = .disc
+        case .symbol:
+            avatar.isHidden = true
+            avatar.show(nil)
+        }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         switch icon {
-        case .avatar(let name, let id):
-            AvatarView.draw(name: name, userId: id, in: bounds)
+        case .avatar:
+            break
         case .symbol(let name):
             Palette.startIcon.setFill()
             NSBezierPath(ovalIn: bounds).fill()

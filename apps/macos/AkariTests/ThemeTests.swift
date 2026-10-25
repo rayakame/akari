@@ -45,6 +45,9 @@ struct ThemeTests {
         Token("danger", "#f23f43", "#da373c"),
         Token("brand", "#5865f2", "#5865f2"),
         Token("composer", "#222327", "#ffffff"),
+        // The disc an avatar shows while it loads, and when it failed (Discord's
+        // background-mod-subtle, 31/255 in both themes).
+        Token("avatarPlaceholder", "#97979f", "#97979f", alpha: (31.0 / 255, 31.0 / 255)),
         Token("mentionText", "#c9cdfb", "#4752c4"),
         Token("mentionBackground", "#5865f2", "#5865f2", alpha: (0.30, 0.15)),
         Token("mentionedBackground", "#f8a300", "#f8a300", alpha: (0.08, 0.10)),
@@ -60,12 +63,6 @@ struct ThemeTests {
         Token("mentionBadgeText", "#ffffff", "#ffffff"),
         Token("newMessages", "#d22d39", "#d22d39"),
         Token("newMessagesText", "#ffffff", "#ffffff"),
-        Token("avatar0", "#5865f2", "#5865f2"),
-        Token("avatar1", "#3e8e7e", "#3e8e7e"),
-        Token("avatar2", "#c06c2b", "#c06c2b"),
-        Token("avatar3", "#a352b5", "#a352b5"),
-        Token("avatar4", "#c2445a", "#c2445a"),
-        Token("avatar5", "#4f7fba", "#4f7fba"),
     ]
 
     let colors: [String: NSColor] = [
@@ -92,10 +89,8 @@ struct ThemeTests {
         "timestampBackground": Palette.timestampBackground, "folder": Palette.folder,
         "mentionBadge": Palette.mentionBadge, "mentionBadgeText": Palette.mentionBadgeText,
         "newMessages": Palette.newMessages, "newMessagesText": Palette.newMessagesText,
-        "brand": Palette.brand, "composer": Palette.composer, "avatar0": Palette.avatars[0],
-        "avatar1": Palette.avatars[1],
-        "avatar2": Palette.avatars[2], "avatar3": Palette.avatars[3],
-        "avatar4": Palette.avatars[4], "avatar5": Palette.avatars[5],
+        "brand": Palette.brand, "composer": Palette.composer,
+        "avatarPlaceholder": Palette.avatarPlaceholder,
     ]
 
     static func components(_ color: NSColor, in appearance: NSAppearance.Name) -> [Double] {
@@ -155,7 +150,6 @@ struct ThemeTests {
     @Test
     func everyTokenIsChecked() {
         #expect(Set(colors.keys) == Set(Self.tokens.map(\.name)))
-        #expect(Palette.avatars.count == 6)
     }
 
     @Test

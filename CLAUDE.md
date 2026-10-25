@@ -24,6 +24,12 @@ implemented with native controls so the app feels at home on each platform.
 - **No Discord assets**: no Discord logo, icons, illustrations (Wumpus), sounds or the
   gg sans font. Use platform icons (SF Symbols on Apple, Adwaita icons on Linux,
   Material icons on Android) and system fonts. Akari has its own name and app icon.
+  What Discord's CDN serves is content, not an asset: avatars, server icons, emoji,
+  stickers, attachments, embed media and the default avatars (`embed/avatars/{index}.png`)
+  are fetched at runtime like any profile picture and cached like every image. Nothing of
+  Discord's is bundled: no file of Discord's in the repo, the app or the test fixtures, no
+  copy made at build time; images that exist only in Discord's client bundle (`/assets/…`:
+  the system bots' avatars, the group DM defaults) stay out.
 
 Reference notes on Discord's layout, behavior and shortcuts live in `docs/ui/`.
 
@@ -48,20 +54,31 @@ with the parent's own slowmode for new threads; `akari_core::media` gets images:
 IDs, the size and form each box asks for (never fewer pixels than it covers on screen), downloads
 without the token on a client of their own (eight at a time, newest first, one per image however
 many ask), signed attachment links renewed in batches, each account's images on disk with LRU
-eviction, Discord's placeholder decoder and media layout from sizes alone;
+eviction, Discord's placeholder decoder and media layout from sizes alone; the store reads the
+display settings (`text_and_images`: spoilers, inline media, GIF autoplay, emoji and sticker
+animation, explicit content) with their event, keeps "0", "0000" and legacy discriminators
+apart, and gives every user an avatar key (the avatar, else Discord's default avatar by the
+client's index rule) and guilds and group DMs their icon's;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, show where a channel's unread state and mentions come from, and get an image as the app
 would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
-(`PendingImage`, placeholders, layout), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+(`PendingImage`, placeholders, layout, the records' image keys, the display settings), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, and the composer), the message
-timeline and the reading signal (what tells the core which channel the user reads). `apps/macos` is the first app: the login screen and the main window with the server
+timeline, the reading signal (what tells the core which channel the user reads), and the
+image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
+two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
+`AnimationClock`: Akari's own playback; `AnimatedFormatProbe`: WebP or GIF per Mac, decided at
+launch from an animated WebP shipped as a resource). `apps/macos` is the first app: the login screen and the main window with the server
 rail (the user's order, with folders, unread pills and mention badges, and unread DMs under
 Home), the channel and DM lists (muted channels dimmed, unread rows bright with the pill, channel
 rows with their counts, joined threads under their parent), a
 message list that loads history in both directions, with the "new messages" line and the unread
-bar, the composer, and marking read with Escape, Shift+Escape and the context menus; a thread
+bar, the composer, and marking read with Escape, Shift+Escape and the context menus; avatars and
+icons in every place (message headers, DM rows and the rail, the user panel, the title bar, a
+DM's start, thread boxes, the browser's rows and facepiles, server icons over their initials)
+as layers from the image tier, animated avatars playing on hover while the window is key; a thread
 opens with its header ("# channel › thread"), its start and starter message, and a locked
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
 its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message

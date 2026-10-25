@@ -36,6 +36,11 @@ category or guild doesn't mute its channels, nor a muted channel its threads.
 guild's settings and mutes; it also comes when a timed mute ends. Category collapse isn't
 here: Discord's clients don't sync it, so each app keeps its own.
 
+`display_settings()` is how media shows and animates (`DisplaySettings`: spoilers, inline
+media, GIF autoplay, embeds, emoji and sticker animation, the explicit content filter and
+redactions), with Discord's defaults where the user set nothing;
+`DisplaySettingsChanged` says to read it again ([user-settings.md](../../docs/protocol/user-settings.md)).
+
 ## Badges and read states
 
 `channel_badges(ids)` and `guild_badges(ids)` return a `Badge` (`unread`, `mentions`) per ID,
@@ -291,6 +296,11 @@ pixels.
 - An image is named by an `ImageKey` (Discord's IDs; hashes as Discord sends them).
   `ImageRequest` adds the box's pixels (points times the backing scale, rounded up) and
   `animated` (`None` for the still, else the `AnimatedFormat` the host's decoder shows right).
+- Records carry their keys, so every view asks the same way: `User.avatar` is the avatar, or
+  one of Discord's default avatars for a user without one (the client's index rule: a bot
+  with "0000" and no avatar is 0, a legacy tag is `tag % 5`, else `(id >> 22) % 6`; a hash
+  that isn't the CDN's counts as none); `Guild.icon` and `Channel.icon` (group DMs) are
+  `None` without one. Hosts draw no default of their own.
 - `Account.request_image(request)` returns a `PendingImage` at once. `result()` waits for the
   `ImageFile` (path, the file's pixels, `animated`, `from_disk`); every call, also a second or
   a concurrent one, gets the same answer. `cancel()` stops a request that hasn't answered:

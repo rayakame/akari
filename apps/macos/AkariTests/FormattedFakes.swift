@@ -5,6 +5,8 @@ import os
 // One server with two text channels (1001, 1002) of formatted messages; a channel's window can
 // grow while it isn't shown, as when messages arrive.
 nonisolated final class FormattedAccount: Account, @unchecked Sendable {
+    override func requestImage(request: ImageRequest) -> PendingImage { UnavailableImage() }
+
     let formattedStore: FormattedStore
 
     // `locked`: 1001 is a locked thread under 1002, where the user can't send. `pinned`: each
@@ -64,6 +66,8 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
 }
 
 nonisolated final class FormattedStore: Store, @unchecked Sendable {
+    override func displaySettings() -> DisplaySettings { displayDefaults() }
+
     static let channelIds = [ChannelId(rawValue: 1001), ChannelId(rawValue: 1002)]
     static let threadId = ChannelId(rawValue: 1003)
 

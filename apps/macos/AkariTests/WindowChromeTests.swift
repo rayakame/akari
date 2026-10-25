@@ -84,6 +84,8 @@ struct WindowChromeTests {
 }
 
 nonisolated private final class EmptyAccount: Account, @unchecked Sendable {
+    override func requestImage(request: ImageRequest) -> PendingImage { UnavailableImage() }
+
     init() {
         super.init(noHandle: NoHandle())
     }
@@ -102,6 +104,8 @@ nonisolated private final class EmptyAccount: Account, @unchecked Sendable {
 }
 
 nonisolated private final class EmptyStore: Store, @unchecked Sendable {
+    override func displaySettings() -> DisplaySettings { displayDefaults() }
+
     init() {
         super.init(noHandle: NoHandle())
     }

@@ -54,23 +54,16 @@ Translucent values are a color plus an opacity; they are drawn over the surface 
 | `newMessagesText` | the tag's "NEW" | `#ffffff` | `#ffffff` |
 | `folder` | a server folder without a color: its tile and, expanded, its column (Akari's value for the neutral gray observed on 2026-10-14) | `#97979f` at 16% | `#97979f` at 20% |
 | `startIcon` | the circle behind a channel's symbol at its start (dark measured on 2026-10-14 as `#242428` on `chat`; light **unverified**) | `#97979f` at 8% | `#97979f` at 10% |
+| `avatarPlaceholder` | the disc under a loading or failed avatar (Discord's `background-mod-subtle`, 31/255 in both themes) | `#97979f` at 31/255 | `#97979f` at 31/255 |
 
 On the dark message list (`#1a1a1e`), `hoverBackground` comes out at about `#29292d` and
 `selectedBackground` at about `#333338`.
 
-## Avatar colors
+## Avatars
 
-Users without a picture get a colored circle with their initials. The colors are Akari's own,
-picked by the user ID modulo 6, and the same in both themes:
-
-| Index | Color |
-|---|---|
-| 0 | `#5865f2` |
-| 1 | `#3e8e7e` |
-| 2 | `#c06c2b` |
-| 3 | `#a352b5` |
-| 4 | `#c2445a` |
-| 5 | `#4f7fba` |
+Users never show initials: one without a picture shows Discord's default avatar, fetched from
+its CDN ([images.md](images.md)). While an avatar loads, and when it failed, its box shows the
+`avatarPlaceholder` disc. Servers without an icon keep their initials on `hoverBackground`.
 
 ## For later
 

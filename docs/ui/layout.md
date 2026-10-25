@@ -36,8 +36,9 @@ view on the right instead ([below](#split-view)).
   Measured on 2026-10-14 (dark theme): icon and name together are centered on the whole
   window, not on the area right of the sidebar; the icon is the server's, a 16 rounded square
   with corners of about 4, then 8 of space and the name in `textDefault`, medium weight (size
-  in [typography.md](typography.md)), both centered on the bar's height. *Akari: servers
-  without a loaded icon (all of them so far) show their initials tile, as in the rail.*
+  in [typography.md](typography.md)), both centered on the bar's height. *Akari: the server's
+  icon over its initials tile, as in the rail; a DM's title shows the person's avatar, a
+  group's its icon ([images.md](images.md)).*
   **Unverified**: the light theme's colors, and what the official client shows while a DM is
   open; Akari then shows the conversation's avatar and name, and "Direct Messages" with the
   rail's home symbol at home without one.

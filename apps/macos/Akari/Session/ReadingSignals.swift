@@ -16,6 +16,7 @@ final class ReadingSignals: NSObject {
     private let isActive: @MainActor () -> Bool
     private let isKey: @MainActor (NSWindow) -> Bool
     private let isVisible: @MainActor (NSWindow) -> Bool
+    private let reducesMotion: @MainActor () -> Bool
     private let monitors: Bool
     // False while fast user switching shows another user's session.
     private var sessionActive = true
@@ -27,6 +28,9 @@ final class ReadingSignals: NSObject {
         isActive: @escaping @MainActor () -> Bool = { NSApp.isActive },
         isKey: @escaping @MainActor (NSWindow) -> Bool = { $0.holdsKey },
         isVisible: @escaping @MainActor (NSWindow) -> Bool = MessageTableController.isOnScreen,
+        reducesMotion: @escaping @MainActor () -> Bool = {
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        },
         monitors: Bool = false
     ) {
         self.session = session
@@ -34,6 +38,7 @@ final class ReadingSignals: NSObject {
         self.isActive = isActive
         self.isKey = isKey
         self.isVisible = isVisible
+        self.reducesMotion = reducesMotion
         self.monitors = monitors
         super.init()
         // Selector observers go away with the object.
@@ -60,6 +65,11 @@ final class ReadingSignals: NSObject {
         workspace.addObserver(
             self, selector: #selector(sessionBecameActive),
             name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        // Reduce Motion stops animations as the official client's does (D136).
+        workspace.addObserver(
+            self, selector: #selector(motionChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        session.setReduceMotion(reducesMotion())
         if monitors {
             startMonitoring()
         }
@@ -116,6 +126,10 @@ final class ReadingSignals: NSObject {
         if let window, (notification.object as? NSWindow)?.isFamily(of: window) == true {
             changed()
         }
+    }
+
+    @objc private func motionChanged() {
+        session.setReduceMotion(reducesMotion())
     }
 
     @objc private func sessionResigned() {

@@ -43,6 +43,8 @@ public final class SessionModel {
     /// Whether animations play: the display settings, read again when they change, and the
     /// system's Reduce Motion (`setReduceMotion`).
     public private(set) var motion = MotionPolicy.default
+    /// The window is key and the app active: what every animation needs besides its own rule.
+    public private(set) var focused = false
     public let servers: ServerListModel
     public let directMessages: DirectMessageListModel
     /// Collapsed categories, Akari's own: Discord's clients don't sync them.
@@ -911,13 +913,22 @@ public final class SessionModel {
     public func setAppActive(_ active: Bool) {
         let lost = appActive && !active
         appActive = active
+        updateFocused()
         readingInputChanged(lost: lost)
     }
 
     public func setWindowKey(_ key: Bool) {
         let lost = windowKey && !key
         windowKey = key
+        updateFocused()
         readingInputChanged(lost: lost)
+    }
+
+    private func updateFocused() {
+        let next = appActive && windowKey
+        if next != focused {
+            focused = next
+        }
     }
 
     public func setWindowVisible(_ visible: Bool) {

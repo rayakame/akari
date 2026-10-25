@@ -474,7 +474,7 @@ struct ThreadBrowserSubtitle: View {
         HStack(spacing: 0) {
             switch subtitle {
             case .latest(let message, let author, let time):
-                InitialsAvatar(message.author, size: 16)
+                UserAvatar(message.author, size: 16, place: .threadBoxAvatar)
                     .padding(.trailing, 8)
                 Text(author)
                     .fontWeight(.semibold)
@@ -489,7 +489,7 @@ struct ThreadBrowserSubtitle: View {
             case .noRecentMessages(let time):
                 Text("No recent messages" + Self.separator + Self.time(time, now: now))
             case .startedBy(let owner, let name, let time):
-                InitialsAvatar(owner, size: 16)
+                UserAvatar(owner, size: 16, place: .threadBoxAvatar)
                     .padding(.trailing, 8)
                 Text("Started by ")
                 Text(name)
@@ -585,12 +585,13 @@ struct Facepile: View {
         .accessibilityHidden(true)
     }
 
+    // A member the store doesn't know yet: the disc, as a loading avatar shows.
     @ViewBuilder private func avatar(_ face: ThreadBrowserModel.Row.Face) -> some View {
         if let user = face.user {
-            InitialsAvatar(user, size: Self.size)
+            UserAvatar(user, size: Self.size, place: .facepile)
         } else {
             Circle()
-                .fill(Color(nsColor: InitialsAvatar.color(face.userId.rawValue)))
+                .fill(Color(nsColor: Palette.avatarPlaceholder))
                 .frame(width: Self.size, height: Self.size)
         }
     }

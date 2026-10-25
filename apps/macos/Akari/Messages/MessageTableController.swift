@@ -18,6 +18,24 @@ struct MessageTableState: Equatable {
     var messageJump: MessageListModel.MessageJump?
     // Kept clear above the start's icon for what covers the list's top.
     var startRoom: CGFloat = 0
+    /// Where the rows' images come from; `nil` shows placeholders only.
+    var images = ImageCacheRef(nil)
+    var motion = MotionPolicy.default
+    /// The window is key and the app active: what every animation needs.
+    var focused = false
+}
+
+/// The session's cache by identity, so the state stays `Equatable`.
+struct ImageCacheRef: Equatable {
+    let cache: ImageCache?
+
+    init(_ cache: ImageCache?) {
+        self.cache = cache
+    }
+
+    static func == (lhs: ImageCacheRef, rhs: ImageCacheRef) -> Bool {
+        lhs.cache === rhs.cache
+    }
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -229,6 +247,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reportLine()
         updateRelativeTimer()
+        if previous.focused != state.focused || previous.motion != state.motion
+            || previous.images != state.images
+        {
+            updateAvatarAnimation()
+        }
         let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
         if startChanged {
             remeasureStart()
@@ -772,6 +795,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func configure(_ cell: NSView, _ edge: MessageTimeline.Edge) {
         if let cell = cell as? ChannelStartCell {
+            cell.images = state.images.cache
             cell.show(state.start, room: state.startRoom)
         } else if let cell = cell as? PlaceholderCell {
             let failure: String? =
@@ -988,6 +1012,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             if let notice = row.noticeParts {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
+                cell.images = state.images.cache
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.onOpenThread = openThread
                 cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
@@ -1000,7 +1025,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell =
                 reuse(MessageCell.identifier) as? MessageCell
                 ?? Signposts.interval("message cell made") { MessageCell() }
+            cell.images = state.images.cache
             cell.isHovered = item.id == hovered
+            cell.animatesAvatar = startsGroup && avatarPlays(groupStartOf: index)
             cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
@@ -1442,6 +1469,51 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
             (cell as? MessageCell)?.isHovered = index == row
         }
+        updateAvatarAnimation()
+    }
+
+    // Hovering any message of a group animates the group's header avatar (Discord), while the
+    // window is key and the app active.
+    private func updateAvatarAnimation() {
+        let visible = tableView.rows(in: tableView.visibleRect)
+        for index in visible.location..<(visible.location + visible.length) {
+            guard
+                let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+                    as? MessageCell, cell.showsHeader
+            else {
+                continue
+            }
+            cell.animatesAvatar = avatarPlays(groupStartOf: index)
+        }
+    }
+
+    // Whether the header at `start` plays: a message of its group is hovered.
+    private func avatarPlays(groupStartOf start: Int) -> Bool {
+        guard let hovered, let hoveredRow = timeline.items.firstIndex(where: { $0.id == hovered })
+        else {
+            return false
+        }
+        guard hoveredRow >= start, groupStart(of: hoveredRow) == start else {
+            return false
+        }
+        return state.motion.plays(
+            .messageAvatar,
+            MotionPolicy.Context(windowKey: state.focused, appActive: state.focused, hovered: true))
+    }
+
+    // The row of the group's first message, for a message row; nil for anything else.
+    private func groupStart(of row: Int) -> Int? {
+        var index = row
+        while index >= 0 {
+            guard case .message(_, let startsGroup) = timeline.items[index] else {
+                return nil
+            }
+            if startsGroup {
+                return index
+            }
+            index -= 1
+        }
+        return nil
     }
 
     @objc private func keyChanged(_ notification: Notification) {

@@ -66,6 +66,9 @@ struct MessageArea: View {
     var autoFocus = true
     var focusNow = false
     var onFocused: () -> Void = {}
+    var images: ImageCache?
+    var motion = MotionPolicy.default
+    var focused = false
     @State private var link = MessageTableLink()
 
     var body: some View {
@@ -134,7 +137,8 @@ struct MessageArea: View {
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
             revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
-            startRoom: messages.composer.locked ? LockedBanner.room : 0)
+            startRoom: messages.composer.locked ? LockedBanner.room : 0,
+            images: ImageCacheRef(images), motion: motion, focused: focused)
     }
 }
 

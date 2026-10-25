@@ -2197,7 +2197,7 @@ struct MessageTableTests {
         let divider = try #require(try cell(at: day) as? DayDividerCell)
         let message = try cell(of: 1)
         let date = try #require(textFields(in: divider).first)
-        let avatar = try #require(message.subviews.first { $0 is AvatarView })
+        let avatar = try #require(message.subviews.first { $0 is ImageLayerView })
 
         let line = date.convert(date.bounds, to: table).midY
         let avatarTop = avatar.convert(avatar.bounds, to: table).minY

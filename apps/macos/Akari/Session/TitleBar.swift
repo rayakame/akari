@@ -4,8 +4,10 @@ import SwiftUI
 /// Where the user is, as the title bar names it.
 struct WindowTitle: Equatable {
     enum Icon: Equatable {
-        case server(String)
-        case avatar(name: String, id: UInt64)
+        /// The server's icon over its initials.
+        case server(String, icon: ImageKey? = nil)
+        /// The conversation's picture: a person's avatar or a group's icon; `nil` shows the disc.
+        case avatar(ImageKey?)
         case home
     }
 
@@ -13,21 +15,19 @@ struct WindowTitle: Equatable {
     let icon: Icon
 
     static func at(
-        _ place: SessionModel.Place, server: String?,
-        conversation: (name: String, avatarId: UInt64)?
+        _ place: SessionModel.Place, server: String?, serverIcon: ImageKey? = nil,
+        conversation: (name: String, avatar: ImageKey?)?
     ) -> WindowTitle {
         switch place {
         case .guild:
             let name = server ?? "Akari"
-            return WindowTitle(text: name, icon: .server(name))
+            return WindowTitle(text: name, icon: .server(name, icon: serverIcon))
         case .home:
             // What the official client shows for an open DM isn't recorded yet (docs/ui/layout.md).
             guard let conversation else {
                 return WindowTitle(text: "Direct Messages", icon: .home)
             }
-            return WindowTitle(
-                text: conversation.name,
-                icon: .avatar(name: conversation.name, id: conversation.avatarId))
+            return WindowTitle(text: conversation.name, icon: .avatar(conversation.avatar))
         }
     }
 }
@@ -68,9 +68,9 @@ struct TitleBar: View {
 
     @ViewBuilder private func icon(_ icon: WindowTitle.Icon) -> some View {
         switch icon {
-        case .avatar(let name, let id):
-            InitialsAvatar(name: name, id: id, size: Self.iconSize)
-        case .server(let name):
+        case .avatar(let key):
+            UserAvatar(key: key, size: Self.iconSize)
+        case .server(let name, let key):
             let initials = Initials.of(name)
             tile {
                 Text(initials)
@@ -81,6 +81,12 @@ struct TitleBar: View {
                     )
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
+            }
+            .overlay {
+                if let key {
+                    RemoteImage(key: key, cornerRadius: Self.iconRadius)
+                        .frame(width: Self.iconSize, height: Self.iconSize)
+                }
             }
         case .home:
             tile {

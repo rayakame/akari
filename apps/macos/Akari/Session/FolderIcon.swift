@@ -18,7 +18,7 @@ struct FolderTile: View {
                 .fill(Color(nsColor: Self.background(item.folder.color)))
                 .frame(width: 40, height: 40)
                 .overlay {
-                    MiniGrid(initials: Self.minis(item))
+                    MiniGrid(guilds: Array(item.guilds.prefix(4)))
                 }
         }
     }
@@ -54,26 +54,33 @@ struct FolderTile: View {
     }
 }
 
+// Up to four servers' minis, 16 each: their icon over their initials, as on the rail.
 private struct MiniGrid: View {
-    let initials: [String]
+    let guilds: [Guild]
 
     var body: some View {
-        let rows = stride(from: 0, to: initials.count, by: 2).map {
-            Array(initials[$0..<min($0 + 2, initials.count)])
+        let rows = stride(from: 0, to: guilds.count, by: 2).map {
+            Array(guilds[$0..<min($0 + 2, guilds.count)])
         }
         VStack(spacing: 2) {
             ForEach(rows.indices, id: \.self) { row in
                 HStack(spacing: 2) {
-                    ForEach(rows[row].indices, id: \.self) { column in
+                    ForEach(rows[row], id: \.id) { guild in
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
                             .fill(Color(nsColor: Palette.hoverBackground))
                             .frame(width: 16, height: 16)
                             .overlay {
-                                Text(rows[row][column])
+                                Text(Initials.of(guild.name))
                                     .font(.system(size: 7, weight: .medium))
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.5)
                                     .foregroundStyle(Color(nsColor: Palette.textDefault))
+                            }
+                            .overlay {
+                                if let icon = guild.icon {
+                                    RemoteImage(key: icon, cornerRadius: 5)
+                                        .frame(width: 16, height: 16)
+                                }
                             }
                     }
                 }

@@ -56,7 +56,8 @@ struct ConversationRow: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 12) {
-                avatar
+                ConversationAvatar(
+                    conversation: conversation, size: 32, place: .dmRowAvatar, hovered: hovered)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(conversation.name)
                         .font(TypeScale.channelName.weight(weight).font)
@@ -103,14 +104,5 @@ struct ConversationRow: View {
     // As a channel row's name.
     private var weight: TextStyle.Weight {
         selected && colorScheme == .light ? .semibold : .medium
-    }
-
-    @ViewBuilder private var avatar: some View {
-        if conversation.channel.kind == .dm, let user = conversation.recipients.first {
-            InitialsAvatar(user, size: 32)
-        } else {
-            InitialsAvatar(
-                name: conversation.name, id: conversation.id.rawValue, size: 32)
-        }
     }
 }

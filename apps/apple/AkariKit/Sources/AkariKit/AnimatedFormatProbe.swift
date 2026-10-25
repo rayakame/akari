@@ -12,6 +12,14 @@ public enum AnimatedFormatProbe {
         Bundle.module.url(forResource: "animated", withExtension: "webp", subdirectory: "Resources")
     }
 
+    /// What this launch decided; GIF, the safe form, until `install()` ran.
+    @MainActor public private(set) static var current: AnimatedFormat = .gif
+
+    /// Runs the probe once and keeps its answer in `current`.
+    @MainActor public static func install() async {
+        current = await run()
+    }
+
     public static func run() async -> AnimatedFormat {
         guard let url = fixtureURL else {
             return .gif

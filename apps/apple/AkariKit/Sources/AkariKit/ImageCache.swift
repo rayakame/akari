@@ -195,6 +195,10 @@ public final class ImageCache {
         drop(.media)
     }
 
+    public func isPinned(_ spec: ImageSpec) -> Bool {
+        pins[spec] != nil
+    }
+
     public var identityBytes: Int { tiers[.identity]?.bytes ?? 0 }
     public var mediaBytes: Int { tiers[.media]?.bytes ?? 0 }
     public var inflightCount: Int { inflight.count }

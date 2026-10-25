@@ -7,7 +7,7 @@ struct ServerRail: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 8) {
-                RailItem(selected: session.place == .home, help: "Direct Messages") { highlighted in
+                RailItem(selected: session.place == .home, help: "Direct Messages") { highlighted, _ in
                     RailIcon(highlighted: highlighted) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
                             .font(.system(size: 18))
@@ -21,8 +21,9 @@ struct ServerRail: View {
                         selected: session.messages?.channelId == conversation.id,
                         help: conversation.name,
                         badge: session.directMessages.badge(of: conversation.id)
-                    ) { _ in
-                        RailAvatar(conversation: conversation)
+                    ) { _, hovered in
+                        ConversationAvatar(
+                            conversation: conversation, size: 40, place: .railIcon, hovered: hovered)
                     } action: {
                         Self.open(conversation, in: session)
                     }
@@ -45,7 +46,7 @@ struct ServerRail: View {
                                     folder, expanded: expanded, place: session.place),
                                 help: FolderTile.help(folder),
                                 badge: session.servers.tileBadge(of: folder)
-                            ) { _ in
+                            ) { _, _ in
                                 FolderTile(item: folder, expanded: expanded)
                             } action: {
                                 session.servers.toggle(folder: folder.id)
@@ -90,8 +91,8 @@ struct ServerRail: View {
         RailItem(
             selected: session.place == .guild(guild.id), help: guild.name,
             badge: session.servers.badge(of: guild.id)
-        ) { highlighted in
-            GuildIcon(name: guild.name, highlighted: highlighted)
+        ) { highlighted, hovered in
+            GuildIcon(name: guild.name, icon: guild.icon, highlighted: highlighted, hovered: hovered)
         } action: {
             session.open(.guild(guild.id))
         }
@@ -105,13 +106,13 @@ struct RailItem<Icon: View>: View {
     let selected: Bool
     let help: String
     var badge = Badge(unread: false, mentions: 0)
-    @ViewBuilder let icon: (_ highlighted: Bool) -> Icon
+    @ViewBuilder let icon: (_ highlighted: Bool, _ hovered: Bool) -> Icon
     let action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            icon(selected || hovered)
+            icon(selected || hovered, hovered)
                 .mentionBadge(badge.mentions)
         }
         .buttonStyle(.plain)
@@ -169,9 +170,13 @@ struct RailIcon<Content: View>: View {
     }
 }
 
+/// A server's icon over its initials: the initials show until the image has decoded, and a
+/// server without an icon keeps them. A changed icon swaps once the new one is ready (D137).
 struct GuildIcon: View {
     let name: String
+    var icon: ImageKey?
     let highlighted: Bool
+    var hovered = false
 
     var body: some View {
         let initials = Initials.of(name)
@@ -182,6 +187,12 @@ struct GuildIcon: View {
                 .minimumScaleFactor(0.5)
                 .padding(.horizontal, 2)
         }
+        .overlay {
+            if let icon {
+                RemoteImage(key: icon, cornerRadius: RailShape.cornerRadius, place: .railIcon, hovered: hovered)
+                    .frame(width: 40, height: 40)
+            }
+        }
     }
 
     static func fontSize(_ length: Int) -> CGFloat {
@@ -191,19 +202,6 @@ struct GuildIcon: View {
         case 5: 14
         case 6: 12
         default: 10
-        }
-    }
-}
-
-/// A DM with unread mentions on the rail: the other person's avatar, or a group's.
-private struct RailAvatar: View {
-    let conversation: DirectMessageListModel.Conversation
-
-    var body: some View {
-        if conversation.channel.kind == .dm, let user = conversation.recipients.first {
-            InitialsAvatar(user, size: 40)
-        } else {
-            InitialsAvatar(name: conversation.name, id: conversation.id.rawValue, size: 40)
         }
     }
 }

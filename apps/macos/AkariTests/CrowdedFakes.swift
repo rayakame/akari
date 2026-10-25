@@ -4,6 +4,8 @@ import Foundation
 // An online account with more of everything than a window shows: 40 servers, 60 channels in
 // server 1, 60 DMs, and 100 messages in each conversation.
 nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
+    override func requestImage(request: ImageRequest) -> PendingImage { UnavailableImage() }
+
     private let unread: [ChannelId]
 
     // `unread`: DMs with mentions, as the rail lists them.
@@ -35,6 +37,8 @@ nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
 }
 
 nonisolated final class CrowdedStore: Store, @unchecked Sendable {
+    override func displaySettings() -> DisplaySettings { displayDefaults() }
+
     static let guildIds = (1...40).map { GuildId(rawValue: $0) }
     static let channelIds = (1001...1060).map { ChannelId(rawValue: $0) }
     static let dmIds = (5001...5060).map { ChannelId(rawValue: $0) }

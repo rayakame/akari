@@ -46,6 +46,15 @@ struct AnimatedFormatProbeTests {
         #expect(AnimatedFormatProbe.probe(text) == .gif)
     }
 
+    @MainActor @Test
+    func installKeepsTheDecision() async {
+        await AnimatedFormatProbe.install()
+
+        let expected: AnimatedFormat =
+            ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 14 ? .gif : .webP
+        #expect(AnimatedFormatProbe.current == expected)
+    }
+
     @Test
     func runDecidesOffTheMainActor() async {
         let decided = await AnimatedFormatProbe.run()

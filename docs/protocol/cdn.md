@@ -64,9 +64,9 @@ backing scale (2 on Retina), rounded up. The host passes those pixels (`ImageReq
 | embed author or footer icon | its `proxy_icon_url` as Discord gives it | |
 
 Stills are WebP. Animations are WebP, or GIF on a Mac whose ImageIO composites animated WebP
-wrong (macOS 14): the host picks per request with `AnimatedFormat`. PR B (`avatars`) adds the
-launch probe that decides, decoding a small animated WebP shipped as an app resource (the test
-fixture `animated.webp`, moved into the app) and checking a frame's pixels. The query order is
+wrong (macOS 14): the host picks per request with `AnimatedFormat`, from a launch probe
+(AkariKit's `AnimatedFormatProbe`) that decodes a small animated WebP shipped with AkariKit
+(`Sources/AkariKit/Resources/animated.webp`) and checks one frame's pixels. The query order is
 Discord's: size, quality, animated. An attachment's kind comes from its file name's extension,
 as the client decides [127038]: images png, jpg, jpeg, jfif, webp, gif, heic, heif, dng, avif
 (SVGs are files); videos mp4, webm, mov, qt. An attachment without a width and height isn't an

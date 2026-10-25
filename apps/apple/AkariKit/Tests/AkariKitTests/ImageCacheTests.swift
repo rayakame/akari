@@ -297,3 +297,23 @@ final class ImageCacheTests {
         #expect(ImageSpec(key: .testAvatar(1), width: 80, height: 40).request.animated == nil)
     }
 }
+
+// Which keys can move: `a_` hashes and animated emoji.
+struct ImageKeyMotionTests {
+    @Test
+    func animatedHashesAndEmojiCanAnimate() {
+        let still = "0123456789abcdef0123456789abcdef"
+        let moving = "a_0123456789abcdef0123456789abcdef"
+        #expect(!ImageKey.avatar(userId: UserId(rawValue: 1), hash: still).canAnimate)
+        #expect(ImageKey.avatar(userId: UserId(rawValue: 1), hash: moving).canAnimate)
+        #expect(
+            ImageKey.memberAvatar(guildId: GuildId(rawValue: 1), userId: UserId(rawValue: 1), hash: moving)
+                .canAnimate)
+        #expect(ImageKey.guildIcon(guildId: GuildId(rawValue: 1), hash: moving).canAnimate)
+        #expect(!ImageKey.guildIcon(guildId: GuildId(rawValue: 1), hash: still).canAnimate)
+        #expect(!ImageKey.groupIcon(channelId: ChannelId(rawValue: 1), hash: moving).canAnimate)
+        #expect(ImageKey.emoji(emojiId: EmojiId(rawValue: 1), animated: true).canAnimate)
+        #expect(!ImageKey.emoji(emojiId: EmojiId(rawValue: 1), animated: false).canAnimate)
+        #expect(!ImageKey.defaultAvatar(index: 3).canAnimate)
+    }
+}

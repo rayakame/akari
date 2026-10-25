@@ -56,6 +56,8 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
 }
 
 nonisolated final class BrowserAccount: Account, @unchecked Sendable {
+    override func requestImage(request: ImageRequest) -> PendingImage { UnavailableImage() }
+
     private let browserStore: BrowserStore
     private let holdsLoads: Bool
 
@@ -107,6 +109,8 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
 }
 
 nonisolated final class BrowserStore: Store, @unchecked Sendable {
+    override func displaySettings() -> DisplaySettings { displayDefaults() }
+
     private let empty: Bool
     private let more: Bool
     private let lines: Bool
