@@ -609,7 +609,8 @@ impl From<&state::Attachment> for Attachment {
     }
 }
 
-/// A sticker a message carries; `key` is its image (a Lottie sticker has no image Akari shows).
+/// A sticker a message carries; `key` is its image in its format (asking for a Lottie
+/// sticker's fails with `Unsupported`: no renderer yet).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Sticker {
     pub id: StickerId,
@@ -624,10 +625,7 @@ impl From<&state::Sticker> for Sticker {
             id: sticker.id,
             name: sticker.name.to_string(),
             format: sticker.format,
-            key: ImageKey::Sticker {
-                sticker_id: sticker.id,
-                format: sticker.format,
-            },
+            key: sticker.image_key().into(),
         }
     }
 }

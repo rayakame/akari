@@ -201,6 +201,20 @@ final class ThreadBoxView: NSButton {
     // spoilers covered.
     static func content(_ built: NSAttributedString) -> NSAttributedString {
         let text = NSMutableAttributedString(attributedString: built)
+        // A custom emoji reads as its name on the line; the box has no image layers.
+        var emoji: [(NSRange, String)] = []
+        text.enumerateAttribute(.akariEmoji, in: NSRange(location: 0, length: text.length)) {
+            value, range, _ in
+            if let box = value as? MessageText.EmojiBox {
+                emoji.append((range, String(repeating: ":\(box.name):", count: range.length)))
+            }
+        }
+        for (range, name) in emoji.reversed() {
+            var attributes = text.attributes(at: range.location, effectiveRange: nil)
+            attributes[.attachment] = nil
+            attributes[.akariEmoji] = nil
+            text.replaceCharacters(in: range, with: NSAttributedString(string: name, attributes: attributes))
+        }
         let whole = NSRange(location: 0, length: text.length)
         text.removeAttribute(.link, range: whole)
         text.removeAttribute(.toolTip, range: whole)

@@ -546,6 +546,17 @@ pub struct Sticker {
     pub format: StickerFormatType,
 }
 
+impl Sticker {
+    /// The sticker's image in its format. A Lottie sticker's key is asked for like any other;
+    /// the media layer answers `Unsupported` until Akari has a renderer.
+    pub fn image_key(&self) -> ImageKey {
+        ImageKey::Sticker {
+            id: self.id,
+            format: self.format,
+        }
+    }
+}
+
 /// An avatar, icon or banner hash. The usual 32-hex-digit hashes take 17 bytes.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ImageHash(Repr);
@@ -723,6 +734,22 @@ mod tests {
         };
         assert_eq!(zeros_not_bot.default_avatar_index(), 5);
         assert_eq!(user(0).default_avatar_index(), 0);
+    }
+
+    #[test]
+    fn a_stickers_key_carries_its_format() {
+        let sticker = Sticker {
+            id: StickerId::new(7),
+            name: "wave".into(),
+            format: StickerFormatType::Lottie,
+        };
+        assert_eq!(
+            sticker.image_key(),
+            ImageKey::Sticker {
+                id: StickerId::new(7),
+                format: StickerFormatType::Lottie,
+            }
+        );
     }
 
     #[test]

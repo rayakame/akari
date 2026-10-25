@@ -64,6 +64,28 @@ jumbo
 p: aemoji"b":2
 jumbo
 
+== 30 custom emoji are jumbo
+<:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1>
+--
+p: emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1
+jumbo
+
+== 31 custom emoji aren't
+<:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1>
+--
+p: emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1
+
+== 31 spaced emoji aren't
+😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀
+--
+p: "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀"
+
+== 30 spaced emoji are jumbo
+😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀
+--
+p: "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀"
+jumbo
+
 == custom emoji count towards 30
 <:a:1>😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
 --

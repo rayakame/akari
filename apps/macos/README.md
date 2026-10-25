@@ -43,9 +43,11 @@ Attachments, embeds, reactions, replies, voice, notifications and settings come 
   decides which group's header avatar plays, by the policy, as it decides the cursor, and per
   row whether its custom emoji and stickers play (the settings, how much of the row shows, the
   100 nearest the bottom for emoji, the row's hover).
-- A custom emoji is a text attachment with a fixed box and no drawing (`MessageText.EmojiBox`
-  on the character); `MessageLayoutManager.blocks()` gives each box's rect and
-  `MessageDecorations` hosts an `ImageLayerView` on it, `:name:` as its fallback text. A
+- A custom emoji is a text attachment whose cell only takes room (`MessageText.EmojiBox` on
+  the character; the cell is as wide as the box and no taller than the font's ascent, so string
+  drawing and the view agree on heights); `MessageLayoutManager.blocks()` places each box on its
+  line and `EmojiOverlay`, above the text view (the selection's fill is opaque), hosts an
+  `ImageLayerView` on it, `:name:` as its fallback text. A
   message's stickers are a `StickerRow` of `StickerView`s (160, 8 apart) in the cell's stack
   under the text; a Lottie or failed sticker shows a box with a symbol and a caption
   (`docs/ui/emoji.md`).

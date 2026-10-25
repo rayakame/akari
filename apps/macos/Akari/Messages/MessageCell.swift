@@ -39,9 +39,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         set { content.animatesEmoji = newValue }
     }
     /// The list's say: this message's stickers play (`animate_stickers`, visibility, hover).
-    var animatesStickers: Bool {
-        get { stickers?.animates ?? false }
-        set { stickers?.animates = newValue }
+    var animatesStickers = false {
+        didSet { stickers?.animates = animatesStickers }
     }
     private let reply = CellText.label()
     private let header = HeaderRow()
@@ -179,6 +178,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         extras.show(lines)
         extras.isHidden = lines.length == 0
         if message.stickers.isEmpty {
+            // A reused cell lets its stickers go: no ask, no pin, no player.
+            stickers?.configure([])
             stickers?.isHidden = true
         } else {
             let row = stickerRow()
@@ -384,6 +385,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         }
         let row = StickerRow()
         row.images = images
+        row.animates = animatesStickers
         let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
         stack.insertView(row, at: after, in: .top)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true

@@ -47,7 +47,7 @@ final class EmojiTests {
     }
 
     func emojiLayers(_ view: MessageTextView) -> [ImageLayerView] {
-        MessageMenuAreaTests.views(ImageLayerView.self, in: view.decorations)
+        MessageMenuAreaTests.views(ImageLayerView.self, in: view.emojiOverlay)
     }
 
     func lineFragment(_ view: MessageTextView, at character: Int) throws -> NSRect {
@@ -66,7 +66,7 @@ final class EmojiTests {
             #expect(shape.rect.size == NSSize(width: 22, height: 22))
         }
         let line = try lineFragment(inline, at: 3)
-        #expect(abs(shapes[0].rect.maxY - line.maxY) <= 1, "\(shapes[0].rect) in \(line)")
+        #expect(shapes[0].rect.maxY == line.maxY, "\(shapes[0].rect) in \(line)")
         #expect(shapes[0].rect.minX > 16 && shapes[0].rect.minX < 30, "after \"hi \"")
         #expect(shapes[1].rect.minX > shapes[0].rect.maxX)
 
@@ -75,7 +75,57 @@ final class EmojiTests {
         #expect(big.count == 1)
         #expect(big.first?.rect.size == NSSize(width: 48, height: 48))
         let jumboLine = try lineFragment(jumbo, at: 0)
-        #expect(abs((big.first?.rect.midY ?? 0) - jumboLine.midY) <= 3, "\(big) in \(jumboLine)")
+        #expect(big.first?.rect.midY == jumboLine.midY, "\(big) in \(jumboLine)")
+    }
+
+    // TextKit gives an attachment without an image a 1 pt advance: the box needs its own cell,
+    // so the text after it moves over and string drawing (row heights) agrees with the view.
+    @Test
+    func theEmojiBoxAdvancesTheTextByItsWidth() throws {
+        let inline = shown("hi <:wave:5> there")
+        let layout = try #require(inline.layoutManager)
+        let box = layout.location(forGlyphAt: layout.glyphIndexForCharacter(at: 3)).x
+        let after = layout.location(forGlyphAt: layout.glyphIndexForCharacter(at: 4)).x
+        #expect(after - box >= 22, "\(box) → \(after)")
+
+        let jumbo = shown(String(repeating: "<:wave:5>", count: 5))
+        let rects = emojiShapes(jumbo).map(\.rect)
+        #expect(rects.count == 5)
+        for (left, right) in zip(rects, rects.dropFirst()) {
+            #expect(right.minX - left.minX >= 48, "\(rects)")
+        }
+    }
+
+    @Test(arguments: [400, 292] as [CGFloat])
+    func theMeasurerAgreesWithTheViewForEmoji(_ width: CGFloat) {
+        for content in [
+            "hi <:wave:5> there", String(repeating: "<:wave:5>", count: 5),
+            String(repeating: "words <a:dance:6> and more <:wave:5> ", count: 12), "-# small <:wave:5> text",
+            "# big <:wave:5>\nbody <:wave:5>", "> quoted <:wave:5>\n- item <:wave:5>",
+        ] {
+            let built = text(content)
+            let view = shown(content, width: width)
+            let measured = TextMeasurer.shared.height(built, width: width)
+            #expect(
+                view.frame.height == measured,
+                "\(content.prefix(30)) at \(width): view \(view.frame.height) measured \(measured)")
+        }
+    }
+
+    // The selection's fill is opaque; the emoji sit above the text, so a selected emoji stays
+    // visible.
+    @Test
+    func emojiLayersSitAboveTheText() throws {
+        let view = shown("hi <:wave:5> there", images: ImageCache(source: FakeImageSource.stalling()))
+        let layer = try #require(emojiLayers(view).first)
+        let container = try #require(view.superview)
+        let host = try #require(layer.superview)
+
+        let textIndex = try #require(container.subviews.firstIndex(of: view))
+        let hostIndex = try #require(container.subviews.firstIndex(of: host))
+        #expect(hostIndex > textIndex)
+        #expect(host.frame == view.frame)
+        #expect(host.hitTest(host.convert(layer.frame.origin, to: container)) == nil)
     }
 
     @Test

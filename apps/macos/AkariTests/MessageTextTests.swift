@@ -81,6 +81,20 @@ struct MessageTextTests {
         #expect(small.bounds.size == NSSize(width: 22, height: 22))
     }
 
+    // 1.375 × the line's own font size: 18 in subtext, 33 in a heading.
+    @Test
+    func anEmojiBoxFollowsItsLinesSize() throws {
+        let text = built("-# small <:wave:5>\n# big <:wave:5>\nbody <:wave:5>").text
+
+        var sides: [CGFloat] = []
+        text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+            if let attachment = value as? NSTextAttachment {
+                sides.append(attachment.bounds.width)
+            }
+        }
+        #expect(sides == [18, 33, 22])
+    }
+
     @Test
     func plainAndAccessibleGiveTheEmojisName() {
         let text = built("hi <:wave:5> there").text

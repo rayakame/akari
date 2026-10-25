@@ -581,6 +581,7 @@ final class NameTextField: NSTextField {
 struct MessagePreview: NSViewRepresentable {
     let message: Message
     var now = Date()
+    @Environment(\.imageCache) private var images
 
     func makeNSView(context: Context) -> MessagePreviewView {
         MessagePreviewView()
@@ -589,6 +590,7 @@ struct MessagePreview: NSViewRepresentable {
     func updateNSView(_ view: MessagePreviewView, context: Context) {
         let calendar = Calendar.current
         let locale = Locale.current
+        view.cell.images = images
         view.cell.configure(
             message, body: Self.text(message, now: now), startsGroup: true,
             groupTime: MessageFormat.groupTime(

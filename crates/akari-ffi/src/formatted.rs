@@ -14,7 +14,7 @@ use crate::names::Names;
 pub struct FormattedText {
     pub blocks: Vec<TextBlock>,
     pub links: Vec<TextLink>,
-    /// 1–27 emoji and whitespace, nothing else: shown large.
+    /// 1–30 emoji and whitespace, nothing else: shown large.
     pub jumbo: bool,
 }
 

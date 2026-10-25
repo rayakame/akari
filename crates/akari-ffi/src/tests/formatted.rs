@@ -53,7 +53,7 @@ fn span_showing<'a>(content: &str, text: &'a FormattedText, wanted: &str) -> &'a
 #[test]
 fn every_span_kind_crosses() {
     let content = "**b** *i* __u__ ~~s~~ `c` <@1> <@&2> <#3> @everyone @here </cmd sub:123456789012345678> \
-                   <a:wave:5> <t:1800000000:R> <id:customize> <id:linked-roles:6>\nx";
+                   <a:wave:5> <:still:7> <t:1800000000:R> <id:customize> <id:linked-roles:6>\nx";
     let text = formatted_text(content.to_owned());
 
     let styled = |wanted: &str| span_showing(content, &text, wanted);
@@ -91,6 +91,15 @@ fn every_span_kind_crosses() {
             key: ImageKey::Emoji {
                 emoji_id: EmojiId::new(5),
                 animated: true,
+            },
+        },
+        SpanKind::Emoji {
+            name: "still".to_owned(),
+            id: 7,
+            animated: false,
+            key: ImageKey::Emoji {
+                emoji_id: EmojiId::new(7),
+                animated: false,
             },
         },
         SpanKind::Timestamp {

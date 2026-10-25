@@ -40,10 +40,13 @@ enum MessageText {
         let key: ImageKey
         let name: String
         let animated: Bool
+        /// The box's side in points: 1.375 × its line's font size, 48 in a jumbo message.
+        var side: CGFloat = 22
+        /// Centered on its line (jumbo); else its bottom on the line's bottom.
+        var centered = false
     }
 
-    /// The box's side at the 16 pt base: 1.375 × the body size inline, 48 in a jumbo message.
-    nonisolated static let emojiInline: CGFloat = 22
+    /// A jumbo message's box side at the 16 pt base; inline boxes are 1.375 × their face's size.
     nonisolated static let emojiJumbo: CGFloat = 48
 
     struct Built {
@@ -525,9 +528,11 @@ private struct Builder {
         case .command(let name, _):
             mention(MentionText.command(name), placeholder: false, span, style, attributes)
         case .emoji(let name, _, let animated, let key):
-            attributes[.akariEmoji] = MessageText.EmojiBox(key: key, name: name, animated: animated)
+            let side = jumbo ? TypeScale.size(MessageText.emojiJumbo) : (style.face.size * 1.375).rounded()
+            attributes[.akariEmoji] = MessageText.EmojiBox(
+                key: key, name: name, animated: animated, side: side, centered: jumbo)
             attributes[.toolTip] = ":\(name):"
-            append(emojiBox(style.face, attributes))
+            append(emojiBox(side, style.face, attributes))
         case .timestamp(let seconds, let timestampStyle):
             attributes[.toolTip] = times.fullDate(seconds)
             pill(times.text(seconds, style: timestampStyle, now: now), .timestamp, attributes)
@@ -652,16 +657,17 @@ private struct Builder {
         out.addAttribute(.kern, value: kern + 2, range: NSRange(location: index, length: 1))
     }
 
-    // The box sits where the face's emoji glyphs sit: centered on the cap height, which puts an
-    // inline box's bottom on the line's bottom and a jumbo box on its line's emoji.
-    private func emojiBox(_ face: Typeface, _ attributes: [NSAttributedString.Key: Any])
+    // The attachment only makes room: `side` wide, no taller than the font's ascent and on the
+    // baseline, so no line grows for it and string drawing measures what the view lays out. The
+    // layout manager places the box itself on the line (`MessageLayoutManager.blocks`).
+    private func emojiBox(_ side: CGFloat, _ face: Typeface, _ attributes: [NSAttributedString.Key: Any])
         -> NSAttributedString
     {
-        let side = TypeScale.size(jumbo ? MessageText.emojiJumbo : MessageText.emojiInline)
         let attachment = NSTextAttachment()
         let font = face.font(bold: false, italic: false)
-        attachment.bounds = NSRect(
-            x: 0, y: ((font.capHeight - side) / 2).rounded(), width: side, height: side)
+        attachment.bounds = NSRect(x: 0, y: 0, width: side, height: side)
+        attachment.attachmentCell = EmojiCell(
+            size: NSSize(width: side, height: min(side, font.ascender.rounded(.down))))
         let box = NSMutableAttributedString(attachment: attachment)
         box.addAttributes(attributes, range: NSRange(location: 0, length: box.length))
         return box
@@ -683,6 +689,43 @@ private struct Builder {
         symbol.addAttributes(attributes, range: NSRange(location: 0, length: symbol.length))
         return symbol
     }
+}
+
+// TextKit 1 gives an attachment without an image or a cell a 1 pt advance; this cell takes the
+// box's size and draws nothing, so the text moves over and string drawing measures the same.
+private final class EmojiCell: NSTextAttachmentCell {
+    nonisolated private let size: NSSize
+
+    init(size: NSSize) {
+        self.size = size
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) {
+        size = .zero
+        super.init(coder: coder)
+    }
+
+    nonisolated override func cellSize() -> NSSize {
+        size
+    }
+
+    nonisolated override func cellBaselineOffset() -> NSPoint {
+        .zero
+    }
+
+    nonisolated override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {}
+
+    nonisolated override func draw(
+        withFrame cellFrame: NSRect, in controlView: NSView?, characterIndex charIndex: Int
+    ) {}
+
+    nonisolated override func draw(
+        withFrame cellFrame: NSRect, in controlView: NSView?, characterIndex charIndex: Int,
+        layoutManager: NSLayoutManager
+    ) {}
+
+    nonisolated override func highlight(_ flag: Bool, withFrame cellFrame: NSRect, in controlView: NSView?) {}
 }
 
 extension NSColor {

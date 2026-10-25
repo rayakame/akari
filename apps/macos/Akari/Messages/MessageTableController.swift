@@ -1510,7 +1510,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func stickersPlay(at index: Int, visible: NSRect) -> Bool {
-        guard let context = mediaContext(at: index, visible: visible, nearBottom: true) else {
+        guard case .message(let row, _) = timeline.items[index], !row.message.stickers.isEmpty,
+            let context = mediaContext(at: index, visible: visible, nearBottom: true)
+        else {
             return false
         }
         return state.motion.plays(.sticker, context)

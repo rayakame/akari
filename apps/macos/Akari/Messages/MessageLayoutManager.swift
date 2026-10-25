@@ -93,7 +93,7 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
             }
             // Equal neighbours form one run; each character is a box of its own.
             for index in range.location..<NSMaxRange(range) {
-                if let rect = emojiRect(index, storage) {
+                if let rect = emojiRect(index, box) {
                     shapes.append(.emoji(rect, box))
                 }
             }
@@ -101,23 +101,17 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
         return shapes.filter { !$0.rect.isEmpty }
     }
 
-    // The attachment's bounds placed on its baseline, in the container's coordinates.
-    private func emojiRect(_ index: Int, _ storage: NSTextStorage) -> NSRect? {
-        guard let attachment = storage.attribute(.attachment, at: index, effectiveRange: nil)
-                as? NSTextAttachment
-        else {
-            return nil
-        }
+    // The box at the attachment's place on its line: its bottom on the line's bottom, or
+    // centered on the line (jumbo), in the container's coordinates.
+    private func emojiRect(_ index: Int, _ box: MessageText.EmojiBox) -> NSRect? {
         let glyph = glyphIndexForCharacter(at: index)
         guard glyph < numberOfGlyphs else {
             return nil
         }
         let line = lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-        let location = location(forGlyphAt: glyph)
-        let bounds = attachment.bounds
-        return NSRect(
-            x: line.minX + location.x, y: line.minY + location.y - bounds.maxY,
-            width: bounds.width, height: bounds.height)
+        let x = line.minX + location(forGlyphAt: glyph).x
+        let y = box.centered ? line.midY - box.side / 2 : line.maxY - box.side
+        return NSRect(x: x, y: y, width: box.side, height: box.side)
     }
 
     private func codeBox(_ range: NSRange, _ storage: NSTextStorage, _ container: NSTextContainer)

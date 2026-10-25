@@ -8,11 +8,13 @@ come from Discord's CDN at runtime like every image ([images.md](images.md),
 
 ## Custom emoji
 
-- **In the text**: `<:name:id>` and `<a:name:id>` are a square box in the line, 1.375 × the body
-  size (22 at 16), its bottom on the line's bottom; the image is drawn to fit it. The box is a
-  text attachment that draws nothing of its own; the layer with the image sits on it, placed by
-  the same layout that places pills and spoiler backgrounds. Text wraps around it as around a
-  word; selecting across it works as across text.
+- **In the text**: `<:name:id>` and `<a:name:id>` are a square box in the line, 1.375 × the
+  line's font size (22 in the body, 18 in subtext, 33 in a large heading), its bottom on the
+  line's bottom; the image is drawn to fit it. The box is a text attachment that only makes room
+  (its width, never taller than the font's ascent, so no line grows for it); the layer with the
+  image sits on it, above the text, placed by the same layout that places pills and spoiler
+  backgrounds. Text wraps around it as around a word; selecting across it works as across text,
+  and a selected emoji stays visible over the selection.
 - **Jumbo**: a message of 1 to 30 emoji (Unicode or custom) and whitespace, nothing else, shows
   them large: Unicode emoji at 48 on a 56 line, custom emoji in a 48 box centered on that line.
   Never in a reply's preview. *Discord's limit is 30 (`MAX_EMOJI_TO_BE_JUMBO`); akari-markdown
@@ -26,6 +28,9 @@ come from Discord's CDN at runtime like every image ([images.md](images.md),
   the message's hover for every emoji in it (Discord tracks the emoji's own hover too).*
 - **Failure**: an emoji that can't load shows `:name:` in its box, small and muted, the text
   around it unmoved. A hidden spoiler's emoji stay under the cover and aren't asked for.
+- **Elsewhere**: a thread box's second line and the Threads browser's rows read a custom emoji
+  as `:name:` (one line of small text, no image layers); the New Thread form's preview shows
+  the message as the list does, emoji and stickers included.
 
 ## Stickers
 

@@ -155,6 +155,47 @@ final class StickerTests {
         #expect(try !cell().animatesStickers)
     }
 
+    // A reused cell for a message without stickers lets its stickers go: no ask, no pin, no
+    // player, and the list's say turns off.
+    @Test
+    func aReusedCellWithoutStickersDropsThem() async throws {
+        let source = FakeImageSource.serving(
+            still: try images.png("s", pixels: 320), animation: images.animated)
+        let cache = ImageCache(source: source)
+        list.show(state(rows(["wave"], format: .apng), cache: cache))
+        let sticker = try #require(stickerViews(try cell()).first)
+        try await eventually { sticker.image.player != nil }
+        let scale = list.window.backingScaleFactor
+        let spec = ImageSpec(
+            key: .sticker(stickerId: StickerId(rawValue: 10), format: .apng),
+            width: Int((160 * scale).rounded(.up)), height: Int((160 * scale).rounded(.up)))
+        #expect(cache.isPinned(spec))
+
+        list.show(state([row(1, at: list.noon, content: "plain now")], cache: cache))
+
+        let cell = try cell()
+        #expect(stickerViews(cell).isEmpty)
+        #expect(sticker.image.content == nil)
+        #expect(sticker.image.player == nil)
+        #expect(!cache.isPinned(spec))
+        #expect(!cell.animatesStickers)
+    }
+
+    // The list's say arrives before the row exists for a fresh cell; it holds.
+    @Test
+    func animatesStickersSetBeforeTheRowExistsHolds() throws {
+        let cell = MessageCell()
+        cell.animatesStickers = true
+        let message = rows(["wave"], format: .apng).first!.message
+
+        cell.configure(
+            message, body: NSAttributedString(string: "hi"), startsGroup: true, groupTime: "", shortTime: "",
+            fullDate: "")
+
+        #expect(cell.animatesStickers)
+        #expect(MessageMenuAreaTests.views(StickerView.self, in: cell).first?.image.animates == true)
+    }
+
     @Test
     func theCursorStaysTheArrowOverASticker() throws {
         list.show(state(rows(["wave"]), cache: ImageCache(source: FakeImageSource.stalling())))

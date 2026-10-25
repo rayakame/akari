@@ -14,15 +14,17 @@ final class MessageTextView: NSTextView {
     // The message's own items, above the text's.
     var messageMenu: () -> [NSMenuItem] = { [] }
     let decorations = MessageDecorations()
+    // Above the text: the selection's fill is opaque, and an emoji stays visible when selected.
+    let emojiOverlay = EmojiOverlay()
     /// Where the custom emoji's images come from.
     var images: ImageCache? {
-        get { decorations.images }
-        set { decorations.images = newValue }
+        get { emojiOverlay.images }
+        set { emojiOverlay.images = newValue }
     }
     /// The list's say: this message's custom emoji play.
     var animatesEmoji: Bool {
-        get { decorations.animatesEmoji }
-        set { decorations.animatesEmoji = newValue }
+        get { emojiOverlay.animates }
+        set { emojiOverlay.animates = newValue }
     }
 
     init() {
@@ -71,6 +73,7 @@ final class MessageTextView: NSTextView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         decorations.frame = frame
+        emojiOverlay.frame = frame
         if newSize.width != measuredWidth {
             measuredWidth = newSize.width
             linkElements = nil
@@ -109,26 +112,34 @@ final class MessageTextView: NSTextView {
     override func viewWillMove(toSuperview newSuperview: NSView?) {
         super.viewWillMove(toSuperview: newSuperview)
         decorations.removeFromSuperview()
+        emojiOverlay.removeFromSuperview()
     }
 
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         superview?.addSubview(decorations, positioned: .below, relativeTo: self)
+        superview?.addSubview(emojiOverlay, positioned: .above, relativeTo: self)
         decorations.frame = frame
+        emojiOverlay.frame = frame
     }
 
     override func setFrameOrigin(_ newOrigin: NSPoint) {
         super.setFrameOrigin(newOrigin)
         decorations.frame = frame
+        emojiOverlay.frame = frame
     }
 
     override var isHidden: Bool {
-        didSet { decorations.isHidden = isHidden }
+        didSet {
+            decorations.isHidden = isHidden
+            emojiOverlay.isHidden = isHidden
+        }
     }
 
     private func updateDecorations() {
         let shapes = (layoutManager as? MessageLayoutManager)?.blocks() ?? []
         decorations.show(shapes, at: textContainerOrigin)
+        emojiOverlay.show(shapes, at: textContainerOrigin)
     }
 
     // The table routes Akari's own links and asks before masked ones; super would open them.
@@ -467,13 +478,11 @@ nonisolated final class LinkElement: NSAccessibilityElement {
     }
 }
 
-/// Code boxes, quote bars, pills and spoilers' backgrounds as layers behind a message's text,
-/// kept out of the text's bitmap (apps/macos/README.md, Performance), and the custom emoji's
-/// image layers on their boxes (D139).
-final class MessageDecorations: NSView {
+/// The custom emoji's image layers on their boxes (D139), over a message's text: one
+/// `ImageLayerView` per box, `:name:` as its fallback. Takes no clicks.
+final class EmojiOverlay: NSView {
     private var shapes: [MessageBlockShape] = []
     private var origin = NSPoint.zero
-    private var blockViews: [BlockView] = []
     private(set) var emojiViews: [ImageLayerView] = []
     var images: ImageCache? {
         didSet {
@@ -482,13 +491,58 @@ final class MessageDecorations: NSView {
             }
         }
     }
-    var animatesEmoji = false {
+    var animates = false {
         didSet {
-            if animatesEmoji != oldValue {
-                emojiViews.forEach { $0.animates = animatesEmoji }
+            if animates != oldValue {
+                emojiViews.forEach { $0.animates = animates }
             }
         }
     }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    func show(_ all: [MessageBlockShape], at origin: NSPoint) {
+        let shapes = all.filter { if case .emoji = $0 { true } else { false } }
+        guard shapes != self.shapes || origin != self.origin else {
+            return
+        }
+        self.shapes = shapes
+        self.origin = origin
+        for (index, shape) in shapes.enumerated() {
+            guard case .emoji(let rect, let box) = shape else {
+                continue
+            }
+            let view: ImageLayerView
+            if index < emojiViews.count {
+                view = emojiViews[index]
+            } else {
+                view = ImageLayerView()
+                view.images = images
+                view.animates = animates
+                emojiViews.append(view)
+                addSubview(view)
+            }
+            view.frame = rect.offsetBy(dx: origin.x, dy: origin.y)
+            view.fallbackText = ":\(box.name):"
+            view.show(ImageLayerView.Content(key: box.key, canAnimate: box.animated))
+        }
+        for view in emojiViews.dropFirst(shapes.count) {
+            view.show(nil)
+            view.removeFromSuperview()
+        }
+        emojiViews.removeLast(emojiViews.count - shapes.count)
+    }
+}
+
+/// Code boxes, quote bars, pills and spoilers' backgrounds as layers behind a message's text,
+/// kept out of the text's bitmap (apps/macos/README.md, Performance).
+final class MessageDecorations: NSView {
+    private var shapes: [MessageBlockShape] = []
+    private var origin = NSPoint.zero
 
     override var isFlipped: Bool { true }
 
@@ -516,54 +570,27 @@ final class MessageDecorations: NSView {
         return nil
     }
 
-    func show(_ shapes: [MessageBlockShape], at origin: NSPoint) {
+    func show(_ all: [MessageBlockShape], at origin: NSPoint) {
+        let shapes = all.filter { if case .emoji = $0 { false } else { true } }
         guard shapes != self.shapes || origin != self.origin else {
             return
         }
         self.shapes = shapes
         self.origin = origin
-        var blocks = 0
-        var emoji = 0
-        for shape in shapes {
-            let frame = shape.rect.offsetBy(dx: origin.x, dy: origin.y)
-            if case .emoji(_, let box) = shape {
-                let view: ImageLayerView
-                if emoji < emojiViews.count {
-                    view = emojiViews[emoji]
-                } else {
-                    view = ImageLayerView()
-                    view.images = images
-                    view.animates = animatesEmoji
-                    emojiViews.append(view)
-                    addSubview(view)
-                }
-                emoji += 1
-                view.frame = frame
-                view.fallbackText = ":\(box.name):"
-                view.show(ImageLayerView.Content(key: box.key, canAnimate: box.animated))
+        for (index, shape) in shapes.enumerated() {
+            let view: BlockView
+            if index < subviews.count, let reused = subviews[index] as? BlockView {
+                view = reused
             } else {
-                let view: BlockView
-                if blocks < blockViews.count {
-                    view = blockViews[blocks]
-                } else {
-                    view = BlockView()
-                    blockViews.append(view)
-                    addSubview(view)
-                }
-                blocks += 1
-                view.shape = shape
-                view.frame = frame
+                view = BlockView()
+                addSubview(view)
             }
+            view.shape = shape
+            view.frame = shape.rect.offsetBy(dx: origin.x, dy: origin.y)
         }
-        for view in blockViews.dropFirst(blocks) {
+        for view in subviews.dropFirst(shapes.count) {
             view.removeFromSuperview()
         }
-        blockViews.removeLast(blockViews.count - blocks)
-        for view in emojiViews.dropFirst(emoji) {
-            view.show(nil)
-            view.removeFromSuperview()
-        }
-        emojiViews.removeLast(emojiViews.count - emoji)
     }
 }
 
