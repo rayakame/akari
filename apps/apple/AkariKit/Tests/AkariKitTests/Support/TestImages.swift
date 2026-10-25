@@ -41,6 +41,26 @@ final class TestImages: @unchecked Sendable {
         return url
     }
 
+    /// A JPEG of `width` × `height` whose EXIF orientation is `orientation` (1–8).
+    func jpeg(_ name: String, width: Int, height: Int, orientation: Int) throws -> URL {
+        let url = directory.appending(path: "\(name).jpg")
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = context.makeImage()!
+        let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.jpeg.identifier as CFString, 1, nil)!
+        let properties: [CFString: Any] = [kCGImagePropertyOrientation: orientation]
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        return url
+    }
+
     var animatedWebP: URL {
         AnimatedFormatProbe.fixtureURL!
     }

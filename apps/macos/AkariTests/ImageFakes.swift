@@ -52,6 +52,10 @@ final class FakeImageSource: ImageSource, @unchecked Sendable {
         FakeImageSource { _ in throw ImageError.Unavailable }
     }
 
+    func replace(_ answer: @escaping @Sendable (ImageRequest) async throws -> ImageFile) {
+        self.answer.withLock { $0 = answer }
+    }
+
     func image(_ request: ImageRequest) async throws -> ImageFile {
         requests.withLock { $0.append(request) }
         do {
@@ -139,7 +143,7 @@ final class TestImages {
 }
 
 extension ImageKey {
-    static func avatar(_ raw: UInt64, animated: Bool = false) -> ImageKey {
+    nonisolated static func avatar(_ raw: UInt64, animated: Bool = false) -> ImageKey {
         .avatar(
             userId: UserId(rawValue: raw),
             hash: (animated ? "a_" : "") + "0123456789abcdef0123456789abcdef")

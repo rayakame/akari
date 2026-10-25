@@ -117,6 +117,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var ownChanges = 0
     private var lastClipOrigin = NSPoint.zero
     private var hovered: MessageTimeline.ItemId?
+    // The group whose header plays: the hovered row's first message.
+    private var hoveredGroup: MessageTimeline.ItemId?
     private weak var underlinedText: MessageTextView?
     private weak var hoveredBox: ThreadBoxView?
     // Paging posts willStart and didLive but no didEnd, so a live scroll also ends when its
@@ -1469,19 +1471,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
             (cell as? MessageCell)?.isHovered = index == row
         }
-        updateAvatarAnimation()
+        let group = row >= 0 ? groupStart(of: row).map { timeline.items[$0].id } : nil
+        if group != hoveredGroup {
+            hoveredGroup = group
+            updateAvatarAnimation()
+        }
     }
 
     // Hovering any message of a group animates the group's header avatar (Discord), while the
-    // window is key and the app active.
+    // window is key and the app active. Every row the table holds, on screen or prepared.
     private func updateAvatarAnimation() {
-        let visible = tableView.rows(in: tableView.visibleRect)
-        for index in visible.location..<(visible.location + visible.length) {
-            guard
-                let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
-                    as? MessageCell, cell.showsHeader
-            else {
-                continue
+        tableView.enumerateAvailableRowViews { rowView, index in
+            guard let cell = rowView.view(atColumn: 0) as? MessageCell, cell.showsHeader else {
+                return
             }
             cell.animatesAvatar = avatarPlays(groupStartOf: index)
         }
@@ -1489,11 +1491,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     // Whether the header at `start` plays: a message of its group is hovered.
     private func avatarPlays(groupStartOf start: Int) -> Bool {
-        guard let hovered, let hoveredRow = timeline.items.firstIndex(where: { $0.id == hovered })
+        guard let hoveredGroup, timeline.items.indices.contains(start),
+            timeline.items[start].id == hoveredGroup
         else {
-            return false
-        }
-        guard hoveredRow >= start, groupStart(of: hoveredRow) == start else {
             return false
         }
         return state.motion.plays(
@@ -1501,15 +1501,20 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             MotionPolicy.Context(windowKey: state.focused, appActive: state.focused, hovered: true))
     }
 
-    // The row of the group's first message, for a message row; nil for anything else.
+    // The row of the group's first message, for a message row; nil for anything else. The new
+    // messages line starts no group.
     private func groupStart(of row: Int) -> Int? {
         var index = row
         while index >= 0 {
-            guard case .message(_, let startsGroup) = timeline.items[index] else {
+            switch timeline.items[index] {
+            case .message(_, let startsGroup):
+                if startsGroup {
+                    return index
+                }
+            case .newMessages:
+                break
+            case .edge, .day:
                 return nil
-            }
-            if startsGroup {
-                return index
             }
             index -= 1
         }

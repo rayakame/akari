@@ -277,8 +277,10 @@ plays them (`docs/ui/images.md`):
   two LRUs bounded in bytes (identity images 16 MB, media 48 MB); shares one source call between
   concurrent asks and cancels it with the last waiter; asks once more for a file the system
   purged; `cached(_:)` answers synchronously; `pin`/`unpin` keep what a box shows;
-  `dropUnpinned` (a memory warning) and `dropMedia` (a hidden window). `animation(spec)` gives
-  an `AnimationSource` (frames, delays, loop count) for the animated form.
+  `dropUnpinned` (a memory warning) and `dropMedia` (a hidden window, from
+  `setWindowVisible`). `animation(spec)` gives an `AnimationSource` (frames, delays, loop count)
+  for the animated form, its download cancelled with the task. `retryFailed()` (the session,
+  each time it comes online) posts `retryFailedNotification`: boxes whose image failed ask again.
 - `MotionPolicy` (`session.motion`, from the store's display settings and
   `setReduceMotion`): `plays(place, context)` for each place's rule (avatars on hover; emoji,
   stickers and GIFs by their settings and visibility), always false while the window isn't key
@@ -286,10 +288,12 @@ plays them (`docs/ui/images.md`):
 - `FramePlayer` plays an `AnimationSource` into a callback on one `AnimationClock` (a 60 Hz
   timer that runs only while a player is registered): each frame decoded at the box's pixels
   off the main actor, shown at its delay, loops honoured, the last frame kept; `prepare()`
-  decodes ahead.
+  decodes ahead, and a start decodes nothing it already has. Past the frame budget (24 MB) only
+  a window of four frames ahead of the play head is kept; a released player ends its decoding.
 - `AnimatedFormatProbe.install()` runs once at launch: `current` is `.webP` where ImageIO
   composites the shipped fixture right, `.gif` where it doesn't (macOS 14) or until it ran.
-- `ImageKey.canAnimate`: an `a_` hash or an animated emoji.
+- `ImageKey.canAnimate`: an `a_` hash or an animated emoji. `sameSubject(as:)`: the same user,
+  server, group, emoji or attachment, whatever the hash.
 
 ## Tests
 

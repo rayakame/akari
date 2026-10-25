@@ -8,7 +8,10 @@ import Testing
 // Every SwiftUI place of D137 shows its image through one layer view, at its size, with its
 // motion rule; users never show initials, servers without an icon keep theirs.
 @MainActor @Suite(.timeLimit(.minutes(1)))
-struct AvatarPlacesTests {
+final class AvatarPlacesTests {
+    // The windows stay for the test: a released window takes its views' asks with it.
+    var windows: [NSWindow] = []
+
     func layers<Content: View>(in view: Content, size: NSSize = NSSize(width: 300, height: 100))
         -> [ImageLayerView]
     {
@@ -16,6 +19,7 @@ struct AvatarPlacesTests {
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
             backing: .buffered, defer: false)
+        windows.append(window)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         return MessageMenuAreaTests.views(ImageLayerView.self, in: host)
@@ -28,13 +32,21 @@ struct AvatarPlacesTests {
     }
 
     @Test
-    func aUserAvatarIsRoundAtItsSizeWithTheDisc() throws {
-        let layer = try #require(layers(in: UserAvatar(ray(), size: 32)).first)
+    func aUserAvatarIsRoundAtItsSizeWithTheDisc() async throws {
+        let images = TestImages()
+        let source = FakeImageSource.serving(try images.png("ray", pixels: 256), pixels: 256)
+        let cache = ImageCache(source: source)
+        let layer = try #require(
+            layers(in: UserAvatar(ray(), size: 32).environment(\.imageCache, cache)).first)
 
         #expect(layer.content?.key == .avatar(2))
         #expect(layer.cornerRadius == 16)
         #expect(layer.placeholder == .disc)
         #expect(layer.frame.size == NSSize(width: 32, height: 32))
+        try await eventually { layer.imageLayer.contents != nil }
+        let scale = layer.window?.backingScaleFactor ?? 0
+        #expect(source.requests.withLock { $0.first }?.width == UInt32((32 * scale).rounded(.up)))
+        #expect(cache.isPinned(ImageSpec(key: .avatar(2), width: Int(32 * scale), height: Int(32 * scale))))
     }
 
     @Test

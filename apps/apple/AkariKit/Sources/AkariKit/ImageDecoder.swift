@@ -46,11 +46,12 @@ public enum ImageDecoder {
 
     /// `frame` decoded so that it covers `pixels` (the larger of the two ratios), at the
     /// source's own size when that is smaller: no image is drawn from fewer pixels than its box
-    /// has, unless the source has fewer (D130).
+    /// has, unless the source has fewer (D130). The covering side is exactly the box's, so the
+    /// layer resamples nothing.
     static func decode(
         _ source: CGImageSource, frame: Int, covering pixels: (width: Int, height: Int)
     ) -> CGImage? {
-        guard let size = pixelSize(of: source, frame: frame) else {
+        guard let size = orientedSize(of: source, frame: frame) else {
             return nil
         }
         let longest = max(size.width, size.height)
@@ -63,7 +64,46 @@ public enum ImageDecoder {
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCacheImmediately: true,
         ]
-        return CGImageSourceCreateThumbnailAtIndex(source, frame, options as CFDictionary)
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, frame, options as CFDictionary)
+        else {
+            return nil
+        }
+        guard scale < 1 else {
+            return thumbnail
+        }
+        // ImageIO rounds the shorter side on its own, at times a pixel over the box.
+        let target = (
+            width: Int((Double(size.width) * scale).rounded(.up)),
+            height: Int((Double(size.height) * scale).rounded(.up))
+        )
+        if thumbnail.width == target.width, thumbnail.height == target.height {
+            return thumbnail
+        }
+        return redraw(thumbnail, to: target)
+    }
+
+    // The first frame's size after its EXIF orientation, which the thumbnail applies.
+    private static func orientedSize(of source: CGImageSource, frame: Int) -> (width: Int, height: Int)? {
+        guard let size = pixelSize(of: source, frame: frame) else {
+            return nil
+        }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, frame, nil) as? [CFString: Any]
+        let orientation = (properties?[kCGImagePropertyOrientation] as? UInt32) ?? 1
+        return orientation >= 5 ? (size.height, size.width) : size
+    }
+
+    private static func redraw(_ image: CGImage, to size: (width: Int, height: Int)) -> CGImage? {
+        guard
+            let context = CGContext(
+                data: nil, width: size.width, height: size.height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else {
+            return nil
+        }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: size.width, height: size.height))
+        return context.makeImage()
     }
 }
 
@@ -80,6 +120,8 @@ public final class AnimationSource: @unchecked Sendable {
     private let source: CGImageSource
     // ImageIO's sources aren't for concurrent use.
     private let lock = NSLock()
+    // Frames decoded so far; tests read it.
+    let decodes = LockedBox(0)
 
     public init?(url: URL) {
         guard let source = try? ImageDecoder.open(url) else {
@@ -108,6 +150,7 @@ public final class AnimationSource: @unchecked Sendable {
         guard (0..<frameCount).contains(index) else {
             return nil
         }
+        decodes.withLock { $0 += 1 }
         return lock.withLock {
             ImageDecoder.decode(source, frame: index, covering: pixels)
         }

@@ -149,22 +149,32 @@ public final class ImageCache {
         }
     }
 
-    /// The frames of an animated image; the player decodes them at its box's pixels.
+    /// The frames of an animated image; the player decodes them at its box's pixels. Cancelling
+    /// the task cancels the source's call.
     public func animation(_ spec: ImageSpec) async throws -> AnimationSource {
-        let source = self.source
         let request = spec.request
-        return try await Task.detached(priority: .userInitiated) {
-            let file = try await source.image(request)
-            guard let animation = AnimationSource(url: URL(fileURLWithPath: file.path)) else {
-                let again = try await source.image(request)
-                guard let animation = AnimationSource(url: URL(fileURLWithPath: again.path))
-                else {
-                    throw ImageCacheError.undecodable
-                }
+        var file = try await source.image(request)
+        for attempt in 0..<2 {
+            let url = URL(fileURLWithPath: file.path)
+            if let animation = await Task.detached(priority: .userInitiated, operation: { AnimationSource(url: url) }).value {
                 return animation
             }
-            return animation
-        }.value
+            // Gone between the answer and the open (the system purged the caches): once more.
+            try Task.checkCancellation()
+            if attempt == 0 {
+                file = try await source.image(request)
+            }
+        }
+        throw ImageCacheError.undecodable
+    }
+
+    /// Posted by `retryFailed` with the cache as its object: every box whose image failed asks
+    /// again.
+    public static let retryFailedNotification = Notification.Name("ImageCache.retryFailed")
+
+    /// The session is back online (D131): boxes that failed while it wasn't ask again.
+    public func retryFailed() {
+        NotificationCenter.default.post(name: Self.retryFailedNotification, object: self)
     }
 
     /// Keeps the entry while a box shows it; balanced by `unpin`.

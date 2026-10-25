@@ -1,6 +1,7 @@
 import AkariKit
 import AppKit
 import Testing
+import os
 
 @testable import Akari
 
@@ -27,10 +28,11 @@ final class ImageLayerViewTests {
         return view
     }
 
+    // The layer lands on whole backing pixels of the window, wherever its view's frame sits
+    // (a thread box's avatar is at a half point), so the bitmap draws 1:1.
     @Test
-    func theImageLayerSitsOnWholeBackingPixels() {
+    func theImageLayerSitsOnWholeBackingPixelsOfTheWindow() {
         let bounds = NSRect(x: 0.3, y: 0.6, width: 40, height: 40)
-
         #expect(
             ImageLayerView.alignedFrame(bounds, scale: 2) == NSRect(x: 0.5, y: 0.5, width: 40, height: 40))
         #expect(
@@ -38,6 +40,214 @@ final class ImageLayerViewTests {
         #expect(
             ImageLayerView.alignedFrame(NSRect(x: 0, y: 0, width: 16.4, height: 16.4), scale: 2)
                 == NSRect(x: 0, y: 0, width: 16.5, height: 16.5))
+
+        let cache = ImageCache(source: FakeImageSource.failing())
+        for origin in [NSPoint(x: 10.25, y: 37.5), NSPoint(x: 100.3, y: 10.8), NSPoint(x: 10, y: 10)] {
+            let view = shown(cache, size: 16, at: origin)
+            let inWindow = view.convert(view.imageLayer.frame.origin, to: nil)
+            #expect(abs(inWindow.x * scale - (inWindow.x * scale).rounded()) < 1e-6, "\(origin)")
+            #expect(abs(inWindow.y * scale - (inWindow.y * scale).rounded()) < 1e-6, "\(origin)")
+            #expect(abs(view.imageLayer.frame.minX) < 1 / scale && abs(view.imageLayer.frame.minY) < 1 / scale)
+            #expect(view.placeholderLayer.frame == view.imageLayer.frame)
+        }
+    }
+
+    // A table cell's subviews join the window at zero size and get their frame in the layout
+    // pass after: the ask happens then.
+    @Test
+    func aViewSizedAfterJoiningTheWindowAsks() async throws {
+        let source = FakeImageSource.serving(try images.png("a", pixels: 80), pixels: 80)
+        let cache = ImageCache(source: source)
+        let view = ImageLayerView()
+        view.images = cache
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        window.contentView?.addSubview(view)
+        #expect(source.count == 0)
+
+        view.frame = NSRect(x: 10, y: 10, width: 40, height: 40)
+        view.layoutSubtreeIfNeeded()
+
+        try await eventually { view.imageLayer.contents != nil }
+        #expect(source.count == 1)
+    }
+
+    // A recycled box showing another user or server clears at once: the disc, never the
+    // previous subject's picture, until the new one decoded. The same subject's new hash keeps
+    // the old image (D137).
+    @Test
+    func anotherSubjectClearsTheOldImageAtOnce() async throws {
+        let gate = Gate()
+        let source = FakeImageSource { request in
+            if case .avatar(let user, _) = request.key, user.rawValue == 2 {
+                await gate.wait()
+            }
+            return ImageFile(path: "/nowhere", width: 80, height: 80, animated: false, fromDisk: false)
+        }
+        let file = try images.png("a", pixels: 80)
+        source.replace { request in
+            if case .avatar(let user, _) = request.key, user.rawValue == 2 {
+                await gate.wait()
+            }
+            return ImageFile(path: file.path, width: 80, height: 80, animated: false, fromDisk: false)
+        }
+        let view = shown(ImageCache(source: source))
+        view.placeholder = .disc
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        try await eventually { view.imageLayer.contents != nil }
+
+        view.show(ImageLayerView.Content(key: .avatar(2)))
+
+        #expect(view.imageLayer.contents == nil)
+        #expect(view.imageLayer.isHidden)
+        #expect(!view.placeholderLayer.isHidden)
+        gate.fire()
+        try await eventually { view.imageLayer.contents != nil }
+        #expect(view.placeholderLayer.isHidden)
+    }
+
+    @Test
+    func aFailedLoadHidesTheOldImage() async throws {
+        let file = try images.png("a", pixels: 80)
+        let source = FakeImageSource { request in
+            if case .avatar(_, let hash) = request.key, hash.hasPrefix("a_") {
+                throw ImageError.Unavailable
+            }
+            return ImageFile(path: file.path, width: 80, height: 80, animated: false, fromDisk: false)
+        }
+        let view = shown(ImageCache(source: source))
+        view.placeholder = .disc
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        try await eventually { view.imageLayer.contents != nil }
+
+        view.show(ImageLayerView.Content(key: .avatar(1, animated: true), canAnimate: true))
+        try await eventually { view.failed }
+
+        #expect(view.imageLayer.contents == nil)
+        #expect(view.imageLayer.isHidden)
+        #expect(!view.placeholderLayer.isHidden)
+    }
+
+    // Offline, a box fails fast; when the session is back online the cache says so and every
+    // failed box asks again (D131).
+    @Test
+    func aFailedViewAsksAgainWhenTheCacheRetries() async throws {
+        let file = try images.png("a", pixels: 80)
+        let source = FakeImageSource { _ in throw ImageError.Unavailable }
+        let cache = ImageCache(source: source)
+        let view = shown(cache)
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        try await eventually { view.failed }
+        source.replace { _ in
+            ImageFile(path: file.path, width: 80, height: 80, animated: false, fromDisk: false)
+        }
+
+        cache.retryFailed()
+
+        try await eventually { view.imageLayer.contents != nil }
+        #expect(!view.failed)
+        #expect(source.count == 2)
+        let other = ImageCache(source: FakeImageSource.failing())
+        other.retryFailed()
+        #expect(source.count == 2, "another cache's retry isn't this view's")
+    }
+
+    // Hover, un-hover, hover again on a slow network: the first ask's failure leaves the
+    // second one in place, so un-hovering still stops it.
+    @Test
+    func aFailedAnimationAskLeavesItsSuccessorAlone() async throws {
+        let first = Gate()
+        let second = Gate()
+        let asks = OSAllocatedUnfairLock(initialState: 0)
+        let still = try images.png("still", pixels: 80)
+        let animated = images.animated
+        let source = FakeImageSource { request in
+            guard request.animated != nil else {
+                return ImageFile(path: still.path, width: 80, height: 80, animated: false, fromDisk: false)
+            }
+            let ask = asks.withLock { count in
+                count += 1
+                return count
+            }
+            if ask == 1 {
+                await first.wait()
+                throw ImageError.Unavailable
+            }
+            await second.wait()
+            return ImageFile(path: animated.path, width: 32, height: 32, animated: true, fromDisk: false)
+        }
+        let view = shown(ImageCache(source: source), size: 16)
+        view.show(ImageLayerView.Content(key: .avatar(1, animated: true), canAnimate: true))
+        try await eventually { view.imageLayer.contents != nil }
+
+        view.animates = true
+        view.animates = false
+        view.animates = true
+        try await eventually { asks.withLock { $0 } == 2 }
+        first.fire()
+        try await Task.sleep(for: .milliseconds(50))
+        view.animates = false
+        second.fire()
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(view.player == nil)
+    }
+
+    // A disc without a key: the store doesn't know the person yet, or the group has no icon.
+    @Test
+    func aNilKeyWithTheDiscShowsTheDisc() {
+        let view = shown(ImageCache(source: FakeImageSource.failing()))
+        view.placeholder = .disc
+
+        view.show(nil)
+
+        #expect(!view.placeholderLayer.isHidden)
+        view.placeholder = .none
+        #expect(view.placeholderLayer.isHidden)
+    }
+
+    @Test
+    func noLayerPropertyAnimatesImplicitly() {
+        let view = ImageLayerView()
+        for key in ["contents", "hidden", "bounds", "position", "cornerRadius", "backgroundColor"] {
+            #expect(view.imageLayer.actions?[key] is NSNull, "\(key)")
+            #expect(view.placeholderLayer.actions?[key] is NSNull, "\(key)")
+        }
+    }
+
+    // Moved to a display with another scale, the box asks at the new pixels and keeps the old
+    // image until the new one decoded.
+    @Test
+    func aScaleChangeAsksAgainKeepingTheOldImage() async throws {
+        let gate = Gate()
+        let file = try images.png("a", pixels: 256)
+        let source = FakeImageSource { request in
+            if request.width > 40 {
+                await gate.wait()
+            }
+            return ImageFile(path: file.path, width: 256, height: 256, animated: false, fromDisk: false)
+        }
+        let cache = ImageCache(source: source)
+        let one = ScaledWindow(scale: 1)
+        let two = ScaledWindow(scale: 2)
+        let view = ImageLayerView()
+        view.images = cache
+        view.frame = NSRect(x: 10, y: 10, width: 40, height: 40)
+        one.contentView?.addSubview(view)
+        view.layoutSubtreeIfNeeded()
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        try await eventually { view.imageLayer.contents != nil }
+        let before = view.imageLayer.image
+        #expect(before?.width == 40)
+
+        two.contentView?.addSubview(view)
+        view.layoutSubtreeIfNeeded()
+        try await eventually { source.count == 2 }
+
+        #expect(source.requests.withLock { $0.last }?.width == 80)
+        #expect(view.imageLayer.image === before)
+        gate.fire()
+        try await eventually { view.imageLayer.image?.width == 80 }
+        #expect(view.imageLayer.contentsScale == 2)
     }
 
     @Test
@@ -213,6 +423,20 @@ final class ImageLayerViewTests {
         #expect(view.player == nil)
         #expect(source.count == 1)
     }
+}
+
+/// A window whose backing scale is what the test says.
+final class ScaledWindow: NSWindow {
+    private let scale: CGFloat
+
+    init(scale: CGFloat) {
+        self.scale = scale
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled],
+            backing: .buffered, defer: false)
+    }
+
+    override var backingScaleFactor: CGFloat { scale }
 }
 
 extension CALayer {

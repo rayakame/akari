@@ -58,6 +58,53 @@ final class SessionModelTests {
         session.close()
     }
 
+    // Going online asks every image that failed while offline again (D131), once per return.
+    @Test
+    func goingOnlineRetriesFailedImages() {
+        store.update { state in
+            state.connection = .offline
+            state.currentUser = user(1)
+        }
+        let session = makeSession()
+        session.start()
+        let heard = Locked(0)
+        let token = NotificationCenter.default.addObserver(
+            forName: ImageCache.retryFailedNotification, object: session.images, queue: .main
+        ) { [heard] _ in heard.withLock { $0 += 1 } }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        session.apply(EventBatch([.connection(state: .online)]))
+        #expect(heard.current == 1)
+        session.apply(EventBatch([.connection(state: .online)]))
+        #expect(heard.current == 1, "still online")
+        session.apply(EventBatch([.connection(state: .connecting)]))
+        session.apply(EventBatch([.connection(state: .online)]))
+        #expect(heard.current == 2)
+        session.close()
+    }
+
+    // A hidden or minimized window drops the media tier; identity images stay (D134).
+    @Test
+    func aHiddenWindowDropsTheMediaTier() async throws {
+        let images = TestImages()
+        let file = try images.png("media", width: 80, height: 80)
+        account.imageAnswer.withLock { answer in
+            answer = { _ in ImageFile(path: file.path, width: 80, height: 80, animated: false, fromDisk: false) }
+        }
+        let session = makeSession()
+        session.start()
+        _ = try await session.images.image(ImageSpec(key: .testAvatar(1), width: 80, height: 80), tier: .media)
+        _ = try await session.images.image(ImageSpec(key: .testAvatar(2), width: 80, height: 80))
+        #expect(session.images.mediaBytes > 0)
+
+        session.setWindowVisible(true)
+        session.setWindowVisible(false)
+
+        #expect(session.images.mediaBytes == 0)
+        #expect(session.images.identityBytes > 0)
+        session.close()
+    }
+
     // The motion policy follows the display settings: read at the start, again when they change.
     @Test
     func theMotionPolicyFollowsTheDisplaySettings() {

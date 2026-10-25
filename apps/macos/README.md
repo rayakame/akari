@@ -30,11 +30,13 @@ Attachments, embeds, reactions, replies, voice, notifications and settings come 
 ## Images
 
 - `ImageLayerView` (`Shared/`) shows one image as a layer: it asks the session's `ImageCache`
-  at the box's pixels on the window's backing scale, sets the decoded bitmap as contents on
-  whole backing pixels (1:1, never resampled), clips with the layer, cancels its ask when the
-  box shows something else or leaves the window, asks again when the scale changes, and plays
-  the animated form through AkariKit's `FramePlayer` while its owner says so. It draws nothing
-  and tracks no pointer. `RemoteImage` wraps it for SwiftUI (`UserAvatar`, `ConversationAvatar`,
+  at the box's pixels on the window's backing scale once it has a size in a window (a table's
+  cells get theirs after joining), sets the decoded bitmap as contents on whole backing pixels
+  of the window (1:1, never resampled), clips with the layer, cancels its ask when the box shows
+  something else or leaves the window, asks again when the scale changes or the cache says
+  failed boxes may retry, and plays the animated form through AkariKit's `FramePlayer` while its
+  owner says so. A box recycled for another subject clears at once; the same subject's new
+  picture keeps the old until the new decoded. It draws nothing and tracks no pointer. `RemoteImage` wraps it for SwiftUI (`UserAvatar`, `ConversationAvatar`,
   the rail's `GuildIcon`), fed through the environment (`imageEnvironment(session)`: the cache,
   the motion policy and whether the window is key and the app active).
 - The message list's cells get the cache with the table's state; the controller's hover

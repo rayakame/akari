@@ -3,9 +3,10 @@ import AppKit
 
 /// A box's image as a layer (D135): asked from the cache at the box's pixels on the window's
 /// backing scale, set as layer contents at that scale on whole backing pixels, clipped by the
-/// layer. It asks when shown in a window, cancels when it shows something else or leaves, asks
-/// again when the backing scale changes, and plays the animated form through a `FramePlayer`
-/// while `animates` is on. It draws nothing and tracks no pointer: the list stays the authority.
+/// layer. It asks when shown in a window and sized, cancels when it shows something else or
+/// leaves, asks again when the backing scale changes or the cache says failed boxes may retry,
+/// and plays the animated form through a `FramePlayer` while `animates` is on. It draws nothing
+/// and tracks no pointer: the list stays the authority.
 final class ImageLayerView: NSView {
     struct Content: Equatable {
         let key: ImageKey
@@ -21,13 +22,14 @@ final class ImageLayerView: NSView {
     enum Placeholder {
         /// Nothing: what lies behind shows (a server's initials).
         case none
-        /// Discord's disc while an avatar loads, kept when it fails.
+        /// Discord's disc while an avatar loads or without one, kept when it fails.
         case disc
     }
 
     var images: ImageCache? {
         didSet {
             if images !== oldValue {
+                cancelLoads()
                 reload()
             }
         }
@@ -51,7 +53,7 @@ final class ImageLayerView: NSView {
         }
     }
     private(set) var content: Content?
-    /// The still failed to load; the placeholder stays.
+    /// The still failed to load; the placeholder stays until a retry.
     private(set) var failed = false
     let imageLayer = CALayer()
     let placeholderLayer = CALayer()
@@ -67,32 +69,40 @@ final class ImageLayerView: NSView {
         wantsLayer = true
         layerContentsRedrawPolicy = .never
         for layer in [placeholderLayer, imageLayer] {
-            layer.actions = ["contents": NSNull(), "hidden": NSNull(), "bounds": NSNull(), "position": NSNull()]
+            layer.actions = [
+                "contents": NSNull(), "hidden": NSNull(), "bounds": NSNull(), "position": NSNull(),
+                "cornerRadius": NSNull(), "backgroundColor": NSNull(),
+            ]
             layer.masksToBounds = true
             layer.isHidden = true
             self.layer?.addSublayer(layer)
         }
         imageLayer.contentsGravity = .resizeAspectFill
         updatePlaceholder()
+        // A selector observer goes away with the view.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(retryRequested(_:)), name: ImageCache.retryFailedNotification,
+            object: nil)
     }
 
     required init?(coder: NSCoder) {
         nil
     }
 
-    /// Shows `content`: the cached image at once, else the placeholder (or the old image, until
-    /// the new one has decoded) while it loads. `nil` clears the box.
+    /// Shows `content`: the cached image at once, else the placeholder while it loads. The same
+    /// subject's new picture (a changed avatar or icon) keeps the old one until the new has
+    /// decoded (D137); another subject clears at once. `nil` clears the box.
     func show(_ content: Content?) {
         guard content != self.content else {
             return
         }
+        let sameSubject =
+            if let content, let old = self.content { content.key.sameSubject(as: old.key) } else { false }
         self.content = content
         failed = false
         cancelLoads()
-        if content == nil {
-            still = nil
-            imageLayer.contents = nil
-            imageLayer.isHidden = true
+        if !sameSubject {
+            clearImage()
         }
         updatePlaceholder()
         reload()
@@ -105,9 +115,9 @@ final class ImageLayerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil {
-            cancelLoads()
-        } else {
+        cancelLoads()
+        if window != nil {
+            needsLayout = true
             reload()
         }
     }
@@ -117,27 +127,46 @@ final class ImageLayerView: NSView {
         let scale = window?.backingScaleFactor ?? 1
         imageLayer.contentsScale = scale
         placeholderLayer.contentsScale = scale
-        // The size in pixels changed: ask at it, keeping the old image until the new one decoded.
-        if content != nil, let asked = askedPixels, asked != pixels {
-            cancelLoads(keepingImage: true)
-            reload()
-        }
+        needsLayout = true
     }
 
+    // The box's size (a table cell's subviews get theirs after joining the window) and the
+    // backing scale are known here: the ask happens, or happens again, at the pixels they give,
+    // the old image staying until the new one decoded.
     override func layout() {
         super.layout()
         let scale = window?.backingScaleFactor ?? 1
-        let frame = Self.alignedFrame(bounds, scale: scale)
+        var frame = Self.alignedFrame(bounds, scale: scale)
+        if window != nil {
+            let inWindow = convert(frame.origin, to: nil)
+            frame.origin.x += (inWindow.x * scale).rounded() / scale - inWindow.x
+            frame.origin.y += (inWindow.y * scale).rounded() / scale - inWindow.y
+        }
         imageLayer.frame = frame
         placeholderLayer.frame = frame
-        if content != nil, let asked = askedPixels, asked != pixels {
-            cancelLoads(keepingImage: true)
-            reload()
+        askIfPixelsChanged()
+    }
+
+    // SwiftUI sizes its representables outside a layout pass.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        askIfPixelsChanged()
+    }
+
+    private func askIfPixelsChanged() {
+        guard content != nil, let pixels = pixelsIfSized else {
+            return
         }
+        if let askedPixels, askedPixels == pixels {
+            return
+        }
+        cancelLoads()
+        reload()
     }
 
     /// `bounds` moved onto whole backing pixels at `scale`: the origin to the nearest pixel,
     /// the size rounded up to whole pixels, so a bitmap decoded at the box's pixels draws 1:1.
+    /// `layout` then shifts the result onto the window's pixel grid.
     static func alignedFrame(_ bounds: NSRect, scale: CGFloat) -> NSRect {
         NSRect(
             x: (bounds.minX * scale).rounded() / scale, y: (bounds.minY * scale).rounded() / scale,
@@ -150,26 +179,23 @@ final class ImageLayerView: NSView {
         (Int((size.width * scale).rounded(.up)), Int((size.height * scale).rounded(.up)))
     }
 
-    private var pixels: (Int, Int) {
-        Self.pixels(bounds.size, scale: window?.backingScaleFactor ?? 1)
+    private var pixelsIfSized: (Int, Int)? {
+        let pixels = Self.pixels(bounds.size, scale: window?.backingScaleFactor ?? 1)
+        return pixels.0 > 0 && pixels.1 > 0 ? pixels : nil
     }
 
     private func spec(animated: AnimatedFormat? = nil) -> ImageSpec? {
-        guard let content else {
-            return nil
-        }
-        let pixels = pixels
-        guard pixels.0 > 0, pixels.1 > 0 else {
+        guard let content, let pixels = pixelsIfSized else {
             return nil
         }
         return ImageSpec(key: content.key, width: pixels.0, height: pixels.1, animated: animated)
     }
 
     private func reload() {
-        guard window != nil, let images, stillTask == nil, let spec = spec() else {
+        guard window != nil, let images, stillTask == nil, !failed, let spec = spec() else {
             return
         }
-        askedPixels = pixels
+        askedPixels = (spec.width, spec.height)
         pin(spec)
         if let cached = images.cached(spec) {
             set(still: cached)
@@ -195,9 +221,20 @@ final class ImageLayerView: NSView {
                 break
             case .failure:
                 self.failed = true
+                self.clearImage()
                 self.updatePlaceholder()
             }
         }
+    }
+
+    // The cache says the session is back: a failed box asks once more.
+    @objc private func retryRequested(_ notification: Notification) {
+        guard failed, let images, notification.object as AnyObject === images else {
+            return
+        }
+        failed = false
+        cancelLoads()
+        reload()
     }
 
     private func set(still image: CGImage) {
@@ -211,7 +248,14 @@ final class ImageLayerView: NSView {
         updatePlaceholder()
     }
 
-    private func cancelLoads(keepingImage: Bool = false) {
+    private func clearImage() {
+        still = nil
+        imageLayer.contents = nil
+        imageLayer.isHidden = true
+    }
+
+    // Stops every ask and the animation; the image shown stays.
+    private func cancelLoads() {
         stillTask?.cancel()
         stillTask = nil
         stopAnimation()
@@ -220,9 +264,6 @@ final class ImageLayerView: NSView {
             self.pinned = nil
         }
         askedPixels = nil
-        if !keepingImage {
-            still = nil
-        }
     }
 
     private func pin(_ spec: ImageSpec) {
@@ -236,7 +277,7 @@ final class ImageLayerView: NSView {
     }
 
     private func updatePlaceholder() {
-        let showsDisc = placeholder == .disc && content != nil && (still == nil || failed)
+        let showsDisc = placeholder == .disc && (still == nil || failed)
         placeholderLayer.isHidden = !showsDisc
         if showsDisc {
             effectiveAppearance.performAsCurrentDrawingAppearance {
@@ -263,16 +304,17 @@ final class ImageLayerView: NSView {
         guard let images, let spec = spec(animated: AnimatedFormatProbe.current) else {
             return
         }
-        let pixels = pixels
+        let pixels = (spec.width, spec.height)
         animationTask = Task { [weak self] in
-            guard let animation = try? await images.animation(spec) else {
-                self?.animationTask = nil
-                return
-            }
+            let animation = try? await images.animation(spec)
+            // A cancelled ask leaves whatever replaced it alone.
             guard let self, !Task.isCancelled else {
                 return
             }
             self.animationTask = nil
+            guard let animation else {
+                return
+            }
             let player = FramePlayer(animation: animation, pixels: pixels) { [weak self] image, _ in
                 self?.imageLayer.contents = image
                 self?.imageLayer.isHidden = false

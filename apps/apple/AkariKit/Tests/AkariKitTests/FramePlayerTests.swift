@@ -107,17 +107,75 @@ final class FramePlayerTests {
 
     // Without `prepare` the frames arrive as they decode: a tick never waits for one.
     @Test
-    func aTickNeverWaitsForAFrame() async throws {
+    func aFrameDecodedLateShowsIfStillDue() async throws {
         let player = player(try animation())
 
         player.start(at: 0)
-        clock.advance(to: 0.1)
-
-        let before = shown.current
-        #expect(before.count <= 2)
-        await player.prepare()
         clock.advance(to: 0.3)
-        #expect(shown.current.last == 2)
+        await player.prepare()
+
+        #expect(shown.current.last == 2, "the due frame shows when it lands")
+        #expect(shown.current == shown.current.sorted(), "never a frame before an earlier one")
+    }
+
+    // After `prepare`, a start decodes nothing again, nor a second start after a stop.
+    @Test
+    func preparedFramesAreNotDecodedAgain() async throws {
+        let animation = try animation()
+        let player = player(animation)
+        await player.prepare()
+        let decoded = animation.decodes.current
+        #expect(decoded == 5)
+
+        player.start(at: 0)
+        #expect(!player.isDecoding)
+        player.stop()
+        player.start(at: 1)
+        #expect(!player.isDecoding)
+        #expect(animation.decodes.current == decoded)
+    }
+
+    // Past the budget only a window of four frames ahead of the play head is kept, decoded
+    // in time for their turn, and a start wipes nothing already there.
+    @Test
+    func pastTheBudgetAWindowOfFramesIsKept() async throws {
+        let animation = try animation()
+        let player = FramePlayer(animation: animation, pixels: (16, 16), clock: clock, frameBudget: 1) {
+            [shown] _, index in shown.withLock { $0.append(index) }
+        }
+        await player.prepare()
+        #expect(player.decodedFrameCount == 4)
+
+        player.start(at: 0)
+        clock.advance(to: 0.1)
+        #expect(shown.current == [0, 1])
+        clock.advance(to: 0.65)
+        try await eventually { self.shown.current.last == 4 }
+        #expect(player.decodedFrameCount <= 4)
+        clock.advance(to: 0.8)
+        try await eventually { self.shown.current.last == 0 }
+        #expect(player.decodedFrameCount <= 4)
+        player.stop()
+    }
+
+    // A player released without `stop` takes its decoding with it.
+    @Test
+    func aReleasedPlayerStopsDecoding() async throws {
+        let animation = try animation()
+        var player: FramePlayer? = FramePlayer(
+            animation: animation, pixels: (16, 16), clock: clock, frameBudget: 1) { _, _ in }
+        weak var released = player
+        player?.start(at: 0)
+        try await eventually { animation.decodes.current >= 4 }
+
+        player = nil
+
+        // An in-flight hop to the main actor holds it a moment longer.
+        try await eventually { released == nil }
+        try await Task.sleep(for: .milliseconds(50))
+        let settled = animation.decodes.current
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(animation.decodes.current == settled)
     }
 
     @Test

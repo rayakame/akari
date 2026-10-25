@@ -87,8 +87,8 @@ public final class AnimationClock {
 public final class FramePlayer {
     public typealias Frame = @MainActor (CGImage, Int) -> Void
 
-    // Frames kept decoded per player; past it, only a window ahead of the play head.
-    nonisolated static let frameBudget = 24 << 20
+    /// Frames kept decoded per player; past it, only a window ahead of the play head.
+    nonisolated public static let frameBudget = 24 << 20
     nonisolated private static let window = 4
 
     public let animation: AnimationSource
@@ -100,28 +100,47 @@ public final class FramePlayer {
     private var started: Double?
     private var shownIndex: Int?
     private var dueIndex = 0
-    private var decoding: Task<Void, Never>?
     private var keepsAll: Bool
     private var generation = 0
-    // The decoder reads where the play head is, to stay a window ahead.
+    // What the decoder shares with the player: where the play head is, which frames are here,
+    // and its own task, which goes with the player.
     private let head = LockedBox(0)
+    private let present = LockedBox(Set<Int>())
+    private let decoding = LockedBox<Task<Void, Never>?>(nil)
 
     public init(
         animation: AnimationSource, pixels: (width: Int, height: Int),
-        clock: AnimationClock = .shared, onFrame: @escaping Frame
+        clock: AnimationClock = .shared, frameBudget: Int = FramePlayer.frameBudget,
+        onFrame: @escaping Frame
     ) {
         self.animation = animation
         self.pixels = pixels
         self.clock = clock
         self.onFrame = onFrame
         let perFrame = pixels.width * pixels.height * 4
-        keepsAll = perFrame * animation.frameCount <= Self.frameBudget
+        keepsAll = perFrame * animation.frameCount <= frameBudget
+    }
+
+    deinit {
+        decoding.current?.cancel()
+    }
+
+    var isDecoding: Bool {
+        decoding.current != nil
+    }
+
+    var decodedFrameCount: Int {
+        frames.count
     }
 
     /// Decodes the frames ahead of a start (all of them when they fit the budget), so the first
     /// ticks have them.
     public func prepare() async {
-        let indexes = keepsAll ? Array(0..<animation.frameCount) : Array(0..<min(Self.window, animation.frameCount))
+        let wanted = keepsAll ? 0..<animation.frameCount : 0..<min(Self.window, animation.frameCount)
+        let indexes = wanted.filter { frames[$0] == nil }
+        guard !indexes.isEmpty else {
+            return
+        }
         let animation = animation
         let pixels = pixels
         let decoded = await Task.detached(priority: .userInitiated) {
@@ -129,6 +148,10 @@ public final class FramePlayer {
         }.value
         for (index, image) in decoded where frames[index] == nil {
             frames[index] = image
+        }
+        present.withLock { $0 = Set(frames.keys) }
+        if isPlaying {
+            show(dueIndex)
         }
     }
 
@@ -153,12 +176,12 @@ public final class FramePlayer {
         }
         isPlaying = false
         started = nil
-        decoding?.cancel()
-        decoding = nil
+        stopDecoding()
         generation += 1
         clock.unregister(self)
         if !keepsAll {
             frames = [:]
+            present.withLock { $0 = [] }
         }
     }
 
@@ -204,50 +227,60 @@ public final class FramePlayer {
     }
 
     private func startDecoding() {
-        decoding?.cancel()
+        stopDecoding()
         let animation = animation
         let pixels = pixels
-        let keepsAll = keepsAll
-        let head = head
         let count = animation.frameCount
         let generation = generation
-        decoding = Task.detached(priority: .userInitiated) { [weak self] in
-            var next = 0
-            var decodedAll = 0
-            while !Task.isCancelled {
-                if keepsAll {
-                    // Every frame once, in order.
-                    guard decodedAll < count else {
-                        return
-                    }
-                    let index = decodedAll
-                    decodedAll += 1
-                    if let image = animation.frame(index, pixels: pixels) {
-                        await self?.decoded(index, image, generation: generation)
-                    }
-                } else {
-                    // A window ahead of the play head; frames behind it are dropped.
-                    let playHead = head.current
-                    if (next - playHead + count) % count >= Self.window {
-                        next = playHead
-                        try? await Task.sleep(for: .milliseconds(8))
-                        continue
-                    }
-                    let index = next % count
-                    next += 1
-                    if await self?.hasFrame(index) == true {
-                        continue
-                    }
+        if keepsAll {
+            // Every frame once; nothing to do when `prepare` or an earlier start got them all.
+            let missing = (0..<count).filter { frames[$0] == nil }
+            guard !missing.isEmpty else {
+                return
+            }
+            decoding.withLock { $0 = Task.detached(priority: .userInitiated) { [weak self] in
+                for index in missing where !Task.isCancelled {
                     if let image = animation.frame(index, pixels: pixels) {
                         await self?.decoded(index, image, generation: generation)
                     }
                 }
+                await self?.decodingEnded()
+            } }
+            return
+        }
+        let head = head
+        let present = present
+        decoding.withLock { $0 = Task.detached(priority: .userInitiated) { [weak self] in
+            // A window ahead of the play head; frames behind it are dropped by the player.
+            var next = 0
+            while !Task.isCancelled {
+                let playHead = head.current
+                if (next - playHead + count) % count >= Self.window {
+                    next = playHead
+                    try? await Task.sleep(for: .milliseconds(16))
+                    continue
+                }
+                let index = next % count
+                next += 1
+                if present.current.contains(index) {
+                    continue
+                }
+                if let image = animation.frame(index, pixels: pixels) {
+                    await self?.decoded(index, image, generation: generation)
+                }
             }
+        } }
+    }
+
+    private func stopDecoding() {
+        decoding.withLock { task in
+            task?.cancel()
+            task = nil
         }
     }
 
-    private func hasFrame(_ index: Int) -> Bool {
-        frames[index] != nil
+    private func decodingEnded() {
+        decoding.withLock { $0 = nil }
     }
 
     private func decoded(_ index: Int, _ image: CGImage, generation: Int) {
@@ -260,6 +293,7 @@ public final class FramePlayer {
             let playHead = head.current
             frames = frames.filter { (($0.key - playHead + count) % count) < Self.window }
         }
+        present.withLock { $0 = Set(frames.keys) }
         if isPlaying, index == dueIndex {
             show(index)
         }

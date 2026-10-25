@@ -149,7 +149,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         avatarBottom?.isActive = startsGroup
         top?.constant = startsGroup ? spacing + Self.groupInset : Self.continuationTop
         bottom?.constant = -(startsGroup ? Self.groupBottom : Self.continuationBottom)
-        avatar.show(ImageLayerView.Content(key: message.author.avatar))
+        avatar.show(startsGroup ? ImageLayerView.Content(key: message.author.avatar) : nil)
         header.show(
             name: name, tagged: message.author.bot || message.fromWebhook,
             time: groupTime, fullDate: fullDate)

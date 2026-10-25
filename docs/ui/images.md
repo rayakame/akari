@@ -42,7 +42,9 @@ Drawn size per place (the pixels asked on Retina in brackets):
   client's rule ([cdn.md](../protocol/cdn.md)). The official client bundles the same six
   pictures; Akari bundles nothing of Discord's (D154).
 - **While an avatar loads**, the box shows a disc in `avatarPlaceholder` (Discord's
-  `background-mod-subtle`); a failed avatar keeps the disc. No fade when it lands.
+  `background-mod-subtle`); a failed avatar keeps the disc, and asks again once the session is
+  back online. No fade when it lands. A box recycled for another person or server clears at
+  once; only the same subject's new picture keeps the old one until the new has decoded.
 - **Servers without an icon keep their initials** ([server-list.md](server-list.md)). A
   server's icon is drawn over the initials once it has decoded; a changed icon swaps only
   once the new one has decoded. Group DMs without an icon show the group symbol on a disc

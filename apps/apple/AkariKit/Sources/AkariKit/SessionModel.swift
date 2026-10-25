@@ -934,6 +934,9 @@ public final class SessionModel {
     public func setWindowVisible(_ visible: Bool) {
         let lost = windowVisible && !visible
         windowVisible = visible
+        if lost {
+            images.dropMedia()
+        }
         readingInputChanged(lost: lost)
     }
 
@@ -1014,9 +1017,13 @@ public final class SessionModel {
             if case .closed(let error) = state {
                 closed(error)
             } else {
+                let cameOnline = state == .online && connection != .online
                 connection = state
                 if state == .online {
                     wasOnline = true
+                }
+                if cameOnline {
+                    images.retryFailed()
                 }
             }
         }

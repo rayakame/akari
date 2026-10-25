@@ -289,6 +289,36 @@ final class ImageCacheTests {
         #expect(source.requests.current == [spec.request])
     }
 
+    // Un-hovering cancels the animated file's download, as it cancels a still's (D131).
+    @Test
+    func cancellingAnAnimationAskCancelsTheSourceCall() async throws {
+        let source = FakeImageSource.stalling()
+        let cache = ImageCache(source: source)
+        let spec = ImageSpec(key: .testAvatar(1), width: 16, height: 16, animated: .webP)
+
+        let ask = Task { try await cache.animation(spec) }
+        _ = await source.started.next()
+        ask.cancel()
+
+        await #expect(throws: CancellationError.self) { try await ask.value }
+        try await eventually { source.cancelled.current == 1 }
+    }
+
+    // Coming back online asks every failed box again; a hidden window drops the media tier.
+    @Test
+    func retryFailedSaysSoToItsViews() async throws {
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        let heard = Locked(0)
+        let token = NotificationCenter.default.addObserver(
+            forName: ImageCache.retryFailedNotification, object: cache, queue: .main
+        ) { [heard] _ in heard.withLock { $0 += 1 } }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        cache.retryFailed()
+
+        #expect(heard.current == 1)
+    }
+
     @Test
     func specsCarryTheirRequest() {
         let spec = ImageSpec(key: .testAvatar(1), width: 80, height: 40, animated: .gif)
@@ -316,4 +346,24 @@ struct ImageKeyMotionTests {
         #expect(!ImageKey.emoji(emojiId: EmojiId(rawValue: 1), animated: false).canAnimate)
         #expect(!ImageKey.defaultAvatar(index: 3).canAnimate)
     }
+
+    @Test
+    func theSameSubjectIsTheSameUserServerOrGroup() {
+        let ray = ImageKey.testAvatar(1)
+        let rayNew = ImageKey.avatar(userId: UserId(rawValue: 1), hash: "a_0123456789abcdef0123456789abcdef")
+        let rayInGuild = ImageKey.memberAvatar(
+            guildId: GuildId(rawValue: 5), userId: UserId(rawValue: 1), hash: "0123456789abcdef0123456789abcdef")
+        let mira = ImageKey.testAvatar(2)
+        #expect(ray.sameSubject(as: rayNew))
+        #expect(ray.sameSubject(as: rayInGuild))
+        #expect(!ray.sameSubject(as: mira))
+        #expect(!ray.sameSubject(as: .defaultAvatar(index: 0)))
+        #expect(!ImageKey.defaultAvatar(index: 0).sameSubject(as: .defaultAvatar(index: 1)))
+        let lab = ImageKey.guildIcon(guildId: GuildId(rawValue: 5), hash: "0123456789abcdef0123456789abcdef")
+        let labNew = ImageKey.guildIcon(guildId: GuildId(rawValue: 5), hash: "a_0123456789abcdef0123456789abcdef")
+        #expect(lab.sameSubject(as: labNew))
+        #expect(!lab.sameSubject(as: .guildIcon(guildId: GuildId(rawValue: 6), hash: "0123456789abcdef0123456789abcdef")))
+        #expect(!lab.sameSubject(as: ray))
+    }
+
 }
