@@ -32,6 +32,8 @@ pub fn unreachable_endpoints() -> Endpoints {
         gateway: format!("wss://{UNREACHABLE}/"),
         remote_auth: format!("wss://{UNREACHABLE}/?v=2"),
         origin: "https://discord.com".to_owned(),
+        cdn: format!("https://{UNREACHABLE}/"),
+        media: format!("https://{UNREACHABLE}/"),
     }
 }
 
@@ -111,12 +113,14 @@ pub async fn rest_server() -> wiremock::MockServer {
 pub fn rest_endpoints(server: &wiremock::MockServer) -> akari_core::Endpoints {
     akari_core::Endpoints {
         api: format!("{}/api/v9/", server.uri()),
+        cdn: format!("{}/", server.uri()),
+        media: format!("{}/", server.uri()),
         ..akari_core::Endpoints::default()
     }
 }
 
 pub fn unreachable_client(store: Arc<dyn TokenStore>) -> Arc<DiscordClient> {
-    DiscordClient::with_endpoints(host(), store, unreachable_endpoints(), None)
+    DiscordClient::with_endpoints(host(), store, unreachable_endpoints(), None, None)
         .unwrap_or_else(|err| panic!("client setup failed: {err}"))
 }
 

@@ -48,6 +48,8 @@ impl FakeGateway {
         akari_core::Endpoints {
             gateway: format!("ws://{}/", self.address),
             api: "http://127.0.0.1:9/api/v9/".to_owned(),
+            cdn: "http://127.0.0.1:9/".to_owned(),
+            media: "http://127.0.0.1:9/".to_owned(),
             ..akari_core::Endpoints::default()
         }
     }

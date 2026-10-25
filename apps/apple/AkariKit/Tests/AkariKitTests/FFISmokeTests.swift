@@ -109,4 +109,33 @@ struct FFISmokeTests {
             try await client.endSession(token: token)
         }
     }
+
+    @Test
+    func imagesCrossAsPendingRequests() async throws {
+        let store = MemoryTokenStore(tokens: [Self.user: "stored.token"])
+        let client = try Self.client(store)
+        let token = try #require(try await client.loadToken(account: Self.user))
+        let account = try client.account(token: token, userId: Self.user)
+        let request = ImageRequest(
+            key: .avatar(userId: Self.user, hash: "0123456789abcdef0123456789abcdef"),
+            width: 80, height: 80, animated: .webP)
+
+        let pending = account.requestImage(request: request)
+
+        await #expect(throws: ImageError.Unavailable) { try await pending.result() }
+        await #expect(throws: ImageError.Cancelled) { try await pending.result() }
+        account.close()
+    }
+
+    @Test
+    func placeholdersAndLayoutCross() throws {
+        let placeholder = try #require(placeholderImage(thumbhash: "6BdS9LIx6ztgCNvPNYoH8Kd5wr5s46fPJx0"))
+        #expect(placeholder.width == 32 && placeholder.height == 18)
+        #expect(placeholder.rgba.count == 32 * 18 * 4)
+
+        let mosaic = mediaMosaic(items: Array(repeating: MediaSize(width: 1000, height: 1000), count: 3))
+        #expect(mosaic.cells.map(\.width) == [364, 182, 182])
+        #expect(mediaContain(source: MediaSize(width: 1920, height: 1080), max: MediaSize(width: 550, height: 350))
+            == MediaSize(width: 550, height: 309))
+    }
 }

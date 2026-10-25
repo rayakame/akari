@@ -4,7 +4,8 @@ use akari_core::model::{ChannelId, GuildId, MessageId};
 use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
-use crate::errors::{CreateThreadError, GatewayError, RequestError};
+use crate::errors::{CreateThreadError, GatewayError, ImageError, RequestError};
+use crate::images::{ImageKey, ImageRequest, PendingImage};
 use crate::records::LoadReport;
 use crate::runtime::run;
 use crate::store::Store;
@@ -55,6 +56,46 @@ impl Account {
     /// Ends the session.
     pub fn close(&self) {
         self.core.close();
+    }
+
+    /// Starts getting the image for `request`: a kept file with enough pixels, else a download
+    /// from Discord, never with the token. Asks for the same image share a download. Offline,
+    /// only kept files answer.
+    pub fn request_image(&self, request: ImageRequest) -> Arc<PendingImage> {
+        PendingImage::start(self.core.clone(), request.into(), self.runtime)
+    }
+
+    /// A link to the original for Open in Browser and Copy Link; an attachment's link is
+    /// renewed when it's about to expire.
+    pub async fn original_url(&self, key: ImageKey) -> Result<String, ImageError> {
+        let core = self.core.clone();
+        let key = key.into();
+        run(self.runtime, async move { core.original_url(&key).await })
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Writes the original to the file at `destination`, whatever its size; returns its
+    /// bytes. Nothing is left there when it fails.
+    pub async fn save_original(
+        &self,
+        key: ImageKey,
+        destination: String,
+    ) -> Result<u64, ImageError> {
+        let core = self.core.clone();
+        let key = key.into();
+        run(self.runtime, async move {
+            core.save_original(&key, std::path::Path::new(&destination))
+                .await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Deletes the account's kept images.
+    pub async fn clear_images(&self) {
+        let core = self.core.clone();
+        run(self.runtime, async move { core.clear_images().await }).await;
     }
 
     /// Writes what changed to the disk cache now, e.g. before the app quits. Resolves when

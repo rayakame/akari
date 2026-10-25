@@ -202,10 +202,11 @@ read.
   typical message takes microseconds. Those count as event parses; a parse on read of something
   a load had parsed is a miss and logs one debug line at `akari_ffi::content` (the channel ID
   and the count).
-- **Swift task cancellation doesn't reach Rust** (UniFFI 0.32 doesn't support it). A request
-  runs to completion; a send that the host stopped waiting for still resolves through the
-  store. Waits end through explicit calls: `PasswordLogin.cancel()`, `QrLogin.cancel()`,
-  `StoreSubscription.close()`, `Account.close()`.
+- **Swift task cancellation doesn't reach Rust** (UniFFI 0.32's Swift glue awaits without a
+  cancellation handler and never cancels the Rust future). A request runs to completion; a
+  send that the host stopped waiting for still resolves through the store. Waits end through
+  explicit calls: `PasswordLogin.cancel()`, `QrLogin.cancel()`, `StoreSubscription.close()`,
+  `Account.close()`, and for images `PendingImage.cancel()` (below).
 
 ## IDs, errors and tokens
 
@@ -276,6 +277,38 @@ akari-core keeps one SQLite file per account ([cache.md](../../docs/protocol/cac
   that isn't open, e.g. at a login screen.
 
 All SQLite work runs on the cache's own thread, never on the runtime's workers or the caller's.
+
+## Images
+
+`DiscordClient`'s constructors take an `image_directory` too (on Apple, a folder in the caches
+directory); without one accounts have no images. akari-core keeps each account's images in a
+directory of its own there, downloads them without the token, renews signed attachment links
+and evicts past 256 MB ([cdn.md](../../docs/protocol/cdn.md)). No decoded image and no bytes
+cross the boundary: a file's path does.
+
+- An image is named by an `ImageKey` (Discord's IDs; hashes as Discord sends them).
+  `ImageRequest` adds the box's pixels (points times the backing scale, rounded up) and
+  `animated` (`None` for the still, else the `AnimatedFormat` the host's decoder shows right).
+- `Account.request_image(request)` returns a `PendingImage` at once. `result()` waits for the
+  `ImageFile` (path, the file's pixels, `animated`, `from_disk`), once; `cancel()`, or releasing
+  the object, stops waiting, and the download stops when nobody else waits. Swift calls
+  `cancel()` from its task's cancellation handler.
+- A file stays at least a minute after it's handed out; one gone at decode (the system purged
+  it) is asked for again.
+- `ImageError` says why there's none: `NotFound` (remembered for the session), `Unavailable`
+  (offline or failing: ask again online), `TooLarge`, `NotAnImage`, `UnknownKey` (the store
+  doesn't have the message), `Unsupported` (Lottie stickers, other hosts), `Io`, `Closed`,
+  `Cancelled`.
+- `Account.original_url(key)` gives a link for Open in Browser and Copy Link (attachments'
+  renewed when due); `Account.save_original(key, destination)` streams the original into a
+  file, whatever its size; `Account.clear_images()` empties the account's directory. Logout,
+  `forget_account` and `clear_caches` delete images as they delete the cache.
+- `placeholder_image(thumbhash)` decodes an attachment's placeholder as Discord's client
+  does, into at most 32 × 32 RGBA.
+- Layout from sizes alone (points), so a row's height is final before anything loads:
+  `media_contain`, `media_cover`, `media_box`, `media_mosaic`, `media_fit_width`,
+  `sticker_size`, `embed_image_size`, `embed_thumbnail_size`, `gallery_columns`,
+  `gallery_card_height`.
 
 ## Changing the API
 

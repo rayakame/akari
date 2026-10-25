@@ -6,6 +6,7 @@ mod client;
 mod contents;
 mod fake;
 mod formatted;
+mod images;
 mod login;
 mod messages;
 mod settings;

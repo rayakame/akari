@@ -28,6 +28,12 @@ pub struct Endpoints {
     pub remote_auth: String,
     /// The `Origin` header the remote auth gateway requires.
     pub origin: String,
+    /// Discord's CDN.
+    #[uniffi(default = "https://cdn.discordapp.com/")]
+    pub cdn: String,
+    /// Discord's media proxy.
+    #[uniffi(default = "https://media.discordapp.net/")]
+    pub media: String,
 }
 
 /// Discord's production endpoints.
@@ -39,6 +45,8 @@ pub fn discord_endpoints() -> Endpoints {
         gateway: endpoints.gateway,
         remote_auth: endpoints.remote_auth,
         origin: endpoints.origin,
+        cdn: endpoints.cdn,
+        media: endpoints.media,
     }
 }
 
@@ -68,23 +76,33 @@ impl DiscordClient {
     /// A client for Discord's production service. The first client starts Akari's
     /// background runtime. Fails on platforms Discord has no desktop client for. With
     /// `cache_directory`, each account's state is kept there in a file of its own; without
-    /// it nothing is written.
-    #[uniffi::constructor]
+    /// it nothing is written. With `image_directory`, each account's images are kept in a
+    /// directory of its own there (a caches directory the system may purge); without it
+    /// accounts have no images.
+    #[uniffi::constructor(default(image_directory = None))]
     pub fn new(
         host: HostInfo,
         token_store: Arc<dyn TokenStore>,
         cache_directory: Option<String>,
+        image_directory: Option<String>,
     ) -> Result<Arc<Self>, ClientError> {
-        Self::with_endpoints(host, token_store, discord_endpoints(), cache_directory)
+        Self::with_endpoints(
+            host,
+            token_store,
+            discord_endpoints(),
+            cache_directory,
+            image_directory,
+        )
     }
 
     /// For canary builds and tests; every endpoint must use TLS.
-    #[uniffi::constructor]
+    #[uniffi::constructor(default(image_directory = None))]
     pub fn with_endpoints(
         host: HostInfo,
         token_store: Arc<dyn TokenStore>,
         endpoints: Endpoints,
         cache_directory: Option<String>,
+        image_directory: Option<String>,
     ) -> Result<Arc<Self>, ClientError> {
         let runtime = runtime()?;
         let os = desktop_os().ok_or(ClientError::UnsupportedPlatform)?;
@@ -101,6 +119,8 @@ impl DiscordClient {
             gateway: endpoints.gateway,
             remote_auth: endpoints.remote_auth,
             origin: endpoints.origin,
+            cdn: endpoints.cdn,
+            media: endpoints.media,
             ..akari_core::Endpoints::default()
         };
         let mut core = akari_core::DiscordClient::with_endpoints(
@@ -110,6 +130,9 @@ impl DiscordClient {
         )?;
         if let Some(directory) = cache_directory {
             core = core.with_cache(directory.into());
+        }
+        if let Some(directory) = image_directory {
+            core = core.with_image_cache(directory.into());
         }
         Ok(Arc::new(Self { core, runtime }))
     }

@@ -25,3 +25,7 @@ extension RequestError: CustomStringConvertible, LocalizedError {
 extension GatewayError: CustomStringConvertible, LocalizedError {
     public var errorDescription: String? { description }
 }
+
+extension ImageError: CustomStringConvertible, LocalizedError {
+    public var errorDescription: String? { description }
+}
