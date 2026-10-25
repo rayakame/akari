@@ -57,6 +57,7 @@ final class ExpressionTests {
             view.widthAnchor.constraint(equalToConstant: 400),
         ])
         let message = row(1, at: list.noon, content: content).message
+        view.detectsExpressions = true
         view.show(MessageText.build(message, revealed: [], now: list.noon, times: times).text)
         container.layoutSubtreeIfNeeded()
         retained.append(window)
@@ -83,6 +84,56 @@ final class ExpressionTests {
         #expect(view.expression(at: try local(index(of: "🎉", in: view))) == nil, "code")
         #expect(view.expression(at: try local(index(of: "🍕", in: view))) == nil, "a hidden spoiler")
         #expect(view.expression(at: try local(index(of: "™", in: view))) == nil, "™ stays text")
+    }
+
+    // Only a message's own text offers emoji: a channel's start, a notice or a file's line
+    // doesn't open popouts, nor does the New Thread form's preview.
+    @Test
+    func onlyAMessagesTextKnowsItsEmoji() throws {
+        let plain = MessageTextView()
+        #expect(!plain.detectsExpressions)
+        let view = standalone("hi 😀")
+        view.detectsExpressions = false
+        #expect(view.expression(at: view.convert(try point(at: 3, in: view), from: nil)) == nil)
+        #expect(view.cursor(at: view.convert(try point(at: 3, in: view), from: nil)) != .pointingHand)
+
+        show("hi 😀")
+        #expect(try text().detectsExpressions)
+        let cell = MessageCell()
+        cell.expressionsEnabled = false
+        #expect(!(MessageMenuAreaTests.views(MessageTextView.self, in: cell).contains { $0.detectsExpressions }))
+    }
+
+    @Test
+    func keycapsAreEmoji() throws {
+        let view = standalone("1️⃣ and #️⃣ and 1 #")
+        let local = { (index: Int) in view.convert(try self.point(at: index, in: view), from: nil) }
+
+        #expect(view.expression(at: try local(0))?.target == .unicodeEmoji("1️⃣", name: "one"))
+        #expect(view.expression(at: try local(index(of: "#️⃣", in: view)))?.target == .unicodeEmoji("#️⃣", name: "hash"))
+        #expect(view.expression(at: try local((view.string as NSString).length - 1)) == nil, "a plain #")
+    }
+
+    // The card's animated emoji plays while the window is key, as in the message.
+    @Test
+    func theCardPlaysAnAnimatedEmoji() async throws {
+        list.show(
+            MessageTableState(
+                rows: [row(1, at: list.noon, content: "hi <a:dance:6> there")], reachedOldest: true,
+                images: ImageCacheRef(ImageCache(source: FakeImageSource.stalling())), focused: true))
+        let view = try text()
+        list.pointer.location = try point(at: 3, in: view)
+        list.controller.pointerMoved()
+        try await eventually { self.list.controller.hoverCard.shown != nil }
+
+        let panel = try #require(list.controller.hoverCard.panel)
+        let content = try #require(panel.contentView)
+        let layer = try #require(MessageMenuAreaTests.views(ImageLayerView.self, in: content).first)
+        #expect(layer.animates)
+
+        list.pointer.location = try point(at: 0, in: view)
+        list.controller.pointerMoved()
+        #expect(panel.contentView == nil, "a hidden card lets go of its image")
     }
 
     @Test
@@ -112,9 +163,9 @@ final class ExpressionTests {
         let panel = try #require(list.controller.hoverCard.panel)
         #expect(panel.isVisible)
         #expect(panel.ignoresMouseEvents)
-        let anchor = view.window!.convertToScreen(
-            NSRect(origin: try point(at: 3, in: view), size: .zero))
-        #expect(panel.frame.minY > anchor.minY, "above the emoji")
+        let emoji = try #require(view.expression(at: view.convert(try point(at: 3, in: view), from: nil)))
+        let box = view.window!.convertToScreen(view.convert(emoji.rect, to: nil))
+        #expect(panel.frame.minY >= box.maxY, "above the emoji, not over it")
 
         list.pointer.location = try point(at: 0, in: view)
         list.controller.pointerMoved()
@@ -168,6 +219,83 @@ final class ExpressionTests {
                 charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
         reopened.sendEvent(escape)
         #expect(presenter.windows.panel == nil)
+    }
+
+    // "Show More" grows the popout around the item, inside the window.
+    @Test
+    func showMoreGrowsThePopoutAroundTheItem() async throws {
+        let window = list.window
+        let presenter = ExpressionPopoutPresenter()
+        presenter.windows.focus = WindowFocus(makeKey: { _ in })
+        final class Hub: ExpressionLookups {
+            func emojiSource(emojiId: EmojiId) async throws -> EmojiSource {
+                .guild(guild: SourceGuild(
+                    id: GuildId(rawValue: 60), name: "Hub", icon: nil, discoverable: true, verified: false,
+                    partnered: false, presenceCount: 10,
+                    emojis: (0..<20).map { SourceEmoji(id: EmojiId(rawValue: UInt64(100 + $0)), name: "e", animated: false, key: .emoji(emojiId: EmojiId(rawValue: UInt64(100 + $0)), animated: false)) },
+                    stickers: []))
+            }
+            func sticker(stickerId: StickerId) async throws -> StickerDetails { throw RequestError.UnexpectedResponse }
+            func stickerGuild(stickerId: StickerId) async throws -> SourceGuild { throw RequestError.UnexpectedResponse }
+            func stickerPack(packId: StickerPackId) async throws -> StickerPack { throw RequestError.UnexpectedResponse }
+        }
+        struct Nowhere: ExpressionStore {
+            func emojiGuild(emojiId: EmojiId) -> GuildId? { nil }
+            func guild(id: GuildId) -> Guild? { nil }
+            func nitro() -> Nitro { .none }
+        }
+        let model = ExpressionPopoutModel(
+            target: .customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false), channelGuild: nil,
+            store: Nowhere(), lookups: Hub())
+        let anchor = NSRect(x: 100, y: 200, width: 22, height: 22)
+        presenter.show(model, anchor: anchor, in: window, images: nil)
+        try await eventually { model.content.loading == false && presenter.windows.panel != nil }
+        try await Task.sleep(for: .milliseconds(30))
+        let before = try #require(presenter.windows.panel).frame
+
+        presenter.toggleMore()
+
+        let after = try #require(presenter.windows.panel).frame
+        #expect(after.height > before.height + 30)
+        let item = window.convertToScreen(anchor)
+        #expect(abs(after.midY - item.midY) < 1 || after.minY >= window.frame.minY + 8)
+        #expect(after.minY >= window.frame.minY + 8 - 1 && after.maxY <= window.frame.maxY - 8 + 1)
+        presenter.close()
+    }
+
+    // The card sits above the item, flips below at the top of the screen, stays on the item's
+    // screen, and its arrow points at the item when the card is pushed in from an edge.
+    @Test
+    func theCardsPlacement() {
+        let screen = NSRect(x: 0, y: 0, width: 1000, height: 800)
+        let size = NSSize(width: 200, height: 70)
+
+        let middle = ExpressionHoverCard.placement(
+            anchor: NSRect(x: 400, y: 300, width: 22, height: 22), size: size, screen: screen)
+        #expect(!middle.below)
+        #expect(middle.frame.minY == 322 + ExpressionHoverCard.gap)
+        #expect(middle.frame.midX == 411)
+        #expect(middle.arrowX == 100)
+
+        let top = ExpressionHoverCard.placement(
+            anchor: NSRect(x: 400, y: 760, width: 22, height: 22), size: size, screen: screen)
+        #expect(top.below)
+        #expect(top.frame.maxY == 760 - ExpressionHoverCard.gap)
+
+        let edge = ExpressionHoverCard.placement(
+            anchor: NSRect(x: 10, y: 300, width: 22, height: 22), size: size, screen: screen)
+        #expect(edge.frame.minX == 4)
+        #expect(abs(edge.arrowX - 17) < 0.001, "\(edge)")
+    }
+
+    // A sticker is a button VoiceOver names; it isn't a Tab stop among the messages.
+    @Test
+    func aStickerIsNamedForVoiceOver() throws {
+        show("hi", stickers: ["wave"])
+        let sticker = try #require(MessageMenuAreaTests.views(StickerView.self, in: try list.cell(of: 1)).first)
+
+        #expect(sticker.accessibilityLabel() == "Sticker, wave")
+        #expect(sticker.refusesFirstResponder)
     }
 
     @Test

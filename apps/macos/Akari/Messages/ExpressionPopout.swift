@@ -9,7 +9,11 @@ import SwiftUI
 final class ExpressionPopoutPresenter {
     let windows = ChildWindows(keyable: true)
     private(set) var model: ExpressionPopoutModel?
+    /// "Show More" is open.
+    private(set) var expanded = false
     var openGuild: (GuildId) -> Void = { _ in }
+    var motion = MotionPolicy.default
+    var focused = false
     private var anchor = NSRect.zero
     private weak var window: NSWindow?
     private var images: ImageCache?
@@ -24,6 +28,7 @@ final class ExpressionPopoutPresenter {
     func show(_ model: ExpressionPopoutModel, anchor: NSRect, in window: NSWindow, images: ImageCache?) {
         loading?.cancel()
         self.model = model
+        expanded = false
         self.anchor = anchor
         self.window = window
         self.images = images
@@ -50,7 +55,9 @@ final class ExpressionPopoutPresenter {
         windows.tearDown(refocus: true)
     }
 
-    func relayout() {
+    /// "Show More": the popout grows around the item.
+    func toggleMore() {
+        expanded.toggle()
         place()
     }
 
@@ -59,10 +66,12 @@ final class ExpressionPopoutPresenter {
             return
         }
         let view = ExpressionPopoutView(
-            model: model, openServer: { [weak self] in self?.openServer($0) },
-            resized: { [weak self] in self?.relayout() }
+            model: model, expanded: expanded, openServer: { [weak self] in self?.openServer($0) },
+            toggleMore: { [weak self] in self?.toggleMore() }
         )
         .environment(\.imageCache, images)
+        .environment(\.motion, motion)
+        .environment(\.windowFocused, focused)
         let measure = NSHostingController(rootView: view)
         let height = measure.sizeThatFits(
             in: CGSize(width: ExpressionPopoutView.width, height: CGFloat.greatestFiniteMagnitude)
@@ -76,7 +85,9 @@ final class ExpressionPopoutPresenter {
         }
         origin.y = min(max(origin.y, frame.minY + 8), frame.maxY - size.height - 8)
         windows.show(
-            AnyView(view), at: NSRect(origin: origin, size: size).integral, in: window, dimmed: false)
+            AnyView(view),
+            at: NSRect(origin: NSPoint(x: origin.x.rounded(), y: origin.y.rounded()), size: size), in: window,
+            dimmed: false)
     }
 }
 
@@ -85,9 +96,9 @@ final class ExpressionPopoutPresenter {
 struct ExpressionPopoutView: View {
     static let width: CGFloat = 288
     let model: ExpressionPopoutModel
+    let expanded: Bool
     let openServer: (GuildId) -> Void
-    let resized: () -> Void
-    @State private var expanded = false
+    let toggleMore: () -> Void
 
     private var content: ExpressionPopout { model.content }
 
@@ -102,7 +113,6 @@ struct ExpressionPopoutView: View {
         .background(Color(nsColor: Palette.surfaceHigh))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: Palette.borderSubtle)) }
-        .onChange(of: expanded) { resized() }
     }
 
     private var top: some View {
@@ -170,10 +180,16 @@ struct ExpressionPopoutView: View {
                     openServer(server.id)
                 }
             }
+            .accessibilityElement(children: .combine)
             .accessibilityAddTraits(server.opens ? .isButton : [])
+            .accessibilityAction {
+                if server.opens {
+                    openServer(server.id)
+                }
+            }
             if let label = content.moreLabel, let more = content.more {
                 Button {
-                    expanded.toggle()
+                    toggleMore()
                 } label: {
                     HStack(spacing: 4) {
                         Text(label)
@@ -215,7 +231,7 @@ struct ExpressionPopoutView: View {
     @ViewBuilder private func pictureView(_ picture: ExpressionPopout.Picture) -> some View {
         switch picture {
         case .emoji(let key):
-            RemoteImage(key: key, fit: .contain).frame(width: 48, height: 48)
+            RemoteImage(key: key, place: .emoji, hovered: true, fit: .contain).frame(width: 48, height: 48)
         case .glyph(let glyph):
             Text(glyph).font(.system(size: 40)).frame(width: 48, height: 48)
         case .sticker(let sticker):

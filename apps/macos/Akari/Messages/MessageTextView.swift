@@ -10,6 +10,8 @@ final class MessageTextView: NSTextView {
     var onLink: (URL) -> Void = { _ in }
     /// A click on a custom or Unicode emoji, with its box in window coordinates.
     var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
+    /// A message's own text, whose emoji show the hand, a hover card and a popout.
+    var detectsExpressions = false
     /// On a link Discord underlines while the pointer is over it.
     static let underlinesOnHover = NSAttributedString.Key("akari.underlinesOnHover")
     private var underlined: NSRange?
@@ -336,7 +338,8 @@ final class MessageTextView: NSTextView {
     /// A custom or Unicode emoji under `point` (this view's coordinates), with its box: one in
     /// a link, inline code, a code block or a hidden spoiler is that, not an emoji.
     func expression(at point: NSPoint) -> (target: ExpressionTarget, rect: NSRect)? {
-        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0
+        guard detectsExpressions, let layoutManager, let textContainer, let storage = textStorage,
+            storage.length > 0
         else {
             return nil
         }
@@ -359,8 +362,10 @@ final class MessageTextView: NSTextView {
         }
         let range = (storage.string as NSString).rangeOfComposedCharacterSequence(at: index)
         let glyph = (storage.string as NSString).substring(with: range)
-        // ASCII is never an emoji; the name lookup crosses into Rust.
-        guard glyph.unicodeScalars.first.map({ $0.value >= 0xA9 }) == true,
+        // A lone ASCII character is never an emoji (a keycap is a digit and two more); the name
+        // lookup crosses into Rust.
+        let scalars = glyph.unicodeScalars
+        guard scalars.count > 1 || scalars.first.map({ $0.value >= 0xA9 }) == true,
             let name = emojiShortcode(emoji: glyph)
         else {
             return nil

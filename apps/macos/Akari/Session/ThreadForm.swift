@@ -626,6 +626,7 @@ final class MessagePreviewView: NSView, CursorAuthority {
 
     init() {
         super.init(frame: .zero)
+        cell.expressionsEnabled = false
         addSubview(cell)
     }
 

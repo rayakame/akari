@@ -1424,22 +1424,31 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         hoveredBox = box
         target?.cursor.set()
         hoverCard.images = state.images.cache
+        hoverCard.motion = state.motion
+        hoverCard.focused = state.focused
         hoverCard.hover(
             expressionPopout.windows.panel == nil ? location.flatMap { hoverItem(at: $0, over: target?.view) } : nil,
             in: tableView.window)
     }
 
-    // The emoji or sticker under the pointer, with its box in window coordinates.
+    // The emoji or sticker under the pointer, with the part of its box the list shows, in
+    // window coordinates.
     private func hoverItem(at location: NSPoint, over view: NSView?) -> (target: ExpressionTarget, rect: NSRect)? {
-        if let text = view as? MessageTextView,
-            let hit = text.expression(at: text.convert(location, from: nil))
-        {
-            return (hit.target, text.convert(hit.rect, to: nil))
+        let item: (ExpressionTarget, NSRect)? =
+            if let text = view as? MessageTextView,
+                let hit = text.expression(at: text.convert(location, from: nil))
+            {
+                (hit.target, text.convert(hit.rect, to: nil))
+            } else if let sticker = view as? StickerView, let shown = sticker.sticker {
+                (.sticker(shown), sticker.convert(sticker.bounds, to: nil))
+            } else {
+                nil
+            }
+        guard let (target, rect) = item else {
+            return nil
         }
-        if let sticker = view as? StickerView, let shown = sticker.sticker {
-            return (.sticker(shown), sticker.convert(sticker.bounds, to: nil))
-        }
-        return nil
+        let shown = rect.intersection(tableView.convert(tableView.visibleRect, to: nil))
+        return shown.isEmpty ? nil : (target, shown)
     }
 
     // A click on an emoji or a sticker: its popout, beside it.
@@ -1449,6 +1458,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return
         }
         expressionPopout.openGuild = { [weak self] in self?.actions?.openGuild($0) }
+        expressionPopout.motion = state.motion
+        expressionPopout.focused = state.focused
         expressionPopout.show(model, anchor: rect, in: window, images: state.images.cache)
     }
 

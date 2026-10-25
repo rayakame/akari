@@ -61,6 +61,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     var onLink: (URL) -> Void = { _ in }
     /// A click on an emoji or a sticker, with its box in window coordinates.
     var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
+    /// The text's emoji offer hover cards and popouts; not in the New Thread form's preview.
+    var expressionsEnabled = true {
+        didSet { content.detectsExpressions = expressionsEnabled }
+    }
     private var message: Message?
     private var mentioned = false {
         didSet {
@@ -399,6 +403,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     private func build() {
         content.onLink = { [weak self] url in self?.onLink(url) }
         content.onExpression = { [weak self] target, rect in self?.onExpression(target, rect) }
+        content.detectsExpressions = expressionsEnabled
         content.messageMenu = { [weak self] in
             guard let self, let message else {
                 return []

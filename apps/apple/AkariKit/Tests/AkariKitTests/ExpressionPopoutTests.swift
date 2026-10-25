@@ -29,11 +29,20 @@ struct ExpressionPopoutTests {
         var stickerGuild: Result<SourceGuild, Error> = .failure(RequestError.UnexpectedResponse)
         var pack: Result<StickerPack, Error> = .failure(RequestError.UnexpectedResponse)
         var delay: Duration = .zero
+        // UniFFI's futures ignore cancellation: a wait that only time ends.
+        var deaf = false
         let asked = Locked<[String]>([])
 
         func emojiSource(emojiId: EmojiId) async throws -> EmojiSource {
             asked.withLock { $0.append("source") }
-            try await Task.sleep(for: delay)
+            if deaf {
+                let seconds = Double(delay.components.seconds)
+                await withCheckedContinuation { continuation in
+                    DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { continuation.resume() }
+                }
+            } else {
+                try await Task.sleep(for: delay)
+            }
             return try source.get()
         }
 
@@ -231,6 +240,26 @@ struct ExpressionPopoutTests {
 
         #expect(model.content.server == nil)
         #expect(!model.content.loading)
+    }
+
+    // The real call can't be cancelled (UniFFI's futures don't cancel): the limit stops waiting
+    // for it all the same.
+    @Test
+    func theLimitHoldsForACallThatIgnoresCancellation() async {
+        let lookups = Lookups()
+        lookups.source = .success(.guild(guild: Self.hubGuild()))
+        lookups.delay = .seconds(2)
+        lookups.deaf = true
+        let model = ExpressionPopoutModel(
+            target: wave, channelGuild: Self.here, store: Store(), lookups: lookups,
+            sourceTimeout: .milliseconds(50))
+        let started = ContinuousClock.now
+
+        await model.load()
+
+        #expect(ContinuousClock.now - started < .milliseconds(1000))
+        #expect(!model.content.loading)
+        #expect(model.content.server == nil)
     }
 
     @Test

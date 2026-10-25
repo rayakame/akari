@@ -118,6 +118,8 @@ final class StickerView: NSButton {
         setButtonType(.momentaryChange)
         target = self
         action = #selector(clicked)
+        // The messages aren't Tab stops; VoiceOver presses it.
+        refusesFirstResponder = true
         wantsLayer = true
         layer?.cornerRadius = 8
         picture.placeholder = .none
@@ -159,6 +161,7 @@ final class StickerView: NSButton {
 
     func configure(_ sticker: Sticker?) {
         self.sticker = sticker
+        setAccessibilityLabel(sticker.map { "Sticker, \($0.name)" })
         guard let sticker, sticker.format != .lottie else {
             picture.show(nil)
             updateBox()

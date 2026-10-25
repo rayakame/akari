@@ -274,20 +274,22 @@ public final class ExpressionPopoutModel {
         return nil
     }
 
-    // The answer, or `nil` after a failure or `limit` (Discord's call keeps running: UniFFI's
-    // futures don't cancel).
+    // The answer, or `nil` after a failure or `limit`. A task group would wait for the call,
+    // which UniFFI's futures never let go of; two loose tasks race, the first one answers.
     private static func within<T: Sendable>(
         _ limit: Duration, _ work: @escaping @Sendable () async throws -> T
     ) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { try? await work() }
-            group.addTask {
-                try? await Task.sleep(for: limit)
-                return nil
+        let answered = OnceBox<T?>()
+        return await withCheckedContinuation { continuation in
+            answered.waiting(continuation)
+            let call = Task {
+                answered.answer(try? await work())
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
+            Task {
+                try? await Task.sleep(for: limit)
+                answered.answer(nil)
+                call.cancel()
+            }
         }
     }
 }
@@ -338,5 +340,23 @@ enum ExpressionText {
 
     static func unavailable(_ words: Words) -> String {
         "This \(words.noun) is from a server that is either invite-only or unavailable."
+    }
+}
+
+// A continuation resumed by the first answer only.
+private final class OnceBox<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+
+    func waiting(_ continuation: CheckedContinuation<T, Never>) {
+        lock.withLock { self.continuation = continuation }
+    }
+
+    func answer(_ value: T) {
+        let waiting = lock.withLock {
+            defer { continuation = nil }
+            return continuation
+        }
+        waiting?.resume(returning: value)
     }
 }

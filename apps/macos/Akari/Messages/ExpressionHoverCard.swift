@@ -9,6 +9,8 @@ import SwiftUI
 final class ExpressionHoverCard {
     var delay: Duration = .milliseconds(300)
     var images: ImageCache?
+    var motion = MotionPolicy.default
+    var focused = false
     private(set) var shown: ExpressionCard?
     private(set) var panel: NSPanel?
     private var pending: (target: ExpressionTarget, rect: NSRect)?
@@ -43,22 +45,54 @@ final class ExpressionHoverCard {
         if let panel {
             panel.parent?.removeChildWindow(panel)
             panel.orderOut(nil)
+            // Its image goes with it: the cache may let it go.
+            panel.contentView = nil
         }
+    }
+
+    /// Where a card of `size` (its arrow included) goes for an item at `anchor` (screen
+    /// coordinates) on a screen whose visible part is `screen`: above it, below it when there's no
+    /// room above, pushed in from the sides, the arrow still at the item.
+    struct Placement: Equatable {
+        let frame: NSRect
+        let below: Bool
+        /// The arrow's middle, from the card's left edge.
+        let arrowX: CGFloat
+    }
+
+    static func placement(anchor: NSRect, size: NSSize, screen: NSRect) -> Placement {
+        let inset: CGFloat = 4
+        let x = min(max(anchor.midX - size.width / 2, screen.minX + inset), screen.maxX - size.width - inset)
+        let above = anchor.maxY + gap
+        let below = above + size.height > screen.maxY
+        let y = below ? anchor.minY - gap - size.height : above
+        let edge = ExpressionCardView.arrow.width / 2 + 4
+        let arrowX = min(max(anchor.midX - x, edge), size.width - edge)
+        return Placement(
+            frame: NSRect(x: x, y: y, width: size.width, height: size.height), below: below,
+            arrowX: arrowX)
     }
 
     private func present(_ item: (target: ExpressionTarget, rect: NSRect), in window: NSWindow) {
         let card = item.target.card
+        let anchor = window.convertToScreen(item.rect)
+        let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? window.screen
+        let measure = NSHostingView(rootView: ExpressionCardView(card: card))
+        let place = Self.placement(
+            anchor: anchor, size: measure.fittingSize, screen: screen?.visibleFrame ?? window.frame)
         let host = NSHostingView(
-            rootView: ExpressionCardView(card: card).environment(\.imageCache, images))
-        let size = host.fittingSize
+            rootView: ExpressionCardView(card: card, below: place.below, arrowX: place.arrowX)
+                .environment(\.imageCache, images)
+                .environment(\.motion, motion)
+                .environment(\.windowFocused, focused))
         let panel = self.panel ?? Self.makePanel()
         panel.contentView = host
         panel.appearance = window.effectiveAppearance
-        let anchor = window.convertToScreen(item.rect)
-        let bounds = window.screen?.visibleFrame ?? window.frame
-        let x = min(max(anchor.midX - size.width / 2, bounds.minX + 4), bounds.maxX - size.width - 4)
+        let frame = place.frame
         panel.setFrame(
-            NSRect(x: x.rounded(), y: (anchor.maxY + Self.gap).rounded(), width: size.width, height: size.height),
+            NSRect(
+                x: frame.minX.rounded(), y: frame.minY.rounded(), width: frame.width.rounded(.up),
+                height: frame.height.rounded(.up)),
             display: true)
         if panel.parent !== window {
             panel.parent?.removeChildWindow(panel)
@@ -87,10 +121,17 @@ final class ExpressionHoverCard {
 /// sticker's symbol and name over it (240 at most); an arrow under it toward the item.
 struct ExpressionCardView: View {
     let card: ExpressionCard
+    /// Under the item instead of over it: the arrow points up.
+    var below = false
+    /// The arrow's middle from the card's left; `nil` centers it.
+    var arrowX: CGFloat?
     static let arrow = CGSize(width: 16, height: 10)
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
+            if below {
+                arrowRow
+            }
             content
                 .padding(.vertical, 8)
                 .padding(.horizontal, 12)
@@ -98,13 +139,23 @@ struct ExpressionCardView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: Palette.borderSubtle))
                 }
+            if !below {
+                arrowRow
+            }
+        }
+        .fixedSize()
+    }
+
+    private var arrowRow: some View {
+        GeometryReader { proxy in
             Arrow()
                 .fill(Color(nsColor: Palette.surfaceHigh))
                 .overlay { Arrow().stroke(Color(nsColor: Palette.borderSubtle), lineWidth: 1) }
                 .frame(width: Self.arrow.width, height: Self.arrow.height)
-                .offset(y: -1)
+                .rotationEffect(.degrees(below ? 180 : 0))
+                .offset(x: (arrowX ?? proxy.size.width / 2) - Self.arrow.width / 2, y: below ? 1 : -1)
         }
-        .fixedSize()
+        .frame(height: Self.arrow.height)
     }
 
     @ViewBuilder private var content: some View {
@@ -149,7 +200,7 @@ struct ExpressionCardView: View {
     @ViewBuilder private var picture: some View {
         switch card.picture {
         case .image(let key):
-            RemoteImage(key: key, fit: .contain).frame(width: 48, height: 48)
+            RemoteImage(key: key, place: .emoji, hovered: true, fit: .contain).frame(width: 48, height: 48)
         case .glyph(let glyph):
             Text(glyph).font(.system(size: 40)).frame(width: 48, height: 48)
         case .stickerSymbol:
