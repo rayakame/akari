@@ -58,6 +58,48 @@ final class SessionModelTests {
         session.close()
     }
 
+    // The motion policy follows the display settings: read at the start, again when they change.
+    @Test
+    func theMotionPolicyFollowsTheDisplaySettings() {
+        store.update { state in
+            state.connection = .online
+            state.currentUser = user(1)
+            state.displaySettings.gifAutoPlay = false
+        }
+        let session = makeSession()
+        session.start()
+
+        #expect(store.log.calls.contains(.read(.displaySettings)))
+        #expect(!session.motion.gifAutoPlay)
+        #expect(session.motion.animateStickers == .always)
+
+        store.update { $0.displaySettings.animateStickers = .never }
+        session.apply(EventBatch([.guildSettingsChanged(guildId: nil)]))
+        #expect(session.motion.animateStickers == .always, "not this event")
+        session.apply(EventBatch([.displaySettingsChanged]))
+        #expect(session.motion.animateStickers == .never)
+
+        store.update { $0.displaySettings.animateEmoji = false }
+        session.apply(EventBatch([.ready]))
+        #expect(!session.motion.animateEmoji)
+
+        session.setReduceMotion(true)
+        #expect(session.motion.reduceMotion)
+        #expect(!session.motion.animateEmoji)
+        session.close()
+    }
+
+    @Test
+    func theSessionsImagesAskTheAccount() async throws {
+        let session = makeSession()
+        let spec = ImageSpec(key: .testAvatar(1), width: 80, height: 80)
+
+        await #expect(throws: ImageError.Unavailable) { try await session.images.image(spec) }
+
+        #expect(account.imageRequests.current == [spec.request])
+        session.close()
+    }
+
     @Test
     func startSubscribesBeforeReadingThenConnects() {
         store.update { state in

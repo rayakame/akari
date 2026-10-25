@@ -33,6 +33,7 @@ final class CallLog: Sendable {
         case guildIds
         case serverList
         case guildSettings(GuildId?)
+        case displaySettings
         case mutedChannels([ChannelId])
         case guild(GuildId)
         case unavailableGuildIds

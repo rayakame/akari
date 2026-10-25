@@ -45,6 +45,17 @@ func settings(
     )
 }
 
+/// Discord's defaults, as the core gives them without the field.
+func displayDefaults() -> DisplaySettings {
+    DisplaySettings(
+        renderSpoilers: .onClick, viewImageDescriptions: false, inlineAttachmentMedia: true,
+        inlineEmbedMedia: true, gifAutoPlay: true, renderEmbeds: true, animateEmoji: true,
+        animateStickers: .always, explicitContentFilter: .nonFriends,
+        explicitContent: .init(guilds: .unset, friendDm: .unset, nonFriendDm: .unset),
+        gore: .init(guilds: .unset, friendDm: .unset, nonFriendDm: .unset),
+        selfHarm: .init(guilds: .unset, friendDm: .unset, nonFriendDm: .unset))
+}
+
 func folder(_ raw: Int64, _ guilds: [UInt64], name: String? = nil) -> ServerListItem {
     .folder(folder: Folder(id: raw, name: name, color: nil, guildIds: guilds.map(id)))
 }

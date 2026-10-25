@@ -57,6 +57,17 @@ final class FakeAccount: Account, @unchecked Sendable {
         fakeStore
     }
 
+    // Images: what each request gets; nothing by default, as offline.
+    let imageAnswer = Locked<@Sendable (ImageRequest) async throws -> ImageFile>({ _ in
+        throw ImageError.Unavailable
+    })
+    let imageRequests = Locked<[ImageRequest]>([])
+
+    override func requestImage(request: ImageRequest) -> PendingImage {
+        imageRequests.withLock { $0.append(request) }
+        return FakePendingImage(request: request, answer: imageAnswer.current)
+    }
+
     override func connect() throws {
         log.append(.connect)
         if let error = connectError.current {
@@ -360,5 +371,42 @@ final class FakeAccount: Account, @unchecked Sendable {
         if holdFlushes.current {
             _ = await flushes.next()
         }
+    }
+}
+
+// A request's answer, computed when `result()` is awaited; `cancel()` cancels that work.
+final class FakePendingImage: PendingImage, @unchecked Sendable {
+    private let request: ImageRequest
+    private let answer: @Sendable (ImageRequest) async throws -> ImageFile
+    private let work = Locked<Task<ImageFile, Error>?>(nil)
+
+    init(request: ImageRequest, answer: @escaping @Sendable (ImageRequest) async throws -> ImageFile) {
+        self.request = request
+        self.answer = answer
+        super.init(noHandle: NoHandle())
+    }
+
+    required init(unsafeFromHandle handle: UInt64) {
+        fatalError("a fake has no Rust object")
+    }
+
+    override func result() async throws -> ImageFile {
+        let task = work.withLock { current -> Task<ImageFile, Error> in
+            if let current {
+                return current
+            }
+            let task = Task { [request, answer] in try await answer(request) }
+            current = task
+            return task
+        }
+        do {
+            return try await task.value
+        } catch is CancellationError {
+            throw ImageError.Cancelled
+        }
+    }
+
+    override func cancel() {
+        work.current?.cancel()
     }
 }
