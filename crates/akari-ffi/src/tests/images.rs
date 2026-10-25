@@ -10,7 +10,8 @@ use super::support::{MemoryStore, USER, core_client, token};
 use crate::client::DiscordClient;
 use crate::errors::ImageError;
 use crate::images::{
-    ImageKey, ImageRequest, MediaSize, Pending, gallery_columns, media_mosaic, placeholder_image,
+    EmbedSlot, ImageKey, ImageRequest, MediaSize, Pending, gallery_columns, media_mosaic,
+    placeholder_image,
 };
 
 const AVATAR: &str = "/avatars/100000000000000002/0123456789abcdef0123456789abcdef.webp";
@@ -139,6 +140,66 @@ async fn records_carry_their_image_keys() {
     let group = store.channel(akari_core::model::ChannelId::new(300_000_000_000_000_011));
     assert_eq!(group.unwrap().icon, None);
     account.close();
+}
+
+#[test]
+fn every_image_key_round_trips() {
+    let keys = [
+        ImageKey::Avatar {
+            user_id: USER,
+            hash: "0123456789abcdef0123456789abcdef".to_owned(),
+        },
+        ImageKey::MemberAvatar {
+            guild_id: super::fake::GUILD,
+            user_id: USER,
+            hash: "a_0123456789abcdef0123456789abcdef".to_owned(),
+        },
+        ImageKey::DefaultAvatar { index: 3 },
+        ImageKey::GuildIcon {
+            guild_id: super::fake::GUILD,
+            hash: "00000000000000000000000000000001".to_owned(),
+        },
+        ImageKey::GroupIcon {
+            channel_id: akari_core::model::ChannelId::new(300_000_000_000_000_011),
+            hash: "00000000000000000000000000000002".to_owned(),
+        },
+        ImageKey::RoleIcon {
+            role_id: akari_core::model::RoleId::new(500_000_000_000_000_002),
+            hash: "00000000000000000000000000000003".to_owned(),
+        },
+        ImageKey::Emoji {
+            emoji_id: akari_core::model::EmojiId::new(600_000_000_000_000_001),
+            animated: true,
+        },
+        ImageKey::Sticker {
+            sticker_id: akari_core::model::StickerId::new(700_000_000_000_000_001),
+            format: akari_core::model::StickerFormatType::Lottie,
+        },
+        ImageKey::Attachment {
+            channel_id: akari_core::model::ChannelId::new(300_000_000_000_000_002),
+            message_id: akari_core::model::MessageId::new(400_000_000_000_000_001),
+            attachment_id: akari_core::model::AttachmentId::new(800_000_000_000_000_001),
+        },
+    ];
+    for key in keys {
+        let core: akari_core::media::ImageKey = key.clone().into();
+        assert_eq!(ImageKey::from(core), key);
+    }
+    for slot in [
+        EmbedSlot::Image,
+        EmbedSlot::Thumbnail,
+        EmbedSlot::AuthorIcon,
+        EmbedSlot::FooterIcon,
+    ] {
+        let key = ImageKey::EmbedMedia {
+            channel_id: akari_core::model::ChannelId::new(300_000_000_000_000_002),
+            message_id: akari_core::model::MessageId::new(400_000_000_000_000_001),
+            embed: 2,
+            slot,
+        };
+        let core: akari_core::media::ImageKey = key.clone().into();
+        assert_eq!(ImageKey::from(core), key);
+    }
 }
 
 #[tokio::test]

@@ -211,11 +211,13 @@ async fn the_settings_events_carry_ids_only() {
     account.close();
 }
 
-// text_and_images (6): gif_auto_play (11) off, animate_stickers (15) never.
+// text_and_images (6): gif_auto_play (11) off, animate_emoji (14) off, animate_stickers (15)
+// never.
 fn quiet_display_proto() -> String {
     let gif = bytes_field(11, &varint_field(1, 0));
+    let emoji = bytes_field(14, &varint_field(1, 0));
     let stickers = bytes_field(15, &varint_field(1, 2));
-    STANDARD.encode(bytes_field(6, &[gif, stickers].concat()))
+    STANDARD.encode(bytes_field(6, &[gif, emoji, stickers].concat()))
 }
 
 #[tokio::test]
@@ -273,7 +275,8 @@ async fn display_settings_cross_with_their_event() {
 
     let display = store.display_settings();
     assert!(!display.gif_auto_play);
+    assert!(!display.animate_emoji);
     assert_eq!(display.animate_stickers, StickerAnimation::Never);
-    assert!(display.animate_emoji);
+    assert!(display.render_embeds);
     account.close();
 }

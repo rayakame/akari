@@ -447,7 +447,7 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
         ]
         .into(),
         notification_flags: 16,
-        unreadable_folders: false,
+        unreadable: false,
     };
     entities
 }

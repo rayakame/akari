@@ -73,9 +73,9 @@ partial one keeps them, and the disk cache keeps them for the next launch, as th
   ([User Settings Proto Update](https://docs.discord.food/gateway/gateway-events#user-settings-proto-update)).
   Akari replaces the folders when the update carries field 14, keeps them when a partial
   one doesn't, and clears them when a full one doesn't. Other types are ignored.
-- **A proto that doesn't decode** changes nothing: READY keeps the folders the store had
-  (from the last session or the disk cache), an update is skipped. Both log a warning with
-  the byte offset, never the bytes.
+- **A proto that doesn't decode** changes nothing: READY keeps the folders and display
+  settings the store had (from the last session or the disk cache), an update is skipped. Both
+  log a warning with the byte offset, never the bytes.
 - **Status.** The chosen status lives here too (field 11), so another device's status
   survives Akari connecting (see [gateway.md](gateway.md#presence)). Not read yet.
 - **Writes** (`PATCH /users/@me/settings-proto/1`) must send the whole top-level field they

@@ -151,29 +151,45 @@ fn text_and_images(mut reader: Reader<'_>, into: &mut TextAndImages) -> Result<(
         if known && wire != Wire::Len {
             return Err(ProtoError::Malformed { offset: at });
         }
+        // A repeated sub-message merges into the earlier one, as protobuf reads it.
         match number {
             4 => into.render_spoilers = Some(wrapped_string(reader.message()?)?),
-            7 => into.view_image_descriptions = Some(wrapped_bool(reader.message()?)?),
-            9 => into.inline_attachment_media = Some(wrapped_bool(reader.message()?)?),
-            10 => into.inline_embed_media = Some(wrapped_bool(reader.message()?)?),
-            11 => into.gif_auto_play = Some(wrapped_bool(reader.message()?)?),
-            12 => into.render_embeds = Some(wrapped_bool(reader.message()?)?),
-            14 => into.animate_emoji = Some(wrapped_bool(reader.message()?)?),
-            // A uint32 that doesn't fit is truncated, as protobuf does.
-            15 => into.animate_stickers = Some(wrapped_varint(reader.message()?)? as u32),
-            19 => into.explicit_content_filter = Some(wrapped_varint(reader.message()?)? as u32),
-            29 => into.explicit_content = Some(redactions(reader.message()?)?),
-            32 => into.gore = Some(redactions(reader.message()?)?),
-            35 => into.self_harm = Some(redactions(reader.message()?)?),
+            7 => merge_bool(&mut into.view_image_descriptions, reader.message()?)?,
+            9 => merge_bool(&mut into.inline_attachment_media, reader.message()?)?,
+            10 => merge_bool(&mut into.inline_embed_media, reader.message()?)?,
+            11 => merge_bool(&mut into.gif_auto_play, reader.message()?)?,
+            12 => merge_bool(&mut into.render_embeds, reader.message()?)?,
+            14 => merge_bool(&mut into.animate_emoji, reader.message()?)?,
+            15 => merge_u32(&mut into.animate_stickers, reader.message()?)?,
+            19 => merge_u32(&mut into.explicit_content_filter, reader.message()?)?,
+            29 => merge_redactions(&mut into.explicit_content, reader.message()?)?,
+            32 => merge_redactions(&mut into.gore, reader.message()?)?,
+            35 => merge_redactions(&mut into.self_harm, reader.message()?)?,
             _ => reader.skip(wire)?,
         }
     }
     Ok(())
 }
 
-// Three enum fields, plain varints; absent means 0 (unset).
-fn redactions(mut reader: Reader<'_>) -> Result<Redactions, ProtoError> {
-    let mut value = Redactions::default();
+fn merge_bool(into: &mut Option<bool>, reader: Reader<'_>) -> Result<(), ProtoError> {
+    let prior = into.map(u64::from);
+    *into = Some(wrapped_varint_over(reader, prior)? != 0);
+    Ok(())
+}
+
+// A uint32 that doesn't fit is truncated, as protobuf does.
+fn merge_u32(into: &mut Option<u32>, reader: Reader<'_>) -> Result<(), ProtoError> {
+    let prior = into.map(u64::from);
+    *into = Some(wrapped_varint_over(reader, prior)? as u32);
+    Ok(())
+}
+
+fn merge_redactions(
+    into: &mut Option<Redactions>,
+    mut reader: Reader<'_>,
+) -> Result<(), ProtoError> {
+    // Three enum fields, plain varints; absent means 0 (unset).
+    let mut value = into.unwrap_or_default();
     while let Some((number, wire, at)) = reader.tag()? {
         match (number, wire) {
             (1, Wire::Varint) => value.guilds = reader.varint()? as u32,
@@ -183,17 +199,18 @@ fn redactions(mut reader: Reader<'_>) -> Result<Redactions, ProtoError> {
             (_, wire) => reader.skip(wire)?,
         }
     }
-    Ok(value)
-}
-
-// BoolValue: field 1, absent meaning false.
-fn wrapped_bool(reader: Reader<'_>) -> Result<bool, ProtoError> {
-    Ok(wrapped_varint(reader)? != 0)
+    *into = Some(value);
+    Ok(())
 }
 
 // Int64Value and UInt64Value: field 1, absent meaning 0.
-fn wrapped_varint(mut reader: Reader<'_>) -> Result<u64, ProtoError> {
-    let mut value = 0;
+fn wrapped_varint(reader: Reader<'_>) -> Result<u64, ProtoError> {
+    wrapped_varint_over(reader, None)
+}
+
+// A wrapper merged over an earlier value of the same field: field 1 replaces it when present.
+fn wrapped_varint_over(mut reader: Reader<'_>, prior: Option<u64>) -> Result<u64, ProtoError> {
+    let mut value = prior.unwrap_or(0);
     while let Some((number, wire, at)) = reader.tag()? {
         match (number, wire) {
             (1, Wire::Varint) => value = reader.varint()?,

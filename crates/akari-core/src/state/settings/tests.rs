@@ -978,9 +978,41 @@ fn an_unreadable_proto_keeps_the_display_settings() {
         "USER_SETTINGS_PROTO_UPDATE",
         &proto_update("not base64!", false),
     );
-
     assert_eq!(events, Vec::<String>::new());
     assert!(!state.display_settings().gif_auto_play);
+
+    let mut ready = ready_value();
+    ready["user_settings_proto"] = STANDARD.encode([0x72, 0x09]).into();
+    let again = apply(&mut state, "READY", &ready);
+    assert!(
+        !again.contains(&"DisplaySettingsChanged".to_owned()),
+        "{again:?}"
+    );
+    assert!(!state.display_settings().gif_auto_play);
+    assert_eq!(
+        state.display_settings().animate_stickers,
+        StickerAnimation::Never
+    );
+}
+
+#[test]
+fn a_partial_update_with_the_field_replaces_it_whole() {
+    let mut state = ready_with(&quiet_display());
+
+    let events = apply(
+        &mut state,
+        "USER_SETTINGS_PROTO_UPDATE",
+        &proto_update(&display_proto(&[bool_value(11, true)]), true),
+    );
+
+    assert_eq!(events, ["DisplaySettingsChanged"]);
+    assert_eq!(
+        state.display_settings(),
+        DisplaySettings {
+            gif_auto_play: true,
+            ..DisplaySettings::default()
+        }
+    );
 }
 
 #[tokio::test]

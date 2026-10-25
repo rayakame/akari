@@ -547,6 +547,33 @@ fn a_repeated_display_field_merges() {
     assert_eq!(display.animate_emoji, Some(false));
 }
 
+#[test]
+fn a_repeated_display_sub_message_merges() {
+    let display = display_of(&[
+        text_and_images(&[
+            field(29, Wire::Bytes(field(1, Wire::Varint(2)))),
+            bool_value(11, true),
+            u32_value(15, 2),
+        ]),
+        text_and_images(&[
+            field(29, Wire::Bytes(field(2, Wire::Varint(3)))),
+            field(11, Wire::Bytes(Vec::new())),
+            field(15, Wire::Bytes(Vec::new())),
+        ]),
+    ]);
+
+    assert_eq!(
+        display.explicit_content,
+        Some(Redactions {
+            guilds: 2,
+            friend_dm: 3,
+            non_friend_dm: 0,
+        })
+    );
+    assert_eq!(display.gif_auto_play, Some(true));
+    assert_eq!(display.animate_stickers, Some(2));
+}
+
 fn versions_field() -> Vec<u8> {
     field(1, Wire::Bytes(field(3, Wire::Varint(9))))
 }

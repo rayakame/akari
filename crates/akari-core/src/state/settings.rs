@@ -332,8 +332,8 @@ pub(crate) struct UserSettings {
     // `None` holds the DM settings.
     pub(crate) guilds: HashMap<Option<GuildId>, Arc<GuildSettings>>,
     pub(crate) notification_flags: u64,
-    // READY's proto didn't decode, so the store keeps the folders it had.
-    pub(crate) unreadable_folders: bool,
+    // READY's proto didn't decode, so the store keeps the folders and display settings it had.
+    pub(crate) unreadable: bool,
 }
 
 impl UserSettings {
@@ -361,7 +361,7 @@ impl UserSettings {
                 }
                 Err(err) => {
                     tracing::warn!(error = %err, "READY's settings proto not read");
-                    settings.unreadable_folders = true;
+                    settings.unreadable = true;
                 }
             }
         }

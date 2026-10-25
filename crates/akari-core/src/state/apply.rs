@@ -438,7 +438,7 @@ impl State {
     }
 
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
-        self.keep_folders(&mut next);
+        self.keep_unreadable_settings(&mut next);
         self.keep_memberships(&mut next);
         self.keep_known_threads(&mut next);
         let derived = Derived::build(&next, self.now_millis());
@@ -446,10 +446,12 @@ impl State {
         self.swap(next, derived, diff, events);
     }
 
-    // A READY whose settings proto didn't decode keeps the folders the store had.
-    pub(crate) fn keep_folders(&self, next: &mut Entities) {
-        if std::mem::take(&mut next.settings.unreadable_folders) {
+    // A READY whose settings proto didn't decode keeps the folders and display settings the
+    // store had.
+    pub(crate) fn keep_unreadable_settings(&self, next: &mut Entities) {
+        if std::mem::take(&mut next.settings.unreadable) {
             next.settings.folders = self.entities.settings.folders.clone();
+            next.settings.display = self.entities.settings.display;
         }
     }
 

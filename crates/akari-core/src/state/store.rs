@@ -385,7 +385,7 @@ impl Store {
         #[cfg(test)]
         Self::park_in(&self.shared.diff_park);
         let diff = self.read(|inner| {
-            inner.state.keep_folders(&mut entities);
+            inner.state.keep_unreadable_settings(&mut entities);
             // Known since the first pass; the diff mustn't report them removed.
             for thread in inner.state.keep_known_threads(&mut entities) {
                 derived.add_thread(&thread);
