@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       # Without a toolchain argument, rustup installs the one pinned in rust-toolchain.toml.
@@ -37,11 +37,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Built alone, akari-core has no dev features; akari-cli turns them on in workspace builds.
       - run: cargo clippy -p akari-core --all-targets --locked -- -D warnings
@@ -63,11 +63,11 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # akari-bindgen is a host tool; it never runs on a device.
       - run: cargo check --workspace --exclude akari-cli --exclude akari-bindgen --target aarch64-apple-ios --locked
 
@@ -76,12 +76,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2
         with:
           tool: cargo-ndk@4.1.2
       # cargo-ndk finds the runner's preinstalled NDK through ANDROID_NDK_HOME.
@@ -92,11 +92,11 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: xcodebuild -version && swift --version
       # Universal release build of akari-ffi, the Swift bindings and the XCFramework.
       - run: apps/apple/build-ffi.sh
@@ -107,11 +107,11 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: xcodebuild -version && swift --version
       # This runner's architecture is enough to build the app and run its tests.
       - run: apps/apple/build-ffi.sh --host-only
@@ -141,7 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -162,7 +162,7 @@ jobs:
           echo "FUZZ_TARGET=$(rustc -vV | sed -n 's/^host: //p')" >> "$GITHUB_ENV"
           mkdir -p corpus/parse corpus/source_range
       - if: steps.changed.outputs.run == 'true'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2
         with:
           tool: cargo-fuzz@0.13.2
       # Two minutes per target, seeded with the corpus files, with debug assertions and overflow checks.
@@ -179,7 +179,7 @@ jobs:
           cargo fuzz run source_range -O -a --target "$FUZZ_TARGET" corpus/source_range ../tests/corpus
           -- -max_total_time=120 -max_len=8192
       - if: ${{ failure() && steps.changed.outputs.run == 'true' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fuzz-artifacts
           path: crates/akari-markdown/fuzz/artifacts/
@@ -190,10 +190,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       # The action installs the toolchain from rust-toolchain.toml on its own.
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check bans
