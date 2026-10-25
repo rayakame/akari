@@ -29,6 +29,8 @@ surprises we found.
   badges on channels, servers, folders and DMs
 - [cache.md](cache.md): the SQLite disk cache per account, the cold start from it, and when
   it's written and deleted
+- [cdn.md](cdn.md): images from Discord's CDN and media proxy: URLs, sizes and forms, signed
+  links and their renewal, downloads without the token, the images kept on disk
 
 ## Conventions
 
