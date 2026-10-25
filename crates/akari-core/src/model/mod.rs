@@ -37,6 +37,7 @@ pub use user::{
 
 pub type AttachmentId = Snowflake<AttachmentMarker>;
 pub type ChannelId = Snowflake<ChannelMarker>;
+pub type EmojiId = Snowflake<EmojiMarker>;
 pub type GuildId = Snowflake<GuildMarker>;
 pub type MessageId = Snowflake<MessageMarker>;
 pub type RoleId = Snowflake<RoleMarker>;
