@@ -3,6 +3,7 @@
 
 mod connect;
 mod host;
+mod image;
 mod keychain;
 mod login;
 mod messages;
@@ -45,6 +46,9 @@ enum Command {
     /// Print what Discord sent and what Akari has for one channel's unread state, mentions
     /// and threads: IDs, flags, counts and times, no names or message content.
     ReadState(ReadStateArgs),
+    /// Get one image as the app would for a box of the given size, and say where it came
+    /// from: its file, its pixels, and whether it was on disk already.
+    Image(image::ImageArgs),
     #[command(flatten)]
     Session(SessionCommand),
 }
@@ -124,6 +128,7 @@ async fn main() -> ExitCode {
             };
             read_state::run(&client, &store, options).await
         }
+        Command::Image(args) => image::run(&client, &store, args).await,
         Command::Session(command) => messages::run(&client, &store, command).await,
     }
 }
@@ -131,7 +136,25 @@ async fn main() -> ExitCode {
 fn client(store: Arc<KeychainStore>) -> Result<DiscordClient, String> {
     let host = host::host_info()?;
     let properties = ClientProperties::desktop(&host, &ClientBuild::current(host.os));
-    DiscordClient::new(properties, store).map_err(|err| report(&err))
+    let client = DiscordClient::new(properties, store).map_err(|err| report(&err))?;
+    // Always set, so a logout deletes them too.
+    Ok(match image_directory() {
+        Some(directory) => client.with_image_cache(directory),
+        None => client,
+    })
+}
+
+// The platform's caches directory, as the app's.
+fn image_directory() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let caches = if cfg!(target_os = "macos") {
+        home?.join("Library/Caches")
+    } else {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home.map(|home| home.join(".cache")))?
+    };
+    Some(caches.join("akari-cli").join("Images"))
 }
 
 // Colors only on a terminal, so a log redirected to a file can be grepped.
