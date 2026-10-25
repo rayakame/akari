@@ -1,5 +1,5 @@
 #!/bin/sh
-# Rebuilds the image fixtures; needs img2webp (`brew install webp`) and perl.
+# Rebuilds the image fixtures; needs img2webp and webpmux (`brew install webp`) and perl.
 set -eu
 cd "$(dirname "$0")"
 work=$(mktemp -d)
@@ -26,4 +26,7 @@ img2webp -loop 3 -lossless \
     -d 100 "$work/red.pam" -d 200 "$work/green.pam" \
     -d 50 "$work/clear-blue.pam" -d 300 "$work/half-yellow.pam" \
     -d 150 "$work/magenta-yellow.pam" \
-    -o animated.webp
+    -o "$work/opaque-background.webp"
+# A transparent canvas background, so disposing to it must clear, whether or not a decoder
+# honors the color (img2webp writes opaque white).
+webpmux -set bgcolor 0,0,0,0 "$work/opaque-background.webp" -o animated.webp

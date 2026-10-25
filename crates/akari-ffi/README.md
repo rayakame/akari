@@ -206,7 +206,8 @@ read.
   cancellation handler and never cancels the Rust future). A request runs to completion; a
   send that the host stopped waiting for still resolves through the store. Waits end through
   explicit calls: `PasswordLogin.cancel()`, `QrLogin.cancel()`, `StoreSubscription.close()`,
-  `Account.close()`, and for images `PendingImage.cancel()` (below).
+  `Account.close()`, and for images `PendingImage.cancel()` and `PendingSave.cancel()`
+  (below), which AkariKit's wrappers call from the task's cancellation handler.
 
 ## IDs, errors and tokens
 
@@ -283,26 +284,36 @@ All SQLite work runs on the cache's own thread, never on the runtime's workers o
 `DiscordClient`'s constructors take an `image_directory` too (on Apple, a folder in the caches
 directory); without one accounts have no images. akari-core keeps each account's images in a
 directory of its own there, downloads them without the token, renews signed attachment links
-and evicts past 256 MB ([cdn.md](../../docs/protocol/cdn.md)). No decoded image and no bytes
-cross the boundary: a file's path does.
+and evicts past 256 MB ([cdn.md](../../docs/protocol/cdn.md)). No decoded image crosses the
+boundary: a file's path does. The one image that crosses as bytes is a placeholder's few RGBA
+pixels.
 
 - An image is named by an `ImageKey` (Discord's IDs; hashes as Discord sends them).
   `ImageRequest` adds the box's pixels (points times the backing scale, rounded up) and
   `animated` (`None` for the still, else the `AnimatedFormat` the host's decoder shows right).
 - `Account.request_image(request)` returns a `PendingImage` at once. `result()` waits for the
-  `ImageFile` (path, the file's pixels, `animated`, `from_disk`), once; `cancel()`, or releasing
-  the object, stops waiting, and the download stops when nobody else waits. Swift calls
-  `cancel()` from its task's cancellation handler.
+  `ImageFile` (path, the file's pixels, `animated`, `from_disk`); every call, also a second or
+  a concurrent one, gets the same answer. `cancel()` stops a request that hasn't answered:
+  `result()` is then `Cancelled`, and the download stops when nobody else waits for it; an
+  answer that has arrived is still returned. Releasing the object cancels only a request nobody
+  is waiting for: a running `result()` holds the object (UniFFI moves the `Arc` into the call),
+  so a Swift task's cancellation must call `cancel()` itself. AkariKit's `Account.image(_:)`
+  does that with `withTaskCancellationHandler`; use it rather than `result()`.
 - A file stays at least a minute after it's handed out; one gone at decode (the system purged
   it) is asked for again.
 - `ImageError` says why there's none: `NotFound` (remembered for the session), `Unavailable`
   (offline or failing: ask again online), `TooLarge`, `NotAnImage`, `UnknownKey` (the store
   doesn't have the message), `Unsupported` (Lottie stickers, other hosts), `Io`, `Closed`,
-  `Cancelled`.
+  `Cancelled`, and `Failed` (the request panicked inside Akari: a bug, never a cancel).
 - `Account.original_url(key)` gives a link for Open in Browser and Copy Link (attachments'
-  renewed when due); `Account.save_original(key, destination)` streams the original into a
-  file, whatever its size; `Account.clear_images()` empties the account's directory. Logout,
-  `forget_account` and `clear_caches` delete images as they delete the cache.
+  renewed when due). It is the one signed link that leaves the core, for the user's own action:
+  the host hands it to the browser or the clipboard at once and never logs or keeps it.
+  `Account.save_original(key, destination)` returns a `PendingSave` (`result()` is the bytes
+  written, `cancel()` as above) that streams the original into a file beside `destination` and
+  moves it into place once it's whole: a failed or cancelled save leaves what was there. Saves
+  have slots of their own (two), so a large original never holds up a row's images.
+  `Account.clear_images()` empties the account's directory. Logout, `forget_account` and
+  `clear_caches` delete images as they delete the cache.
 - `placeholder_image(thumbhash)` decodes an attachment's placeholder as Discord's client
   does, into at most 32 × 32 RGBA.
 - Layout from sizes alone (points), so a row's height is final before anything loads:

@@ -123,7 +123,73 @@ struct FFISmokeTests {
         let pending = account.requestImage(request: request)
 
         await #expect(throws: ImageError.Unavailable) { try await pending.result() }
-        await #expect(throws: ImageError.Cancelled) { try await pending.result() }
+        await #expect(throws: ImageError.Unavailable, "every result() gets the same answer") {
+            try await pending.result()
+        }
+        account.close()
+    }
+
+    // Connecting (to nothing) keeps the account off its offline fast path, and a CDN that
+    // accepts the connection and never answers keeps `result()` waiting until the cancel.
+    static func stalled(_ store: MemoryTokenStore, images: URL?) async throws -> (DiscordClient, StallingHost) {
+        let stalling = try await StallingHost.start()
+        let endpoints = Endpoints(
+            api: unreachable.api, gateway: unreachable.gateway, remoteAuth: unreachable.remoteAuth,
+            origin: unreachable.origin, cdn: stalling.url, media: stalling.url)
+        let client = try DiscordClient.withEndpoints(
+            host: host, tokenStore: store, endpoints: endpoints, cacheDirectory: nil,
+            imageDirectory: images?.path)
+        return (client, stalling)
+    }
+
+    @Test
+    func aCancelledTaskCancelsTheImageRequest() async throws {
+        let store = MemoryTokenStore(tokens: [Self.user: "stored.token"])
+        let images = FileManager.default.temporaryDirectory
+            .appendingPathComponent("akari-images-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: images) }
+        let (client, stalling) = try await Self.stalled(store, images: images)
+        defer { stalling.stop() }
+        let token = try #require(try await client.loadToken(account: Self.user))
+        let account = try client.account(token: token, userId: Self.user)
+        try account.connect()
+        let request = ImageRequest(
+            key: .avatar(userId: Self.user, hash: "0123456789abcdef0123456789abcdef"),
+            width: 80, height: 80, animated: nil)
+        let loading = Task { try await account.image(request) }
+
+        try await Task.sleep(for: .milliseconds(100))
+        loading.cancel()
+        let outcome = await loading.result
+
+        #expect(throws: ImageError.Cancelled) { try outcome.get() }
+        account.close()
+    }
+
+    @Test
+    func aCancelledTaskCancelsTheSave() async throws {
+        let store = MemoryTokenStore(tokens: [Self.user: "stored.token"])
+        let (client, stalling) = try await Self.stalled(store, images: nil)
+        defer { stalling.stop() }
+        let token = try #require(try await client.loadToken(account: Self.user))
+        let account = try client.account(token: token, userId: Self.user)
+        try account.connect()
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("akari-save-\(UUID().uuidString).png")
+        try Data("the old file".utf8).write(to: destination)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        let saving = Task {
+            try await account.saveOriginal(
+                .avatar(userId: Self.user, hash: "0123456789abcdef0123456789abcdef"),
+                to: destination)
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        saving.cancel()
+        let outcome = await saving.result
+
+        #expect(throws: ImageError.Cancelled) { try outcome.get() }
+        #expect(try Data(contentsOf: destination) == Data("the old file".utf8))
         account.close()
     }
 

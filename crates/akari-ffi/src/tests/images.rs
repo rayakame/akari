@@ -10,7 +10,7 @@ use super::support::{MemoryStore, USER, core_client, token};
 use crate::client::DiscordClient;
 use crate::errors::ImageError;
 use crate::images::{
-    ImageKey, ImageRequest, MediaSize, gallery_columns, media_mosaic, placeholder_image,
+    ImageKey, ImageRequest, MediaSize, Pending, gallery_columns, media_mosaic, placeholder_image,
 };
 
 const AVATAR: &str = "/avatars/100000000000000002/0123456789abcdef0123456789abcdef.webp";
@@ -123,9 +123,83 @@ async fn a_pending_image_answers_with_its_file() {
     assert!(again.result().await.unwrap().from_disk);
     assert_eq!(
         again.result().await,
-        Err(ImageError::Cancelled),
-        "a result is taken once"
+        again.result().await,
+        "every result() call gets the same answer"
     );
+}
+
+#[tokio::test]
+async fn concurrent_results_share_one_answer() {
+    let online = connected(false).await;
+    let pending = online.account.request_image(avatar());
+
+    let (first, second) = tokio::join!(pending.result(), pending.result());
+
+    assert!(first.is_ok(), "{first:?}");
+    assert_eq!(first, second);
+    assert_eq!(online.downloads().await, 1);
+}
+
+#[tokio::test]
+async fn a_panic_in_the_core_is_a_failure_not_a_cancel() {
+    let runtime = crate::runtime::runtime().unwrap();
+    let pending: Pending<u64> = Pending::start(runtime, async { panic!("a bug") });
+
+    assert_eq!(pending.result().await, Err(ImageError::Failed));
+}
+
+#[tokio::test]
+async fn a_cancel_before_the_answer_is_cancelled_and_after_it_changes_nothing() {
+    let runtime = crate::runtime::runtime().unwrap();
+    let waiting: Pending<u64> = Pending::start(runtime, async {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        Ok(1)
+    });
+    let answered: Pending<u64> = Pending::start(runtime, async { Ok(2) });
+    assert_eq!(answered.result().await, Ok(2));
+
+    waiting.cancel();
+    answered.cancel();
+
+    assert_eq!(waiting.result().await, Err(ImageError::Cancelled));
+    assert_eq!(answered.result().await, Ok(2));
+}
+
+#[tokio::test]
+async fn a_cancelled_save_leaves_the_destination_as_it_was() {
+    let online = connected(false).await;
+    let original = "/avatars/100000000000000002/0123456789abcdef0123456789abcdef.png";
+    Mock::given(path(original))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/png")
+                .set_body_bytes(webp())
+                .set_delay(Duration::from_secs(10)),
+        )
+        .mount(&online.server)
+        .await;
+    let destination = online._dir.0.join("saved.png");
+    std::fs::write(&destination, b"the old file").unwrap();
+    let key = ImageKey::Avatar {
+        user_id: akari_core::model::UserId::new(100_000_000_000_000_002),
+        hash: "0123456789abcdef0123456789abcdef".to_owned(),
+    };
+    let saving = online
+        .account
+        .save_original(key, destination.to_string_lossy().into_owned());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while online.server.received_requests().await.unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    saving.cancel();
+    let cancelled = tokio::time::timeout(Duration::from_secs(1), saving.result()).await;
+
+    assert_eq!(cancelled.unwrap(), Err(ImageError::Cancelled));
+    assert_eq!(std::fs::read(&destination).unwrap(), b"the old file");
 }
 
 #[tokio::test]
@@ -147,8 +221,9 @@ async fn cancelling_stops_waiting_and_the_download() {
     );
 }
 
+// Only a request nobody waits for: a running `result()` holds the object.
 #[tokio::test]
-async fn releasing_a_pending_image_cancels_it() {
+async fn releasing_a_pending_image_nobody_waits_for_cancels_it() {
     let online = connected(true).await;
     let pending = online.account.request_image(avatar());
     arrived(&online).await;

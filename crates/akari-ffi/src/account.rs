@@ -5,7 +5,7 @@ use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
 use crate::errors::{CreateThreadError, GatewayError, ImageError, RequestError};
-use crate::images::{ImageKey, ImageRequest, PendingImage};
+use crate::images::{ImageKey, ImageRequest, PendingImage, PendingSave};
 use crate::records::LoadReport;
 use crate::runtime::run;
 use crate::store::Store;
@@ -66,7 +66,8 @@ impl Account {
     }
 
     /// A link to the original for Open in Browser and Copy Link; an attachment's link is
-    /// renewed when it's about to expire.
+    /// renewed when it's about to expire. The one signed link that leaves the core, for the
+    /// user's own action: the host hands it to the system at once and never logs or keeps it.
     pub async fn original_url(&self, key: ImageKey) -> Result<String, ImageError> {
         let core = self.core.clone();
         let key = key.into();
@@ -75,21 +76,11 @@ impl Account {
             .map_err(Into::into)
     }
 
-    /// Writes the original to the file at `destination`, whatever its size; returns its
-    /// bytes. Nothing is left there when it fails.
-    pub async fn save_original(
-        &self,
-        key: ImageKey,
-        destination: String,
-    ) -> Result<u64, ImageError> {
-        let core = self.core.clone();
-        let key = key.into();
-        run(self.runtime, async move {
-            core.save_original(&key, std::path::Path::new(&destination))
-                .await
-        })
-        .await
-        .map_err(Into::into)
+    /// Starts writing the original to the file at `destination`, whatever its size; the
+    /// `PendingSave` answers with its bytes. The file is replaced only once the original is
+    /// whole: a failed or cancelled save leaves what was there.
+    pub fn save_original(&self, key: ImageKey, destination: String) -> Arc<PendingSave> {
+        PendingSave::start(self.core.clone(), key.into(), destination, self.runtime)
     }
 
     /// Deletes the account's kept images.

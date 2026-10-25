@@ -101,12 +101,13 @@ struct ImageIOWebPTests {
     }
 
     // macOS 14's ImageIO fills frame 1's dispose-to-background area with frame 0 instead of
-    // clearing it (seen on 14.8.9; 15.7 and 26 clear it).
+    // clearing it (seen on 14.8.9; 15.7 and 26 clear it). Intermittent: a decoder that happens
+    // to get it right on one run doesn't fail the test.
     static func expectFrame(
         _ index: Int, left: [Int], right: [Int], sourceLocation: SourceLocation = #_sourceLocation
     ) {
         let expected = frames[index]
-        withKnownIssue("macOS 14 disposes frame 1 to frame 0") {
+        withKnownIssue("macOS 14 disposes frame 1 to frame 0", isIntermittent: true) {
             expectColor(left, expected.left, "frame \(index), left", sourceLocation: sourceLocation)
         } when: {
             index == 2 && ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 14

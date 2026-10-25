@@ -31,7 +31,7 @@ pub use formatted::{
 };
 pub use images::{
     EmbedSlot, GalleryColumns, ImageFile, ImageKey, ImageRequest, MediaMosaic, MediaRect,
-    MediaSize, PendingImage, PlaceholderImage, embed_image_size, embed_thumbnail_size,
+    MediaSize, PendingImage, PendingSave, PlaceholderImage, embed_image_size, embed_thumbnail_size,
     gallery_card_height, gallery_columns, media_box, media_contain, media_cover, media_fit_width,
     media_mosaic, placeholder_image, sticker_size,
 };

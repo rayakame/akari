@@ -423,9 +423,12 @@ pub enum ImageError {
     /// The account is closed.
     #[error("the account is closed")]
     Closed,
-    /// `PendingImage.cancel` was called, or its result was already taken.
+    /// `cancel` was called on the pending request before it answered.
     #[error("cancelled")]
     Cancelled,
+    /// The request failed inside Akari (a bug: it panicked).
+    #[error("the image request failed inside Akari")]
+    Failed,
 }
 
 impl From<akari_core::media::ImageError> for ImageError {

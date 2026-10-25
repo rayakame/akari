@@ -1,4 +1,6 @@
-use std::sync::{Arc, Mutex, PoisonError};
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use akari_core::media::{self, AnimatedFormat, layout};
 use akari_core::model::{
@@ -6,7 +8,7 @@ use akari_core::model::{
     UserId,
 };
 use akari_core::state::ImageHash;
-use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::AbortHandle;
 
 use crate::errors::ImageError;
@@ -213,13 +215,64 @@ impl From<media::ImageFile> for ImageFile {
     }
 }
 
-/// An image on its way. `result` waits for it once; `cancel`, or releasing this object, stops
-/// waiting, and the download stops when nobody else waits for it. Swift doesn't cancel a Rust
-/// call when its task is cancelled; call `cancel` from the task's cancellation handler.
+// A request running on Akari's runtime, answered once for every waiter.
+pub(crate) struct Pending<T> {
+    answer: watch::Receiver<Option<Result<T, media::ImageError>>>,
+    task: AbortHandle,
+    cancelled: AtomicBool,
+}
+
+impl<T: Clone + Send + Sync + 'static> Pending<T> {
+    pub(crate) fn start(
+        runtime: &tokio::runtime::Runtime,
+        work: impl Future<Output = Result<T, media::ImageError>> + Send + 'static,
+    ) -> Self {
+        let (sender, answer) = watch::channel(None);
+        let task = runtime.spawn(async move {
+            let _ = sender.send(Some(work.await));
+        });
+        Self {
+            answer,
+            task: task.abort_handle(),
+            cancelled: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) async fn result(&self) -> Result<T, ImageError> {
+        let mut answer = self.answer.clone();
+        match answer.wait_for(Option::is_some).await {
+            Ok(answer) => match answer.as_ref() {
+                Some(Ok(value)) => Ok(value.clone()),
+                Some(Err(err)) => Err((*err).into()),
+                None => Err(ImageError::Failed),
+            },
+            // The task ended without an answer: aborted by `cancel`, or it panicked.
+            Err(_) if self.cancelled.load(Ordering::Acquire) => Err(ImageError::Cancelled),
+            Err(_) => Err(ImageError::Failed),
+        }
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        self.task.abort();
+    }
+}
+
+impl<T> Drop for Pending<T> {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// An image on its way. `result()` waits for it; every call, also a second or a concurrent
+/// one, gets the same answer. `cancel()` stops a request that hasn't answered yet: `result()` is
+/// then `Cancelled`, and the download stops when nobody else waits for it; an answer that has
+/// arrived is still returned. Swift doesn't cancel a Rust call when its task is cancelled, and a
+/// running `result()` holds this object, so releasing it can't either: call `cancel()` from the
+/// task's cancellation handler (AkariKit's `Account.image(_:)` does).
 #[derive(uniffi::Object)]
 pub struct PendingImage {
-    answer: Mutex<Option<oneshot::Receiver<Result<media::ImageFile, media::ImageError>>>>,
-    task: AbortHandle,
+    pending: Pending<media::ImageFile>,
 }
 
 impl PendingImage {
@@ -228,42 +281,59 @@ impl PendingImage {
         request: media::ImageRequest,
         runtime: &tokio::runtime::Runtime,
     ) -> Arc<Self> {
-        let (sender, answer) = oneshot::channel();
-        let task = runtime.spawn(async move {
-            let _ = sender.send(account.image(request).await);
-        });
         Arc::new(Self {
-            answer: Mutex::new(Some(answer)),
-            task: task.abort_handle(),
+            pending: Pending::start(runtime, async move { account.image(request).await }),
         })
     }
 }
 
 #[uniffi::export]
 impl PendingImage {
-    /// The image, or why there is none; `Cancelled` after `cancel` or a second call.
+    /// The image, or why there is none; `Cancelled` after `cancel`.
     pub async fn result(&self) -> Result<ImageFile, ImageError> {
-        let answer = self
-            .answer
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-            .ok_or(ImageError::Cancelled)?;
-        match answer.await {
-            Ok(answer) => answer.map(Into::into).map_err(Into::into),
-            Err(_) => Err(ImageError::Cancelled),
-        }
+        self.pending.result().await.map(Into::into)
     }
 
-    /// Stops waiting; `result` then returns `Cancelled`.
+    /// Stops a request that hasn't answered yet; `result` then returns `Cancelled`.
     pub fn cancel(&self) {
-        self.task.abort();
+        self.pending.cancel();
     }
 }
 
-impl Drop for PendingImage {
-    fn drop(&mut self) {
-        self.task.abort();
+/// An original being saved: as `PendingImage`, with the bytes written as its answer. Cancelled,
+/// it leaves the destination as it was.
+#[derive(uniffi::Object)]
+pub struct PendingSave {
+    pending: Pending<u64>,
+}
+
+impl PendingSave {
+    pub(crate) fn start(
+        account: Arc<akari_core::Account>,
+        key: media::ImageKey,
+        destination: String,
+        runtime: &tokio::runtime::Runtime,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            pending: Pending::start(runtime, async move {
+                account
+                    .save_original(&key, std::path::Path::new(&destination))
+                    .await
+            }),
+        })
+    }
+}
+
+#[uniffi::export]
+impl PendingSave {
+    /// The bytes written, or why nothing was; `Cancelled` after `cancel`.
+    pub async fn result(&self) -> Result<u64, ImageError> {
+        self.pending.result().await
+    }
+
+    /// Stops a save that hasn't finished; `result` then returns `Cancelled`.
+    pub fn cancel(&self) {
+        self.pending.cancel();
     }
 }
 
