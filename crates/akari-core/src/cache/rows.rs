@@ -169,6 +169,9 @@ pub(super) struct GuildRow {
     // 0 all messages, 1 only mentions, 2 nothing.
     #[serde(default, skip_serializing_if = "is_zero")]
     default_level: u8,
+    // Its custom emoji's IDs, sorted; absent in files written before them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    emojis: Vec<u64>,
 }
 
 fn is_zero(value: &u8) -> bool {
@@ -214,6 +217,7 @@ impl From<&Guild> for GuildRow {
             large: guild.large,
             community: guild.community,
             default_level: level_code(guild.default_message_notifications),
+            emojis: guild.emojis.iter().map(|emoji| emoji.get()).collect(),
         }
     }
 }
@@ -242,6 +246,7 @@ impl GuildRow {
             large: self.large,
             default_message_notifications: level(self.default_level),
             community: self.community,
+            emojis: self.emojis.into_iter().map(Snowflake::new).collect(),
         }
     }
 }

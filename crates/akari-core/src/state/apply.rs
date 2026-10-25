@@ -24,11 +24,11 @@ use super::windows::{
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
-    GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, ThreadListSync,
-    ThreadMemberUpdate, ThreadMembersUpdate, UserUpdate,
+    GuildEmojisUpdate, GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready,
+    ThreadListSync, ThreadMemberUpdate, ThreadMembersUpdate, UserUpdate,
 };
 use crate::load_report::PageOutcome;
-use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
+use crate::model::{self, ChannelId, EmojiId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -737,6 +737,7 @@ impl State {
             }
             E::GuildRoleCreate(event) | E::GuildRoleUpdate(event) => self.put_role(*event, events),
             E::GuildRoleDelete(delete) => self.delete_role(delete, events),
+            E::GuildEmojisUpdate(update) => self.put_emojis(*update),
             E::GuildMemberUpdate(update) => self.member_update(*update, events),
             E::ChannelCreate(channel) => self.put_channel(*channel, events),
             E::ThreadCreate(thread) => {
@@ -1367,6 +1368,16 @@ impl State {
         self.put_guild(next, &known, events);
     }
 
+    // Nothing shows the list, so no event.
+    fn put_emojis(&mut self, update: GuildEmojisUpdate) {
+        let Some(known) = self.entities.guilds.get(&update.guild_id) else {
+            return;
+        };
+        let mut next = (**known).clone();
+        next.emojis = super::convert::emoji_ids(&update.emojis);
+        self.entities.guilds.insert(update.guild_id, Arc::new(next));
+    }
+
     fn delete_role(&mut self, delete: GuildRoleDelete, events: &mut Vec<StoreEvent>) {
         let Some(known) = self.entities.guilds.get(&delete.guild_id).cloned() else {
             return;
@@ -1627,6 +1638,14 @@ impl State {
 
     pub(crate) fn guild(&self, id: GuildId) -> Option<Arc<Guild>> {
         self.entities.guilds.get(&id).cloned()
+    }
+
+    pub(crate) fn emoji_guild(&self, emoji: EmojiId) -> Option<GuildId> {
+        self.entities
+            .guilds
+            .values()
+            .find(|guild| guild.emojis.binary_search(&emoji).is_ok())
+            .map(|guild| guild.id)
     }
 
     pub(crate) fn unavailable_guilds(&self) -> Vec<GuildId> {

@@ -7,6 +7,13 @@ use akari_markdown::{
 };
 
 use crate::images::ImageKey;
+
+/// A Unicode emoji's name as Discord's hover card and popout show it, without colons
+/// (`grinning`, `thumbsup_tone3`, `flag_de`); `None` for anything that isn't one emoji.
+#[uniffi::export]
+pub fn emoji_shortcode(emoji: String) -> Option<String> {
+    akari_markdown::emoji_shortcode(&emoji)
+}
 use crate::names::Names;
 
 /// A message's content as Discord formats it. Offsets are UTF-16 code units into `content`.

@@ -11,7 +11,7 @@ use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
 };
 use crate::model::{
-    self, ChannelId, GenericMarker, GuildId, MessageId, Snowflake, Timestamp, UserId,
+    self, ChannelId, EmojiId, GenericMarker, GuildId, MessageId, Snowflake, Timestamp, UserId,
 };
 
 fn text(value: String) -> Box<str> {
@@ -94,6 +94,7 @@ impl Guild {
             large: guild.large,
             default_message_notifications: default_level(properties.default_message_notifications),
             community: community(&properties.features),
+            emojis: emoji_ids(&guild.emojis),
         }
     }
 
@@ -120,6 +121,13 @@ impl Guild {
         }
         next
     }
+}
+
+pub(crate) fn emoji_ids(emojis: &[model::GuildEmoji]) -> Box<[EmojiId]> {
+    let mut ids: Vec<EmojiId> = emojis.iter().map(|emoji| emoji.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into()
 }
 
 fn community(features: &[String]) -> bool {

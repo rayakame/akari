@@ -27,7 +27,7 @@ pub use errors::{
 };
 pub use formatted::{
     ChannelLink, FormattedText, GuildNavigation, MentionName, SpanKind, TextBlock, TextBlockKind,
-    TextContainer, TextLink, TextSpan, TimestampStyle, formatted_text,
+    TextContainer, TextLink, TextSpan, TimestampStyle, emoji_shortcode, formatted_text,
 };
 pub use images::{
     EmbedSlot, GalleryColumns, ImageFile, ImageKey, ImageRequest, MediaMosaic, MediaRect,
@@ -41,10 +41,10 @@ pub use login::{
     QrEvent, QrLogin, ScannedUser,
 };
 pub use records::{
-    Attachment, Channel, ConnectionState, ContentStats, Delivery, DisplaySettings,
+    Attachment, Channel, ConnectionState, ContentStats, Delivery, DisplaySettings, EmojiSource,
     ExplicitContentFilter, ExplicitContentSettings, Guild, Message, MessageReference,
-    MessageWindow, Redaction, Slowmode, SpoilerSetting, StarterMessage, Sticker, StickerAnimation,
-    User,
+    MessageWindow, Nitro, Redaction, Slowmode, SourceEmoji, SourceGuild, SpoilerSetting,
+    StarterMessage, Sticker, StickerAnimation, StickerDetails, StickerOrigin, StickerPack, User,
 };
 pub use store::{Store, message_length};
 pub use subscription::{StoreEvent, StoreSubscription};

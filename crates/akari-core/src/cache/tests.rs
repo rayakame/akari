@@ -116,6 +116,11 @@ pub(crate) fn guild(id: u64, name: &str) -> Guild {
         large: true,
         default_message_notifications: crate::state::NotificationLevel::OnlyMentions,
         community: id == 100,
+        emojis: if id == 100 {
+            [Snowflake::new(7001), Snowflake::new(7002)].into()
+        } else {
+            Box::new([])
+        },
     }
 }
 

@@ -1738,6 +1738,7 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
 
 mod acks;
 mod deadlines;
+mod expressions;
 
 #[cfg(test)]
 mod tests;

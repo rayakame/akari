@@ -25,7 +25,7 @@ use super::windows::{
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
-use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
+use crate::model::{self, ChannelId, EmojiId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[cfg(test)]
 thread_local! {
@@ -904,6 +904,12 @@ impl Store {
 
     pub fn guild(&self, id: GuildId) -> Option<Arc<Guild>> {
         self.read(|inner| inner.state.guild(id))
+    }
+
+    /// The server a custom emoji is from, among the user's servers; `None` for an emoji from
+    /// a server the user isn't in.
+    pub fn emoji_guild(&self, emoji: EmojiId) -> Option<GuildId> {
+        self.read(|inner| inner.state.emoji_guild(emoji))
     }
 
     /// Guilds that are down or blocked in the user's region.

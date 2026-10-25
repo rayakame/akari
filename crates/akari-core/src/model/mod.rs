@@ -1,6 +1,7 @@
 //! Discord objects as the API sends them.
 
 mod channel;
+mod expression;
 mod guild;
 mod int_enum;
 mod message;
@@ -13,8 +14,13 @@ pub use channel::{
     Channel, ChannelType, OverwriteType, PermissionOverwrite, ThreadMember, ThreadMetadata,
     ThreadMuteConfig, ThreadSearchResults,
 };
+pub use expression::{
+    EmojiSource, EmojiSourceApplication, EmojiSourceGuild, Sticker, StickerGuild, StickerPack,
+    StickerType,
+};
 pub use guild::{
-    Guild, GuildMember, MessageNotificationLevel, NsfwLevel, PremiumTier, Role, RoleColors,
+    Guild, GuildEmoji, GuildMember, MessageNotificationLevel, NsfwLevel, PremiumTier, Role,
+    RoleColors,
 };
 pub use message::{
     Attachment, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
@@ -26,7 +32,7 @@ pub use permissions::Permissions;
 pub(crate) use snowflake::DISCORD_EPOCH;
 pub use snowflake::{
     AttachmentMarker, ChannelMarker, EmojiMarker, GenericMarker, GuildMarker, MessageMarker,
-    RoleMarker, SkuMarker, Snowflake, StickerMarker, UserMarker, WebhookMarker,
+    RoleMarker, SkuMarker, Snowflake, StickerMarker, StickerPackMarker, UserMarker, WebhookMarker,
 };
 pub use timestamp::Timestamp;
 #[cfg(test)]
@@ -42,6 +48,7 @@ pub type GuildId = Snowflake<GuildMarker>;
 pub type MessageId = Snowflake<MessageMarker>;
 pub type RoleId = Snowflake<RoleMarker>;
 pub type StickerId = Snowflake<StickerMarker>;
+pub type StickerPackId = Snowflake<StickerPackMarker>;
 pub type UserId = Snowflake<UserMarker>;
 pub type WebhookId = Snowflake<WebhookMarker>;
 

@@ -75,6 +75,45 @@ pub(crate) fn exempt(emoji: &str) -> bool {
     matches!(emoji.trim_end_matches('\u{fe0f}'), "©" | "®" | "™")
 }
 
+/// A Unicode emoji's name as Discord's hover card and popout show it, without colons: gemoji's
+/// word (`grinning`, `thumbsup`), a skin tone as `_tone1`–`_tone5`, a flag as `flag_de`. `None`
+/// for anything that isn't exactly one emoji, and for ©, ® and ™, which Discord leaves as text.
+pub fn emoji_shortcode(emoji: &str) -> Option<String> {
+    if exempt(emoji) {
+        return None;
+    }
+    let found = emojis::get(emoji)?;
+    let letters: Vec<char> = emoji.chars().filter(|&c| c != '\u{fe0f}').collect();
+    if let [first, second] = letters[..]
+        && let (Some(a), Some(b)) = (regional_letter(first), regional_letter(second))
+    {
+        return Some(format!("flag_{a}{b}"));
+    }
+    let tone = found
+        .skin_tone()
+        .filter(|&tone| tone != emojis::SkinTone::Default);
+    let base = match tone {
+        Some(_) => found
+            .with_skin_tone(emojis::SkinTone::Default)
+            .unwrap_or(found),
+        None => found,
+    };
+    // gemoji lists `+1` before `thumbsup`; Discord's names are words.
+    let name = base
+        .shortcodes()
+        .find(|name| name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+        .or_else(|| base.shortcode())?;
+    Some(match tone.map(|tone| tone as u8) {
+        Some(tone @ 1..=5) => format!("{name}_tone{tone}"),
+        _ => name.to_owned(),
+    })
+}
+
+fn regional_letter(c: char) -> Option<char> {
+    let offset = u32::from(c).checked_sub(0x1F1E6)?;
+    (offset < 26).then(|| char::from(b'a' + offset as u8))
+}
+
 // Shortcodes show as text (D66); only masked-link checks count them as emoji.
 pub(crate) fn is_shortcode(name: &str) -> bool {
     emojis::get_by_shortcode(name).is_some_and(|e| !exempt(e.as_str()))

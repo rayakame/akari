@@ -4,9 +4,9 @@ use std::sync::Arc;
 use super::settings::NotificationLevel;
 use crate::media::ImageKey;
 use crate::model::{
-    AttachmentId, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageReferenceType,
-    MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake, StickerFormatType,
-    StickerId, Timestamp, UserId, WebhookId,
+    AttachmentId, ChannelId, ChannelType, EmojiId, GenericMarker, GuildId, MessageId,
+    MessageReferenceType, MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake,
+    StickerFormatType, StickerId, Timestamp, UserId, WebhookId,
 };
 
 /// The logged-in user.
@@ -112,6 +112,8 @@ pub struct Guild {
     pub default_message_notifications: NotificationLevel,
     /// A community server, where the user can choose its channels ("Channels & Roles").
     pub community: bool,
+    /// Its custom emoji, sorted: which server an emoji in a message is from.
+    pub emojis: Box<[EmojiId]>,
 }
 
 impl Guild {
@@ -793,6 +795,7 @@ mod tests {
             large: false,
             default_message_notifications: NotificationLevel::AllMessages,
             community: false,
+            emojis: Box::new([]),
         };
         assert_eq!(
             guild.icon_key(),
