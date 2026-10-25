@@ -11,6 +11,7 @@ import Testing
 final class AvatarPlacesTests {
     // The windows stay for the test: a released window takes its views' asks with it.
     var windows: [NSWindow] = []
+    let images = TestImages()
 
     func layers<Content: View>(in view: Content, size: NSSize = NSSize(width: 300, height: 100))
         -> [ImageLayerView]
@@ -33,7 +34,6 @@ final class AvatarPlacesTests {
 
     @Test
     func aUserAvatarIsRoundAtItsSizeWithTheDisc() async throws {
-        let images = TestImages()
         let source = FakeImageSource.serving(try images.png("ray", pixels: 256), pixels: 256)
         let cache = ImageCache(source: source)
         let layer = try #require(
@@ -67,6 +67,125 @@ final class AvatarPlacesTests {
         #expect(layer.placeholder == .none, "the initials show until the image decoded")
         #expect(layer.frame.size == NSSize(width: 40, height: 40))
         #expect(layers(in: GuildIcon(name: "Lab", icon: nil, highlighted: false)).isEmpty)
+    }
+
+    // A server icon over a known background, hosted at 2x scale-independent sizes; the pixel at
+    // the icon's center and one well outside it, once the icon's layer settled.
+    func serverIcon<Content: View>(
+        _ view: Content, source: FakeImageSource, size: CGFloat = 72, settle: Bool = true,
+        at point: NSPoint? = nil
+    ) async throws -> (center: NSColor?, outside: NSColor?) {
+        let cache = ImageCache(source: source)
+        let host = NSHostingView(
+            rootView: view.frame(width: size, height: size).background(Color(nsColor: Self.backdrop))
+                .environment(\.imageCache, cache))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: size, height: size), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        windows.append(window)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        let layers = MessageMenuAreaTests.views(ImageLayerView.self, in: host)
+        if settle {
+            try await eventually { layers.allSatisfy { $0.imageLayer.contents != nil || $0.failed } }
+            try await Task.sleep(for: .milliseconds(30))
+            host.layoutSubtreeIfNeeded()
+        }
+        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / host.bounds.width
+        let center = point.map { (Int($0.x * scale), Int($0.y * scale)) }
+            ?? (rep.pixelsWide / 2, rep.pixelsHigh / 2)
+        return (
+            rep.colorAt(x: center.0, y: center.1)?.usingColorSpace(.sRGB),
+            rep.colorAt(x: 1, y: 1)?.usingColorSpace(.sRGB)
+        )
+    }
+
+    static let backdrop = NSColor(srgbRed: 0.1, green: 0.2, blue: 0.3, alpha: 1)
+    static let labIcon = ImageKey.guildIcon(
+        guildId: GuildId(rawValue: 1), hash: "0123456789abcdef0123456789abcdef")
+
+    func same(_ a: NSColor?, _ b: NSColor?) -> Bool {
+        guard let a, let b else {
+            return false
+        }
+        return abs(a.redComponent - b.redComponent) < 0.02
+            && abs(a.greenComponent - b.greenComponent) < 0.02
+            && abs(a.blueComponent - b.blueComponent) < 0.02
+    }
+
+    func clearIcon() throws -> FakeImageSource {
+        FakeImageSource.serving(try images.png("clear", pixels: 80, color: [0, 0, 0, 0]), pixels: 80)
+    }
+
+    // The acronym tile belongs to a server without an icon (and one whose icon failed). A
+    // loaded icon shows what's behind its transparent pixels, as the official client does;
+    // nothing is filled under it, loading or loaded, hovered or selected.
+    @Test
+    func aServerIconShowsWhatsBehindItsTransparency() async throws {
+        let loaded = try await serverIcon(
+            GuildIcon(name: "Lab", icon: Self.labIcon, highlighted: false), source: try clearIcon())
+        #expect(same(loaded.center, loaded.outside), "\(String(describing: loaded))")
+
+        let selected = try await serverIcon(
+            GuildIcon(name: "Lab", icon: Self.labIcon, highlighted: true), source: try clearIcon())
+        #expect(same(selected.center, selected.outside), "no brand fill under a selected icon")
+
+        let loading = try await serverIcon(
+            GuildIcon(name: "Lab", icon: Self.labIcon, highlighted: false),
+            source: FakeImageSource.stalling(), settle: false)
+        #expect(same(loading.center, loading.outside), "nothing while it loads")
+
+        let none = try await serverIcon(
+            GuildIcon(name: "Lab", icon: nil, highlighted: false), source: try clearIcon())
+        #expect(!same(none.center, none.outside), "a server without an icon keeps its tile")
+    }
+
+    // A failed icon falls back to the acronym tile (the official client shows a broken image),
+    // and the icon is asked again later: the layer stays.
+    @Test
+    func aFailedServerIconShowsTheTile() async throws {
+        let failed = try await serverIcon(
+            GuildIcon(name: "Lab", icon: Self.labIcon, highlighted: false),
+            source: FakeImageSource.failing())
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!same(failed.center, failed.outside))
+    }
+
+    @Test
+    func theFolderMinisAndTheTitleBarIconShowWhatsBehindTheirIcons() async throws {
+        let lab = Guild(id: GuildId(rawValue: 1), name: "Lab", icon: Self.labIcon)
+        let folder = ServerListModel.FolderItem(
+            folder: Folder(id: 7, name: nil, color: nil, guildIds: [lab.id]), guilds: [lab])
+        // One server: its mini at the grid's top, centered (from the top left: 12...28, 3...19).
+        let mini = NSPoint(x: 20, y: 11)
+        let minis = try await serverIcon(
+            FolderTile(item: folder, expanded: false).frame(width: 40, height: 40),
+            source: try clearIcon(), size: 40, at: mini)
+        let plain = try await serverIcon(
+            FolderTile(
+                item: ServerListModel.FolderItem(
+                    folder: Folder(id: 7, name: nil, color: nil, guildIds: [lab.id]),
+                    guilds: [Guild(id: lab.id, name: "Lab")]),
+                expanded: false
+            ).frame(width: 40, height: 40), source: try clearIcon(), size: 40, at: mini)
+        #expect(!same(minis.center, plain.center), "the mini's tile is gone under a loaded icon")
+        let empty = try await serverIcon(
+            FolderTile(
+                item: ServerListModel.FolderItem(
+                    folder: Folder(id: 8, name: nil, color: nil, guildIds: []), guilds: []),
+                expanded: false
+            ).frame(width: 40, height: 40), source: try clearIcon(), size: 40, at: mini)
+        #expect(same(minis.center, empty.center), "the folder's own tile shows through the icon")
+
+        let title = try await serverIcon(
+            TitleBar.ServerIcon(name: "Lab", icon: Self.labIcon), source: try clearIcon(), size: 16)
+        let titleTile = try await serverIcon(
+            TitleBar.ServerIcon(name: "Lab", icon: nil), source: try clearIcon(), size: 16)
+        #expect(same(title.center, title.outside))
+        #expect(!same(titleTile.center, titleTile.outside))
     }
 
     @Test

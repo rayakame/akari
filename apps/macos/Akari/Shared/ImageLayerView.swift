@@ -52,6 +52,9 @@ final class ImageLayerView: NSView {
             }
         }
     }
+    /// Told when the image landed, failed or was replaced; owners that show something of their
+    /// own around a failure (a server's acronym tile) listen.
+    var onStateChange: ((ImageLayerView) -> Void)?
     private(set) var content: Content?
     /// The still failed to load; the placeholder stays until a retry.
     private(set) var failed = false
@@ -106,6 +109,7 @@ final class ImageLayerView: NSView {
         }
         updatePlaceholder()
         reload()
+        onStateChange?(self)
     }
 
     // Clicks and the pointer belong to what lies around the box.
@@ -223,6 +227,7 @@ final class ImageLayerView: NSView {
                 self.failed = true
                 self.clearImage()
                 self.updatePlaceholder()
+                self.onStateChange?(self)
             }
         }
     }
@@ -246,6 +251,7 @@ final class ImageLayerView: NSView {
         imageLayer.isHidden = false
         failed = false
         updatePlaceholder()
+        onStateChange?(self)
     }
 
     private func clearImage() {

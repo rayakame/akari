@@ -45,9 +45,11 @@ Drawn size per place (the pixels asked on Retina in brackets):
   `background-mod-subtle`); a failed avatar keeps the disc, and asks again once the session is
   back online. No fade when it lands. A box recycled for another person or server clears at
   once; only the same subject's new picture keeps the old one until the new has decoded.
-- **Servers without an icon keep their initials** ([server-list.md](server-list.md)). A
-  server's icon is drawn over the initials once it has decoded; a changed icon swaps only
-  once the new one has decoded. Group DMs without an icon show the group symbol on a disc
+- **Servers without an icon show their initials' tile** ([server-list.md](server-list.md)). A
+  server's icon is drawn alone, nothing filled under it (loading, loaded, hovered or
+  selected), so transparent pixels show what's behind; a failed icon falls back to the tile;
+  a changed icon swaps only once the new one has decoded. No loaded image anywhere has a fill
+  under it: the avatars' disc shows only while loading or after a failure. Group DMs without an icon show the group symbol on a disc
   (Discord's group defaults are its own assets).
 - **A member the store doesn't know yet** (a facepile face, a thread's owner) shows the
   loading disc.

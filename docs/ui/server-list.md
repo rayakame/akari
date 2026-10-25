@@ -27,9 +27,12 @@ measured from the web client on 2026-10-10; sizes in [layout.md](layout.md), col
 - 40 × 40 with a fixed rounded-square mask, about 12 corner radius. Before the redesign an
   icon was a circle that turned into a rounded square on hover; that animation is gone.
 - 8 between icons.
-- A server's icon, asked lossless at the box's pixels, over its initials until it has decoded
-  ([images.md](images.md)); an animated icon plays while hovered. Servers without an icon
-  show initials (below).
+- A server's icon, asked lossless at the box's pixels ([images.md](images.md)), drawn alone:
+  nothing under it while it loads, and the rail shows through its transparent pixels; hover
+  and selection fill only the initials' tile. An animated icon plays while hovered. Servers
+  without an icon show initials (below). *Akari: an icon that failed shows the initials too
+  (the official client shows a broken image), and is asked again when the session is back.*
+  The folder minis and the title bar's server icon follow the same rule.
 
 ## The pill
 

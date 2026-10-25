@@ -9,15 +9,38 @@ struct RemoteImage: NSViewRepresentable {
     var placeholder = ImageLayerView.Placeholder.none
     var place = MotionPolicy.Place.userPanel
     var hovered = false
+    /// Told whether the image failed, after each change (never during a view update).
+    var onFailure: ((Bool) -> Void)?
     @Environment(\.imageCache) private var images
     @Environment(\.motion) private var motion
     @Environment(\.windowFocused) private var focused
 
+    final class Coordinator {
+        var onFailure: ((Bool) -> Void)?
+        var reported: Bool?
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> ImageLayerView {
-        ImageLayerView()
+        let view = ImageLayerView()
+        let coordinator = context.coordinator
+        view.onStateChange = { view in
+            let failed = view.failed
+            guard coordinator.reported != failed else {
+                return
+            }
+            coordinator.reported = failed
+            // SwiftUI state can't change while it updates this view.
+            DispatchQueue.main.async { coordinator.onFailure?(failed) }
+        }
+        return view
     }
 
     func updateNSView(_ view: ImageLayerView, context: Context) {
+        context.coordinator.onFailure = onFailure
         view.images = images
         view.cornerRadius = cornerRadius
         view.placeholder = placeholder

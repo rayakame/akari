@@ -41,8 +41,9 @@ Attachments, embeds, reactions, replies, voice, notifications and settings come 
   the motion policy and whether the window is key and the app active).
 - The message list's cells get the cache with the table's state; the controller's hover
   decides which group's header avatar plays, by the policy, as it decides the cursor.
-- A loading or failed avatar shows the `avatarPlaceholder` disc; servers keep their initials
-  under their icon. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).
+- A loading or failed avatar shows the `avatarPlaceholder` disc; a server's icon is drawn
+  alone (`ServerPicture`: the rail, the folder minis, the title bar), its initials' tile only
+  without an icon or after a failure. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).
 - `ReadingSignals` also feeds the system's Reduce Motion to the session, and `Launch` runs
   AkariKit's `AnimatedFormatProbe` once (WebP or GIF for animations on this Mac).
 

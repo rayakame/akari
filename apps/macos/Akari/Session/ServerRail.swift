@@ -170,8 +170,8 @@ struct RailIcon<Content: View>: View {
     }
 }
 
-/// A server's icon over its initials: the initials show until the image has decoded, and a
-/// server without an icon keeps them. A changed icon swaps once the new one is ready (D137).
+/// A server on the rail: its icon, or its acronym tile (D137). A changed icon swaps once the
+/// new one is ready.
 struct GuildIcon: View {
     let name: String
     var icon: ImageKey?
@@ -179,20 +179,9 @@ struct GuildIcon: View {
     var hovered = false
 
     var body: some View {
-        let initials = Initials.of(name)
-        RailIcon(highlighted: highlighted) {
-            Text(initials)
-                .font(.system(size: Self.fontSize(initials.count), weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .padding(.horizontal, 2)
-        }
-        .overlay {
-            if let icon {
-                RemoteImage(key: icon, cornerRadius: RailShape.cornerRadius, place: .railIcon, hovered: hovered)
-                    .frame(width: 40, height: 40)
-            }
-        }
+        ServerPicture(
+            name: name, icon: icon, size: 40, cornerRadius: RailShape.cornerRadius,
+            highlighted: highlighted, place: .railIcon, hovered: hovered)
     }
 
     static func fontSize(_ length: Int) -> CGFloat {
@@ -203,5 +192,51 @@ struct GuildIcon: View {
         case 6: 12
         default: 10
         }
+    }
+}
+
+/// A server's picture at any size: its icon alone when it has one, nothing drawn under it while
+/// it loads or through its transparency, as the official client; the acronym tile (hover and
+/// selection fill it) without an icon, or when the icon failed: the icon is still asked again.
+struct ServerPicture: View {
+    let name: String
+    var icon: ImageKey?
+    var size: CGFloat = 40
+    var cornerRadius: CGFloat = RailShape.cornerRadius
+    var highlighted = false
+    var place = MotionPolicy.Place.userPanel
+    var hovered = false
+    @State private var failed = false
+
+    var body: some View {
+        ZStack {
+            if icon == nil || failed {
+                tile
+            }
+            if let icon {
+                RemoteImage(
+                    key: icon, cornerRadius: cornerRadius, place: place, hovered: hovered,
+                    onFailure: { failed = $0 })
+            }
+        }
+        .frame(width: size, height: size)
+        .onChange(of: icon) {
+            failed = false
+        }
+    }
+
+    private var tile: some View {
+        let initials = Initials.of(name)
+        return RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(Color(nsColor: highlighted ? Palette.brand : Palette.hoverBackground))
+            .overlay {
+                Text(initials)
+                    .font(.system(size: GuildIcon.fontSize(initials.count) * size / 40, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .padding(.horizontal, 2 * size / 40)
+                    .foregroundStyle(highlighted ? Color.white : Color(nsColor: Palette.textDefault))
+            }
+            .animation(.easeOut(duration: 0.2), value: highlighted)
     }
 }

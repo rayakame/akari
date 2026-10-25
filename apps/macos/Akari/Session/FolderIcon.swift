@@ -54,7 +54,7 @@ struct FolderTile: View {
     }
 }
 
-// Up to four servers' minis, 16 each: their icon over their initials, as on the rail.
+// Up to four servers' minis, 16 each: their icon or their initials, as on the rail.
 private struct MiniGrid: View {
     let guilds: [Guild]
 
@@ -66,22 +66,7 @@ private struct MiniGrid: View {
             ForEach(rows.indices, id: \.self) { row in
                 HStack(spacing: 2) {
                     ForEach(rows[row], id: \.id) { guild in
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Color(nsColor: Palette.hoverBackground))
-                            .frame(width: 16, height: 16)
-                            .overlay {
-                                Text(Initials.of(guild.name))
-                                    .font(.system(size: 7, weight: .medium))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.5)
-                                    .foregroundStyle(Color(nsColor: Palette.textDefault))
-                            }
-                            .overlay {
-                                if let icon = guild.icon {
-                                    RemoteImage(key: icon, cornerRadius: 5)
-                                        .frame(width: 16, height: 16)
-                                }
-                            }
+                        ServerPicture(name: guild.name, icon: guild.icon, size: 16, cornerRadius: 5)
                     }
                 }
             }
