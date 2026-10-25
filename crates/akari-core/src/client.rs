@@ -13,6 +13,8 @@ use crate::cache::Caches;
 use crate::error::TransportError;
 use crate::gateway::session::Timing;
 use crate::gateway::{Gateway, GatewayError};
+use crate::media::url::Hosts;
+use crate::media::{ImageDirs, MediaClient};
 use crate::model::{Snowflake, UserId, UserMarker};
 use crate::properties::ClientProperties;
 use crate::rest::{BuildError, RequestExtras, RestClient};
@@ -37,6 +39,8 @@ struct Inner {
     fingerprint: OnceCell<String>,
     store: Arc<dyn TokenStore>,
     caches: Arc<Caches>,
+    media: Arc<MediaClient>,
+    images: ImageDirs,
 }
 
 // A cache write at most this often while the state changes, plus on disconnect, close and
@@ -53,6 +57,10 @@ pub struct Endpoints {
     pub remote_auth: String,
     /// The `Origin` header the remote auth gateway requires.
     pub origin: String,
+    /// Discord's CDN, for avatars, icons, emoji and attachments' originals.
+    pub cdn: String,
+    /// Discord's media proxy, for sized attachments and stickers.
+    pub media: String,
     /// Allows `http://` and `ws://` endpoints for local test servers. Only exists with the
     /// `insecure-test-endpoints` feature; otherwise every endpoint must use TLS.
     #[cfg(any(test, feature = "insecure-test-endpoints"))]
@@ -66,6 +74,8 @@ impl Default for Endpoints {
             gateway: "wss://gateway.discord.gg/".to_owned(),
             remote_auth: "wss://remote-auth-gateway.discord.gg/?v=2".to_owned(),
             origin: "https://discord.com".to_owned(),
+            cdn: "https://cdn.discordapp.com/".to_owned(),
+            media: "https://media.discordapp.net/".to_owned(),
             #[cfg(any(test, feature = "insecure-test-endpoints"))]
             allow_plaintext: false,
         }
@@ -119,10 +129,34 @@ impl DiscordClient {
         )?;
         HeaderValue::from_str(&endpoints.origin)
             .map_err(|_| ClientError::InvalidEndpoint("origin"))?;
+        let with_slash = |url: &str| {
+            let mut url = url.to_owned();
+            if !url.ends_with('/') {
+                url.push('/');
+            }
+            url
+        };
+        let cdn = parse_endpoint(
+            &with_slash(&endpoints.cdn),
+            "cdn",
+            "https",
+            plaintext.then_some("http"),
+        )?;
+        let media = parse_endpoint(
+            &with_slash(&endpoints.media),
+            "media",
+            "https",
+            plaintext.then_some("http"),
+        )?;
 
         let tls = tls::client_config().map_err(ClientError::Tls)?;
         let rest =
             RestClient::new(&tls, api, &properties, !plaintext).map_err(|err| match err {
+                BuildError::InvalidHeader(name) => ClientError::InvalidProperties(name),
+                BuildError::Transport(err) => ClientError::Http(err),
+            })?;
+        let media = MediaClient::new(&tls, &properties, Hosts::new(cdn, media), !plaintext)
+            .map_err(|err| match err {
                 BuildError::InvalidHeader(name) => ClientError::InvalidProperties(name),
                 BuildError::Transport(err) => ClientError::Http(err),
             })?;
@@ -136,8 +170,18 @@ impl DiscordClient {
                 fingerprint: OnceCell::new(),
                 store: token_store,
                 caches: Arc::default(),
+                media: Arc::new(media),
+                images: ImageDirs::default(),
             }),
         })
+    }
+
+    /// Keeps each account's images in `directory/<user id>/`; without it accounts have no
+    /// images. Set it before the first account.
+    #[must_use]
+    pub fn with_image_cache(self, directory: PathBuf) -> Self {
+        self.inner.images.set(directory);
+        self
     }
 
     /// Keeps each account's disk cache in `directory`, one SQLite file per account. Without
@@ -200,6 +244,7 @@ impl DiscordClient {
             Timing::default(),
             DEFAULT_LIMITS,
             cache,
+            Some(user),
         )
     }
 
@@ -221,7 +266,8 @@ impl DiscordClient {
         blocking(move || store.load(account)).await
     }
 
-    /// Ends the session on Discord, then deletes the stored token and the account's cache.
+    /// Ends the session on Discord, then deletes the stored token, the account's cache and its
+    /// images.
     ///
     /// The token is deleted even when Discord can't be reached; a token Discord no longer
     /// accepts counts as logged out.
@@ -238,11 +284,12 @@ impl DiscordClient {
             .await
             .map_err(LogoutError::Storage)?;
         self.inner.caches.forget(account).await;
+        self.inner.images.forget(account).await;
         remote
     }
 
     /// Deletes the stored token without a request to Discord, e.g. for a token Discord
-    /// already rejected, then the account's cache, also while the account is open.
+    /// already rejected, then the account's cache and images, also while the account is open.
     pub async fn forget_account(
         &self,
         account: Snowflake<UserMarker>,
@@ -250,12 +297,14 @@ impl DiscordClient {
         let store = self.inner.store.clone();
         blocking(move || store.delete(account)).await?;
         self.inner.caches.forget(account).await;
+        self.inner.images.forget(account).await;
         Ok(())
     }
 
-    /// Deletes the caches of all accounts that aren't open, e.g. at a login screen.
+    /// Deletes the caches and images of all accounts that aren't open, e.g. at a login screen.
     pub async fn clear_caches(&self) {
         self.inner.caches.clear().await;
+        self.inner.images.clear().await;
     }
 
     /// Ends the session `token` belongs to, without touching the token store; for a token
@@ -286,6 +335,14 @@ impl DiscordClient {
 
     pub(crate) fn rest(&self) -> &RestClient {
         &self.inner.rest
+    }
+
+    pub(crate) fn media(&self) -> Arc<MediaClient> {
+        self.inner.media.clone()
+    }
+
+    pub(crate) fn image_tier(&self, user: UserId) -> Option<Arc<crate::media::DiskTier>> {
+        self.inner.images.tier(user)
     }
 
     pub(crate) fn tls(&self) -> Arc<rustls::ClientConfig> {
@@ -470,6 +527,8 @@ mod tests {
             "wss://remote-auth-gateway.discord.gg/?v=2"
         );
         assert_eq!(endpoints.origin, "https://discord.com");
+        assert_eq!(endpoints.cdn, "https://cdn.discordapp.com/");
+        assert_eq!(endpoints.media, "https://media.discordapp.net/");
     }
 
     #[test]

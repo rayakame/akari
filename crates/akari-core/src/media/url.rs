@@ -69,7 +69,7 @@ pub(crate) fn proxy_size(source: (u32, u32), wanted: (u32, u32)) -> Option<(u32,
 }
 
 /// What a file is, besides its size.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Form {
     Still,
     WebP,
@@ -103,14 +103,6 @@ pub(crate) struct Hosts {
 impl Hosts {
     pub(crate) fn new(cdn: Url, media: Url) -> Self {
         Self { cdn, media }
-    }
-
-    pub(crate) fn cdn(&self) -> &Url {
-        &self.cdn
-    }
-
-    pub(crate) fn media(&self) -> &Url {
-        &self.media
     }
 
     /// Whether Akari fetches from `url`: only Discord's image hosts, each with its scheme and
@@ -209,6 +201,81 @@ impl Hosts {
                 Err(ImageError::UnknownKey)
             }
         }
+    }
+
+    /// The original of an identity image, for Open in Browser and Copy Link: PNG, or GIF for an
+    /// animated one, at the CDN's largest size.
+    pub(crate) fn original(&self, key: &ImageKey) -> Result<Url, ImageError> {
+        let still_or_gif = |animated: bool| if animated { "gif" } else { "png" };
+        let (host, path, sized) = match key {
+            ImageKey::Avatar { user, hash } => (
+                &self.cdn,
+                format!(
+                    "avatars/{}/{hash}.{}",
+                    user.get(),
+                    still_or_gif(hash.is_animated())
+                ),
+                true,
+            ),
+            ImageKey::MemberAvatar { guild, user, hash } => (
+                &self.cdn,
+                format!(
+                    "guilds/{}/users/{}/avatars/{hash}.{}",
+                    guild.get(),
+                    user.get(),
+                    still_or_gif(hash.is_animated())
+                ),
+                true,
+            ),
+            ImageKey::GuildIcon { guild, hash } => (
+                &self.cdn,
+                format!(
+                    "icons/{}/{hash}.{}",
+                    guild.get(),
+                    still_or_gif(hash.is_animated())
+                ),
+                true,
+            ),
+            ImageKey::GroupIcon { channel, hash } => (
+                &self.cdn,
+                format!("channel-icons/{}/{hash}.png", channel.get()),
+                true,
+            ),
+            ImageKey::RoleIcon { role, hash } => (
+                &self.cdn,
+                format!("role-icons/{}/{hash}.png", role.get()),
+                true,
+            ),
+            ImageKey::Emoji { id, animated } => (
+                &self.cdn,
+                format!("emojis/{}.{}", id.get(), still_or_gif(*animated)),
+                false,
+            ),
+            ImageKey::Sticker { id, format } => {
+                let extension = match format {
+                    StickerFormatType::Png | StickerFormatType::Apng => "png",
+                    StickerFormatType::Gif => "gif",
+                    StickerFormatType::Lottie | StickerFormatType::Unknown(_) => {
+                        return Err(ImageError::Unsupported);
+                    }
+                };
+                (
+                    &self.media,
+                    format!("stickers/{}.{extension}", id.get()),
+                    false,
+                )
+            }
+            ImageKey::DefaultAvatar { index } if *index <= 5 => {
+                (&self.cdn, format!("embed/avatars/{index}.png"), false)
+            }
+            _ => return Err(ImageError::UnknownKey),
+        };
+        let mut url = join(host, &path)?;
+        if sized {
+            url.query_pairs_mut()
+                .append_pair("size", &MAX_SIZE.to_string());
+        }
+        Ok(url)
     }
 
     // Discord's query order: size, quality, animated.
@@ -320,7 +387,7 @@ impl Hosts {
             }
             _ => Form::Still,
         };
-        Ok(self.proxied(
+        Ok(Self::proxied(
             proxy,
             format!("attachment/{}", attachment.id.get()),
             (width, height),
@@ -359,7 +426,7 @@ impl Hosts {
             .ok()
             .filter(|url| self.allows(url) && is_attachment_link(url))
             .or_else(|| Some(proxy.clone()).filter(is_attachment_link));
-        Ok(self.proxied(
+        Ok(Self::proxied(
             proxy.clone(),
             embed_disk_key(&proxy),
             (width, height),
@@ -387,9 +454,7 @@ impl Hosts {
     }
 
     // The client's form (module 803316): the signature kept, then format, quality, size.
-    #[allow(clippy::too_many_arguments)]
     fn proxied(
-        &self,
         mut url: Url,
         disk: String,
         source: (u32, u32),

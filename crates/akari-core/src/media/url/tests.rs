@@ -633,3 +633,43 @@ fn only_discords_hosts_are_allowed() {
         assert_eq!(hosts.allows(&Url::parse(url).unwrap()), allowed, "{url}");
     }
 }
+
+#[test]
+fn originals_are_png_or_gif_at_the_largest_size() {
+    let hosts = hosts();
+
+    assert_eq!(
+        hosts.original(&avatar(HASH)).unwrap().as_str(),
+        format!("https://cdn.discordapp.com/avatars/80351110224678912/{HASH}.png?size=4096")
+    );
+    assert_eq!(
+        hosts.original(&avatar(ANIMATED)).unwrap().as_str(),
+        format!("https://cdn.discordapp.com/avatars/80351110224678912/{ANIMATED}.gif?size=4096")
+    );
+    assert_eq!(
+        hosts
+            .original(&ImageKey::Emoji {
+                id: Snowflake::new(392_938_283_556_143_104),
+                animated: true
+            })
+            .unwrap()
+            .as_str(),
+        "https://cdn.discordapp.com/emojis/392938283556143104.gif"
+    );
+    assert_eq!(
+        hosts
+            .original(&ImageKey::DefaultAvatar { index: 2 })
+            .unwrap()
+            .as_str(),
+        "https://cdn.discordapp.com/embed/avatars/2.png"
+    );
+    assert_eq!(
+        hosts
+            .original(&ImageKey::Sticker {
+                id: Snowflake::new(749_054_660_769_218_631),
+                format: StickerFormatType::Lottie
+            })
+            .err(),
+        Some(ImageError::Unsupported)
+    );
+}

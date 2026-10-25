@@ -219,7 +219,7 @@ impl FakeConnection {
     }
 }
 
-struct NoStore;
+pub(crate) struct NoStore;
 
 impl TokenStore for NoStore {
     fn load(&self, _: Snowflake<UserMarker>) -> Result<Option<Token>, TokenStoreError> {
@@ -242,9 +242,42 @@ pub(crate) fn client_with(gateway: String, api: String) -> DiscordClient {
     client_with_store(gateway, api, Arc::new(NoStore))
 }
 
+// REST, the CDN and the media proxy all on `server`.
+pub(crate) fn client_with_media(gateway: String, server: &str) -> DiscordClient {
+    client_with_endpoints(
+        Endpoints {
+            gateway,
+            api: format!("{server}/api/v9/"),
+            cdn: format!("{server}/"),
+            media: format!("{server}/"),
+            allow_plaintext: true,
+            ..Endpoints::default()
+        },
+        Arc::new(NoStore),
+    )
+}
+
 pub(crate) fn client_with_store(
     gateway: String,
     api: String,
+    store: Arc<dyn TokenStore>,
+) -> DiscordClient {
+    client_with_endpoints(
+        Endpoints {
+            gateway,
+            api,
+            // Images too: a test must never reach Discord's CDN.
+            cdn: "http://127.0.0.1:9/".to_owned(),
+            media: "http://127.0.0.1:9/".to_owned(),
+            allow_plaintext: true,
+            ..Endpoints::default()
+        },
+        store,
+    )
+}
+
+pub(crate) fn client_with_endpoints(
+    endpoints: Endpoints,
     store: Arc<dyn TokenStore>,
 ) -> DiscordClient {
     let host = HostInfo {
@@ -254,12 +287,6 @@ pub(crate) fn client_with_store(
         system_locale: "en-US".to_owned(),
     };
     let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
-    let endpoints = Endpoints {
-        gateway,
-        api,
-        allow_plaintext: true,
-        ..Endpoints::default()
-    };
     DiscordClient::with_endpoints(properties, store, endpoints).unwrap()
 }
 

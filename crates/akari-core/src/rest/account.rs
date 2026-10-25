@@ -276,6 +276,11 @@ impl AccountRest {
         self.closed.store(true, Ordering::Release);
     }
 
+    #[cfg(test)]
+    pub(crate) fn client(&self) -> &DiscordClient {
+        &self.client
+    }
+
     pub(crate) fn is_unauthorized(&self) -> bool {
         self.unauthorized.load(Ordering::Acquire)
     }

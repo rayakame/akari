@@ -2,16 +2,43 @@
 //! for, downloads without the token, signed links, and the files kept on disk per account.
 //! Decoding and drawing are the host's.
 
+mod client;
+mod dirs;
 mod disk;
+mod images;
 pub mod layout;
 mod placeholder;
 mod signed;
-mod sniff;
+pub(crate) mod sniff;
 pub(crate) mod url;
 
 use std::path::PathBuf;
 
+pub(crate) use client::MediaClient;
+pub(crate) use dirs::ImageDirs;
+pub(crate) use disk::DiskTier;
+pub(crate) use images::Images;
 pub use placeholder::{Placeholder, placeholder};
+
+/// The size Discord's CDN is asked for a box whose longest side has `pixels`: the smallest
+/// of its sizes with at least as many, at most 4096.
+pub fn cdn_size(pixels: u32) -> u32 {
+    url::ladder_size(pixels)
+}
+
+/// The width and height the media proxy is asked for a box of `pixels` over an image of
+/// `source` pixels: the box covered, the longest side up the CDN's sizes from 128 and the other
+/// following the aspect, at most 4096; `None` asks for the source as it is, never above it.
+pub fn proxy_size(source: (u32, u32), pixels: (u32, u32)) -> Option<(u32, u32)> {
+    url::proxy_size(source, pixels)
+}
+
+// What a display file may weigh; originals are saved without a cap.
+pub(crate) const MAX_BODY: usize = if cfg!(test) {
+    256 * 1024
+} else {
+    16 * 1024 * 1024
+};
 
 use crate::model::{
     AttachmentId, ChannelId, EmojiId, GuildId, MessageId, RoleId, StickerFormatType, StickerId,

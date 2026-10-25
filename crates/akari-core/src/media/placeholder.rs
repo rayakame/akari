@@ -102,10 +102,9 @@ fn decode(hash: &[u8]) -> Option<Placeholder> {
                 }
             }
             let mut j = 0;
-            for cy in 0..3 {
-                let fy2 = 2.0 * fy[cy];
-                for cx in usize::from(cy == 0)..3 - cy {
-                    let f = fx[cx] * fy2;
+            for (cy, fy) in fy.iter().take(3).enumerate() {
+                for fx in &fx[usize::from(cy == 0)..3 - cy] {
+                    let f = fx * 2.0 * fy;
                     p += p_ac[j] * f;
                     q += q_ac[j] * f;
                     j += 1;
@@ -113,10 +112,9 @@ fn decode(hash: &[u8]) -> Option<Placeholder> {
             }
             if has_alpha {
                 let mut j = 0;
-                for cy in 0..5 {
-                    let fy2 = 2.0 * fy[cy];
-                    for cx in usize::from(cy == 0)..5 - cy {
-                        a += a_ac[j] * fx[cx] * fy2;
+                for (cy, fy) in fy.iter().take(5).enumerate() {
+                    for fx in &fx[usize::from(cy == 0)..5 - cy] {
+                        a += a_ac[j] * fx * 2.0 * fy;
                         j += 1;
                     }
                 }

@@ -377,7 +377,7 @@ mod tests {
             }
             assert_no_overlap(&laid);
         }
-        assert_eq!(mosaic(&vec![size(10, 10); 12]).cells.len(), 10);
+        assert_eq!(mosaic(&[size(10, 10); 12]).cells.len(), 10);
         assert_eq!(mosaic(&[]).size, size(0, 0));
     }
 

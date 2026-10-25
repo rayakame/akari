@@ -11,6 +11,7 @@ use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
     MemberLists, PresenceStatus, SendError,
 };
+use crate::media::{ImageError, ImageFile, ImageKey, ImageRequest, Images};
 use crate::model::{ChannelId, ChannelType, GuildId, MessageId, MessageType, Timestamp, UserId};
 use crate::rest::{
     AccountRest, CreateMessage, CreateThread, Failure, Page, Query, RequestError, uri_component,
@@ -230,6 +231,7 @@ pub(crate) struct Shared {
     // The cache's thread and whose file it has open.
     cache: Option<(CacheThread, UserId)>,
     preparer: RwLock<Option<Arc<dyn MessagePreparer>>>,
+    images: Arc<Images>,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -1032,7 +1034,19 @@ impl Account {
         timing: Timing,
         limits: WindowLimits,
     ) -> Result<Self, GatewayError> {
-        Self::start_with_cache(client, token, timing, limits, None)
+        Self::start_with_cache(client, token, timing, limits, None, None)
+    }
+
+    // With `user`'s image directory.
+    #[cfg(test)]
+    pub(crate) fn start_as(
+        client: DiscordClient,
+        token: Token,
+        timing: Timing,
+        limits: WindowLimits,
+        user: UserId,
+    ) -> Result<Self, GatewayError> {
+        Self::start_with_cache(client, token, timing, limits, None, Some(user))
     }
 
     pub(crate) fn start_with_cache(
@@ -1041,6 +1055,7 @@ impl Account {
         timing: Timing,
         limits: WindowLimits,
         cache: Option<DiskCache>,
+        user: Option<UserId>,
     ) -> Result<Self, GatewayError> {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| GatewayError::NoRuntime)?;
         let rest = Arc::new(AccountRest::new(
@@ -1070,6 +1085,13 @@ impl Account {
             });
         }
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
+        let images = Images::new(
+            client.media(),
+            user.and_then(|user| client.image_tier(user)),
+            store.clone(),
+            rest.clone(),
+            &runtime,
+        );
         let gateway = Gateway::start(client, token, timing)?;
         let shared = Arc::new_cyclic(|weak: &Weak<Shared>| {
             let unauthorized = {
@@ -1102,6 +1124,7 @@ impl Account {
                 flusher,
                 cache: thread,
                 preparer: RwLock::new(None),
+                images,
             }
         });
         // Built before the task starts, so it runs even if the task is never polled.
@@ -1535,6 +1558,35 @@ impl Account {
     /// Drops a failed message.
     pub fn discard_message(&self, channel: ChannelId, pending: MessageId) {
         self.shared.store.discard_message(channel, pending);
+    }
+
+    /// The image for `request`: a kept file with enough pixels, else downloaded from Discord's
+    /// CDN or media proxy, never with the token. Waiters for the same image share a download;
+    /// dropping the future stops waiting, and the last waiter to go cancels the download.
+    /// Offline, only kept files answer.
+    pub async fn image(&self, request: ImageRequest) -> Result<ImageFile, ImageError> {
+        self.shared.images.image(request).await
+    }
+
+    /// A link to the original for Open in Browser and Copy Link; an attachment's link is
+    /// renewed when it's about to expire.
+    pub async fn original_url(&self, key: &ImageKey) -> Result<String, ImageError> {
+        self.shared.images.original_url(key).await
+    }
+
+    /// Writes the original to `destination`, whatever its size; returns its bytes. Nothing is
+    /// left at `destination` when it fails.
+    pub async fn save_original(
+        &self,
+        key: &ImageKey,
+        destination: &std::path::Path,
+    ) -> Result<u64, ImageError> {
+        self.shared.images.save_original(key, destination).await
+    }
+
+    /// Deletes the account's kept images.
+    pub async fn clear_images(&self) {
+        self.shared.images.clear().await;
     }
 
     /// Sets this session's status now if online, and again after every new session.
