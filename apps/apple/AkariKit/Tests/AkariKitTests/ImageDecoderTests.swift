@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 import Testing
 
 @testable import AkariKit
@@ -24,9 +25,10 @@ struct ImageDecoderTests {
         #expect(image2.height == 334)
     }
 
-    // The corrective redraw draws into an RGB context whatever the source's color space.
+    // The corrective redraw takes a grayscale or CMYK source too (ImageIO's thumbnails of a gray
+    // file stay gray; a CMYK file's come back RGB).
     @Test
-    func aGrayscaleSourceIsRedrawnToo() throws {
+    func grayscaleAndCmykSourcesAreRedrawnToo() throws {
         let source = try ImageDecoder.open(try images.grayPNG("gray", width: 640, height: 480))
         #expect(CGImageSourceCreateImageAtIndex(source, 0, nil)?.colorSpace?.model == .monochrome)
 
@@ -34,6 +36,11 @@ struct ImageDecoderTests {
 
         #expect(image.width == 86)
         #expect(image.height == 64)
+
+        let cmyk = try ImageDecoder.open(try images.cmykJPEG("cmyk", width: 640, height: 480))
+        let printed = try #require(ImageDecoder.decode(cmyk, frame: 0, covering: (64, 64)))
+        #expect(printed.width == 86)
+        #expect(printed.height == 64)
     }
 
     @Test

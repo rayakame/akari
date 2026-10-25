@@ -60,6 +60,25 @@ final class TestImages: @unchecked Sendable {
         return url
     }
 
+    /// A CMYK JPEG of `width` × `height`.
+    func cmykJPEG(_ name: String, width: Int, height: Int) throws -> URL {
+        let url = directory.appending(path: "\(name).jpg")
+        let space = CGColorSpace(name: CGColorSpace.genericCMYK)!
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: space, bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+        context.setFillColor(CGColor(genericCMYKCyan: 1, magenta: 0, yellow: 0, black: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = context.makeImage()!
+        let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.jpeg.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        return url
+    }
+
     /// A JPEG of `width` × `height` whose EXIF orientation is `orientation` (1–8).
     func jpeg(_ name: String, width: Int, height: Int, orientation: Int) throws -> URL {
         let url = directory.appending(path: "\(name).jpg")
