@@ -310,7 +310,7 @@ struct MessageMenuThreadTests {
             id: UserId(rawValue: 2), username: "ray", globalName: nil, displayName: "Ray",
             bot: false, system: false, avatar: .defaultAvatar(index: 2)),
         fromWebhook: false, content: "hello", timestamp: Date(), editedTimestamp: nil,
-        pinned: false, mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
+        pinned: false, mentionEveryone: false, attachments: [], embedCount: 0, stickers: [],
         componentsV2: false, delivery: .sent, formatted: formattedText(content: "hello"),
         mentionsMe: false, reference: nil, hasThread: false, mentions: [], call: nil,
         roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,

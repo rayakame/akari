@@ -9,6 +9,8 @@ extension NSAttributedString.Key {
     // The x of a quote's bar, as an NSNumber.
     nonisolated static let akariQuoteBar = NSAttributedString.Key("akariQuoteBar")
     nonisolated static let akariSpoiler = NSAttributedString.Key("akariSpoiler")
+    // A custom emoji's box: `MessageText.EmojiBox` on its attachment character.
+    nonisolated static let akariEmoji = NSAttributedString.Key("akariEmoji")
 }
 
 /// A message's content as the list shows it.
@@ -32,6 +34,18 @@ enum MessageText {
         let hidden: Bool
     }
 
+    /// A custom emoji in the text (D139): a fixed box the layout manager places an image layer
+    /// on; `:name:` is its tooltip, its copy and its fallback.
+    nonisolated struct EmojiBox: Hashable {
+        let key: ImageKey
+        let name: String
+        let animated: Bool
+    }
+
+    /// The box's side at the 16 pt base: 1.375 × the body size inline, 48 in a jumbo message.
+    nonisolated static let emojiInline: CGFloat = 22
+    nonisolated static let emojiJumbo: CGFloat = 48
+
     struct Built {
         let text: NSAttributedString
         /// When a relative timestamp's text changes next.
@@ -48,9 +62,22 @@ enum MessageText {
         return builder.build()
     }
 
-    /// The text a selection shows, as plain text: line breaks as newlines, symbols left out.
+    /// The text a selection shows, as plain text: line breaks as newlines, a custom emoji as
+    /// `:name:`, other symbols left out.
     nonisolated static func plain(_ text: NSAttributedString, _ range: NSRange) -> String {
-        text.attributedSubstring(from: range).string
+        let part = text.attributedSubstring(from: range)
+        let out = NSMutableString(string: part.string)
+        var emoji: [(NSRange, String)] = []
+        part.enumerateAttribute(.akariEmoji, in: NSRange(location: 0, length: part.length)) {
+            value, range, _ in
+            if let box = value as? EmojiBox {
+                emoji.append((range, String(repeating: ":\(box.name):", count: range.length)))
+            }
+        }
+        for (range, name) in emoji.reversed() {
+            out.replaceCharacters(in: range, with: name)
+        }
+        return (out as String)
             .replacingOccurrences(of: "\u{2028}", with: "\n")
             .replacingOccurrences(of: "\u{FFFC}", with: "")
     }
@@ -252,12 +279,7 @@ private struct Builder {
             default: Palette.textDefault
             }
         columns = Self.columns(message.formatted.blocks)
-        // Custom emoji are text until the emoji milestone, so they can't be large yet.
-        jumbo =
-            message.formatted.jumbo
-            && !message.formatted.blocks.contains { block in
-                block.spans.contains { if case .emoji = $0.kind { true } else { false } }
-            }
+        jumbo = message.formatted.jumbo
     }
 
     private static func columns(_ blocks: [TextBlock]) -> [CGFloat] {
@@ -502,8 +524,10 @@ private struct Builder {
             mention("@here", placeholder: false, span, style, attributes)
         case .command(let name, _):
             mention(MentionText.command(name), placeholder: false, span, style, attributes)
-        case .emoji(let name, _, _):
-            append(":\(name):", attributes)
+        case .emoji(let name, _, let animated, let key):
+            attributes[.akariEmoji] = MessageText.EmojiBox(key: key, name: name, animated: animated)
+            attributes[.toolTip] = ":\(name):"
+            append(emojiBox(style.face, attributes))
         case .timestamp(let seconds, let timestampStyle):
             attributes[.toolTip] = times.fullDate(seconds)
             pill(times.text(seconds, style: timestampStyle, now: now), .timestamp, attributes)
@@ -626,6 +650,21 @@ private struct Builder {
     private func addKern(at index: Int) {
         let kern = out.attribute(.kern, at: index, effectiveRange: nil) as? CGFloat ?? 0
         out.addAttribute(.kern, value: kern + 2, range: NSRange(location: index, length: 1))
+    }
+
+    // The box sits where the face's emoji glyphs sit: centered on the cap height, which puts an
+    // inline box's bottom on the line's bottom and a jumbo box on its line's emoji.
+    private func emojiBox(_ face: Typeface, _ attributes: [NSAttributedString.Key: Any])
+        -> NSAttributedString
+    {
+        let side = TypeScale.size(jumbo ? MessageText.emojiJumbo : MessageText.emojiInline)
+        let attachment = NSTextAttachment()
+        let font = face.font(bold: false, italic: false)
+        attachment.bounds = NSRect(
+            x: 0, y: ((font.capHeight - side) / 2).rounded(), width: side, height: side)
+        let box = NSMutableAttributedString(attachment: attachment)
+        box.addAttributes(attributes, range: NSRange(location: 0, length: box.length))
+        return box
     }
 
     private func symbol(

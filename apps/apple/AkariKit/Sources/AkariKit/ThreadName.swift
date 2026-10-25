@@ -70,7 +70,7 @@ public enum ThreadName {
             default:
                 return "#\(name)"
             }
-        case .emoji(let name, _, _):
+        case .emoji(let name, _, _, _):
             return ":\(name):"
         case .timestamp(let seconds, let style):
             return times.text(seconds, style: style, now: Date())

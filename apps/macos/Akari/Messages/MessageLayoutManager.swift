@@ -82,7 +82,42 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
                 }
             }
         }
+        storage.enumerateAttribute(.akariEmoji, in: whole) { value, range, _ in
+            guard let box = value as? MessageText.EmojiBox else {
+                return
+            }
+            // A hidden spoiler's emoji stay under the cover, unasked.
+            let spoiler = storage.attribute(.akariSpoiler, at: range.location, effectiveRange: nil)
+            if let spoiler = spoiler as? MessageText.Spoiler, spoiler.hidden {
+                return
+            }
+            // Equal neighbours form one run; each character is a box of its own.
+            for index in range.location..<NSMaxRange(range) {
+                if let rect = emojiRect(index, storage) {
+                    shapes.append(.emoji(rect, box))
+                }
+            }
+        }
         return shapes.filter { !$0.rect.isEmpty }
+    }
+
+    // The attachment's bounds placed on its baseline, in the container's coordinates.
+    private func emojiRect(_ index: Int, _ storage: NSTextStorage) -> NSRect? {
+        guard let attachment = storage.attribute(.attachment, at: index, effectiveRange: nil)
+                as? NSTextAttachment
+        else {
+            return nil
+        }
+        let glyph = glyphIndexForCharacter(at: index)
+        guard glyph < numberOfGlyphs else {
+            return nil
+        }
+        let line = lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let location = location(forGlyphAt: glyph)
+        let bounds = attachment.bounds
+        return NSRect(
+            x: line.minX + location.x, y: line.minY + location.y - bounds.maxY,
+            width: bounds.width, height: bounds.height)
     }
 
     private func codeBox(_ range: NSRange, _ storage: NSTextStorage, _ container: NSTextContainer)
@@ -161,11 +196,13 @@ nonisolated enum MessageBlockShape: Equatable {
     case cover(NSRect, UInt16)
     case revealed(NSRect)
     case pill(NSRect, MessageText.Pill)
+    /// A custom emoji's box, for an image layer.
+    case emoji(NSRect, MessageText.EmojiBox)
 
     var rect: NSRect {
         switch self {
         case .codeBox(let rect), .quoteBar(let rect), .cover(let rect, _), .revealed(let rect),
-            .pill(let rect, _):
+            .pill(let rect, _), .emoji(let rect, _):
             rect
         }
     }

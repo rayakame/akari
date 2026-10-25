@@ -55,11 +55,16 @@ final class ImageLayerView: NSView {
     /// Told when the image landed, failed or was replaced; owners that show something of their
     /// own around a failure (a server's acronym tile) listen.
     var onStateChange: ((ImageLayerView) -> Void)?
+    /// Shown in the box when the image failed (a custom emoji's `:name:`).
+    var fallbackText: String? {
+        didSet { updateFallback() }
+    }
     private(set) var content: Content?
     /// The still failed to load; the placeholder stays until a retry.
     private(set) var failed = false
     let imageLayer = CALayer()
     let placeholderLayer = CALayer()
+    let fallbackLayer = CATextLayer()
     private(set) var player: FramePlayer?
     private var still: CGImage?
     private var stillTask: Task<Void, Never>?
@@ -81,6 +86,14 @@ final class ImageLayerView: NSView {
             self.layer?.addSublayer(layer)
         }
         imageLayer.contentsGravity = .resizeAspectFill
+        fallbackLayer.actions = ["contents": NSNull(), "hidden": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        fallbackLayer.isHidden = true
+        fallbackLayer.alignmentMode = .center
+        fallbackLayer.truncationMode = .end
+        fallbackLayer.isWrapped = false
+        fallbackLayer.font = NSFont.systemFont(ofSize: TypeScale.size(11))
+        fallbackLayer.fontSize = TypeScale.size(11)
+        layer?.addSublayer(fallbackLayer)
         updatePlaceholder()
         // A selector observer goes away with the view.
         NotificationCenter.default.addObserver(
@@ -148,6 +161,8 @@ final class ImageLayerView: NSView {
         }
         imageLayer.frame = frame
         placeholderLayer.frame = frame
+        fallbackLayer.frame = frame
+        fallbackLayer.contentsScale = scale
         askIfPixelsChanged()
     }
 
@@ -289,6 +304,19 @@ final class ImageLayerView: NSView {
             effectiveAppearance.performAsCurrentDrawingAppearance {
                 placeholderLayer.backgroundColor = Palette.avatarPlaceholder.cgColor
             }
+        }
+        updateFallback()
+    }
+
+    private func updateFallback() {
+        let shows = failed && fallbackText != nil
+        fallbackLayer.isHidden = !shows
+        guard shows else {
+            return
+        }
+        fallbackLayer.string = fallbackText
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            fallbackLayer.foregroundColor = Palette.textMuted.cgColor
         }
     }
 

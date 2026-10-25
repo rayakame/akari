@@ -46,6 +46,64 @@ struct MessageTextTests {
         try #require(try attributes(text, of: shown)[.paragraphStyle] as? NSParagraphStyle)
     }
 
+    // A custom emoji is a fixed box in the text (D139): 1.375 × the body size, its name as the
+    // tooltip, the image key for the layer the layout manager places on it.
+    @Test
+    func aCustomEmojiIsABoxWithItsNameAsTooltip() throws {
+        let text = built("hi <:wave:5> there").text
+
+        #expect(text.string == "hi \u{FFFC} there")
+        let attributes = text.attributes(at: 3, effectiveRange: nil)
+        let box = try #require(attributes[.akariEmoji] as? MessageText.EmojiBox)
+        #expect(box == MessageText.EmojiBox(key: .emoji(emojiId: EmojiId(rawValue: 5), animated: false), name: "wave", animated: false))
+        #expect(attributes[.toolTip] as? String == ":wave:")
+        let attachment = try #require(attributes[.attachment] as? NSTextAttachment)
+        #expect(attachment.bounds.size == NSSize(width: 22, height: 22))
+        #expect(attachment.image == nil, "the layer draws it")
+        #expect(attributes[.akariSource] as? NSRange == NSRange(location: 3, length: 9))
+
+        let animated = built("<a:dance:6> x").text
+        let moving = try #require(animated.attribute(.akariEmoji, at: 0, effectiveRange: nil) as? MessageText.EmojiBox)
+        #expect(moving.animated && moving.key == .emoji(emojiId: EmojiId(rawValue: 6), animated: true))
+    }
+
+    // Custom emoji count for jumbo now that they're images: 48 in a 56 line.
+    @Test
+    func aJumboCustomEmojiIs48() throws {
+        let text = built("<:wave:5> 😀").text
+
+        let attachment = try #require(text.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)
+        #expect(attachment.bounds.size == NSSize(width: 48, height: 48))
+        #expect(try font(text, of: "😀").pointSize == 48)
+        #expect(try paragraph(text, of: "😀").minimumLineHeight == 56)
+        let thirtyOne = built(String(repeating: "<:wave:5>", count: 31)).text
+        let small = try #require(thirtyOne.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)
+        #expect(small.bounds.size == NSSize(width: 22, height: 22))
+    }
+
+    @Test
+    func plainAndAccessibleGiveTheEmojisName() {
+        let text = built("hi <:wave:5> there").text
+
+        #expect(MessageText.plain(text, NSRange(location: 0, length: text.length)) == "hi :wave: there")
+        #expect(MessageText.plain(text, NSRange(location: 3, length: 1)) == ":wave:")
+        #expect(MessageText.accessible(text) == "hi :wave: there")
+        #expect(MessageText.plain(built("a <#3> b").text, NSRange(location: 0, length: 6)).contains("\u{FFFC}") == false, "other attachments stay out")
+    }
+
+    @Test
+    func aMessageWithoutCustomEmojiHasNoEmojiBoxes() {
+        let text = built("plain **bold** 😀 <#3> <t:1800000000:R>").text
+
+        var boxes = 0
+        text.enumerateAttribute(.akariEmoji, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+            if value != nil {
+                boxes += 1
+            }
+        }
+        #expect(boxes == 0)
+    }
+
     @Test
     func stylesUseFontTraitsAndLines() throws {
         let text = built("**b** *i* __u__ ~~s~~ ***x***").text
@@ -251,14 +309,15 @@ struct MessageTextTests {
     }
 
     @Test
-    func onlyUnicodeEmojiAreJumbo() throws {
+    func unicodeAndCustomEmojiAreJumboTogether() throws {
         let jumbo = built("😀 🎉").text
         #expect(try font(jumbo, of: "🎉").pointSize == 48)
         #expect(try paragraph(jumbo, of: "🎉").minimumLineHeight == 56)
 
         let custom = built("😀 <:wave:123456789012345678>").text
-        #expect(custom.string.contains(":wave:"))
-        #expect(try font(custom, of: "😀").pointSize == 16)
+        #expect(!custom.string.contains(":wave:"), "the box, not the name")
+        #expect(try font(custom, of: "😀").pointSize == 48)
+        #expect(try font(built("😀 <:wave:123456789012345678> text").text, of: "😀").pointSize == 16)
     }
 
     @Test

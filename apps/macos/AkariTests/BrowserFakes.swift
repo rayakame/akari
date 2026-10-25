@@ -193,7 +193,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
             fromWebhook: false, content: "test",
             timestamp: FakeBrowserStore.date(last.rawValue), editedTimestamp: nil,
             pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
-            stickerNames: [], componentsV2: false, delivery: .sent,
+            stickers: [], componentsV2: false, delivery: .sent,
             formatted: formattedText(content: "test"),
             mentionsMe: false, reference: nil, hasThread: false, mentions: [], call: nil,
             roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
@@ -255,7 +255,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
                 fromWebhook: false, content: content,
                 timestamp: FakeBrowserStore.date(id.rawValue), editedTimestamp: nil,
                 pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
-                stickerNames: [], componentsV2: false, delivery: .sent,
+                stickers: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: false,
                 reference: kind == .threadCreated
                     ? MessageReference(

@@ -23,6 +23,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         get { avatar.images }
         set {
             avatar.images = newValue
+            content.images = newValue
             threadBox?.images = newValue
         }
     }
@@ -30,6 +31,11 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     var animatesAvatar: Bool {
         get { avatar.animates }
         set { avatar.animates = newValue }
+    }
+    /// The list's say: this message's custom emoji play (the setting, visibility, hover).
+    var animatesEmoji: Bool {
+        get { content.animatesEmoji }
+        set { content.animatesEmoji = newValue }
     }
     private let reply = CellText.label()
     private let header = HeaderRow()
@@ -438,9 +444,6 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         if message.embedCount > 0 {
             let embeds = message.embedCount == 1 ? "1 embed" : "\(message.embedCount) embeds"
             lines.append(CellText.symbolLine("rectangle.on.rectangle", embeds))
-        }
-        for sticker in message.stickerNames {
-            lines.append(CellText.symbolLine("seal", "Sticker: \(sticker)"))
         }
         let joined = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {

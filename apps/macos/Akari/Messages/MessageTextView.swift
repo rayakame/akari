@@ -1,3 +1,4 @@
+import AkariKit
 import AppKit
 
 /// Selectable, not editable, laid out by TextKit 1: a message's body, and the other text Discord
@@ -13,6 +14,16 @@ final class MessageTextView: NSTextView {
     // The message's own items, above the text's.
     var messageMenu: () -> [NSMenuItem] = { [] }
     let decorations = MessageDecorations()
+    /// Where the custom emoji's images come from.
+    var images: ImageCache? {
+        get { decorations.images }
+        set { decorations.images = newValue }
+    }
+    /// The list's say: this message's custom emoji play.
+    var animatesEmoji: Bool {
+        get { decorations.animatesEmoji }
+        set { decorations.animatesEmoji = newValue }
+    }
 
     init() {
         let storage = NSTextStorage()
@@ -457,10 +468,27 @@ nonisolated final class LinkElement: NSAccessibilityElement {
 }
 
 /// Code boxes, quote bars, pills and spoilers' backgrounds as layers behind a message's text,
-/// kept out of the text's bitmap (apps/macos/README.md, Performance).
+/// kept out of the text's bitmap (apps/macos/README.md, Performance), and the custom emoji's
+/// image layers on their boxes (D139).
 final class MessageDecorations: NSView {
     private var shapes: [MessageBlockShape] = []
     private var origin = NSPoint.zero
+    private var blockViews: [BlockView] = []
+    private(set) var emojiViews: [ImageLayerView] = []
+    var images: ImageCache? {
+        didSet {
+            if images !== oldValue {
+                emojiViews.forEach { $0.images = images }
+            }
+        }
+    }
+    var animatesEmoji = false {
+        didSet {
+            if animatesEmoji != oldValue {
+                emojiViews.forEach { $0.animates = animatesEmoji }
+            }
+        }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -494,20 +522,48 @@ final class MessageDecorations: NSView {
         }
         self.shapes = shapes
         self.origin = origin
-        for (index, shape) in shapes.enumerated() {
-            let view: BlockView
-            if index < subviews.count, let reused = subviews[index] as? BlockView {
-                view = reused
+        var blocks = 0
+        var emoji = 0
+        for shape in shapes {
+            let frame = shape.rect.offsetBy(dx: origin.x, dy: origin.y)
+            if case .emoji(_, let box) = shape {
+                let view: ImageLayerView
+                if emoji < emojiViews.count {
+                    view = emojiViews[emoji]
+                } else {
+                    view = ImageLayerView()
+                    view.images = images
+                    view.animates = animatesEmoji
+                    emojiViews.append(view)
+                    addSubview(view)
+                }
+                emoji += 1
+                view.frame = frame
+                view.fallbackText = ":\(box.name):"
+                view.show(ImageLayerView.Content(key: box.key, canAnimate: box.animated))
             } else {
-                view = BlockView()
-                addSubview(view)
+                let view: BlockView
+                if blocks < blockViews.count {
+                    view = blockViews[blocks]
+                } else {
+                    view = BlockView()
+                    blockViews.append(view)
+                    addSubview(view)
+                }
+                blocks += 1
+                view.shape = shape
+                view.frame = frame
             }
-            view.shape = shape
-            view.frame = shape.rect.offsetBy(dx: origin.x, dy: origin.y)
         }
-        for view in subviews.dropFirst(shapes.count) {
+        for view in blockViews.dropFirst(blocks) {
             view.removeFromSuperview()
         }
+        blockViews.removeLast(blockViews.count - blocks)
+        for view in emojiViews.dropFirst(emoji) {
+            view.show(nil)
+            view.removeFromSuperview()
+        }
+        emojiViews.removeLast(emojiViews.count - emoji)
     }
 }
 
@@ -560,6 +616,8 @@ private final class BlockView: NSView {
                 layer.backgroundColor = Palette.spoilerRevealed.cgColor
                 layer.borderWidth = 0
                 layer.cornerRadius = 3
+            case .emoji:
+                layer.backgroundColor = nil
             case .pill(_, let pill):
                 layer.borderWidth = 0
                 layer.cornerRadius = 3

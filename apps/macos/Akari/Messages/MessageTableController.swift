@@ -253,6 +253,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             || previous.images != state.images
         {
             updateAvatarAnimation()
+            updateEmojiAnimation()
         }
         let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
         if startChanged {
@@ -1030,6 +1031,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.images = state.images.cache
             cell.isHovered = item.id == hovered
             cell.animatesAvatar = startsGroup && avatarPlays(groupStartOf: index)
+            cell.animatesEmoji = emojiPlays(at: index, visible: tableView.visibleRect, nearBottom: nearBottomStart())
             cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
@@ -1479,6 +1481,49 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             hoveredGroup = group
             updateAvatarAnimation()
         }
+        updateEmojiAnimation()
+    }
+
+    // Custom emoji play by the setting while at least 70 % of their message shows and it is
+    // among the 100 nearest the bottom, or while the message is hovered (D139); the window key.
+    private func updateEmojiAnimation() {
+        let visible = tableView.visibleRect
+        let nearBottom = nearBottomStart()
+        tableView.enumerateAvailableRowViews { rowView, index in
+            guard let cell = rowView.view(atColumn: 0) as? MessageCell else {
+                return
+            }
+            cell.animatesEmoji = emojiPlays(at: index, visible: visible, nearBottom: nearBottom)
+        }
+    }
+
+    private func emojiPlays(at index: Int, visible: NSRect, nearBottom: Int) -> Bool {
+        guard timeline.items.indices.contains(index), case .message = timeline.items[index] else {
+            return false
+        }
+        let rect = tableView.rect(ofRow: index)
+        let shown = rect.intersection(visible)
+        let fraction = rect.height > 0 && !shown.isNull ? shown.height / rect.height : 0
+        return state.motion.plays(
+            .emoji,
+            MotionPolicy.Context(
+                windowKey: state.focused, appActive: state.focused,
+                hovered: timeline.items[index].id == hovered, visibleFraction: fraction,
+                nearBottom: index >= nearBottom))
+    }
+
+    // The row of the 100th message from the bottom; rows before it are too far up.
+    private func nearBottomStart() -> Int {
+        var remaining = 100
+        for index in timeline.items.indices.reversed() {
+            if case .message = timeline.items[index] {
+                remaining -= 1
+                if remaining == 0 {
+                    return index
+                }
+            }
+        }
+        return 0
     }
 
     // Hovering any message of a group animates the group's header avatar (Discord), while the
