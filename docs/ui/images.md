@@ -36,6 +36,8 @@ Drawn size per place (the pixels asked on Retina in brackets):
 | Thread box's newest author | 16 (32) | never |
 | Threads browser rows | 16 (32), facepiles 24 (48) | never |
 | More Active Threads | 16 (32) | never |
+| Custom emoji in the text | 22 (44), jumbo 48 (96) | by `animate_emoji`, visibility, hover ([emoji.md](emoji.md)) |
+| Sticker | 160 (320) | by `animate_stickers`, visibility, hover |
 
 - **Users never show initials.** A user without an avatar shows Discord's default avatar,
   fetched from its CDN (`embed/avatars/{index}.png`) like any avatar; the index follows the
@@ -67,9 +69,10 @@ how much of the image shows, and hover:
 - **Avatars** play only while hovered: a message group's header avatar while any message of
   the group is hovered, a DM row's while the row is, a rail icon's while it is. The user
   panel, replies, facepiles and thread boxes never play.
-- **Custom emoji** (PR C) play with `animate_emoji`, at least 70 % visible and among the 100
-  messages nearest the bottom, or while hovered; **stickers** by `animate_stickers` (always,
-  on hover, never) and 70 %; **GIFs** (PR D) with `gif_auto_play` and 60 %, or while hovered.
+- **Custom emoji** play with `animate_emoji`, at least 70 % of their message visible and the
+  message among the 100 nearest the bottom, or while the message is hovered; **stickers** by
+  `animate_stickers` (always, on hover, never) and 70 % ([emoji.md](emoji.md)); **GIFs** (PR D)
+  with `gif_auto_play` and 60 %, or while hovered.
 - Reduce Motion turns autoplay off (GIFs, emoji) and stickers' "always" into "on hover", as
   the official client does; hover still plays.
 

@@ -27,14 +27,14 @@ style that starts there: `*> a*` is an italic quote.
 | Email, phone | `<a@b.co>`, `<+1 555 010 0199>` | links (docs.discord.food) | links |
 | Mentions | `<@id>`, `<@&id>`, `<#id>`, `@everyone`, `@here` | pills with the name; role color for roles | medium-weight pills, `mentionText` on `mentionBackground`; a role with a color in that color on 10% of it; a channel with its kind's symbol, and a click opens it |
 | Slash command | `</name sub:id>` | a pill with `/name sub` | a pill; a click does nothing yet |
-| Custom emoji | `<:name:id>`, `<a:name:id>` | the image | `:name:` as text until the emoji milestone |
+| Custom emoji | `<:name:id>`, `<a:name:id>` | the image, 1.375em, bottom-aligned; `:name:` on hover | the image on a 22 box in the line, `:name:` as the tooltip, in a copy and as the fallback ([emoji.md](emoji.md)) |
 | Timestamp | `<t:seconds:style>`, styles `t T d D f F s S R` | the time in the viewer's locale (below); `R` counts | a `timestampBackground` pill; the full date as a tooltip; `R` counts while on screen |
 | Navigation | `<id:customize>` and friends | a link into the server's pages | a pill in Akari's words (Channels & Roles, Browse Channels, Server Guide, Linked Roles); a click does nothing yet |
 | Escapes | `\*` | the character | the character |
 
 A message of 1 to 30 emoji (Unicode or custom) and whitespace, nothing else, shows them large
-(jumbo). Akari shows Unicode emoji at 48 on 56; a message with a custom emoji isn't jumbo until
-custom emoji are images.
+(jumbo). Akari shows Unicode emoji at 48 on 56 and custom emoji in a 48 box on that line
+([emoji.md](emoji.md)).
 
 A message that mentions the reader is highlighted ([message-list.md](message-list.md)).
 

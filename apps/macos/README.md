@@ -40,7 +40,15 @@ Attachments, embeds, reactions, replies, voice, notifications and settings come 
   the rail's `GuildIcon`), fed through the environment (`imageEnvironment(session)`: the cache,
   the motion policy and whether the window is key and the app active).
 - The message list's cells get the cache with the table's state; the controller's hover
-  decides which group's header avatar plays, by the policy, as it decides the cursor.
+  decides which group's header avatar plays, by the policy, as it decides the cursor, and per
+  row whether its custom emoji and stickers play (the settings, how much of the row shows, the
+  100 nearest the bottom for emoji, the row's hover).
+- A custom emoji is a text attachment with a fixed box and no drawing (`MessageText.EmojiBox`
+  on the character); `MessageLayoutManager.blocks()` gives each box's rect and
+  `MessageDecorations` hosts an `ImageLayerView` on it, `:name:` as its fallback text. A
+  message's stickers are a `StickerRow` of `StickerView`s (160, 8 apart) in the cell's stack
+  under the text; a Lottie or failed sticker shows a box with a symbol and a caption
+  (`docs/ui/emoji.md`).
 - A loading or failed avatar shows the `avatarPlaceholder` disc; a server's icon is drawn
   alone (`ServerPicture`: the rail, the folder minis, the title bar), its initials' tile only
   without an icon or after a failure. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).

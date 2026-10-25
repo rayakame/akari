@@ -158,7 +158,9 @@ Mention names come from the message's own users, else the store, at read time, s
 needs no invalidation: `Known`, `NoAccess` (a channel the user can't view), `Missing` (the
 store has the list but not the item) or `NotLoaded` (before READY, a pending message's users,
 a guild not in the store). `formatted_text(content)` parses without a store, for tests and
-previews.
+previews. A custom emoji span (`SpanKind::Emoji`) carries its `ImageKey`, so the text's layer
+asks for it like any image; `Message.stickers` are `Sticker` records (ID, name, format and the
+sticker's key). `FormattedText.jumbo` follows Discord's limit of 30 emoji.
 
 Names and `mentions_me` can change without a message event, so a host rereads the messages it
 shows after `GuildUpdated` (role names and colors), `ChannelUpdated` (channel names, access),

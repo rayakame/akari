@@ -63,7 +63,8 @@ client's index rule) and guilds and group DMs their icon's;
 messages, show where a channel's unread state and mentions come from, and get an image as the app
 would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
-(`PendingImage`, placeholders, layout, the records' image keys, the display settings), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+(`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
+emoji span's key, the display settings), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, and the composer), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
@@ -78,7 +79,10 @@ message list that loads history in both directions, with the "new messages" line
 bar, the composer, and marking read with Escape, Shift+Escape and the context menus; avatars and
 icons in every place (message headers, DM rows and the rail, the user panel, the title bar, a
 DM's start, thread boxes, the browser's rows and facepiles, server icons over their initials)
-as layers from the image tier, animated avatars playing on hover while the window is key; a thread
+as layers from the image tier, animated avatars playing on hover while the window is key; custom
+emoji as image layers on fixed boxes in the text (jumbo at 48, `:name:` as tooltip, copy and
+fallback) and stickers in a row under the text (Lottie as a named box), both animated by their
+settings, visibility and the message's hover; a thread
 opens with its header ("# channel › thread"), its start and starter message, and a locked
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
 its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message
@@ -92,7 +96,7 @@ connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
 messages, which the macOS app restores before the gateway connects. `akari-markdown` parses
 Discord's message markdown (the rules, a flat document with source spans, a source map, UTF-16
-offsets and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
+offsets, jumbo for up to 30 emoji and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
 on Akari's runtime through akari-core's message preparer hook; the macOS app renders it (styles,
 code, quotes, lists, mentions, timestamps, spoilers and links), drawing boxes, pills and spoiler
 backgrounds as layers behind the text. The other app folders contain only a README.

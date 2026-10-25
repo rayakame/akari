@@ -292,8 +292,8 @@ plays them (`docs/ui/images.md`):
   a window of four frames ahead of the play head is kept; a released player ends its decoding.
 - `AnimatedFormatProbe.install()` runs once at launch: `current` is `.webP` where ImageIO
   composites the shipped fixture right, `.gif` where it doesn't (macOS 14) or until it ran.
-- `ImageKey.canAnimate`: an `a_` hash or an animated emoji. `sameSubject(as:)`: the same user,
-  server, group, emoji or attachment, whatever the hash.
+- `ImageKey.canAnimate`: an `a_` hash, an animated emoji, an APNG or GIF sticker.
+  `sameSubject(as:)`: the same user, server, group, emoji or attachment, whatever the hash.
 
 ## Tests
 
