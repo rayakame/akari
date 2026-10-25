@@ -319,6 +319,23 @@ final class ImageCacheTests {
         #expect(heard.current == 1)
     }
 
+    // A spec that fits inside its box is its own entry, decoded to fit.
+    @Test
+    func aFittingSpecDecodesInsideTheBox() async throws {
+        let source = FakeImageSource.serving(
+            try images.png("wide", width: 400, height: 200), width: 400, height: 200)
+        let cache = ImageCache(source: source)
+        let contained = ImageSpec(key: .testAvatar(1), width: 64, height: 64, fit: .contain)
+
+        let image = try await cache.image(contained)
+
+        #expect(image.width == 64)
+        #expect(image.height == 32)
+        #expect(cache.cached(contained) === image)
+        #expect(cache.cached(spec(1, width: 64, height: 64)) == nil, "the covering decode is another entry")
+        #expect(contained.request.width == 64, "the core is asked for the box's pixels either way")
+    }
+
     @Test
     func specsCarryTheirRequest() {
         let spec = ImageSpec(key: .testAvatar(1), width: 80, height: 40, animated: .gif)

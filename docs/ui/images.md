@@ -11,7 +11,9 @@ client (canary 649848, read 2026-10-24) and the plan's decisions D130–D137.
 Every image is asked at the pixels its box covers on screen: the box's points times the
 backing scale (2 on Retina), each side rounded up, then up to the next size Discord's CDN
 serves. The file is decoded to exactly those pixels (never above the source's own size) and
-drawn 1:1 as a layer's contents on whole backing pixels, so nothing is resampled. When the
+drawn 1:1 as a layer's contents on whole backing pixels, so nothing is resampled. Avatars and
+icons cover their box (the overflow clipped); emoji and stickers fit inside it, the whole
+picture centered, a wide one shorter than the box (Discord's `object-fit: contain`). When the
 window moves to a display with another scale, every image is asked again at the new size,
 and the old one stays until the new one has decoded. *Discord asks twice the drawn size for
 some places (a message avatar 80 for 40 points, 160 on Retina); Akari asks the screen's pixels:

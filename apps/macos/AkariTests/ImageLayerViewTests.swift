@@ -277,6 +277,37 @@ final class ImageLayerViewTests {
         #expect(view.imageLayer.frame == ImageLayerView.alignedFrame(view.bounds, scale: scale))
     }
 
+    // A box that fits its image (emoji, stickers) shows the whole picture, centered, never
+    // cut: a wide image gets shorter. The box's size is the same before and after it lands.
+    @Test
+    func aFittingBoxShowsTheWholeImageCentered() async throws {
+        let source = FakeImageSource.serving(
+            try images.png("wide", width: 200, height: 100), pixels: 200)
+        let cache = ImageCache(source: source)
+        let view = shown(cache)
+        view.fit = .contain
+        #expect(view.imageLayer.contentsGravity == .resizeAspect)
+
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        try await eventually { view.imageLayer.contents != nil }
+
+        let image = try #require(view.imageLayer.image)
+        #expect(CGFloat(image.width) == (40 * scale).rounded(.up))
+        #expect(CGFloat(image.height) == (20 * scale).rounded(.up))
+        #expect(view.frame.size == NSSize(width: 40, height: 40))
+        let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let middle = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?.usingColorSpace(.sRGB)
+        let top = rep.colorAt(x: rep.pixelsWide / 2, y: 2)?.usingColorSpace(.sRGB)
+        #expect(middle?.redComponent ?? 0 > 0.9 && middle?.alphaComponent ?? 0 > 0.9, "the image in the middle")
+        #expect(top?.alphaComponent ?? 1 < 0.1, "nothing above it: the box isn't filled")
+
+        let covering = shown(cache, at: NSPoint(x: 100, y: 10))
+        covering.show(ImageLayerView.Content(key: .avatar(1)))
+        try await eventually { covering.imageLayer.contents != nil }
+        #expect(covering.imageLayer.image?.height == Int((40 * scale).rounded(.up)), "a covering box is another entry")
+    }
+
     @Test
     func aCachedImageIsSetWithoutWaiting() async throws {
         let source = FakeImageSource.serving(try images.png("a", pixels: 256), pixels: 256)

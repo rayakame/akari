@@ -43,6 +43,24 @@ struct ImageDecoderTests {
         #expect(printed.height == 64)
     }
 
+    // Emoji and stickers fit inside their box (the smaller ratio), never cut, never upscaled.
+    @Test
+    func aContainedDecodeFitsInsideTheBox() throws {
+        let wide = try ImageDecoder.open(try images.png("wide2", width: 640, height: 480))
+        let fitted = try #require(ImageDecoder.decode(wide, frame: 0, fitting: (64, 64)))
+        #expect(fitted.width == 64)
+        #expect(fitted.height == 48)
+
+        let tall = try ImageDecoder.open(try images.png("tall2", width: 300, height: 1000))
+        let fittedTall = try #require(ImageDecoder.decode(tall, frame: 0, fitting: (100, 50)))
+        #expect(fittedTall.width == 15)
+        #expect(fittedTall.height == 50)
+
+        let small = try ImageDecoder.open(try images.png("small", width: 20, height: 10))
+        let kept = try #require(ImageDecoder.decode(small, frame: 0, fitting: (64, 64)))
+        #expect(kept.width == 20 && kept.height == 10, "never above the source")
+    }
+
     @Test
     func anOrientedFileIsSizedAfterItsRotation() throws {
         let url = try images.jpeg("turned", width: 400, height: 200, orientation: 6)

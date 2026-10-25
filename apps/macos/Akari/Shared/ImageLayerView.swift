@@ -43,6 +43,20 @@ final class ImageLayerView: NSView {
             placeholderLayer.cornerRadius = cornerRadius
         }
     }
+    /// Covering the box (avatars, icons) or the whole picture inside it (emoji, stickers).
+    var fit = ImageFit.cover {
+        didSet {
+            guard fit != oldValue else {
+                return
+            }
+            imageLayer.contentsGravity = fit == .cover ? .resizeAspectFill : .resizeAspect
+            if content != nil {
+                cancelLoads()
+                clearImage()
+                reload()
+            }
+        }
+    }
     /// Whether the owner wants the animation (the motion policy's say); nothing without an
     /// animated form.
     var animates = false {
@@ -207,7 +221,8 @@ final class ImageLayerView: NSView {
         guard let content, let pixels = pixelsIfSized else {
             return nil
         }
-        return ImageSpec(key: content.key, width: pixels.0, height: pixels.1, animated: animated)
+        return ImageSpec(
+            key: content.key, width: pixels.0, height: pixels.1, animated: animated, fit: fit)
     }
 
     private func reload() {
@@ -349,7 +364,7 @@ final class ImageLayerView: NSView {
             guard let animation else {
                 return
             }
-            let player = FramePlayer(animation: animation, pixels: pixels) { [weak self] image, _ in
+            let player = FramePlayer(animation: animation, pixels: pixels, fit: self.fit) { [weak self] image, _ in
                 self?.imageLayer.contents = image
                 self?.imageLayer.isHidden = false
             }

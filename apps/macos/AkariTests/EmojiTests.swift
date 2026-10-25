@@ -142,6 +142,7 @@ final class EmojiTests {
         ])
         #expect(layers.first?.images === cache)
         #expect(layers.first?.placeholder == ImageLayerView.Placeholder.none)
+        #expect(layers.allSatisfy { $0.fit == .contain }, "the whole emoji, never cut")
         let shapes = emojiShapes(view)
         #expect(layers.first?.frame.size == shapes.first?.rect.size)
         #expect(layers.first?.frame.minX == (shapes.first?.rect.minX ?? -1) + view.textContainerOrigin.x)

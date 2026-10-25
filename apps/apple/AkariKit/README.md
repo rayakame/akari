@@ -272,8 +272,9 @@ The core hands out files (`Account.image(_:)`, `docs/protocol/cdn.md`); AkariKit
 plays them (`docs/ui/images.md`):
 
 - `ImageCache` (`session.images`, main actor): `image(spec)` decodes the file for an
-  `ImageSpec` (a key and the box's pixels) at those pixels off the main actor, covering the box
-  and never above the source, refusing sources over 64 MP from the header; keeps the result in
+  `ImageSpec` (a key, the box's pixels and its `fit`: covering the box for avatars and icons,
+  the whole picture inside it for emoji and stickers) at those pixels off the main actor, never
+  above the source, refusing sources over 64 MP from the header; keeps the result in
   two LRUs bounded in bytes (identity images 16 MB, media 48 MB); shares one source call between
   concurrent asks and cancels it with the last waiter; asks once more for a file the system
   purged; `cached(_:)` answers synchronously; `pin`/`unpin` keep what a box shows;

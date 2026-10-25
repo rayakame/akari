@@ -8,20 +8,32 @@ public protocol ImageSource: Sendable {
 
 extension Account: ImageSource {}
 
-/// One box's ask: the image, the box's pixels (points times the backing scale, rounded up) and
-/// whether it should move.
+/// How a decoded image meets its box: covering it (avatars, icons: the box is filled, the
+/// overflow clipped) or fitting inside it (emoji, stickers: the whole picture, centered).
+public enum ImageFit: Hashable, Sendable {
+    case cover
+    case contain
+}
+
+/// One box's ask: the image, the box's pixels (points times the backing scale, rounded up),
+/// whether it should move, and how it meets the box.
 public struct ImageSpec: Hashable, Sendable {
     public var key: ImageKey
     public var width: Int
     public var height: Int
     /// `nil` asks for the still.
     public var animated: AnimatedFormat?
+    public var fit: ImageFit
 
-    public init(key: ImageKey, width: Int, height: Int, animated: AnimatedFormat? = nil) {
+    public init(
+        key: ImageKey, width: Int, height: Int, animated: AnimatedFormat? = nil,
+        fit: ImageFit = .cover
+    ) {
         self.key = key
         self.width = width
         self.height = height
         self.animated = animated
+        self.fit = fit
     }
 
     public var request: ImageRequest {
@@ -226,10 +238,11 @@ public final class ImageCache {
     private func start(_ spec: ImageSpec, tier: ImageTier) {
         let source = self.source
         let pixels = spec.pixels
+        let fit = spec.fit
         let request = spec.request
         let maxPixels = maxPixels
         let task = Task.detached(priority: .userInitiated) {
-            try await Self.load(request, pixels: pixels, maxPixels: maxPixels, from: source)
+            try await Self.load(request, pixels: pixels, fit: fit, maxPixels: maxPixels, from: source)
         }
         inflight[spec] = Inflight(task: task, waiters: [:])
         Task { [weak self] in
@@ -299,7 +312,7 @@ public final class ImageCache {
     // Off the main actor: the file, then the decode. A file gone between the answer and the
     // decode (the system purged the caches) is asked for once more.
     private static func load(
-        _ request: ImageRequest, pixels: (width: Int, height: Int), maxPixels: Int,
+        _ request: ImageRequest, pixels: (width: Int, height: Int), fit: ImageFit, maxPixels: Int,
         from source: any ImageSource
     ) async throws -> CGImage {
         var file = try await source.image(request)
@@ -307,7 +320,7 @@ public final class ImageCache {
             do {
                 let opened = try ImageDecoder.open(
                     URL(fileURLWithPath: file.path), maxPixels: maxPixels)
-                guard let image = ImageDecoder.decode(opened, frame: 0, covering: pixels) else {
+                guard let image = ImageDecoder.decode(opened, frame: 0, pixels: pixels, fit: fit) else {
                     throw ImageCacheError.undecodable
                 }
                 return image

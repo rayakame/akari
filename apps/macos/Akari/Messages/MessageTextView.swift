@@ -521,6 +521,7 @@ final class EmojiOverlay: NSView {
                 view = emojiViews[index]
             } else {
                 view = ImageLayerView()
+                view.fit = .contain
                 view.images = images
                 view.animates = animates
                 emojiViews.append(view)

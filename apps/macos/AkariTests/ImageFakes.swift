@@ -117,16 +117,21 @@ final class TestImages {
 
     /// A square PNG of `pixels` filled with `color` (RGBA 0–255).
     func png(_ name: String, pixels: Int, color: [Int] = [255, 0, 0, 255]) throws -> URL {
+        try png(name, width: pixels, height: pixels, color: color)
+    }
+
+    /// A PNG of `width` × `height` filled with `color` (RGBA 0–255).
+    func png(_ name: String, width: Int, height: Int, color: [Int] = [255, 0, 0, 255]) throws -> URL {
         let url = directory.appending(path: "\(name).png")
         let space = CGColorSpace(name: CGColorSpace.sRGB)!
         let context = CGContext(
-            data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
             space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         context.setFillColor(
             CGColor(
                 srgbRed: CGFloat(color[0]) / 255, green: CGFloat(color[1]) / 255,
                 blue: CGFloat(color[2]) / 255, alpha: CGFloat(color[3]) / 255))
-        context.fill(CGRect(x: 0, y: 0, width: pixels, height: pixels))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         let destination = CGImageDestinationCreateWithURL(
             url as CFURL, UTType.png.identifier as CFString, 1, nil)!
         CGImageDestinationAddImage(destination, context.makeImage()!, nil)

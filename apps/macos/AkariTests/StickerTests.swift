@@ -87,6 +87,7 @@ final class StickerTests {
 
         let scale = list.window.backingScaleFactor
         let key = ImageKey.sticker(stickerId: StickerId(rawValue: 10), format: .apng)
+        try await eventually { source.requests.withLock { $0.contains { $0.key == key && $0.animated != nil } } }
         let requests = source.requests.withLock { $0.filter { $0.key == key } }
         let still = try #require(requests.first { $0.animated == nil })
         #expect(still.width == UInt32((160 * scale).rounded(.up)))
@@ -94,6 +95,7 @@ final class StickerTests {
         #expect(sticker.image.content?.canAnimate == true)
         #expect(sticker.image.cornerRadius == 0)
         #expect(sticker.image.images === cache)
+        #expect(sticker.image.fit == .contain, "the whole sticker, never cut")
     }
 
     // A Lottie sticker has no image Akari shows: a box with a face and the sticker's name, no ask.
@@ -168,7 +170,7 @@ final class StickerTests {
         let scale = list.window.backingScaleFactor
         let spec = ImageSpec(
             key: .sticker(stickerId: StickerId(rawValue: 10), format: .apng),
-            width: Int((160 * scale).rounded(.up)), height: Int((160 * scale).rounded(.up)))
+            width: Int((160 * scale).rounded(.up)), height: Int((160 * scale).rounded(.up)), fit: .contain)
         #expect(cache.isPinned(spec))
 
         list.show(state([row(1, at: list.noon, content: "plain now")], cache: cache))

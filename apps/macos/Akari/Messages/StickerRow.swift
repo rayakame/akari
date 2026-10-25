@@ -104,6 +104,7 @@ final class StickerView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 8
         image.placeholder = .none
+        image.fit = .contain
         label.font = TypeScale.detail.nsFont
         label.textColor = Palette.textMuted
         label.alignment = .center
