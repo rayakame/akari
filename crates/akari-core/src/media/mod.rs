@@ -5,6 +5,7 @@
 mod disk;
 pub mod layout;
 mod placeholder;
+mod signed;
 mod sniff;
 pub(crate) mod url;
 
