@@ -150,6 +150,64 @@ final class AvatarPlacesTests {
         #expect(!same(none.center, none.outside), "a server without an icon keeps its tile")
     }
 
+    // A press and release at a rail item's center, as the window gets them: its clicks.
+    func railClicks<Icon: View>(source: FakeImageSource, settle: Bool = true, @ViewBuilder icon: @escaping (Bool, Bool) -> Icon) async throws -> Int {
+        var clicks = 0
+        let cache = ImageCache(source: source)
+        let window = ThreadBrowserWindowsTests.KeyWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 72, height: 60), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        windows.append(window)
+        let host = NSHostingView(
+            rootView: RailItem(selected: false, help: "Lab", icon: icon) { clicks += 1 }
+                .environment(\.imageCache, cache))
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+        let layers = MessageMenuAreaTests.views(ImageLayerView.self, in: host)
+        if settle {
+            try await eventually { layers.allSatisfy { $0.imageLayer.contents != nil || $0.failed } }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        let center = host.convert(NSPoint(x: host.bounds.midX, y: host.bounds.midY), to: nil)
+        let event = { (type: NSEvent.EventType) in
+            NSEvent.mouseEvent(
+                with: type, location: center, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+        }
+        window.sendEvent(try #require(event(.leftMouseDown)))
+        try await Task.sleep(for: .milliseconds(30))
+        window.sendEvent(try #require(event(.leftMouseUp)))
+        try await Task.sleep(for: .milliseconds(100))
+        return clicks
+    }
+
+    // With nothing drawn under an icon, the rail item's whole tile still takes the click (and
+    // the hover): a server with an icon, loading or loaded, transparent or not, and an unread DM.
+    @Test
+    func aRailItemTakesClicksOverItsIcon() async throws {
+        let opaque = { FakeImageSource.serving(try self.images.png("red", pixels: 80), pixels: 80) }
+        let lab = { (icon: ImageKey?) in
+            { (highlighted: Bool, hovered: Bool) in
+                GuildIcon(name: "Lab", icon: icon, highlighted: highlighted, hovered: hovered)
+            }
+        }
+        #expect(try await railClicks(source: try opaque(), icon: lab(nil)) == 1, "the tile")
+        #expect(try await railClicks(source: try opaque(), icon: lab(Self.labIcon)) == 1, "a loaded icon")
+        #expect(try await railClicks(source: try clearIcon(), icon: lab(Self.labIcon)) == 1, "a clear icon")
+        #expect(
+            try await railClicks(source: FakeImageSource.stalling(), settle: false, icon: lab(Self.labIcon)) == 1,
+            "a loading icon")
+        #expect(
+            try await railClicks(source: try opaque()) { _, hovered in
+                UserAvatar(key: .avatar(2), size: 40, place: .railIcon, hovered: hovered)
+            } == 1, "an unread DM's avatar")
+    }
+
     // A failed icon falls back to the acronym tile (the official client shows a broken image),
     // and the icon is asked again later: the layer stays.
     @Test

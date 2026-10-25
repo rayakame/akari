@@ -114,6 +114,9 @@ struct RailItem<Icon: View>: View {
         Button(action: action) {
             icon(selected || hovered, hovered)
                 .mentionBadge(badge.mentions)
+                // An icon draws nothing under itself and its image takes no hits: the tile's
+                // shape is what clicks and hovers.
+                .contentShape(RoundedRectangle(cornerRadius: RailShape.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
