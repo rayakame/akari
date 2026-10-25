@@ -253,7 +253,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             || previous.images != state.images
         {
             updateAvatarAnimation()
-            updateEmojiAnimation()
+            updateMediaAnimation()
         }
         let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
         if startChanged {
@@ -1031,7 +1031,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.images = state.images.cache
             cell.isHovered = item.id == hovered
             cell.animatesAvatar = startsGroup && avatarPlays(groupStartOf: index)
-            cell.animatesEmoji = emojiPlays(at: index, visible: tableView.visibleRect, nearBottom: nearBottomStart())
+            let visible = tableView.visibleRect
+            cell.animatesEmoji = emojiPlays(at: index, visible: visible, nearBottom: nearBottomStart())
+            cell.animatesStickers = stickersPlay(at: index, visible: visible)
             cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
@@ -1481,12 +1483,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             hoveredGroup = group
             updateAvatarAnimation()
         }
-        updateEmojiAnimation()
+        updateMediaAnimation()
     }
 
     // Custom emoji play by the setting while at least 70 % of their message shows and it is
-    // among the 100 nearest the bottom, or while the message is hovered (D139); the window key.
-    private func updateEmojiAnimation() {
+    // among the 100 nearest the bottom, or while the message is hovered (D139); stickers by
+    // `animate_stickers` and the hover (D140); the window key for both.
+    private func updateMediaAnimation() {
         let visible = tableView.visibleRect
         let nearBottom = nearBottomStart()
         tableView.enumerateAvailableRowViews { rowView, index in
@@ -1494,22 +1497,37 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 return
             }
             cell.animatesEmoji = emojiPlays(at: index, visible: visible, nearBottom: nearBottom)
+            cell.animatesStickers = stickersPlay(at: index, visible: visible)
         }
     }
 
     private func emojiPlays(at index: Int, visible: NSRect, nearBottom: Int) -> Bool {
-        guard timeline.items.indices.contains(index), case .message = timeline.items[index] else {
+        guard let context = mediaContext(at: index, visible: visible, nearBottom: index >= nearBottom)
+        else {
             return false
+        }
+        return state.motion.plays(.emoji, context)
+    }
+
+    private func stickersPlay(at index: Int, visible: NSRect) -> Bool {
+        guard let context = mediaContext(at: index, visible: visible, nearBottom: true) else {
+            return false
+        }
+        return state.motion.plays(.sticker, context)
+    }
+
+    // What the policy asks about a message row: hovered, how much of it shows.
+    private func mediaContext(at index: Int, visible: NSRect, nearBottom: Bool) -> MotionPolicy.Context? {
+        guard timeline.items.indices.contains(index), case .message = timeline.items[index] else {
+            return nil
         }
         let rect = tableView.rect(ofRow: index)
         let shown = rect.intersection(visible)
         let fraction = rect.height > 0 && !shown.isNull ? shown.height / rect.height : 0
-        return state.motion.plays(
-            .emoji,
-            MotionPolicy.Context(
-                windowKey: state.focused, appActive: state.focused,
-                hovered: timeline.items[index].id == hovered, visibleFraction: fraction,
-                nearBottom: index >= nearBottom))
+        return MotionPolicy.Context(
+            windowKey: state.focused, appActive: state.focused,
+            hovered: timeline.items[index].id == hovered, visibleFraction: fraction,
+            nearBottom: nearBottom)
     }
 
     // The row of the 100th message from the bottom; rows before it are too far up.

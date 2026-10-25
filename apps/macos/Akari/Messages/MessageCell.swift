@@ -24,6 +24,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         set {
             avatar.images = newValue
             content.images = newValue
+            stickers?.images = newValue
             threadBox?.images = newValue
         }
     }
@@ -37,11 +38,18 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         get { content.animatesEmoji }
         set { content.animatesEmoji = newValue }
     }
+    /// The list's say: this message's stickers play (`animate_stickers`, visibility, hover).
+    var animatesStickers: Bool {
+        get { stickers?.animates ?? false }
+        set { stickers?.animates = newValue }
+    }
     private let reply = CellText.label()
     private let header = HeaderRow()
     private let hoverTime = CellText.label()
     private let content = MessageTextView()
     private let extras = MessageTextView()
+    // Built for the first message with stickers; most messages have none.
+    private var stickers: StickerRow?
     // Built for the first message with a thread, as the failed line is: buttons cost.
     private var threadBox: ThreadBoxView?
     var onOpenThread: () -> Void = {}
@@ -170,6 +178,13 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         content.isHidden = message.content.isEmpty
         extras.show(lines)
         extras.isHidden = lines.length == 0
+        if message.stickers.isEmpty {
+            stickers?.isHidden = true
+        } else {
+            let row = stickerRow()
+            row.isHidden = false
+            row.configure(message.stickers)
+        }
         let isFailed = message.delivery == .failed
         if isFailed && failed == nil {
             let line = FailedLine()
@@ -209,7 +224,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     // The constraints of build() in arithmetic; the stack leaves hidden views out.
     private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
-        let shown = ([reply, header, content, extras] + [threadBox, failed].compactMap { $0 })
+        let shown = ([reply, header, content, extras] + [stickers, threadBox, failed].compactMap { $0 })
             .filter { !$0.isHidden }
         let stacked =
             shown.map { view in
@@ -355,11 +370,25 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         box.topInset = Self.boxGap - Self.spacing
         box.target = self
         box.action = #selector(threadBoxClicked)
-        let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
+        let anchor: NSView = stickers ?? extras
+        let after = stack.views(in: .top).firstIndex(of: anchor).map { $0 + 1 } ?? 0
         stack.insertView(box, at: after, in: .top)
         box.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         threadBox = box
         return box
+    }
+
+    private func stickerRow() -> StickerRow {
+        if let stickers {
+            return stickers
+        }
+        let row = StickerRow()
+        row.images = images
+        let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
+        stack.insertView(row, at: after, in: .top)
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        stickers = row
+        return row
     }
 
     private func build() {

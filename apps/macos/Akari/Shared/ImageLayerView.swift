@@ -53,7 +53,7 @@ final class ImageLayerView: NSView {
         }
     }
     /// Told when the image landed, failed or was replaced; owners that show something of their
-    /// own around a failure (a server's acronym tile) listen.
+    /// own around a failure (a server's acronym tile, a sticker's "Uh Oh!") listen.
     var onStateChange: ((ImageLayerView) -> Void)?
     /// Shown in the box when the image failed (a custom emoji's `:name:`).
     var fallbackText: String? {

@@ -32,7 +32,7 @@ func row(
     _ raw: UInt64, by user: User = author(1), at time: Date, kind: MessageType = .default,
     content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false,
     attachments: [String] = [], embedCount: UInt32 = 0, stickers: [String] = [],
-    delivery: Delivery = .sent, edited: Date? = nil, reference: MessageReference? = nil,
+    stickerFormat: StickerFormatType = .png, delivery: Delivery = .sent, edited: Date? = nil, reference: MessageReference? = nil,
     hasThread: Bool = false, fields: [EmbedField] = [],
     context: Message.NoticeContext = .init(), authorName: String? = nil,
     threadBox: ThreadBox? = nil
@@ -48,7 +48,7 @@ func row(
         author: user, fromWebhook: false, content: content, timestamp: time,
         editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
         embedCount: embedCount, stickers: stickers.enumerated().map { index, name in
-            sticker(raw * 10 + UInt64(index), name)
+            sticker(raw * 10 + UInt64(index), name, format: stickerFormat)
         }, componentsV2: componentsV2,
         delivery: delivery, formatted: formattedText(content: content), mentionsMe: false,
         reference: reference, hasThread: hasThread, mentions: [],

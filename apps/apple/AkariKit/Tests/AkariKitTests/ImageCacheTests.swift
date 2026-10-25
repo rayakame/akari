@@ -344,6 +344,9 @@ struct ImageKeyMotionTests {
         #expect(!ImageKey.groupIcon(channelId: ChannelId(rawValue: 1), hash: moving).canAnimate)
         #expect(ImageKey.emoji(emojiId: EmojiId(rawValue: 1), animated: true).canAnimate)
         #expect(!ImageKey.emoji(emojiId: EmojiId(rawValue: 1), animated: false).canAnimate)
+        for (format, animates) in [(StickerFormatType.png, false), (.apng, true), (.gif, true), (.lottie, false)] {
+            #expect(ImageKey.sticker(stickerId: StickerId(rawValue: 1), format: format).canAnimate == animates, "\(format)")
+        }
         #expect(!ImageKey.defaultAvatar(index: 3).canAnimate)
     }
 
