@@ -461,3 +461,20 @@ async fn two_processes_opening_a_new_directory_at_once_both_work() {
         second.close().await;
     }
 }
+
+// Logout and forget_account must not leave a user's images because this process never
+// opened the index.
+#[tokio::test]
+async fn deleting_works_without_an_open_index() {
+    let dir = TempDir::new();
+    let account = dir.path().join("1234");
+    fs::create_dir_all(account.join(INDEX)).unwrap();
+    fs::create_dir_all(account.join("files/ab")).unwrap();
+    fs::write(account.join("files/ab/kept.webp"), b"an image").unwrap();
+    let tier = tier(&dir, LIMIT);
+    assert_eq!(tier.find(KEY, Form::Still, 80).await, None);
+
+    tier.delete().await;
+
+    assert!(!account.exists());
+}

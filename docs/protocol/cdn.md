@@ -131,7 +131,8 @@ The client treats a link as expired an hour before `ex`, or when it has none [67
 - An index that isn't one (not a database, corrupt, another schema) is dropped with the
   directory and starts empty. One that is busy, or being created by another process, is
   tried again and never deleted.
-- Logout and `forget_account` delete the account's directory, also while it's open: the open
+- Logout and `forget_account` delete the account's directory, also while it's open (and when
+  this process never opened its index, or another process uses it): the open
   account's later asks are `Unavailable`, nothing downloads, and a download that was on its way
   leaves nothing behind;
   `clear_caches` deletes those of accounts that aren't open; `Account::clear_images` empties

@@ -265,7 +265,14 @@ fn answer_closed(command: Command, directory: &Path) {
             }
             let _ = reply.send(None);
         }
-        Command::Clear { reply } | Command::Delete { reply } => {
+        Command::Clear { reply } => {
+            let _ = reply.send(());
+        }
+        // Even unopened, or opened by another process: a logged-out user's images go.
+        Command::Delete { reply } => {
+            if remove(directory).is_err() {
+                tracing::warn!(target: LOG, "couldn't delete the image directory");
+            }
             let _ = reply.send(());
         }
         #[cfg(test)]
