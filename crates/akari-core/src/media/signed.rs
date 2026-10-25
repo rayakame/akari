@@ -47,9 +47,19 @@ pub(crate) fn resign(target: &Url, signed: &Url) -> Url {
     url
 }
 
+/// What a renewal got.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Renewal {
+    Renewed(Url),
+    /// Discord answered without this link: it won't sign it again.
+    Refused,
+    /// The request failed; a later one may work.
+    Failed,
+}
+
 struct Ask {
     url: String,
-    reply: oneshot::Sender<Option<Url>>,
+    reply: oneshot::Sender<Renewal>,
 }
 
 /// Renews signed links through the account's REST: asks within `window` of each other share a
@@ -70,16 +80,17 @@ impl Refresher {
         Self { asks }
     }
 
-    /// The link with a fresh signature, or `None` when Discord gave none.
-    pub(crate) async fn refresh(&self, url: &Url) -> Option<Url> {
+    /// The link with a fresh signature.
+    pub(crate) async fn refresh(&self, url: &Url) -> Renewal {
         let (reply, answer) = oneshot::channel();
-        self.asks
-            .send(Ask {
-                url: url.to_string(),
-                reply,
-            })
-            .ok()?;
-        answer.await.ok().flatten()
+        let asked = self.asks.send(Ask {
+            url: url.to_string(),
+            reply,
+        });
+        if asked.is_err() {
+            return Renewal::Failed;
+        }
+        answer.await.unwrap_or(Renewal::Failed)
     }
 }
 
@@ -104,24 +115,35 @@ async fn run(rest: Arc<AccountRest>, mut asks: mpsc::UnboundedReceiver<Ask>, win
                 urls.push(ask.url.clone());
             }
         }
-        let refreshed: HashMap<String, Url> = match rest.refresh_urls(&urls).await {
-            Ok(pairs) => pairs
-                .into_iter()
-                .filter_map(|(original, fresh)| Some((original, Url::parse(&fresh).ok()?)))
-                .collect(),
+        let refreshed: Option<HashMap<String, Url>> = match rest.refresh_urls(&urls).await {
+            Ok(pairs) => Some(
+                pairs
+                    .into_iter()
+                    .filter_map(|(original, fresh)| Some((original, Url::parse(&fresh).ok()?)))
+                    .collect(),
+            ),
             Err(err) => {
                 tracing::debug!(target: LOG, links = urls.len(), error = err.kind(), "links not refreshed");
-                HashMap::new()
+                None
             }
         };
-        tracing::debug!(
-            target: LOG,
-            links = urls.len(),
-            refreshed = refreshed.len(),
-            "links refreshed"
-        );
+        if let Some(refreshed) = &refreshed {
+            tracing::debug!(
+                target: LOG,
+                links = urls.len(),
+                refreshed = refreshed.len(),
+                "links refreshed"
+            );
+        }
         for ask in batch {
-            let _ = ask.reply.send(refreshed.get(&ask.url).cloned());
+            let answer = match &refreshed {
+                None => Renewal::Failed,
+                Some(refreshed) => refreshed
+                    .get(&ask.url)
+                    .cloned()
+                    .map_or(Renewal::Refused, Renewal::Renewed),
+            };
+            let _ = ask.reply.send(answer);
         }
     }
 }

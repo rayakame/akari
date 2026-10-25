@@ -86,7 +86,7 @@ identity images as PNG, or GIF when animated, at `size=4096`.
 - 5xx and network errors: 3 attempts in all, the waits doubling from 0.5–1 s with jitter, at
   most 5 s. *Discord's client tries 5 times [loader, §9 of the research].* A 429 pauses that
   host for its `Retry-After` (at most 60 s; 1 s without one), every account's downloads from it
-  included, and counts as an attempt. 404, 403 and 410: `NotFound`, remembered for the
+  included, also those already waiting for a slot, and counts as an attempt. 404, 403 and 410: `NotFound`, remembered for the
   session. 415 (the proxy's "not an image"): `NotAnImage`.
 - Offline (`Account::disconnect`, before `connect`): kept files answer; anything else fails at
   once as `Unavailable`, for the host to ask again online. A closed account answers `Closed`.
@@ -106,24 +106,34 @@ The client treats a link as expired an hour before `ex`, or when it has none [67
   Akari keeps the messages (what a UI shows is never dropped), and a renewal reloads no row.*
 - A 403 or 404 through a link whose `ex` has passed (a clock off by more than the margin)
   renews it once more and tries again; then it's `NotFound`.
-- When a renewal fails, a link that hasn't expired yet is used as it is.
+- When a renewal fails, or Discord answers without the link, a link that hasn't expired yet is
+  used as it is. An expired one Discord won't renew is `NotFound` for the session (no renewal
+  is asked again); a failed request is `Unavailable`.
 - Logs name image keys (IDs) and outcomes, never a URL: a signed link is a secret for as long
   as it's valid.
 
 ## On disk
 
 - Per account, under the directory the host passes (`DiscordClient::with_image_cache`): on
-  macOS `~/Library/Caches/<bundle>/Images/<user id>/`, which the system may purge.
+  macOS `~/Library/Caches/<bundle>/Images/<user id>/`, which the system may purge. The user is
+  the one READY names (the host's guess until then); accounts of one user share it.
 - The files as Discord sent them under `files/`, named by a digest of their key (no key text in
   a path), and an index in `index.sqlite` (key, form, size, animated, whether it's the
   source's own size, bytes, last use), served by a thread of its own.
 - A download is written apart first (`tmp/`, per launch), then moved into place and indexed.
-  Files a crash left unindexed, and earlier launches' downloads, are deleted at open.
+  At open, files the index doesn't know (older than a minute) and earlier launches' downloads
+  (older than an hour) are deleted: another process may be using the directory (two akari-cli
+  runs), so its newest files stay. Each process recounts the index's size every 64 files it
+  keeps.
 - The smallest kept file with enough pixels, in the same form, answers; so does one of the
   source's own size. A file gone when it's answered (the system purged it) is fetched again.
 - Past 256 MB the least recently used go, down to 90 %, never one used in the last minute.
-- A broken or foreign index is dropped with the directory and starts empty.
-- Logout and `forget_account` delete the account's directory, also while it's open;
+- An index that isn't one (not a database, corrupt, another schema) is dropped with the
+  directory and starts empty. One that is busy, or being created by another process, is
+  tried again and never deleted.
+- Logout and `forget_account` delete the account's directory, also while it's open: the open
+  account's later asks are `Unavailable`, nothing downloads, and a download that was on its way
+  leaves nothing behind;
   `clear_caches` deletes those of accounts that aren't open; `Account::clear_images` empties
   it.
 

@@ -1085,13 +1085,7 @@ impl Account {
             });
         }
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
-        let images = Images::new(
-            client.media(),
-            user.and_then(|user| client.image_tier(user)),
-            store.clone(),
-            rest.clone(),
-            &runtime,
-        );
+        let images = Images::new(&client, user, store.clone(), rest.clone(), &runtime);
         let gateway = Gateway::start(client, token, timing)?;
         let shared = Arc::new_cyclic(|weak: &Weak<Shared>| {
             let unauthorized = {

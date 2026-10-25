@@ -3,11 +3,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 use tokio::sync::oneshot;
 
 use super::url::Form;
@@ -20,6 +20,8 @@ const SCHEMA: i32 = 1;
 pub(crate) const LIMIT: u64 = 256 * 1024 * 1024;
 // A file just handed out is being decoded; never evict it from under the host.
 const GUARD: Duration = Duration::from_secs(60);
+const STALE_RUN: Duration = Duration::from_secs(3600);
+const RECOUNT_EVERY: u32 = 64;
 
 /// A file the index has.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,9 +58,6 @@ enum Command {
         file: Box<NewFile>,
         reply: oneshot::Sender<Option<Entry>>,
     },
-    Forget {
-        path: PathBuf,
-    },
     Clear {
         reply: oneshot::Sender<()>,
     },
@@ -71,6 +70,8 @@ enum Command {
     Total(oneshot::Sender<u64>),
     #[cfg(test)]
     Close(oneshot::Sender<()>),
+    #[cfg(test)]
+    FailDeletes,
 }
 
 /// The account's image directory, served by its own thread until every clone is dropped.
@@ -78,12 +79,15 @@ enum Command {
 pub(crate) struct DiskTier {
     commands: mpsc::Sender<Command>,
     temporary: PathBuf,
+    // Shared by every account of the user, so their downloads never share a name.
+    downloads: Arc<AtomicU64>,
+    deleted: Arc<AtomicBool>,
 }
 
 impl DiskTier {
     pub(crate) fn start(directory: PathBuf, limit: u64) -> Self {
         static STARTED: AtomicU64 = AtomicU64::new(0);
-        // Each start writes its downloads apart, so sweeping an earlier run's never races them.
+        // Each start writes its downloads apart; the sweep leaves recent runs' alone.
         let run_name = format!(
             "{}-{}",
             std::process::id(),
@@ -100,12 +104,25 @@ impl DiskTier {
         Self {
             commands,
             temporary,
+            downloads: Arc::default(),
+            deleted: Arc::default(),
         }
     }
 
     /// Where downloads are written before `insert`; the caller creates it.
     pub(crate) fn temporary(&self) -> &Path {
         &self.temporary
+    }
+
+    /// A name in `temporary` for one download.
+    pub(crate) fn temporary_file(&self) -> PathBuf {
+        let number = self.downloads.fetch_add(1, Ordering::Relaxed);
+        self.temporary.join(format!("{number}.part"))
+    }
+
+    /// The directory was deleted: nothing is found or kept any more.
+    pub(crate) fn is_deleted(&self) -> bool {
+        self.deleted.load(Ordering::Acquire)
     }
 
     async fn ask<T>(&self, command: impl FnOnce(oneshot::Sender<T>) -> Command) -> Option<T> {
@@ -115,7 +132,7 @@ impl DiskTier {
     }
 
     /// The smallest file of `key` in `form` whose longest side has `needed` pixels, or the
-    /// source's own size. Marks it used.
+    /// source's own size, if it's still there. Marks it used.
     pub(crate) async fn find(&self, key: &str, form: Form, needed: u32) -> Option<Entry> {
         self.ask(|reply| Command::Find {
             key: key.to_owned(),
@@ -137,11 +154,6 @@ impl DiskTier {
         .flatten()
     }
 
-    /// Drops an entry whose file is gone.
-    pub(crate) fn forget(&self, path: PathBuf) {
-        let _ = self.commands.send(Command::Forget { path });
-    }
-
     /// Deletes every file; the directory stays in use.
     pub(crate) async fn clear(&self) {
         self.ask(|reply| Command::Clear { reply }).await;
@@ -149,6 +161,7 @@ impl DiskTier {
 
     /// Deletes the directory; later calls find nothing and keep nothing.
     pub(crate) async fn delete(&self) {
+        self.deleted.store(true, Ordering::Release);
         self.ask(|reply| Command::Delete { reply }).await;
     }
 
@@ -167,6 +180,11 @@ impl DiskTier {
     pub(crate) async fn close(&self) {
         self.ask(Command::Close).await;
     }
+
+    #[cfg(test)]
+    pub(crate) fn fail_deletes(&self) {
+        let _ = self.commands.send(Command::FailDeletes);
+    }
 }
 
 struct Index {
@@ -174,15 +192,19 @@ struct Index {
     directory: PathBuf,
     limit: u64,
     total: u64,
+    // Other processes may write to the index too; recounted every so many inserts.
+    inserts: u32,
     #[cfg(test)]
     clock: Option<i64>,
+    #[cfg(test)]
+    fail_deletes: bool,
 }
 
 fn run(directory: &Path, run_name: &str, limit: u64, commands: &mpsc::Receiver<Command>) {
     let mut index = Index::open_or_rebuild(directory, run_name, limit);
     while let Ok(command) = commands.recv() {
         let Some(open) = index.as_mut() else {
-            answer_closed(command);
+            answer_closed(command, directory);
             continue;
         };
         match command {
@@ -197,7 +219,6 @@ fn run(directory: &Path, run_name: &str, limit: u64, commands: &mpsc::Receiver<C
             Command::Insert { file, reply } => {
                 let _ = reply.send(open.insert(&file));
             }
-            Command::Forget { path } => open.forget(&path),
             Command::Clear { reply } => {
                 open.clear();
                 let _ = reply.send(());
@@ -220,20 +241,33 @@ fn run(directory: &Path, run_name: &str, limit: u64, commands: &mpsc::Receiver<C
                 drop(index.take());
                 let _ = reply.send(());
             }
+            #[cfg(test)]
+            Command::FailDeletes => open.fail_deletes = true,
         }
     }
 }
 
-// After a delete, or when the directory can't be used.
-fn answer_closed(command: Command) {
+// After a delete, or when the directory can't be used. A download that was on its way when the
+// directory went is deleted with the folders it made.
+fn answer_closed(command: Command, directory: &Path) {
     match command {
-        Command::Find { reply, .. } | Command::Insert { reply, .. } => {
+        Command::Find { reply, .. } => {
+            let _ = reply.send(None);
+        }
+        Command::Insert { file, reply } => {
+            let _ = fs::remove_file(&file.temporary);
+            let mut folder = file.temporary.parent();
+            while let Some(path) = folder
+                && path.starts_with(directory)
+                && fs::remove_dir(path).is_ok()
+            {
+                folder = path.parent();
+            }
             let _ = reply.send(None);
         }
         Command::Clear { reply } | Command::Delete { reply } => {
             let _ = reply.send(());
         }
-        Command::Forget { .. } => {}
         #[cfg(test)]
         Command::SetClock(_) => {}
         #[cfg(test)]
@@ -244,6 +278,8 @@ fn answer_closed(command: Command) {
         Command::Close(reply) => {
             let _ = reply.send(());
         }
+        #[cfg(test)]
+        Command::FailDeletes => {}
     }
 }
 
@@ -271,6 +307,23 @@ fn now_seconds() -> i64 {
         })
 }
 
+// Only a file that isn't an index Akari can use goes: not a database, corrupt, or another
+// schema (InvalidQuery, from `open`).
+fn broken(err: &rusqlite::Error) -> bool {
+    matches!(err, rusqlite::Error::InvalidQuery)
+        || matches!(
+            err.sqlite_error_code(),
+            Some(ErrorCode::NotADatabase | ErrorCode::DatabaseCorrupt)
+        )
+}
+
+fn older_than(entry: &fs::DirEntry, age: Duration) -> bool {
+    entry
+        .metadata()
+        .and_then(|metadata| metadata.modified())
+        .is_ok_and(|modified| modified.elapsed().is_ok_and(|elapsed| elapsed > age))
+}
+
 // The key's digest names its files, so no key text reaches a path.
 fn file_name(key: &str, form: Form, longest: u32, extension: &str) -> String {
     let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, key.as_bytes());
@@ -287,12 +340,25 @@ fn file_name(key: &str, form: Form, longest: u32, extension: &str) -> String {
 
 impl Index {
     fn open_or_rebuild(directory: &Path, run_name: &str, limit: u64) -> Option<Self> {
-        match Self::open(directory, run_name, limit) {
-            Ok(index) => return Some(index),
-            Err(err) => {
-                tracing::info!(target: LOG, error = %err, "image index discarded");
+        let mut attempt = 0;
+        let err = loop {
+            match Self::open(directory, run_name, limit) {
+                Ok(index) => return Some(index),
+                Err(err) if broken(&err) => break err,
+                // Busy, or being created by another process right now: not broken, so not
+                // deleted.
+                Err(err) if attempt < 5 => {
+                    tracing::debug!(target: LOG, error = %err, "image index not opened yet");
+                    attempt += 1;
+                    std::thread::sleep(Duration::from_millis(20 << attempt));
+                }
+                Err(err) => {
+                    tracing::warn!(target: LOG, error = %err, "no image index this session");
+                    return None;
+                }
             }
-        }
+        };
+        tracing::info!(target: LOG, error = %err, "image index discarded");
         if remove(directory).is_err() {
             tracing::warn!(target: LOG, "couldn't delete the image directory");
             return None;
@@ -305,10 +371,11 @@ impl Index {
     fn open(directory: &Path, run_name: &str, limit: u64) -> Result<Self, rusqlite::Error> {
         let io = |_| rusqlite::Error::InvalidPath(directory.to_path_buf());
         fs::create_dir_all(directory.join(FILES)).map_err(io)?;
-        // Downloads of earlier runs that never made it into the index.
+        // Downloads of earlier runs that never made it into the index; another process's
+        // current one is recent.
         if let Ok(runs) = fs::read_dir(directory.join(TEMPORARY)) {
             for run in runs.flatten() {
-                if run.file_name() != run_name {
+                if run.file_name() != run_name && older_than(&run, STALE_RUN) {
                     let _ = fs::remove_dir_all(run.path());
                 }
             }
@@ -317,7 +384,11 @@ impl Index {
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let conn = Connection::open_with_flags(directory.join(INDEX), flags)?;
-        conn.busy_timeout(Duration::from_millis(500))?;
+        conn.busy_timeout(Duration::from_secs(2))?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // Another process may be creating the index right now.
+        conn.execute_batch("BEGIN IMMEDIATE")?;
         let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let tables: i64 =
             conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))?;
@@ -341,14 +412,12 @@ impl Index {
             conn.pragma_update(None, "user_version", SCHEMA)?;
         } else if version != SCHEMA {
             return Err(rusqlite::Error::InvalidQuery);
-        } else {
-            let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-            if check != "ok" {
-                return Err(rusqlite::Error::InvalidQuery);
-            }
         }
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.execute_batch("COMMIT")?;
+        let check: String = conn.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        if check != "ok" {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
         let total: i64 =
             conn.query_row("SELECT coalesce(sum(bytes), 0) FROM images", [], |row| {
                 row.get(0)
@@ -358,8 +427,11 @@ impl Index {
             directory: directory.to_path_buf(),
             limit,
             total: u64::try_from(total).unwrap_or(0),
+            inserts: 0,
             #[cfg(test)]
             clock: None,
+            #[cfg(test)]
+            fail_deletes: false,
         };
         index.sweep();
         Ok(index)
@@ -404,7 +476,11 @@ impl Index {
                     folder.file_name().to_string_lossy(),
                     file.file_name().to_string_lossy()
                 );
-                if !known.contains(&name) && fs::remove_file(file.path()).is_ok() {
+                // A recent one may be between another process's rename and its insert.
+                if !known.contains(&name)
+                    && older_than(&file, GUARD)
+                    && fs::remove_file(file.path()).is_ok()
+                {
                     swept += 1;
                 }
             }
@@ -415,38 +491,62 @@ impl Index {
     }
 
     fn find(&mut self, key: &str, form: Form, needed: u32) -> Option<Entry> {
-        let found = self
+        // Each pass drops a row whose file the system purged, then looks again.
+        for _ in 0..8 {
+            let (file, width, height, animated, longest) = self
+                .conn
+                .query_row(
+                    "SELECT file, width, height, animated, longest FROM images
+                     WHERE key = ?1 AND form = ?2 AND (longest >= ?3 OR full = 1)
+                     ORDER BY longest LIMIT 1",
+                    params![key, form_code(form), needed],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, u32>(1)?,
+                            row.get::<_, u32>(2)?,
+                            row.get::<_, bool>(3)?,
+                            row.get::<_, u32>(4)?,
+                        ))
+                    },
+                )
+                .optional()
+                .ok()
+                .flatten()?;
+            let path = self.path(&file);
+            if !path.exists() {
+                self.drop_row(&file);
+                continue;
+            }
+            let now = self.now();
+            let _ = self.conn.execute(
+                "UPDATE images SET used = ?1 WHERE key = ?2 AND form = ?3 AND longest = ?4",
+                params![now, key, form_code(form), longest],
+            );
+            return Some(Entry {
+                path,
+                width,
+                height,
+                animated,
+            });
+        }
+        None
+    }
+
+    fn drop_row(&mut self, file: &str) {
+        let bytes: Option<i64> = self
             .conn
             .query_row(
-                "SELECT file, width, height, animated, longest FROM images
-                 WHERE key = ?1 AND form = ?2 AND (longest >= ?3 OR full = 1)
-                 ORDER BY longest LIMIT 1",
-                params![key, form_code(form), needed],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, u32>(1)?,
-                        row.get::<_, u32>(2)?,
-                        row.get::<_, bool>(3)?,
-                        row.get::<_, u32>(4)?,
-                    ))
-                },
+                "DELETE FROM images WHERE file = ?1 RETURNING bytes",
+                [file],
+                |row| row.get(0),
             )
             .optional()
             .ok()
-            .flatten()?;
-        let (file, width, height, animated, longest) = found;
-        let now = self.now();
-        let _ = self.conn.execute(
-            "UPDATE images SET used = ?1 WHERE key = ?2 AND form = ?3 AND longest = ?4",
-            params![now, key, form_code(form), longest],
-        );
-        Some(Entry {
-            path: self.path(&file),
-            width,
-            height,
-            animated,
-        })
+            .flatten();
+        if let Some(bytes) = bytes {
+            self.total = self.total.saturating_sub(u64::try_from(bytes).unwrap_or(0));
+        }
     }
 
     fn insert(&mut self, file: &NewFile) -> Option<Entry> {
@@ -462,12 +562,12 @@ impl Index {
             tracing::warn!(target: LOG, "couldn't keep an image");
             return None;
         }
-        let replaced: Option<i64> = self
+        let replaced: Option<(i64, String)> = self
             .conn
             .query_row(
-                "SELECT bytes FROM images WHERE key = ?1 AND form = ?2 AND longest = ?3",
+                "SELECT bytes, file FROM images WHERE key = ?1 AND form = ?2 AND longest = ?3",
                 params![file.key, form_code(file.form), longest],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .ok()
@@ -494,10 +594,19 @@ impl Index {
             tracing::warn!(target: LOG, "couldn't index an image");
             return None;
         }
+        if let Some((_, old)) = &replaced
+            && *old != name
+        {
+            let _ = fs::remove_file(self.path(old));
+        }
         self.total = self
             .total
-            .saturating_sub(replaced.map_or(0, |bytes| u64::try_from(bytes).unwrap_or(0)))
+            .saturating_sub(replaced.map_or(0, |(bytes, _)| u64::try_from(bytes).unwrap_or(0)))
             .saturating_add(file.bytes);
+        self.inserts += 1;
+        if self.inserts.is_multiple_of(RECOUNT_EVERY) {
+            self.recount();
+        }
         self.evict();
         Some(Entry {
             path,
@@ -505,6 +614,17 @@ impl Index {
             height: file.height,
             animated: file.animated,
         })
+    }
+
+    fn recount(&mut self) {
+        if let Ok(total) =
+            self.conn
+                .query_row("SELECT coalesce(sum(bytes), 0) FROM images", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+        {
+            self.total = u64::try_from(total).unwrap_or(0);
+        }
     }
 
     // Least recently used first, down to 90 % of the limit; nothing used within the guard.
@@ -541,42 +661,35 @@ impl Index {
             if oldest.is_empty() {
                 break;
             }
+            let before = evicted;
             for (key, form, longest, file, bytes) in oldest {
                 if self.total <= target {
                     break;
                 }
-                let deleted = self.conn.execute(
-                    "DELETE FROM images WHERE key = ?1 AND form = ?2 AND longest = ?3",
-                    params![key, form, longest],
-                );
+                #[cfg(test)]
+                let failing = self.fail_deletes;
+                #[cfg(not(test))]
+                let failing = false;
+                let deleted = if failing {
+                    Err(rusqlite::Error::InvalidQuery)
+                } else {
+                    self.conn.execute(
+                        "DELETE FROM images WHERE key = ?1 AND form = ?2 AND longest = ?3",
+                        params![key, form, longest],
+                    )
+                };
                 if deleted.is_ok() {
                     let _ = fs::remove_file(self.path(&file));
                     self.total = self.total.saturating_sub(u64::try_from(bytes).unwrap_or(0));
                     evicted += 1;
                 }
             }
+            // The index refuses to delete: the next pass would find the same rows.
+            if evicted == before {
+                break;
+            }
         }
         tracing::debug!(target: LOG, evicted, total = self.total, "images evicted");
-    }
-
-    fn forget(&mut self, path: &Path) {
-        let Ok(relative) = path.strip_prefix(self.directory.join(FILES)) else {
-            return;
-        };
-        let name = relative.to_string_lossy().into_owned();
-        let bytes: Option<i64> = self
-            .conn
-            .query_row(
-                "DELETE FROM images WHERE file = ?1 RETURNING bytes",
-                [&name],
-                |row| row.get(0),
-            )
-            .optional()
-            .ok()
-            .flatten();
-        if let Some(bytes) = bytes {
-            self.total = self.total.saturating_sub(u64::try_from(bytes).unwrap_or(0));
-        }
     }
 
     fn clear(&mut self) {

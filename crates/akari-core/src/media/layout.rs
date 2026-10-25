@@ -210,8 +210,8 @@ pub fn fit_width(mosaic: &Mosaic, width: u32) -> Mosaic {
             Rect {
                 x,
                 y,
-                width: at(cell.x + cell.width) - x,
-                height: at(cell.y + cell.height) - y,
+                width: at(cell.x.saturating_add(cell.width)).saturating_sub(x),
+                height: at(cell.y.saturating_add(cell.height)).saturating_sub(y),
             }
         })
         .collect();
@@ -411,6 +411,24 @@ mod tests {
             }
         );
         assert_eq!(fit_width(&laid, 600), laid);
+    }
+
+    #[test]
+    fn fitting_a_hosts_odd_mosaic_never_overflows() {
+        let odd = Mosaic {
+            size: size(u32::MAX, u32::MAX),
+            cells: vec![Rect {
+                x: u32::MAX,
+                y: u32::MAX,
+                width: u32::MAX,
+                height: 7,
+            }],
+        };
+
+        let fitted = fit_width(&odd, 100);
+
+        assert_eq!(fitted.size.width, 100);
+        assert!(fitted.cells[0].x <= 100);
     }
 
     #[test]

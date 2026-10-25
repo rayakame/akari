@@ -3,7 +3,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -13,11 +12,13 @@ use tokio::task::AbortHandle;
 
 use super::client::{Fetched, MediaClient, Saved};
 use super::disk::{DiskTier, NewFile};
-use super::signed::{self, Refresher};
+use super::signed::{self, Refresher, Renewal};
 use super::sniff;
 use super::url::{Form, Planned, is_attachment_link};
 use super::{EmbedSlot, ImageError, ImageFile, ImageKey, ImageRequest, MAX_BODY};
+use crate::DiscordClient;
 use crate::backoff;
+use crate::model::UserId;
 use crate::rest::{AccountRest, RequestError};
 use crate::state::{ConnectionState, Message, Store};
 
@@ -63,7 +64,10 @@ struct Flights {
 
 pub(crate) struct Images {
     media: Arc<MediaClient>,
-    tier: Option<Arc<DiskTier>>,
+    client: DiscordClient,
+    // Whose directory: the host's account until READY names one.
+    owner: Option<UserId>,
+    tier: Mutex<Option<(UserId, Arc<DiskTier>)>>,
     store: Store,
     rest: Arc<AccountRest>,
     refresher: Refresher,
@@ -73,7 +77,6 @@ pub(crate) struct Images {
     missing: Mutex<HashSet<String>>,
     // Renewed links by path, beside the store: a renewal never reloads a row.
     renewed: Mutex<HashMap<String, Url>>,
-    downloads: AtomicU64,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -105,15 +108,17 @@ impl Drop for Waiting<'_> {
 
 impl Images {
     pub(crate) fn new(
-        media: Arc<MediaClient>,
-        tier: Option<Arc<DiskTier>>,
+        client: &DiscordClient,
+        owner: Option<UserId>,
         store: Store,
         rest: Arc<AccountRest>,
         runtime: &tokio::runtime::Handle,
     ) -> Arc<Self> {
         Arc::new(Self {
-            media,
-            tier,
+            media: client.media(),
+            client: client.clone(),
+            owner,
+            tier: Mutex::default(),
             refresher: Refresher::start(runtime, rest.clone(), REFRESH_WINDOW),
             store,
             rest,
@@ -121,8 +126,25 @@ impl Images {
             flights: Mutex::default(),
             missing: Mutex::default(),
             renewed: Mutex::default(),
-            downloads: AtomicU64::new(0),
         })
+    }
+
+    // The directory of the account READY named, or of the host's account before READY.
+    fn tier(&self) -> Option<Arc<DiskTier>> {
+        let user = self
+            .store
+            .current_user()
+            .map(|current| current.user.id)
+            .or(self.owner)?;
+        let mut tier = lock(&self.tier);
+        match &*tier {
+            Some((owner, kept)) if *owner == user => Some(kept.clone()),
+            _ => {
+                let kept = self.client.image_tier(user)?;
+                *tier = Some((user, kept.clone()));
+                Some(kept)
+            }
+        }
     }
 
     fn now_seconds(&self) -> i64 {
@@ -220,18 +242,18 @@ impl Images {
         if lock(&self.missing).contains(&planned.disk) {
             return Err(ImageError::NotFound);
         }
-        let tier = self.tier.as_ref().ok_or(ImageError::Unavailable)?;
+        let tier = self
+            .tier()
+            .filter(|tier| !tier.is_deleted())
+            .ok_or(ImageError::Unavailable)?;
         if let Some(entry) = tier.find(&planned.disk, planned.form, planned.needed).await {
-            if entry.path.exists() {
-                return Ok(ImageFile {
-                    path: entry.path,
-                    width: entry.width,
-                    height: entry.height,
-                    animated: entry.animated,
-                    from_disk: true,
-                });
-            }
-            tier.forget(entry.path);
+            return Ok(ImageFile {
+                path: entry.path,
+                width: entry.width,
+                height: entry.height,
+                animated: entry.animated,
+                from_disk: true,
+            });
         }
         if matches!(self.store.connection(), ConnectionState::Offline) {
             return Err(ImageError::Unavailable);
@@ -243,12 +265,11 @@ impl Images {
         let ImageKey::Attachment { id, .. } = &request.key else {
             return Err(ImageError::UnknownKey);
         };
-        let tier = self.tier.as_ref().ok_or(ImageError::UnknownKey)?;
+        let tier = self.tier().ok_or(ImageError::UnknownKey)?;
         let needed = request.width.max(request.height);
         let entry = tier
             .find(&format!("attachment/{}", id.get()), Form::Still, needed)
             .await
-            .filter(|entry| entry.path.exists())
             .ok_or(ImageError::UnknownKey)?;
         Ok(ImageFile {
             path: entry.path,
@@ -319,21 +340,22 @@ impl Images {
             return Ok(planned.url.clone());
         };
         let current = self.current_link(link);
-        let current = if force || signed::due(&current, self.now_seconds()) {
-            match self.refresher.refresh(&current).await {
-                Some(fresh) => {
-                    self.keep_renewed(link, fresh.clone());
-                    fresh
-                }
-                None if !force
-                    && signed::expires(&current).is_some_and(|ex| ex > self.now_seconds()) =>
-                {
-                    current
-                }
-                None => return Err(ImageError::Unavailable),
+        if !force && !signed::due(&current, self.now_seconds()) {
+            return Ok(signed::resign(&planned.url, &current));
+        }
+        let usable = !force && signed::expires(&current).is_some_and(|ex| ex > self.now_seconds());
+        let current = match self.refresher.refresh(&current).await {
+            Renewal::Renewed(fresh) => {
+                self.keep_renewed(link, fresh.clone());
+                fresh
             }
-        } else {
-            current
+            // Not expired yet: it still works for now.
+            Renewal::Refused | Renewal::Failed if usable => current,
+            Renewal::Refused => {
+                lock(&self.missing).insert(planned.disk.clone());
+                return Err(ImageError::NotFound);
+            }
+            Renewal::Failed => return Err(ImageError::Unavailable),
         };
         Ok(signed::resign(&planned.url, &current))
     }
@@ -408,12 +430,12 @@ impl Images {
         if u64::from(inspected.width) * u64::from(inspected.height) > MAX_PIXELS {
             return Err(ImageError::TooLarge);
         }
-        let tier = self.tier.as_ref().ok_or(ImageError::Unavailable)?;
+        let tier = self
+            .tier()
+            .filter(|tier| !tier.is_deleted())
+            .ok_or(ImageError::Unavailable)?;
         let directory = tier.temporary().to_path_buf();
-        let temporary = directory.join(format!(
-            "{}.part",
-            self.downloads.fetch_add(1, Ordering::Relaxed)
-        ));
+        let temporary = tier.temporary_file();
         let length = bytes.len() as u64;
         let written = async {
             tokio::fs::create_dir_all(&directory).await?;
@@ -497,13 +519,14 @@ impl Images {
         if !signed::due(&current, self.now_seconds()) {
             return Ok(current);
         }
-        let fresh = self
-            .refresher
-            .refresh(&current)
-            .await
-            .ok_or(ImageError::Unavailable)?;
-        self.keep_renewed(&link, fresh.clone());
-        Ok(fresh)
+        match self.refresher.refresh(&current).await {
+            Renewal::Renewed(fresh) => {
+                self.keep_renewed(&link, fresh.clone());
+                Ok(fresh)
+            }
+            Renewal::Refused => Err(ImageError::NotFound),
+            Renewal::Failed => Err(ImageError::Unavailable),
+        }
     }
 
     pub(crate) async fn original_url(&self, key: &ImageKey) -> Result<String, ImageError> {
@@ -575,7 +598,7 @@ impl Images {
 
     pub(crate) async fn clear(&self) {
         lock(&self.missing).clear();
-        if let Some(tier) = &self.tier {
+        if let Some(tier) = self.tier() {
             tier.clear().await;
         }
     }

@@ -191,6 +191,11 @@ async fn a_broken_index_starts_over() {
     );
 }
 
+fn age(path: &std::path::Path, seconds: u64) {
+    let then = std::time::SystemTime::now() - std::time::Duration::from_secs(seconds);
+    fs::File::open(path).unwrap().set_modified(then).unwrap();
+}
+
 #[tokio::test]
 async fn files_the_index_doesnt_know_are_swept_at_open() {
     let dir = TempDir::new();
@@ -198,9 +203,11 @@ async fn files_the_index_doesnt_know_are_swept_at_open() {
     let kept = keep(&first, KEY, Form::Still, 80, false, 100).await;
     let stray = kept.path.with_file_name("stray.webp");
     fs::write(&stray, b"left by a crash").unwrap();
+    age(&stray, 120);
     fs::create_dir_all(first.temporary()).unwrap();
     let leftover = first.temporary().join("half-written");
     fs::write(&leftover, b"half").unwrap();
+    age(first.temporary(), 7200);
     first.close().await;
 
     let second = tier(&dir, LIMIT);
@@ -210,17 +217,155 @@ async fn files_the_index_doesnt_know_are_swept_at_open() {
     assert!(!leftover.exists());
 }
 
+// Another process may use the directory: its newest files and downloads aren't crash leftovers.
 #[tokio::test]
-async fn a_forgotten_file_is_no_longer_found() {
+async fn recent_files_survive_the_sweep() {
+    let dir = TempDir::new();
+    let first = tier(&dir, LIMIT);
+    let kept = keep(&first, KEY, Form::Still, 80, false, 100).await;
+    let moving = kept.path.with_file_name("being-indexed.webp");
+    fs::write(&moving, b"renamed, not yet indexed").unwrap();
+    fs::create_dir_all(first.temporary()).unwrap();
+    let downloading = first.temporary().join("0.part");
+    fs::write(&downloading, b"half").unwrap();
+
+    let second = tier(&dir, LIMIT);
+    second.find(KEY, Form::Still, 80).await;
+
+    assert!(moving.exists());
+    assert!(downloading.exists());
+    first.close().await;
+}
+
+#[tokio::test]
+async fn temporary_files_never_repeat() {
+    let dir = TempDir::new();
+    let tier = Arc::new(tier(&dir, LIMIT));
+    let shared = tier.clone();
+
+    let names: std::collections::HashSet<PathBuf> = (0..50)
+        .map(|n| {
+            if n % 2 == 0 {
+                tier.temporary_file()
+            } else {
+                shared.temporary_file()
+            }
+        })
+        .collect();
+
+    assert_eq!(names.len(), 50);
+    assert!(names.iter().all(|name| name.starts_with(tier.temporary())));
+}
+
+#[tokio::test]
+async fn a_file_gone_from_disk_is_not_found() {
     let dir = TempDir::new();
     let tier = tier(&dir, LIMIT);
     let kept = keep(&tier, KEY, Form::Still, 80, false, 100).await;
     fs::remove_file(&kept.path).unwrap();
 
-    tier.forget(kept.path.clone());
-
     assert_eq!(tier.find(KEY, Form::Still, 80).await, None);
     assert_eq!(tier.total().await, 0);
+}
+
+#[tokio::test]
+async fn a_replacement_with_another_extension_deletes_the_old_file() {
+    let dir = TempDir::new();
+    let tier = tier(&dir, LIMIT);
+    let old = keep(&tier, KEY, Form::Still, 80, false, 100).await;
+    let temporary = download(&tier, 120).await;
+
+    let new = tier
+        .insert(NewFile {
+            key: KEY.to_owned(),
+            form: Form::Still,
+            width: 80,
+            height: 80,
+            animated: false,
+            full: false,
+            extension: "png",
+            bytes: 120,
+            temporary,
+        })
+        .await
+        .unwrap();
+
+    assert_ne!(new.path, old.path);
+    assert!(!old.path.exists());
+    assert_eq!(tier.total().await, 120);
+}
+
+#[tokio::test]
+async fn eviction_that_cant_delete_gives_up() {
+    let dir = TempDir::new();
+    let tier = tier(&dir, 1000);
+    tier.set_clock(1_000);
+    keep(&tier, "a", Form::Still, 80, false, 600).await;
+    tier.fail_deletes();
+    tier.set_clock(2_000);
+
+    let kept = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        keep(&tier, "b", Form::Still, 80, false, 600),
+    )
+    .await;
+
+    assert!(kept.is_ok(), "the image thread kept answering");
+    assert!(tier.find("b", Form::Still, 80).await.is_some());
+}
+
+#[tokio::test]
+async fn a_deleted_directory_stays_gone() {
+    let dir = TempDir::new();
+    let tier = tier(&dir, LIMIT);
+    keep(&tier, KEY, Form::Still, 80, false, 100).await;
+    tier.delete().await;
+    assert!(tier.is_deleted());
+
+    // A download that was already on its way.
+    fs::create_dir_all(tier.temporary()).unwrap();
+    let late = tier.temporary_file();
+    fs::write(&late, b"late").unwrap();
+    let kept = tier
+        .insert(NewFile {
+            key: KEY.to_owned(),
+            form: Form::Still,
+            width: 80,
+            height: 80,
+            animated: false,
+            full: false,
+            extension: "webp",
+            bytes: 4,
+            temporary: late,
+        })
+        .await;
+
+    assert_eq!(kept, None);
+    assert!(!dir.path().join("1234").exists());
+}
+
+// Each process counts what it wrote; the index has what every process wrote.
+#[tokio::test]
+async fn the_size_counts_what_other_processes_kept() {
+    let dir = TempDir::new();
+    let first = tier(&dir, 10_000);
+    first.find("ready", Form::Still, 0).await;
+    let second = tier(&dir, 10_000);
+    first.set_clock(1_000);
+    second.set_clock(2_000);
+    keep(&first, "big", Form::Still, 80, false, 9_000).await;
+
+    for n in 0..70 {
+        keep(&second, &format!("small/{n}"), Form::Still, 80, false, 30).await;
+    }
+
+    assert_eq!(
+        second.find("big", Form::Still, 80).await,
+        None,
+        "evicted by the other"
+    );
+    assert!(second.total().await <= 9_000);
+    first.close().await;
 }
 
 #[tokio::test]
@@ -296,4 +441,23 @@ async fn eviction_leaves_room_below_the_limit() {
     assert_eq!(tier.find("a", Form::Still, 80).await, None);
     assert_eq!(tier.find("b", Form::Still, 80).await, None);
     assert!(tier.find("c", Form::Still, 80).await.is_some());
+}
+
+#[tokio::test]
+async fn two_processes_opening_a_new_directory_at_once_both_work() {
+    for _ in 0..10 {
+        let dir = TempDir::new();
+        let (first, second) = (tier(&dir, LIMIT), tier(&dir, LIMIT));
+
+        let (one, two) = tokio::join!(
+            keep(&first, "one", Form::Still, 80, false, 10),
+            keep(&second, "two", Form::Still, 80, false, 10)
+        );
+
+        assert!(one.path.exists() && two.path.exists());
+        assert!(first.find("two", Form::Still, 80).await.is_some());
+        assert!(second.find("one", Form::Still, 80).await.is_some());
+        first.close().await;
+        second.close().await;
+    }
 }

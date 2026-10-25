@@ -93,26 +93,31 @@ impl MediaClient {
         )
     }
 
-    async fn wait_for_host(&self, url: &Url) {
-        let until = self
-            .pauses
+    fn paused_until(&self, url: &Url) -> Option<Instant> {
+        self.pauses
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&Self::host(url))
-            .copied();
-        if let Some(until) = until {
-            tokio::time::sleep_until(until).await;
+            .copied()
+            .filter(|until| *until > Instant::now())
+    }
+
+    // A slot for `url`'s host once it isn't paused; a pause that began while waiting for the
+    // slot is waited out too, without holding it.
+    async fn slot_for(&self, url: &Url) -> Permit {
+        loop {
+            if let Some(until) = self.paused_until(url) {
+                tokio::time::sleep_until(until).await;
+            }
+            let permit = self.permits.acquire().await;
+            if self.paused_until(url).is_none() {
+                return permit;
+            }
         }
     }
 
     fn pause(&self, url: &Url, headers: &HeaderMap) {
-        let wait = headers
-            .get(RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.trim().parse::<f64>().ok())
-            .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
-            .map_or(Duration::from_secs(1), Duration::from_secs_f64)
-            .min(MAX_PAUSE);
+        let wait = pause_for(headers);
         self.pauses
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -124,8 +129,7 @@ impl MediaClient {
         if !self.hosts.allows(url) {
             return Fetched::Refused;
         }
-        self.wait_for_host(url).await;
-        let _permit = self.permits.acquire().await;
+        let _permit = self.slot_for(url).await;
         let mut response = match self.http.get(url.clone()).send().await {
             Ok(response) => response,
             Err(err) => return Fetched::Transport(TransportError::from_reqwest(err).kind()),
@@ -173,8 +177,7 @@ impl MediaClient {
         if !self.hosts.allows(url) {
             return Err(Saved::Refused);
         }
-        self.wait_for_host(url).await;
-        let _permit = self.permits.acquire().await;
+        let _permit = self.slot_for(url).await;
         let mut response = self
             .http
             .get(url.clone())
@@ -208,6 +211,18 @@ impl MediaClient {
         }
         Ok(written)
     }
+}
+
+// Bounded before it becomes a Duration, which panics on absurd values.
+fn pause_for(headers: &HeaderMap) -> Duration {
+    headers
+        .get(RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map_or(Duration::from_secs(1), |seconds| {
+            Duration::from_secs_f64(seconds.min(MAX_PAUSE.as_secs_f64()))
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +325,23 @@ mod tests {
         while permits.waiting() < count {
             tokio::task::yield_now().await;
         }
+    }
+
+    #[test]
+    fn retry_after_is_bounded_and_never_panics() {
+        let pause = |value: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(RETRY_AFTER, HeaderValue::from_str(value).unwrap());
+            pause_for(&headers)
+        };
+
+        assert_eq!(pause("0.3"), Duration::from_millis(300));
+        assert_eq!(pause("99999999999999999999"), MAX_PAUSE);
+        assert_eq!(pause("1e300"), MAX_PAUSE);
+        assert_eq!(pause("-5"), Duration::from_secs(1));
+        assert_eq!(pause("NaN"), Duration::from_secs(1));
+        assert_eq!(pause("soon"), Duration::from_secs(1));
+        assert_eq!(pause_for(&HeaderMap::new()), Duration::from_secs(1));
     }
 
     #[tokio::test]

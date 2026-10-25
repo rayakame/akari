@@ -149,8 +149,8 @@ async fn refreshes_close_together_go_in_one_request() {
 
     for (n, answer) in answers.into_iter().enumerate() {
         assert_eq!(
-            answer.map(|url| url.to_string()),
-            Some(format!("{}&fresh=1", attachment(n))),
+            answer,
+            Renewal::Renewed(url(&format!("{}&fresh=1", attachment(n)))),
             "{n}"
         );
     }
@@ -176,7 +176,11 @@ async fn at_most_fifty_per_request_and_one_request_at_a_time() {
     }))
     .await;
 
-    assert!(answers.iter().all(Option::is_some));
+    assert!(
+        answers
+            .iter()
+            .all(|answer| matches!(answer, Renewal::Renewed(_)))
+    );
     let arrivals = responder.arrivals.lock().unwrap().clone();
     assert!(
         arrivals.iter().all(|(_, count)| *count <= 50),
@@ -205,7 +209,7 @@ async fn the_same_link_is_asked_once_per_request() {
     let (first, second) = tokio::join!(refresher.refresh(&link), refresher.refresh(&link));
 
     assert_eq!(first, second);
-    assert!(first.is_some());
+    assert!(matches!(first, Renewal::Renewed(_)));
     let arrivals = responder.arrivals.lock().unwrap().clone();
     assert_eq!(
         arrivals.iter().map(|(_, count)| *count).collect::<Vec<_>>(),
@@ -214,7 +218,7 @@ async fn the_same_link_is_asked_once_per_request() {
 }
 
 #[tokio::test]
-async fn a_failed_refresh_answers_none_and_the_next_asks_again() {
+async fn a_failed_refresh_answers_failed_and_the_next_asks_again() {
     let server = MockServer::start().await;
     Mock::given(path(REFRESH))
         .respond_with(ResponseTemplate::new(500))
@@ -227,12 +231,15 @@ async fn a_failed_refresh_answers_none_and_the_next_asks_again() {
         .await;
     let refresher = refresher(&server, Duration::from_millis(10)).await;
 
-    assert_eq!(refresher.refresh(&attachment(1)).await, None);
-    assert!(refresher.refresh(&attachment(1)).await.is_some());
+    assert_eq!(refresher.refresh(&attachment(1)).await, Renewal::Failed);
+    assert!(matches!(
+        refresher.refresh(&attachment(1)).await,
+        Renewal::Renewed(_)
+    ));
 }
 
 #[tokio::test]
-async fn an_answer_without_the_link_is_none() {
+async fn an_answer_without_the_link_is_a_refusal() {
     let server = MockServer::start().await;
     Mock::given(path(REFRESH))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"refreshed_urls": []})))
@@ -240,5 +247,5 @@ async fn an_answer_without_the_link_is_none() {
         .await;
     let refresher = refresher(&server, Duration::from_millis(10)).await;
 
-    assert_eq!(refresher.refresh(&attachment(1)).await, None);
+    assert_eq!(refresher.refresh(&attachment(1)).await, Renewal::Refused);
 }

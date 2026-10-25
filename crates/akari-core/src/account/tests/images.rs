@@ -1039,3 +1039,228 @@ async fn a_source_smaller_than_asked_answers_larger_asks() {
     assert!(larger.from_disk, "nothing larger exists");
     assert_eq!(online.requests_to(AVATAR_PATH).await.len(), 1);
 }
+
+#[tokio::test]
+async fn forgetting_the_account_mid_download_leaves_nothing_behind() {
+    let online = connected().await;
+    serve(
+        &online.server,
+        AVATAR_PATH,
+        webp(80).set_delay(Duration::from_millis(300)),
+    )
+    .await;
+    let account = Arc::new(online.account);
+    let downloading = {
+        let account = account.clone();
+        tokio::spawn(async move { account.image(request(avatar(), 80)).await })
+    };
+    while online.server.received_requests().await.unwrap().is_empty() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let client = account.shared.rest.client().clone();
+
+    client.forget_account(Snowflake::new(ME)).await.unwrap();
+    let late = downloading.await.unwrap();
+    let after = account.image(request(avatar(), 80)).await;
+
+    assert!(late.is_err(), "{late:?}");
+    assert_eq!(after, Err(ImageError::Unavailable));
+    assert!(!online.dir.path().join(ME.to_string()).exists());
+    assert_eq!(
+        online
+            .server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|request| request.url.path() == AVATAR_PATH)
+            .count(),
+        1,
+        "nothing downloads after the account is forgotten"
+    );
+}
+
+// The first request is refused with a 429; the next seven hold every slot for a while.
+#[derive(Clone, Default)]
+struct Crowded(Arc<Mutex<Vec<(String, std::time::Instant)>>>);
+
+impl Respond for Crowded {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let mut arrivals = self.0.lock().unwrap();
+        let first = arrivals.is_empty();
+        arrivals.push((request.url.path().to_owned(), std::time::Instant::now()));
+        if first {
+            // Refused only once every slot is taken.
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "0.4")
+                .set_delay(Duration::from_millis(200))
+        } else if arrivals.len() <= 8 {
+            webp(80).set_delay(Duration::from_millis(800))
+        } else {
+            webp(80)
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_429_holds_back_requests_already_waiting_for_a_slot() {
+    let online = connected().await;
+    let arrivals = Crowded::default();
+    Mock::given(method("GET"))
+        .respond_with(arrivals.clone())
+        .mount(&online.server)
+        .await;
+    let account = Arc::new(online.account);
+    let key = |n: u64| ImageKey::Avatar {
+        user: Snowflake::new(AUTHOR + n),
+        hash: ImageHash::parse(HASH),
+    };
+    let mut tasks = Vec::new();
+    for n in 0..8 {
+        let account = account.clone();
+        tasks.push(tokio::spawn(async move {
+            account.image(request(key(n), 80)).await
+        }));
+        while arrivals.0.lock().unwrap().len() <= n as usize {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    }
+    // Queued behind the eight; the 429 frees a slot during its own pause.
+    let queued = {
+        let account = account.clone();
+        tokio::spawn(async move { account.image(request(key(20), 80)).await })
+    };
+
+    for task in tasks {
+        assert!(task.await.unwrap().is_ok());
+    }
+    assert!(queued.await.unwrap().is_ok());
+    let arrivals = arrivals.0.lock().unwrap().clone();
+    let paused_until = arrivals[0].1 + Duration::from_millis(600);
+    for (path, at) in &arrivals[8..] {
+        assert!(*at >= paused_until, "{path} came during the pause");
+    }
+}
+
+#[tokio::test]
+async fn a_link_discord_wont_renew_is_not_found_for_the_session() {
+    let online = connected().await;
+    load_message(&online, |message| {
+        message["attachments"] = json!([attachment_json(&online, now_seconds() - 600)]);
+    })
+    .await;
+    Mock::given(method("POST"))
+        .and(path(REFRESH))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"refreshed_urls": []})))
+        .mount(&online.server)
+        .await;
+    let ask = || ImageRequest {
+        key: attachment_key(),
+        width: 800,
+        height: 450,
+        animated: None,
+    };
+
+    assert_eq!(online.account.image(ask()).await, Err(ImageError::NotFound));
+    assert_eq!(online.account.image(ask()).await, Err(ImageError::NotFound));
+    assert_eq!(online.requests_to(REFRESH).await.len(), 1);
+}
+
+#[tokio::test]
+async fn images_go_where_ready_says_the_account_is() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let dir = TempDir::new();
+    let client =
+        client_with_media(fake.url(), &server.uri()).with_image_cache(dir.path().to_path_buf());
+    // The host thought it was another account; READY names ME.
+    let account = Account::start_as(
+        client,
+        Token::new(TOKEN.to_owned()),
+        timing(),
+        DEFAULT_LIMITS,
+        Snowflake::new(100_000_000_000_000_077),
+    )
+    .unwrap();
+    let subscription = account.store().subscribe();
+    let _connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    serve(&server, AVATAR_PATH, webp(80)).await;
+
+    let file = account.image(request(avatar(), 80)).await.unwrap();
+
+    assert!(
+        file.path.starts_with(dir.path().join(ME.to_string())),
+        "{:?}",
+        file.path
+    );
+    assert!(
+        !dir.path()
+            .join("100000000000000077")
+            .join("files")
+            .read_dir()
+            .is_ok_and(|mut files| files.next().is_some())
+    );
+}
+
+#[tokio::test]
+async fn two_accounts_of_one_user_share_its_directory() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let dir = TempDir::new();
+    let client =
+        client_with_media(fake.url(), &server.uri()).with_image_cache(dir.path().to_path_buf());
+    let start = || {
+        Account::start_as(
+            client.clone(),
+            Token::new(TOKEN.to_owned()),
+            timing(),
+            DEFAULT_LIMITS,
+            Snowflake::new(ME),
+        )
+        .unwrap()
+    };
+    let (first, second) = (start(), start());
+    let _one = online(&mut fake, &first).await;
+    let _two = online(&mut fake, &second).await;
+    for account in [&first, &second] {
+        while !matches!(account.store().connection(), ConnectionState::Online) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+    let other = "/avatars/100000000000000009/0123456789abcdef0123456789abcdef.webp";
+    serve(
+        &server,
+        AVATAR_PATH,
+        webp(80).set_delay(Duration::from_millis(100)),
+    )
+    .await;
+    serve(
+        &server,
+        other,
+        webp(96).set_delay(Duration::from_millis(100)),
+    )
+    .await;
+
+    let (mine, theirs) = tokio::join!(
+        first.image(request(avatar(), 80)),
+        second.image(request(
+            ImageKey::Avatar {
+                user: Snowflake::new(100_000_000_000_000_009),
+                hash: ImageHash::parse(HASH),
+            },
+            96
+        ))
+    );
+
+    let (mine, theirs) = (mine.unwrap(), theirs.unwrap());
+    assert_eq!((mine.width, theirs.width), (80, 96));
+    assert_eq!(
+        std::fs::read(&mine.path).unwrap(),
+        webp_bytes(80, 80, false)
+    );
+    assert_eq!(
+        std::fs::read(&theirs.path).unwrap(),
+        webp_bytes(96, 96, false)
+    );
+}
