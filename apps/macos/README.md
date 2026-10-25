@@ -50,7 +50,11 @@ Attachments, embeds, reactions, replies, voice, notifications and settings come 
   `ImageLayerView` on it, `:name:` as its fallback text. A
   message's stickers are a `StickerRow` of `StickerView`s (160, 8 apart) in the cell's stack
   under the text; a Lottie or failed sticker shows a box with a symbol and a caption
-  (`docs/ui/emoji.md`).
+  (`docs/ui/emoji.md`). Emoji and stickers fit inside their box (`ImageFit.contain`).
+- Over an emoji or a sticker the list's authority shows the hand (`MessageTextView.expression(at:)`;
+  a sticker is a button) and `ExpressionHoverCard` its card after 300 ms, a borderless child
+  window that takes no mouse events; a click (the text view's, once its tracking ends without a
+  selection) opens `ExpressionPopoutPresenter`'s panel in `ChildWindows` beside the item.
 - A loading or failed avatar shows the `avatarPlaceholder` disc; a server's icon is drawn
   alone (`ServerPicture`: the rail, the folder minis, the title bar), its initials' tile only
   without an icon or after a failure. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).

@@ -160,7 +160,11 @@ store has the list but not the item) or `NotLoaded` (before READY, a pending mes
 a guild not in the store). `formatted_text(content)` parses without a store, for tests and
 previews. A custom emoji span (`SpanKind::Emoji`) carries its `ImageKey`, so the text's layer
 asks for it like any image; `Message.stickers` are `Sticker` records (ID, name, format and the
-sticker's key). `FormattedText.jumbo` follows Discord's limit of 30 emoji.
+sticker's key). `FormattedText.jumbo` follows Discord's limit of 30 emoji. For their popouts,
+`Account.emoji_source`, `sticker`, `sticker_guild` and `sticker_pack` ask Discord where an emoji or
+sticker is from (`EmojiSource`, `StickerDetails`, `SourceGuild`, `StickerPack`), `Store.emoji_guild`
+names the user's own server an emoji is from, `Store.nitro()` the user's tier, and
+`emoji_shortcode` a Unicode emoji's name.
 
 Names and `mentions_me` can change without a message event, so a host rereads the messages it
 shows after `GuildUpdated` (role names and colors), `ChannelUpdated` (channel names, access),
