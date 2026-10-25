@@ -1,4 +1,6 @@
-use akari_core::model::{AttachmentId, ChannelId, GuildId, MessageId, Permissions, RoleId, UserId};
+use akari_core::model::{
+    AttachmentId, ChannelId, EmojiId, GuildId, MessageId, Permissions, RoleId, StickerId, UserId,
+};
 
 uniffi::custom_type!(UserId, u64, {
     remote,
@@ -34,6 +36,18 @@ uniffi::custom_type!(AttachmentId, u64, {
     remote,
     lower: |id| id.get(),
     try_lift: |raw| Ok(AttachmentId::new(raw)),
+});
+
+uniffi::custom_type!(EmojiId, u64, {
+    remote,
+    lower: |id| id.get(),
+    try_lift: |raw| Ok(EmojiId::new(raw)),
+});
+
+uniffi::custom_type!(StickerId, u64, {
+    remote,
+    lower: |id| id.get(),
+    try_lift: |raw| Ok(StickerId::new(raw)),
 });
 
 uniffi::custom_type!(Permissions, u64, {

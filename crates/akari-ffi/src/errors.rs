@@ -394,3 +394,57 @@ impl From<akari_core::RequestError> for RequestError {
         }
     }
 }
+
+/// Why there is no image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, uniffi::Error)]
+#[uniffi::export(Display)]
+pub enum ImageError {
+    /// Discord has no such image; asking again this session fails at once.
+    #[error("Discord has no such image")]
+    NotFound,
+    /// Offline, or the network or Discord failed; asking again later can work, e.g. online.
+    #[error("the image can't be loaded now")]
+    Unavailable,
+    /// More bytes or pixels than Akari shows.
+    #[error("the image is too large")]
+    TooLarge,
+    /// The answer isn't a PNG, GIF, WebP or JPEG image.
+    #[error("not an image")]
+    NotAnImage,
+    /// The store doesn't have the key's message or embed, or the key names nothing.
+    #[error("unknown image")]
+    UnknownKey,
+    /// An image Akari doesn't show yet, such as a Lottie sticker.
+    #[error("unsupported image")]
+    Unsupported,
+    /// The file couldn't be written.
+    #[error("the image couldn't be written to disk")]
+    Io,
+    /// The account is closed.
+    #[error("the account is closed")]
+    Closed,
+    /// `cancel` was called on the pending request before it answered.
+    #[error("cancelled")]
+    Cancelled,
+    /// The request failed inside Akari (a bug: it panicked).
+    #[error("the image request failed inside Akari")]
+    Failed,
+}
+
+impl From<akari_core::media::ImageError> for ImageError {
+    fn from(err: akari_core::media::ImageError) -> Self {
+        use akari_core::media::ImageError as E;
+
+        match err {
+            E::NotFound => Self::NotFound,
+            E::Unavailable => Self::Unavailable,
+            E::TooLarge => Self::TooLarge,
+            E::NotAnImage => Self::NotAnImage,
+            E::UnknownKey => Self::UnknownKey,
+            E::Unsupported => Self::Unsupported,
+            E::Io => Self::Io,
+            E::Closed => Self::Closed,
+            _ => Self::Unavailable,
+        }
+    }
+}

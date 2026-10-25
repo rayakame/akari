@@ -25,8 +25,8 @@ fn plaintext_and_malformed_endpoints_are_rejected() {
         ..unreachable_endpoints()
     };
 
-    let plaintext = DiscordClient::with_endpoints(host(), store.clone(), plaintext, None);
-    let malformed = DiscordClient::with_endpoints(host(), store, malformed, None);
+    let plaintext = DiscordClient::with_endpoints(host(), store.clone(), plaintext, None, None);
+    let malformed = DiscordClient::with_endpoints(host(), store, malformed, None, None);
 
     assert!(
         matches!(&plaintext, Err(ClientError::InvalidEndpoint { name }) if name == "api"),

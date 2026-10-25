@@ -486,7 +486,8 @@ enum Repr {
 const ANIMATED: &str = "a_";
 
 impl ImageHash {
-    pub(crate) fn parse(hash: &str) -> Self {
+    /// Keeps any text; Discord's 32 lowercase hex digits, with or without `a_`, take 17 bytes.
+    pub fn parse(hash: &str) -> Self {
         let (animated, hex) = match hash.strip_prefix(ANIMATED) {
             Some(rest) => (true, rest),
             None => (false, hash),

@@ -23,6 +23,8 @@ public enum ChannelMarker {}
 public enum MessageMarker {}
 public enum RoleMarker {}
 public enum AttachmentMarker {}
+public enum EmojiMarker {}
+public enum StickerMarker {}
 
 public typealias UserId = Snowflake<UserMarker>
 public typealias GuildId = Snowflake<GuildMarker>
@@ -30,3 +32,5 @@ public typealias ChannelId = Snowflake<ChannelMarker>
 public typealias MessageId = Snowflake<MessageMarker>
 public typealias RoleId = Snowflake<RoleMarker>
 public typealias AttachmentId = Snowflake<AttachmentMarker>
+public typealias EmojiId = Snowflake<EmojiMarker>
+public typealias StickerId = Snowflake<StickerMarker>

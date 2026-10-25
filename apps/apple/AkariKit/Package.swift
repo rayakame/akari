@@ -23,6 +23,10 @@ let package = Package(
             ]
         ),
         .target(name: "AkariKit", dependencies: ["AkariFFI"]),
-        .testTarget(name: "AkariKitTests", dependencies: ["AkariKit"]),
+        .testTarget(
+            name: "AkariKitTests",
+            dependencies: ["AkariKit"],
+            resources: [.copy("Fixtures")]
+        ),
     ]
 )

@@ -44,10 +44,16 @@ that the store doesn't have; it keeps the threads THREAD_LIST_SYNC and messages 
 thread's live message count and newest message for its box, and joins and leaves threads; for
 a channel's Threads browser it lists the active threads, loads the archived ones page by page and
 searches threads by name; it creates threads, from a message or not, as the official client does,
-with the parent's own slowmode for new threads;
+with the parent's own slowmode for new threads; `akari_core::media` gets images: keys by Discord's
+IDs, the size and form each box asks for (never fewer pixels than it covers on screen), downloads
+without the token on a client of their own (eight at a time, newest first, one per image however
+many ask), signed attachment links renewed in batches, each account's images on disk with LRU
+eviction, Discord's placeholder decoder and media layout from sizes alone;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
-messages, and show where a channel's unread state and mentions come from. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
-and the message APIs, including the send rules, the read calls and `end_session`, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+messages, show where a channel's unread state and mentions come from, and get an image as the app
+would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
+and the message APIs, including the send rules, the read calls and `end_session`, and images
+(`PendingImage`, placeholders, layout), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, and the composer), the message
 timeline and the reading signal (what tells the core which channel the user reads). `apps/macos` is the first app: the login screen and the main window with the server
@@ -76,7 +82,7 @@ backgrounds as layers behind the text. The other app folders contain only a READ
 
 | Path | Contents |
 |---|---|
-| `crates/akari-core` | Discord gateway (WebSocket, zstd-stream), REST with rate limit handling, models, state store, SQLite disk cache |
+| `crates/akari-core` | Discord gateway (WebSocket, zstd-stream), REST with rate limit handling, models, state store, SQLite disk cache, images from Discord's CDN |
 | `crates/akari-markdown` | Discord-flavored markdown parser |
 | `crates/akari-ffi` | UniFFI bindings only (Swift for macOS/iOS, Kotlin for Android) |
 | `crates/akari-cli` | Terminal test client for developing the core |

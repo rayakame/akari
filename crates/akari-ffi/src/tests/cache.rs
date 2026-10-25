@@ -11,7 +11,7 @@ use super::support::{MemoryStore, USER, core_client, host, token};
 use crate::client::DiscordClient;
 use crate::subscription::{StoreEvent, StoreSubscription};
 
-pub(super) struct TempDir(PathBuf);
+pub(super) struct TempDir(pub(super) PathBuf);
 
 impl TempDir {
     pub(super) fn new() -> Self {
@@ -70,6 +70,7 @@ async fn the_constructor_takes_the_cache_directory() {
         host(),
         Arc::new(MemoryStore::default()),
         Some(dir.0.to_string_lossy().into_owned()),
+        None,
     )
     .unwrap();
 
@@ -81,7 +82,7 @@ async fn the_constructor_takes_the_cache_directory() {
 #[tokio::test]
 async fn no_directory_means_no_cache() {
     let dir = TempDir::new();
-    let client = DiscordClient::new(host(), Arc::new(MemoryStore::default()), None).unwrap();
+    let client = DiscordClient::new(host(), Arc::new(MemoryStore::default()), None, None).unwrap();
 
     client.preload(USER);
     client.clear_caches().await;

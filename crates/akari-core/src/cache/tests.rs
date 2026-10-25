@@ -36,6 +36,11 @@ impl TempDir {
         Self(path)
     }
 
+    // Takes over a directory another handle was forgotten for.
+    pub(crate) fn at(path: PathBuf) -> Self {
+        Self(path)
+    }
+
     pub(crate) fn path(&self) -> &Path {
         &self.0
     }

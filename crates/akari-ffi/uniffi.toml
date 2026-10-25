@@ -27,6 +27,14 @@ lower = "{}.rawValue"
 lift = "AttachmentId(rawValue: {})"
 lower = "{}.rawValue"
 
+[bindings.swift.custom_types.EmojiId]
+lift = "EmojiId(rawValue: {})"
+lower = "{}.rawValue"
+
+[bindings.swift.custom_types.StickerId]
+lift = "StickerId(rawValue: {})"
+lower = "{}.rawValue"
+
 [bindings.swift.custom_types.Permissions]
 lift = "Permissions(rawValue: {})"
 lower = "{}.rawValue"

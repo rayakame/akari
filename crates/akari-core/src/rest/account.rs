@@ -23,6 +23,7 @@ const THREAD_MEMBER: &str = "channels/{}/thread-members/@me";
 const THREAD_SEARCH: &str = "channels/{}/threads/search";
 const THREADS: &str = "channels/{}/threads";
 const MESSAGE_THREADS: &str = "channels/{}/messages/{}/threads";
+const REFRESH_URLS: &str = "attachments/refresh-urls";
 const SLOWMODE: u32 = 20016;
 const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
@@ -275,6 +276,11 @@ impl AccountRest {
         self.closed.store(true, Ordering::Release);
     }
 
+    #[cfg(test)]
+    pub(crate) fn client(&self) -> &DiscordClient {
+        &self.client
+    }
+
     pub(crate) fn is_unauthorized(&self) -> bool {
         self.unauthorized.load(Ordering::Acquire)
     }
@@ -473,6 +479,43 @@ impl AccountRest {
         })
         .await?;
         Ok(())
+    }
+
+    // Original and refreshed link, in Discord's order; links it didn't refresh are missing.
+    pub(crate) async fn refresh_urls(
+        &self,
+        urls: &[String],
+    ) -> Result<Vec<(String, String)>, RequestError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            attachment_urls: &'a [String],
+        }
+        #[derive(serde::Deserialize)]
+        struct Answer {
+            refreshed_urls: Vec<Refreshed>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Refreshed {
+            original: String,
+            refreshed: String,
+        }
+        let body = Body {
+            attachment_urls: urls,
+        };
+        let route = RouteKey::new(Method::Post, REFRESH_URLS, 0);
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Allowed, || {
+                Ok(self.request(HttpMethod::POST, REFRESH_URLS)?.json(&body))
+            })
+            .await
+            .map_err(RequestError::from)?;
+        let answer: Answer =
+            serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)?;
+        Ok(answer
+            .refreshed_urls
+            .into_iter()
+            .map(|refreshed| (refreshed.original, refreshed.refreshed))
+            .collect())
     }
 
     pub(crate) fn server_now_millis(&self) -> Option<i64> {

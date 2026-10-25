@@ -11,6 +11,7 @@ pub mod gateway;
 mod heartbeat;
 mod lenient;
 mod load_report;
+pub mod media;
 pub mod model;
 mod prepare;
 pub mod properties;
