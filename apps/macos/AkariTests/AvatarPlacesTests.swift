@@ -69,19 +69,24 @@ final class AvatarPlacesTests {
         #expect(layers(in: GuildIcon(name: "Lab", icon: nil, highlighted: false)).isEmpty)
     }
 
-    // A server icon over a known background, hosted at 2x scale-independent sizes; the pixel at
-    // the icon's center and one well outside it, once the icon's layer settled.
+    // A server icon over a known background with an 8 point margin around it, at any backing
+    // scale; the pixel at the icon's center and one in the margin, once the icon's layer settled.
     func serverIcon<Content: View>(
         _ view: Content, source: FakeImageSource, size: CGFloat = 72, settle: Bool = true,
-        at point: NSPoint? = nil
+        at point: NSPoint? = nil, scale: CGFloat? = nil
     ) async throws -> (center: NSColor?, outside: NSColor?) {
         let cache = ImageCache(source: source)
         let host = NSHostingView(
-            rootView: view.frame(width: size, height: size).background(Color(nsColor: Self.backdrop))
+            rootView: view.frame(width: size, height: size)
+                .frame(width: size + 2 * Self.margin, height: size + 2 * Self.margin)
+                .background(Color(nsColor: Self.backdrop))
                 .environment(\.imageCache, cache))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: size, height: size), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let side = size + 2 * Self.margin
+        let window = scale.map { ScaledWindow(scale: $0) as NSWindow }
+            ?? NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: side, height: side), styleMask: [.titled],
+                backing: .buffered, defer: false)
+        window.setContentSize(NSSize(width: side, height: side))
         windows.append(window)
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = host
@@ -95,7 +100,7 @@ final class AvatarPlacesTests {
         let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: rep)
         let scale = CGFloat(rep.pixelsWide) / host.bounds.width
-        let center = point.map { (Int($0.x * scale), Int($0.y * scale)) }
+        let center = point.map { (Int(($0.x + Self.margin) * scale), Int(($0.y + Self.margin) * scale)) }
             ?? (rep.pixelsWide / 2, rep.pixelsHigh / 2)
         return (
             rep.colorAt(x: center.0, y: center.1)?.usingColorSpace(.sRGB),
@@ -104,6 +109,7 @@ final class AvatarPlacesTests {
     }
 
     static let backdrop = NSColor(srgbRed: 0.1, green: 0.2, blue: 0.3, alpha: 1)
+    static let margin: CGFloat = 8
     static let labIcon = ImageKey.guildIcon(
         guildId: GuildId(rawValue: 1), hash: "0123456789abcdef0123456789abcdef")
 
@@ -123,10 +129,11 @@ final class AvatarPlacesTests {
     // The acronym tile belongs to a server without an icon (and one whose icon failed). A
     // loaded icon shows what's behind its transparent pixels, as the official client does;
     // nothing is filled under it, loading or loaded, hovered or selected.
-    @Test
-    func aServerIconShowsWhatsBehindItsTransparency() async throws {
+    @Test(arguments: [1, 2] as [CGFloat])
+    func aServerIconShowsWhatsBehindItsTransparency(_ scale: CGFloat) async throws {
         let loaded = try await serverIcon(
-            GuildIcon(name: "Lab", icon: Self.labIcon, highlighted: false), source: try clearIcon())
+            GuildIcon(name: "Lab", icon: Self.labIcon, highlighted: false), source: try clearIcon(),
+            scale: scale)
         #expect(same(loaded.center, loaded.outside), "\(String(describing: loaded))")
 
         let selected = try await serverIcon(
@@ -180,12 +187,15 @@ final class AvatarPlacesTests {
             ).frame(width: 40, height: 40), source: try clearIcon(), size: 40, at: mini)
         #expect(same(minis.center, empty.center), "the folder's own tile shows through the icon")
 
-        let title = try await serverIcon(
-            TitleBar.ServerIcon(name: "Lab", icon: Self.labIcon), source: try clearIcon(), size: 16)
-        let titleTile = try await serverIcon(
-            TitleBar.ServerIcon(name: "Lab", icon: nil), source: try clearIcon(), size: 16)
-        #expect(same(title.center, title.outside))
-        #expect(!same(titleTile.center, titleTile.outside))
+        for scale in [1, 2] as [CGFloat] {
+            let title = try await serverIcon(
+                TitleBar.ServerIcon(name: "Lab", icon: Self.labIcon), source: try clearIcon(), size: 16,
+                scale: scale)
+            let titleTile = try await serverIcon(
+                TitleBar.ServerIcon(name: "Lab", icon: nil), source: try clearIcon(), size: 16, scale: scale)
+            #expect(same(title.center, title.outside), "\(scale)x")
+            #expect(!same(titleTile.center, titleTile.outside), "\(scale)x")
+        }
     }
 
     @Test
