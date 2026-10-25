@@ -24,6 +24,18 @@ struct ImageDecoderTests {
         #expect(image2.height == 334)
     }
 
+    // The corrective redraw draws into an RGB context whatever the source's color space.
+    @Test
+    func aGrayscaleSourceIsRedrawnToo() throws {
+        let source = try ImageDecoder.open(try images.grayPNG("gray", width: 640, height: 480))
+        #expect(CGImageSourceCreateImageAtIndex(source, 0, nil)?.colorSpace?.model == .monochrome)
+
+        let image = try #require(ImageDecoder.decode(source, frame: 0, covering: (64, 64)))
+
+        #expect(image.width == 86)
+        #expect(image.height == 64)
+    }
+
     @Test
     func anOrientedFileIsSizedAfterItsRotation() throws {
         let url = try images.jpeg("turned", width: 400, height: 200, orientation: 6)

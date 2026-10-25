@@ -92,12 +92,13 @@ public enum ImageDecoder {
         return orientation >= 5 ? (size.height, size.width) : size
     }
 
+    // Into an RGB context: a grayscale or CMYK source's own space takes no alpha layout.
     private static func redraw(_ image: CGImage, to size: (width: Int, height: Int)) -> CGImage? {
-        guard
+        let rgb = image.colorSpace?.model == .rgb ? image.colorSpace : nil
+        guard let space = rgb ?? CGColorSpace(name: CGColorSpace.sRGB),
             let context = CGContext(
                 data: nil, width: size.width, height: size.height, bitsPerComponent: 8, bytesPerRow: 0,
-                space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
         else {
             return nil
         }
