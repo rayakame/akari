@@ -12,6 +12,7 @@ use tokio::task::AbortHandle;
 
 use super::client::{Fetched, MediaClient, Saved};
 use super::disk::{DiskTier, NewFile};
+use super::part::PartFile;
 use super::signed::{self, Refresher, Renewal};
 use super::sniff;
 use super::url::{Form, Planned, is_attachment_link};
@@ -114,6 +115,9 @@ impl Images {
         rest: Arc<AccountRest>,
         runtime: &tokio::runtime::Handle,
     ) -> Arc<Self> {
+        if let Some(owner) = owner {
+            client.open_images(owner);
+        }
         Arc::new(Self {
             media: client.media(),
             client: client.clone(),
@@ -130,21 +134,21 @@ impl Images {
     }
 
     // The directory of the account READY named, or of the host's account before READY.
-    fn tier(&self) -> Option<Arc<DiskTier>> {
+    async fn tier(&self) -> Option<Arc<DiskTier>> {
         let user = self
             .store
             .current_user()
             .map(|current| current.user.id)
             .or(self.owner)?;
-        let mut tier = lock(&self.tier);
-        match &*tier {
-            Some((owner, kept)) if *owner == user => Some(kept.clone()),
-            _ => {
-                let kept = self.client.image_tier(user)?;
-                *tier = Some((user, kept.clone()));
-                Some(kept)
-            }
+        if let Some((owner, kept)) = &*lock(&self.tier)
+            && *owner == user
+            && !kept.is_deleted()
+        {
+            return Some(kept.clone());
         }
+        let kept = self.client.image_tier(user).await?;
+        *lock(&self.tier) = Some((user, kept.clone()));
+        Some(kept)
     }
 
     fn now_seconds(&self) -> i64 {
@@ -244,6 +248,7 @@ impl Images {
         }
         let tier = self
             .tier()
+            .await
             .filter(|tier| !tier.is_deleted())
             .ok_or(ImageError::Unavailable)?;
         if let Some(entry) = tier.find(&planned.disk, planned.form, planned.needed).await {
@@ -265,7 +270,7 @@ impl Images {
         let ImageKey::Attachment { id, .. } = &request.key else {
             return Err(ImageError::UnknownKey);
         };
-        let tier = self.tier().ok_or(ImageError::UnknownKey)?;
+        let tier = self.tier().await.ok_or(ImageError::UnknownKey)?;
         let needed = request.width.max(request.height);
         let entry = tier
             .find(&format!("attachment/{}", id.get()), Form::Still, needed)
@@ -432,21 +437,27 @@ impl Images {
         }
         let tier = self
             .tier()
+            .await
             .filter(|tier| !tier.is_deleted())
             .ok_or(ImageError::Unavailable)?;
         let directory = tier.temporary().to_path_buf();
-        let temporary = tier.temporary_file();
+        let part = PartFile::new(tier.temporary_file());
         let length = bytes.len() as u64;
         let written = async {
             tokio::fs::create_dir_all(&directory).await?;
-            tokio::fs::write(&temporary, bytes).await
+            tokio::fs::write(part.path(), bytes).await
         }
         .await;
         if written.is_err() {
-            let _ = tokio::fs::remove_file(&temporary).await;
             return Err(ImageError::Io);
         }
         let longest = inspected.width.max(inspected.height);
+        let full = planned.full
+            || match planned.source {
+                Some(source) => longest >= source,
+                // The CDN never answers larger than the source.
+                None => longest < planned.needed,
+            };
         let entry = tier
             .insert(NewFile {
                 key: planned.disk.clone(),
@@ -454,11 +465,10 @@ impl Images {
                 width: inspected.width,
                 height: inspected.height,
                 animated: inspected.animated,
-                // The CDN never answers larger than the source.
-                full: planned.full || longest < planned.needed,
+                full,
                 extension: inspected.format.extension(),
                 bytes: length,
-                temporary,
+                temporary: part.keep(),
             })
             .await
             .ok_or(ImageError::Io)?;
@@ -598,8 +608,16 @@ impl Images {
 
     pub(crate) async fn clear(&self) {
         lock(&self.missing).clear();
-        if let Some(tier) = self.tier() {
+        if let Some(tier) = self.tier().await {
             tier.clear().await;
+        }
+    }
+}
+
+impl Drop for Images {
+    fn drop(&mut self) {
+        if let Some(owner) = self.owner {
+            self.client.release_images(owner);
         }
     }
 }

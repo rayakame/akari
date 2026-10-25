@@ -13,12 +13,15 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 
+use super::part::PartFile;
 use super::url::Hosts;
 use crate::error::{TransportError, TransportErrorKind};
 use crate::properties::ClientProperties;
 use crate::rest::BuildError;
 
 const IN_FLIGHT: usize = 8;
+// Originals the user saves: apart from the images, so a large one never stalls a row.
+const SAVES_IN_FLIGHT: usize = 2;
 // Chromium's Accept for an <img>.
 const IMAGES: &str = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
 // A host that asks for longer is treated as down for now.
@@ -43,6 +46,7 @@ pub(crate) struct MediaClient {
     http: reqwest::Client,
     hosts: Hosts,
     permits: Arc<Permits>,
+    saves: Arc<Permits>,
     // Until when each host (and port) asked for a pause.
     pauses: Mutex<HashMap<(String, u16), Instant>>,
 }
@@ -78,6 +82,7 @@ impl MediaClient {
             http,
             hosts,
             permits: Permits::new(IN_FLIGHT),
+            saves: Permits::new(SAVES_IN_FLIGHT),
             pauses: Mutex::default(),
         })
     }
@@ -104,12 +109,12 @@ impl MediaClient {
 
     // A slot for `url`'s host once it isn't paused; a pause that began while waiting for the
     // slot is waited out too, without holding it.
-    async fn slot_for(&self, url: &Url) -> Permit {
+    async fn slot_for(&self, permits: &Arc<Permits>, url: &Url) -> Permit {
         loop {
             if let Some(until) = self.paused_until(url) {
                 tokio::time::sleep_until(until).await;
             }
-            let permit = self.permits.acquire().await;
+            let permit = permits.acquire().await;
             if self.paused_until(url).is_none() {
                 return permit;
             }
@@ -129,7 +134,7 @@ impl MediaClient {
         if !self.hosts.allows(url) {
             return Fetched::Refused;
         }
-        let _permit = self.slot_for(url).await;
+        let _permit = self.slot_for(&self.permits, url).await;
         let mut response = match self.http.get(url.clone()).send().await {
             Ok(response) => response,
             Err(err) => return Fetched::Transport(TransportError::from_reqwest(err).kind()),
@@ -171,13 +176,14 @@ impl MediaClient {
         }
     }
 
-    /// Streams `url` into `destination` whatever its size and type; deletes what it wrote when
-    /// it fails.
+    /// Streams `url` into a file beside `destination`, whatever its size and type, and moves it
+    /// into place once it's whole: `destination` is replaced or untouched, never half written,
+    /// also when the future is dropped.
     pub(crate) async fn save(&self, url: &Url, destination: &Path) -> Result<u64, Saved> {
         if !self.hosts.allows(url) {
             return Err(Saved::Refused);
         }
-        let _permit = self.slot_for(url).await;
+        let _permit = self.slot_for(&self.saves, url).await;
         let mut response = self
             .http
             .get(url.clone())
@@ -192,24 +198,24 @@ impl MediaClient {
             }
             status => return Err(Saved::Status(status)),
         }
-        let mut file = tokio::fs::File::create(destination)
+        let part = PartFile::beside(destination);
+        let mut file = tokio::fs::File::create(part.path())
             .await
             .map_err(|_| Saved::Io)?;
         let mut written = 0_u64;
-        let copied: Result<(), Saved> = async {
-            while let Some(chunk) = response.chunk().await.map_err(|_| Saved::Network)? {
-                file.write_all(&chunk).await.map_err(|_| Saved::Io)?;
-                written += chunk.len() as u64;
+        while let Some(chunk) = response.chunk().await.map_err(|_| Saved::Network)? {
+            file.write_all(&chunk).await.map_err(|_| Saved::Io)?;
+            written += chunk.len() as u64;
+        }
+        file.flush().await.map_err(|_| Saved::Io)?;
+        drop(file);
+        match tokio::fs::rename(part.path(), destination).await {
+            Ok(()) => {
+                part.keep();
+                Ok(written)
             }
-            file.flush().await.map_err(|_| Saved::Io)
+            Err(_) => Err(Saved::Io),
         }
-        .await;
-        if let Err(err) = copied {
-            drop(file);
-            let _ = tokio::fs::remove_file(destination).await;
-            return Err(err);
-        }
-        Ok(written)
     }
 }
 

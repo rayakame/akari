@@ -87,6 +87,9 @@ pub(crate) struct Planned {
     pub(crate) needed: u32,
     /// The URL asks for the source's own size: nothing larger exists.
     pub(crate) full: bool,
+    /// The source's longest side when it's known (attachments, embeds); an answer that large is
+    /// the source. Without it, the CDN's rule: an answer under `needed` is.
+    pub(crate) source: Option<u32>,
     pub(crate) url: Url,
     /// The signed CDN link whose signature `url` carries, refreshed when it's due.
     pub(crate) signed: Option<Url>,
@@ -172,6 +175,7 @@ impl Hosts {
                     form: Form::Still,
                     needed: size,
                     full: false,
+                    source: None,
                     url,
                     signed: None,
                 })
@@ -192,6 +196,7 @@ impl Hosts {
                 form: Form::Still,
                 needed: 0,
                 full: true,
+                source: None,
                 url: join(&self.cdn, &format!("embed/avatars/{index}.png"))?,
                 signed: None,
             }),
@@ -313,6 +318,7 @@ impl Hosts {
             },
             needed: size,
             full: false,
+            source: None,
             url,
             signed: None,
         }
@@ -349,6 +355,7 @@ impl Hosts {
             form,
             needed: size,
             full: false,
+            source: None,
             url,
             signed: None,
         })
@@ -448,6 +455,7 @@ impl Hosts {
             form: Form::Still,
             needed: 0,
             full: true,
+            source: None,
             signed: Some(url.clone()).filter(is_attachment_link),
             url,
         })
@@ -509,6 +517,7 @@ impl Hosts {
             form,
             needed,
             full,
+            source: Some(longest),
             url,
             signed,
         }

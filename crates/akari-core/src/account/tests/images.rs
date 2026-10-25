@@ -48,14 +48,13 @@ impl Online {
 }
 
 async fn connected() -> Online {
-    connected_with(None).await
+    connected_with(None, TempDir::new()).await
 }
 
-// With the CDN at `cdn` instead of the mock server.
-async fn connected_with(cdn: Option<String>) -> Online {
+// With the CDN at `cdn` instead of the mock server, keeping images under `dir`.
+async fn connected_with(cdn: Option<String>, dir: TempDir) -> Online {
     let mut fake = FakeGateway::start().await;
     let server = MockServer::start().await;
-    let dir = TempDir::new();
     let client = match cdn {
         None => client_with_media(fake.url(), &server.uri()),
         Some(cdn) => crate::gateway::fake::client_with_endpoints(
@@ -143,7 +142,12 @@ fn attachment_path() -> String {
 }
 
 fn attachment_json(online: &Online, ex: i64) -> Value {
-    let link = format!("{}{}?{}&", online.uri(), attachment_path(), signature(ex));
+    attachment_json_at(&online.uri(), ex)
+}
+
+// An attachment whose links point at `host`.
+fn attachment_json_at(host: &str, ex: i64) -> Value {
+    let link = format!("{host}{}?{}&", attachment_path(), signature(ex));
     json!({
         "id": ATTACHMENT.to_string(),
         "filename": "photo.png",
@@ -1016,7 +1020,11 @@ async fn chunked_cdn(bytes: usize) -> String {
 
 #[tokio::test]
 async fn a_body_without_a_length_is_capped_while_it_streams() {
-    let online = connected_with(Some(chunked_cdn(crate::media::MAX_BODY + 1).await)).await;
+    let online = connected_with(
+        Some(chunked_cdn(crate::media::MAX_BODY + 1).await),
+        TempDir::new(),
+    )
+    .await;
 
     assert_eq!(
         online.account.image(request(avatar(), 80)).await,
@@ -1263,4 +1271,329 @@ async fn two_accounts_of_one_user_share_its_directory() {
         std::fs::read(&theirs.path).unwrap(),
         webp_bytes(96, 96, false)
     );
+}
+
+#[tokio::test]
+async fn forgetting_the_account_before_its_first_ask_keeps_the_directory_gone() {
+    let online = connected().await;
+    serve(&online.server, AVATAR_PATH, webp(80)).await;
+    let client = online.account.shared.rest.client().clone();
+
+    client.forget_account(Snowflake::new(ME)).await.unwrap();
+    let after = online.account.image(request(avatar(), 80)).await;
+
+    assert_eq!(after, Err(ImageError::Unavailable));
+    assert!(!online.image_directory().exists());
+    assert!(
+        online.requests_to(AVATAR_PATH).await.is_empty(),
+        "nothing downloads for a forgotten account"
+    );
+}
+
+#[tokio::test]
+async fn a_second_account_of_a_forgotten_user_gets_no_images_either() {
+    let mut first = connected().await;
+    serve(&first.server, AVATAR_PATH, webp(80)).await;
+    let client = first.account.shared.rest.client().clone();
+    let second = Account::start_as(
+        client.clone(),
+        Token::new(TOKEN.to_owned()),
+        timing(),
+        DEFAULT_LIMITS,
+        Snowflake::new(ME),
+    )
+    .unwrap();
+    let _connection = online(&mut first._fake, &second).await;
+    while !matches!(second.store().connection(), ConnectionState::Online) {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    client.forget_account(Snowflake::new(ME)).await.unwrap();
+    let after = second.image(request(avatar(), 80)).await;
+
+    assert_eq!(after, Err(ImageError::Unavailable));
+    assert!(!first.image_directory().exists());
+}
+
+#[tokio::test]
+async fn an_account_opened_again_after_a_forget_has_images() {
+    let mut first = connected().await;
+    serve(&first.server, AVATAR_PATH, webp(80)).await;
+    let client = first.account.shared.rest.client().clone();
+    client.forget_account(Snowflake::new(ME)).await.unwrap();
+
+    let reopened = Account::start_as(
+        client.clone(),
+        Token::new(TOKEN.to_owned()),
+        timing(),
+        DEFAULT_LIMITS,
+        Snowflake::new(ME),
+    )
+    .unwrap();
+    let _connection = online(&mut first._fake, &reopened).await;
+    while !matches!(reopened.store().connection(), ConnectionState::Online) {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let file = reopened.image(request(avatar(), 80)).await;
+
+    assert!(file.is_ok(), "{file:?}");
+    assert!(first.image_directory().exists());
+}
+
+#[tokio::test]
+async fn clearing_caches_keeps_the_images_of_an_open_account_that_hasnt_asked_yet() {
+    let dir = TempDir::new();
+    let root = dir.path().to_path_buf();
+    {
+        let earlier = connected_with(None, dir).await;
+        serve(&earlier.server, AVATAR_PATH, webp(80)).await;
+        earlier.account.image(request(avatar(), 80)).await.unwrap();
+        earlier.account.close();
+        // The directory outlives this run: a new TempDir handle takes it over below.
+        std::mem::forget(earlier.dir);
+    }
+    let later = connected_with(None, TempDir::at(root)).await;
+    serve(&later.server, AVATAR_PATH, webp(80)).await;
+    let client = later.account.shared.rest.client().clone();
+
+    client.clear_caches().await;
+    let file = later.account.image(request(avatar(), 80)).await.unwrap();
+
+    assert!(file.from_disk, "an open account's kept images stay");
+    assert!(later.requests_to(AVATAR_PATH).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_proxy_answer_a_pixel_under_the_box_is_not_the_source() {
+    let online = connected().await;
+    let fresh = now_seconds() + 86_400;
+    load_message(&online, |message| {
+        message["attachments"] = json!([attachment_json(&online, fresh)]);
+    })
+    .await;
+    Mock::given(method("GET"))
+        .and(path(attachment_path()))
+        .and(query_param("width", "600"))
+        .respond_with(png(599, 337))
+        .mount(&online.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(attachment_path()))
+        .and(query_param("width", "1024"))
+        .respond_with(png(1024, 576))
+        .mount(&online.server)
+        .await;
+    let ask = |width, height| ImageRequest {
+        key: attachment_key(),
+        width,
+        height,
+        animated: None,
+    };
+
+    let small = online.account.image(ask(550, 310)).await.unwrap();
+    let large = online.account.image(ask(1000, 563)).await.unwrap();
+
+    assert_eq!((small.width, small.height), (599, 337));
+    assert!(!large.from_disk, "an answer under the box isn't the source");
+    assert_eq!((large.width, large.height), (1024, 576));
+}
+
+#[tokio::test]
+async fn a_proxy_answer_of_the_sources_size_answers_every_ask() {
+    let online = connected().await;
+    let fresh = now_seconds() + 86_400;
+    load_message(&online, |message| {
+        message["attachments"] = json!([attachment_json(&online, fresh)]);
+    })
+    .await;
+    Mock::given(method("GET"))
+        .and(path(attachment_path()))
+        .respond_with(png(1920, 1080))
+        .mount(&online.server)
+        .await;
+    let ask = |width, height| ImageRequest {
+        key: attachment_key(),
+        width,
+        height,
+        animated: None,
+    };
+
+    let first = online.account.image(ask(1500, 844)).await.unwrap();
+    let larger = online.account.image(ask(1900, 1069)).await.unwrap();
+
+    assert_eq!((first.width, first.height), (1920, 1080));
+    assert!(larger.from_disk, "the source's own size answers every ask");
+}
+
+// A CDN that announces 300 000 bytes and sends 1 000, then closes, or holds the connection.
+async fn partial_cdn(close: bool) -> String {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request).await;
+                let mut answer =
+                    b"HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncontent-length: 300000\r\n\r\n"
+                        .to_vec();
+                answer.extend(vec![7_u8; 1000]);
+                let _ = stream.write_all(&answer).await;
+                let _ = stream.flush().await;
+                if !close {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                }
+            });
+        }
+    });
+    format!("http://{address}/")
+}
+
+// A folder with a file the user chose to replace.
+fn chosen_file(online: &Online) -> std::path::PathBuf {
+    let folder = online.dir.path().join("saves");
+    std::fs::create_dir_all(&folder).unwrap();
+    let destination = folder.join("photo.png");
+    std::fs::write(&destination, b"the old file").unwrap();
+    destination
+}
+
+fn files_in(folder: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[tokio::test]
+async fn a_failed_save_keeps_the_file_that_was_there() {
+    let cdn = partial_cdn(true).await;
+    let online = connected_with(Some(cdn.clone()), TempDir::new()).await;
+    let fresh = now_seconds() + 86_400;
+    load_message(&online, |message| {
+        message["attachments"] = json!([attachment_json_at(&cdn, fresh)]);
+    })
+    .await;
+    let destination = chosen_file(&online);
+
+    let saved = online
+        .account
+        .save_original(&attachment_key(), &destination)
+        .await;
+
+    assert_eq!(saved, Err(ImageError::Unavailable));
+    assert_eq!(std::fs::read(&destination).unwrap(), b"the old file");
+    assert_eq!(files_in(destination.parent().unwrap()), ["photo.png"]);
+}
+
+#[tokio::test]
+async fn a_cancelled_save_keeps_the_file_that_was_there() {
+    let cdn = partial_cdn(false).await;
+    let online = connected_with(Some(cdn.clone()), TempDir::new()).await;
+    let fresh = now_seconds() + 86_400;
+    load_message(&online, |message| {
+        message["attachments"] = json!([attachment_json_at(&cdn, fresh)]);
+    })
+    .await;
+    let destination = chosen_file(&online);
+    let account = Arc::new(online.account);
+    let folder = destination.parent().unwrap().to_path_buf();
+    let saving = {
+        let account = account.clone();
+        let destination = destination.clone();
+        tokio::spawn(async move { account.save_original(&attachment_key(), &destination).await })
+    };
+    // The save is writing once a second file is in the folder.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while files_in(&folder).len() < 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    saving.abort();
+    let _ = saving.await;
+
+    assert_eq!(std::fs::read(&destination).unwrap(), b"the old file");
+    assert_eq!(files_in(&folder), ["photo.png"]);
+}
+
+// Notes when each request arrived; images take two seconds, the attachment answers at once.
+#[derive(Clone, Default)]
+struct SlowImages(Arc<Mutex<Vec<(String, std::time::Instant)>>>);
+
+impl Respond for SlowImages {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let at = request.url.path().to_owned();
+        self.0
+            .lock()
+            .unwrap()
+            .push((at.clone(), std::time::Instant::now()));
+        if at == attachment_path() {
+            png(1920, 1080)
+        } else {
+            webp(80).set_delay(Duration::from_secs(2))
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_save_isnt_held_back_by_the_image_downloads() {
+    let online = connected().await;
+    let fresh = now_seconds() + 86_400;
+    load_message(&online, |message| {
+        message["attachments"] = json!([attachment_json(&online, fresh)]);
+    })
+    .await;
+    let arrivals = SlowImages::default();
+    Mock::given(method("GET"))
+        .respond_with(arrivals.clone())
+        .mount(&online.server)
+        .await;
+    let account = Arc::new(online.account);
+    let keys: Vec<ImageKey> = (0..8)
+        .map(|n| ImageKey::Avatar {
+            user: Snowflake::new(AUTHOR + n),
+            hash: ImageHash::parse(HASH),
+        })
+        .collect();
+    let images = {
+        let account = account.clone();
+        tokio::spawn(async move {
+            futures_util::future::join_all(
+                keys.into_iter().map(|key| account.image(request(key, 80))),
+            )
+            .await
+        })
+    };
+    while arrivals.0.lock().unwrap().len() < 8 {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let destination = online.dir.path().join("saved.png");
+
+    let saved = account.save_original(&attachment_key(), &destination).await;
+
+    assert!(saved.is_ok(), "{saved:?}");
+    let (first_image, save) = {
+        let arrivals = arrivals.0.lock().unwrap();
+        let first_image = arrivals.iter().map(|(_, at)| *at).min().unwrap();
+        let save = arrivals
+            .iter()
+            .find(|(at, _)| *at == attachment_path())
+            .map(|(_, when)| *when)
+            .unwrap();
+        (first_image, save)
+    };
+    // No image slot frees before the first image's two seconds are over.
+    assert!(
+        save < first_image + Duration::from_secs(2),
+        "the save waited {:?} for an image slot",
+        save - first_image
+    );
+    assert!(images.await.unwrap().iter().all(Result::is_ok));
 }

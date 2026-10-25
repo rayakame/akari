@@ -12,8 +12,9 @@ for, how signed attachment links are renewed, and what it keeps on disk. Sources
 An image is named by Discord's IDs (`ImageKey`): an avatar (user, hash), a member's guild
 avatar, a default avatar (0–5), a server, group DM or role icon, an emoji, a sticker, an
 attachment (channel, message, attachment), or an embed's image, thumbnail or icon (channel,
-message, the embed's place, the slot). The core builds the URL; signed links never leave it.
-A new avatar or icon has a new hash, so a new key.
+message, the embed's place, the slot). The core builds the URL; signed links never leave it,
+with one exception: `Account::original_url`, for the user's own Open in Browser and Copy Link
+(below). A new avatar or icon has a new hash, so a new key.
 
 ## Hosts
 
@@ -63,7 +64,9 @@ backing scale (2 on Retina), rounded up. The host passes those pixels (`ImageReq
 | embed author or footer icon | its `proxy_icon_url` as Discord gives it | |
 
 Stills are WebP. Animations are WebP, or GIF on a Mac whose ImageIO composites animated WebP
-wrong (macOS 14; the host picks per request with `AnimatedFormat`). The query order is
+wrong (macOS 14): the host picks per request with `AnimatedFormat`. PR B (`avatars`) adds the
+launch probe that decides, decoding a small animated WebP shipped as an app resource (the test
+fixture `animated.webp`, moved into the app) and checking a frame's pixels. The query order is
 Discord's: size, quality, animated. An attachment's kind comes from its file name's extension,
 as the client decides [127038]: images png, jpg, jpeg, jfif, webp, gif, heic, heif, dng, avif
 (SVGs are files); videos mp4, webm, mov, qt. An attachment without a width and height isn't an
@@ -71,7 +74,12 @@ image here.
 
 Originals (`Account::original_url`, `save_original`): an attachment's CDN `url`, renewed when
 due; an embed's own `url` (saved from the proxy's copy, since Akari fetches only from Discord);
-identity images as PNG, or GIF when animated, at `size=4096`.
+identity images as PNG, or GIF when animated, at `size=4096`. `original_url` is the one signed
+link that leaves the core: the user asked for it (Open in Browser, Copy Link), the host hands it
+to the browser or the clipboard at once, and neither side logs or keeps it. `save_original`
+streams into a file beside the destination and moves it into place once it's whole, so a failed
+or cancelled save leaves the chosen file as it was; saves have two slots of their own, apart from
+the images'.
 
 ## Downloads
 
@@ -126,17 +134,21 @@ The client treats a link as expired an hour before `ex`, or when it has none [67
   runs), so its newest files stay. Each process recounts the index's size every 64 files it
   keeps.
 - The smallest kept file with enough pixels, in the same form, answers; so does one of the
-  source's own size. A file gone when it's answered (the system purged it) is fetched again.
+  source's own size: for an attachment or embed, an answer as large as the size Discord gave
+  for it; for the CDN, whose sources are unknown, an answer smaller than asked (the CDN never
+  answers larger than the source). A file gone when it's answered (the system purged it) is
+  fetched again. A download the last asker left during the write is removed with it.
 - Past 256 MB the least recently used go, down to 90 %, never one used in the last minute.
 - An index that isn't one (not a database, corrupt, another schema) is dropped with the
   directory and starts empty. One that is busy, or being created by another process, is
   tried again and never deleted.
 - Logout and `forget_account` delete the account's directory, also while it's open (and when
-  this process never opened its index, or another process uses it): the open
-  account's later asks are `Unavailable`, nothing downloads, and a download that was on its way
-  leaves nothing behind;
-  `clear_caches` deletes those of accounts that aren't open; `Account::clear_images` empties
-  it.
+  this process never opened its index, or another process uses it): the open account's later
+  asks are `Unavailable`, nothing downloads, no new directory is made (the user is forgotten
+  in this process, also for a second account of theirs, until the host opens the account
+  again), and a download that was on its way leaves nothing behind; `clear_caches` deletes
+  those of accounts that aren't open (an open account's, also before its first ask, stays), and
+  no directory starts while one is being deleted; `Account::clear_images` empties it.
 
 ## Placeholders
 

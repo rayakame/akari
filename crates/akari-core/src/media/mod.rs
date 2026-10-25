@@ -7,6 +7,7 @@ mod dirs;
 mod disk;
 mod images;
 pub mod layout;
+mod part;
 mod placeholder;
 mod signed;
 pub(crate) mod sniff;

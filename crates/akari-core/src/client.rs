@@ -341,8 +341,16 @@ impl DiscordClient {
         self.inner.media.clone()
     }
 
-    pub(crate) fn image_tier(&self, user: UserId) -> Option<Arc<crate::media::DiskTier>> {
-        self.inner.images.tier(user)
+    pub(crate) async fn image_tier(&self, user: UserId) -> Option<Arc<crate::media::DiskTier>> {
+        self.inner.images.tier(user).await
+    }
+
+    pub(crate) fn open_images(&self, user: UserId) {
+        self.inner.images.open(user);
+    }
+
+    pub(crate) fn release_images(&self, user: UserId) {
+        self.inner.images.release(user);
     }
 
     pub(crate) fn tls(&self) -> Arc<rustls::ClientConfig> {

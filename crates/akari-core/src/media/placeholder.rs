@@ -1,3 +1,6 @@
+// Ported from ThumbHash (https://github.com/evanw/thumbhash), with Discord's parameters.
+// Copyright (c) 2023 Evan Wallace. MIT License; the text is in THIRD-PARTY-NOTICES.md.
+
 use std::f64::consts::PI;
 
 use base64::Engine as _;

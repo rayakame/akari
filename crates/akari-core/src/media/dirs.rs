@@ -1,6 +1,6 @@
 //! Where each account's images live, and which directories an open account is using.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
@@ -10,9 +10,20 @@ use crate::model::UserId;
 const LOG: &str = "akari_core::media";
 
 #[derive(Default)]
+struct Registry {
+    running: HashMap<UserId, Weak<DiskTier>>,
+    // Accounts open in this process, whether or not they asked for an image yet.
+    open: HashMap<UserId, usize>,
+    // Forgotten in this process: only the host opening the account again brings images back.
+    forgotten: HashSet<UserId>,
+}
+
+#[derive(Default)]
 pub(crate) struct ImageDirs {
     directory: OnceLock<PathBuf>,
-    running: Mutex<HashMap<UserId, Weak<DiskTier>>>,
+    registry: Mutex<Registry>,
+    // Held while a directory is deleted, so no tier starts in it meanwhile.
+    lifecycle: tokio::sync::Mutex<()>,
 }
 
 impl ImageDirs {
@@ -22,31 +33,63 @@ impl ImageDirs {
         }
     }
 
-    fn running(&self) -> std::sync::MutexGuard<'_, HashMap<UserId, Weak<DiskTier>>> {
-        self.running.lock().unwrap_or_else(PoisonError::into_inner)
+    fn registry(&self) -> std::sync::MutexGuard<'_, Registry> {
+        self.registry.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// `user`'s directory, shared with an account already using it; `None` without a directory.
-    pub(crate) fn tier(&self, user: UserId) -> Option<Arc<DiskTier>> {
+    /// An account of `user` opened: its images are kept, also before its first ask, and a
+    /// forget from before doesn't apply to it.
+    pub(crate) fn open(&self, user: UserId) {
+        let mut registry = self.registry();
+        registry.forgotten.remove(&user);
+        *registry.open.entry(user).or_default() += 1;
+    }
+
+    pub(crate) fn release(&self, user: UserId) {
+        let mut registry = self.registry();
+        if let Some(count) = registry.open.get_mut(&user) {
+            *count -= 1;
+            if *count == 0 {
+                registry.open.remove(&user);
+            }
+        }
+    }
+
+    /// `user`'s directory, shared with an account already using it; `None` without a directory,
+    /// or for a user forgotten since the account was opened.
+    pub(crate) async fn tier(&self, user: UserId) -> Option<Arc<DiskTier>> {
         let directory = self.directory.get()?;
-        let mut running = self.running();
-        if let Some(tier) = running.get(&user).and_then(Weak::upgrade) {
+        let _not_deleting = self.lifecycle.lock().await;
+        let mut registry = self.registry();
+        if registry.forgotten.contains(&user) {
+            return None;
+        }
+        if let Some(tier) = registry.running.get(&user).and_then(Weak::upgrade) {
             return Some(tier);
         }
         let tier = Arc::new(DiskTier::start(
             directory.join(user.get().to_string()),
             LIMIT,
         ));
-        running.insert(user, Arc::downgrade(&tier));
+        registry.running.insert(user, Arc::downgrade(&tier));
         Some(tier)
     }
 
-    /// Deletes `user`'s images, also while the account is open.
+    /// Deletes `user`'s images, also while the account is open; it gets none until the host
+    /// opens it again.
     pub(crate) async fn forget(&self, user: UserId) {
         let Some(directory) = self.directory.get() else {
             return;
         };
-        let open = self.running().remove(&user).and_then(|tier| tier.upgrade());
+        let _deleting = self.lifecycle.lock().await;
+        let open = {
+            let mut registry = self.registry();
+            registry.forgotten.insert(user);
+            registry
+                .running
+                .remove(&user)
+                .and_then(|tier| tier.upgrade())
+        };
         match open {
             Some(tier) => tier.delete().await,
             None => {
@@ -69,12 +112,22 @@ impl ImageDirs {
         let Some(directory) = self.directory.get().cloned() else {
             return;
         };
-        let open: BTreeSet<String> = self
-            .running()
-            .iter()
-            .filter(|(_, tier)| tier.strong_count() > 0)
-            .map(|(user, _)| user.get().to_string())
-            .collect();
+        let _deleting = self.lifecycle.lock().await;
+        let open: BTreeSet<String> = {
+            let registry = self.registry();
+            registry
+                .open
+                .keys()
+                .chain(
+                    registry
+                        .running
+                        .iter()
+                        .filter(|(_, tier)| tier.strong_count() > 0)
+                        .map(|(user, _)| user),
+                )
+                .map(|user| user.get().to_string())
+                .collect()
+        };
         let cleared = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
             for entry in std::fs::read_dir(&directory)? {
                 let entry = entry?;
