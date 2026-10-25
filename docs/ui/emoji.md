@@ -56,10 +56,13 @@ come from Discord's CDN at runtime like every image ([images.md](images.md),
 
 ## Hover card
 
-Over a custom emoji, a Unicode emoji or a sticker the pointer is the hand (the message list's
-cursor authority), and after 300 ms a card shows above it, its arrow 3 above the item; it goes
-at once when the pointer leaves the item, on a click and while the popout is open, and takes no
-clicks.
+Over a custom emoji, a Unicode emoji or a sticker in a message's text (not a channel's start, a
+notice, a file's line or the New Thread form's preview) the pointer is the hand (the message
+list's cursor authority), and after 300 ms a card shows above it, its arrow 3 above the item (the
+part of it the list shows); it goes at once when the pointer leaves the item, on a click and
+while the popout is open, and takes no clicks. *Akari: at the top of the screen it shows below
+the item, and pushed in from a screen edge its arrow still points at the item.* An animated
+emoji plays in it while the window is key.
 
 - Emoji (custom and Unicode): the emoji at 48, then `:name:` (14 medium, one line) over "Click
   to learn more" (14, muted), 8 apart; padding 8 × 12, at most 272 wide; `surfaceHigh`, radius
@@ -94,6 +97,8 @@ edge), 288 wide and as tall as its content; a press outside or Escape closes it.
   the invite-only line. (`GET /stickers/{id}`, `/stickers/{id}/guild`, `/sticker-packs/{id}`.)
 - **Unicode emoji**: the emoji at 48, `:name:` and "A default emoji. You can use this emoji
   everywhere on Discord." (`:pizza:` gets " (without pineapple)" in English).
+- "Show More" grows the popout around the item, inside the window. A sticker is a button for
+  VoiceOver ("Sticker, {name}"); an emoji in text opens its popout only with the pointer.
 - *Akari leaves out what it can't do yet: the "Join Server", "Get Nitro", "Subscribe", "Change
   Tier" and "View More Stickers" buttons, the "Join Server" link and the "Learn more" links;
   the server row of a server the user isn't in has no click (Discord opens a preview); an unsold
