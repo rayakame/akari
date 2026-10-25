@@ -48,6 +48,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     let scrollView = NSScrollView()
     // Strong: the bridge that implements it holds nothing that leads back here.
     var actions: MessageListActions?
+    /// The card over a hovered emoji or sticker, and a clicked one's popout.
+    let hoverCard = ExpressionHoverCard()
+    let expressionPopout = ExpressionPopoutPresenter()
     private let clipView = BottomClipView()
     private static var created = 0
     // Tells tables apart in the scroll log, so a replaced scroll view shows.
@@ -1037,6 +1040,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
+            cell.onExpression = { [weak self] target, rect in self?.openExpression(target, at: rect) }
             cell.onOpenThread = openThread
             cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
             cell.configure(
@@ -1419,6 +1423,39 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         box?.hovered = true
         hoveredBox = box
         target?.cursor.set()
+        hoverCard.images = state.images.cache
+        hoverCard.hover(
+            expressionPopout.windows.panel == nil ? location.flatMap { hoverItem(at: $0, over: target?.view) } : nil,
+            in: tableView.window)
+    }
+
+    // The emoji or sticker under the pointer, with its box in window coordinates.
+    private func hoverItem(at location: NSPoint, over view: NSView?) -> (target: ExpressionTarget, rect: NSRect)? {
+        if let text = view as? MessageTextView,
+            let hit = text.expression(at: text.convert(location, from: nil))
+        {
+            return (hit.target, text.convert(hit.rect, to: nil))
+        }
+        if let sticker = view as? StickerView, let shown = sticker.sticker {
+            return (.sticker(shown), sticker.convert(sticker.bounds, to: nil))
+        }
+        return nil
+    }
+
+    // A click on an emoji or a sticker: its popout, beside it.
+    private func openExpression(_ target: ExpressionTarget, at rect: NSRect) {
+        hoverCard.hide()
+        guard let window = tableView.window, let model = actions?.expressionPopout(target) else {
+            return
+        }
+        expressionPopout.openGuild = { [weak self] in self?.actions?.openGuild($0) }
+        expressionPopout.show(model, anchor: rect, in: window, images: state.images.cache)
+    }
+
+    /// The table leaves: its card and popout go with it.
+    func dismantle() {
+        hoverCard.hide()
+        expressionPopout.close()
     }
 
     /// The cursor the list shows at `location` (window coordinates): the I-beam over a message's

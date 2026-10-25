@@ -105,6 +105,23 @@ final class SessionModelTests {
         session.close()
     }
 
+    // A popout's "this server" is the server of the message's channel; a DM's has none.
+    @Test
+    func anExpressionPopoutKnowsTheChannelsServer() {
+        store.update { state in
+            state.connection = .online
+            state.currentUser = user(1)
+            state.add(guild(1))
+            state.list([channel(11)], in: 1)
+        }
+        let session = makeSession()
+        let wave = ExpressionTarget.customEmoji(id: id(5), name: "wave", animated: false)
+
+        #expect(session.expressionPopout(wave, in: id(11)).channelGuild == id(1))
+        #expect(session.expressionPopout(wave, in: id(99)).channelGuild == nil)
+        #expect(session.expressionPopout(wave, in: id(11)).target == wave)
+    }
+
     // The motion policy follows the display settings: read at the start, again when they change.
     @Test
     func theMotionPolicyFollowsTheDisplaySettings() {

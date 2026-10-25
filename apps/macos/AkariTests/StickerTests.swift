@@ -83,7 +83,7 @@ final class StickerTests {
         list.show(state(rows(["wave"], format: .apng), cache: cache))
         let sticker = try #require(stickerViews(try cell()).first)
 
-        try await eventually { sticker.image.imageLayer.contents != nil }
+        try await eventually { sticker.picture.imageLayer.contents != nil }
 
         let scale = list.window.backingScaleFactor
         let key = ImageKey.sticker(stickerId: StickerId(rawValue: 10), format: .apng)
@@ -92,10 +92,10 @@ final class StickerTests {
         let still = try #require(requests.first { $0.animated == nil })
         #expect(still.width == UInt32((160 * scale).rounded(.up)))
         #expect(requests.contains { $0.animated != nil }, "the setting plays it: the animated form too")
-        #expect(sticker.image.content?.canAnimate == true)
-        #expect(sticker.image.cornerRadius == 0)
-        #expect(sticker.image.images === cache)
-        #expect(sticker.image.fit == .contain, "the whole sticker, never cut")
+        #expect(sticker.picture.content?.canAnimate == true)
+        #expect(sticker.picture.cornerRadius == 0)
+        #expect(sticker.picture.images === cache)
+        #expect(sticker.picture.fit == .contain, "the whole sticker, never cut")
     }
 
     // A Lottie sticker has no image Akari shows: a box with a face and the sticker's name, no ask.
@@ -107,7 +107,7 @@ final class StickerTests {
         let sticker = try #require(stickerViews(try cell()).first)
         #expect(sticker.symbolName == "face.smiling")
         #expect(sticker.caption == "dance")
-        #expect(sticker.image.isHidden)
+        #expect(sticker.picture.isHidden)
         try await Task.sleep(for: .milliseconds(50))
         let asked = source.requests.withLock { $0.filter { if case .sticker = $0.key { true } else { false } } }
         #expect(asked.isEmpty)
@@ -118,7 +118,7 @@ final class StickerTests {
         list.show(state(rows(["wave"]), cache: ImageCache(source: FakeImageSource.failing())))
         let sticker = try #require(stickerViews(try cell()).first)
 
-        try await eventually { sticker.image.failed }
+        try await eventually { sticker.picture.failed }
 
         #expect(sticker.symbolName == "exclamationmark.triangle")
         #expect(sticker.caption == "Uh Oh!")
@@ -132,7 +132,7 @@ final class StickerTests {
         let rows = rows(["wave"], format: .apng)
         list.show(state(rows, cache: cache))
         #expect(try cell().animatesStickers)
-        #expect(try stickerViews(cell()).first?.image.animates == true)
+        #expect(try stickerViews(cell()).first?.picture.animates == true)
 
         list.show(state(rows, cache: cache, focused: false))
         #expect(try !cell().animatesStickers)
@@ -166,7 +166,7 @@ final class StickerTests {
         let cache = ImageCache(source: source)
         list.show(state(rows(["wave"], format: .apng), cache: cache))
         let sticker = try #require(stickerViews(try cell()).first)
-        try await eventually { sticker.image.player != nil }
+        try await eventually { sticker.picture.player != nil }
         let scale = list.window.backingScaleFactor
         let spec = ImageSpec(
             key: .sticker(stickerId: StickerId(rawValue: 10), format: .apng),
@@ -177,8 +177,8 @@ final class StickerTests {
 
         let cell = try cell()
         #expect(stickerViews(cell).isEmpty)
-        #expect(sticker.image.content == nil)
-        #expect(sticker.image.player == nil)
+        #expect(sticker.picture.content == nil)
+        #expect(sticker.picture.player == nil)
         #expect(!cache.isPinned(spec))
         #expect(!cell.animatesStickers)
     }
@@ -195,16 +195,24 @@ final class StickerTests {
             fullDate: "")
 
         #expect(cell.animatesStickers)
-        #expect(MessageMenuAreaTests.views(StickerView.self, in: cell).first?.image.animates == true)
+        #expect(MessageMenuAreaTests.views(StickerView.self, in: cell).first?.picture.animates == true)
     }
 
+    // A sticker takes a click (its popout) and shows the hand through the list's authority;
+    // a right-click still opens the message's menu.
     @Test
-    func theCursorStaysTheArrowOverASticker() throws {
+    func aStickerShowsTheHandAndKeepsTheRowsMenu() throws {
         list.show(state(rows(["wave"]), cache: ImageCache(source: FakeImageSource.stalling())))
         let sticker = try #require(stickerViews(try cell()).first)
         let over = sticker.convert(NSPoint(x: 80, y: 80), to: nil)
 
-        #expect(list.controller.cursor(at: over) == .arrow)
-        #expect(sticker.hitTest(sticker.convert(NSPoint(x: 80, y: 80), to: sticker.superview)) == nil)
+        #expect(list.controller.cursor(at: over) == .pointingHand)
+        #expect(sticker.superview?.hitTest(sticker.convert(NSPoint(x: 80, y: 80), to: sticker.superview?.superview)) === sticker)
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: over, modifierFlags: [], timestamp: 0,
+                windowNumber: list.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 1))
+        #expect(sticker.menu(for: event) != nil)
     }
 }

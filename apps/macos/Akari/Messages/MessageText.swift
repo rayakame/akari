@@ -44,6 +44,10 @@ enum MessageText {
         var side: CGFloat = 22
         /// Centered on its line (jumbo); else its bottom on the line's bottom.
         var centered = false
+
+        var id: EmojiId {
+            if case .emoji(let id, _) = key { id } else { EmojiId(rawValue: 0) }
+        }
     }
 
     /// A jumbo message's box side at the 16 pt base; inline boxes are 1.375 × their face's size.
@@ -726,6 +730,18 @@ private final class EmojiCell: NSTextAttachmentCell {
     ) {}
 
     nonisolated override func highlight(_ flag: Bool, withFrame cellFrame: NSRect, in controlView: NSView?) {}
+
+    // A drag from the emoji selects text, as from any character, instead of dragging the
+    // attachment out.
+    nonisolated override func wantsToTrackMouse() -> Bool {
+        false
+    }
+
+    nonisolated override func wantsToTrackMouse(
+        for theEvent: NSEvent, in cellFrame: NSRect, of controlView: NSView?, atCharacterIndex charIndex: Int
+    ) -> Bool {
+        false
+    }
 }
 
 extension NSColor {

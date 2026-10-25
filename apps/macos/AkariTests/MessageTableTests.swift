@@ -1227,6 +1227,28 @@ struct MessageTableTests {
         func createThread(from message: MessageId) {
             calls.append("create thread from \(message.rawValue)")
         }
+
+        var popouts: [ExpressionTarget] = []
+
+        func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? {
+            popouts.append(target)
+            return ExpressionPopoutModel(
+                target: target, channelGuild: nil, store: PopoutStore(), lookups: PopoutLookups())
+        }
+    }
+
+    // A store and lookups for a popout: the emoji is from server 50, which the user is in.
+    struct PopoutStore: ExpressionStore {
+        func emojiGuild(emojiId: EmojiId) -> GuildId? { GuildId(rawValue: 50) }
+        func guild(id: GuildId) -> Guild? { id.rawValue == 50 ? Guild(id: id, name: "Emoji Hub") : nil }
+        func nitro() -> Nitro { .none }
+    }
+
+    final class PopoutLookups: ExpressionLookups {
+        func emojiSource(emojiId: EmojiId) async throws -> EmojiSource { throw RequestError.UnexpectedResponse }
+        func sticker(stickerId: StickerId) async throws -> StickerDetails { throw RequestError.UnexpectedResponse }
+        func stickerGuild(stickerId: StickerId) async throws -> SourceGuild { throw RequestError.UnexpectedResponse }
+        func stickerPack(packId: StickerPackId) async throws -> StickerPack { throw RequestError.UnexpectedResponse }
     }
 
     // At the middle of message `raw`'s box.

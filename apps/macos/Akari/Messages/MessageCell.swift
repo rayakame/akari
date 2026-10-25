@@ -59,6 +59,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     var onRetry: () -> Void = {}
     var onDelete: () -> Void = {}
     var onLink: (URL) -> Void = { _ in }
+    /// A click on an emoji or a sticker, with its box in window coordinates.
+    var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
     private var message: Message?
     private var mentioned = false {
         didSet {
@@ -386,6 +388,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         let row = StickerRow()
         row.images = images
         row.animates = animatesStickers
+        row.onSticker = { [weak self] sticker, rect in self?.onExpression(.sticker(sticker), rect) }
         let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
         stack.insertView(row, at: after, in: .top)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
@@ -395,6 +398,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
 
     private func build() {
         content.onLink = { [weak self] url in self?.onLink(url) }
+        content.onExpression = { [weak self] target, rect in self?.onExpression(target, rect) }
         content.messageMenu = { [weak self] in
             guard let self, let message else {
                 return []

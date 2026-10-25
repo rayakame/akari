@@ -8,6 +8,8 @@ final class MessageTextView: NSTextView {
     private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
     private var linkElements: [LinkElement]?
     var onLink: (URL) -> Void = { _ in }
+    /// A click on a custom or Unicode emoji, with its box in window coordinates.
+    var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
     /// On a link Discord underlines while the pointer is over it.
     static let underlinesOnHover = NSAttributedString.Key("akari.underlinesOnHover")
     private var underlined: NSRange?
@@ -233,13 +235,22 @@ final class MessageTextView: NSTextView {
         return hides
     }
 
-    // A hidden code block reveals on a click anywhere on its cover, its padding included.
+    // A hidden code block reveals on a click anywhere on its cover, its padding included. A
+    // click on an emoji opens its popout once the tracking loop ends without a selection.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let spoiler = decorations.cover(at: point),
             let url = URL(string: "akari://spoiler/\(spoiler)")
         {
             onLink(url)
+            return
+        }
+        if event.clickCount == 1, let hit = expression(at: point) {
+            super.mouseDown(with: event)
+            let end = convert(NSApp.currentEvent?.locationInWindow ?? event.locationInWindow, from: nil)
+            if selectedRange().length == 0, hit.rect.contains(end) {
+                onExpression(hit.target, convert(hit.rect, to: nil))
+            }
             return
         }
         // NSTextView would start dragging the selection; a browser follows the link.
@@ -316,7 +327,59 @@ final class MessageTextView: NSTextView {
     /// text: the pointing hand over a link or a hidden block, the I-beam over text, the arrow
     /// around it.
     func cursor(at point: NSPoint) -> NSCursor {
-        cursorAreas.last { $0.rect.contains(point) }?.cursor ?? .arrow
+        if expression(at: point) != nil {
+            return .pointingHand
+        }
+        return cursorAreas.last { $0.rect.contains(point) }?.cursor ?? .arrow
+    }
+
+    /// A custom or Unicode emoji under `point` (this view's coordinates), with its box: one in
+    /// a link, inline code, a code block or a hidden spoiler is that, not an emoji.
+    func expression(at point: NSPoint) -> (target: ExpressionTarget, rect: NSRect)? {
+        guard let layoutManager, let textContainer, let storage = textStorage, storage.length > 0
+        else {
+            return nil
+        }
+        if let (box, rect) = emojiOverlay.box(at: point) {
+            guard let index = character(at: point) ?? emojiIndex(near: point),
+                storage.attribute(.link, at: index, effectiveRange: nil) == nil
+            else {
+                return nil
+            }
+            return (.customEmoji(id: box.id, name: box.name, animated: box.animated), rect)
+        }
+        guard let index = character(at: point) else {
+            return nil
+        }
+        let attributes = storage.attributes(at: index, effectiveRange: nil)
+        let code = (attributes[.akariBlock] as? MessageText.Block)?.contains(.code) == true
+            || attributes[.akariPill] as? MessageText.Pill == .code
+        guard attributes[.link] == nil, !code, attributes[.akariEmoji] == nil else {
+            return nil
+        }
+        let range = (storage.string as NSString).rangeOfComposedCharacterSequence(at: index)
+        let glyph = (storage.string as NSString).substring(with: range)
+        // ASCII is never an emoji; the name lookup crosses into Rust.
+        guard glyph.unicodeScalars.first.map({ $0.value >= 0xA9 }) == true,
+            let name = emojiShortcode(emoji: glyph)
+        else {
+            return nil
+        }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+            .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+        return (.unicodeEmoji(glyph, name: name), rect)
+    }
+
+    // The attachment character a custom emoji's box stands on, for a point in the box above the
+    // attachment's own (shorter) glyph.
+    private func emojiIndex(near point: NSPoint) -> Int? {
+        guard let layoutManager, let textContainer else {
+            return nil
+        }
+        let inside = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        return layoutManager.characterIndexForGlyph(
+            at: layoutManager.glyphIndex(for: inside, in: textContainer))
     }
 
     // Each line's text runs, links apart, and the hidden blocks' covers, in this view's
@@ -503,6 +566,19 @@ final class EmojiOverlay: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
+    }
+
+    /// The emoji whose box holds `point` (the text view's coordinates).
+    func box(at point: NSPoint) -> (MessageText.EmojiBox, NSRect)? {
+        for shape in shapes {
+            if case .emoji(let rect, let box) = shape {
+                let placed = rect.offsetBy(dx: origin.x, dy: origin.y)
+                if placed.contains(point) {
+                    return (box, placed)
+                }
+            }
+        }
+        return nil
     }
 
     func show(_ all: [MessageBlockShape], at origin: NSPoint) {

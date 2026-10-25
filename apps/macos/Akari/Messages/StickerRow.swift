@@ -1,8 +1,8 @@
 import AkariKit
 import AppKit
 
-/// A message's stickers under its text (D140): 160 × 160 boxes in a row, 8 apart. Nothing in it
-/// takes clicks yet; the pointer and the menu belong to the row.
+/// A message's stickers under its text (D140): 160 × 160 boxes in a row, 8 apart. A sticker
+/// takes a click (its popout); the list decides the cursor, the row the menu.
 final class StickerRow: NSView {
     static let height = StickerView.side
     static let gap: CGFloat = 8
@@ -14,6 +14,8 @@ final class StickerRow: NSView {
             }
         }
     }
+    /// A click on a sticker, with its box in window coordinates.
+    var onSticker: (Sticker, NSRect) -> Void = { _, _ in }
     /// The list's say: the message's stickers play.
     var animates = false {
         didSet {
@@ -39,7 +41,8 @@ final class StickerRow: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
+        let local = convert(point, from: superview)
+        return stickers.first { !$0.isHidden && $0.frame.contains(local) }
     }
 
     func configure(_ shown: [Sticker]) {
@@ -51,6 +54,12 @@ final class StickerRow: NSView {
                 view = StickerView()
                 view.images = images
                 view.animates = animates
+                view.onClick = { [weak self, weak view] sticker in
+                    guard let self, let view else {
+                        return
+                    }
+                    self.onSticker(sticker, view.convert(view.bounds, to: nil))
+                }
                 stickers.append(view)
                 addSubview(view)
             }
@@ -76,22 +85,25 @@ final class StickerRow: NSView {
 
 /// One sticker: its image from the cache in the sticker's format, animated while the row says
 /// so; a Lottie sticker (no renderer yet) a box with a face and the sticker's name; a failed one
-/// a warning and "Uh Oh!", as Discord words it.
-final class StickerView: NSView {
+/// a warning and "Uh Oh!", as Discord words it. A button: a click opens its popout.
+final class StickerView: NSButton {
     static let side = CGFloat(stickerSize().width)
+    /// Akari's sticker symbol: the Lottie box's, the hover card's.
+    static let symbol = "face.smiling"
     private static let symbolSize: CGFloat = 40
-    let image = ImageLayerView()
+    let picture = ImageLayerView()
     private let symbol = NSImageView()
     private let label = CellText.label()
     private(set) var symbolName: String?
-    private var sticker: Sticker?
+    private(set) var sticker: Sticker?
+    var onClick: (Sticker) -> Void = { _ in }
     var images: ImageCache? {
-        get { image.images }
-        set { image.images = newValue }
+        get { picture.images }
+        set { picture.images = newValue }
     }
     var animates: Bool {
-        get { image.animates }
-        set { image.animates = newValue }
+        get { picture.animates }
+        set { picture.animates = newValue }
     }
 
     /// The box's text: the Lottie sticker's name, or "Uh Oh!"; `nil` while the image shows.
@@ -101,10 +113,15 @@ final class StickerView: NSView {
 
     init() {
         super.init(frame: .zero)
+        isBordered = false
+        title = ""
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(clicked)
         wantsLayer = true
         layer?.cornerRadius = 8
-        image.placeholder = .none
-        image.fit = .contain
+        picture.placeholder = .none
+        picture.fit = .contain
         label.font = TypeScale.detail.nsFont
         label.textColor = Palette.textMuted
         label.alignment = .center
@@ -112,10 +129,10 @@ final class StickerView: NSView {
         label.translatesAutoresizingMaskIntoConstraints = true
         symbol.imageScaling = .scaleNone
         symbol.contentTintColor = Palette.textMuted
-        for view in [image, symbol, label] as [NSView] {
+        for view in [picture, symbol, label] as [NSView] {
             addSubview(view)
         }
-        image.onStateChange = { [weak self] _ in self?.updateBox() }
+        picture.onStateChange = { [weak self] _ in self?.updateBox() }
         updateBox()
     }
 
@@ -125,24 +142,35 @@ final class StickerView: NSView {
 
     override var isFlipped: Bool { true }
 
+    // The image, the symbol and the caption take no clicks of their own.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
+        frame.contains(point) ? self : nil
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        rowMessageMenu(for: event)
+    }
+
+    @objc private func clicked() {
+        if let sticker {
+            onClick(sticker)
+        }
     }
 
     func configure(_ sticker: Sticker?) {
         self.sticker = sticker
         guard let sticker, sticker.format != .lottie else {
-            image.show(nil)
+            picture.show(nil)
             updateBox()
             return
         }
-        image.show(ImageLayerView.Content(key: sticker.key))
+        picture.show(ImageLayerView.Content(key: sticker.key))
         updateBox()
     }
 
     override func layout() {
         super.layout()
-        image.frame = bounds
+        picture.frame = bounds
         symbol.frame = NSRect(
             x: 0, y: (bounds.height - Self.symbolSize) / 2 - 14, width: bounds.width,
             height: Self.symbolSize)
@@ -157,14 +185,14 @@ final class StickerView: NSView {
     private func updateBox() {
         let box: (symbol: String, text: String)? =
             if let sticker, sticker.format == .lottie {
-                ("face.smiling", sticker.name)
-            } else if image.failed {
+                (Self.symbol, sticker.name)
+            } else if picture.failed {
                 ("exclamationmark.triangle", "Uh Oh!")
             } else {
                 nil
             }
         symbolName = box?.symbol
-        image.isHidden = box != nil || sticker == nil
+        picture.isHidden = box != nil || sticker == nil
         symbol.isHidden = box == nil
         label.isHidden = box == nil
         guard let box else {
