@@ -1,0 +1,41 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":semanticCommitsDisabled",
+    ":configMigration"
+  ],
+  "timezone": "Europe/Berlin",
+  "lockFileMaintenance": {
+    "enabled": true
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The workspace's rust-version, which Renovate's cargo manager leaves alone.",
+      "managerFilePatterns": ["/^Cargo\\.toml$/"],
+      "matchStrings": ["\\nrust-version = \"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "rust",
+      "datasourceTemplate": "rust-version"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "One PR for all action updates. Digests stay pinned, the version comment follows.",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "The toolchain and rust-version move together.",
+      "matchFileNames": ["rust-toolchain.toml", "Cargo.toml"],
+      "matchDepNames": ["rust"],
+      "groupName": "Rust"
+    },
+    {
+      "description": "A nightly comes out every day; the fuzz crate takes a new one once a month.",
+      "matchFileNames": ["crates/akari-markdown/fuzz/rust-toolchain.toml"],
+      "schedule": ["* 0-3 1 * *"]
+    }
+  ]
+}
