@@ -18,7 +18,7 @@ func berlinTime(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
 func author(_ raw: UInt64, _ name: String = "Mira", bot: Bool = false) -> User {
     User(
         id: UserId(rawValue: raw), username: name.lowercased(), globalName: name,
-        displayName: name, bot: bot, system: false)
+        displayName: name, bot: bot, system: false, avatar: .defaultAvatar(index: UInt8(raw % 6)))
 }
 
 func row(

@@ -192,6 +192,70 @@ impl From<ImageKey> for media::ImageKey {
     }
 }
 
+impl From<media::ImageKey> for ImageKey {
+    fn from(key: media::ImageKey) -> Self {
+        match key {
+            media::ImageKey::Avatar { user, hash } => Self::Avatar {
+                user_id: user,
+                hash: hash.to_string(),
+            },
+            media::ImageKey::MemberAvatar { guild, user, hash } => Self::MemberAvatar {
+                guild_id: guild,
+                user_id: user,
+                hash: hash.to_string(),
+            },
+            media::ImageKey::DefaultAvatar { index } => Self::DefaultAvatar { index },
+            media::ImageKey::GuildIcon { guild, hash } => Self::GuildIcon {
+                guild_id: guild,
+                hash: hash.to_string(),
+            },
+            media::ImageKey::GroupIcon { channel, hash } => Self::GroupIcon {
+                channel_id: channel,
+                hash: hash.to_string(),
+            },
+            media::ImageKey::RoleIcon { role, hash } => Self::RoleIcon {
+                role_id: role,
+                hash: hash.to_string(),
+            },
+            media::ImageKey::Emoji { id, animated } => Self::Emoji {
+                emoji_id: id,
+                animated,
+            },
+            media::ImageKey::Sticker { id, format } => Self::Sticker {
+                sticker_id: id,
+                format,
+            },
+            media::ImageKey::Attachment {
+                channel,
+                message,
+                id,
+            } => Self::Attachment {
+                channel_id: channel,
+                message_id: message,
+                attachment_id: id,
+            },
+            media::ImageKey::EmbedMedia {
+                channel,
+                message,
+                embed,
+                slot,
+            } => Self::EmbedMedia {
+                channel_id: channel,
+                message_id: message,
+                embed,
+                slot: match slot {
+                    media::EmbedSlot::Thumbnail => EmbedSlot::Thumbnail,
+                    media::EmbedSlot::AuthorIcon => EmbedSlot::AuthorIcon,
+                    media::EmbedSlot::FooterIcon => EmbedSlot::FooterIcon,
+                    _ => EmbedSlot::Image,
+                },
+            },
+            // A kind this build's bindings don't name yet: no image.
+            _ => Self::DefaultAvatar { index: 0 },
+        }
+    }
+}
+
 impl From<ImageRequest> for media::ImageRequest {
     fn from(request: ImageRequest) -> Self {
         Self {

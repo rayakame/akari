@@ -11,12 +11,12 @@ use crate::model::{
     Permissions, PremiumType, Snowflake, StickerFormatType, Timestamp, UserId,
 };
 use crate::state::{
-    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, DisplaySettings, Embed,
-    EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, ExplicitContentFilter,
-    ExplicitContentSettings, FolderEntry, Guild, GuildSettings, ImageHash, Member, Message,
-    MessageReference, NotificationLevel, PermissionOverwrite, ReadState, Redaction,
-    ReferencedMessage, Role, RoleSubscription, SpoilerSetting, Sticker, StickerAnimation,
-    SystemData, ThreadInfo, ThreadMembership, Unreads, User,
+    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
+    DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
+    ExplicitContentFilter, ExplicitContentSettings, FolderEntry, Guild, GuildSettings, ImageHash,
+    Member, Message, MessageReference, NotificationLevel, PermissionOverwrite, ReadState,
+    Redaction, ReferencedMessage, Role, RoleSubscription, SpoilerSetting, Sticker,
+    StickerAnimation, SystemData, ThreadInfo, ThreadMembership, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -54,7 +54,11 @@ pub(super) struct UserRow {
     username: Box<str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     global_name: Option<Box<str>>,
+    /// A legacy tag; 0 otherwise.
     discriminator: u16,
+    /// "0000" rather than "0": rows from before this field read as "0".
+    #[serde(skip_serializing_if = "is_false")]
+    zeros: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     avatar: Option<Box<str>>,
     #[serde(skip_serializing_if = "is_false")]
@@ -70,7 +74,11 @@ impl From<&User> for UserRow {
             id: user.id.get(),
             username: user.username.clone(),
             global_name: user.global_name.clone(),
-            discriminator: user.discriminator,
+            discriminator: match user.discriminator {
+                Discriminator::Tag(tag) => tag,
+                _ => 0,
+            },
+            zeros: user.discriminator == Discriminator::Zeros,
             avatar: hash(user.avatar.as_ref()),
             bot: user.bot,
             system: user.system,
@@ -85,7 +93,11 @@ impl From<UserRow> for User {
             id: Snowflake::new(row.id),
             username: row.username,
             global_name: row.global_name,
-            discriminator: row.discriminator,
+            discriminator: match (row.zeros, row.discriminator) {
+                (true, _) => Discriminator::Zeros,
+                (false, 0) => Discriminator::Migrated,
+                (false, tag) => Discriminator::Tag(tag),
+            },
             avatar: image(row.avatar),
             bot: row.bot,
             system: row.system,
@@ -1178,6 +1190,45 @@ impl ReadStateRow {
             acked: snowflake(self.acked),
             mentions: self.mentions,
             estimated: self.estimated,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_user_row_from_before_zeros_reads_as_migrated() {
+        let row: UserRow = serde_json::from_str(
+            r#"{"id":7,"username":"hook","discriminator":0,"bot":true,"public_flags":0}"#,
+        )
+        .unwrap();
+
+        assert_eq!(User::from(row).discriminator, Discriminator::Migrated);
+    }
+
+    #[test]
+    fn discriminators_round_trip() {
+        for discriminator in [
+            Discriminator::Migrated,
+            Discriminator::Zeros,
+            Discriminator::Tag(1337),
+        ] {
+            let user = User {
+                id: Snowflake::new(7),
+                username: "hook".into(),
+                global_name: None,
+                discriminator,
+                avatar: None,
+                bot: true,
+                system: false,
+                public_flags: 0,
+            };
+            let json = serde_json::to_string(&UserRow::from(&user)).unwrap();
+            let read: UserRow = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(User::from(read).discriminator, discriminator, "{json}");
         }
     }
 }

@@ -8,6 +8,7 @@ use akari_core::state;
 
 use crate::errors::GatewayError;
 use crate::formatted::FormattedText;
+use crate::images::ImageKey;
 
 /// A user, as the current user, a DM recipient or a message author.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -19,6 +20,9 @@ pub struct User {
     pub display_name: String,
     pub bot: bool,
     pub system: bool,
+    /// The avatar to show: the user's own, or one of Discord's default avatars (every view
+    /// asks for it the same way).
+    pub avatar: ImageKey,
 }
 
 impl From<&state::User> for User {
@@ -30,6 +34,7 @@ impl From<&state::User> for User {
             display_name: user.display_name().to_owned(),
             bot: user.bot,
             system: user.system,
+            avatar: user.avatar_key().into(),
         }
     }
 }
@@ -38,6 +43,9 @@ impl From<&state::User> for User {
 pub struct Guild {
     pub id: GuildId,
     pub name: String,
+    /// `None` without an icon: the host shows the name's initials.
+    #[uniffi(default = None)]
+    pub icon: Option<ImageKey>,
 }
 
 impl From<&state::Guild> for Guild {
@@ -45,6 +53,7 @@ impl From<&state::Guild> for Guild {
         Self {
             id: guild.id,
             name: guild.name.to_string(),
+            icon: guild.icon_key().map(Into::into),
         }
     }
 }
@@ -294,6 +303,9 @@ pub struct Channel {
     pub rate_limit_per_user: u32,
     /// DM and group DM recipients without the current user; see `Store::user`.
     pub recipient_ids: Vec<UserId>,
+    /// A group DM's icon; `None` without one.
+    #[uniffi(default = None)]
+    pub icon: Option<ImageKey>,
     /// Set for threads.
     pub thread: Option<ThreadInfo>,
 }
@@ -382,6 +394,7 @@ impl From<&state::Channel> for Channel {
             nsfw: channel.nsfw,
             rate_limit_per_user: channel.rate_limit_per_user,
             recipient_ids: channel.recipients.to_vec(),
+            icon: channel.icon_key().map(Into::into),
             thread: channel.thread.as_deref().map(|info| ThreadInfo {
                 joined: info.joined(),
                 archived: info.archived,

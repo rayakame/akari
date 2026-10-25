@@ -186,7 +186,7 @@ struct MoreActiveThreadsPopoutTests {
             id: ChannelId(rawValue: raw), name: name, ownerId: UserId(rawValue: 2),
             owner: User(
                 id: UserId(rawValue: 2), username: "ray", globalName: nil, displayName: "Ray",
-                bot: false, system: false),
+                bot: false, system: false, avatar: .defaultAvatar(index: 2)),
             time: now - 3600)
     }
 

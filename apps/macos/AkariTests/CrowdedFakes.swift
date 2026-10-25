@@ -60,7 +60,8 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
     private func person(_ raw: UInt64) -> User {
         User(
             id: UserId(rawValue: raw), username: "user\(raw)", globalName: nil,
-            displayName: "User \(raw)", bot: false, system: false)
+            displayName: "User \(raw)", bot: false, system: false,
+            avatar: .defaultAvatar(index: UInt8(raw % 6)))
     }
 
     override func subscribe() -> StoreSubscription {

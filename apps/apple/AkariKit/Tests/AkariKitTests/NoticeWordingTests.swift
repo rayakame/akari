@@ -230,7 +230,7 @@ struct NoticeWordingTests {
     func aBotsJoinNamesWhoAddedIt() {
         let bot = User(
             id: id(9), username: "akaribot", globalName: nil, displayName: "Akari Bot", bot: true,
-            system: false)
+            system: false, avatar: .defaultAvatar(index: 0))
 
         #expect(message(.userJoin, by: bot, actor: mira).noticeParts(in: context()) == [
             .actor("Mira"), .text(" has added "), .strong("Akari Bot"), .text(" to the server."),

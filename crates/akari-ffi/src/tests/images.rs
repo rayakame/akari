@@ -105,6 +105,42 @@ async fn arrived(online: &Online) {
     .unwrap();
 }
 
+// The fixture: the current user has no avatar, recipient 2 has one, the guild an icon, the
+// group DM none.
+#[tokio::test]
+async fn records_carry_their_image_keys() {
+    let gateway = FakeGateway::start().await;
+    let account = gateway.client().account(token("t"), USER).unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let _ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    let store = account.store();
+
+    assert_eq!(
+        store.current_user().unwrap().avatar,
+        ImageKey::DefaultAvatar { index: 0 }
+    );
+    let ren = store.user(akari_core::model::UserId::new(100_000_000_000_000_002));
+    assert_eq!(
+        ren.unwrap().avatar,
+        ImageKey::Avatar {
+            user_id: akari_core::model::UserId::new(100_000_000_000_000_002),
+            hash: "0123456789abcdef0123456789abcdef".to_owned(),
+        }
+    );
+    assert_eq!(
+        store.guild(super::fake::GUILD).unwrap().icon,
+        Some(ImageKey::GuildIcon {
+            guild_id: super::fake::GUILD,
+            hash: "00000000000000000000000000000001".to_owned(),
+        })
+    );
+    let group = store.channel(akari_core::model::ChannelId::new(300_000_000_000_000_011));
+    assert_eq!(group.unwrap().icon, None);
+    account.close();
+}
+
 #[tokio::test]
 async fn a_pending_image_answers_with_its_file() {
     let online = connected(false).await;

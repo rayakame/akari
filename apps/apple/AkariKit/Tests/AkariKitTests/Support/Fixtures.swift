@@ -8,7 +8,7 @@ func id<Marker>(_ raw: UInt64) -> Snowflake<Marker> {
 func user(_ raw: UInt64, name: String = "someone") -> User {
     User(
         id: id(raw), username: name, globalName: nil, displayName: name, bot: false,
-        system: false
+        system: false, avatar: .defaultAvatar(index: UInt8(raw % 6))
     )
 }
 

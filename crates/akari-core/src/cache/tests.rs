@@ -13,12 +13,12 @@ use crate::model::{
 };
 use crate::state::apply::Entities;
 use crate::state::{
-    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, DisplaySettings, Embed,
-    EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, ExplicitContentSettings,
-    FolderEntry, Guild, GuildSettings, ImageHash, Member, Message, MessageReference,
-    NotificationLevel, PermissionOverwrite, Redaction, ReferencedMessage, Role, RoleSubscription,
-    SpoilerSetting, Sticker, StickerAnimation, SystemData, ThreadInfo, ThreadMembership, Unreads,
-    User, UserSettings,
+    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
+    DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
+    ExplicitContentSettings, FolderEntry, Guild, GuildSettings, ImageHash, Member, Message,
+    MessageReference, NotificationLevel, PermissionOverwrite, Redaction, ReferencedMessage, Role,
+    RoleSubscription, SpoilerSetting, Sticker, StickerAnimation, SystemData, ThreadInfo,
+    ThreadMembership, Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -69,7 +69,7 @@ pub(crate) fn user(id: u64, name: &str) -> User {
         id: Snowflake::new(id),
         username: name.to_lowercase().into(),
         global_name: Some(name.into()),
-        discriminator: 0,
+        discriminator: Discriminator::Migrated,
         avatar: Some(ImageHash::parse("a_0123456789abcdef0123456789abcdef")),
         bot: false,
         system: false,

@@ -199,7 +199,8 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private func user(_ id: UserId) -> User {
         let name = id == FakeBrowserStore.me ? "rayakame" : "Ray"
         return User(
-            id: id, username: name, globalName: nil, displayName: name, bot: false, system: false)
+            id: id, username: name, globalName: nil, displayName: name, bot: false, system: false,
+            avatar: .defaultAvatar(index: UInt8(id.rawValue % 6)))
     }
 
     override func connection() -> ConnectionState { .online }
