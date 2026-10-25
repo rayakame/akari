@@ -2,8 +2,10 @@
 //! for, downloads without the token, signed links, and the files kept on disk per account.
 //! Decoding and drawing are the host's.
 
+mod disk;
 pub mod layout;
 mod placeholder;
+mod sniff;
 pub(crate) mod url;
 
 use std::path::PathBuf;
