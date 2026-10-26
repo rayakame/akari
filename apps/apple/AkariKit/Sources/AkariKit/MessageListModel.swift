@@ -16,8 +16,9 @@ public struct SpoilerKey: Hashable, Sendable {
 public struct MediaKey: Hashable, Sendable {
     public enum Item: Hashable, Sendable {
         case attachment(AttachmentId)
-        /// By its place among the message's embeds.
-        case embed(UInt8)
+        /// By its place among the message's embeds and its link, so an edit that brings another
+        /// embed to that place doesn't inherit a reveal.
+        case embed(UInt8, url: String?)
     }
 
     public let messageId: MessageId
@@ -28,9 +29,9 @@ public struct MediaKey: Hashable, Sendable {
         item = .attachment(attachmentId)
     }
 
-    public init(messageId: MessageId, embed: UInt8) {
+    public init(messageId: MessageId, embed: UInt8, url: String?) {
         self.messageId = messageId
-        item = .embed(embed)
+        item = .embed(embed, url: url)
     }
 }
 

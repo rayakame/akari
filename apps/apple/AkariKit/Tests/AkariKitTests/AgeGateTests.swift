@@ -202,10 +202,11 @@ final class MediaStateTests {
         #expect(list.shownSensitive.isEmpty)
 
         // An embed keys by its place, apart from the attachments.
-        let embed = MediaKey(messageId: id(1), embed: 0)
+        let embed = MediaKey(messageId: id(1), embed: 0, url: "https://example.com/a")
         list.reveal(media: embed)
         #expect(list.revealedMedia == [key, embed])
-        #expect(embed != MediaKey(messageId: id(1), embed: 1))
+        #expect(embed != MediaKey(messageId: id(1), embed: 1, url: "https://example.com/a"))
+        #expect(embed != MediaKey(messageId: id(1), embed: 0, url: "https://example.com/b"))
     }
 
     @Test
