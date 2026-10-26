@@ -130,6 +130,26 @@ Run `build-ffi.sh` again after akari-ffi changes, and `xcodegen generate` after
 `project.yml` changes or files are added. The Xcode project is generated, so it isn't
 committed: `project.yml` is its source.
 
+## The icon and the logo
+
+`assets/app-icon.svg` is the source of the app's icon and of the logo inside the app.
+`make-icons.swift` derives both, and its outputs are committed:
+
+- `Akari/AppIcon.icon`, an Icon Composer document: the master's color as the fill and its logo,
+  where the master places it, as the one layer. Xcode renders every size macOS needs from it:
+  the Liquid Glass icon on macOS 26 and later, and for macOS 14 and 15 a flattened one in the
+  classic grid (an 824-point rounded square in the 1024 canvas, with its shadow).
+- `Akari/Assets.xcassets/AkariLogo`, the logo alone in the master's square, as a vector template
+  image: the rail's home button and the title bar's home tile draw it in their foreground color.
+
+```sh
+swift apps/macos/make-icons.swift   # needs only Xcode's Swift
+```
+
+Run it after changing the master; CI checks that the committed files match. There is no
+`AppIcon.appiconset` of PNGs: since Xcode 26.1 the older systems' icon comes from the `.icon`
+file, and a PNG set of the same name is left out of the build.
+
 ## Signing and the Keychain
 
 Akari keeps the login token in the login keychain. The keychain lets an app read an item

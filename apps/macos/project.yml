@@ -31,6 +31,9 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Akari
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.social-networking
+        # AppIcon.icon, from make-icons.swift: Xcode renders every size from it, and macOS 14
+        # and 15 get its flattened form.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Akari/Akari.entitlements
       configs:
         # Debug runs and the test host get their own container: settings, cache and tokens.

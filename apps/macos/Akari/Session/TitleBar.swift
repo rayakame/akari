@@ -73,10 +73,7 @@ struct TitleBar: View {
         case .server(let name, let key):
             ServerIcon(name: name, icon: key)
         case .home:
-            tile {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 18 * Self.iconSize / 40))
-            }
+            tile { AkariLogo() }
         }
     }
 

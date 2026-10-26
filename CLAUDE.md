@@ -73,9 +73,11 @@ timeline, the reading signal (what tells the core which channel the user reads),
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
 `AnimationClock`: Akari's own playback; `AnimatedFormatProbe`: WebP or GIF per Mac, decided at
-launch from an animated WebP shipped as a resource). `apps/macos` is the first app: the login screen and the main window with the server
-rail (the user's order, with folders, unread pills and mention badges, and unread DMs under
-Home), the channel and DM lists (muted channels dimmed, unread rows bright with the pill, channel
+launch from an animated WebP shipped as a resource). `apps/macos` is the first app: Akari's icon and logo, derived from `assets/` by
+`make-icons.swift` (an Icon Composer `.icon` and a vector template image), the login screen
+(the logo in the QR code's middle) and the main window with the server
+rail (the logo on Home, the user's order, with folders, unread pills and mention badges, and
+unread DMs under Home), the channel and DM lists (muted channels dimmed, unread rows bright with the pill, channel
 rows with their counts, joined threads under their parent), a
 message list that loads history in both directions, with the "new messages" line and the unread
 bar, the composer, and marking read with Escape, Shift+Escape and the context menus; avatars and
