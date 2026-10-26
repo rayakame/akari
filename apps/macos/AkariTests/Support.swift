@@ -1,3 +1,4 @@
+import AkariFFI
 import AkariKit
 import AppKit
 import SwiftUI
@@ -28,20 +29,49 @@ func sticker(_ raw: UInt64, _ name: String, format: StickerFormatType = .png) ->
         key: .sticker(stickerId: StickerId(rawValue: raw), format: format))
 }
 
+/// An attachment shown as a file row, as the core gives one without a size.
+func file(_ id: UInt64, _ name: String, size: UInt64 = 2_000_000, message: UInt64 = 1) -> AkariFFI.Attachment {
+    Attachment(
+        id: AttachmentId(rawValue: id), filename: name, title: nil, description: nil,
+        contentType: nil, size: size, kind: .file, width: 0, height: 0, placeholder: nil,
+        spoiler: false, animated: false,
+        key: .attachment(
+            channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: message),
+            attachmentId: AttachmentId(rawValue: id)),
+        display: .file, cover: nil)
+}
+
+/// An image or video in the mosaic.
+func media(
+    _ id: UInt64, _ name: String = "photo.png", width: UInt32 = 640, height: UInt32 = 480,
+    kind: AttachmentKind = .image, animated: Bool = false, cover: MediaCover? = nil,
+    description: String? = nil, placeholder: String? = nil, message: UInt64 = 1
+) -> AkariFFI.Attachment {
+    Attachment(
+        id: AttachmentId(rawValue: id), filename: name, title: nil, description: description,
+        contentType: nil, size: 100_000, kind: kind, width: width, height: height,
+        placeholder: placeholder, spoiler: cover == .spoiler, animated: animated,
+        key: .attachment(
+            channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: message),
+            attachmentId: AttachmentId(rawValue: id)),
+        display: .media, cover: cover)
+}
+
 func row(
     _ raw: UInt64, by user: User = author(1), at time: Date, kind: MessageType = .default,
     content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false,
-    attachments: [String] = [], embedCount: UInt32 = 0, stickers: [String] = [],
+    attachments: [String] = [], files: [AkariFFI.Attachment]? = nil, embedCount: UInt32 = 0,
+    stickers: [String] = [],
     stickerFormat: StickerFormatType = .png, delivery: Delivery = .sent, edited: Date? = nil, reference: MessageReference? = nil,
     hasThread: Bool = false, fields: [EmbedField] = [],
     context: Message.NoticeContext = .init(), authorName: String? = nil,
     threadBox: ThreadBox? = nil
 ) -> MessageListModel.Row {
-    let files = attachments.enumerated().map { index, name in
-        Attachment(
-            id: AttachmentId(rawValue: raw * 100 + UInt64(index)), filename: name,
-            contentType: nil, size: 2_000_000)
-    }
+    let files =
+        files
+        ?? attachments.enumerated().map { index, name in
+            file(raw * 100 + UInt64(index), name, message: raw)
+        }
     let content = content ?? "message \(raw)"
     let message = Message(
         id: MessageId(rawValue: raw), channelId: ChannelId(rawValue: 10), kind: kind,

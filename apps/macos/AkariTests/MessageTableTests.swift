@@ -753,8 +753,9 @@ struct MessageTableTests {
         #expect(font("Mira".count) == TypeScale.body.nsFont)
     }
 
+    // A message's files are file rows, whose name is a link (AttachmentTests).
     @Test
-    func clickingTheStartAndAMessagesFilesKeepsThemAsDrawn() throws {
+    func clickingTheStartKeepsItAsDrawn() throws {
         let general = ChannelName(kind: .guildChannel(.guildText), name: "general")
         show(
             MessageTableState(
@@ -765,10 +766,8 @@ struct MessageTableTests {
         let start = try #require(try cell(at: 0) as? ChannelStartCell)
         let texts = messageTexts(in: start).filter { !$0.isHiddenOrHasHiddenAncestor }
         #expect(texts.map(\.string) == ["Welcome to #general!", "This is the start of the #general channel."])
-        let files = try #require(
-            messageTexts(in: try cell(of: 1)).first { $0.string.contains("a.zip") })
 
-        for view in texts + [files] {
+        for view in texts {
             try expectClicksKeepTheDrawing(of: view, selectable: true)
         }
     }
@@ -1356,8 +1355,8 @@ struct MessageTableTests {
         let marker = text.attributes(at: text.length - 1, effectiveRange: nil)
         #expect((marker[.font] as? NSFont)?.pointSize == 12)
         #expect(marker[.foregroundColor] as? NSColor == Palette.chatTextMuted)
-        let extras = shownTexts(in: try cell(of: 2)).filter { $0.contains("a.zip") }
-        #expect(try #require(extras.first).hasSuffix(" (edited)"))
+        let extras = shownTexts(in: try cell(of: 2)).filter { $0.contains("(edited)") }
+        #expect(extras.count == 1, "a message without text shows the marker on its own")
         #expect(try #require(messageText(in: try cell(of: 3))).string == "message 3")
     }
 

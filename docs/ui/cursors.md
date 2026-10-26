@@ -13,7 +13,7 @@ tracking event comes first.
 
 | Region | Cursor | Authority |
 |---|---|---|
-| The message list (each of the channel's and the split's): rows, a message's text, links, mentions, hidden spoilers and code blocks, thread boxes, Retry and Delete, Try again; the bars over it (unread, jump, locked, status) | I-beam over text, pointing hand over what clicks (custom and Unicode emoji, stickers, the unread bar, the jump bar's button too), arrow elsewhere | The list's tracking area (`MessageTableController`): it hit-tests on every move, scroll, update and key change, while its window is key and on top at the pointer; over a bar it takes the bar's `CursorArea`. Text views and boxes track nothing themselves. |
+| The message list (each of the channel's and the split's): rows, a message's text, links, mentions, hidden spoilers and code blocks, thread boxes, Retry and Delete, Try again; the bars over it (unread, jump, locked, status) | I-beam over text, pointing hand over what clicks (custom and Unicode emoji, stickers, images and videos and a spoiler's cover, a sensitive cover's eye, ALT buttons, a file's name, the unread bar, the jump bar's button too), arrow elsewhere (also over media waiting for a scan or under a sensitive cover) | The list's tracking area (`MessageTableController`): it hit-tests on every move, scroll, update and key change, while its window is key and on top at the pointer; over a bar it takes the bar's `CursorArea`. Text views and boxes track nothing themselves. |
 | The composer | I-beam | AppKit (NSTextView's own) |
 | The channel header: the "# parent ›" link, the Threads button, the thread's "…" | Pointing hand | `CursorArea` |
 | The split's header: its title, "…", the X | Pointing hand | `CursorArea` |

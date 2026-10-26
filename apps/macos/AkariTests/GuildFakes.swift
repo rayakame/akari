@@ -53,6 +53,7 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
 // One server with one text channel, and no messages.
 nonisolated final class GuildStore: Store, @unchecked Sendable {
     override func displaySettings() -> DisplaySettings { displayDefaults() }
+    override func ageGate(channelId: ChannelId) -> AgeGate { .open }
 
     private let channel = Channel(
         id: ChannelId(rawValue: 11), kind: .guildText, guildId: GuildId(rawValue: 1),

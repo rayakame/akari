@@ -13,6 +13,9 @@ struct MessageTableState: Equatable {
     var openedAt: ContinuousClock.Instant?
     var openedFrom = MessageListModel.Origin.network
     var revealedSpoilers: Set<SpoilerKey> = []
+    var revealedMedia: Set<MediaKey> = []
+    var shownSensitive: Set<MediaKey> = []
+    var showsAltText = false
     var newMessages: MessageId?
     var unreadJumps = 0
     var messageJump: MessageListModel.MessageJump?
@@ -25,16 +28,18 @@ struct MessageTableState: Equatable {
     var focused = false
 }
 
-/// The session's cache by identity, so the state stays `Equatable`.
+/// The session's caches by identity, so the state stays `Equatable`.
 struct ImageCacheRef: Equatable {
     let cache: ImageCache?
+    let placeholders: PlaceholderCache?
 
-    init(_ cache: ImageCache?) {
+    init(_ cache: ImageCache?, placeholders: PlaceholderCache? = nil) {
         self.cache = cache
+        self.placeholders = placeholders
     }
 
     static func == (lhs: ImageCacheRef, rhs: ImageCacheRef) -> Bool {
-        lhs.cache === rhs.cache
+        lhs.cache === rhs.cache && lhs.placeholders === rhs.placeholders
     }
 }
 
@@ -124,6 +129,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var hoveredGroup: MessageTimeline.ItemId?
     private weak var underlinedText: MessageTextView?
     private weak var hoveredBox: ThreadBoxView?
+    private weak var hoveredTile: MediaTileView?
+    private weak var hoveredOverlay: OverlayButton?
+    private weak var hoveredFileName: FileNameButton?
+    /// An ALT button's description, open beside it.
+    private(set) var altText: NSPopover?
+    // The media of the rows a screen above and below what shows, asked before it scrolls in.
+    private(set) var prefetching: [ImageSpec: Task<Void, Never>] = [:]
     // Paging posts willStart and didLive but no didEnd, so a live scroll also ends when its
     // notifications stop.
     private var liveScrollEnded = true
@@ -232,6 +244,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.contentInsets.bottom =
             Self.restingInset + (atPresent ? 0 : JumpBar.height + JumpBar.margin)
         let revealedNow = revealed(previous.revealedSpoilers, state.revealedSpoilers)
+            .union(previous.revealedMedia.symmetricDifference(state.revealedMedia).map(\.messageId))
+            .union(previous.shownSensitive.symmetricDifference(state.shownSensitive).map(\.messageId))
+            .union(previous.showsAltText != state.showsAltText ? messageIds() : [])
         let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
@@ -252,6 +267,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reportLine()
         updateRelativeTimer()
+        prefetchMedia()
         if previous.focused != state.focused || previous.motion != state.motion
             || previous.images != state.images
         {
@@ -433,6 +449,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         revealed = Dictionary(grouping: new, by: \.messageId).mapValues { Set($0.map(\.index)) }
         return Set(old.symmetricDifference(new).map(\.messageId))
+    }
+
+    private func messageIds() -> Set<MessageId> {
+        Set(timeline.items.compactMap { if case .message(let row, _) = $0 { row.id } else { nil } })
     }
 
     // A revealed spoiler keeps the height, but a relative time in the same row may not.
@@ -1041,6 +1061,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
             cell.onExpression = { [weak self] target, rect in self?.openExpression(target, at: rect) }
+            cell.placeholders = state.images.placeholders
+            cell.onMedia = { [weak self] attachment, action, tile in
+                self?.media(action, attachment, of: row.message.id, tile: tile)
+            }
+            cell.onOpenFile = { [weak self] attachment in self?.actions?.openMedia(attachment.key) }
             cell.onOpenThread = openThread
             cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
             cell.configure(
@@ -1048,10 +1073,47 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
-                fullDate: fullDate, threadBox: boxParts(row))
+                fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.message.id))
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
+            updateMedia(of: cell, at: index, visible: visible)
             return cell
         }
+    }
+
+    private func mediaState(of message: MessageId) -> MessageCell.MediaState {
+        MessageCell.MediaState(
+            revealed: Set(state.revealedMedia.filter { $0.messageId == message }.map(\.attachmentId)),
+            shownSensitive: Set(
+                state.shownSensitive.filter { $0.messageId == message }.map(\.attachmentId)),
+            showsAltText: state.showsAltText)
+    }
+
+    private func media(
+        _ action: MediaTileView.Action, _ attachment: Attachment, of message: MessageId,
+        tile: MediaTileView
+    ) {
+        let key = MediaKey(messageId: message, attachmentId: attachment.id)
+        switch action {
+        case .open:
+            actions?.openMedia(attachment.key)
+        case .reveal:
+            actions?.revealMedia(key)
+        case .toggleSensitive:
+            actions?.toggleSensitive(key)
+        case .altText:
+            showAltText(attachment.description ?? "", from: tile.alt)
+        }
+    }
+
+    // Discord's popout: to the right of the button, its title over the description.
+    private func showAltText(_ text: String, from button: NSView) {
+        altText?.close()
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = false
+        popover.contentViewController = AltTextController(text: text)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxX)
+        altText = popover
     }
 
     private func body(_ row: MessageListModel.Row) -> NSAttributedString {
@@ -1341,6 +1403,59 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             restoreAnchor()
         }
         alignShortContent()
+        prefetchMedia()
+    }
+
+    // D135: the media of rows within a screen above and below the visible ones, at the pixels
+    // their tiles will ask; what leaves that range is let go. Covered media isn't asked.
+    func prefetchMedia() {
+        guard let images = state.images.cache, let scale = tableView.window?.backingScaleFactor,
+            let column = tableView.tableColumns.first
+        else {
+            cancelPrefetches()
+            return
+        }
+        let visible = tableView.visibleRect
+        let shown = tableView.rows(in: visible)
+        let near = tableView.rows(in: visible.insetBy(dx: 0, dy: -visible.height))
+        let width = MessageCell.textWidth(cell: column.width)
+        var wanted = Set<ImageSpec>()
+        for index in near.location..<(near.location + near.length) where !NSLocationInRange(index, shown) {
+            guard timeline.items.indices.contains(index),
+                case .message(let row, _) = timeline.items[index]
+            else {
+                continue
+            }
+            let attachments = row.shown.attachments
+            let media = attachments.filter { $0.display == .media }
+            guard !media.isEmpty else {
+                continue
+            }
+            let cells = AttachmentsView.layout(attachments, width: width).cells
+            let state = mediaState(of: row.message.id)
+            for (attachment, cell) in zip(media, cells)
+            where !MediaTileView.hides(MessageCell.cover(attachment, state)) {
+                let pixels = ImageLayerView.pixels(cell.size, scale: scale)
+                wanted.insert(ImageSpec(key: attachment.key, width: pixels.0, height: pixels.1, fit: .cover))
+            }
+        }
+        for (spec, task) in prefetching where !wanted.contains(spec) {
+            task.cancel()
+            prefetching[spec] = nil
+        }
+        for spec in wanted where prefetching[spec] == nil && images.cached(spec) == nil {
+            prefetching[spec] = Task { [weak self] in
+                _ = try? await images.image(spec, tier: .media)
+                if !Task.isCancelled {
+                    self?.prefetching[spec] = nil
+                }
+            }
+        }
+    }
+
+    private func cancelPrefetches() {
+        prefetching.values.forEach { $0.cancel() }
+        prefetching = [:]
     }
 
     // A list that grew below its rows looks like a bounce past the bottom, which settling leaves
@@ -1422,6 +1537,26 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         box?.hovered = true
         hoveredBox = box
+        let overlay = target?.view as? OverlayButton
+        let tile = (target?.view as? MediaTileView) ?? (overlay?.superview as? MediaTileView)
+            ?? hoveredMedia(at: location)
+        if hoveredOverlay !== overlay {
+            hoveredOverlay?.isHovered = false
+        }
+        overlay?.isHovered = true
+        hoveredOverlay = overlay
+        let fileName = target?.view as? FileNameButton
+        if hoveredFileName !== fileName {
+            hoveredFileName?.isHovered = false
+        }
+        fileName?.isHovered = true
+        hoveredFileName = fileName
+        if hoveredTile !== tile {
+            hoveredTile?.isHovered = false
+            tile?.isHovered = true
+            hoveredTile = tile
+            updateMediaAnimation()
+        }
         target?.cursor.set()
         hoverCard.images = state.images.cache
         hoverCard.motion = state.motion
@@ -1467,6 +1602,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     func dismantle() {
         hoverCard.hide()
         expressionPopout.close()
+        altText?.close()
+        cancelPrefetches()
     }
 
     /// The cursor the list shows at `location` (window coordinates): the I-beam over a message's
@@ -1536,7 +1673,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     // Custom emoji play by the setting while at least 70 % of their message shows and it is
     // among the 100 nearest the bottom, or while the message is hovered (D139); stickers by
-    // `animate_stickers` and the hover (D140); the window key for both.
+    // `animate_stickers` and the hover (D140); GIFs by `gif_auto_play` and their own hover
+    // (D136); the window key for all.
     private func updateMediaAnimation() {
         let visible = tableView.visibleRect
         let nearBottom = nearBottomStart()
@@ -1546,7 +1684,46 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             cell.animatesEmoji = emojiPlays(at: index, visible: visible, nearBottom: nearBottom)
             cell.animatesStickers = stickersPlay(at: index, visible: visible)
+            updateMedia(of: cell, at: index, visible: visible)
         }
+    }
+
+    // Each GIF by how much of it shows and whether the pointer is over it.
+    private func updateMedia(of cell: MessageCell, at index: Int, visible: NSRect) {
+        guard let tiles = cell.attachments?.tiles, timeline.items.indices.contains(index) else {
+            return
+        }
+        for tile in tiles where !tile.isHidden {
+            guard tile.content?.attachment.animated == true, tile.window != nil else {
+                tile.animates = false
+                continue
+            }
+            let rect = tile.convert(tile.bounds, to: tableView)
+            let shown = rect.intersection(visible)
+            let fraction =
+                rect.height > 0 && rect.width > 0 && !shown.isNull
+                ? (shown.width * shown.height) / (rect.width * rect.height) : 0
+            tile.animates = state.motion.plays(
+                .gif,
+                MotionPolicy.Context(
+                    windowKey: state.focused, appActive: state.focused, hovered: tile === hoveredTile,
+                    visibleFraction: fraction))
+        }
+    }
+
+    // The tile under the pointer even where it takes no click (a covered one): hover still shows.
+    private func hoveredMedia(at location: NSPoint?) -> MediaTileView? {
+        guard let location, let content = tableView.window?.contentView else {
+            return nil
+        }
+        var view = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
+        while let current = view {
+            if let tile = current as? MediaTileView {
+                return tile
+            }
+            view = current.superview
+        }
+        return nil
     }
 
     private func emojiPlays(at index: Int, visible: NSRect, nearBottom: Int) -> Bool {
@@ -1677,6 +1854,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         actions?.userScrolled(by: lastClipOrigin.y - origin.y, height: clipView.bounds.height)
         anchor = sticksToBottom ? nil : visibleAnchor(skipping: [])
         askForMore()
+        if !isLiveScrolling {
+            prefetchMedia()
+        }
     }
 
     // Read before the update: `timeline` and the table still hold the old rows.

@@ -309,3 +309,26 @@ Discord (canary 649848's calls):
 - `GET /sticker-packs/{pack.id}` (`Account::sticker_pack`): `name`, `stickers`.
 - Nitro (`premium_type`): any tier counts for emoji; for stickers only Nitro (2) and Basic (3),
   not Classic (1).
+
+## Attachments and Discord's content scan
+
+What akari-core keeps of an attachment, and the requests behind its covers
+([attachments.md](../ui/attachments.md)):
+
+- `title` (the name without its extension when Discord changed the file's name),
+  `placeholder` (a thumbhash, kept only with `placeholder_version` 1), `flags` (2 a media post's
+  thumbnail, 8 a spoiler, 16 explicit, 32 animated, 64 gore, 128 self-harm) and
+  `content_scan_version` (missing until Discord scanned it, 0 when it can't).
+- READY's `explicit_content_scan_version` is the newest scan. Media counts as unscanned without
+  a version, or, where gore is covered, with one below the smaller of READY's and 4 (the
+  official client's `validContentScanVersion`).
+- `PATCH /channels/{channel.id}/explicit-media {message_ids: [1–75]}` asks Discord to scan; the
+  answer is a 204 and the results come as MESSAGE_UPDATEs with the versions and flags. akari-core
+  asks for every message in a viewed channel whose media waits (loaded, created or updated, not
+  the user's own, only where a setting covers something), once per message per session, per
+  channel in chunks of 75, after up to 0.8 s; 3 s after asking it stops waiting, answered or not
+  (the client's −1). *The official client sends a channel's messages in one request; the docs'
+  limit is 75.*
+- The user's `nsfw_allowed` (READY's user, USER_UPDATE) is `false` for a user Discord knows is
+  under 18 and missing while it doesn't know. A guild's `owner_configured_content_level` 1
+  (explicit) or 3 (age-restricted) gates every channel; channels and their threads carry `nsfw`.

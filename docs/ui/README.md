@@ -33,6 +33,8 @@ app can mirror it and Discord users can switch with zero relearning.
   animation, memory
 - [emoji.md](emoji.md): custom emoji in the text (the box, jumbo, the name, animation, failure)
   and stickers under it (the row, formats, animation, Lottie, failure)
+- [attachments.md](attachments.md): a message's files: the mosaic, loading and failure, GIFs
+  and videos, file rows, alt text, spoilers, sensitive media and the age gate
 - [theme.md](theme.md): the dark and light color tokens
 - [typography.md](typography.md): the type scale, every text style's size and weight, and how
   they were matched to the official client

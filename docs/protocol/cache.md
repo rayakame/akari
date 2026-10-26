@@ -15,9 +15,11 @@ from it at once; READY then brings only what changed. Linux and Android get it w
 - Pending and failed messages (the outbox), drafts, slowmode cooldowns and the gateway
   session (no resume across launches). Each holds what the user typed or needs the exact state
   at the end of a session, so each is its own decision for later.
-- Images. Akari loads none yet.
-- Blocked and ignored users. They only decide which live messages count as mentions, and
-  none arrive before READY brings them again.
+- Images: they have their own files and index ([cdn.md](cdn.md)).
+- Blocked, ignored and befriended users. They decide which live messages count as mentions and
+  which DMs' media is covered as a stranger's; none arrive before READY brings them again, and
+  until then a DM's media is covered as a stranger's.
+- Which explicit content scans were asked or given up on: a session's own.
 
 ## One file per account
 
@@ -44,8 +46,9 @@ every other target builds rusqlite's bundled copy.
   (with their roles), `unavailable_guilds`, `members` (the current user's, per guild),
   `channels`, `windows` (a cached channel and when it was last viewed), `messages` (per
   channel and ID), `guild_settings` (per guild; `guild_id` 0 holds the DM settings),
-  `user_settings` (per key: `folders`, absent when the settings proto had none, and
-  `notification_flags`) and `read_states` (per channel: the acknowledged message and the
+  `user_settings` (per key: `folders`, absent when the settings proto had none,
+  `notification_flags`, `display` and `age_agreements`, the servers whose age-restricted
+  channels the user agreed to see) and `read_states` (per channel: the acknowledged message and the
   mention count). Each row is its key columns plus a `data` column of JSON in the cache's own
   row types, never the wire structs or the state types, so either can change without breaking
   files already written. A field added later reads old rows through its default. A thread the
@@ -55,15 +58,15 @@ every other target builds rusqlite's bundled copy.
   THREAD_LIST_SYNC and the refreshed pages bring them again.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
-- **Version:** `PRAGMA user_version`, 5 since a thread's membership holds the user's join time,
-  which orders the channel list; 4 brought the membership (its mute and level) instead of
-  `joined`; 3 brought the read states. A version 4 file is upgraded in place: its rows read as
-  they are, its threads without a join time order by ID until READY brings the times. Older
-  files are deleted once, so the first launch after such an update starts empty: a version 3
-  file would restore every joined thread as unjoined and leave it out of the channel list until
-  READY, and a version 2 file would restore without read states. A file with any other version
-  is deleted and started empty: the cache refills from Discord, so a file is only upgraded when
-  a field's default covers the change.
+- **Version:** `PRAGMA user_version`, 6 since attachments keep their placeholder and the version
+  of Discord's content scan; 5 brought a thread member's join time, which orders the channel
+  list; 4 the membership (its mute and level) instead of `joined`; 3 the read states. Older
+  files are deleted once, so the first launch after such an update starts empty: a version 5
+  file's attachments have no scan version, which would cover their media as waiting for a scan,
+  a version 3 file would restore every joined thread as unjoined, and a version 2 file would
+  restore without read states. A file with any other version is deleted and started empty: the
+  cache refills from Discord, so a file is only upgraded when a field's default covers the
+  change.
 
 ### Opening, and when a file is thrown away
 

@@ -73,6 +73,13 @@ final class ImageLayerView: NSView {
     var fallbackText: String? {
         didSet { updateFallback() }
     }
+    /// The decoded tier the image is kept in: a message's media has its own budget.
+    var tier = ImageTier.identity
+    /// Discord's fade for media (D142): 0.2 s, 0.05 s for an image that came within 200 ms,
+    /// none for one already decoded.
+    var fadesIn = false
+    static let fade: TimeInterval = 0.2
+    static let quickFade: TimeInterval = 0.05
     private(set) var content: Content?
     /// The still failed to load; the placeholder stays until a retry.
     private(set) var failed = false
@@ -236,10 +243,12 @@ final class ImageLayerView: NSView {
             updateAnimation()
             return
         }
+        let asked = ContinuousClock.now
+        let tier = tier
         stillTask = Task { [weak self] in
             let outcome: Result<CGImage, Error>
             do {
-                outcome = .success(try await images.image(spec))
+                outcome = .success(try await images.image(spec, tier: tier))
             } catch {
                 outcome = .failure(error)
             }
@@ -249,6 +258,9 @@ final class ImageLayerView: NSView {
             self.stillTask = nil
             switch outcome {
             case .success(let image):
+                if self.fadesIn, self.still == nil {
+                    self.fade(quick: ContinuousClock.now - asked < .milliseconds(200))
+                }
                 self.set(still: image)
                 self.updateAnimation()
             case .failure(is CancellationError):
@@ -264,12 +276,35 @@ final class ImageLayerView: NSView {
 
     // The cache says the session is back: a failed box asks once more.
     @objc private func retryRequested(_ notification: Notification) {
-        guard failed, let images, notification.object as AnyObject === images else {
+        guard notification.object as AnyObject === images else {
+            return
+        }
+        retry()
+    }
+
+    /// A failed image asks once more.
+    func retry() {
+        guard failed else {
             return
         }
         failed = false
         cancelLoads()
+        updatePlaceholder()
+        onStateChange?(self)
         reload()
+    }
+
+    /// Whether the still is being asked for: neither shown nor failed.
+    var isLoading: Bool {
+        content != nil && still == nil && !failed
+    }
+
+    private func fade(quick: Bool) {
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0.0
+        fade.toValue = 1.0
+        fade.duration = quick ? Self.quickFade : Self.fade
+        imageLayer.add(fade, forKey: "fade")
     }
 
     private func set(still image: CGImage) {
