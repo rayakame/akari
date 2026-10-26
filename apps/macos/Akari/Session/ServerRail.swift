@@ -9,8 +9,7 @@ struct ServerRail: View {
             VStack(spacing: 8) {
                 RailItem(selected: session.place == .home, help: "Direct Messages") { highlighted in
                     RailIcon(highlighted: highlighted) {
-                        Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .font(.system(size: 18))
+                        AkariLogo(label: "Direct Messages")
                     }
                 } action: {
                     session.open(.home)

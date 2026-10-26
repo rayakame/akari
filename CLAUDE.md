@@ -56,9 +56,11 @@ and the message APIs, including the send rules, the read calls and `end_session`
 (`PendingImage`, placeholders, layout), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, and the composer), the message
-timeline and the reading signal (what tells the core which channel the user reads). `apps/macos` is the first app: the login screen and the main window with the server
-rail (the user's order, with folders, unread pills and mention badges, and unread DMs under
-Home), the channel and DM lists (muted channels dimmed, unread rows bright with the pill, channel
+timeline and the reading signal (what tells the core which channel the user reads). `apps/macos` is the first app: Akari's icon and logo, derived from `assets/` by
+`make-icons.swift` (an Icon Composer `.icon` and a vector template image), the login screen
+(the logo in the QR code's middle) and the main window with the server
+rail (the logo on Home, the user's order, with folders, unread pills and mention badges, and
+unread DMs under Home), the channel and DM lists (muted channels dimmed, unread rows bright with the pill, channel
 rows with their counts, joined threads under their parent), a
 message list that loads history in both directions, with the "new messages" line and the unread
 bar, the composer, and marking read with Escape, Shift+Escape and the context menus; a thread

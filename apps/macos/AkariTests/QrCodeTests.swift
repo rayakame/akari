@@ -1,5 +1,6 @@
 import AppKit
 import CoreImage
+import SwiftUI
 import Testing
 
 @testable import Akari
@@ -29,6 +30,32 @@ struct QrCodeTests {
         #expect(side <= 176)
         #expect(side % modules == 0)
         #expect(side / modules >= 2)
+    }
+
+    // The official client's code carries its logo in the middle; Akari's carries Akari's, and a
+    // phone still reads it.
+    @MainActor @Test(arguments: [NSAppearance.Name.darkAqua, .aqua])
+    func theCodeWithTheLogoStillDecodes(appearance: NSAppearance.Name) throws {
+        // On its white tile, as the login screen shows it.
+        let side: CGFloat = 176
+        let image = try Rendered(
+            ZStack {
+                Color.white
+                QrCodeView(url: url)
+            }
+            .frame(width: side, height: side)
+            .ignoresSafeArea(),
+            appearance: appearance, size: NSSize(width: side, height: side))
+        let cgImage = try #require(image.rep.cgImage)
+        let detector = try #require(
+            CIDetector(ofType: CIDetectorTypeQRCode, context: nil, options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]))
+
+        let codes = detector.features(in: CIImage(cgImage: cgImage))
+
+        #expect((codes.first as? CIQRCodeFeature)?.messageString == url)
+        // Left of the logo, inside its tile: the brand color.
+        let tile = try #require(image.color(side / 2 - QrCodeView.logo * 0.33, side / 2))
+        #expect(tile.blueComponent - tile.redComponent > 0.3, "\(tile)")
     }
 
     @Test

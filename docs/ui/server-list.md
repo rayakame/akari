@@ -6,7 +6,11 @@ measured from the web client on 2026-10-10; sizes in [layout.md](layout.md), col
 
 ## Order, top to bottom
 
-1. Home, which opens the DM list.
+1. Home, which opens the DM list. Its icon is the client's logo on the tile: white on the brand
+   color when selected or hovered, `textDefault` on `hoverBackground` otherwise. *Akari: its own
+   logo, sized and placed in the 40-point tile as the app icon places it in its square (about
+   7/12 of the tile's width, as Discord's logo had in its 48-point button before the redesign;
+   the redesigned client's size isn't measured yet). The title bar's home tile shows it too.*
 2. Avatars of DMs with unread messages. *Akari: the DMs and group DMs with mentions (every
    message in an unmuted DM is one), newest first, as initials avatars with the badge and the
    unread pill; clicking one goes home and opens it there.*

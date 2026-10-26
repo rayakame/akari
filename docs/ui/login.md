@@ -11,7 +11,7 @@ can be resized; the card keeps its size and stays centered.
 
 | Left column (wider) | Right column |
 |---|---|
-| A welcome-back heading and a one-line subtitle | A QR code in a rounded white tile |
+| A welcome-back heading and a one-line subtitle | A QR code in a rounded white tile, the client's logo in its middle |
 | Field for the email address or phone number | Heading: log in with a QR code |
 | Password field (hidden, with a reveal toggle) | One line: scan it with the Discord mobile app |
 | Link for a forgotten password | |
@@ -83,4 +83,5 @@ check their email; the paste field exists because Akari can't receive the link.
 
 No Discord logo, illustrations or the gg sans font. The card uses system fonts and
 platform icons (SF Symbols on Apple, Adwaita icons on Linux); the QR tile is drawn by the
-app.
+app. *Akari: Akari's logo, white on a brand-colored tile in a white ring, stands in the code's
+middle, small enough for the code's error correction.*

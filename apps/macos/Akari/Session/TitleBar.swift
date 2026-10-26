@@ -83,10 +83,7 @@ struct TitleBar: View {
                     .minimumScaleFactor(0.5)
             }
         case .home:
-            tile {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 18 * Self.iconSize / 40))
-            }
+            tile { AkariLogo() }
         }
     }
 
