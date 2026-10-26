@@ -35,6 +35,38 @@ impl EmbedKind {
     }
 }
 
+/// How an embed's text parses, which the host's markdown applies (modules 91688 and 46054).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct EmbedTextRules {
+    /// Markdown, on a rich embed; others show the plain string.
+    pub markdown: bool,
+    /// Lists and headings in the description and field values (messages after 2023-03-22).
+    pub lists: bool,
+    /// Links in the title and field names: the embed has no URL of its own.
+    pub title_links: bool,
+    /// Images, videos and GIFVs show no description.
+    pub description: bool,
+    /// Only a rich embed shows fields.
+    pub fields: bool,
+}
+
+/// The rules `embed` of `message` shows its text by.
+pub fn embed_text_rules(message: &Message, embed: &Embed) -> EmbedTextRules {
+    let kind = EmbedKind::of(embed.kind.as_deref());
+    EmbedTextRules {
+        markdown: kind == EmbedKind::Rich,
+        lists: message
+            .edited_timestamp
+            .unwrap_or(message.timestamp)
+            .unix_millis()
+            >= LISTS_SINCE_MILLIS,
+        title_links: embed.url.as_deref().is_none_or(str::is_empty),
+        description: !matches!(kind, EmbedKind::Image | EmbedKind::Video | EmbedKind::Gifv),
+        fields: kind == EmbedKind::Rich,
+    }
+}
+
 /// One media object of a message's embeds: the embed's place and its slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EmbedMediaRef {
@@ -71,6 +103,16 @@ pub struct ShownEmbed {
     pub description: bool,
     /// TikTok, or a portrait YouTube video: its media fits 400 × 450, not 400 × 300.
     pub tall: bool,
+    /// Its text is markdown (a rich embed's); others show the plain string.
+    pub markdown: bool,
+    /// Lists and headings parse in its description and values (messages after 2023-03-22).
+    pub lists: bool,
+    /// Its title and field names may hold links: the embed has no URL of its own.
+    pub title_links: bool,
+    /// The bar's color; none or white draws the border's.
+    pub color: Option<u32>,
+    /// A footer shows: its text or the embed's time.
+    pub footer: bool,
     pub cover: Option<MediaCover>,
 }
 
@@ -87,6 +129,11 @@ const NEVER: [&str; 10] = [
     "poll_result",
     "gift",
 ];
+// Discord gates lists and headings in embeds by this snowflake's time (module 384231,
+// 1088216706570268682, 2023-03-22).
+const LISTS_SINCE_MILLIS: i64 = 1_679_521_480_935;
+// The client draws a gallery's first four (161573 `renderImages`).
+const GALLERY_MAX: usize = 4;
 const CONTAINS_EXPLICIT: u64 = 1 << 4;
 const CONTAINS_GORE: u64 = 1 << 6;
 // Only a user's message shows embeds (module 143413's USER_MESSAGE).
@@ -116,10 +163,11 @@ pub(crate) fn shown_embeds(
             .kind
             .as_deref()
             .is_some_and(|kind| NEVER.contains(&kind))
+            || discords_own_page(embed)
         {
             continue;
         }
-        let record = record(embed, place);
+        let record = record(embed, place, embed_text_rules(message, embed));
         if let Some(url) = embed.url.as_deref() {
             if let Some(&(_, first)) = urls.iter().find(|(known, _)| *known == url) {
                 if let Some(image) = record.image {
@@ -127,7 +175,9 @@ pub(crate) fn shown_embeds(
                     if into.gallery.is_empty() {
                         into.gallery.extend(into.image);
                     }
-                    into.gallery.push(image);
+                    if into.gallery.len() < GALLERY_MAX {
+                        into.gallery.push(image);
+                    }
                 }
                 continue;
             }
@@ -147,7 +197,7 @@ pub(crate) fn shown_embeds(
 
 // The client's record (module 659674 `R`): sized media only, the thumbnail promoted for
 // articles and images, a video kept with a poster and a source that plays.
-fn record(embed: &Embed, place: u8) -> ShownEmbed {
+fn record(embed: &Embed, place: u8, rules: EmbedTextRules) -> ShownEmbed {
     let kind = EmbedKind::of(embed.kind.as_deref());
     let at = |slot| EmbedMediaRef { embed: place, slot };
     let mut image = None;
@@ -183,15 +233,51 @@ fn record(embed: &Embed, place: u8) -> ShownEmbed {
         gallery: Vec::new(),
         video,
         thumbnail,
-        fields: kind == EmbedKind::Rich,
-        description: !matches!(kind, EmbedKind::Image | EmbedKind::Video | EmbedKind::Gifv),
-        tall: tall(embed),
+        fields: rules.fields,
+        description: rules.description,
+        tall: false,
+        markdown: rules.markdown,
+        lists: rules.lists,
+        title_links: rules.title_links,
+        color: embed.color.filter(|color| *color != 0xFF_FF_FF),
+        footer: embed
+            .footer
+            .as_ref()
+            .is_some_and(|footer| !footer.text.is_empty())
+            || embed.timestamp.is_some(),
         cover: None,
     }
 }
 
+// Module 659674 `p6, V, G8, Xk`: articles for Discord's own shop and game pages draw as their
+// own cards in the client, which Akari doesn't have.
+fn discords_own_page(embed: &Embed) -> bool {
+    if embed.kind.as_deref() != Some("article") {
+        return false;
+    }
+    let Some(url) = embed
+        .url
+        .as_deref()
+        .and_then(|url| reqwest::Url::parse(url).ok())
+    else {
+        return false;
+    };
+    let discord = matches!(
+        url.host_str(),
+        Some("discord.com" | "ptb.discord.com" | "canary.discord.com")
+    );
+    let parts: Vec<&str> = url.path_segments().map_or_else(Vec::new, Iterator::collect);
+    discord
+        && match parts.as_slice() {
+            ["shop", ..] => true,
+            ["games", id] => id.parse::<u64>().is_ok(),
+            ["channels", guild, "shop", ..] => guild.parse::<u64>().is_ok(),
+            _ => false,
+        }
+}
+
 // Module 659674 `ds` and `y`: the provider's name, or YouTube's host.
-fn tall(embed: &Embed) -> bool {
+fn tall(embed: &Embed, video: bool) -> bool {
     let provider = embed
         .provider
         .as_ref()
@@ -199,14 +285,14 @@ fn tall(embed: &Embed) -> bool {
     if provider == Some("TikTok") {
         return true;
     }
-    let Some(video) = embed.video.as_ref() else {
+    let Some(source) = embed.video.as_ref().filter(|_| video) else {
         return false;
     };
-    let portrait = video.height.unwrap_or(0) > video.width.unwrap_or(0);
-    let youtube = provider == Some("YouTube")
-        || reqwest::Url::parse(&video.url)
-            .is_ok_and(|url| url.host_str() == Some("www.youtube.com"));
-    portrait && youtube
+    let portrait = source.height.unwrap_or(0) > source.width.unwrap_or(0);
+    let host = source.url.split_once("://").map_or("", |(_, rest)| {
+        rest.split(['/', '?', '#']).next().unwrap_or_default()
+    });
+    portrait && (provider == Some("YouTube") || host == "www.youtube.com")
 }
 
 fn sized(media: &EmbedMedia) -> bool {
@@ -215,9 +301,12 @@ fn sized(media: &EmbedMedia) -> bool {
 
 // After the merge: the inline form, the thumbnail's place, the media setting.
 fn finish(shown: &mut ShownEmbed, embed: &Embed, display: &DisplaySettings) {
+    shown.tall = tall(embed, shown.video.is_some());
+    // The client's inline test reads the record's image, which the merge leaves set.
+    let gallery = shown.gallery.len() > 1;
     if shown.gallery.len() == 1 {
         shown.image = shown.gallery.pop();
-    } else if !shown.gallery.is_empty() {
+    } else if gallery {
         shown.image = None;
     }
     if !display.inline_embed_media {
@@ -227,7 +316,7 @@ fn finish(shown: &mut ShownEmbed, embed: &Embed, display: &DisplaySettings) {
         shown.thumbnail = None;
         return;
     }
-    let media = shown.image.is_some() || shown.video.is_some();
+    let media = shown.image.is_some() || shown.video.is_some() || gallery;
     shown.inline = media
         && (shown.kind == EmbedKind::Gifv
             || (shown.kind != EmbedKind::Rich && embed.author.is_none() && embed.title.is_none()));

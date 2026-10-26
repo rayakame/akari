@@ -1089,6 +1089,9 @@ impl Store {
     /// cover; `spoilered_link` says the content has a link inside a spoiler (the host's markdown
     /// knows), which covers them all. Read again with the message.
     pub fn shown_embeds(&self, message: &Message, spoilered_link: bool) -> Vec<ShownEmbed> {
+        if message.embeds.is_empty() {
+            return Vec::new();
+        }
         let now = self.now_millis();
         self.read(|inner| inner.state.shown_embeds(message, spoilered_link, now))
     }

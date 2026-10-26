@@ -1,5 +1,6 @@
 use super::*;
 use crate::media::EmbedSlot;
+use crate::model::Timestamp;
 use crate::state::media::{Covered, Scan};
 use crate::state::settings::DisplaySettings;
 use crate::state::types::{EmbedAuthor, EmbedMedia};
@@ -448,4 +449,111 @@ fn tiktok_and_portrait_youtube_are_tall() {
         "a landscape one"
     );
     assert!(!tall(video(1080, 1920, provider("Vimeo"))));
+}
+
+// Review: what the host needs to show a card's text and bar, as the client decides it (91688,
+// 161573): markdown on rich embeds only, lists by the message's time (its edit's first), title
+// links when the embed has no URL (an empty one counts as none), white as no color, a footer with
+// text or a time.
+#[test]
+fn the_shown_embed_says_how_its_text_and_bar_show() {
+    let mut rich = embed("rich");
+    rich.url = Some("".into());
+    rich.color = Some(0xFF_FF_FF);
+    rich.footer = Some(crate::state::types::EmbedFooter {
+        text: "".into(),
+        proxy_icon_url: None,
+    });
+    let mut article = embed("article");
+    article.color = Some(0x12_34_56);
+    article.timestamp = Some(Timestamp::from_unix_millis(1_700_000_000_000));
+    let mut message = message(vec![rich, article]);
+    message.timestamp = Timestamp::from_unix_millis(1_600_000_000_000);
+    let shown = shown_embeds(&message, &DisplaySettings::default(), |_| None);
+
+    assert!(shown[0].markdown && !shown[1].markdown);
+    assert!(!shown[0].lists, "2020");
+    assert!(shown[0].title_links, "no URL");
+    assert!(!shown[1].title_links);
+    assert_eq!((shown[0].color, shown[1].color), (None, Some(0x12_34_56)));
+    assert!(!shown[0].footer, "empty text, no time");
+    assert!(shown[1].footer, "a time");
+
+    message.edited_timestamp = Some(Timestamp::from_unix_millis(1_700_000_000_000));
+    let edited = shown_embeds(&message, &DisplaySettings::default(), |_| None);
+    assert!(edited[0].lists, "the edit's time");
+}
+
+// Review: a merged gallery of bare images shows alone and hides its link (659674 tests the
+// record's first image); at most four images are kept.
+#[test]
+fn a_bare_gallery_shows_alone_with_at_most_four_images() {
+    let image = |n: u32| {
+        let mut image = embed("image");
+        image.thumbnail = Some(media(600 + n, 400));
+        image
+    };
+    let shown = shown((0..6).map(image).collect());
+
+    let [gallery] = &shown[..] else {
+        panic!("merged: {shown:?}");
+    };
+    assert!(gallery.inline);
+    assert_eq!(gallery.gallery.len(), 4);
+    assert!(hides_link(&shown, &DisplaySettings::default(), true));
+}
+
+// A GIFV alone hides its link too (521981's h5: IMAGE and GIFV).
+#[test]
+fn a_gifv_hides_its_link() {
+    let mut gifv = embed("gifv");
+    gifv.thumbnail = Some(media(498, 280));
+    gifv.video = Some(media(498, 280));
+    let shown = shown(vec![gifv]);
+
+    assert!(shown[0].inline);
+    assert!(hides_link(&shown, &DisplaySettings::default(), true));
+}
+
+// Module 659674 `p6, V, G8, Xk`: articles for Discord's own shop and game pages aren't drawn.
+#[test]
+fn discords_shop_and_game_articles_are_left_out() {
+    let article = |url: &str| {
+        let mut article = embed("article");
+        article.url = Some(url.into());
+        article.title = Some("Shop".into());
+        article
+    };
+    for url in [
+        "https://discord.com/channels/123/shop",
+        "https://discord.com/channels/123/shop/456",
+        "https://discord.com/shop",
+        "https://canary.discord.com/shop#itemSkuId=1",
+        "https://discord.com/games/789",
+    ] {
+        assert!(shown(vec![article(url)]).is_empty(), "{url}");
+    }
+    for url in [
+        "https://example.com/shop",
+        "https://discord.com/channels/123/456",
+    ] {
+        assert_eq!(shown(vec![article(url)]).len(), 1, "{url}");
+    }
+}
+
+// Module 619517 `isAnimated`: a GIF, or a WebP or AVIF Discord flags animated.
+#[test]
+fn embed_media_animates_as_discords_client_says() {
+    let at = |url: &str, flags: u64| EmbedMedia {
+        url: url.into(),
+        proxy_url: None,
+        flags,
+        ..media(10, 10)
+    };
+    assert!(at("https://media.tenor.com/a.gif", 0).is_animated());
+    assert!(at("https://example.com/a.GIF?x=1", 0).is_animated());
+    assert!(!at("https://example.com/a.webp", 0).is_animated());
+    assert!(at("https://example.com/a.webp", 32).is_animated());
+    assert!(at("https://example.com/a.avif", 32).is_animated());
+    assert!(!at("https://example.com/a.png", 32).is_animated());
 }

@@ -43,14 +43,20 @@ impl Store {
             .shown_embeds(message, document.has_spoilered_link());
         let hides_content = self
             .core
-            .embeds_hide_link(&shown, document.is_single_link());
+            .embeds_hide_link(&shown, document.is_single_link(&message.content));
         Message::new(
             message,
             formatted,
             self.core.mentions_me(message),
             self.core.shown_attachments(message),
             self.core.spoilers_shown(message.channel_id),
-            embeds::embeds(message, &shown, names, document.spoiler_count()),
+            embeds::embeds(
+                message,
+                &shown,
+                names,
+                document.spoiler_count(),
+                &self.contents,
+            ),
             hides_content,
         )
     }

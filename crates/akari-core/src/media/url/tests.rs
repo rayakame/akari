@@ -598,6 +598,31 @@ fn embed_images_size_like_attachments_and_key_by_their_path() {
     assert_ne!(planned.disk, other.disk);
 }
 
+// Review: a flagged animated WebP plays in its animated form, as an attachment's does.
+#[test]
+fn an_animated_webp_embed_is_asked_animated() {
+    let media = EmbedMedia {
+        url: "https://example.com/a.webp".into(),
+        proxy_url: Some(
+            "https://images-ext-1.discordapp.net/external/AbCdEf/https/example.com/a.webp".into(),
+        ),
+        width: Some(320),
+        height: Some(240),
+        flags: 32,
+        placeholder: None,
+    };
+
+    let planned = hosts()
+        .embed(&media, (320, 240), Some(AnimatedFormat::WebP))
+        .unwrap();
+
+    assert!(
+        planned.url.as_str().contains("animated=true"),
+        "{}",
+        planned.url
+    );
+}
+
 #[test]
 fn embed_icons_are_fetched_as_discord_gives_them() {
     let planned = hosts()

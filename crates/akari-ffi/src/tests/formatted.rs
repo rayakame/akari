@@ -868,3 +868,53 @@ async fn descriptions_and_fields_follow_the_kind() {
     );
     loaded.account.close();
 }
+
+// Review: titles and field names are one line; field names follow the title's link rule (the
+// client's renderTitle with the embed); lists only for messages from 2023-03-22, by their edit.
+#[tokio::test]
+async fn titles_are_one_line_and_lists_follow_the_date() {
+    let embed = json!({
+        "type": "rich", "url": "https://example.com/",
+        "title": "Line one\nLine two",
+        "description": "- one\n- two",
+        "fields": [{"name": "[Docs](https://example.org)", "value": "1"}],
+    });
+    let mut old = page_message(400_000_000_000_000_018, "", json!([]));
+    old["timestamp"] = "2022-01-01T12:00:00.000000+00:00".into();
+    old["embeds"] = json!([embed.clone()]);
+    let mut edited = old.clone();
+    edited["id"] = "400000000000000019".into();
+    edited["edited_timestamp"] = "2024-01-01T12:00:00.000000+00:00".into();
+    let loaded = loaded(vec![edited, old], |_| {}).await;
+    let by_id = |id: u64| {
+        loaded
+            .messages
+            .iter()
+            .find(|message| message.id == MessageId::new(id))
+            .expect("the message")
+    };
+    let card = &by_id(400_000_000_000_000_018).embeds[0];
+
+    assert_eq!(
+        card.title.as_ref().map(|title| title.text.as_str()),
+        Some("Line one Line two")
+    );
+    assert!(
+        card.fields[0].name.formatted.links.is_empty(),
+        "the embed has a URL"
+    );
+    let in_list = |embed: &crate::embeds::Embed| {
+        embed.description.as_ref().is_some_and(|text| {
+            matches!(
+                text.formatted.blocks[0].containers[..],
+                [TextContainer::ListItem { .. }]
+            )
+        })
+    };
+    assert!(!in_list(card), "2022");
+    assert!(
+        in_list(&by_id(400_000_000_000_000_019).embeds[0]),
+        "edited 2024"
+    );
+    loaded.account.close();
+}

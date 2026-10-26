@@ -2,8 +2,8 @@ use std::time::SystemTime;
 
 use akari_core::media;
 use akari_core::state::{self, EmbedMediaRef};
-use akari_markdown::EmbedText;
 
+use crate::contents::{Contents, embed_parts};
 use crate::formatted::FormattedText;
 use crate::images::{EmbedSlot, ImageKey};
 use crate::names::Names;
@@ -112,98 +112,86 @@ pub struct EmbedFooter {
     pub timestamp: Option<SystemTime>,
 }
 
-const IS_ANIMATED: u64 = 1 << 5;
-
-// Discord gates lists and headings in embeds by this date (module 384231's snowflake
-// 1088216706570268682, 2023-03-22).
-const LISTS_SINCE_MILLIS: i64 = 1_679_521_480_935;
-
 /// The records of a message's shown embeds; their spoilers numbered after the content's.
 pub(crate) fn embeds(
     message: &state::Message,
     shown: &[state::ShownEmbed],
     names: &Names<'_>,
     first_spoiler: u16,
+    contents: &Contents,
 ) -> Vec<Embed> {
-    let lists = message
-        .edited_timestamp
-        .unwrap_or(message.timestamp)
-        .unix_millis()
-        >= LISTS_SINCE_MILLIS;
     let mut spoilers = first_spoiler;
     shown
         .iter()
         .filter_map(|shown| {
             let embed = message.embeds.get(shown.index)?;
             let index = u8::try_from(shown.index).ok()?;
-            Some(record(
+            let context = Context {
                 message,
-                embed,
-                shown,
-                index,
-                lists,
                 names,
-                &mut spoilers,
-            ))
+                contents,
+                index,
+            };
+            Some(record(&context, embed, shown, &mut spoilers))
         })
         .collect()
 }
 
+struct Context<'a> {
+    message: &'a state::Message,
+    names: &'a Names<'a>,
+    contents: &'a Contents,
+    index: u8,
+}
+
 fn record(
-    message: &state::Message,
+    context: &Context<'_>,
     embed: &state::Embed,
     shown: &state::ShownEmbed,
-    index: u8,
-    lists: bool,
-    names: &Names<'_>,
     spoilers: &mut u16,
 ) -> Embed {
-    let kind = EmbedKind::from(shown.kind);
-    let rich = kind == EmbedKind::Rich;
-    let mut text = |source: &str, rules: EmbedText| {
-        let document = if rich {
-            akari_markdown::parse_embed(source, rules)
-        } else {
-            akari_markdown::plain(source)
-        };
-        let formatted = FormattedText::numbered(&document, source, names, Some(message), *spoilers);
+    let message = context.message;
+    let index = context.index;
+    let rules = state::embed_text_rules(message, embed);
+    let mut texts: Vec<Option<RichText>> = Vec::new();
+    for part in embed_parts(embed, rules) {
+        let document = context.contents.embed_document(message, index, &part);
+        let formatted = FormattedText::numbered(
+            &document,
+            &part.text,
+            context.names,
+            Some(message),
+            *spoilers,
+        );
         *spoilers = spoilers.saturating_add(document.spoiler_count());
-        RichText {
-            text: source.to_owned(),
-            formatted,
+        let slot = usize::from(part.part);
+        if texts.len() <= slot {
+            texts.resize(slot + 1, None);
         }
-    };
+        texts[slot] = Some(RichText {
+            text: part.text.into_owned(),
+            formatted,
+        });
+    }
+    let mut texts = texts.into_iter();
+    let title = texts.next().flatten();
+    let description = texts.next().flatten();
+    let mut fields = Vec::new();
+    for field in &embed.fields {
+        let (Some(Some(name)), Some(Some(value))) = (texts.next(), texts.next()) else {
+            break;
+        };
+        fields.push(EmbedFieldText {
+            name,
+            value,
+            inline: field.inline,
+        });
+    }
     let key = |slot| ImageKey::EmbedMedia {
         channel_id: message.channel_id,
         message_id: message.id,
         embed: index,
         slot,
-    };
-    let title = embed.title.as_deref().map(|title| {
-        text(
-            title,
-            EmbedText::Title {
-                links: embed.url.is_none(),
-            },
-        )
-    });
-    let description = embed
-        .description
-        .as_deref()
-        .filter(|_| shown.description)
-        .map(|description| text(description, EmbedText::Description { lists }));
-    let fields = if shown.fields {
-        embed
-            .fields
-            .iter()
-            .map(|field| EmbedFieldText {
-                name: text(&field.name, EmbedText::Title { links: true }),
-                value: text(&field.value, EmbedText::FieldValue { lists }),
-                inline: field.inline,
-            })
-            .collect()
-    } else {
-        Vec::new()
     };
     let image = |at: EmbedMediaRef| image(message, at);
     let media = if shown.gallery.is_empty() {
@@ -224,10 +212,14 @@ fn record(
     let icon = |url: Option<&str>, slot| url.filter(|url| !url.is_empty()).map(|_| key(slot));
     Embed {
         index,
-        kind,
+        kind: EmbedKind::from(shown.kind),
         inline: shown.inline,
-        color: embed.color.filter(|color| *color != 0xFF_FF_FF),
-        url: embed.url.as_deref().map(str::to_owned),
+        color: shown.color,
+        url: embed
+            .url
+            .as_deref()
+            .filter(|url| !url.is_empty())
+            .map(str::to_owned),
         provider: embed.provider.as_ref().and_then(|provider| {
             Some(EmbedLink {
                 name: provider.name.as_deref()?.to_owned(),
@@ -245,33 +237,24 @@ fn record(
         media,
         video,
         thumbnail: shown.thumbnail.and_then(image),
-        footer: footer(
-            embed,
-            icon(
+        footer: shown.footer.then(|| EmbedFooter {
+            text: embed
+                .footer
+                .as_ref()
+                .map(|footer| footer.text.to_string())
+                .filter(|text| !text.is_empty()),
+            icon: icon(
                 embed
                     .footer
                     .as_ref()
                     .and_then(|footer| footer.proxy_icon_url.as_deref()),
                 EmbedSlot::FooterIcon,
             ),
-        ),
+            timestamp: embed.timestamp.map(system_time),
+        }),
         tall: shown.tall,
         cover: shown.cover.map(MediaCover::from),
     }
-}
-
-fn footer(embed: &state::Embed, icon: Option<ImageKey>) -> Option<EmbedFooter> {
-    let text = embed
-        .footer
-        .as_ref()
-        .map(|footer| footer.text.to_string())
-        .filter(|text| !text.is_empty());
-    let timestamp = embed.timestamp.map(system_time);
-    (text.is_some() || timestamp.is_some()).then_some(EmbedFooter {
-        text,
-        icon,
-        timestamp,
-    })
 }
 
 fn image(message: &state::Message, at: EmbedMediaRef) -> Option<EmbedImage> {
@@ -292,7 +275,7 @@ fn image(message: &state::Message, at: EmbedMediaRef) -> Option<EmbedImage> {
         width: media.width?,
         height: media.height?,
         placeholder: media.placeholder.as_deref().map(str::to_owned),
-        animated: media.flags & IS_ANIMATED != 0,
+        animated: media.is_animated(),
     })
 }
 

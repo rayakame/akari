@@ -137,3 +137,25 @@ fn a_friendship_updates_dm_embeds() {
 
     assert_eq!(events, ["MessageUpdated(10)"]);
 }
+
+// Review: nothing is asked for embeds that don't show: `render_embeds` off, a system message.
+#[test]
+fn hidden_embeds_wait_for_no_scan() {
+    let mut state = viewing(DM);
+    state.entities.settings.display.render_embeds = false;
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        with_embed(dm_message(10, DM), MIRA, image_embed(0, None)),
+    );
+    assert_eq!(state.scans_due(false), []);
+
+    state.entities.settings.display.render_embeds = true;
+    let mut join = with_embed(dm_message(11, DM), MIRA, image_embed(0, None));
+    join["type"] = 7.into();
+    apply(&mut state, "MESSAGE_CREATE", join);
+    assert_eq!(
+        state.scans_due(false),
+        [(Snowflake::new(DM), vec![Snowflake::new(10)])]
+    );
+}

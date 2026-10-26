@@ -628,6 +628,22 @@ pub struct EmbedMedia {
     pub placeholder: Option<Box<str>>,
 }
 
+impl EmbedMedia {
+    /// A GIF, or a WebP or AVIF Discord marks animated (the client's `isAnimated`).
+    pub fn is_animated(&self) -> bool {
+        let path = self.url.split(['?', '#']).next().unwrap_or_default();
+        let extension = path
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+            .unwrap_or_default();
+        match extension.as_str() {
+            "gif" => true,
+            "webp" | "avif" => self.flags & IS_ANIMATED != 0,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EmbedAuthor {
