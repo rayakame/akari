@@ -9,6 +9,7 @@ struct RemoteImage: NSViewRepresentable {
     var placeholder = ImageLayerView.Placeholder.none
     var place = MotionPolicy.Place.userPanel
     var hovered = false
+    var fit = ImageFit.cover
     /// Told whether the image failed, after each change (never during a view update).
     var onFailure: ((Bool) -> Void)?
     @Environment(\.imageCache) private var images
@@ -44,6 +45,7 @@ struct RemoteImage: NSViewRepresentable {
         view.images = images
         view.cornerRadius = cornerRadius
         view.placeholder = placeholder
+        view.fit = fit
         view.show(key.map { ImageLayerView.Content(key: $0) })
         view.animates = motion.plays(
             place, MotionPolicy.Context(windowKey: focused, appActive: focused, hovered: hovered))

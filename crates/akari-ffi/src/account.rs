@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use akari_core::model::{ChannelId, GuildId, MessageId};
+use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, StickerId, StickerPackId};
 use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
 use crate::errors::{CreateThreadError, GatewayError, ImageError, RequestError};
 use crate::images::{ImageKey, ImageRequest, PendingImage, PendingSave};
-use crate::records::LoadReport;
+use crate::records::{EmojiSource, LoadReport, SourceGuild, StickerDetails, StickerPack};
 use crate::runtime::run;
 use crate::store::Store;
 
@@ -214,6 +214,52 @@ impl Account {
             core.search_threads(parent_id, &name).await
         })
         .await
+        .map_err(Into::into)
+    }
+
+    /// The server or app a custom emoji is from; a server only while it's discoverable (for the
+    /// user's own servers, `Store.emoji_guild`).
+    pub async fn emoji_source(&self, emoji_id: EmojiId) -> Result<EmojiSource, RequestError> {
+        let core = self.core.clone();
+        run(
+            self.runtime,
+            async move { core.emoji_source(emoji_id).await },
+        )
+        .await
+        .map(Into::into)
+        .map_err(Into::into)
+    }
+
+    /// A sticker, and its pack or server.
+    pub async fn sticker(&self, sticker_id: StickerId) -> Result<StickerDetails, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move { core.sticker(sticker_id).await })
+            .await
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+
+    /// The discoverable server a sticker is from, with its stickers.
+    pub async fn sticker_guild(&self, sticker_id: StickerId) -> Result<SourceGuild, RequestError> {
+        let core = self.core.clone();
+        run(
+            self.runtime,
+            async move { core.sticker_guild(sticker_id).await },
+        )
+        .await
+        .map(Into::into)
+        .map_err(Into::into)
+    }
+
+    /// One of Discord's sticker packs, with its stickers.
+    pub async fn sticker_pack(&self, pack_id: StickerPackId) -> Result<StickerPack, RequestError> {
+        let core = self.core.clone();
+        run(
+            self.runtime,
+            async move { core.sticker_pack(pack_id).await },
+        )
+        .await
+        .map(Into::into)
         .map_err(Into::into)
     }
 

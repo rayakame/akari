@@ -11,7 +11,9 @@ client (canary 649848, read 2026-10-24) and the plan's decisions D130–D137.
 Every image is asked at the pixels its box covers on screen: the box's points times the
 backing scale (2 on Retina), each side rounded up, then up to the next size Discord's CDN
 serves. The file is decoded to exactly those pixels (never above the source's own size) and
-drawn 1:1 as a layer's contents on whole backing pixels, so nothing is resampled. When the
+drawn 1:1 as a layer's contents on whole backing pixels, so nothing is resampled. Avatars and
+icons cover their box (the overflow clipped); emoji and stickers fit inside it, the whole
+picture centered, a wide one shorter than the box (Discord's `object-fit: contain`). When the
 window moves to a display with another scale, every image is asked again at the new size,
 and the old one stays until the new one has decoded. *Discord asks twice the drawn size for
 some places (a message avatar 80 for 40 points, 160 on Retina); Akari asks the screen's pixels:
@@ -36,6 +38,8 @@ Drawn size per place (the pixels asked on Retina in brackets):
 | Thread box's newest author | 16 (32) | never |
 | Threads browser rows | 16 (32), facepiles 24 (48) | never |
 | More Active Threads | 16 (32) | never |
+| Custom emoji in the text | 22 (44), jumbo 48 (96) | by `animate_emoji`, visibility, hover ([emoji.md](emoji.md)) |
+| Sticker | 160 (320) | by `animate_stickers`, visibility, hover |
 
 - **Users never show initials.** A user without an avatar shows Discord's default avatar,
   fetched from its CDN (`embed/avatars/{index}.png`) like any avatar; the index follows the
@@ -67,9 +71,10 @@ how much of the image shows, and hover:
 - **Avatars** play only while hovered: a message group's header avatar while any message of
   the group is hovered, a DM row's while the row is, a rail icon's while it is. The user
   panel, replies, facepiles and thread boxes never play.
-- **Custom emoji** (PR C) play with `animate_emoji`, at least 70 % visible and among the 100
-  messages nearest the bottom, or while hovered; **stickers** by `animate_stickers` (always,
-  on hover, never) and 70 %; **GIFs** (PR D) with `gif_auto_play` and 60 %, or while hovered.
+- **Custom emoji** play with `animate_emoji`, at least 70 % of their message visible and the
+  message among the 100 nearest the bottom, or while the message is hovered; **stickers** by
+  `animate_stickers` (always, on hover, never) and 70 % ([emoji.md](emoji.md)); **GIFs** (PR D)
+  with `gif_auto_play` and 60 %, or while hovered.
 - Reduce Motion turns autoplay off (GIFs, emoji) and stickers' "always" into "on hover", as
   the official client does; hover still plays.
 

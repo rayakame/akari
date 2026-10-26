@@ -43,6 +43,20 @@ final class ImageLayerView: NSView {
             placeholderLayer.cornerRadius = cornerRadius
         }
     }
+    /// Covering the box (avatars, icons) or the whole picture inside it (emoji, stickers).
+    var fit = ImageFit.cover {
+        didSet {
+            guard fit != oldValue else {
+                return
+            }
+            imageLayer.contentsGravity = fit == .cover ? .resizeAspectFill : .resizeAspect
+            if content != nil {
+                cancelLoads()
+                clearImage()
+                reload()
+            }
+        }
+    }
     /// Whether the owner wants the animation (the motion policy's say); nothing without an
     /// animated form.
     var animates = false {
@@ -53,13 +67,18 @@ final class ImageLayerView: NSView {
         }
     }
     /// Told when the image landed, failed or was replaced; owners that show something of their
-    /// own around a failure (a server's acronym tile) listen.
+    /// own around a failure (a server's acronym tile, a sticker's "Uh Oh!") listen.
     var onStateChange: ((ImageLayerView) -> Void)?
+    /// Shown in the box when the image failed (a custom emoji's `:name:`).
+    var fallbackText: String? {
+        didSet { updateFallback() }
+    }
     private(set) var content: Content?
     /// The still failed to load; the placeholder stays until a retry.
     private(set) var failed = false
     let imageLayer = CALayer()
     let placeholderLayer = CALayer()
+    let fallbackLayer = CATextLayer()
     private(set) var player: FramePlayer?
     private var still: CGImage?
     private var stillTask: Task<Void, Never>?
@@ -81,6 +100,14 @@ final class ImageLayerView: NSView {
             self.layer?.addSublayer(layer)
         }
         imageLayer.contentsGravity = .resizeAspectFill
+        fallbackLayer.actions = ["contents": NSNull(), "hidden": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        fallbackLayer.isHidden = true
+        fallbackLayer.alignmentMode = .center
+        fallbackLayer.truncationMode = .end
+        fallbackLayer.isWrapped = false
+        fallbackLayer.font = NSFont.systemFont(ofSize: TypeScale.size(11))
+        fallbackLayer.fontSize = TypeScale.size(11)
+        layer?.addSublayer(fallbackLayer)
         updatePlaceholder()
         // A selector observer goes away with the view.
         NotificationCenter.default.addObserver(
@@ -148,6 +175,8 @@ final class ImageLayerView: NSView {
         }
         imageLayer.frame = frame
         placeholderLayer.frame = frame
+        fallbackLayer.frame = frame
+        fallbackLayer.contentsScale = scale
         askIfPixelsChanged()
     }
 
@@ -192,7 +221,8 @@ final class ImageLayerView: NSView {
         guard let content, let pixels = pixelsIfSized else {
             return nil
         }
-        return ImageSpec(key: content.key, width: pixels.0, height: pixels.1, animated: animated)
+        return ImageSpec(
+            key: content.key, width: pixels.0, height: pixels.1, animated: animated, fit: fit)
     }
 
     private func reload() {
@@ -290,6 +320,19 @@ final class ImageLayerView: NSView {
                 placeholderLayer.backgroundColor = Palette.avatarPlaceholder.cgColor
             }
         }
+        updateFallback()
+    }
+
+    private func updateFallback() {
+        let shows = failed && fallbackText != nil
+        fallbackLayer.isHidden = !shows
+        guard shows else {
+            return
+        }
+        fallbackLayer.string = fallbackText
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            fallbackLayer.foregroundColor = Palette.textMuted.cgColor
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -321,7 +364,7 @@ final class ImageLayerView: NSView {
             guard let animation else {
                 return
             }
-            let player = FramePlayer(animation: animation, pixels: pixels) { [weak self] image, _ in
+            let player = FramePlayer(animation: animation, pixels: pixels, fit: self.fit) { [weak self] image, _ in
                 self?.imageLayer.contents = image
                 self?.imageLayer.isHidden = false
             }

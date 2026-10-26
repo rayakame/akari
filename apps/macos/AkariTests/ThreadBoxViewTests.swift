@@ -207,6 +207,15 @@ struct ThreadBoxViewTests {
         #expect(blank(Self.pixel(rep, 36, box.midY - 1.5)))
     }
 
+    // The line has no image layers: a custom emoji reads as its name.
+    @Test
+    func theLineShowsACustomEmojiAsItsName() throws {
+        let withEmoji = try shown(box(.latest(latest("look <:pog:5>"), authorName: "Mira"))).box
+        #expect(withEmoji.bottom == ["Mira", "look :pog:", "25m ago"])
+        let onlyEmoji = try shown(box(.latest(latest("<:pog:5>"), authorName: "Mira"))).box
+        #expect(onlyEmoji.bottom == ["Mira", ":pog:", "25m ago"])
+    }
+
     @Test
     func theBoxShowsTheLatestMessage() throws {
         let (_, view) = try shown()

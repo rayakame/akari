@@ -13,7 +13,7 @@ tracking event comes first.
 
 | Region | Cursor | Authority |
 |---|---|---|
-| The message list (each of the channel's and the split's): rows, a message's text, links, mentions, hidden spoilers and code blocks, thread boxes, Retry and Delete, Try again; the bars over it (unread, jump, locked, status) | I-beam over text, pointing hand over what clicks (the unread bar, the jump bar's button too), arrow elsewhere | The list's tracking area (`MessageTableController`): it hit-tests on every move, scroll, update and key change, while its window is key and on top at the pointer; over a bar it takes the bar's `CursorArea`. Text views and boxes track nothing themselves. |
+| The message list (each of the channel's and the split's): rows, a message's text, links, mentions, hidden spoilers and code blocks, thread boxes, Retry and Delete, Try again; the bars over it (unread, jump, locked, status) | I-beam over text, pointing hand over what clicks (custom and Unicode emoji, stickers, the unread bar, the jump bar's button too), arrow elsewhere | The list's tracking area (`MessageTableController`): it hit-tests on every move, scroll, update and key change, while its window is key and on top at the pointer; over a bar it takes the bar's `CursorArea`. Text views and boxes track nothing themselves. |
 | The composer | I-beam | AppKit (NSTextView's own) |
 | The channel header: the "# parent ›" link, the Threads button, the thread's "…" | Pointing hand | `CursorArea` |
 | The split's header: its title, "…", the X | Pointing hand | `CursorArea` |
@@ -27,6 +27,8 @@ tracking event comes first.
 | A floating split's card over the channel's list | What lies there | The list asks `CursorArea.cursor(at:in:)` for what isn't its own: an area, another authority, the I-beam over editable text, else the arrow |
 | The shield under the browser | Arrow | Its own tracking area (`ShieldWindow`) |
 | More Active Threads (never key): its rows and "See All" | Pointing hand | `CursorArea` |
+| An emoji's or sticker's popout (key): a server row that opens, "Show More" | Pointing hand | `CursorArea` |
+| The hover card over an emoji or sticker | None of its own: it takes no mouse events | The list keeps deciding under it |
 | Everything else: the server rail, the channel and DM lists, the user panel, the title bar, menus, alerts, the login screen (its fields: AppKit's I-beam) | Arrow | AppKit's default |
 
 Discord also shows the pointer over the channel and DM rows and the server icons; Akari's show the

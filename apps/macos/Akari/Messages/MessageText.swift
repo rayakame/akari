@@ -9,6 +9,8 @@ extension NSAttributedString.Key {
     // The x of a quote's bar, as an NSNumber.
     nonisolated static let akariQuoteBar = NSAttributedString.Key("akariQuoteBar")
     nonisolated static let akariSpoiler = NSAttributedString.Key("akariSpoiler")
+    // A custom emoji's box: `MessageText.EmojiBox` on its attachment character.
+    nonisolated static let akariEmoji = NSAttributedString.Key("akariEmoji")
 }
 
 /// A message's content as the list shows it.
@@ -32,6 +34,25 @@ enum MessageText {
         let hidden: Bool
     }
 
+    /// A custom emoji in the text (D139): a fixed box the layout manager places an image layer
+    /// on; `:name:` is its tooltip, its copy and its fallback.
+    nonisolated struct EmojiBox: Hashable {
+        let key: ImageKey
+        let name: String
+        let animated: Bool
+        /// The box's side in points: 1.375 × its line's font size, 48 in a jumbo message.
+        var side: CGFloat = 22
+        /// Centered on its line (jumbo); else its bottom on the line's bottom.
+        var centered = false
+
+        var id: EmojiId {
+            if case .emoji(let id, _) = key { id } else { EmojiId(rawValue: 0) }
+        }
+    }
+
+    /// A jumbo message's box side at the 16 pt base; inline boxes are 1.375 × their face's size.
+    nonisolated static let emojiJumbo: CGFloat = 48
+
     struct Built {
         let text: NSAttributedString
         /// When a relative timestamp's text changes next.
@@ -41,6 +62,24 @@ enum MessageText {
 
     nonisolated static let codePadding: CGFloat = 8
 
+    /// Where a plain first line's capitals are centered below the text's top, whatever the text
+    /// holds: a follow-up's hover time is centered there.
+    static let firstLineMiddle: CGFloat = {
+        let view = MessageTextView()
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 100)
+        let face = Typeface.body
+        let font = face.font(bold: false, italic: false)
+        view.show(
+            NSAttributedString(
+                string: "0",
+                attributes: [
+                    .font: font,
+                    .paragraphStyle: ParagraphKey(line: face.line).style,
+                    .baselineOffset: face.offset,
+                ]))
+        return view.firstBaselineOffsetFromTop - font.capHeight / 2
+    }()
+
     static func build(
         _ message: Message, revealed: Set<UInt16>, now: Date, times: TimestampText
     ) -> Built {
@@ -48,9 +87,22 @@ enum MessageText {
         return builder.build()
     }
 
-    /// The text a selection shows, as plain text: line breaks as newlines, symbols left out.
+    /// The text a selection shows, as plain text: line breaks as newlines, a custom emoji as
+    /// `:name:`, other symbols left out.
     nonisolated static func plain(_ text: NSAttributedString, _ range: NSRange) -> String {
-        text.attributedSubstring(from: range).string
+        let part = text.attributedSubstring(from: range)
+        let out = NSMutableString(string: part.string)
+        var emoji: [(NSRange, String)] = []
+        part.enumerateAttribute(.akariEmoji, in: NSRange(location: 0, length: part.length)) {
+            value, range, _ in
+            if let box = value as? EmojiBox {
+                emoji.append((range, String(repeating: ":\(box.name):", count: range.length)))
+            }
+        }
+        for (range, name) in emoji.reversed() {
+            out.replaceCharacters(in: range, with: name)
+        }
+        return (out as String)
             .replacingOccurrences(of: "\u{2028}", with: "\n")
             .replacingOccurrences(of: "\u{FFFC}", with: "")
     }
@@ -252,12 +304,7 @@ private struct Builder {
             default: Palette.textDefault
             }
         columns = Self.columns(message.formatted.blocks)
-        // Custom emoji are text until the emoji milestone, so they can't be large yet.
-        jumbo =
-            message.formatted.jumbo
-            && !message.formatted.blocks.contains { block in
-                block.spans.contains { if case .emoji = $0.kind { true } else { false } }
-            }
+        jumbo = message.formatted.jumbo
     }
 
     private static func columns(_ blocks: [TextBlock]) -> [CGFloat] {
@@ -502,8 +549,12 @@ private struct Builder {
             mention("@here", placeholder: false, span, style, attributes)
         case .command(let name, _):
             mention(MentionText.command(name), placeholder: false, span, style, attributes)
-        case .emoji(let name, _, _):
-            append(":\(name):", attributes)
+        case .emoji(let name, _, let animated, let key):
+            let side = jumbo ? TypeScale.size(MessageText.emojiJumbo) : (style.face.size * 1.375).rounded()
+            attributes[.akariEmoji] = MessageText.EmojiBox(
+                key: key, name: name, animated: animated, side: side, centered: jumbo)
+            attributes[.toolTip] = ":\(name):"
+            append(emojiBox(side, style.face, attributes))
         case .timestamp(let seconds, let timestampStyle):
             attributes[.toolTip] = times.fullDate(seconds)
             pill(times.text(seconds, style: timestampStyle, now: now), .timestamp, attributes)
@@ -628,6 +679,22 @@ private struct Builder {
         out.addAttribute(.kern, value: kern + 2, range: NSRange(location: index, length: 1))
     }
 
+    // The attachment only makes room: `side` wide, no taller than the font's ascent and on the
+    // baseline, so no line grows for it and string drawing measures what the view lays out. The
+    // layout manager places the box itself on the line (`MessageLayoutManager.blocks`).
+    private func emojiBox(_ side: CGFloat, _ face: Typeface, _ attributes: [NSAttributedString.Key: Any])
+        -> NSAttributedString
+    {
+        let attachment = NSTextAttachment()
+        let font = face.font(bold: false, italic: false)
+        attachment.bounds = NSRect(x: 0, y: 0, width: side, height: side)
+        attachment.attachmentCell = EmojiCell(
+            size: NSSize(width: side, height: min(side, font.ascender.rounded(.down))))
+        let box = NSMutableAttributedString(attachment: attachment)
+        box.addAttributes(attributes, range: NSRange(location: 0, length: box.length))
+        return box
+    }
+
     private func symbol(
         _ name: String, _ face: Typeface, _ color: NSColor,
         _ attributes: [NSAttributedString.Key: Any]
@@ -643,6 +710,55 @@ private struct Builder {
         let symbol = NSMutableAttributedString(attachment: attachment)
         symbol.addAttributes(attributes, range: NSRange(location: 0, length: symbol.length))
         return symbol
+    }
+}
+
+// TextKit 1 gives an attachment without an image or a cell a 1 pt advance; this cell takes the
+// box's size and draws nothing, so the text moves over and string drawing measures the same.
+private final class EmojiCell: NSTextAttachmentCell {
+    nonisolated private let size: NSSize
+
+    init(size: NSSize) {
+        self.size = size
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) {
+        size = .zero
+        super.init(coder: coder)
+    }
+
+    nonisolated override func cellSize() -> NSSize {
+        size
+    }
+
+    nonisolated override func cellBaselineOffset() -> NSPoint {
+        .zero
+    }
+
+    nonisolated override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {}
+
+    nonisolated override func draw(
+        withFrame cellFrame: NSRect, in controlView: NSView?, characterIndex charIndex: Int
+    ) {}
+
+    nonisolated override func draw(
+        withFrame cellFrame: NSRect, in controlView: NSView?, characterIndex charIndex: Int,
+        layoutManager: NSLayoutManager
+    ) {}
+
+    nonisolated override func highlight(_ flag: Bool, withFrame cellFrame: NSRect, in controlView: NSView?) {}
+
+    // A drag from the emoji selects text, as from any character, instead of dragging the
+    // attachment out.
+    nonisolated override func wantsToTrackMouse() -> Bool {
+        false
+    }
+
+    nonisolated override func wantsToTrackMouse(
+        for theEvent: NSEvent, in cellFrame: NSRect, of controlView: NSView?, atCharacterIndex charIndex: Int
+    ) -> Bool {
+        false
     }
 }
 

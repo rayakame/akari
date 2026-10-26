@@ -40,7 +40,7 @@ impl Document {
         &self.links
     }
 
-    /// 1–27 emoji (Unicode or custom) and whitespace, nothing else.
+    /// 1–30 emoji (Unicode or custom) and whitespace, nothing else.
     pub fn jumbo(&self) -> bool {
         self.jumbo
     }

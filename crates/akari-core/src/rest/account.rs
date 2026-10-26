@@ -24,6 +24,10 @@ const THREAD_SEARCH: &str = "channels/{}/threads/search";
 const THREADS: &str = "channels/{}/threads";
 const MESSAGE_THREADS: &str = "channels/{}/messages/{}/threads";
 const REFRESH_URLS: &str = "attachments/refresh-urls";
+const EMOJI_SOURCE: &str = "emojis/{}/source";
+const STICKER: &str = "stickers/{}";
+const STICKER_GUILD: &str = "stickers/{}/guild";
+const STICKER_PACK: &str = "sticker-packs/{}";
 const SLOWMODE: u32 = 20016;
 const DAY_MILLIS: u64 = 86_400_000;
 const INVALID_FORM_BODY: u32 = 50035;
@@ -414,6 +418,54 @@ impl AccountRest {
             .await?;
         // `None`: Discord said yes in a body that doesn't read as a channel.
         Ok(serde_json::from_slice(&body).ok())
+    }
+
+    // A GET whose answer decodes as `T`, on a route with no major parameter.
+    async fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        template: &'static str,
+        path: &str,
+    ) -> Result<T, RequestError> {
+        let route = RouteKey::new(Method::Get, template, 0);
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Allowed, || {
+                self.request(HttpMethod::GET, path)
+            })
+            .await
+            .map_err(RequestError::from)?;
+        serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
+    }
+
+    pub(crate) async fn emoji_source(
+        &self,
+        emoji: model::EmojiId,
+    ) -> Result<model::EmojiSource, RequestError> {
+        self.get_json(EMOJI_SOURCE, &format!("emojis/{}/source", emoji.get()))
+            .await
+    }
+
+    pub(crate) async fn sticker(
+        &self,
+        sticker: model::StickerId,
+    ) -> Result<model::Sticker, RequestError> {
+        self.get_json(STICKER, &format!("stickers/{}", sticker.get()))
+            .await
+    }
+
+    pub(crate) async fn sticker_guild(
+        &self,
+        sticker: model::StickerId,
+    ) -> Result<model::StickerGuild, RequestError> {
+        self.get_json(STICKER_GUILD, &format!("stickers/{}/guild", sticker.get()))
+            .await
+    }
+
+    pub(crate) async fn sticker_pack(
+        &self,
+        pack: model::StickerPackId,
+    ) -> Result<model::StickerPack, RequestError> {
+        self.get_json(STICKER_PACK, &format!("sticker-packs/{}", pack.get()))
+            .await
     }
 
     // `query` is already encoded. A 202 while Discord indexes the channel decodes without

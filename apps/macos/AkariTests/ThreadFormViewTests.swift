@@ -310,7 +310,7 @@ struct MessageMenuThreadTests {
             id: UserId(rawValue: 2), username: "ray", globalName: nil, displayName: "Ray",
             bot: false, system: false, avatar: .defaultAvatar(index: 2)),
         fromWebhook: false, content: "hello", timestamp: Date(), editedTimestamp: nil,
-        pinned: false, mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
+        pinned: false, mentionEveryone: false, attachments: [], embedCount: 0, stickers: [],
         componentsV2: false, delivery: .sent, formatted: formattedText(content: "hello"),
         mentionsMe: false, reference: nil, hasThread: false, mentions: [], call: nil,
         roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
@@ -616,9 +616,10 @@ struct ThreadFormKeysTests {
 @MainActor
 struct ThreadFormPreviewTests {
     // Ray's long message from #new as the source, in a 500-point window less the title bar.
-    func rendered(lines: Int, height: CGFloat = 468) throws -> (SessionModel, ThreadFormModel, NSHostingView<some View>, NSWindow) {
+    func rendered(lines: Int, height: CGFloat = 468, emoji: Bool = false) throws -> (SessionModel, ThreadFormModel, NSHostingView<some View>, NSWindow) {
         let fakes = FakeBrowserStore()
         fakes.lines = true
+        fakes.firstLineEmoji = emoji
         fakes.creation = ThreadCreation(public: true, private: true)
         fakes.longFirstLine = lines
         let session = fakes.session()
@@ -664,6 +665,32 @@ struct ThreadFormPreviewTests {
 
         #expect(scroll.frame.height > 100)
         #expect(scroll.frame.height <= host.bounds.height / 2 + 1, "\(scroll.frame.height)")
+    }
+
+    // The preview's emoji and stickers come from the session's cache, like the list's.
+    @Test
+    func thePreviewShowsEmojiFromTheCache() throws {
+        let (session, form, _, window) = try rendered(lines: 1, emoji: true)
+        defer { window.close() }
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        let host = NSHostingView(
+            rootView: ThreadFormView(form: form, session: session).frame(width: 480, height: 468)
+                .environment(\.imageCache, cache))
+        let own = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 468), styleMask: [.titled],
+            backing: .buffered, defer: false)
+        own.isReleasedWhenClosed = false
+        defer { own.close() }
+        own.contentView = host
+        host.layoutSubtreeIfNeeded()
+
+        let preview = try #require(SessionScreenTests().views(MessagePreviewView.self, in: host).first)
+        #expect(form.source?.content.contains("<:") == true, "the fixture's source carries a custom emoji")
+        let layers = SessionScreenTests().views(ImageLayerView.self, in: preview).filter {
+            if case .emoji = $0.content?.key { true } else { false }
+        }
+        #expect(layers.count == 1)
+        #expect(layers.first?.images === cache)
     }
 
     @Test

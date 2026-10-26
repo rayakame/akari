@@ -144,6 +144,9 @@ pub enum SkuMarker {}
 /// Marks the ID of a sticker.
 pub enum StickerMarker {}
 
+/// Marks the ID of one of Discord's sticker packs.
+pub enum StickerPackMarker {}
+
 /// Marks the ID of a user.
 pub enum UserMarker {}
 

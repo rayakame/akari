@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use akari_core::model::{
-    AttachmentId, ChannelId, ChannelType, GuildId, MessageId, MessageType, Timestamp, UserId,
+    AttachmentId, ChannelId, ChannelType, EmojiId, GuildId, MessageId, MessageType, PremiumType,
+    StickerFormatType, StickerId, StickerPackId, Timestamp, UserId,
 };
 use akari_core::state;
 
@@ -428,7 +429,7 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
     /// Embeds aren't rendered yet; the count is enough for a placeholder.
     pub embed_count: u32,
-    pub sticker_names: Vec<String>,
+    pub stickers: Vec<Sticker>,
     /// Laid out with Components V2, which Akari can't show yet; such a message has no content.
     pub components_v2: bool,
     pub delivery: Delivery,
@@ -520,11 +521,7 @@ impl Message {
             mention_everyone: message.mention_everyone,
             attachments: message.attachments.iter().map(Attachment::from).collect(),
             embed_count: u32::try_from(message.embeds.len()).unwrap_or(u32::MAX),
-            sticker_names: message
-                .stickers
-                .iter()
-                .map(|sticker| sticker.name.to_string())
-                .collect(),
+            stickers: message.stickers.iter().map(Sticker::from).collect(),
             components_v2: message.uses_components_v2(),
             delivery: message.delivery.into(),
             formatted,
@@ -608,6 +605,27 @@ impl From<&state::Attachment> for Attachment {
             filename: attachment.filename.to_string(),
             content_type: attachment.content_type.as_deref().map(str::to_owned),
             size: attachment.size,
+        }
+    }
+}
+
+/// A sticker a message carries; `key` is its image in its format (asking for a Lottie
+/// sticker's fails with `Unsupported`: no renderer yet).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Sticker {
+    pub id: StickerId,
+    pub name: String,
+    pub format: StickerFormatType,
+    pub key: ImageKey,
+}
+
+impl From<&state::Sticker> for Sticker {
+    fn from(sticker: &state::Sticker) -> Self {
+        Self {
+            id: sticker.id,
+            name: sticker.name.to_string(),
+            format: sticker.format,
+            key: sticker.image_key().into(),
         }
     }
 }
@@ -900,4 +918,149 @@ pub struct ContentStats {
     pub event_parses: u64,
     /// Documents held now.
     pub cached: u32,
+}
+
+/// The current user's Nitro subscription.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum Nitro {
+    None,
+    Classic,
+    Nitro,
+    Basic,
+}
+
+impl From<PremiumType> for Nitro {
+    fn from(premium: PremiumType) -> Self {
+        match premium {
+            PremiumType::Tier1 => Self::Classic,
+            PremiumType::Tier2 => Self::Nitro,
+            PremiumType::Tier3 => Self::Basic,
+            _ => Self::None,
+        }
+    }
+}
+
+/// Where a custom emoji comes from (`Account::emoji_source`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum EmojiSource {
+    /// A discoverable server: Discord answers no other.
+    Guild {
+        guild: SourceGuild,
+    },
+    /// An app's own emoji.
+    Application {
+        name: String,
+    },
+    Unknown,
+}
+
+/// A server an emoji or a sticker is from, as its popout shows it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SourceGuild {
+    pub id: GuildId,
+    pub name: String,
+    pub icon: Option<ImageKey>,
+    pub discoverable: bool,
+    pub verified: bool,
+    pub partnered: bool,
+    pub presence_count: Option<u32>,
+    pub emojis: Vec<SourceEmoji>,
+    pub stickers: Vec<Sticker>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SourceEmoji {
+    pub id: EmojiId,
+    pub name: String,
+    pub animated: bool,
+    pub key: ImageKey,
+}
+
+/// A sticker and where it's from (`Account::sticker`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StickerDetails {
+    pub sticker: Sticker,
+    pub origin: StickerOrigin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum StickerOrigin {
+    /// One of Discord's packs.
+    Pack {
+        pack_id: StickerPackId,
+    },
+    Guild {
+        guild_id: GuildId,
+    },
+    Unknown,
+}
+
+/// One of Discord's sticker packs (`Account::sticker_pack`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StickerPack {
+    pub id: StickerPackId,
+    pub name: String,
+    pub stickers: Vec<Sticker>,
+}
+
+impl From<state::SourceGuild> for SourceGuild {
+    fn from(guild: state::SourceGuild) -> Self {
+        Self {
+            id: guild.id,
+            name: guild.name.to_string(),
+            icon: guild.icon_key().map(Into::into),
+            discoverable: guild.discoverable,
+            verified: guild.verified,
+            partnered: guild.partnered,
+            presence_count: guild.presence_count,
+            emojis: guild
+                .emojis
+                .iter()
+                .map(|emoji| SourceEmoji {
+                    id: emoji.id,
+                    name: emoji.name.to_string(),
+                    animated: emoji.animated,
+                    key: emoji.image_key().into(),
+                })
+                .collect(),
+            stickers: guild.stickers.iter().map(Sticker::from).collect(),
+        }
+    }
+}
+
+impl From<state::EmojiSource> for EmojiSource {
+    fn from(source: state::EmojiSource) -> Self {
+        match source {
+            state::EmojiSource::Guild(guild) => Self::Guild {
+                guild: guild.into(),
+            },
+            state::EmojiSource::Application { name } => Self::Application {
+                name: name.to_string(),
+            },
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<state::StickerDetails> for StickerDetails {
+    fn from(details: state::StickerDetails) -> Self {
+        Self {
+            sticker: Sticker::from(&details.sticker),
+            origin: match details.origin {
+                state::StickerOrigin::Pack(pack_id) => StickerOrigin::Pack { pack_id },
+                state::StickerOrigin::Guild(guild_id) => StickerOrigin::Guild { guild_id },
+                _ => StickerOrigin::Unknown,
+            },
+        }
+    }
+}
+
+impl From<state::StickerPack> for StickerPack {
+    fn from(pack: state::StickerPack) -> Self {
+        Self {
+            id: pack.id,
+            name: pack.name.to_string(),
+            stickers: pack.stickers.iter().map(Sticker::from).collect(),
+        }
+    }
 }

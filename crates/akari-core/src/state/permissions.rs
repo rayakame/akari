@@ -145,6 +145,7 @@ mod tests {
             large: false,
             default_message_notifications: crate::state::NotificationLevel::AllMessages,
             community: false,
+            emojis: Box::new([]),
         }
     }
 

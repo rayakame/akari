@@ -2,7 +2,9 @@ use serde::Deserialize;
 
 use super::int_enum::int_enum;
 use super::permissions::Permissions;
-use super::snowflake::{ChannelMarker, GuildMarker, RoleMarker, Snowflake, UserMarker};
+use super::snowflake::{
+    ChannelMarker, EmojiMarker, GuildMarker, RoleMarker, Snowflake, UserMarker,
+};
 use super::timestamp::Timestamp;
 use super::user::User;
 
@@ -34,6 +36,30 @@ pub struct Guild {
     /// Boost level.
     #[serde(default)]
     pub premium_tier: PremiumTier,
+}
+
+/// A guild's custom emoji, as READY, GUILD_CREATE and GUILD_EMOJIS_UPDATE carry them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GuildEmoji {
+    pub id: Snowflake<EmojiMarker>,
+    /// `None` only for an emoji that was deleted.
+    pub name: Option<String>,
+    #[serde(default)]
+    pub animated: bool,
+    /// `false` when the guild lost the boosts the emoji needs.
+    #[serde(default = "yes")]
+    pub available: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A guild emoji by its ID alone: READY's and GUILD_EMOJIS_UPDATE's lists, of which the store
+/// keeps only which guild an emoji is from, decoded without their names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct EmojiRef {
+    pub id: Snowflake<EmojiMarker>,
 }
 
 // The reference's documented default.

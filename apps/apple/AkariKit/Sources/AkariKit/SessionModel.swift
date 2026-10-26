@@ -699,6 +699,14 @@ public final class SessionModel {
     }
 
     /// Opens `parent`'s Threads browser, in place of one already open.
+    /// A clicked emoji's or sticker's popout, for a message in `channel` ("this server" is the
+    /// channel's).
+    public func expressionPopout(_ target: ExpressionTarget, in channel: ChannelId) -> ExpressionPopoutModel {
+        ExpressionPopoutModel(
+            target: target, channelGuild: store.channel(id: channel)?.guildId, store: store,
+            lookups: account)
+    }
+
     public func openThreadBrowser(of parent: ChannelId, as presentation: ThreadBrowserModel.Presentation) {
         engage()
         threadBrowser = ThreadBrowserModel(

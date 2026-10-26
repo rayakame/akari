@@ -249,7 +249,9 @@ struct ThreadBoxTests {
                     Attachment(id: id(1), filename: "a.png", contentType: nil, size: 1)
                 ]
             } == "Click to see attachment")
-        #expect(placeholder { $0.stickerNames = ["wave"] } == "Click to see sticker")
+        let wave = Sticker(
+            id: id(7), name: "wave", format: .png, key: .sticker(stickerId: id(7), format: .png))
+        #expect(placeholder { $0.stickers = [wave] } == "Click to see sticker")
         #expect(placeholder { $0.kind = .chatInputCommand } == "Click to see command")
         #expect(placeholder { $0.kind = .contextMenuCommand } == "Click to see command")
         #expect(placeholder { $0.componentsV2 = true } == "Click to see message")

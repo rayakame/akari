@@ -58,7 +58,11 @@ author; the rest show only their content.
 **The other messages:** no avatar and no name. Hovering one shows its time (hours and minutes)
 in the left column, right-aligned in a 56 wide space. Their text sits where the first text line
 of a group start sits in its line: its baseline 19 below the box's top (derived from the group
-start's measurement; *Akari: 3 above the text, 1 below*).
+start's measurement; *Akari: 3 above the text, 1 below*). The time is centered on that first
+line, its digits' middle on the middle of the line's capitals, so it sits about 2 above the
+text's baseline and in the middle of a one-line message (*Akari: 13.25 below the box's top*).
+It stays there whatever the message holds: a jumbo emoji line, a sticker, a file or an embed
+doesn't move it (observed 2026-10-26).
 
 ### When a new group starts
 

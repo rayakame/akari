@@ -25,6 +25,8 @@ pub(crate) struct Timing {
     pub(crate) invalid_session_max: Duration,
     pub(crate) healthy: Duration,
     pub(crate) rate_window: Duration,
+    /// What a popout's lookup is given, as the official client gives an emoji's source.
+    pub(crate) lookup_timeout: Duration,
 }
 
 impl Default for Timing {
@@ -39,6 +41,7 @@ impl Default for Timing {
             invalid_session_max: Duration::from_secs(5),
             healthy: Duration::from_secs(30),
             rate_window: Duration::from_secs(60),
+            lookup_timeout: Duration::from_secs(5),
         }
     }
 }

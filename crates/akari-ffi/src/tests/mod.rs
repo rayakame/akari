@@ -4,6 +4,7 @@ mod badges;
 mod cache;
 mod client;
 mod contents;
+mod expressions;
 mod fake;
 mod formatted;
 mod images;

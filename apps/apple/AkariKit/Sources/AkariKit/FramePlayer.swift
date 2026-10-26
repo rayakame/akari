@@ -93,6 +93,7 @@ public final class FramePlayer {
 
     public let animation: AnimationSource
     public let pixels: (width: Int, height: Int)
+    public let fit: ImageFit
     public private(set) var isPlaying = false
     private let clock: AnimationClock
     private let onFrame: Frame
@@ -109,12 +110,13 @@ public final class FramePlayer {
     private let decoding = LockedBox<Task<Void, Never>?>(nil)
 
     public init(
-        animation: AnimationSource, pixels: (width: Int, height: Int),
+        animation: AnimationSource, pixels: (width: Int, height: Int), fit: ImageFit = .cover,
         clock: AnimationClock = .shared, frameBudget: Int = FramePlayer.frameBudget,
         onFrame: @escaping Frame
     ) {
         self.animation = animation
         self.pixels = pixels
+        self.fit = fit
         self.clock = clock
         self.onFrame = onFrame
         let perFrame = pixels.width * pixels.height * 4
@@ -143,8 +145,9 @@ public final class FramePlayer {
         }
         let animation = animation
         let pixels = pixels
+        let fit = fit
         let decoded = await Task.detached(priority: .userInitiated) {
-            indexes.compactMap { index in animation.frame(index, pixels: pixels).map { (index, $0) } }
+            indexes.compactMap { index in animation.frame(index, pixels: pixels, fit: fit).map { (index, $0) } }
         }.value
         for (index, image) in decoded where frames[index] == nil {
             frames[index] = image
@@ -230,6 +233,7 @@ public final class FramePlayer {
         stopDecoding()
         let animation = animation
         let pixels = pixels
+        let fit = fit
         let count = animation.frameCount
         let generation = generation
         if keepsAll {
@@ -240,7 +244,7 @@ public final class FramePlayer {
             }
             decoding.withLock { $0 = Task.detached(priority: .userInitiated) { [weak self] in
                 for index in missing where !Task.isCancelled {
-                    if let image = animation.frame(index, pixels: pixels) {
+                    if let image = animation.frame(index, pixels: pixels, fit: fit) {
                         await self?.decoded(index, image, generation: generation)
                     }
                 }
@@ -265,7 +269,7 @@ public final class FramePlayer {
                 if present.current.contains(index) {
                     continue
                 }
-                if let image = animation.frame(index, pixels: pixels) {
+                if let image = animation.frame(index, pixels: pixels, fit: fit) {
                     await self?.decoded(index, image, generation: generation)
                 }
             }

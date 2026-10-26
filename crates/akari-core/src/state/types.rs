@@ -4,9 +4,9 @@ use std::sync::Arc;
 use super::settings::NotificationLevel;
 use crate::media::ImageKey;
 use crate::model::{
-    AttachmentId, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageReferenceType,
-    MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake, StickerFormatType,
-    StickerId, Timestamp, UserId, WebhookId,
+    AttachmentId, ChannelId, ChannelType, EmojiId, GenericMarker, GuildId, MessageId,
+    MessageReferenceType, MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake,
+    StickerFormatType, StickerId, Timestamp, UserId, WebhookId,
 };
 
 /// The logged-in user.
@@ -112,9 +112,38 @@ pub struct Guild {
     pub default_message_notifications: NotificationLevel,
     /// A community server, where the user can choose its channels ("Channels & Roles").
     pub community: bool,
+    /// Its custom emoji, sorted: which server an emoji in a message is from.
+    pub emojis: Box<[EmojiId]>,
 }
 
 impl Guild {
+    /// Equal in all a host shows: its emoji list aside, which nothing shows.
+    pub(crate) fn shows_the_same(&self, other: &Self) -> bool {
+        let Self {
+            id,
+            name,
+            icon,
+            banner,
+            owner_id,
+            roles,
+            member_count,
+            large,
+            default_message_notifications,
+            community,
+            emojis: _,
+        } = self;
+        *id == other.id
+            && *name == other.name
+            && *icon == other.icon
+            && *banner == other.banner
+            && *owner_id == other.owner_id
+            && *roles == other.roles
+            && *member_count == other.member_count
+            && *large == other.large
+            && *default_message_notifications == other.default_message_notifications
+            && *community == other.community
+    }
+
     /// The icon's image; `None` without one (the app shows initials).
     pub fn icon_key(&self) -> Option<ImageKey> {
         let hash = self.icon.as_ref().filter(|hash| hash.is_cdn_hash())?;
@@ -546,6 +575,17 @@ pub struct Sticker {
     pub format: StickerFormatType,
 }
 
+impl Sticker {
+    /// The sticker's image in its format. A Lottie sticker's key is asked for like any other;
+    /// the media layer answers `Unsupported` until Akari has a renderer.
+    pub fn image_key(&self) -> ImageKey {
+        ImageKey::Sticker {
+            id: self.id,
+            format: self.format,
+        }
+    }
+}
+
 /// An avatar, icon or banner hash. The usual 32-hex-digit hashes take 17 bytes.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ImageHash(Repr);
@@ -726,6 +766,22 @@ mod tests {
     }
 
     #[test]
+    fn a_stickers_key_carries_its_format() {
+        let sticker = Sticker {
+            id: StickerId::new(7),
+            name: "wave".into(),
+            format: StickerFormatType::Lottie,
+        };
+        assert_eq!(
+            sticker.image_key(),
+            ImageKey::Sticker {
+                id: StickerId::new(7),
+                format: StickerFormatType::Lottie,
+            }
+        );
+    }
+
+    #[test]
     fn the_avatar_key_is_the_avatar_or_the_default() {
         let hash = ImageHash::parse("0123456789abcdef0123456789abcdef");
         let with = User {
@@ -766,6 +822,7 @@ mod tests {
             large: false,
             default_message_notifications: NotificationLevel::AllMessages,
             community: false,
+            emojis: Box::new([]),
         };
         assert_eq!(
             guild.icon_key(),

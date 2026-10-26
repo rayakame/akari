@@ -51,12 +51,26 @@ public enum ImageDecoder {
     static func decode(
         _ source: CGImageSource, frame: Int, covering pixels: (width: Int, height: Int)
     ) -> CGImage? {
+        decode(source, frame: frame, pixels: pixels, fit: .cover)
+    }
+
+    /// `frame` decoded so that it fits inside `pixels` (the smaller of the two ratios): the
+    /// whole picture, a wide one shorter than the box, never above the source's own size.
+    static func decode(
+        _ source: CGImageSource, frame: Int, fitting pixels: (width: Int, height: Int)
+    ) -> CGImage? {
+        decode(source, frame: frame, pixels: pixels, fit: .contain)
+    }
+
+    static func decode(
+        _ source: CGImageSource, frame: Int, pixels: (width: Int, height: Int), fit: ImageFit
+    ) -> CGImage? {
         guard let size = orientedSize(of: source, frame: frame) else {
             return nil
         }
         let longest = max(size.width, size.height)
-        let scale = max(
-            Double(pixels.width) / Double(size.width), Double(pixels.height) / Double(size.height))
+        let ratios = (Double(pixels.width) / Double(size.width), Double(pixels.height) / Double(size.height))
+        let scale = fit == .cover ? max(ratios.0, ratios.1) : min(ratios.0, ratios.1)
         let wanted = scale >= 1 ? longest : Int((Double(longest) * scale).rounded(.up))
         let options: [CFString: Any] = [
             kCGImageSourceThumbnailMaxPixelSize: wanted,
@@ -146,14 +160,14 @@ public final class AnimationSource: @unchecked Sendable {
         loopCount = Self.loopCount(in: container)
     }
 
-    /// `index` decoded to cover `pixels`.
-    public func frame(_ index: Int, pixels: (width: Int, height: Int)) -> CGImage? {
+    /// `index` decoded to cover `pixels`, or to fit inside them.
+    public func frame(_ index: Int, pixels: (width: Int, height: Int), fit: ImageFit = .cover) -> CGImage? {
         guard (0..<frameCount).contains(index) else {
             return nil
         }
         decodes.withLock { $0 += 1 }
         return lock.withLock {
-            ImageDecoder.decode(source, frame: index, covering: pixels)
+            ImageDecoder.decode(source, frame: index, pixels: pixels, fit: fit)
         }
     }
 

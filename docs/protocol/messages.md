@@ -288,3 +288,24 @@ would show as an empty row.
 Akari doesn't model `components` yet. The state message keeps the flag, the FFI record says
 `components_v2`, and the apps show a one-line placeholder instead of the layout; the row still
 lists the message's attachments. Reading and rendering the components is a later milestone.
+
+## Emoji and stickers in a message
+
+What a custom emoji's or a sticker's popout shows comes partly from the store, partly from
+Discord (canary 649848's calls):
+
+- The user's servers carry their custom emoji in READY and GUILD_CREATE (`emojis`) and
+  GUILD_EMOJIS_UPDATE (the whole list); akari-core keeps each server's emoji IDs, sorted
+  (`Store::emoji_guild`), in memory and in the disk cache's guild row.
+- `GET /emojis/{emoji.id}/source` (`Account::emoji_source`): `{type: "GUILD" | "APPLICATION",
+  guild, application}`. A guild is answered only while it's discoverable; its object has `id`,
+  `name`, `icon`, `features` (DISCOVERABLE, VERIFIED, PARTNERED), `emojis` and
+  `approximate_presence_count`. The official client gives it 5 s and shows the invite-only line
+  on any failure.
+- `GET /stickers/{sticker.id}` (`Account::sticker`): `type` 1 (a Discord pack, `pack_id`) or 2
+  (a server's, `guild_id`), `format_type`.
+- `GET /stickers/{sticker.id}/guild` (`Account::sticker_guild`): the discoverable server, with up
+  to 30 `stickers`.
+- `GET /sticker-packs/{pack.id}` (`Account::sticker_pack`): `name`, `stickers`.
+- Nitro (`premium_type`): any tier counts for emoji; for stickers only Nitro (2) and Basic (3),
+  not Classic (1).

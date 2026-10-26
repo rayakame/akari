@@ -1,5 +1,6 @@
 use akari_core::model::{
-    AttachmentId, ChannelId, EmojiId, GuildId, MessageId, Permissions, RoleId, StickerId, UserId,
+    AttachmentId, ChannelId, EmojiId, GuildId, MessageId, Permissions, RoleId, StickerId,
+    StickerPackId, UserId,
 };
 
 uniffi::custom_type!(UserId, u64, {
@@ -48,6 +49,12 @@ uniffi::custom_type!(StickerId, u64, {
     remote,
     lower: |id| id.get(),
     try_lift: |raw| Ok(StickerId::new(raw)),
+});
+
+uniffi::custom_type!(StickerPackId, u64, {
+    remote,
+    lower: |id| id.get(),
+    try_lift: |raw| Ok(StickerPackId::new(raw)),
 });
 
 uniffi::custom_type!(Permissions, u64, {

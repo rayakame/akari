@@ -272,8 +272,9 @@ The core hands out files (`Account.image(_:)`, `docs/protocol/cdn.md`); AkariKit
 plays them (`docs/ui/images.md`):
 
 - `ImageCache` (`session.images`, main actor): `image(spec)` decodes the file for an
-  `ImageSpec` (a key and the box's pixels) at those pixels off the main actor, covering the box
-  and never above the source, refusing sources over 64 MP from the header; keeps the result in
+  `ImageSpec` (a key, the box's pixels and its `fit`: covering the box for avatars and icons,
+  the whole picture inside it for emoji and stickers) at those pixels off the main actor, never
+  above the source, refusing sources over 64 MP from the header; keeps the result in
   two LRUs bounded in bytes (identity images 16 MB, media 48 MB); shares one source call between
   concurrent asks and cancels it with the last waiter; asks once more for a file the system
   purged; `cached(_:)` answers synchronously; `pin`/`unpin` keep what a box shows;
@@ -292,8 +293,13 @@ plays them (`docs/ui/images.md`):
   a window of four frames ahead of the play head is kept; a released player ends its decoding.
 - `AnimatedFormatProbe.install()` runs once at launch: `current` is `.webP` where ImageIO
   composites the shipped fixture right, `.gif` where it doesn't (macOS 14) or until it ran.
-- `ImageKey.canAnimate`: an `a_` hash or an animated emoji. `sameSubject(as:)`: the same user,
-  server, group, emoji or attachment, whatever the hash.
+- `ExpressionPopoutModel` (`session.expressionPopout(target, in:)`): a clicked custom emoji's,
+  Unicode emoji's or sticker's popout, its content (`ExpressionPopout`) decided by the official
+  client's rules from the store (`ExpressionStore`: the user's servers and their emoji, the Nitro
+  tier) and Discord's answers (`ExpressionLookups`, 5 s for an emoji's source);
+  `ExpressionTarget.card` is its hover card (`ExpressionCard`).
+- `ImageKey.canAnimate`: an `a_` hash, an animated emoji, an APNG or GIF sticker.
+  `sameSubject(as:)`: the same user, server, group, emoji or attachment, whatever the hash.
 
 ## Tests
 

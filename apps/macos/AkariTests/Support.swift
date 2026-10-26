@@ -21,11 +21,18 @@ func author(_ raw: UInt64, _ name: String = "Mira", bot: Bool = false) -> User {
         displayName: name, bot: bot, system: false, avatar: .defaultAvatar(index: UInt8(raw % 6)))
 }
 
+/// A PNG sticker named `name`.
+func sticker(_ raw: UInt64, _ name: String, format: StickerFormatType = .png) -> Sticker {
+    Sticker(
+        id: StickerId(rawValue: raw), name: name, format: format,
+        key: .sticker(stickerId: StickerId(rawValue: raw), format: format))
+}
+
 func row(
     _ raw: UInt64, by user: User = author(1), at time: Date, kind: MessageType = .default,
     content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false,
     attachments: [String] = [], embedCount: UInt32 = 0, stickers: [String] = [],
-    delivery: Delivery = .sent, edited: Date? = nil, reference: MessageReference? = nil,
+    stickerFormat: StickerFormatType = .png, delivery: Delivery = .sent, edited: Date? = nil, reference: MessageReference? = nil,
     hasThread: Bool = false, fields: [EmbedField] = [],
     context: Message.NoticeContext = .init(), authorName: String? = nil,
     threadBox: ThreadBox? = nil
@@ -40,7 +47,9 @@ func row(
         id: MessageId(rawValue: raw), channelId: ChannelId(rawValue: 10), kind: kind,
         author: user, fromWebhook: false, content: content, timestamp: time,
         editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
-        embedCount: embedCount, stickerNames: stickers, componentsV2: componentsV2,
+        embedCount: embedCount, stickers: stickers.enumerated().map { index, name in
+            sticker(raw * 10 + UInt64(index), name, format: stickerFormat)
+        }, componentsV2: componentsV2,
         delivery: delivery, formatted: formattedText(content: content), mentionsMe: false,
         reference: reference, hasThread: hasThread, mentions: [],
         call: nil, roleSubscription: nil, purchasedProduct: nil, actor: nil,

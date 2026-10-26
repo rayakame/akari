@@ -1,5 +1,5 @@
 # Unicode emoji, :shortcodes: and jumbo messages (R§10, R§12, D66). Emoji show as text; a
-# message of 1 to 27 emoji (Unicode or custom) and whitespace is jumbo.
+# message of 1 to 30 emoji (Unicode or custom) and whitespace is jumbo.
 
 == one emoji is jumbo
 😀
@@ -31,16 +31,16 @@ input: " 😀 "
 p: " 😀 "
 jumbo
 
-== 27 emoji are jumbo
-😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+== 30 emoji are jumbo
+😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
 --
-p: "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+p: "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
 jumbo
 
-== 28 emoji aren't
-😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+== 31 emoji aren't
+😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
 --
-p: "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+p: "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
 
 == text after an emoji cancels jumbo
 😀 a
@@ -64,16 +64,38 @@ jumbo
 p: aemoji"b":2
 jumbo
 
-== custom emoji count towards 27
-<:a:1>😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+== 30 custom emoji are jumbo
+<:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1>
 --
-p: emoji"a":1 "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+p: emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1
 jumbo
 
-== custom emoji count towards 28
-<:a:1>😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+== 31 custom emoji aren't
+<:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1><:a:1>
 --
-p: emoji"a":1 "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+p: emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1 emoji"a":1
+
+== 31 spaced emoji aren't
+😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀
+--
+p: "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀"
+
+== 30 spaced emoji are jumbo
+😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀
+--
+p: "😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀 😀"
+jumbo
+
+== custom emoji count towards 30
+<:a:1>😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+--
+p: emoji"a":1 "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+jumbo
+
+== custom emoji count towards 31
+<:a:1>😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀
+--
+p: emoji"a":1 "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
 
 == a family is one emoji
 👨‍👩‍👧
