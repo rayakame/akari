@@ -249,7 +249,9 @@ final class MessageTextView: NSTextView {
         }
         if event.clickCount == 1, let hit = expression(at: point) {
             super.mouseDown(with: event)
-            let end = convert(NSApp.currentEvent?.locationInWindow ?? event.locationInWindow, from: nil)
+            // A drag selected text. The release, when AppKit still has it, must be on the emoji.
+            let release = NSApp.currentEvent.flatMap { $0.type == .leftMouseUp ? $0 : nil }
+            let end = release.map { convert($0.locationInWindow, from: nil) } ?? point
             if selectedRange().length == 0, hit.rect.contains(end) {
                 onExpression(hit.target, convert(hit.rect, to: nil))
             }

@@ -66,6 +66,31 @@ final class ExpressionTests {
 
     var retained: [NSWindow] = []
 
+    // A click on an emoji opens it at either backing scale (CI's displays are 1x).
+    @Test(arguments: [1, 2] as [CGFloat])
+    func aClickOnAnEmojiInTextOpensIt(_ scale: CGFloat) throws {
+        let window = ScaledWindow(scale: scale)
+        retained.append(window)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        window.contentView = container
+        let view = MessageTextView()
+        view.detectsExpressions = true
+        container.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            view.topAnchor.constraint(equalTo: container.topAnchor),
+            view.widthAnchor.constraint(equalToConstant: 280),
+        ])
+        view.show(MessageText.build(row(1, at: list.noon, content: "hi <:wave:5> there").message, revealed: [], now: list.noon, times: times).text)
+        container.layoutSubtreeIfNeeded()
+        var opened: [ExpressionTarget] = []
+        view.onExpression = { target, _ in opened.append(target) }
+
+        try click(at: try point(at: 3, in: view), in: view)
+
+        #expect(opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)], "\(scale)x: selection \(view.selectedRange())")
+    }
+
     @Test
     func theTextKnowsItsEmoji() throws {
         // Discord's masked links can't hold emoji, so none is ever inside a link.
