@@ -202,6 +202,19 @@ final class MediaStateTests {
         #expect(list.shownSensitive.isEmpty)
     }
 
+    // CodeRabbit: a restore or a READY replaces the settings and conversations covers come from.
+    @Test(arguments: [StoreEvent.restored, .ready])
+    func aSessionChangeReadsEveryRowAgain(_ event: StoreEvent) {
+        let list = list()
+        var changed = message(1, in: 11)
+        changed.content = "after"
+        store.update { $0.show(changed) }
+
+        list.apply(EventBatch([event]))
+
+        #expect(list.rows.map(\.message.content) == ["after"])
+    }
+
     @Test
     func aDisplaySettingsChangeReadsEveryRowAgain() {
         let list = list()
