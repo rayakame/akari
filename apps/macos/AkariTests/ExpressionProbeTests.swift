@@ -79,6 +79,28 @@ struct ExpressionTestsProbe {
         Probe.log("window \(window.windowNumber), stale stamped \(staleStamp), press \(start): \(read)")
     }
 
+    // A release at the stale test's point, read back through the queue: x and y, the global
+    // location, for a fresh window as is, after a spin, and ordered in.
+    @Test(arguments: ["fresh", "spun", "ordered"])
+    func aLocationThroughTheQueue(_ variant: String) {
+        let window = ScaledWindow(scale: 1)
+        window.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        if variant == "spun" {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        }
+        if variant == "ordered" {
+            window.orderFront(nil)
+        }
+        let posted = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: 27.9296875, y: 189), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        NSApp.postEvent(posted, atStart: false)
+        let read = window.nextEvent(matching: [.leftMouseUp])
+        Probe.log("\(variant): window \(window.windowNumber) frame \(window.frame) visible \(window.isVisible) posted \(posted.locationInWindow) global \(posted.cgEvent?.location ?? .zero) read \(read?.locationInWindow ?? .zero) global \(read?.cgEvent?.location ?? .zero) w \(read?.windowNumber ?? -1) window object \(read?.window === window)")
+        window.orderOut(nil)
+    }
+
     // The stale test's view, measured as built and again after the run loop turns.
     @Test(arguments: [1, 2] as [CGFloat])
     func theGeometryBeforeAndAfterASpin(_ scale: CGFloat) throws {

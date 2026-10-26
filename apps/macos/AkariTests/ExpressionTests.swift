@@ -97,6 +97,8 @@ final class ExpressionTests {
         }
 
         let before = ProcessInfo.processInfo.systemUptime
+        MessageTextView.pressTrace = { NSLog("PROBE stale test %@x press: %@", "\(scale)", $0) }
+        defer { MessageTextView.pressTrace = nil }
         NSLog("PROBE stale test %@x before the click: %@", "\(scale)", Probe.state(view, at: try point(at: 3, in: view)))
         try click(at: try point(at: 3, in: view), in: view, draining: false)
 
