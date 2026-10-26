@@ -218,6 +218,7 @@ pub(crate) fn entities() -> Entities {
         read_states: Default::default(),
         memberless: Default::default(),
         kept_threads: Default::default(),
+        scan_version: None,
     }
 }
 
@@ -382,6 +383,7 @@ fn write_entities(cache: &mut Cache, entities: &Entities) {
             writer.put_folders(entities.settings.folders.as_deref())?;
             writer.put_notification_flags(entities.settings.notification_flags)?;
             writer.put_display_settings(&entities.settings.display)?;
+            writer.put_age_agreements(&entities.settings.age_agreements)?;
             Ok(())
         })
         .unwrap();
@@ -458,6 +460,7 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
         .into(),
         notification_flags: 16,
         unreadable: false,
+        age_agreements: Arc::new([Snowflake::new(100), Snowflake::new(200)].into()),
     };
     entities
 }
@@ -904,6 +907,7 @@ fn rebuilt(entities: &Entities) -> Entities {
         read_states: entities.read_states.clone(),
         memberless: entities.memberless.clone(),
         kept_threads: entities.kept_threads.clone(),
+        scan_version: entities.scan_version,
     }
 }
 

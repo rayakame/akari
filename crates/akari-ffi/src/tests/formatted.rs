@@ -18,7 +18,9 @@ use crate::formatted::{
 };
 use crate::images::ImageKey;
 use crate::names::Names;
-use crate::records::{Message, Sticker};
+use crate::records::{
+    AgeGate, Attachment, AttachmentDisplay, AttachmentKind, MediaCover, Message, Sticker,
+};
 
 const MESSAGES: &str = "/api/v9/channels/300000000000000002/messages";
 const MIRA: UserId = UserId::new(100_000_000_000_000_002);
@@ -551,5 +553,115 @@ async fn stickers_cross_with_their_keys() {
             },
         ]
     );
+    loaded.account.close();
+}
+
+fn attachment(id: u64, name: &str, size: Option<(u32, u32)>, flags: u64) -> Value {
+    let mut attachment = json!({
+        "id": id.to_string(), "filename": name, "size": 1536,
+        "url": format!("https://cdn.discordapp.com/attachments/1/{id}/{name}"),
+        "proxy_url": format!("https://media.discordapp.net/attachments/1/{id}/{name}"),
+        "flags": flags, "content_scan_version": 4,
+    });
+    if let Some((width, height)) = size {
+        attachment["width"] = width.into();
+        attachment["height"] = height.into();
+    }
+    attachment
+}
+
+// The store's order (media, then files), each with what its box needs; a spoiler's cover.
+#[tokio::test]
+async fn attachments_cross_in_their_order_with_their_box() {
+    let mut message = page_message(400_000_000_000_000_013, "", json!([]));
+    let mut photo = attachment(601, "photo.png", Some((640, 480)), 8);
+    photo["placeholder"] = "3PcNNYSFeXh/d3eld0iHZoZgVwh2".into();
+    photo["placeholder_version"] = 1.into();
+    photo["description"] = "a cat".into();
+    message["attachments"] = json!([
+        attachment(600, "notes.zip", None, 0),
+        photo,
+        attachment(602, "clip.gif", Some((320, 240)), 0),
+    ]);
+    let loaded = loaded(vec![message], |_| {}).await;
+    let message = &loaded.messages[0];
+    let key = |id: u64| ImageKey::Attachment {
+        channel_id: GENERAL,
+        message_id: MessageId::new(400_000_000_000_000_013),
+        attachment_id: akari_core::model::AttachmentId::new(id),
+    };
+
+    assert!(!message.spoilers_shown);
+    assert_eq!(
+        message.attachments,
+        vec![
+            Attachment {
+                id: akari_core::model::AttachmentId::new(601),
+                filename: "photo.png".to_owned(),
+                title: None,
+                description: Some("a cat".to_owned()),
+                content_type: None,
+                size: 1536,
+                kind: AttachmentKind::Image,
+                width: 640,
+                height: 480,
+                placeholder: Some("3PcNNYSFeXh/d3eld0iHZoZgVwh2".to_owned()),
+                spoiler: true,
+                animated: false,
+                key: key(601),
+                display: AttachmentDisplay::Media,
+                cover: Some(MediaCover::Spoiler),
+            },
+            Attachment {
+                id: akari_core::model::AttachmentId::new(602),
+                filename: "clip.gif".to_owned(),
+                title: None,
+                description: None,
+                content_type: None,
+                size: 1536,
+                kind: AttachmentKind::Image,
+                width: 320,
+                height: 240,
+                placeholder: None,
+                spoiler: false,
+                animated: true,
+                key: key(602),
+                display: AttachmentDisplay::Media,
+                cover: None,
+            },
+            Attachment {
+                id: akari_core::model::AttachmentId::new(600),
+                filename: "notes.zip".to_owned(),
+                title: None,
+                description: None,
+                content_type: None,
+                size: 1536,
+                kind: AttachmentKind::File,
+                width: 0,
+                height: 0,
+                placeholder: None,
+                spoiler: false,
+                animated: false,
+                key: key(600),
+                display: AttachmentDisplay::File,
+                cover: None,
+            },
+        ]
+    );
+    loaded.account.close();
+}
+
+#[tokio::test]
+async fn the_age_gate_and_the_agreement_cross() {
+    let loaded = loaded(vec![], |ready| {
+        ready["guilds"][0]["channels"][1]["nsfw"] = true.into();
+    })
+    .await;
+    let store = loaded.account.store();
+    assert_eq!(store.age_gate(GENERAL), AgeGate::Ask { server: false });
+
+    loaded.account.agree_to_age_restricted(GUILD);
+
+    assert_eq!(store.age_gate(GENERAL), AgeGate::Open);
     loaded.account.close();
 }

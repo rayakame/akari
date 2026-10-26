@@ -303,6 +303,8 @@ pub(crate) fn timing() -> Timing {
         invalid_session_min: Duration::from_millis(10),
         invalid_session_max: Duration::from_millis(20),
         lookup_timeout: Duration::from_millis(300),
+        scan_wait: Duration::from_millis(300),
+        scan_jitter: Duration::from_millis(50),
         ..Timing::default()
     }
 }

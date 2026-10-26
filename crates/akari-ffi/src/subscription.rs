@@ -109,8 +109,13 @@ pub enum StoreEvent {
     },
     /// The server list's order or folders changed; read `server_list` again.
     ServerListChanged,
-    /// The display settings changed; read `display_settings` again.
+    /// The display settings changed; read `display_settings` again, and the messages: their
+    /// attachments may show otherwise.
     DisplaySettingsChanged,
+    /// The user agreed to see the guild's age-restricted channels; read `age_gate` again.
+    AgeGateChanged {
+        guild_id: GuildId,
+    },
     /// The notification settings for a guild (`None`: DMs) changed, or a timed mute in it
     /// ended. Mutes, highlights and hidden channels may have changed.
     GuildSettingsChanged {
@@ -229,6 +234,7 @@ impl StoreEvent {
             },
             E::ServerListChanged => Self::ServerListChanged,
             E::DisplaySettingsChanged => Self::DisplaySettingsChanged,
+            E::AgeGateChanged { guild_id } => Self::AgeGateChanged { guild_id },
             E::GuildSettingsChanged { guild_id } => Self::GuildSettingsChanged { guild_id },
             E::BadgeChanged {
                 channel_id,

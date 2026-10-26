@@ -27,8 +27,8 @@ pub(crate) use self::thread::CacheThread;
 use crate::model::{ChannelId, GuildId, Snowflake, UserId};
 use crate::state::apply::Entities;
 use crate::state::{
-    Channel, CurrentUser, Delivery, DisplaySettings, FolderEntry, Guild, GuildSettings, Member,
-    Message, ReadState, User,
+    AgeAgreements, Channel, CurrentUser, Delivery, DisplaySettings, FolderEntry, Guild,
+    GuildSettings, Member, Message, ReadState, User,
 };
 
 const LOG: &str = "akari_core::cache";
@@ -47,6 +47,7 @@ const DM_SETTINGS: u64 = 0;
 const FOLDERS: &str = "folders";
 const NOTIFICATION_FLAGS: &str = "notification_flags";
 const DISPLAY: &str = "display";
+const AGE_AGREEMENTS: &str = "age_agreements";
 
 pub(crate) fn file(directory: &Path, user: UserId) -> PathBuf {
     directory.join(format!("{}.sqlite", user.get()))
@@ -302,6 +303,10 @@ impl Cache {
                 DISPLAY => serde_json::from_str::<DisplayRow>(&data)
                     .ok()
                     .map(|row| settings.display = row.into()),
+                AGE_AGREEMENTS => serde_json::from_str::<Vec<u64>>(&data).ok().map(|guilds| {
+                    settings.age_agreements =
+                        Arc::new(guilds.into_iter().map(GuildId::new).collect());
+                }),
                 _ => Some(()),
             };
             if read.is_none() {
@@ -557,6 +562,11 @@ impl Writer<'_> {
         display: &DisplaySettings,
     ) -> rusqlite::Result<()> {
         self.put_user_setting(DISPLAY, json(&DisplayRow::from(display))?)
+    }
+
+    pub(crate) fn put_age_agreements(&mut self, guilds: &AgeAgreements) -> rusqlite::Result<()> {
+        let ids: Vec<u64> = guilds.iter().map(|guild| guild.get()).collect();
+        self.put_user_setting(AGE_AGREEMENTS, json(&ids)?)
     }
 
     fn put_user_setting(&mut self, key: &str, data: String) -> rusqlite::Result<()> {

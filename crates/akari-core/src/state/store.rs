@@ -9,6 +9,7 @@ use super::apply::{Derived, Entities, Learned, OlderPage, ReadyDiff, State};
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
 use super::events::{ConnectionState, StoreEvent};
+use super::media::{AgeGate, ShownAttachment};
 use super::order;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
@@ -1073,6 +1074,46 @@ impl Store {
     pub fn permissions(&self, channel: ChannelId) -> Option<Permissions> {
         let now = self.now_millis();
         self.read(|inner| inner.state.permissions(channel, now))
+    }
+
+    /// How the message's attachments show, in Discord's order: the images and videos of its
+    /// mosaic, then its files; each one's cover from the user's settings, the conversation and
+    /// Discord's scan. Read again on `MessageUpdated`, `DisplaySettingsChanged` and `Ready`.
+    pub fn shown_attachments(&self, message: &Message) -> Vec<ShownAttachment> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.shown_attachments(message, now))
+    }
+
+    /// Whether the channel's spoilers show without a click (`render_spoilers`).
+    pub fn spoilers_shown(&self, channel: ChannelId) -> bool {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.spoilers_shown(channel, now))
+    }
+
+    /// Whether the channel's messages wait behind the age gate; `AgeGateChanged` says when to
+    /// read it again.
+    pub fn age_gate(&self, channel: ChannelId) -> AgeGate {
+        self.read(|inner| inner.state.age_gate(channel))
+    }
+
+    pub(crate) fn agree_to_age_restricted(&self, guild: GuildId) {
+        self.write("age", |inner, events| {
+            inner.state.agree_to_age_restricted(guild, events);
+        });
+    }
+
+    pub(crate) fn scans_due(&self) -> Vec<(ChannelId, Vec<MessageId>)> {
+        self.read(|inner| inner.state.scans_due())
+    }
+
+    pub(crate) fn ask_scans(&self, ids: &[MessageId]) {
+        self.write("scan", |inner, _| inner.state.ask_scans(ids));
+    }
+
+    pub(crate) fn settle_scans(&self, channel: ChannelId, ids: &[MessageId]) {
+        self.write("scan", |inner, events| {
+            inner.state.settle_scans(channel, ids, events);
+        });
     }
 
     /// The longest message the current user may send: 4,000 characters with Nitro, else 2,000.

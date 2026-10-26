@@ -47,6 +47,8 @@ pub(crate) struct Entities {
     pub(crate) memberless: HashSet<ChannelId>,
     // Threads the store kept across READY or GUILD_CREATE without their listing them.
     pub(crate) kept_threads: HashSet<ChannelId>,
+    // READY's newest explicit content scan.
+    pub(crate) scan_version: Option<u32>,
 }
 
 impl Entities {
@@ -61,6 +63,7 @@ impl Entities {
                 ready.notification_settings,
             ),
             read_states: ReadStates::from_ready(ready.read_state, ready.relationships),
+            scan_version: ready.explicit_content_scan_version,
             ..Self::default()
         };
         let mut recipients = HashSet::new();
@@ -392,6 +395,8 @@ pub(crate) struct State {
     // The channel whose Threads browser is open.
     browsing: Option<ChannelId>,
     page_tickets: u64,
+    // Explicit content scans asked and given up on this session.
+    scans: super::media::Scans,
     clock: Arc<Clock>,
 }
 
@@ -428,6 +433,7 @@ impl State {
             generation: 0,
             browsing: None,
             page_tickets: 0,
+            scans: super::media::Scans::default(),
             clock,
         }
     }
@@ -439,6 +445,7 @@ impl State {
 
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_unreadable_settings(&mut next);
+        next.settings.age_agreements = self.entities.settings.age_agreements.clone();
         self.keep_memberships(&mut next);
         self.keep_known_threads(&mut next);
         let derived = Derived::build(&next, self.now_millis());
@@ -2034,6 +2041,7 @@ pub(crate) fn wall_millis() -> i64 {
 mod boxes;
 mod browser;
 mod creating;
+mod media;
 mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
