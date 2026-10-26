@@ -6,6 +6,7 @@ use crate::state::{AgeGate, AttachmentDisplay, MediaCover, Redaction, SpoilerSet
 const FRIEND: u64 = 100_000_000_000_000_003;
 const NSFW: u64 = 300_000_000_000_000_007;
 const NSFW_THREAD: u64 = 300_000_000_000_000_008;
+const OTHER_STRANGER: u64 = 100_000_000_000_000_042;
 
 fn image(flags: u64, version: Option<u32>) -> Value {
     let mut image = json!({
@@ -156,9 +157,9 @@ fn scans_are_asked_once_and_settle_with_an_update() {
     );
     let dm = Snowflake::new(DM);
 
-    assert_eq!(state.scans_due(), [(dm, vec![Snowflake::new(10)])]);
+    assert_eq!(state.scans_due(false), [(dm, vec![Snowflake::new(10)])]);
     state.ask_scans(&[Snowflake::new(10)]);
-    assert_eq!(state.scans_due(), []);
+    assert_eq!(state.scans_due(false), []);
 
     let mut events = Vec::new();
     state.settle_scans(dm, &[Snowflake::new(10)], &mut events);
@@ -204,7 +205,7 @@ fn nothing_is_due_where_nothing_is_covered() {
         with_image(message(10, GENERAL), MIRA, image(0, None)),
     );
 
-    assert_eq!(state.scans_due(), []);
+    assert_eq!(state.scans_due(false), []);
 }
 
 fn nsfw_channels(state: &mut State) {
@@ -275,4 +276,172 @@ fn the_agreement_outlives_a_new_session() {
 
     assert_eq!(gate(&state, NSFW), AgeGate::Open);
     let _ = (ChannelId::new(NSFW), MessageId::new(1));
+}
+
+fn guild_media_waits(state: &mut State) {
+    state.entities.settings.display.explicit_content = ExplicitContentSettings {
+        guilds: Redaction::Blur,
+        ..ExplicitContentSettings::default()
+    };
+}
+
+fn starter(id: u64, origin: Value) -> Value {
+    let mut starter = message(id, THREAD);
+    starter["type"] = 21.into();
+    starter["message_reference"] = json!({
+        "message_id": origin["id"].clone(), "channel_id": GENERAL.to_string(),
+    });
+    starter["referenced_message"] = origin;
+    starter
+}
+
+// Review: a viewed thread shows its starter from the row, not a window; its media is asked for
+// in the parent, and the settle updates the row that shows it.
+#[test]
+fn a_viewed_threads_starter_is_scanned_and_its_row_updated() {
+    let mut state = viewing(THREAD);
+    guild_media_waits(&mut state);
+    let origin = with_image(message(19, GENERAL), MIRA, image(0, None));
+    apply(&mut state, "MESSAGE_CREATE", starter(20, origin));
+    let general = Snowflake::new(GENERAL);
+
+    assert_eq!(
+        state.scans_due(false),
+        [(general, vec![Snowflake::new(19)])]
+    );
+    state.ask_scans(&[Snowflake::new(19)]);
+    assert_eq!(state.scans_due(false), []);
+
+    let mut events = Vec::new();
+    state.settle_scans(general, &[Snowflake::new(19)], &mut events);
+    assert_eq!(
+        events.iter().map(describe).collect::<Vec<_>>(),
+        ["MessageUpdated(20)"]
+    );
+}
+
+// Shown in its channel's window and as a viewed thread's starter: asked once, both rows updated.
+#[test]
+fn a_starter_shown_twice_is_asked_once() {
+    let mut state = viewing(THREAD);
+    guild_media_waits(&mut state);
+    let origin = with_image(message(19, GENERAL), MIRA, image(0, None));
+    apply(&mut state, "MESSAGE_CREATE", starter(20, origin.clone()));
+    let general = Snowflake::new(GENERAL);
+    state.view_channel(general, &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", origin);
+
+    assert_eq!(
+        state.scans_due(false),
+        [(general, vec![Snowflake::new(19)])]
+    );
+    state.ask_scans(&[Snowflake::new(19)]);
+    let mut events = Vec::new();
+    state.settle_scans(general, &[Snowflake::new(19)], &mut events);
+    let mut updated: Vec<String> = events.iter().map(describe).collect();
+    updated.sort();
+    assert_eq!(updated, ["MessageUpdated(19)", "MessageUpdated(20)"]);
+}
+
+// Review: an ask that failed for a while (network, 5xx, rate limit) is asked again when the
+// account reloads, until Discord has scanned the media; the wait still ends meanwhile.
+#[test]
+fn a_failed_ask_is_asked_again_on_a_reload_until_scanned() {
+    let mut state = viewing(DM);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        with_image(dm_message(10, DM), MIRA, image(0, None)),
+    );
+    let dm = Snowflake::new(DM);
+    let ten = [Snowflake::new(10)];
+    state.ask_scans(&ten);
+    state.fail_scans(&ten);
+    state.settle_scans(dm, &ten, &mut Vec::new());
+    assert_eq!(cover(&state, DM, 10), None);
+
+    assert_eq!(state.scans_due(false), [], "not for any event");
+    assert_eq!(state.scans_due(true), [(dm, ten.to_vec())]);
+    state.ask_scans(&ten);
+    assert_eq!(state.scans_due(true), [], "asked again once");
+
+    state.fail_scans(&ten);
+    apply(
+        &mut state,
+        "MESSAGE_UPDATE",
+        with_image(dm_message(10, DM), MIRA, image(0, Some(4))),
+    );
+    assert_eq!(state.scans_due(true), [], "scanned meanwhile");
+}
+
+// Review: a READY forgets the scans of messages no window or starter shows any more; what
+// still shows stays settled.
+#[test]
+fn a_ready_forgets_the_scans_of_messages_gone() {
+    let mut state = viewing(DM);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        with_image(dm_message(10, DM), MIRA, image(0, None)),
+    );
+    state.view_channel(Snowflake::new(THREAD), &mut Vec::new());
+    let origin = with_image(message(19, GENERAL), MIRA, image(0, None));
+    apply(&mut state, "MESSAGE_CREATE", starter(20, origin));
+    let dm = Snowflake::new(DM);
+    let asked = [Snowflake::new(10), Snowflake::new(99)];
+    state.ask_scans(&asked);
+    state.fail_scans(&asked[1..]);
+    state.settle_scans(dm, &asked, &mut Vec::new());
+    state.ask_scans(&[Snowflake::new(19)]);
+    state.settle_scans(
+        Snowflake::new(GENERAL),
+        &[Snowflake::new(19)],
+        &mut Vec::new(),
+    );
+
+    state.apply(dispatch("READY", &ready_value()), &mut Vec::new());
+
+    assert_eq!(cover(&state, DM, 10), None, "still settled");
+    let shown = HashSet::from([Snowflake::new(10), Snowflake::new(19)]);
+    assert_eq!(state.scans.asked, shown);
+    assert_eq!(state.scans.settled, shown, "the thread's starter too");
+    assert!(state.scans.failed.is_empty());
+}
+
+// Review: whether the author is a friend decides a DM's covers; a new or ended friendship
+// updates the author's messages with media, and only those.
+#[test]
+fn a_friendship_updates_the_covers_of_the_authors_dm_media() {
+    let mut state = viewing(DM);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        with_image(dm_message(10, DM), MIRA, image(0, None)),
+    );
+    let mut text = dm_message(11, DM);
+    text["author"]["id"] = MIRA.to_string().into();
+    apply(&mut state, "MESSAGE_CREATE", text);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        with_image(dm_message(12, DM), OTHER_STRANGER, image(0, None)),
+    );
+    assert_eq!(cover(&state, DM, 10), Some(MediaCover::Pending));
+    let relationship =
+        |kind: u8| json!({"id": MIRA.to_string(), "type": kind, "user_ignored": false});
+
+    let events = apply(&mut state, "RELATIONSHIP_ADD", relationship(1));
+    assert_eq!(events, ["MessageUpdated(10)"]);
+    assert_eq!(cover(&state, DM, 10), None, "a friend's");
+
+    let events = apply(&mut state, "RELATIONSHIP_ADD", relationship(1));
+    assert!(events.is_empty(), "no change");
+
+    let events = apply(
+        &mut state,
+        "RELATIONSHIP_REMOVE",
+        json!({"id": MIRA.to_string(), "type": 1}),
+    );
+    assert_eq!(events, ["MessageUpdated(10)"]);
+    assert_eq!(cover(&state, DM, 10), Some(MediaCover::Pending));
 }

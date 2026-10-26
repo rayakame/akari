@@ -144,3 +144,68 @@ async fn a_failed_scan_still_ends_the_wait() {
     events_until(&subscription, "MessageUpdated(10)").await;
     assert_eq!(cover(&account, 10), None);
 }
+
+// Review: the wait ends on time while the request hangs (its timeouts are 10 and 30 s).
+#[tokio::test]
+async fn the_wait_ends_on_time_while_the_request_hangs() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path(SCAN))
+        .respond_with(ResponseTemplate::new(204).set_delay(Duration::from_secs(20)))
+        .mount(&server)
+        .await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(Snowflake::new(DM));
+
+    connection.send(dm_message(2, 10, false)).await;
+
+    events_until(&subscription, "MessageUpdated(10)").await;
+    assert_eq!(cover(&account, 10), None);
+}
+
+// Review: an ask that failed for a while is asked again with the next READY, not with every new
+// message.
+#[tokio::test]
+async fn a_failed_ask_is_asked_again_with_the_next_ready() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path(SCAN))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(SCAN))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(Snowflake::new(DM));
+
+    connection.send(dm_message(2, 10, false)).await;
+    events_until(&subscription, "MessageUpdated(10)").await;
+    connection.send(dm_message(3, 11, false)).await;
+    events_until(&subscription, "MessageUpdated(11)").await;
+    let asked_ids = |requests: Vec<Request>| requests.iter().map(asked).collect::<Vec<_>>();
+    assert_eq!(
+        asked_ids(scans(&server).await),
+        [["10"], ["11"]],
+        "not with a message"
+    );
+
+    connection.send(ready_payload(4, &fake, |_| {})).await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while scans(&server).await.len() < 3 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(asked_ids(scans(&server).await), [["10"], ["11"], ["10"]]);
+}

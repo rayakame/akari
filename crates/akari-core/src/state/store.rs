@@ -1102,8 +1102,12 @@ impl Store {
         });
     }
 
-    pub(crate) fn scans_due(&self) -> Vec<(ChannelId, Vec<MessageId>)> {
-        self.read(|inner| inner.state.scans_due())
+    pub(crate) fn scans_due(&self, retry: bool) -> Vec<(ChannelId, Vec<MessageId>)> {
+        self.read(|inner| inner.state.scans_due(retry))
+    }
+
+    pub(crate) fn fail_scans(&self, ids: &[MessageId]) {
+        self.write("scan", |inner, _| inner.state.fail_scans(ids));
     }
 
     pub(crate) fn ask_scans(&self, ids: &[MessageId]) {

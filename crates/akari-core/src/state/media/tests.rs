@@ -307,14 +307,17 @@ fn spoilers_show_by_the_setting_and_a_moderators_permission() {
     let moderator = Some(Permissions::VIEW_CHANNEL | Permissions::MANAGE_MESSAGES);
     let member = Some(Permissions::VIEW_CHANNEL);
 
-    assert!(spoilers_shown(&with(SpoilerSetting::Always), None));
-    assert!(!spoilers_shown(&with(SpoilerSetting::OnClick), moderator));
-    assert!(spoilers_shown(
-        &with(SpoilerSetting::IfModerator),
+    // Review: only "If moderator" reads the permissions.
+    let unread = || -> Option<Permissions> { panic!("permissions read") };
+    assert!(spoilers_shown(&with(SpoilerSetting::Always), unread));
+    assert!(!spoilers_shown(&with(SpoilerSetting::OnClick), unread));
+    assert!(spoilers_shown(&with(SpoilerSetting::IfModerator), || {
         moderator
-    ));
-    assert!(!spoilers_shown(&with(SpoilerSetting::IfModerator), member));
-    assert!(!spoilers_shown(&with(SpoilerSetting::IfModerator), None));
+    }));
+    assert!(!spoilers_shown(&with(SpoilerSetting::IfModerator), || {
+        member
+    }));
+    assert!(!spoilers_shown(&with(SpoilerSetting::IfModerator), || None));
 }
 
 #[test]

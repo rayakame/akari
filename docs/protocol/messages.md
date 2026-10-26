@@ -325,10 +325,15 @@ What akari-core keeps of an attachment, and the requests behind its covers
 - `PATCH /channels/{channel.id}/explicit-media {message_ids: [1–75]}` asks Discord to scan; the
   answer is a 204 and the results come as MESSAGE_UPDATEs with the versions and flags. akari-core
   asks for every message in a viewed channel whose media waits (loaded, created or updated, not
-  the user's own, only where a setting covers something), once per message per session, per
-  channel in chunks of 75, after up to 0.8 s; 3 s after asking it stops waiting, answered or not
-  (the client's −1). *The official client sends a channel's messages in one request; the docs'
-  limit is 75.*
+  the user's own, only where a setting covers something), a viewed thread's starter message
+  among them, once per message per session, per channel in chunks of 75, after up to 0.8 s;
+  3 s after asking it stops waiting, answered or not and however long the request takes (the
+  client's −1). *The official client sends a channel's messages in one request; the docs' limit
+  is 75.* *An ask that failed with a network or server error or a rate limit goes again with the
+  next READY or page while the media is still unscanned; a READY forgets the asks of messages
+  no window shows.*
+- A DM's covers depend on whether the author is a friend: RELATIONSHIP_ADD and _REMOVE update
+  that author's messages with media.
 - The user's `nsfw_allowed` (READY's user, USER_UPDATE) is `false` for a user Discord knows is
   under 18 and missing while it doesn't know. A guild's `owner_configured_content_level` 1
   (explicit) or 3 (age-restricted) gates every channel; channels and their threads carry `nsfw`.

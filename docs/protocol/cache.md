@@ -48,7 +48,8 @@ every other target builds rusqlite's bundled copy.
   channel and ID), `guild_settings` (per guild; `guild_id` 0 holds the DM settings),
   `user_settings` (per key: `folders`, absent when the settings proto had none,
   `notification_flags`, `display` and `age_agreements`, the servers whose age-restricted
-  channels the user agreed to see) and `read_states` (per channel: the acknowledged message and the
+  channels the user agreed to see; READY doesn't carry them, so every READY keeps the store's,
+  and one that came before the restore takes the cached ones in too) and `read_states` (per channel: the acknowledged message and the
   mention count). Each row is its key columns plus a `data` column of JSON in the cache's own
   row types, never the wire structs or the state types, so either can change without breaking
   files already written. A field added later reads old rows through its default. A thread the

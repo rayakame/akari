@@ -189,10 +189,13 @@ pub(crate) fn shown_attachments(
 }
 
 /// Whether spoilers show without a click: the setting, or a moderator's with Manage Messages.
-pub(crate) fn spoilers_shown(display: &DisplaySettings, permissions: Option<Permissions>) -> bool {
+pub(crate) fn spoilers_shown(
+    display: &DisplaySettings,
+    permissions: impl FnOnce() -> Option<Permissions>,
+) -> bool {
     match display.render_spoilers {
         SpoilerSetting::Always => true,
-        SpoilerSetting::IfModerator => permissions
+        SpoilerSetting::IfModerator => permissions()
             .is_some_and(|permissions| permissions.contains(Permissions::MANAGE_MESSAGES)),
         _ => false,
     }
@@ -231,6 +234,8 @@ pub(crate) fn age_gate(
 pub(crate) struct Scans {
     pub(crate) asked: HashSet<MessageId>,
     pub(crate) settled: HashSet<MessageId>,
+    // Asked, but the request failed for a while: asked again on a reload.
+    pub(crate) failed: HashSet<MessageId>,
 }
 
 /// Guilds whose age-restricted channels the user agreed to see, kept per account.

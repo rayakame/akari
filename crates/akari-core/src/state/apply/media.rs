@@ -1,10 +1,11 @@
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
-use super::State;
-use crate::model::{ChannelId, ChannelType, GuildId, MessageId};
+use super::{Entities, State};
+use crate::model::{ChannelId, ChannelType, GuildId, MessageId, UserId};
 use crate::state::events::StoreEvent;
 use crate::state::media::{self, AgeGate, Covered, MediaCover, Scan, ShownAttachment};
-use crate::state::types::Message;
+use crate::state::types::{Message, StarterMessage};
 
 impl State {
     pub(crate) fn shown_attachments(
@@ -22,10 +23,9 @@ impl State {
     }
 
     pub(crate) fn spoilers_shown(&self, channel: ChannelId, now_millis: i64) -> bool {
-        media::spoilers_shown(
-            &self.entities.settings.display,
-            self.permissions(channel, now_millis),
-        )
+        media::spoilers_shown(&self.entities.settings.display, || {
+            self.permissions(channel, now_millis)
+        })
     }
 
     pub(crate) fn age_gate(&self, channel: ChannelId) -> AgeGate {
@@ -64,35 +64,68 @@ impl State {
         events.push(StoreEvent::AgeGateChanged { guild_id: guild });
     }
 
-    /// Per viewed channel, the messages whose media waits for a scan nobody asked for yet.
-    pub(crate) fn scans_due(&self) -> Vec<(ChannelId, Vec<MessageId>)> {
-        let mut due = Vec::new();
-        for channel in self.windows.channels() {
-            let Some(window) = self.windows.snapshot(channel) else {
-                continue;
+    // A READY that beat the restore knows nothing of them; the flusher would erase them.
+    pub(crate) fn keep_cached_agreements(
+        &mut self,
+        cached: &Entities,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        for guild in cached.settings.age_agreements.iter() {
+            self.agree_to_age_restricted(*guild, events);
+        }
+    }
+
+    /// Per channel, the messages of viewed windows and threads' starters whose media waits for a
+    /// scan nobody asked for yet; with `retry`, also those whose ask failed and that Discord
+    /// still hasn't scanned.
+    pub(crate) fn scans_due(&self, retry: bool) -> Vec<(ChannelId, Vec<MessageId>)> {
+        let mut due: BTreeMap<ChannelId, BTreeSet<MessageId>> = BTreeMap::new();
+        let mut consider = |message: &Message| {
+            let wanted = if self.scans.asked.contains(&message.id) {
+                retry
+                    && self.scans.failed.contains(&message.id)
+                    && self.waits(
+                        message,
+                        Scan {
+                            settled: false,
+                            ..self.scan(message.id)
+                        },
+                    )
+            } else {
+                self.waits(message, self.scan(message.id))
             };
-            let ids: Vec<MessageId> = window
-                .messages
-                .iter()
-                .filter(|message| {
-                    !self.scans.asked.contains(&message.id) && self.waits_for_scan(message)
-                })
-                .map(|message| message.id)
-                .collect();
-            if !ids.is_empty() {
-                due.push((channel, ids));
+            if wanted {
+                due.entry(message.channel_id)
+                    .or_default()
+                    .insert(message.id);
+            }
+        };
+        for channel in self.windows.channels() {
+            for message in self.windows.messages(channel) {
+                consider(message);
+            }
+            if let Some(StarterMessage::Loaded(starter)) = self.windows.starter_message(channel) {
+                consider(&starter);
             }
         }
-        due.sort_unstable_by_key(|(channel, _)| *channel);
-        due
+        due.into_iter()
+            .map(|(channel, ids)| (channel, ids.into_iter().collect()))
+            .collect()
     }
 
     pub(crate) fn ask_scans(&mut self, ids: &[MessageId]) {
-        self.scans.asked.extend(ids.iter().copied());
+        for id in ids {
+            self.scans.asked.insert(*id);
+            self.scans.failed.remove(id);
+        }
+    }
+
+    pub(crate) fn fail_scans(&mut self, ids: &[MessageId]) {
+        self.scans.failed.extend(ids.iter().copied());
     }
 
     /// The scans' wait is over (the client's 3 s): their media shows unless Discord flagged it
-    /// meanwhile.
+    /// meanwhile, in the channel's window and in the starters of threads that show it.
     pub(crate) fn settle_scans(
         &mut self,
         channel: ChannelId,
@@ -103,28 +136,73 @@ impl State {
             if !self.scans.settled.insert(*id) {
                 continue;
             }
-            let Some(message) = self.windows.message(channel, *id) else {
+            let Some(message) = self.windows.shown(channel, *id) else {
                 continue;
             };
             let unsettled = Scan {
                 settled: false,
                 ..self.scan(*id)
             };
-            let covered = self.covered(&message);
-            let waited = message.attachments.iter().any(|attachment| {
-                media::media_cover(attachment, covered, unsettled, true)
-                    == Some(MediaCover::Pending)
-            });
-            if waited {
-                events.push(StoreEvent::MessageUpdated(message));
+            if self.waits(&message, unsettled) {
+                let rows = self.windows.message(channel, *id).into_iter();
+                let starters = self.windows.starter_rows_showing(channel, *id);
+                events.extend(rows.chain(starters).map(StoreEvent::MessageUpdated));
             }
         }
     }
 
+    // A READY: the scans of messages no window or starter shows any more go.
+    pub(crate) fn forget_gone_scans(&mut self) {
+        let mut shown = HashSet::new();
+        for channel in self.windows.channels() {
+            shown.extend(
+                self.windows
+                    .messages(channel)
+                    .iter()
+                    .map(|message| message.id),
+            );
+            if let Some(StarterMessage::Loaded(starter)) = self.windows.starter_message(channel) {
+                shown.insert(starter.id);
+            }
+        }
+        let scans = &mut self.scans;
+        for ids in [&mut scans.asked, &mut scans.settled, &mut scans.failed] {
+            ids.retain(|id| shown.contains(id));
+        }
+    }
+
+    // Whether the author is a friend decides a DM's covers: their messages with media change.
+    pub(crate) fn friendship_changed(&self, user: UserId, was: bool, events: &mut Vec<StoreEvent>) {
+        if self.entities.read_states.is_friend(user) == was {
+            return;
+        }
+        for channel in self.windows.channels() {
+            let private = self.entities.channels.get(&channel).is_some_and(|channel| {
+                matches!(channel.kind, ChannelType::Dm | ChannelType::GroupDm)
+            });
+            if !private {
+                continue;
+            }
+            events.extend(
+                self.windows
+                    .messages(channel)
+                    .iter()
+                    .filter(|message| {
+                        message.author.id == user
+                            && message
+                                .attachments
+                                .iter()
+                                .any(|attachment| attachment.is_visual())
+                    })
+                    .cloned()
+                    .map(StoreEvent::MessageUpdated),
+            );
+        }
+    }
+
     // The user's own messages, pending and failed ones among them, never wait.
-    fn waits_for_scan(&self, message: &Message) -> bool {
+    fn waits(&self, message: &Message, scan: Scan) -> bool {
         let covered = self.covered(message);
-        let scan = self.scan(message.id);
         message.attachments.iter().any(|attachment| {
             attachment.is_visual()
                 && media::media_cover(attachment, covered, scan, true) == Some(MediaCover::Pending)

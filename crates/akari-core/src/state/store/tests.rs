@@ -2199,3 +2199,52 @@ async fn a_thread_fetched_between_readys_build_and_diff_isnt_reported_removed() 
         StoreEvent::ChannelRemoved { channel_id, .. } if *channel_id == fetched_id()
     )));
 }
+
+fn nsfw_general(data: &mut Value) {
+    for channel in data["guilds"][0]["channels"].as_array_mut().unwrap() {
+        if channel["id"].as_str().and_then(|id| id.parse().ok()) == Some(GENERAL) {
+            channel["nsfw"] = true.into();
+        }
+    }
+}
+
+// Review: the pump's READY (prepared, then swapped in) keeps the user's agreements, one given
+// while it was being prepared too.
+#[test]
+fn age_agreements_outlive_the_pumps_ready() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.replace(store.prepare_ready(ready_where(nsfw_general)));
+    assert!(matches!(store.age_gate(general()), AgeGate::Ask { .. }));
+
+    let prepared = store.prepare_ready(ready_where(nsfw_general));
+    store.agree_to_age_restricted(Snowflake::new(G1));
+    store.replace(prepared);
+    assert_eq!(store.age_gate(general()), AgeGate::Open);
+
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(nsfw_general))));
+    assert_eq!(store.age_gate(general()), AgeGate::Open);
+}
+
+// Review: a READY that beats the restore keeps the cached agreements, which the flusher would
+// otherwise erase.
+#[test]
+fn a_ready_before_the_restore_keeps_the_cached_agreements() {
+    let store = Store::new(DEFAULT_LIMITS);
+    store.apply(DispatchEvent::Ready(Box::new(ready_where(nsfw_general))));
+    let subscription = store.subscribe();
+    let mut cache = Entities::from_ready(ready_where(nsfw_general));
+    Arc::make_mut(&mut cache.settings.age_agreements).insert(Snowflake::new(G1));
+
+    assert!(!store.restore(cache));
+
+    assert_eq!(store.age_gate(general()), AgeGate::Open);
+    assert_eq!(
+        changes(&subscription),
+        [format!(
+            "{:?}",
+            StoreEvent::AgeGateChanged {
+                guild_id: Snowflake::new(G1)
+            }
+        )]
+    );
+}

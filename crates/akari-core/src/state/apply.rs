@@ -445,7 +445,6 @@ impl State {
 
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
         self.keep_unreadable_settings(&mut next);
-        next.settings.age_agreements = self.entities.settings.age_agreements.clone();
         self.keep_memberships(&mut next);
         self.keep_known_threads(&mut next);
         let derived = Derived::build(&next, self.now_millis());
@@ -540,6 +539,8 @@ impl State {
         mut diff: Option<ReadyDiff>,
         events: &mut Vec<StoreEvent>,
     ) -> (Entities, Derived) {
+        // READY doesn't carry them: they're Akari's, kept with the account.
+        next.settings.age_agreements = self.entities.settings.age_agreements.clone();
         self.recounts = match self.journal.take() {
             Some(journal) => self.replay(&journal, &mut next, &mut derived, diff.as_mut()),
             None => HashMap::new(),
@@ -587,6 +588,7 @@ impl State {
         // A guild READY doesn't list won't come in this session.
         self.unplaced_threads.clear();
         self.refresh_badges(self.now_millis(), events);
+        self.forget_gone_scans();
         old
     }
 
@@ -607,6 +609,7 @@ impl State {
         events: &mut Vec<StoreEvent>,
     ) -> bool {
         if self.ready || self.restored || self.journal.is_some() {
+            self.keep_cached_agreements(&cached, events);
             return false;
         }
         self.entities = cached;
@@ -841,11 +844,20 @@ impl State {
             E::PassiveUpdateV2(update) => {
                 self.note_unreads(update.guild_id, &update.updated_channels);
             }
-            E::RelationshipAdd(relationship) => self.entities.read_states.relate(relationship),
+            E::RelationshipAdd(relationship) => {
+                let user = relationship.id;
+                let was = self.entities.read_states.is_friend(user);
+                self.entities.read_states.relate(relationship);
+                self.friendship_changed(user, was, events);
+            }
             E::RelationshipUpdate(update) => {
                 self.entities.read_states.update_relationship(update);
             }
-            E::RelationshipRemove(removed) => self.entities.read_states.unrelate(removed.id),
+            E::RelationshipRemove(removed) => {
+                let was = self.entities.read_states.is_friend(removed.id);
+                self.entities.read_states.unrelate(removed.id);
+                self.friendship_changed(removed.id, was, events);
+            }
             E::ThreadMemberUpdate(update) => self.thread_member_update(*update, events),
             E::ThreadMembersUpdate(update) => self.thread_members_update(*update, events),
             E::ThreadListSync(sync) => self.thread_list_sync(*sync, events),
