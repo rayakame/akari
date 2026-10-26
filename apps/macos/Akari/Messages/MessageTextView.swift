@@ -240,9 +240,6 @@ final class MessageTextView: NSTextView {
     // A hidden code block reveals on a click anywhere on its cover, its padding included. A
     // press on an emoji is tracked here: released on it, its popout opens; dragged away, the
     // press and what followed go to NSTextView, which selects.
-    // PROBE (temporary): the press's reads and decisions, for CI's log.
-    static var pressTrace: ((String) -> Void)?
-
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let spoiler = decorations.cover(at: point),
@@ -251,7 +248,6 @@ final class MessageTextView: NSTextView {
             onLink(url)
             return
         }
-        Self.pressTrace?("down ts \(event.timestamp) w \(event.windowNumber) at \(point) clicks \(event.clickCount) hit \(expression(at: point).map { "\($0.rect)" } ?? "nil") window \(window?.windowNumber ?? -1)")
         if event.clickCount == 1, let hit = expression(at: point), let window {
             var seen: [NSEvent] = []
             var others: [NSEvent] = []
@@ -261,7 +257,6 @@ final class MessageTextView: NSTextView {
                 }
             }
             while let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
-                Self.pressTrace?("read type \(next.type.rawValue) ts \(next.timestamp) w \(next.windowNumber) in window \(next.locationInWindow) here \(convert(next.locationInWindow, from: nil))")
                 // Another window's events go back to it; older ones were never this press's.
                 if next.windowNumber != window.windowNumber {
                     others.append(next)
@@ -273,7 +268,6 @@ final class MessageTextView: NSTextView {
                 seen.append(next)
                 let at = convert(next.locationInWindow, from: nil)
                 if next.type == .leftMouseUp {
-                    Self.pressTrace?("up: inside \(hit.rect.contains(at))")
                     if hit.rect.contains(at) {
                         setSelectedRange(NSRange(location: selectedRange().location, length: 0))
                         onExpression(hit.target, convert(hit.rect, to: nil))
@@ -284,14 +278,12 @@ final class MessageTextView: NSTextView {
                     break
                 }
             }
-            Self.pressTrace?("loop ended without a release: seen \(seen.count)")
             for followed in seen.reversed() {
                 NSApp.postEvent(followed, atStart: true)
             }
             super.mouseDown(with: event)
             return
         }
-        Self.pressTrace?("not an emoji press: super")
         // NSTextView would start dragging the selection; a browser follows the link.
         if event.clickCount == 1, let index = character(at: point),
             textStorage?.attribute(.link, at: index, effectiveRange: nil) != nil,

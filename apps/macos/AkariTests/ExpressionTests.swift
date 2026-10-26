@@ -85,7 +85,8 @@ final class ExpressionTests {
         container.layoutSubtreeIfNeeded()
         var opened: [ExpressionTarget] = []
         view.onExpression = { target, _ in opened.append(target) }
-        // What CI leaves behind: another suite's drag and release nobody consumed, older than the press.
+        try settleEvents(in: window)
+        // A drag and a release nobody consumed, older than the press, don't end it.
         let stale = try point(at: 3, in: view)
         for type in [NSEvent.EventType.leftMouseDragged, .leftMouseUp] {
             NSApp.postEvent(
@@ -96,21 +97,8 @@ final class ExpressionTests {
                         clickCount: 1, pressure: 1)), atStart: false)
         }
 
-        let before = ProcessInfo.processInfo.systemUptime
-        MessageTextView.pressTrace = { NSLog("PROBE stale test %@x press: %@", "\(scale)", $0) }
-        defer { MessageTextView.pressTrace = nil }
-        NSLog("PROBE stale test %@x before the click: %@", "\(scale)", Probe.state(view, at: try point(at: 3, in: view)))
         try click(at: try point(at: 3, in: view), in: view, draining: false)
 
-        // PROBE (temporary): what's left after the click; read after it, so the click is untouched.
-        var left: [String] = []
-        while let next = NSApp.nextEvent(
-            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp], until: .distantPast,
-            inMode: .default, dequeue: true)
-        {
-            left.append("type \(next.type.rawValue) ts \(next.timestamp) w \(next.windowNumber) x \(next.locationInWindow.x)")
-        }
-        NSLog("PROBE stale test %@x: opened %@, selection %@, window %d, uptime before the click %f, left %@", "\(scale)", "\(opened)", "\(view.selectedRange())", window.windowNumber, before, "\(left)")
         #expect(opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)], "\(scale)x: selection \(view.selectedRange())")
     }
 
@@ -437,11 +425,11 @@ final class ExpressionTests {
 
     func click(at point: NSPoint, in view: NSView, dragTo end: NSPoint? = nil, draining: Bool = true) throws {
         let window = try #require(view.window)
-        // Events other suites posted and nothing consumed (CI's test host isn't the active app)
-        // would join this click's tracking loop.
+        try settleEvents(in: window)
+        // Mouse events nothing consumed would join this click's tracking loop.
         while draining, NSApp.nextEvent(
-            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp],
-            until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true) != nil
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp], until: .distantPast,
+            inMode: .default, dequeue: true) != nil
         {}
         let start = ProcessInfo.processInfo.systemUptime
         let event = { (type: NSEvent.EventType, at: NSPoint, after: TimeInterval) in
