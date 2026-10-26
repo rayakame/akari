@@ -18,7 +18,16 @@ final class EmbedsView: NSView {
     }
     var onAction: (Embed, EmbedView.Action) -> Void = { _, _ in }
     var onLink: (URL) -> Void = { _ in }
+    var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
+    var messageMenu: () -> [NSMenuItem] = { [] }
     var loopSource: (ImageKey) async -> URL? = { _ in nil }
+    /// The list's say for the message's custom emoji, as for its text.
+    var animatesEmoji = false {
+        didSet { views.forEach { $0.animatesEmoji = animatesEmoji } }
+    }
+    var detectsExpressions = true {
+        didSet { views.forEach { $0.detectsExpressions = detectsExpressions } }
+    }
 
     init() {
         super.init(frame: .zero)
@@ -44,8 +53,9 @@ final class EmbedsView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: height(width: preferredWidth))
     }
 
+    /// Every media tile, thumbnails among them, for the list's motion rule.
     var tiles: [MediaTileView] {
-        views.flatMap(\.tiles)
+        views.flatMap(\.allTiles)
     }
 
     func height(width: CGFloat) -> CGFloat {
@@ -58,22 +68,31 @@ final class EmbedsView: NSView {
         return height
     }
 
-    func configure(_ shown: [EmbedView.Shown]) {
+    /// `keepingSelection` for the same message shown again; `measuring` (the sizing cell) only
+    /// keeps what heights need.
+    func configure(_ shown: [EmbedView.Shown], keepingSelection: Bool = false, measuring: Bool = false) {
         self.shown = shown
         heightCache = nil
+        guard !measuring else {
+            return
+        }
         while views.count < shown.count {
             let view = EmbedView()
             view.images = images
             view.placeholders = placeholders
             view.onAction = { [weak self] embed, action in self?.onAction(embed, action) }
             view.onLink = { [weak self] url in self?.onLink(url) }
+            view.onExpression = { [weak self] target, rect in self?.onExpression(target, rect) }
+            view.messageMenu = { [weak self] in self?.messageMenu() ?? [] }
             view.loopSource = { [weak self] key in await self?.loopSource(key) }
+            view.animatesEmoji = animatesEmoji
+            view.detectsExpressions = detectsExpressions
             views.append(view)
             addSubview(view)
         }
         for (index, view) in views.enumerated() {
             view.isHidden = index >= shown.count
-            view.configure(index < shown.count ? shown[index] : nil)
+            view.configure(index < shown.count ? shown[index] : nil, keepingSelection: keepingSelection)
         }
         invalidateIntrinsicContentSize()
         needsLayout = true
@@ -112,6 +131,8 @@ final class EmbedView: NSView {
         var description: NSAttributedString?
         var fields: [(name: NSAttributedString, value: NSAttributedString, inline: Bool)] = []
         var footer: NSAttributedString?
+        /// When a relative time in its text changes next.
+        var nextChange: Date?
     }
 
     struct Layout: Equatable {
@@ -145,6 +166,7 @@ final class EmbedView: NSView {
     static let thumbnailGap: CGFloat = 16
     static let maxInner: CGFloat = 516
     static let radius: CGFloat = 4
+    static let inlineSpoilerRadius: CGFloat = 8
     static let authorIcon: CGFloat = 24
     static let footerIcon: CGFloat = 20
     static let iconGap: CGFloat = 8
@@ -170,7 +192,7 @@ final class EmbedView: NSView {
     // The media's box and cells, scaled down as a whole to `limit`.
     private static func mediaBox(_ embed: Embed, limit: CGFloat) -> (size: NSSize, cells: [NSRect]) {
         let height = embed.tall ? 450.0 : 300.0
-        if embed.media.count > 1 {
+        if embed.media.count > 1, embed.video == nil {
             let first = embed.media[0]
             let fitted = embedMediaSize(
                 source: MediaSize(width: first.width, height: first.height), tall: embed.tall)
@@ -246,9 +268,11 @@ final class EmbedView: NSView {
             if shown.footer != nil, embed.footer?.icon != nil {
                 widest = max(widest, footerIcon + iconGap + measure.width(shown.footer ?? NSAttributedString()))
             }
+            // A row's columns are equal: its widest field decides.
             for row in fieldRows(shown.fields) {
                 let widths = row.map { max(measure.width($0.name), measure.width($0.value)) }
-                widest = max(widest, widths.reduce(0, +) + fieldGap * CGFloat(row.count - 1))
+                let count = CGFloat(row.count)
+                widest = max(widest, (widths.max() ?? 0) * count + fieldGap * (count - 1))
             }
             inner = widest + beside
             if let media {
@@ -269,16 +293,18 @@ final class EmbedView: NSView {
             let height = measure.height(provider, width: textWidth)
             layout.provider = NSRect(x: left, y: row(height), width: textWidth, height: height)
         }
+        // Icon rows are flex rows: as tall as the icon, the text centered beside it.
         if let author = shown.author {
-            let line = TypeScale.embedAuthor.line
             let icon = embed.author?.icon == nil ? 0 : authorIcon + iconGap
-            let height = max(line, measure.height(author, width: textWidth - icon))
+            let text = measure.height(author, width: textWidth - icon)
+            let height = max(text, icon > 0 ? authorIcon : 0)
             let top = row(height)
             if icon > 0 {
                 layout.authorIcon = NSRect(
-                    x: left, y: top + ((line - authorIcon) / 2).rounded(), width: authorIcon, height: authorIcon)
+                    x: left, y: top + ((height - authorIcon) / 2).rounded(), width: authorIcon, height: authorIcon)
             }
-            layout.author = NSRect(x: left + icon, y: top, width: textWidth - icon, height: height)
+            layout.author = NSRect(
+                x: left + icon, y: top + ((height - text) / 2).rounded(), width: textWidth - icon, height: text)
         }
         if let title = shown.title {
             let height = measure.height(title, width: textWidth)
@@ -324,7 +350,7 @@ final class EmbedView: NSView {
                 size = NSSize(width: inner, height: (size.height * inner / size.width).rounded())
             }
             let cells =
-                embed.media.count > 1
+                embed.media.count > 1 && embed.video == nil
                 ? gallery(embed.media.count, width: size.width, height: size.height) : [NSRect(origin: .zero, size: size)]
             layout.media = NSRect(x: left, y: y, width: size.width, height: size.height)
             layout.cells = cells
@@ -332,14 +358,15 @@ final class EmbedView: NSView {
         }
         if let footer = shown.footer {
             let icon = embed.footer?.icon == nil ? 0 : footerIcon + iconGap
-            let line = TypeScale.embedFooter.line
-            let height = max(line, measure.height(footer, width: inner - icon))
+            let text = measure.height(footer, width: inner - icon)
+            let height = max(text, icon > 0 ? footerIcon : 0)
             let top = row(height)
             if icon > 0 {
                 layout.footerIcon = NSRect(
-                    x: left, y: top + ((line - footerIcon) / 2).rounded(), width: footerIcon, height: footerIcon)
+                    x: left, y: top + ((height - footerIcon) / 2).rounded(), width: footerIcon, height: footerIcon)
             }
-            layout.footer = NSRect(x: left + icon, y: top, width: inner - icon, height: height)
+            layout.footer = NSRect(
+                x: left + icon, y: top + ((height - text) / 2).rounded(), width: inner - icon, height: text)
         }
         y += padding.bottom + border
         layout.size = NSSize(width: inner + chrome, height: y)
@@ -408,7 +435,21 @@ final class EmbedView: NSView {
     }
     var onAction: (Embed, Action) -> Void = { _, _ in }
     var onLink: (URL) -> Void = { _ in }
+    var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
+    var messageMenu: () -> [NSMenuItem] = { [] }
     var loopSource: (ImageKey) async -> URL? = { _ in nil }
+    var animatesEmoji = false {
+        didSet { textViews.forEach { $0.animatesEmoji = animatesEmoji } }
+    }
+    var detectsExpressions = true {
+        didSet { textViews.forEach { $0.detectsExpressions = detectsExpressions } }
+    }
+    private var layoutCache: (width: CGFloat, layout: Layout)?
+
+    /// Its media and thumbnail tiles.
+    var allTiles: [MediaTileView] {
+        tiles + [thumbnail]
+    }
 
     init() {
         super.init(frame: .zero)
@@ -426,8 +467,8 @@ final class EmbedView: NSView {
             icon.wantsLayer = true
             addSubview(icon)
         }
-        authorIcon.layer?.cornerRadius = Self.authorIcon / 2
-        footerIcon.layer?.cornerRadius = Self.footerIcon / 2
+        authorIcon.cornerRadius = Self.authorIcon / 2
+        footerIcon.cornerRadius = Self.footerIcon / 2
         mediaView.wantsLayer = true
         mediaView.layer?.cornerRadius = Self.radius
         mediaView.layer?.masksToBounds = true
@@ -469,6 +510,10 @@ final class EmbedView: NSView {
 
     private func configureText(_ view: MessageTextView) {
         view.onLink = { [weak self] url in self?.onLink(url) }
+        view.onExpression = { [weak self] target, rect in self?.onExpression(target, rect) }
+        view.messageMenu = { [weak self] in self?.messageMenu() ?? [] }
+        view.animatesEmoji = animatesEmoji
+        view.detectsExpressions = detectsExpressions
         addSubview(view)
     }
 
@@ -477,8 +522,10 @@ final class EmbedView: NSView {
         [provider, author, title, descriptionView, footer] + fieldViews.flatMap { [$0.name, $0.value] }
     }
 
-    func configure(_ shown: Shown?) {
+    func configure(_ shown: Shown?, keepingSelection: Bool = false) {
         self.shown = shown
+        layoutCache = nil
+        keepsSelection = keepingSelection
         guard let shown else {
             tiles.forEach { $0.configure(nil) }
             thumbnail.configure(nil)
@@ -502,6 +549,7 @@ final class EmbedView: NSView {
             configureText(pair.value)
             pair.name.images = images
             pair.value.images = images
+            pair.name.messageMenu = { [weak self] in self?.messageMenu() ?? [] }
             fieldViews.append(pair)
         }
         for (index, pair) in fieldViews.enumerated() {
@@ -525,8 +573,8 @@ final class EmbedView: NSView {
             cover.isHidden = false
             cover.configure(
                 MediaTileView.Content(
-                    media: MediaTileView.Media(key: embed.media.first?.key ?? coverKey(embed)), cover: cardCover,
-                    single: true))
+                    media: MediaTileView.Media(key: embed.media.first?.key ?? coverKey(embed), noun: "Embed"),
+                    cover: cardCover, single: true))
         } else {
             cover.isHidden = true
             cover.configure(nil)
@@ -534,11 +582,14 @@ final class EmbedView: NSView {
         eye.isHidden = !(isCard && cardCover == .sensitive(shown: true))
         card.isHidden = !isCard
         updateColors()
-        setAccessibilityElement(true)
+        // A card is a group; media alone is its tile.
+        setAccessibilityElement(isCard)
         setAccessibilityRole(.group)
         setAccessibilityLabel(isCard ? "Embed" : nil)
         needsLayout = true
     }
+
+    private var keepsSelection = false
 
     private func coverKey(_ embed: Embed) -> ImageKey {
         embed.thumbnail?.key ?? embed.video?.key ?? .defaultAvatar(index: 0)
@@ -550,7 +601,7 @@ final class EmbedView: NSView {
             return
         }
         view.isHidden = false
-        view.show(text)
+        view.show(text, keepingSelection: keepsSelection)
     }
 
     private func configureMedia(_ shown: Shown, hidden: Bool) {
@@ -560,6 +611,7 @@ final class EmbedView: NSView {
         if let video = embed.video {
             var poster = MediaTileView.Media(video.poster, video: embed.kind != .gifv)
             poster.loops = embed.kind == .gifv
+            poster.ownPlay = false
             items = [poster]
         } else {
             items = embed.media.map { MediaTileView.Media($0) }
@@ -596,15 +648,12 @@ final class EmbedView: NSView {
             }
             tile.isHidden = false
             tile.cornerRadius = items.count > 1 ? 0 : Self.radius
-            tile.spoilerRadius = Self.radius
-            // The pill plays a video; its poster's own Play stays away.
-            var media = items[index]
-            if embed.video != nil {
-                media.video = false
-            }
-            tile.configure(MediaTileView.Content(media: media, cover: inlineCover, single: items.count == 1))
+            tile.spoilerRadius = Self.inlineSpoilerRadius
+            tile.configure(MediaTileView.Content(media: items[index], cover: inlineCover, single: items.count == 1))
         }
         mediaView.isHidden = items.isEmpty
+        // Media alone under a spoiler takes the attachments' 8 pt corners.
+        mediaView.layer?.cornerRadius = inlineCover == .spoiler ? Self.inlineSpoilerRadius : Self.radius
         let playable = embed.video != nil && embed.kind != .gifv
         pill.isHidden = !playable || inlineCover.map(MediaTileView.hides) == true || hidden
         pill.showsPlay = embed.video?.proxied == true || embed.url != nil
@@ -663,10 +712,9 @@ final class EmbedView: NSView {
 
     override func layout() {
         super.layout()
-        guard let shown else {
+        guard let layout = cachedLayout(width: bounds.width) else {
             return
         }
-        let layout = Self.layout(shown, width: bounds.width)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         card.frame = NSRect(origin: .zero, size: layout.size)
@@ -697,9 +745,21 @@ final class EmbedView: NSView {
         eye.frame = NSRect(x: layout.size.width - 4 - 32, y: layout.size.height - 4 - 32, width: 32, height: 32)
     }
 
+    private func cachedLayout(width: CGFloat) -> Layout? {
+        if let layoutCache, layoutCache.width == width {
+            return layoutCache.layout
+        }
+        guard let shown else {
+            return nil
+        }
+        let layout = Self.layout(shown, width: width)
+        layoutCache = (width, layout)
+        return layout
+    }
+
     /// The card or the media alone: what a click outside the text hits.
     var box: NSRect {
-        shown.map { NSRect(origin: .zero, size: Self.layout($0, width: bounds.width).size) } ?? .zero
+        cachedLayout(width: bounds.width).map { NSRect(origin: .zero, size: $0.size) } ?? .zero
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -790,11 +850,15 @@ extension EmbedView {
         _ embed: Embed, cover: MediaTileView.Cover?, spoilersShown: Bool, revealed: Set<UInt16>, now: Date,
         times: TimestampText, footerTime: String?
     ) -> Shown {
+        var nextChange: Date?
         func rich(_ text: RichText, _ base: MessageText.Source.Base, _ color: NSColor) -> NSAttributedString {
-            MessageText.build(
+            let built = MessageText.build(
                 MessageText.Source(text, base: base, color: color, spoilersShown: spoilersShown),
-                revealed: revealed, now: now, times: times
-            ).text
+                revealed: revealed, now: now, times: times)
+            if let next = built.nextChange {
+                nextChange = min(nextChange ?? next, next)
+            }
+            return built.text
         }
         var shown = Shown(embed: embed, cover: cover)
         if let provider = embed.provider {
@@ -810,8 +874,13 @@ extension EmbedView {
             let link = embed.url.flatMap(URL.init(string:))
             let text = NSMutableAttributedString(
                 attributedString: rich(title, .embedTitle, link == nil ? Palette.textStrong : Palette.textLink))
+            // The title is a link; its spoilers and links of its own keep their clicks.
             if let link {
-                text.addAttribute(.link, value: link, range: NSRange(location: 0, length: text.length))
+                text.enumerateAttribute(.link, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+                    if value == nil {
+                        text.addAttribute(.link, value: link, range: range)
+                    }
+                }
             }
             shown.title = text
         }
@@ -823,6 +892,7 @@ extension EmbedView {
             let parts = [footer.text, footerTime].compactMap { $0 }
             shown.footer = line(parts.joined(separator: " • "), TypeScale.embedFooter, Palette.textDefault, link: nil)
         }
+        shown.nextChange = nextChange
         return shown
     }
 

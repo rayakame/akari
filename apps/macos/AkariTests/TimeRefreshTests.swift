@@ -457,4 +457,27 @@ final class TimeRefreshTests {
 
         #expect(table.fullReloads == 0)
     }
+
+    // Review: a relative time in an embed counts down as the content's does.
+    @Test
+    func anEmbedsRelativeTimeCountsDown() throws {
+        let due = seconds(clock.now) + 61
+        show([row(1, at: clock.now, content: "x", embeds: [embed(description: "ends <t:\(due):R>")])])
+        let text = { () -> String in
+            let cells = (0..<self.table.numberOfRows).compactMap {
+                self.table.view(atColumn: 0, row: $0, makeIfNecessary: true) as? MessageCell
+            }
+            let views = cells.first?.embeds?.views.first?.textViews ?? []
+            return views.first { $0.string.hasPrefix("ends") }?.string ?? ""
+        }
+        let before = text()
+        #expect(!before.isEmpty)
+        let date = try #require(timers.active.map(\.date).min(), "a timer for the embed's time")
+
+        clock.now = date
+        timers.fire()
+        window.layoutIfNeeded()
+
+        #expect(text() != before, "\(before)")
+    }
 }

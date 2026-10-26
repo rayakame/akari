@@ -28,6 +28,10 @@ final class MediaTileView: NSButton {
         let key: ImageKey
         var video = false
         var animated = false
+        /// What VoiceOver calls it; "Video" or "Image" by default.
+        var noun: String?
+        /// A video's own Play; off where something else plays it (an embed's pill).
+        var ownPlay = true
         /// A GIFV: its video plays muted and looping over the poster, as a GIF would.
         var loops = false
         /// Discord's thumbhash.
@@ -36,8 +40,9 @@ final class MediaTileView: NSButton {
         var description: String?
 
         /// A cover's stand-in: nothing of it loads while covered.
-        init(key: ImageKey) {
+        init(key: ImageKey, noun: String? = nil) {
             self.key = key
+            self.noun = noun
         }
 
         init(_ attachment: Attachment) {
@@ -224,7 +229,7 @@ final class MediaTileView: NSButton {
 
     /// The overlay buttons take their own clicks; everything else is the tile's.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard frame.contains(point) else {
+        guard !isHidden, frame.contains(point) else {
             return nil
         }
         let local = convert(point, from: superview)
@@ -273,7 +278,7 @@ final class MediaTileView: NSButton {
     }
 
     static func accessibilityLabel(_ media: Media, cover: Cover?) -> String {
-        let kind = media.video ? "Video" : "Image"
+        let kind = media.noun ?? (media.video ? "Video" : "Image")
         switch cover {
         case .spoiler: return "Spoiler, \(kind)"
         case .pending: return "\(kind), waiting for Discord's scan"
@@ -425,7 +430,7 @@ final class MediaTileView: NSButton {
         failure.isHidden = !failed
         failureLabel.isHidden = !failed
         let video = media?.video == true
-        play.isHidden = !video || cover != nil || failed
+        play.isHidden = !video || media?.ownPlay == false || cover != nil || failed
         playSymbol.isHidden = play.isHidden
         playSymbol.contents = Self.playImage
         let moves = media?.animated == true || media?.loops == true

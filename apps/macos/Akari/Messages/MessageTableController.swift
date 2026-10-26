@@ -1124,11 +1124,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 })
         }
         embedTexts[row.id] = (message, revealed, media, shown)
+        noteRelativeTime(of: row.id)
         return shown
     }
 
+    // A row's next relative time change, in its text or its embeds'.
+    private func noteRelativeTime(of row: MessageId) {
+        let body = texts[row]?.built.nextChange
+        let embeds = embedTexts[row]?.shown.compactMap(\.nextChange).min()
+        relativeTimes[row] = [body, embeds].compactMap { $0 }.min()
+    }
+
     private func embed(_ action: EmbedView.Action, _ embed: Embed, of message: MessageId) {
-        let key = MediaKey(messageId: message, embed: embed.index)
+        let key = MediaKey(messageId: message, embed: embed.index, url: embed.url)
         switch action {
         case .open(let image):
             actions?.openMedia(image)
@@ -1185,7 +1193,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let built = build(row.shown, revealed, now, times)
         texts[row.id] = (row.shown, revealed, built)
-        relativeTimes[row.id] = built.nextChange
+        noteRelativeTime(of: row.id)
         return built.text
     }
 
@@ -1305,6 +1313,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 remeasured.insert(index)
                 rowHeights[item.id] = nil
                 texts[row.id] = nil
+                embedTexts[row.id] = nil
             }
             if body || box {
                 due.insert(index)

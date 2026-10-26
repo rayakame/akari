@@ -705,4 +705,18 @@ struct ThreadFormPreviewTests {
         #expect(preview.cursor(at: glyph) == .iBeam)
         #expect(preview.cursor(at: past) == .arrow)
     }
+
+    // Review: a message whose link its image hides shows that image in the preview.
+    @Test
+    func thePreviewShowsTheMessagesEmbeds() {
+        let image = embed(kind: .image, inline: true, title: nil, description: nil, media: [embedImage(640, 480)])
+        let message = row(1, at: Date(), content: "https://example.com/a.png", embeds: [image], hidesContent: true).message
+        let plain = row(2, at: Date(), content: "https://example.com/a.png").message
+
+        #expect(MessagePreview.height(of: message, width: 600) > MessagePreview.height(of: plain, width: 600) + 200)
+        let cell = MessageCell()
+        MessagePreview.configure(cell, with: message, now: Date())
+        #expect(cell.embeds?.isHidden == false)
+        #expect(cell.embeds?.views.first?.tiles.first?.isHidden == false)
+    }
 }

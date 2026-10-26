@@ -45,7 +45,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     /// The list's say: this message's custom emoji play (the setting, visibility, hover).
     var animatesEmoji: Bool {
         get { content.animatesEmoji }
-        set { content.animatesEmoji = newValue }
+        set {
+            content.animatesEmoji = newValue
+            embeds?.animatesEmoji = newValue
+        }
     }
     /// The list's say: this message's stickers play (`animate_stickers`, visibility, hover).
     var animatesStickers = false {
@@ -89,7 +92,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
     /// The text's emoji offer hover cards and popouts; not in the New Thread form's preview.
     var expressionsEnabled = true {
-        didSet { content.detectsExpressions = expressionsEnabled }
+        didSet {
+            content.detectsExpressions = expressionsEnabled
+            embeds?.detectsExpressions = expressionsEnabled
+        }
     }
     private var message: Message?
     private var mentioned = false {
@@ -126,6 +132,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     private static let textLeading: CGFloat = 72
     private static let textTrailing: CGFloat = 16
     private static let spacing: CGFloat = 2
+    private static let accessoryGap: CGFloat = 4
     private static let avatarSize: CGFloat = 40
     // Discord's box border sits 15.5 below the text's baseline; the stack's spacing gives 2 of it.
     private static let boxGap: CGFloat = 9.5
@@ -204,7 +211,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         hoverTime.isHidden = !isHovered || startsGroup
         reply.isHidden = !(startsGroup && message.kind == .reply)
         let lines = NSMutableAttributedString(attributedString: Self.extras(message))
-        if message.editedTimestamp != nil, message.content.isEmpty {
+        if message.editedTimestamp != nil, message.content.isEmpty || message.hidesContent {
             lines.append(CellText.editedMark())
         }
         // The link the one embed shows alone (Discord's hideSimpleEmbedContent).
@@ -228,7 +235,14 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         } else {
             let view = embedsView()
             view.isHidden = false
-            view.configure(shown)
+            view.configure(
+                shown, keepingSelection: self.message?.id == message.id, measuring: self === Self.sizing)
+        }
+        // Discord's accessories are 4 apart; the stack's spacing is 2.
+        if let attachments {
+            stack.setCustomSpacing(
+                attachments.isHidden || embeds?.isHidden != false ? Self.spacing : Self.accessoryGap,
+                after: attachments)
         }
         if message.stickers.isEmpty {
             // A reused cell lets its stickers go: no ask, no pin, no player.
@@ -266,9 +280,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     /// An embed's cover with the session's reveals, as an attachment's.
     static func cover(_ embed: Embed, _ media: MediaState) -> MediaTileView.Cover? {
         switch embed.cover {
-        case .spoiler: media.revealed.contains(.embed(embed.index)) ? nil : .spoiler
+        case .spoiler: media.revealed.contains(.embed(embed.index, url: embed.url)) ? nil : .spoiler
         case .pending: .pending
-        case .sensitive: .sensitive(shown: media.shownSensitive.contains(.embed(embed.index)))
+        case .sensitive:
+            .sensitive(shown: media.shownSensitive.contains(.embed(embed.index, url: embed.url)))
         case nil: nil
         }
     }
@@ -327,6 +342,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
                                 ? FailedLine.height : view.intrinsicContentSize.height
             }
             .reduce(0, +) + Self.spacing * CGFloat(max(shown.count - 1, 0))
+            + (shown.contains { $0 === attachments } && shown.contains { $0 === embeds }
+                ? Self.accessoryGap - Self.spacing : 0)
         let top = showsHeader ? spacing + Self.groupInset : Self.continuationTop
         let height = top + stacked + (showsHeader ? Self.groupBottom : Self.continuationBottom)
         guard showsHeader else {
@@ -492,6 +509,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         view.placeholders = placeholders
         view.onAction = { [weak self] embed, action in self?.onEmbed(embed, action) }
         view.onLink = { [weak self] url in self?.onLink(url) }
+        view.onExpression = { [weak self] target, rect in self?.onExpression(target, rect) }
+        view.messageMenu = content.messageMenu
+        view.animatesEmoji = content.animatesEmoji
+        view.detectsExpressions = expressionsEnabled
         view.loopSource = { [weak self] key in await self?.loopSource(key) }
         let anchor: NSView = attachments ?? content
         let after = stack.views(in: .top).firstIndex(of: anchor).map { $0 + 1 } ?? 0
