@@ -66,7 +66,8 @@ final class ReadingSignalsTests {
 
     // A right click: a left one would make the window key and bring it on screen.
     func rightClick(in window: NSWindow) throws -> NSEvent {
-        try #require(
+        try settleEvents(in: window)
+        return try #require(
             NSEvent.mouseEvent(
                 with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,

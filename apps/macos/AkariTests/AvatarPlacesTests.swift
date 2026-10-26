@@ -171,7 +171,7 @@ final class AvatarPlacesTests {
         if settle {
             try await eventually { layers.allSatisfy { $0.imageLayer.contents != nil || $0.failed } }
         }
-        try await Task.sleep(for: .milliseconds(50))
+        try settleEvents(in: window)
         let center = host.convert(NSPoint(x: host.bounds.midX, y: host.bounds.midY), to: nil)
         let event = { (type: NSEvent.EventType) in
             NSEvent.mouseEvent(

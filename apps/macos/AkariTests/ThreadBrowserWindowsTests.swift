@@ -144,7 +144,8 @@ final class ThreadBrowserWindowsTests {
     }
 
     func mouse(_ type: NSEvent.EventType, at point: NSPoint, in target: NSWindow) throws -> NSEvent {
-        try #require(
+        try settleEvents(in: target)
+        return try #require(
             NSEvent.mouseEvent(
                 with: type, location: target.convertPoint(fromScreen: point), modifierFlags: [],
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: target.windowNumber,
@@ -441,6 +442,7 @@ final class ThreadBrowserWindowsTests {
         let text = try await line()
         let rect = try glyphs(of: "threads", in: text, within: text)
         let link = text.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+        try settleEvents(in: window)
         let up = try #require(
             NSEvent.mouseEvent(
                 with: .leftMouseUp, location: link, modifierFlags: [],

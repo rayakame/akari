@@ -68,7 +68,6 @@ func keyDown(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierF
         isARepeat: false, keyCode: keyCode)
 }
 
-// Escape and Cmd+. send the same command, cancelOperation(_:).
 /// Returns once the event queue gives back a location in `window` as it was posted. On macOS 26
 /// a mouse event for a window made in the same run-loop turn comes back at a wrong location until
 /// AppKit learns from the window server where the window is (seen on CI's runner, not on 27).
@@ -91,6 +90,7 @@ func settleEvents(in window: NSWindow) throws {
     }
 }
 
+// Escape and Cmd+. send the same command, cancelOperation(_:).
 func escapeKey(_ modifiers: NSEvent.ModifierFlags = []) -> NSEvent? {
     keyDown("\u{1b}", keyCode: 53, modifiers: modifiers)
 }

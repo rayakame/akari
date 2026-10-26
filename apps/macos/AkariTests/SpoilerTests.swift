@@ -122,6 +122,7 @@ struct SpoilerTests {
 
     // Down and up on the word, through the text view's own handling.
     func press(_ shown: String, in view: MessageTextView) throws {
+        try settleEvents(in: try #require(view.window))
         let word = try glyphs(of: shown, in: view)
         let point = NSPoint(x: word.midX, y: word.midY)
         NSApp.postEvent(try click(.leftMouseUp, at: point, in: view), atStart: false)
@@ -150,6 +151,7 @@ struct SpoilerTests {
         var clicked: [URL] = []
         view.onLink = { clicked.append($0) }
 
+        try settleEvents(in: try #require(view.window))
         // Ends the text view's tracking loop, should the click reach it.
         NSApp.postEvent(try click(.leftMouseUp, at: NSPoint(x: 300, y: 3), in: view), atStart: false)
         view.mouseDown(with: try click(.leftMouseDown, at: NSPoint(x: 300, y: 3), in: view))

@@ -152,6 +152,7 @@ struct ResizeCursorTests {
     func drag(in window: NSWindow, from start: NSPoint, by distance: CGFloat, release: Bool = true)
         throws
     {
+        try settleEvents(in: window)
         let now = ProcessInfo.processInfo.systemUptime
         let event = { (type: NSEvent.EventType, point: NSPoint, step: Double) in
             NSEvent.mouseEvent(

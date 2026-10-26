@@ -681,6 +681,7 @@ struct MessageTableTests {
     // the tracking loop a press starts.
     func press(_ view: NSView, clicks: Int = 1, drag: Bool = false) throws {
         let window = try #require(view.window)
+        try settleEvents(in: window)
         let start = view.convert(
             NSPoint(x: min(12, view.bounds.width / 2), y: view.bounds.midY), to: nil)
         let end = drag ? NSPoint(x: start.x + 40, y: start.y) : start
