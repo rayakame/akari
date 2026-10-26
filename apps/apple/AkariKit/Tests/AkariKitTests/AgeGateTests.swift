@@ -80,6 +80,73 @@ final class AgeGateTests {
         session.close()
     }
 
+    // The header's Threads, its browser and the New Thread form would show what the gate hides.
+    @Test
+    func theThreadsEntriesWaitForTheGate() {
+        store.update { $0.threadCreations[id(11)] = ThreadCreation(public: true, private: true) }
+        let session = reading()
+        #expect(session.threadsButtonParent == nil)
+
+        session.openThreadBrowser(of: adult, as: .modal)
+        #expect(session.threadBrowser == nil)
+        session.openThreadForm(in: adult, location: .threadBrowserToolbar)
+        session.openThreadFormHere()
+        #expect(session.threadForm == nil)
+        session.agreeToAgeRestricted(in: adult)
+        #expect(session.threadsButtonParent == adult)
+        session.close()
+    }
+
+    // A link's channel the store doesn't have (an unsynced thread, a channel the user can't see)
+    // is asked about first: the gate needs its parent, and Discord may refuse it.
+    @Test
+    func anUnknownChannelIsFetchedBeforeItOpens() async throws {
+        let session = reading()
+        session.leaveAgeGate()
+        let unknown: ChannelId = id(31)
+        account.fetchedThreads.withLock { $0[unknown] = thread(31, in: 11) }
+        store.update { $0.windows[unknown] = window([3]) }
+
+        session.go(to: unknown)
+
+        #expect(session.messages?.channelId == general, "not before the store knows it")
+        try await eventually { session.messages?.channelId == unknown }
+        #expect(account.log.calls.contains(.fetchThread(unknown, unknown)))
+        session.close()
+    }
+
+    // The user went elsewhere while Discord answered: the link's channel doesn't open over it.
+    @Test
+    func anotherChannelWinsOverAFetchStillRunning() async throws {
+        let session = reading()
+        session.leaveAgeGate()
+        let unknown: ChannelId = id(31)
+        account.fetchedThreads.withLock { $0[unknown] = thread(31, in: 12) }
+        account.holdThreadFetches.withLock { $0 = true }
+
+        session.go(to: unknown)
+        session.open(channel: adult)
+        account.threadFetches.send(())
+        try await eventually { self.store.channel(id: unknown) != nil }
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(session.messages?.channelId == adult)
+        session.close()
+    }
+
+    @Test
+    func aChannelDiscordRefusesDoesntOpen() async throws {
+        let session = reading()
+        session.leaveAgeGate()
+
+        session.go(to: id(99))
+
+        try await eventually { self.account.log.calls.contains(.fetchThread(id(99), id(99))) }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(session.messages?.channelId == general)
+        session.close()
+    }
+
     // A view reading the gate updates when an event may have changed it.
     @Test
     func anAgeGateEventUpdatesItsReaders() async {
