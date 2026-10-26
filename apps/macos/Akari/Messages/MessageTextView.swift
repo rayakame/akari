@@ -250,8 +250,18 @@ final class MessageTextView: NSTextView {
         }
         if event.clickCount == 1, let hit = expression(at: point), let window {
             var seen: [NSEvent] = []
+            var others: [NSEvent] = []
+            defer {
+                for other in others.reversed() {
+                    NSApp.postEvent(other, atStart: true)
+                }
+            }
             while let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
-                // Older than the press: not this press's.
+                // Another window's events go back to it; older ones were never this press's.
+                if next.windowNumber != window.windowNumber {
+                    others.append(next)
+                    continue
+                }
                 guard next.timestamp >= event.timestamp else {
                     continue
                 }

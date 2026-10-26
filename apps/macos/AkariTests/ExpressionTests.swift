@@ -101,6 +101,42 @@ final class ExpressionTests {
         #expect(opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)], "\(scale)x: selection \(view.selectedRange())")
     }
 
+    // Suites run side by side on the main actor: another window's release, even a newer one, isn't
+    // this press's, and its window still gets it.
+    @Test
+    func anotherWindowsReleaseDoesntEndThePress() throws {
+        let window = ScaledWindow(scale: 1)
+        let other = ScaledWindow(scale: 1)
+        retained += [window, other]
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        window.contentView = container
+        let view = MessageTextView()
+        view.detectsExpressions = true
+        view.frame = container.bounds
+        container.addSubview(view)
+        view.show(MessageText.build(row(1, at: list.noon, content: "hi <:wave:5> there").message, revealed: [], now: list.noon, times: times).text)
+        container.layoutSubtreeIfNeeded()
+        var opened: [ExpressionTarget] = []
+        view.onExpression = { target, _ in opened.append(target) }
+        while NSApp.nextEvent(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp],
+            until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true) != nil
+        {}
+        let foreign = try #require(
+            NSEvent.mouseEvent(
+                with: .leftMouseUp, location: NSPoint(x: 5, y: 5), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime + 1, windowNumber: other.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        NSApp.postEvent(foreign, atStart: false)
+
+        try click(at: try point(at: 3, in: view), in: view, draining: false)
+
+        #expect(opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)], "selection \(view.selectedRange()), windows \(window.windowNumber) and \(other.windowNumber)")
+        let left = NSApp.nextEvent(
+            matching: .leftMouseUp, until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true)
+        #expect(left?.windowNumber == other.windowNumber, "the other window's release stays queued")
+    }
+
     @Test
     func theTextKnowsItsEmoji() throws {
         // Discord's masked links can't hold emoji, so none is ever inside a link.
