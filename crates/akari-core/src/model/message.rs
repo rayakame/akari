@@ -189,6 +189,10 @@ pub struct Attachment {
     pub height: Option<u32>,
     /// A thumbhash to show while the file loads.
     pub placeholder: Option<String>,
+    /// 1 for a thumbhash; later versions may be something else.
+    pub placeholder_version: Option<u32>,
+    /// Missing until Discord's explicit content scan looked at it.
+    pub content_scan_version: Option<u32>,
     /// Voice messages only.
     pub duration_secs: Option<f64>,
     /// Voice messages only: base64-encoded samples.

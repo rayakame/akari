@@ -33,6 +33,9 @@ pub struct Guild {
     pub default_message_notifications: MessageNotificationLevel,
     #[serde(default)]
     pub nsfw_level: NsfwLevel,
+    /// The level the owner chose; explicit and age-restricted ones gate every channel.
+    #[serde(default)]
+    pub owner_configured_content_level: Option<NsfwLevel>,
     /// Boost level.
     #[serde(default)]
     pub premium_tier: PremiumTier,

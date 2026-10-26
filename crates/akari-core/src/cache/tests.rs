@@ -83,6 +83,7 @@ pub(crate) fn current_user() -> CurrentUser {
         premium_type: PremiumType::Tier2,
         mfa_enabled: true,
         verified: true,
+        nsfw_allowed: Some(false),
     }
 }
 
@@ -121,6 +122,7 @@ pub(crate) fn guild(id: u64, name: &str) -> Guild {
         } else {
             Box::new([])
         },
+        age_restricted: id == 100,
     }
 }
 
@@ -262,6 +264,7 @@ fn full_message() -> Message {
         attachments: vec![Attachment {
             id: Snowflake::new(77),
             filename: "photo.png".into(),
+            title: Some("photo".into()),
             description: Some("alt text".into()),
             content_type: Some("image/png".into()),
             size: 2_000_000,
@@ -269,7 +272,9 @@ fn full_message() -> Message {
             proxy_url: "https://media.example/photo.png".into(),
             width: Some(640),
             height: Some(480),
-            flags: 0,
+            flags: 8,
+            placeholder: Some("3PcNNYSFeXh/d3eld0iHZoZgVwh2".into()),
+            content_scan_version: Some(2),
         }]
         .into(),
         embeds: vec![Embed {
@@ -665,25 +670,22 @@ fn the_settings_tables_exist() {
     }
 }
 
+// Their attachments have no scan version, which would cover their media as pending scans.
 #[test]
-fn a_schema_4_file_is_upgraded_and_keeps_its_rows() {
-    let dir = TempDir::new();
-    let mut cache = open(&dir);
-    write_entities(&mut cache, &entities());
-    drop(cache);
-    raw(&dir.file(ME))
-        .pragma_update(None, "user_version", 4)
-        .unwrap();
+fn files_from_before_attachments_kept_their_scans_are_discarded() {
+    for version in [4, 5] {
+        let dir = TempDir::new();
+        let mut cache = open(&dir);
+        write_entities(&mut cache, &entities());
+        drop(cache);
+        raw(&dir.file(ME))
+            .pragma_update(None, "user_version", version)
+            .unwrap();
 
-    let opened = Cache::open_or_rebuild(&dir.file(ME), UserId::new(ME)).unwrap();
+        let opened = Cache::open_or_rebuild(&dir.file(ME), UserId::new(ME)).unwrap();
 
-    assert_eq!(opened.discarded, None);
-    assert!(opened.cache.read_entities().unwrap().value == entities());
-    drop(opened);
-    let version: i32 = raw(&dir.file(ME))
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .unwrap();
-    assert_eq!(version, schema::CURRENT);
+        assert_eq!(opened.discarded, Some(Discarded::OtherSchema), "{version}");
+    }
 }
 
 #[test]

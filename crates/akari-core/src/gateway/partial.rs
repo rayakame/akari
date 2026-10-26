@@ -3,8 +3,8 @@ use serde::de::{self, Deserialize, Deserializer};
 use crate::lenient::{default_on_error, skip_invalid_option};
 use crate::model::{
     Attachment, Channel, ChannelId, ChannelType, Embed, GenericMarker, GuildId, MessageCall,
-    MessageId, MessageNotificationLevel, MessageType, PermissionOverwrite, PremiumType, Role,
-    RoleId, Snowflake, StickerItem, ThreadMetadata, Timestamp, User, UserId, WebhookId,
+    MessageId, MessageNotificationLevel, MessageType, NsfwLevel, PermissionOverwrite, PremiumType,
+    Role, RoleId, Snowflake, StickerItem, ThreadMetadata, Timestamp, User, UserId, WebhookId,
     double_option,
 };
 
@@ -19,6 +19,7 @@ pub struct GuildUpdate {
     pub roles: Option<Vec<Role>>,
     pub default_message_notifications: Option<MessageNotificationLevel>,
     pub features: Option<Vec<String>>,
+    pub owner_configured_content_level: Option<Option<NsfwLevel>>,
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -33,6 +34,8 @@ struct GuildFields {
     roles: Option<Vec<Role>>,
     default_message_notifications: Option<MessageNotificationLevel>,
     features: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    owner_configured_content_level: Option<Option<NsfwLevel>>,
     properties: Option<Box<GuildFields>>,
 }
 
@@ -60,6 +63,9 @@ impl<'de> Deserialize<'de> for GuildUpdate {
                 .default_message_notifications
                 .or(top.default_message_notifications),
             features: nested.features.or(top.features),
+            owner_configured_content_level: nested
+                .owner_configured_content_level
+                .or(top.owner_configured_content_level),
         })
     }
 }
@@ -169,4 +175,6 @@ pub struct UserUpdate {
     pub premium_type: Option<PremiumType>,
     pub mfa_enabled: Option<bool>,
     pub verified: Option<bool>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub nsfw_allowed: Option<Option<bool>>,
 }
