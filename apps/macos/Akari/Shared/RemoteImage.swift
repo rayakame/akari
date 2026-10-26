@@ -92,6 +92,7 @@ struct ConversationAvatar: View {
         if conversation.channel.kind == .dm {
             UserAvatar(conversation.recipients.first, size: size, place: place, hovered: hovered)
         } else if let icon = conversation.channel.icon {
+            // Discord asks a group's icon as a still PNG: it never plays, hovered or not.
             RemoteImage(key: icon, cornerRadius: size / 2, placeholder: .disc)
                 .frame(width: size, height: size)
                 .accessibilityHidden(true)

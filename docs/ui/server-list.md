@@ -8,7 +8,7 @@ measured from the web client on 2026-10-10; sizes in [layout.md](layout.md), col
 
 1. Home, which opens the DM list.
 2. Avatars of DMs with unread messages. *Akari: the DMs and group DMs with mentions (every
-   message in an unmuted DM is one), newest first, as 40 point avatars (a person's avatar, a
+   message in an unmuted DM is one), newest first, as 40-point avatars (a person's avatar, a
    group's icon; [images.md](images.md)) with the badge and the unread pill, an animated
    avatar playing while hovered; clicking one goes home and opens it there.*
 3. Servers the user is only previewing. *Akari: not in READY, so not shown

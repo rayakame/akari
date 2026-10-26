@@ -191,7 +191,16 @@ final class MessageAvatarTests {
         var failedSeen = 0
         for _ in 0..<30 {
             let more = try await scrollUp()
-            for (raw, view) in headerAvatars() where raw % 2 == 1 {
+            // Each failing avatar gets 2 s to fail; one that never asks never does.
+            let failing = headerAvatars().filter { $0.raw % 2 == 1 }
+            var pending = failing.filter { !$0.view.failed }
+            let deadline = ContinuousClock.now + .seconds(2)
+            while !pending.isEmpty, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+                pending = pending.filter { !$0.view.failed }
+            }
+            for (raw, view) in failing {
+                #expect(view.failed, "avatar \(raw) never failed")
                 if view.failed {
                     failedSeen += 1
                 }

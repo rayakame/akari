@@ -1471,7 +1471,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
             (cell as? MessageCell)?.isHovered = index == row
         }
-        let group = row >= 0 ? groupStart(of: row).map { timeline.items[$0].id } : nil
+        // The table can briefly hold more rows than the timeline while it updates.
+        let group =
+            timeline.items.indices.contains(row)
+            ? groupStart(of: row).map { timeline.items[$0].id } : nil
         if group != hoveredGroup {
             hoveredGroup = group
             updateAvatarAnimation()
