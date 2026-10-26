@@ -97,6 +97,7 @@ final class ExpressionTests {
         }
 
         let before = ProcessInfo.processInfo.systemUptime
+        NSLog("PROBE stale test %@x before the click: %@", "\(scale)", Probe.state(view, at: try point(at: 3, in: view)))
         try click(at: try point(at: 3, in: view), in: view, draining: false)
 
         // PROBE (temporary): what's left after the click; read after it, so the click is untouched.
