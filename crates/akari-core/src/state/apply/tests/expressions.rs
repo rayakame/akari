@@ -82,3 +82,20 @@ fn a_broken_emoji_is_skipped() {
     assert_eq!(emoji_guild(&state, WAVE), Some(G1));
     assert!(state.guild(GuildId::new(G1)).is_some());
 }
+
+// Nothing shows a server's emoji list: a READY whose servers differ only in it changes nothing
+// the host sees.
+#[test]
+fn a_ready_with_only_new_emoji_reports_no_guild_change() {
+    let mut state = ready_state();
+    let mut ready = ready_value();
+    ready["guilds"][0]["emojis"] = json!([emoji(WAVE, "wave")]);
+
+    let events = apply(&mut state, "READY", ready);
+
+    assert!(
+        !events.iter().any(|event| event.starts_with("GuildUpdated")),
+        "{events:?}"
+    );
+    assert_eq!(emoji_guild(&state, WAVE), Some(G1));
+}

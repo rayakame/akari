@@ -639,7 +639,7 @@ impl State {
             match (old.guilds.get(&id), next.guilds.get(&id)) {
                 (Some(before), Some(after)) => {
                     kept.insert(id);
-                    if before != after {
+                    if !before.shows_the_same(after) {
                         events.push(StoreEvent::GuildUpdated(after.clone()));
                     }
                 }
@@ -1212,7 +1212,7 @@ impl State {
         self.follow_guild_threads(id, &mut next, events);
         match self.entities.guilds.get(&id).cloned() {
             Some(before) => {
-                if before != after {
+                if !before.shows_the_same(&after) {
                     events.push(StoreEvent::GuildUpdated(after));
                 }
                 if let Some(member) = next.members.get(&id)

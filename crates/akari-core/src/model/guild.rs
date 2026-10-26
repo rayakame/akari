@@ -55,6 +55,13 @@ fn yes() -> bool {
     true
 }
 
+/// A guild emoji by its ID alone: READY's and GUILD_EMOJIS_UPDATE's lists, of which the store
+/// keeps only which guild an emoji is from, decoded without their names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct EmojiRef {
+    pub id: Snowflake<EmojiMarker>,
+}
+
 // The reference's documented default.
 fn default_locale() -> String {
     "en-US".to_owned()

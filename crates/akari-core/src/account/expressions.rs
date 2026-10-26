@@ -1,5 +1,8 @@
+use std::future::Future;
+
 use super::Account;
 use crate::RequestError;
+use crate::error::{TransportError, TransportErrorKind};
 use crate::model::{EmojiId, StickerId, StickerPackId};
 use crate::state::{EmojiSource, SourceGuild, StickerDetails, StickerPack};
 
@@ -7,9 +10,10 @@ use crate::state::{EmojiSource, SourceGuild, StickerDetails, StickerPack};
 impl Account {
     /// The server or app a custom emoji is from. Discord answers a server only while it's
     /// discoverable; for the user's own servers, [`crate::state::Store::emoji_guild`] knows.
+    /// Given 5 s, as the official client gives it: a later lookup doesn't wait behind a slow one.
     pub async fn emoji_source(&self, emoji: EmojiId) -> Result<EmojiSource, RequestError> {
-        self.lookup("emoji_source", self.shared.rest.emoji_source(emoji).await)
-            .map(EmojiSource::from)
+        let answer = self.within(self.shared.rest.emoji_source(emoji)).await;
+        self.lookup("emoji_source", answer).map(EmojiSource::from)
     }
 
     /// A sticker, and its pack or server.
@@ -31,6 +35,21 @@ impl Account {
     pub async fn sticker_pack(&self, pack: StickerPackId) -> Result<StickerPack, RequestError> {
         self.lookup("sticker_pack", self.shared.rest.sticker_pack(pack).await)
             .map(StickerPack::from)
+    }
+
+    // Dropping the request at the limit lets its rate-limit lane go.
+    async fn within<T>(
+        &self,
+        request: impl Future<Output = Result<T, RequestError>>,
+    ) -> Result<T, RequestError> {
+        tokio::time::timeout(self.shared.lookup_timeout, request)
+            .await
+            .unwrap_or_else(|_| {
+                Err(RequestError::Network(TransportError::new(
+                    TransportErrorKind::Timeout,
+                    "lookup took too long",
+                )))
+            })
     }
 
     fn lookup<T>(

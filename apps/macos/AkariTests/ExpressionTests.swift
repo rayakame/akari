@@ -243,6 +243,7 @@ final class ExpressionTests {
             func emojiGuild(emojiId: EmojiId) -> GuildId? { nil }
             func guild(id: GuildId) -> Guild? { nil }
             func nitro() -> Nitro { .none }
+            func unavailableGuildIds() -> [GuildId] { [] }
         }
         let model = ExpressionPopoutModel(
             target: .customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false), channelGuild: nil,

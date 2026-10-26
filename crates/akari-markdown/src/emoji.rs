@@ -76,19 +76,27 @@ pub(crate) fn exempt(emoji: &str) -> bool {
 }
 
 /// A Unicode emoji's name as Discord's hover card and popout show it, without colons: gemoji's
-/// word (`grinning`, `thumbsup`), a skin tone as `_tone1`–`_tone5`, a flag as `flag_de`. `None`
-/// for anything that isn't exactly one emoji, and for ©, ® and ™, which Discord leaves as text.
+/// word (`grinning`, `thumbsup`), skin tones as `_tone1`–`_tone5` (two for a pair), a flag as
+/// `flag_de`, a lone regional indicator as `regional_indicator_a`, else Unicode's name. `None`
+/// for anything the parser doesn't count as exactly one emoji: text-presentation symbols without
+/// their variation selector, and ©, ® and ™, which Discord leaves as text.
 pub fn emoji_shortcode(emoji: &str) -> Option<String> {
-    if exempt(emoji) {
+    if exempt(emoji) || !is_emoji(emoji) {
         return None;
     }
-    let found = emojis::get(emoji)?;
     let letters: Vec<char> = emoji.chars().filter(|&c| c != '\u{fe0f}').collect();
-    if let [first, second] = letters[..]
-        && let (Some(a), Some(b)) = (regional_letter(first), regional_letter(second))
-    {
-        return Some(format!("flag_{a}{b}"));
+    match letters[..] {
+        [first] if regional_indicator(first) => {
+            return regional_letter(first).map(|a| format!("regional_indicator_{a}"));
+        }
+        [first, second] => {
+            if let (Some(a), Some(b)) = (regional_letter(first), regional_letter(second)) {
+                return Some(format!("flag_{a}{b}"));
+            }
+        }
+        _ => {}
     }
+    let found = emojis::get(emoji)?;
     let tone = found
         .skin_tone()
         .filter(|&tone| tone != emojis::SkinTone::Default);
@@ -102,11 +110,36 @@ pub fn emoji_shortcode(emoji: &str) -> Option<String> {
     let name = base
         .shortcodes()
         .find(|name| name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
-        .or_else(|| base.shortcode())?;
-    Some(match tone.map(|tone| tone as u8) {
-        Some(tone @ 1..=5) => format!("{name}_tone{tone}"),
-        _ => name.to_owned(),
+        .map(str::to_owned)
+        .unwrap_or_else(|| unicode_name(base.name()));
+    Some(match tone.map(tones) {
+        Some((first, Some(second))) => format!("{name}_tone{first}_tone{second}"),
+        Some((first, None)) => format!("{name}_tone{first}"),
+        None => name,
     })
+}
+
+// Light 1 … dark 5; a pair (light and medium-light, …) in emojis' order, each first tone with
+// the four others.
+fn tones(tone: emojis::SkinTone) -> (u8, Option<u8>) {
+    let index = tone as u8;
+    if index <= 5 {
+        return (index, None);
+    }
+    let pair = index - 6;
+    let first = pair / 4 + 1;
+    let others: Vec<u8> = (1..=5).filter(|&tone| tone != first).collect();
+    (first, others.get(usize::from(pair % 4)).copied())
+}
+
+fn unicode_name(name: &str) -> String {
+    name.chars()
+        .filter_map(|c| match c {
+            ' ' | '-' => Some('_'),
+            c if c.is_ascii_alphanumeric() => Some(c.to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn regional_letter(c: char) -> Option<char> {

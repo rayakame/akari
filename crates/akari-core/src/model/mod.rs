@@ -19,8 +19,8 @@ pub use expression::{
     StickerType,
 };
 pub use guild::{
-    Guild, GuildEmoji, GuildMember, MessageNotificationLevel, NsfwLevel, PremiumTier, Role,
-    RoleColors,
+    EmojiRef, Guild, GuildEmoji, GuildMember, MessageNotificationLevel, NsfwLevel, PremiumTier,
+    Role, RoleColors,
 };
 pub use message::{
     Attachment, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,

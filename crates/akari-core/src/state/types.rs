@@ -117,6 +117,33 @@ pub struct Guild {
 }
 
 impl Guild {
+    /// Equal in all a host shows: its emoji list aside, which nothing shows.
+    pub(crate) fn shows_the_same(&self, other: &Self) -> bool {
+        let Self {
+            id,
+            name,
+            icon,
+            banner,
+            owner_id,
+            roles,
+            member_count,
+            large,
+            default_message_notifications,
+            community,
+            emojis: _,
+        } = self;
+        *id == other.id
+            && *name == other.name
+            && *icon == other.icon
+            && *banner == other.banner
+            && *owner_id == other.owner_id
+            && *roles == other.roles
+            && *member_count == other.member_count
+            && *large == other.large
+            && *default_message_notifications == other.default_message_notifications
+            && *community == other.community
+    }
+
     /// The icon's image; `None` without one (the app shows initials).
     pub fn icon_key(&self) -> Option<ImageKey> {
         let hash = self.icon.as_ref().filter(|hash| hash.is_cdn_hash())?;

@@ -906,8 +906,8 @@ impl Store {
         self.read(|inner| inner.state.guild(id))
     }
 
-    /// The server a custom emoji is from, among the user's servers; `None` for an emoji from
-    /// a server the user isn't in.
+    /// The server a custom emoji is from, among the user's available servers; `None` for an
+    /// emoji from a server the user isn't in, or one that's down.
     pub fn emoji_guild(&self, emoji: EmojiId) -> Option<GuildId> {
         self.read(|inner| inner.state.emoji_guild(emoji))
     }

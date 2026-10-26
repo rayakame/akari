@@ -181,3 +181,48 @@ impl From<model::StickerPack> for StickerPack {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn answers_discord_leaves_half_empty_read_as_unknown() {
+        let guildless: model::EmojiSource =
+            serde_json::from_value(json!({"type": "GUILD", "guild": null, "application": null}))
+                .unwrap();
+        assert_eq!(EmojiSource::from(guildless), EmojiSource::Unknown);
+        let pack: model::EmojiSource =
+            serde_json::from_value(json!({"type": "PACK", "guild": null, "application": null}))
+                .unwrap();
+        assert_eq!(EmojiSource::from(pack), EmojiSource::Unknown);
+        let nameless = serde_json::from_value::<model::EmojiSource>(
+            json!({"type": "APPLICATION", "guild": null, "application": {"id": "1"}}),
+        );
+        assert!(nameless.is_err(), "an app without a name doesn't decode");
+    }
+
+    #[test]
+    fn a_stickers_origin_follows_its_ids() {
+        let sticker = |kind: u8, guild: Option<&str>, pack: Option<&str>| -> StickerOrigin {
+            let wire: model::Sticker = serde_json::from_value(json!({
+                "id": "7", "name": "wave", "type": kind, "format_type": 1,
+                "guild_id": guild, "pack_id": pack
+            }))
+            .unwrap();
+            StickerDetails::from(wire).origin
+        };
+        assert_eq!(
+            sticker(9, Some("5"), None),
+            StickerOrigin::Guild(GuildId::new(5))
+        );
+        assert_eq!(
+            sticker(9, None, Some("6")),
+            StickerOrigin::Pack(StickerPackId::new(6))
+        );
+        assert_eq!(sticker(2, None, None), StickerOrigin::Unknown);
+        assert_eq!(sticker(1, None, None), StickerOrigin::Unknown);
+    }
+}

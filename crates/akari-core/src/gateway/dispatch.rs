@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::lenient::{default_on_error, skip_invalid, skip_invalid_in_each, skip_invalid_or_empty};
 use crate::model::{
-    Channel, ChannelId, GuildEmoji, GuildId, GuildMember, Message, MessageId, Role, RoleId,
+    Channel, ChannelId, EmojiRef, GuildId, GuildMember, Message, MessageId, Role, RoleId,
     ThreadMember, UserId,
 };
 
@@ -45,7 +45,7 @@ pub struct GuildRoleEvent {
 pub struct GuildEmojisUpdate {
     pub guild_id: GuildId,
     #[serde(default, deserialize_with = "skip_invalid")]
-    pub emojis: Vec<GuildEmoji>,
+    pub emojis: Vec<EmojiRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

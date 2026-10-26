@@ -54,9 +54,15 @@ fn unicode_emoji_have_discords_names() {
         ("👋🏿", "wave_tone5"),
         ("🇩🇪", "flag_de"),
         ("🇯🇵", "flag_jp"),
+        ("🇦", "regional_indicator_a"),
         ("❤️", "heart"),
-        ("❤", "heart"),
+        ("✔️", "heavy_check_mark"),
         ("👨‍💻", "man_technologist"),
+        ("🧑🏻‍🤝‍🧑🏼", "people_holding_hands_tone1_tone2"),
+        ("🫱🏻‍🫲🏿", "handshake_tone1_tone5"),
+        ("1️⃣", "one"),
+        // Not in gemoji: Unicode's name.
+        ("🙂‍↔️", "head_shaking_horizontally"),
     ] {
         assert_eq!(
             crate::emoji_shortcode(emoji).as_deref(),
@@ -64,7 +70,8 @@ fn unicode_emoji_have_discords_names() {
             "{emoji}"
         );
     }
-    for text in ["a", "", "™", "©", "😀😀", "1"] {
+    // The parser's rule: a text-presentation symbol without its variation selector is text.
+    for text in ["a", "", "™", "©", "😀😀", "1", "❤", "✔", "▶", "♥", "☀", "⚠"] {
         assert_eq!(crate::emoji_shortcode(text), None, "{text:?}");
     }
 }

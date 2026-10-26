@@ -1242,6 +1242,7 @@ struct MessageTableTests {
         func emojiGuild(emojiId: EmojiId) -> GuildId? { GuildId(rawValue: 50) }
         func guild(id: GuildId) -> Guild? { id.rawValue == 50 ? Guild(id: id, name: "Emoji Hub") : nil }
         func nitro() -> Nitro { .none }
+        func unavailableGuildIds() -> [GuildId] { [] }
     }
 
     final class PopoutLookups: ExpressionLookups {

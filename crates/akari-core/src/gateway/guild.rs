@@ -4,7 +4,7 @@ use serde_json::value::RawValue;
 use crate::JsonError;
 use crate::lenient::skip_invalid;
 use crate::model::{
-    Channel, Guild, GuildEmoji, GuildMarker, GuildMember, Role, Snowflake, Timestamp,
+    Channel, EmojiRef, Guild, GuildMarker, GuildMember, Role, Snowflake, Timestamp,
 };
 
 /// A guild in READY or GUILD_CREATE.
@@ -36,8 +36,8 @@ pub struct AvailableGuild {
     /// Only threads the user has joined.
     pub threads: Vec<Channel>,
     pub roles: Vec<Role>,
-    /// Its custom emoji; one that doesn't decode is left out.
-    pub emojis: Vec<GuildEmoji>,
+    /// Its custom emoji's IDs; one that doesn't decode is left out.
+    pub emojis: Vec<EmojiRef>,
     /// GUILD_CREATE's members: the current user's on join. Empty in READY, which has
     /// `merged_members` instead.
     pub members: Vec<GuildMember>,
@@ -69,7 +69,7 @@ struct RawGatewayGuild {
     #[serde(default)]
     roles: Vec<Role>,
     #[serde(default, deserialize_with = "skip_invalid")]
-    emojis: Vec<GuildEmoji>,
+    emojis: Vec<EmojiRef>,
     #[serde(default, deserialize_with = "skip_invalid")]
     members: Vec<GuildMember>,
     member_count: Option<u32>,

@@ -116,6 +116,8 @@ public protocol ExpressionStore {
     func emojiGuild(emojiId: EmojiId) -> GuildId?
     func guild(id: GuildId) -> Guild?
     func nitro() -> Nitro
+    /// The user's servers that are down: still theirs, with no emoji in the store.
+    func unavailableGuildIds() -> [GuildId]
 }
 
 extension Store: ExpressionStore {}
@@ -195,10 +197,13 @@ public final class ExpressionPopoutModel {
         }
         let found: SourceGuild? = if case .guild(let guild) = source { guild } else { nil }
         let local = store.emojiGuild(emojiId: id).flatMap { store.guild(id: $0) }
+        let joined = local?.id ?? found.map(\.id).flatMap(isDown)
         let words = Words.emoji
-        content.body = [.init(text: body(words, local: local, found: found, nitro: store.nitro() != .none), bold: false)]
-        content.server = server(words, local: local, found: found)
-        if local == nil, let found, found.discoverable {
+        content.body = [
+            .init(text: body(words, joined: joined, found: found, nitro: store.nitro() != .none), bold: false)
+        ]
+        content.server = server(words, joined: joined != nil, local: local, found: found)
+        if joined == nil, let found, found.discoverable {
             let others = found.emojis.filter { $0.id != id }
             if !others.isEmpty {
                 content.more = .emoji(Array(others.prefix(12)))
@@ -225,11 +230,12 @@ public final class ExpressionPopoutModel {
         case .guild(let guildId):
             let found = try? await lookups.stickerGuild(stickerId: sticker.id)
             let local = store.guild(id: guildId)
+            let joined = local?.id ?? isDown(guildId)
             let nitro = [.nitro, .basic].contains(store.nitro())
             let words = Words.sticker
-            content.body = [.init(text: body(words, local: local, found: found, nitro: nitro), bold: false)]
-            content.server = server(words, local: local, found: found)
-            if local == nil, let found, found.discoverable {
+            content.body = [.init(text: body(words, joined: joined, found: found, nitro: nitro), bold: false)]
+            content.server = server(words, joined: joined != nil, local: local, found: found)
+            if joined == nil, let found, found.discoverable {
                 let others = found.stickers.filter { $0.id != sticker.id }
                 if !others.isEmpty {
                     content.more = .stickers(Array(others.prefix(12)))
@@ -244,10 +250,14 @@ public final class ExpressionPopoutModel {
 
     // The official matrix: in one of the user's servers (this one or another), a discoverable
     // one they're not in, or neither; with or without Nitro.
-    private func body(_ words: Words, local: Guild?, found: SourceGuild?, nitro: Bool) -> String {
-        if let local {
-            let here = local.id == channelGuild
-            return ExpressionText.fromYourServer(words, here: here, nitro: nitro)
+    private func isDown(_ id: GuildId) -> GuildId? {
+        store.unavailableGuildIds().contains(id) ? id : nil
+    }
+
+    // `joined`: the user's server it's from, available or down.
+    private func body(_ words: Words, joined: GuildId?, found: SourceGuild?, nitro: Bool) -> String {
+        if let joined {
+            return ExpressionText.fromYourServer(words, here: joined == channelGuild, nitro: nitro)
         }
         if found?.discoverable == true {
             return ExpressionText.joinToUse(words, nitro: nitro)
@@ -255,16 +265,18 @@ public final class ExpressionPopoutModel {
         return ExpressionText.unavailable(words)
     }
 
-    private func server(_ words: Words, local: Guild?, found: SourceGuild?) -> ExpressionPopout.Server? {
-        let heading = local == nil ? words.getFrom : words.isFrom
+    private func server(_ words: Words, joined: Bool, local: Guild?, found: SourceGuild?)
+        -> ExpressionPopout.Server?
+    {
+        let heading = joined ? words.isFrom : words.getFrom
         if let found {
             return ExpressionPopout.Server(
                 heading: heading, id: found.id, name: found.name, icon: found.icon,
                 badge: found.verified ? .verified : found.partnered ? .partnered : nil,
                 line: found.presenceCount.map { count in
-                    local == nil ? .online(Int(count)) : .discoverable(Int(count))
+                    joined ? .discoverable(Int(count)) : .online(Int(count))
                 } ?? .inviteOnly,
-                opens: local != nil)
+                opens: joined)
         }
         if let local {
             return ExpressionPopout.Server(

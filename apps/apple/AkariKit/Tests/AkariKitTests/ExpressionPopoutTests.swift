@@ -17,10 +17,12 @@ struct ExpressionPopoutTests {
         var emojis: [EmojiId: GuildId] = [:]
         var guilds: [GuildId: Guild] = [:]
         var tier = Nitro.none
+        var down: [GuildId] = []
 
         func emojiGuild(emojiId: EmojiId) -> GuildId? { emojis[emojiId] }
         func guild(id: GuildId) -> Guild? { guilds[id] }
         func nitro() -> Nitro { tier }
+        func unavailableGuildIds() -> [GuildId] { down }
     }
 
     final class Lookups: ExpressionLookups, @unchecked Sendable {
@@ -167,6 +169,22 @@ struct ExpressionPopoutTests {
         #expect(!otherFree.loading)
     }
 
+    // A server of the user's that's down: the store has no emoji for it, Discord names it; it's
+    // still one of theirs.
+    @Test
+    func anEmojiFromTheUsersServerWhileItsDown() async {
+        let lookups = Lookups()
+        lookups.source = .success(.guild(guild: Self.hubGuild()))
+
+        let content = await popout(wave, store: Store(down: [Self.hub]), lookups: lookups)
+
+        #expect(text(content.body) == "This emoji is from one of your servers. Get Nitro to use it everywhere.")
+        #expect(content.server?.heading == "This emoji is from")
+        #expect(content.server?.line == .discoverable(1234))
+        #expect(content.server?.opens == true)
+        #expect(content.more == nil)
+    }
+
     // A server the user is in that isn't discoverable: Discord answers nothing, the store knows
     // it; its line says invite-only.
     @Test
@@ -289,6 +307,8 @@ struct ExpressionPopoutTests {
         hub.stickers = (1...5).map { Self.sticker(UInt64($0), "s\($0)") }
         lookups.stickerGuild = .success(hub)
         let joined = Store(guilds: [Self.hub: Guild(id: Self.hub, name: "Emoji Hub")])
+        let down = await popout(.sticker(wave), store: Store(down: [Self.hub]), lookups: lookups)
+        #expect(down.server?.heading == "This sticker is from", "a server that's down is still the user's")
 
         let here = await popout(.sticker(wave), store: joined, lookups: lookups, in: Self.hub)
         #expect(here.picture == .sticker(wave))

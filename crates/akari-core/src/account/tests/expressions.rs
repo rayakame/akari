@@ -21,13 +21,19 @@ struct Online {
 }
 
 async fn online_answering(route: &str, answer: ResponseTemplate) -> Online {
+    online_answering_all(vec![(route.to_owned(), answer)]).await
+}
+
+async fn online_answering_all(answers: Vec<(String, ResponseTemplate)>) -> Online {
     let mut fake = FakeGateway::start().await;
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path(format!("/api/v9/{route}")))
-        .respond_with(answer)
-        .mount(&server)
-        .await;
+    for (route, answer) in answers {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v9/{route}")))
+            .respond_with(answer)
+            .mount(&server)
+            .await;
+    }
     let account = start_with(&fake, &server);
     let subscription = account.store().subscribe();
     let connection = online(&mut fake, &account).await;
@@ -256,4 +262,73 @@ async fn a_sticker_pack_crosses_with_its_stickers() {
     assert_eq!(&*pack.name, "Wumpus Beyond");
     let names: Vec<&str> = pack.stickers.iter().map(|s| &*s.name).collect();
     assert_eq!(names, ["wave", "hi"]);
+}
+
+// The official client gives an emoji's source 5 s (the test timing's limit is shorter); a slow
+// one gives up, and the next lookup doesn't wait behind it.
+#[tokio::test]
+async fn a_slow_source_gives_up_and_the_next_doesnt_wait() {
+    let other = 700_000_000_000_000_002_u64;
+    let online = online_answering_all(vec![
+        (
+            format!("emojis/{EMOJI}/source"),
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"type": "APPLICATION", "guild": null,
+                                      "application": {"id": "1", "name": "Slow"}}))
+                .set_delay(Duration::from_secs(5)),
+        ),
+        (
+            format!("emojis/{other}/source"),
+            ResponseTemplate::new(200).set_body_json(json!({"type": "APPLICATION", "guild": null,
+                                      "application": {"id": "1", "name": "Quick"}})),
+        ),
+    ])
+    .await;
+    let started = std::time::Instant::now();
+
+    let slow = online.account.emoji_source(EmojiId::new(EMOJI)).await;
+    let quick = online.account.emoji_source(EmojiId::new(other)).await;
+
+    assert!(
+        matches!(&slow, Err(RequestError::Network(err)) if err.kind() == crate::TransportErrorKind::Timeout),
+        "{slow:?}"
+    );
+    assert!(matches!(quick, Ok(EmojiSource::Application { ref name }) if &**name == "Quick"));
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+// A 404 is the popout's answer, nothing more: the account stays online.
+#[tokio::test]
+async fn a_404_leaves_the_connection_alone() {
+    let online = online_answering(
+        &format!("stickers/{STICKER}/guild"),
+        ResponseTemplate::new(404)
+            .set_body_json(json!({"message": "Unknown Guild", "code": 10004})),
+    )
+    .await;
+
+    assert!(
+        online
+            .account
+            .sticker_guild(StickerId::new(STICKER))
+            .await
+            .is_err()
+    );
+
+    assert!(matches!(
+        online.account.store().connection(),
+        crate::state::ConnectionState::Online
+    ));
+    assert!(
+        online
+            .account
+            .sticker_guild(StickerId::new(STICKER))
+            .await
+            .is_err(),
+        "and asks again"
+    );
 }

@@ -302,6 +302,7 @@ pub(crate) fn timing() -> Timing {
         retry_max: Duration::from_millis(100),
         invalid_session_min: Duration::from_millis(10),
         invalid_session_max: Duration::from_millis(20),
+        lookup_timeout: Duration::from_millis(300),
         ..Timing::default()
     }
 }
