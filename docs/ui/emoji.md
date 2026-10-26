@@ -44,8 +44,8 @@ come from Discord's CDN at runtime like every image ([images.md](images.md),
 - **The box** fits the whole sticker inside it (contain), as the emoji's does: a wide one is
   shorter, centered, never cut; the box's size is known before the image loads.
 - **Animation**: by `animate_stickers`: *always* plays while the window is key and at least
-  70 % of the message shows; *on interaction* while the message is hovered; *never* doesn't.
-  Reduce Motion turns *always* into *on interaction*.
+  70 % of the message shows; *on interaction* plays while the message is hovered; *never* keeps
+  the still. With Reduce Motion, *always* acts as *on interaction*.
 - **Lottie** (format 3): no renderer in this milestone. The box shows a face symbol and the
   sticker's name on the code background. (Backlog: weigh ThorVG or rlottie against their
   size.)
@@ -56,13 +56,13 @@ come from Discord's CDN at runtime like every image ([images.md](images.md),
 
 ## Hover card
 
-Over a custom emoji, a Unicode emoji or a sticker in a message's text (not a channel's start, a
-notice, a file's line or the New Thread form's preview) the pointer is the hand (the message
+Over a custom or Unicode emoji in a message's text, or a sticker under it (not in a channel's start,
+a notice, a file's line or the New Thread form's preview), the pointer is the hand (the message
 list's cursor authority), and after 300 ms a card shows above it, its arrow 3 above the item (the
-part of it the list shows); it goes at once when the pointer leaves the item, on a click and
-while the popout is open, and takes no clicks. *Akari: at the top of the screen it shows below
-the item, and pushed in from a screen edge its arrow still points at the item.* An animated
-emoji plays in it while the window is key.
+part of it the list shows); it goes at once when the pointer leaves the item, on a click and while
+the popout is open, and takes no clicks. *Akari: at the top of the screen it shows below the item,
+and pushed in from a screen edge its arrow still points at the item.* An animated emoji plays in it
+while the window is key.
 
 - Emoji (custom and Unicode): the emoji at 48, then `:name:` (14 medium, one line) over "Click
   to learn more" (14, muted), 8 apart; padding 8 × 12, at most 272 wide; `surfaceHigh`, radius
