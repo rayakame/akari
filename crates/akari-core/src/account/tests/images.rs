@@ -853,6 +853,60 @@ async fn an_embed_image_and_its_icons() {
     );
 }
 
+// A video embed's poster when it has no thumbnail: the proxy's still of the video, as the
+// official client asks it (`format=webp`); the original is Discord's copy, for playback.
+#[tokio::test]
+async fn an_embeds_video_gives_its_still_and_its_copy() {
+    let online = connected().await;
+    let video = format!("{}/external/vid/https/example.com/clip.mp4", online.uri());
+    load_message(&online, |message| {
+        message["embeds"] = json!([{
+            "type": "gifv",
+            "url": "https://example.com/clip",
+            "video": {"url": "https://example.com/clip.mp4", "proxy_url": video, "width": 640, "height": 360},
+        }]);
+    })
+    .await;
+    serve(
+        &online.server,
+        "/external/vid/https/example.com/clip.mp4",
+        png(640, 360),
+    )
+    .await;
+    let key = ImageKey::EmbedMedia {
+        channel: general(),
+        message: Snowflake::new(MESSAGE),
+        embed: 0,
+        slot: EmbedSlot::Video,
+    };
+
+    let still = online
+        .account
+        .image(ImageRequest {
+            key: key.clone(),
+            width: 400,
+            height: 225,
+            animated: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(still.width, 640);
+    let asked = online
+        .requests_to("/external/vid/https/example.com/clip.mp4")
+        .await;
+    assert!(
+        asked[0]
+            .url
+            .query()
+            .unwrap_or_default()
+            .contains("format=webp"),
+        "{:?}",
+        asked[0].url
+    );
+    assert_eq!(online.account.original_url(&key).await.unwrap(), video);
+}
+
 #[tokio::test]
 async fn a_file_gone_from_disk_is_fetched_again() {
     let online = connected().await;

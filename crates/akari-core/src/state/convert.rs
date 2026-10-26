@@ -555,6 +555,11 @@ fn embed(embed: model::Embed) -> Embed {
         proxy_url: optional_text(media.proxy_url),
         width: media.width,
         height: media.height,
+        flags: media.flags,
+        placeholder: media
+            .placeholder
+            .filter(|_| media.placeholder_version == Some(1))
+            .map(text),
     };
     Embed {
         kind: optional_text(embed.kind),
@@ -584,6 +589,8 @@ fn embed(embed: model::Embed) -> Embed {
             value: text(field.value),
             inline: field.inline,
         }),
+        flags: embed.flags,
+        content_scan_version: embed.content_scan_version,
     }
 }
 
@@ -802,6 +809,47 @@ mod tests {
         assert_eq!(message.mentions.len(), 1);
         assert_eq!(message.stickers.len(), 1);
         assert_eq!(message.referenced_message, ReferencedMessage::NotIncluded);
+    }
+
+    // An embed's cover needs its flags and scan; its media boxes their placeholders.
+    #[test]
+    fn an_embed_keeps_its_flags_scan_and_placeholders() {
+        let embed = |edit: fn(&mut Value)| {
+            let message = Message::from_wire(
+                edited(include_str!("../../tests/fixtures/message.json"), |value| {
+                    edit(&mut value["embeds"][0]);
+                }),
+                &mut new_arc,
+            );
+            message.embeds[0].clone()
+        };
+
+        let shown = embed(|value| {
+            value["flags"] = 16.into();
+            value["thumbnail"]["flags"] = 32.into();
+            value["thumbnail"]["placeholder"] = "3PcNNYSFeXh/d3eld0iHZoZgVwh2".into();
+            value["thumbnail"]["placeholder_version"] = 1.into();
+        });
+        assert_eq!(shown.flags, 16);
+        assert_eq!(shown.content_scan_version, Some(2));
+        let thumbnail = shown.thumbnail.unwrap();
+        assert_eq!(thumbnail.flags, 32);
+        assert_eq!(
+            thumbnail.placeholder.as_deref(),
+            Some("3PcNNYSFeXh/d3eld0iHZoZgVwh2")
+        );
+        let newer = embed(|value| {
+            value["thumbnail"]["placeholder"] = "x".into();
+            value["thumbnail"]["placeholder_version"] = 2.into();
+        });
+        assert_eq!(newer.thumbnail.unwrap().placeholder, None);
+        let unscanned = embed(|value| {
+            value
+                .as_object_mut()
+                .unwrap()
+                .remove("content_scan_version");
+        });
+        assert_eq!(unscanned.content_scan_version, None);
     }
 
     // Its box needs the placeholder before the file and the scan's version for its cover.

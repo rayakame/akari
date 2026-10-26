@@ -609,6 +609,10 @@ pub struct Embed {
     pub thumbnail: Option<EmbedMedia>,
     pub video: Option<EmbedMedia>,
     pub fields: Box<[EmbedField]>,
+    /// 16 explicit, 32 a content inventory entry, 64 gore, 128 self-harm.
+    pub flags: u64,
+    /// The explicit content scan that looked at it; `None` until one did.
+    pub content_scan_version: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -618,6 +622,10 @@ pub struct EmbedMedia {
     pub proxy_url: Option<Box<str>>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// 32: animated.
+    pub flags: u64,
+    /// A thumbhash to show while it loads (Discord's placeholder version 1).
+    pub placeholder: Option<Box<str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

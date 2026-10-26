@@ -81,7 +81,7 @@ pub(crate) struct Covered {
 }
 
 impl Covered {
-    fn any(self) -> bool {
+    pub(crate) fn any(self) -> bool {
         self.explicit || self.gore
     }
 }
@@ -134,15 +134,18 @@ pub(crate) fn media_cover(
     {
         return Some(MediaCover::Sensitive);
     }
-    if covered.any() && !scan.settled && unscanned(attachment, covered, scan.newest) {
+    if covered.any()
+        && !scan.settled
+        && unscanned(attachment.content_scan_version, covered, scan.newest)
+    {
         return Some(MediaCover::Pending);
     }
     (attachment.is_spoiler() && !spoilers_shown).then_some(MediaCover::Spoiler)
 }
 
 // The client's `P`: no version yet, or with gore covered one from before scans found gore.
-fn unscanned(attachment: &Attachment, covered: Covered, newest: Option<u32>) -> bool {
-    match attachment.content_scan_version {
+pub(crate) fn unscanned(version: Option<u32>, covered: Covered, newest: Option<u32>) -> bool {
+    match version {
         None => true,
         Some(version) => covered.gore && version < newest.unwrap_or(GORE_SCAN).min(GORE_SCAN),
     }

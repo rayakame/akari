@@ -557,6 +557,8 @@ fn embed_images_size_like_attachments_and_key_by_their_path() {
         ),
         width: Some(1200),
         height: Some(630),
+        flags: 0,
+        placeholder: None,
     };
     let hosts = hosts();
 

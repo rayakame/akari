@@ -196,11 +196,11 @@ impl Images {
                     .get(usize::from(*embed))
                     .ok_or(ImageError::UnknownKey)?;
                 match slot {
-                    EmbedSlot::Image | EmbedSlot::Thumbnail => {
-                        let media = if *slot == EmbedSlot::Image {
-                            embed.image.as_ref()
-                        } else {
-                            embed.thumbnail.as_ref()
+                    EmbedSlot::Image | EmbedSlot::Thumbnail | EmbedSlot::Video => {
+                        let media = match slot {
+                            EmbedSlot::Image => embed.image.as_ref(),
+                            EmbedSlot::Thumbnail => embed.thumbnail.as_ref(),
+                            _ => embed.video.as_ref(),
                         };
                         hosts.embed(
                             media.ok_or(ImageError::UnknownKey)?,
@@ -503,6 +503,10 @@ impl Images {
                 let link = match slot {
                     EmbedSlot::Image => embed.image.as_ref().map(|media| &*media.url),
                     EmbedSlot::Thumbnail => embed.thumbnail.as_ref().map(|media| &*media.url),
+                    EmbedSlot::Video => embed
+                        .video
+                        .as_ref()
+                        .map(|media| media.proxy_url.as_deref().unwrap_or(&media.url)),
                     EmbedSlot::AuthorIcon => embed
                         .author
                         .as_ref()
@@ -598,6 +602,7 @@ impl Images {
         let media = match slot {
             EmbedSlot::Image => embed.image.as_ref(),
             EmbedSlot::Thumbnail => embed.thumbnail.as_ref(),
+            EmbedSlot::Video => embed.video.as_ref(),
             EmbedSlot::AuthorIcon | EmbedSlot::FooterIcon => None,
         };
         media
