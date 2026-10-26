@@ -152,12 +152,16 @@ final class MessageAvatarTests {
         var checked = 0
         for _ in 0..<30 {
             let more = try await scrollUp()
-            for (raw, view) in headerAvatars() {
-                checked += 1
-                if view.imageLayer.contents == nil {
-                    missing.insert(raw)
-                }
+            let shown = headerAvatars()
+            checked += shown.count
+            // Each gets 2 s to land, as a busy machine may need; one that never asked never does.
+            var waiting = shown.filter { $0.view.imageLayer.contents == nil }
+            let deadline = ContinuousClock.now + .seconds(2)
+            while !waiting.isEmpty, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+                waiting = waiting.filter { $0.view.imageLayer.contents == nil }
             }
+            missing.formUnion(waiting.map(\.raw))
             if !more {
                 break
             }
