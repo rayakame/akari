@@ -67,8 +67,10 @@ emoji plays in it while the window is key.
 - Emoji (custom and Unicode): the emoji at 48, then `:name:` (14 medium, one line) over "Click
   to learn more" (14, muted), 8 apart; padding 8 × 12, at most 272 wide; `surfaceHigh`, radius
   8, a 1 px `borderSubtle` edge, a 16 × 10 arrow. A Unicode emoji's name is gemoji's
-  (`:grinning:`, `:thumbsup_tone3:`, `:flag_de:`), as Discord's; ©, ®, ™ and emoji in code or a
-  hidden spoiler aren't emoji there.
+  (`:grinning:`, `:thumbsup_tone3:`, `:people_holding_hands_tone1_tone2:`, `:flag_de:`,
+  `:regional_indicator_a:`, else Unicode's name), as Discord's; what Discord's parser leaves as
+  text isn't an emoji there: ©, ®, ™, a symbol without its variation selector (✔, ♥), emoji in
+  code or a hidden spoiler.
 - Sticker: a sticker symbol (16) and its name (14 semibold), "Click to learn more" under them,
   centered, at most 240 wide. *Discord's is 200 with gg sans; the system font is wider, so names
   that fit there fit here.*
