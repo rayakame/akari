@@ -3,7 +3,6 @@
 //! the link text, 294520 for the cover).
 
 use crate::media::EmbedSlot;
-use crate::model::MessageType;
 
 use super::media::{self, Covered, MediaCover, Scan};
 use super::settings::DisplaySettings;
@@ -70,6 +69,8 @@ pub struct ShownEmbed {
     pub fields: bool,
     /// Images, videos and GIFVs show no description.
     pub description: bool,
+    /// TikTok, or a portrait YouTube video: its media fits 400 × 450, not 400 × 300.
+    pub tall: bool,
     pub cover: Option<MediaCover>,
 }
 
@@ -91,13 +92,18 @@ const CONTAINS_GORE: u64 = 1 << 6;
 // Only a user's message shows embeds (module 143413's USER_MESSAGE).
 const USER_MESSAGES: [u16; 4] = [0, 19, 20, 23];
 
+/// Whether the message shows embeds at all: a user's message, with `render_embeds` on.
+pub(crate) fn shows_embeds(message: &Message, display: &DisplaySettings) -> bool {
+    display.render_embeds && USER_MESSAGES.contains(&u16::from(message.kind))
+}
+
 /// The embeds a message shows, in order; `cover` gives each one's cover.
 pub(crate) fn shown_embeds(
     message: &Message,
     display: &DisplaySettings,
     cover: impl Fn(&Embed) -> Option<MediaCover>,
 ) -> Vec<ShownEmbed> {
-    if !display.render_embeds || !USER_MESSAGES.contains(&u16::from(message.kind)) {
+    if !shows_embeds(message, display) {
         return Vec::new();
     }
     let mut shown: Vec<ShownEmbed> = Vec::new();
@@ -179,8 +185,28 @@ fn record(embed: &Embed, place: u8) -> ShownEmbed {
         thumbnail,
         fields: kind == EmbedKind::Rich,
         description: !matches!(kind, EmbedKind::Image | EmbedKind::Video | EmbedKind::Gifv),
+        tall: tall(embed),
         cover: None,
     }
+}
+
+// Module 659674 `ds` and `y`: the provider's name, or YouTube's host.
+fn tall(embed: &Embed) -> bool {
+    let provider = embed
+        .provider
+        .as_ref()
+        .and_then(|provider| provider.name.as_deref());
+    if provider == Some("TikTok") {
+        return true;
+    }
+    let Some(video) = embed.video.as_ref() else {
+        return false;
+    };
+    let portrait = video.height.unwrap_or(0) > video.width.unwrap_or(0);
+    let youtube = provider == Some("YouTube")
+        || reqwest::Url::parse(&video.url)
+            .is_ok_and(|url| url.host_str() == Some("www.youtube.com"));
+    portrait && youtube
 }
 
 fn sized(media: &EmbedMedia) -> bool {

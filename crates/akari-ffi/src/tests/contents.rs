@@ -285,7 +285,7 @@ async fn an_update_without_an_edit_reuses_the_document() {
     .await;
     let read = read_all(&online.account);
 
-    assert_eq!(read[1].embed_count, 1);
+    assert_eq!(read[1].embeds.len(), 1);
     let stats = stats(&online.account);
     assert_eq!((stats.misses, stats.event_parses, stats.parsed), (0, 0, 3));
     online.account.close();

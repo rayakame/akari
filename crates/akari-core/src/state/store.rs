@@ -8,6 +8,7 @@ use tokio::sync::{Mutex, Notify, mpsc};
 use super::apply::{Derived, Entities, Learned, OlderPage, ReadyDiff, State};
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
+use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
 use super::order;
@@ -1082,6 +1083,20 @@ impl Store {
     pub fn shown_attachments(&self, message: &Message) -> Vec<ShownAttachment> {
         let now = self.now_millis();
         self.read(|inner| inner.state.shown_attachments(message, now))
+    }
+
+    /// How a message's embeds show, after Discord's merge, promotion and filters, each with its
+    /// cover; `spoilered_link` says the content has a link inside a spoiler (the host's markdown
+    /// knows), which covers them all. Read again with the message.
+    pub fn shown_embeds(&self, message: &Message, spoilered_link: bool) -> Vec<ShownEmbed> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.shown_embeds(message, spoilered_link, now))
+    }
+
+    /// Discord hides the content when it's one link (`single_link`, the host's markdown says)
+    /// shown alone as an image or GIF by the message's one embed.
+    pub fn embeds_hide_link(&self, shown: &[ShownEmbed], single_link: bool) -> bool {
+        self.read(|inner| inner.state.embeds_hide_link(shown, single_link))
     }
 
     /// Whether the channel's spoilers show without a click (`render_spoilers`).

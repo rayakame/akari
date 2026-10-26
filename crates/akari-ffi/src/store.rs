@@ -4,6 +4,7 @@ use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, Permissions, Use
 use akari_core::state;
 
 use crate::contents::{Contents, Found};
+use crate::embeds;
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
@@ -37,12 +38,20 @@ impl Store {
             *misses += 1;
         }
         let formatted = FormattedText::new(&document, &message.content, names, Some(message));
+        let shown = self
+            .core
+            .shown_embeds(message, document.has_spoilered_link());
+        let hides_content = self
+            .core
+            .embeds_hide_link(&shown, document.is_single_link());
         Message::new(
             message,
             formatted,
             self.core.mentions_me(message),
             self.core.shown_attachments(message),
             self.core.spoilers_shown(message.channel_id),
+            embeds::embeds(message, &shown, names, document.spoiler_count()),
+            hides_content,
         )
     }
 }

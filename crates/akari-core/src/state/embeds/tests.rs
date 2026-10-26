@@ -394,8 +394,10 @@ fn the_link_hides_under_its_one_inline_image() {
         !hides_link(&shown(vec![image.clone(), second]), &display, true),
         "two embeds"
     );
-    let mut off = DisplaySettings::default();
-    off.inline_embed_media = false;
+    let off = DisplaySettings {
+        inline_embed_media: false,
+        ..DisplaySettings::default()
+    };
     assert!(!hides_link(&shown(vec![image]), &off, true));
 }
 
@@ -410,4 +412,40 @@ fn an_author_makes_an_image_a_card() {
     });
 
     assert!(!shown(vec![image])[0].inline);
+}
+
+// Module 659674 `ds`: TikTok, and a portrait video from YouTube, fit their media in 400 × 450.
+#[test]
+fn tiktok_and_portrait_youtube_are_tall() {
+    let provider = |name: &str| {
+        Some(crate::state::types::EmbedProvider {
+            name: Some(name.into()),
+            url: None,
+        })
+    };
+    let video = |width, height, provider| {
+        let mut video = embed("video");
+        video.provider = provider;
+        video.thumbnail = Some(media(width, height));
+        video.video = Some(media(width, height));
+        video
+    };
+    let mut from_host = video(1080, 1920, None);
+    if let Some(source) = from_host.video.as_mut() {
+        source.url = "https://www.youtube.com/embed/x".into();
+    }
+
+    let tall = |embed| shown(vec![embed])[0].tall;
+    assert!(tall(video(1080, 1920, provider("TikTok"))));
+    assert!(
+        tall(video(1920, 1080, provider("TikTok"))),
+        "TikTok whatever its shape"
+    );
+    assert!(tall(video(1080, 1920, provider("YouTube"))));
+    assert!(tall(from_host));
+    assert!(
+        !tall(video(1920, 1080, provider("YouTube"))),
+        "a landscape one"
+    );
+    assert!(!tall(video(1080, 1920, provider("Vimeo"))));
 }
