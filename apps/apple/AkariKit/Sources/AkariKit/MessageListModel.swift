@@ -12,14 +12,25 @@ public struct SpoilerKey: Hashable, Sendable {
     }
 }
 
-/// One attachment of one message.
+/// One attachment or one embed of one message: what a reveal or an eye button keys by.
 public struct MediaKey: Hashable, Sendable {
+    public enum Item: Hashable, Sendable {
+        case attachment(AttachmentId)
+        /// By its place among the message's embeds.
+        case embed(UInt8)
+    }
+
     public let messageId: MessageId
-    public let attachmentId: AttachmentId
+    public let item: Item
 
     public init(messageId: MessageId, attachmentId: AttachmentId) {
         self.messageId = messageId
-        self.attachmentId = attachmentId
+        item = .attachment(attachmentId)
+    }
+
+    public init(messageId: MessageId, embed: UInt8) {
+        self.messageId = messageId
+        item = .embed(embed)
     }
 }
 
@@ -169,7 +180,8 @@ public final class MessageListModel {
     public private(set) var openedFrom = Origin.network
     /// Revealed for as long as the model lives: through rereads and loads, not a channel switch.
     public private(set) var revealedSpoilers: Set<SpoilerKey> = []
-    /// Spoilered media the user revealed, as long as the model lives (D143: no re-hiding).
+    /// Spoilered media and embeds the user revealed, as long as the model lives (D143: no
+    /// re-hiding).
     public private(set) var revealedMedia: Set<MediaKey> = []
     /// Sensitive media the user showed with its eye; a second click hides it again (D144).
     public private(set) var shownSensitive: Set<MediaKey> = []
