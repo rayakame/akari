@@ -8,7 +8,7 @@ func id<Marker>(_ raw: UInt64) -> Snowflake<Marker> {
 func user(_ raw: UInt64, name: String = "someone") -> User {
     User(
         id: id(raw), username: name, globalName: nil, displayName: name, bot: false,
-        system: false
+        system: false, avatar: .defaultAvatar(index: UInt8(raw % 6))
     )
 }
 
@@ -43,6 +43,17 @@ func settings(
         muted: muted, muteEndsAt: nil, suppressEveryone: suppressEveryone, suppressRoles: false,
         hideMutedChannels: hideMutedChannels
     )
+}
+
+/// Discord's defaults, as the core gives them without the field.
+func displayDefaults() -> DisplaySettings {
+    DisplaySettings(
+        renderSpoilers: .onClick, viewImageDescriptions: false, inlineAttachmentMedia: true,
+        inlineEmbedMedia: true, gifAutoPlay: true, renderEmbeds: true, animateEmoji: true,
+        animateStickers: .always, explicitContentFilter: .nonFriends,
+        explicitContent: .init(guilds: .unset, friendDm: .unset, nonFriendDm: .unset),
+        gore: .init(guilds: .unset, friendDm: .unset, nonFriendDm: .unset),
+        selfHarm: .init(guilds: .unset, friendDm: .unset, nonFriendDm: .unset))
 }
 
 func folder(_ raw: Int64, _ guilds: [UInt64], name: String? = nil) -> ServerListItem {

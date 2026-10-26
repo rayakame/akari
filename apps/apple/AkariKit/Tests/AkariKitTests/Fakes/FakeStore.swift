@@ -9,6 +9,7 @@ final class FakeStore: Store, @unchecked Sendable {
         // `nil`: `guildIds`, none in a folder.
         var serverList: [ServerListItem]?
         var guildSettings: [GuildId?: GuildSettings] = [:]
+        var displaySettings = displayDefaults()
         var mutedChannels: Set<ChannelId> = []
         var guilds: [GuildId: Guild] = [:]
         var unavailableGuildIds: [GuildId] = []
@@ -120,6 +121,10 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func guildSettings(guildId: GuildId?) -> GuildSettings {
         read(.guildSettings(guildId)) { $0.guildSettings[guildId] ?? settings() }
+    }
+
+    override func displaySettings() -> DisplaySettings {
+        read(.displaySettings) { $0.displaySettings }
     }
 
     override func mutedChannels(ids: [ChannelId]) -> [ChannelId] {

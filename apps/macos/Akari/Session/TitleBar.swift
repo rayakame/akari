@@ -4,8 +4,10 @@ import SwiftUI
 /// Where the user is, as the title bar names it.
 struct WindowTitle: Equatable {
     enum Icon: Equatable {
-        case server(String)
-        case avatar(name: String, id: UInt64)
+        /// The server's icon, or its initials without one.
+        case server(String, icon: ImageKey? = nil)
+        /// The conversation's picture: a person's avatar or a group's icon; `nil` shows the disc.
+        case avatar(ImageKey?)
         case home
     }
 
@@ -13,21 +15,19 @@ struct WindowTitle: Equatable {
     let icon: Icon
 
     static func at(
-        _ place: SessionModel.Place, server: String?,
-        conversation: (name: String, avatarId: UInt64)?
+        _ place: SessionModel.Place, server: String?, serverIcon: ImageKey? = nil,
+        conversation: (name: String, avatar: ImageKey?)?
     ) -> WindowTitle {
         switch place {
         case .guild:
             let name = server ?? "Akari"
-            return WindowTitle(text: name, icon: .server(name))
+            return WindowTitle(text: name, icon: .server(name, icon: serverIcon))
         case .home:
             // What the official client shows for an open DM isn't recorded yet (docs/ui/layout.md).
             guard let conversation else {
                 return WindowTitle(text: "Direct Messages", icon: .home)
             }
-            return WindowTitle(
-                text: conversation.name,
-                icon: .avatar(name: conversation.name, id: conversation.avatarId))
+            return WindowTitle(text: conversation.name, icon: .avatar(conversation.avatar))
         }
     }
 }
@@ -68,25 +68,26 @@ struct TitleBar: View {
 
     @ViewBuilder private func icon(_ icon: WindowTitle.Icon) -> some View {
         switch icon {
-        case .avatar(let name, let id):
-            InitialsAvatar(name: name, id: id, size: Self.iconSize)
-        case .server(let name):
-            let initials = Initials.of(name)
-            tile {
-                Text(initials)
-                    .font(
-                        .system(
-                            size: GuildIcon.fontSize(initials.count) * Self.iconSize / 40,
-                            weight: .medium)
-                    )
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-            }
+        case .avatar(let key):
+            UserAvatar(key: key, size: Self.iconSize)
+        case .server(let name, let key):
+            ServerIcon(name: name, icon: key)
         case .home:
             tile {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 18 * Self.iconSize / 40))
             }
+        }
+    }
+
+    /// The open server's picture at the title's size: its icon, or its acronym tile.
+    struct ServerIcon: View {
+        let name: String
+        let icon: ImageKey?
+
+        var body: some View {
+            ServerPicture(
+                name: name, icon: icon, size: TitleBar.iconSize, cornerRadius: TitleBar.iconRadius)
         }
     }
 

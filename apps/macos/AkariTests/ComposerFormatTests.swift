@@ -68,7 +68,7 @@ struct ComposerFormatTests {
         #expect(
             mira.start
                 == ChannelStart(
-                    icon: .avatar(name: "Mira", id: 7), title: "Mira", username: "mira",
+                    icon: .avatar(.defaultAvatar(index: 1)), title: "Mira", username: "mira",
                     subtitle: "This is the beginning of your direct message history with Mira."))
         #expect(
             group.start

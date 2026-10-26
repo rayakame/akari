@@ -308,7 +308,7 @@ struct MessageMenuThreadTests {
         id: MessageId(rawValue: 5), channelId: ChannelId(rawValue: 11), kind: .default,
         author: User(
             id: UserId(rawValue: 2), username: "ray", globalName: nil, displayName: "Ray",
-            bot: false, system: false),
+            bot: false, system: false, avatar: .defaultAvatar(index: 2)),
         fromWebhook: false, content: "hello", timestamp: Date(), editedTimestamp: nil,
         pinned: false, mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
         componentsV2: false, delivery: .sent, formatted: formattedText(content: "hello"),

@@ -787,3 +787,264 @@ fn the_store_reads_mutes_for_guilds_and_batches_of_channels() {
     assert!(store.guild_muted(Some(Snowflake::new(G1))));
     assert!(!store.guild_muted(None));
 }
+
+// Display settings (text_and_images)
+
+fn bool_value(number: u64, value: bool) -> Vec<u8> {
+    field(
+        number,
+        Wire::Bytes(field(1, Wire::Varint(u64::from(value)))),
+    )
+}
+
+fn u32_value(number: u64, value: u32) -> Vec<u8> {
+    field(
+        number,
+        Wire::Bytes(field(1, Wire::Varint(u64::from(value)))),
+    )
+}
+
+fn string_value(number: u64, value: &str) -> Vec<u8> {
+    field(
+        number,
+        Wire::Bytes(field(1, Wire::Bytes(value.as_bytes().to_vec()))),
+    )
+}
+
+fn redactions(number: u64, guilds: u64, friend_dm: u64, non_friend_dm: u64) -> Vec<u8> {
+    field(
+        number,
+        Wire::Bytes(
+            [
+                field(1, Wire::Varint(guilds)),
+                field(2, Wire::Varint(friend_dm)),
+                field(3, Wire::Varint(non_friend_dm)),
+            ]
+            .concat(),
+        ),
+    )
+}
+
+fn display_proto(fields: &[Vec<u8>]) -> String {
+    STANDARD.encode(field(6, Wire::Bytes(fields.concat())))
+}
+
+fn quiet_display() -> String {
+    display_proto(&[
+        string_value(4, "ALWAYS"),
+        bool_value(7, true),
+        bool_value(9, false),
+        bool_value(10, false),
+        bool_value(11, false),
+        bool_value(12, false),
+        bool_value(14, false),
+        u32_value(15, 2),
+        u32_value(19, 2),
+        redactions(29, 1, 2, 3),
+        redactions(32, 3, 3, 3),
+        redactions(35, 2, 0, 1),
+    ])
+}
+
+#[test]
+fn display_settings_take_discords_defaults_without_the_field() {
+    let state = ready_with(&versions_only());
+
+    assert_eq!(
+        state.display_settings(),
+        DisplaySettings {
+            render_spoilers: SpoilerSetting::OnClick,
+            view_image_descriptions: false,
+            inline_attachment_media: true,
+            inline_embed_media: true,
+            gif_auto_play: true,
+            render_embeds: true,
+            animate_emoji: true,
+            animate_stickers: StickerAnimation::Always,
+            explicit_content_filter: ExplicitContentFilter::NonFriends,
+            explicit_content: ExplicitContentSettings::default(),
+            gore: ExplicitContentSettings::default(),
+            self_harm: ExplicitContentSettings::default(),
+        }
+    );
+    assert_eq!(state.display_settings(), DisplaySettings::default());
+    assert_eq!(
+        ready_with("").display_settings(),
+        DisplaySettings::default()
+    );
+}
+
+#[test]
+fn ready_display_settings_are_read() {
+    let state = ready_with(&quiet_display());
+
+    assert_eq!(
+        state.display_settings(),
+        DisplaySettings {
+            render_spoilers: SpoilerSetting::Always,
+            view_image_descriptions: true,
+            inline_attachment_media: false,
+            inline_embed_media: false,
+            gif_auto_play: false,
+            render_embeds: false,
+            animate_emoji: false,
+            animate_stickers: StickerAnimation::Never,
+            explicit_content_filter: ExplicitContentFilter::All,
+            explicit_content: ExplicitContentSettings {
+                guilds: Redaction::Show,
+                friend_dm: Redaction::Blur,
+                non_friend_dm: Redaction::Block,
+            },
+            gore: ExplicitContentSettings {
+                guilds: Redaction::Block,
+                friend_dm: Redaction::Block,
+                non_friend_dm: Redaction::Block,
+            },
+            self_harm: ExplicitContentSettings {
+                guilds: Redaction::Blur,
+                friend_dm: Redaction::Unset,
+                non_friend_dm: Redaction::Show,
+            },
+        }
+    );
+}
+
+#[test]
+fn unknown_display_values_take_the_defaults() {
+    let state = ready_with(&display_proto(&[
+        string_value(4, "SOMETIMES"),
+        u32_value(15, 7),
+        u32_value(19, 9),
+        redactions(29, 8, 1, 0),
+    ]));
+
+    let display = state.display_settings();
+    assert_eq!(display.render_spoilers, SpoilerSetting::OnClick);
+    assert_eq!(display.animate_stickers, StickerAnimation::Always);
+    assert_eq!(
+        display.explicit_content_filter,
+        ExplicitContentFilter::NonFriends
+    );
+    assert_eq!(display.explicit_content.guilds, Redaction::Unset);
+    assert_eq!(display.explicit_content.friend_dm, Redaction::Show);
+}
+
+#[test]
+fn a_proto_update_changes_the_display_settings_and_says_so() {
+    let mut state = ready_with(&versions_only());
+
+    let events = apply(
+        &mut state,
+        "USER_SETTINGS_PROTO_UPDATE",
+        &proto_update(&display_proto(&[bool_value(11, false)]), true),
+    );
+    assert_eq!(events, ["DisplaySettingsChanged"]);
+    assert!(!state.display_settings().gif_auto_play);
+    assert!(state.display_settings().animate_emoji);
+
+    // The same values again: nothing changed.
+    let events = apply(
+        &mut state,
+        "USER_SETTINGS_PROTO_UPDATE",
+        &proto_update(&display_proto(&[bool_value(11, false)]), true),
+    );
+    assert_eq!(events, Vec::<String>::new());
+
+    // A partial update without the field keeps the settings.
+    let events = apply(
+        &mut state,
+        "USER_SETTINGS_PROTO_UPDATE",
+        &proto_update(&versions_only(), true),
+    );
+    assert_eq!(events, Vec::<String>::new());
+    assert!(!state.display_settings().gif_auto_play);
+
+    // A full update without the field resets them to the defaults.
+    let events = apply(
+        &mut state,
+        "USER_SETTINGS_PROTO_UPDATE",
+        &proto_update(&versions_only(), false),
+    );
+    assert_eq!(events, ["DisplaySettingsChanged"]);
+    assert_eq!(state.display_settings(), DisplaySettings::default());
+}
+
+#[test]
+fn an_unreadable_proto_keeps_the_display_settings() {
+    let mut state = ready_with(&quiet_display());
+
+    let events = apply(
+        &mut state,
+        "USER_SETTINGS_PROTO_UPDATE",
+        &proto_update("not base64!", false),
+    );
+    assert_eq!(events, Vec::<String>::new());
+    assert!(!state.display_settings().gif_auto_play);
+
+    let mut ready = ready_value();
+    ready["user_settings_proto"] = STANDARD.encode([0x72, 0x09]).into();
+    let again = apply(&mut state, "READY", &ready);
+    assert!(
+        !again.contains(&"DisplaySettingsChanged".to_owned()),
+        "{again:?}"
+    );
+    assert!(!state.display_settings().gif_auto_play);
+    assert_eq!(
+        state.display_settings().animate_stickers,
+        StickerAnimation::Never
+    );
+}
+
+#[test]
+fn a_partial_update_with_the_field_replaces_it_whole() {
+    let mut state = ready_with(&quiet_display());
+
+    let events = apply(
+        &mut state,
+        "USER_SETTINGS_PROTO_UPDATE",
+        &proto_update(&display_proto(&[bool_value(11, true)]), true),
+    );
+
+    assert_eq!(events, ["DisplaySettingsChanged"]);
+    assert_eq!(
+        state.display_settings(),
+        DisplaySettings {
+            gif_auto_play: true,
+            ..DisplaySettings::default()
+        }
+    );
+}
+
+#[tokio::test]
+async fn a_new_ready_reports_changed_display_settings() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let mut ready = ready_value();
+    ready["user_settings_proto"] = quiet_display().into();
+    store.apply(dispatch("READY", &ready));
+    let subscription = store.subscribe();
+
+    store.apply(dispatch("READY", &ready_value()));
+    let names: Vec<String> = subscription
+        .next_batch(256)
+        .await
+        .iter()
+        .map(describe)
+        .filter(|name| name == "DisplaySettingsChanged")
+        .collect();
+
+    assert_eq!(names, ["DisplaySettingsChanged"]);
+    assert_eq!(store.display_settings(), DisplaySettings::default());
+}
+
+#[test]
+fn the_store_reads_display_settings() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let mut ready = ready_value();
+    ready["user_settings_proto"] = quiet_display().into();
+    store.apply(dispatch("READY", &ready));
+
+    assert_eq!(
+        store.display_settings().animate_stickers,
+        StickerAnimation::Never
+    );
+}

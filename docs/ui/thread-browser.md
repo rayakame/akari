@@ -121,7 +121,8 @@ A card has the thread's name (16 semibold) and a second line (14):
 Times use the thread box's words ("1m ago" … "29d ago", ">30d ago", then the date). On the
 right, 16 after the text: the faces of Discord's member preview, 24 each at a 16 step, each cut
 where the next lies, then "+N" for the members not shown, or "50+" from 50 members; nothing
-without a preview. *Akari draws initials faces; an unknown member is a plain colored circle.*
+without a preview. *Akari draws the members' avatars ([images.md](images.md)); a member the
+store doesn't know yet shows the loading disc.*
 
 **Clicking a row** closes the browser and opens the thread full width, closing its channel's
 split, as a thread's row in the channel list does. **Shift+click** opens it in the split view

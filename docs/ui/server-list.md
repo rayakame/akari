@@ -8,8 +8,9 @@ measured from the web client on 2026-10-10; sizes in [layout.md](layout.md), col
 
 1. Home, which opens the DM list.
 2. Avatars of DMs with unread messages. *Akari: the DMs and group DMs with mentions (every
-   message in an unmuted DM is one), newest first, as initials avatars with the badge and the
-   unread pill; clicking one goes home and opens it there.*
+   message in an unmuted DM is one), newest first, as 40-point avatars (a person's avatar, a
+   group's icon; [images.md](images.md)) with the badge and the unread pill, an animated
+   avatar playing while hovered; clicking one goes home and opens it there.*
 3. Servers the user is only previewing. *Akari: not in READY, so not shown
    ([dispatches.md](../protocol/dispatches.md#open-points)).*
 4. A separator: 32 × 1, `frameBorder`.
@@ -26,7 +27,12 @@ measured from the web client on 2026-10-10; sizes in [layout.md](layout.md), col
 - 40 × 40 with a fixed rounded-square mask, about 12 corner radius. Before the redesign an
   icon was a circle that turned into a rounded square on hover; that animation is gone.
 - 8 between icons.
-- Servers without an icon show initials (below).
+- A server's icon, asked lossless at the box's pixels ([images.md](images.md)), drawn alone:
+  nothing under it while it loads, and the rail shows through its transparent pixels; hover
+  and selection fill only the initials' tile. An animated icon plays while hovered. Servers
+  without an icon show initials (below). *Akari: an icon that failed shows the initials too
+  (the official client shows a broken image), and is asked again when the session is back.*
+  The folder minis and the title bar's server icon follow the same rule.
 
 ## The pill
 
@@ -61,8 +67,8 @@ Observed in the official desktop client on 2026-10-14:
 - The tooltip is the folder's name, or its servers' names joined with ", " when it has none.
 - Clicking the tile expands or collapses it.
 
-*Akari:* the collapsed tile shows up to four servers' initials, each on a 16 × 16 rounded
-square in `hoverBackground`. A colored folder's tile and column use its color at 30%; one
+*Akari:* the collapsed tile shows up to four servers, each their icon over their initials on a
+16 × 16 rounded square in `hoverBackground`. A colored folder's tile and column use its color at 30%; one
 without a color uses `folder`. Expanded, the header is `folder.fill` (18) in the folder's
 color, or `brand`, in the 40 × 40 slot of a rail item; the column is 48 wide with corner
 radius 16 (the tiles' 12 plus its 4 of padding), 4 of padding above the header and below the

@@ -1,5 +1,5 @@
-//! The two fields Akari reads from Discord's `PreloadedUserSettings` proto: `versions` (1)
-//! and `guild_folders` (14). Everything else is skipped unread.
+//! The fields Akari reads from Discord's `PreloadedUserSettings` proto: `versions` (1),
+//! `text_and_images` (6) and `guild_folders` (14). Everything else is skipped unread.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -12,6 +12,37 @@ pub(crate) struct PreloadedSettings {
     pub(crate) data_version: Option<u32>,
     /// `None` when the proto has no `guild_folders`.
     pub(crate) guild_folders: Option<GuildFolders>,
+    /// `None` when the proto has no `text_and_images`.
+    pub(crate) text_and_images: Option<TextAndImages>,
+}
+
+/// `text_and_images` (6) as sent: an absent field is `None` and means Discord's default.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TextAndImages {
+    /// StringValue 4: ALWAYS, ON_CLICK or IF_MODERATOR.
+    pub(crate) render_spoilers: Option<String>,
+    pub(crate) view_image_descriptions: Option<bool>,
+    pub(crate) inline_attachment_media: Option<bool>,
+    pub(crate) inline_embed_media: Option<bool>,
+    pub(crate) gif_auto_play: Option<bool>,
+    pub(crate) render_embeds: Option<bool>,
+    pub(crate) animate_emoji: Option<bool>,
+    /// UInt32Value 15: 0 always, 1 on interaction, 2 never.
+    pub(crate) animate_stickers: Option<u32>,
+    /// UInt32Value 19: 0 disabled, 1 non-friends, 2 all.
+    pub(crate) explicit_content_filter: Option<u32>,
+    pub(crate) explicit_content: Option<Redactions>,
+    pub(crate) gore: Option<Redactions>,
+    pub(crate) self_harm: Option<Redactions>,
+}
+
+/// An `ExplicitContentSettings` message: a redaction per context, 0 unset, 1 show, 2 blur,
+/// 3 block.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Redactions {
+    pub(crate) guilds: u32,
+    pub(crate) friend_dm: u32,
+    pub(crate) non_friend_dm: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -55,7 +86,13 @@ pub(crate) fn decode_preloaded(base64: &str) -> Result<PreloadedSettings, ProtoE
                 reader.message()?,
                 settings.guild_folders.get_or_insert_with(Default::default),
             )?,
-            (1 | 14, _) => return Err(ProtoError::Malformed { offset: at }),
+            (6, Wire::Len) => text_and_images(
+                reader.message()?,
+                settings
+                    .text_and_images
+                    .get_or_insert_with(Default::default),
+            )?,
+            (1 | 6 | 14, _) => return Err(ProtoError::Malformed { offset: at }),
             (_, wire) => reader.skip(wire)?,
         }
     }
@@ -108,9 +145,72 @@ fn guild_folder(mut reader: Reader<'_>) -> Result<GuildFolder, ProtoError> {
     Ok(folder)
 }
 
+fn text_and_images(mut reader: Reader<'_>, into: &mut TextAndImages) -> Result<(), ProtoError> {
+    while let Some((number, wire, at)) = reader.tag()? {
+        let known = matches!(number, 4 | 7 | 9..=12 | 14 | 15 | 19 | 29 | 32 | 35);
+        if known && wire != Wire::Len {
+            return Err(ProtoError::Malformed { offset: at });
+        }
+        // A repeated sub-message merges into the earlier one, as protobuf reads it.
+        match number {
+            4 => into.render_spoilers = Some(wrapped_string(reader.message()?)?),
+            7 => merge_bool(&mut into.view_image_descriptions, reader.message()?)?,
+            9 => merge_bool(&mut into.inline_attachment_media, reader.message()?)?,
+            10 => merge_bool(&mut into.inline_embed_media, reader.message()?)?,
+            11 => merge_bool(&mut into.gif_auto_play, reader.message()?)?,
+            12 => merge_bool(&mut into.render_embeds, reader.message()?)?,
+            14 => merge_bool(&mut into.animate_emoji, reader.message()?)?,
+            15 => merge_u32(&mut into.animate_stickers, reader.message()?)?,
+            19 => merge_u32(&mut into.explicit_content_filter, reader.message()?)?,
+            29 => merge_redactions(&mut into.explicit_content, reader.message()?)?,
+            32 => merge_redactions(&mut into.gore, reader.message()?)?,
+            35 => merge_redactions(&mut into.self_harm, reader.message()?)?,
+            _ => reader.skip(wire)?,
+        }
+    }
+    Ok(())
+}
+
+fn merge_bool(into: &mut Option<bool>, reader: Reader<'_>) -> Result<(), ProtoError> {
+    let prior = into.map(u64::from);
+    *into = Some(wrapped_varint_over(reader, prior)? != 0);
+    Ok(())
+}
+
+// A uint32 that doesn't fit is truncated, as protobuf does.
+fn merge_u32(into: &mut Option<u32>, reader: Reader<'_>) -> Result<(), ProtoError> {
+    let prior = into.map(u64::from);
+    *into = Some(wrapped_varint_over(reader, prior)? as u32);
+    Ok(())
+}
+
+fn merge_redactions(
+    into: &mut Option<Redactions>,
+    mut reader: Reader<'_>,
+) -> Result<(), ProtoError> {
+    // Three enum fields, plain varints; absent means 0 (unset).
+    let mut value = into.unwrap_or_default();
+    while let Some((number, wire, at)) = reader.tag()? {
+        match (number, wire) {
+            (1, Wire::Varint) => value.guilds = reader.varint()? as u32,
+            (2, Wire::Varint) => value.friend_dm = reader.varint()? as u32,
+            (3, Wire::Varint) => value.non_friend_dm = reader.varint()? as u32,
+            (1..=3, _) => return Err(ProtoError::Malformed { offset: at }),
+            (_, wire) => reader.skip(wire)?,
+        }
+    }
+    *into = Some(value);
+    Ok(())
+}
+
 // Int64Value and UInt64Value: field 1, absent meaning 0.
-fn wrapped_varint(mut reader: Reader<'_>) -> Result<u64, ProtoError> {
-    let mut value = 0;
+fn wrapped_varint(reader: Reader<'_>) -> Result<u64, ProtoError> {
+    wrapped_varint_over(reader, None)
+}
+
+// A wrapper merged over an earlier value of the same field: field 1 replaces it when present.
+fn wrapped_varint_over(mut reader: Reader<'_>, prior: Option<u64>) -> Result<u64, ProtoError> {
+    let mut value = prior.unwrap_or(0);
     while let Some((number, wire, at)) = reader.tag()? {
         match (number, wire) {
             (1, Wire::Varint) => value = reader.varint()?,

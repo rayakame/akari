@@ -10,7 +10,13 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
     private var iconHeight: NSLayoutConstraint?
     private let text = MessageTextView()
     // Built for the first line with a box: buttons cost.
-    private var threadBox: ThreadBoxView?
+    private var threadBox: ThreadBoxView? {
+        didSet { threadBox?.images = images }
+    }
+    /// Where the thread box's avatar comes from.
+    var images: ImageCache? {
+        didSet { threadBox?.images = images }
+    }
     var onLink: (URL) -> Void = { _ in }
     var onOpenThread: () -> Void = {}
     // As a message's: asked when the menu opens, nil leaves "Create Thread" out.

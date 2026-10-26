@@ -15,6 +15,12 @@ public final class DirectMessageListModel {
 
         /// Everyone in the conversation, the current user included, known to the store or not.
         public var memberCount: Int { channel.recipientIds.count + 1 }
+
+        public init(channel: Channel, recipients: [User], name: String) {
+            self.channel = channel
+            self.recipients = recipients
+            self.name = name
+        }
     }
 
     /// The latest conversation first.

@@ -17,18 +17,41 @@ With the `USER_SETTINGS_PROTO` capability (bit 9, which Akari sends), READY has 
 the docs give the field order, and the field numbers come from the proto definitions they
 link (discord-userdoccers/discord-protos, `PreloadedUserSettings.proto`).
 
-Akari reads two fields with its own small reader (`gateway::settings_proto`, no protobuf
+Akari reads three fields with its own small reader (`gateway::settings_proto`, no protobuf
 dependency) and skips everything else unread:
 
 | Field | Number | Contents |
 |---|---|---|
 | `versions` | 1 | `Versions`: `data_version = 3` (uint32) |
 | `guild_folders` | 14 | `GuildFolders`: `repeated GuildFolder folders = 1`, `repeated fixed64 guild_positions = 2` (deprecated, not read) |
+| `text_and_images` | 6 | `TextAndImagesSettings` (below) |
 | `GuildFolder` | | `repeated fixed64 guild_ids = 1` (packed or not), `Int64Value id = 2`, `StringValue name = 3`, `UInt64Value color = 4` |
 
 A wrapper that is present but empty means 0 or "", an absent one `None`. Input that doesn't
 decode (bad base64, a length past the end, a group, an unknown wire type, a name that
 isn't UTF-8) is an error naming only a byte offset.
+
+**The display settings** (`Store::display_settings`, `DisplaySettingsChanged`) come from
+`text_and_images` (field numbers from the bundle's descriptors, checked by hand on
+2026-10-24); wrappers are `BoolValue` unless said, and an absent field means Discord's default:
+
+| Field | Number | Default | Values |
+|---|---|---|---|
+| `render_spoilers` | 4 | `ON_CLICK` (`StringValue`) | `ALWAYS`, `ON_CLICK`, `IF_MODERATOR` |
+| `view_image_descriptions` | 7 | false | the ALT button on media with a description |
+| `inline_attachment_media` | 9 | true | |
+| `inline_embed_media` | 10 | true | |
+| `gif_auto_play` | 11 | true | "Play GIFs when Discord is focused" |
+| `render_embeds` | 12 | true | |
+| `animate_emoji` | 14 | true | |
+| `animate_stickers` | 15 | 0 (`UInt32Value`) | 0 always, 1 on interaction, 2 never |
+| `explicit_content_filter` | 19 | 1 (`UInt32Value`) | 0 disabled, 1 non-friends, 2 all |
+| `explicit_content_settings` | 29 | — | `{guilds = 1, friend_dm = 2, non_friend_dm = 3}`, each 0 unset, 1 show, 2 blur, 3 block |
+| gore (32), self-harm (35) | | — | the same shape as 29 |
+
+A value Akari doesn't know (a new spoiler word, a sticker setting above 2) reads as the
+default. A full `USER_SETTINGS_PROTO_UPDATE` without the field resets them to the defaults, a
+partial one keeps them, and the disk cache keeps them for the next launch, as the folders.
 
 **The server list** (`Store::server_list`) follows the folders:
 
@@ -50,9 +73,9 @@ isn't UTF-8) is an error naming only a byte offset.
   ([User Settings Proto Update](https://docs.discord.food/gateway/gateway-events#user-settings-proto-update)).
   Akari replaces the folders when the update carries field 14, keeps them when a partial
   one doesn't, and clears them when a full one doesn't. Other types are ignored.
-- **A proto that doesn't decode** changes nothing: READY keeps the folders the store had
-  (from the last session or the disk cache), an update is skipped. Both log a warning with
-  the byte offset, never the bytes.
+- **A proto that doesn't decode** changes nothing: READY keeps the folders and display
+  settings the store had (from the last session or the disk cache), an update is skipped. Both
+  log a warning with the byte offset, never the bytes.
 - **Status.** The chosen status lives here too (field 11), so another device's status
   survives Akari connecting (see [gateway.md](gateway.md#presence)). Not read yet.
 - **Writes** (`PATCH /users/@me/settings-proto/1`) must send the whole top-level field they

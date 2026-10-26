@@ -38,6 +38,9 @@ pub enum StoreEvent {
     /// The server list's order or folders changed: read
     /// [`Store::server_list`](super::Store::server_list) again.
     ServerListChanged,
+    /// The display settings changed: read
+    /// [`Store::display_settings`](super::Store::display_settings) again.
+    DisplaySettingsChanged,
     /// The user's notification settings for a guild changed (`None`: for DMs), or a timed
     /// mute in it ended. Mutes, what counts as a mention and which channels are hidden may
     /// have changed.

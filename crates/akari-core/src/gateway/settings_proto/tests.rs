@@ -383,6 +383,201 @@ fn captured_settings_proto_decodes() {
     );
 }
 
+// text_and_images (6): wrappers as the proto has them.
+fn bool_value(number: u64, value: bool) -> Vec<u8> {
+    field(
+        number,
+        Wire::Bytes(field(1, Wire::Varint(u64::from(value)))),
+    )
+}
+
+fn u32_value(number: u64, value: u32) -> Vec<u8> {
+    field(
+        number,
+        Wire::Bytes(field(1, Wire::Varint(u64::from(value)))),
+    )
+}
+
+fn string_value(number: u64, value: &str) -> Vec<u8> {
+    field(
+        number,
+        Wire::Bytes(field(1, Wire::Bytes(value.as_bytes().to_vec()))),
+    )
+}
+
+fn redactions(number: u64, guilds: u64, friend_dm: u64, non_friend_dm: u64) -> Vec<u8> {
+    field(
+        number,
+        Wire::Bytes(
+            [
+                field(1, Wire::Varint(guilds)),
+                field(2, Wire::Varint(friend_dm)),
+                field(3, Wire::Varint(non_friend_dm)),
+            ]
+            .concat(),
+        ),
+    )
+}
+
+fn text_and_images(fields: &[Vec<u8>]) -> Vec<u8> {
+    field(6, Wire::Bytes(fields.concat()))
+}
+
+fn display_of(fields: &[Vec<u8>]) -> TextAndImages {
+    decode(fields)
+        .unwrap()
+        .text_and_images
+        .expect("a text_and_images field")
+}
+
+#[test]
+fn every_display_field_decodes() {
+    let display = display_of(&[text_and_images(&[
+        string_value(4, "ALWAYS"),
+        bool_value(7, true),
+        bool_value(9, false),
+        bool_value(10, false),
+        bool_value(11, false),
+        bool_value(12, false),
+        bool_value(14, false),
+        u32_value(15, 2),
+        u32_value(19, 1),
+        redactions(29, 1, 2, 3),
+        redactions(32, 3, 0, 1),
+        redactions(35, 2, 2, 2),
+    ])]);
+
+    assert_eq!(
+        display,
+        TextAndImages {
+            render_spoilers: Some("ALWAYS".to_owned()),
+            view_image_descriptions: Some(true),
+            inline_attachment_media: Some(false),
+            inline_embed_media: Some(false),
+            gif_auto_play: Some(false),
+            render_embeds: Some(false),
+            animate_emoji: Some(false),
+            animate_stickers: Some(2),
+            explicit_content_filter: Some(1),
+            explicit_content: Some(Redactions {
+                guilds: 1,
+                friend_dm: 2,
+                non_friend_dm: 3,
+            }),
+            gore: Some(Redactions {
+                guilds: 3,
+                friend_dm: 0,
+                non_friend_dm: 1,
+            }),
+            self_harm: Some(Redactions {
+                guilds: 2,
+                friend_dm: 2,
+                non_friend_dm: 2,
+            }),
+        }
+    );
+}
+
+#[test]
+fn absent_display_fields_are_none() {
+    let display = display_of(&[text_and_images(&[bool_value(11, true)])]);
+
+    assert_eq!(
+        display,
+        TextAndImages {
+            gif_auto_play: Some(true),
+            ..TextAndImages::default()
+        }
+    );
+    assert_eq!(decode(&[versions_field()]).unwrap().text_and_images, None);
+}
+
+#[test]
+fn an_empty_display_wrapper_is_false_zero_or_empty() {
+    let display = display_of(&[text_and_images(&[
+        field(4, Wire::Bytes(Vec::new())),
+        field(11, Wire::Bytes(Vec::new())),
+        field(15, Wire::Bytes(Vec::new())),
+        field(29, Wire::Bytes(Vec::new())),
+    ])]);
+
+    assert_eq!(display.render_spoilers, Some(String::new()));
+    assert_eq!(display.gif_auto_play, Some(false));
+    assert_eq!(display.animate_stickers, Some(0));
+    assert_eq!(display.explicit_content, Some(Redactions::default()));
+}
+
+#[test]
+fn unknown_display_fields_are_skipped() {
+    let display = display_of(&[text_and_images(&[
+        every_wire_type(1),
+        bool_value(11, false),
+        every_wire_type(17),
+        every_wire_type(41),
+        every_wire_type(500),
+    ])]);
+
+    assert_eq!(display.gif_auto_play, Some(false));
+}
+
+#[test]
+fn a_display_field_with_another_wire_type_is_malformed() {
+    let bytes = [
+        versions_field(),
+        text_and_images(&[field(11, Wire::Varint(1))]),
+    ]
+    .concat();
+    let offset = versions_field().len() + 2;
+
+    assert_eq!(decode(&[bytes]), Err(ProtoError::Malformed { offset }));
+    assert_eq!(
+        decode(&[field(6, Wire::Varint(1))]),
+        Err(ProtoError::Malformed { offset: 0 })
+    );
+}
+
+#[test]
+fn a_repeated_display_field_merges() {
+    let display = display_of(&[
+        text_and_images(&[bool_value(11, false), bool_value(14, false)]),
+        text_and_images(&[bool_value(11, true)]),
+    ]);
+
+    assert_eq!(display.gif_auto_play, Some(true));
+    assert_eq!(display.animate_emoji, Some(false));
+}
+
+#[test]
+fn a_repeated_display_sub_message_merges() {
+    let display = display_of(&[
+        text_and_images(&[
+            field(29, Wire::Bytes(field(1, Wire::Varint(2)))),
+            bool_value(11, true),
+            u32_value(15, 2),
+        ]),
+        text_and_images(&[
+            field(29, Wire::Bytes(field(2, Wire::Varint(3)))),
+            field(11, Wire::Bytes(Vec::new())),
+            field(15, Wire::Bytes(Vec::new())),
+        ]),
+    ]);
+
+    assert_eq!(
+        display.explicit_content,
+        Some(Redactions {
+            guilds: 2,
+            friend_dm: 3,
+            non_friend_dm: 0,
+        })
+    );
+    assert_eq!(display.gif_auto_play, Some(true));
+    assert_eq!(display.animate_stickers, Some(2));
+}
+
+fn versions_field() -> Vec<u8> {
+    field(1, Wire::Bytes(field(3, Wire::Varint(9))))
+}
+
 fn sample() -> Vec<u8> {
     [
         field(1, Wire::Bytes(field(3, Wire::Varint(77)))),

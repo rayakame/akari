@@ -12,7 +12,7 @@ use super::events::{ConnectionState, StoreEvent};
 use super::order;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
-use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
+use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{
     Channel, CurrentUser, Guild, Member, Message, StarterMessage, ThreadBrowser, ThreadCreation,
     User,
@@ -385,7 +385,7 @@ impl Store {
         #[cfg(test)]
         Self::park_in(&self.shared.diff_park);
         let diff = self.read(|inner| {
-            inner.state.keep_folders(&mut entities);
+            inner.state.keep_unreadable_settings(&mut entities);
             // Known since the first pass; the diff mustn't report them removed.
             for thread in inner.state.keep_known_threads(&mut entities) {
                 derived.add_thread(&thread);
@@ -863,6 +863,12 @@ impl Store {
     /// The user's notification settings for a guild, or for DMs with `None`.
     pub fn guild_settings(&self, guild: Option<GuildId>) -> Arc<GuildSettings> {
         self.read(|inner| inner.state.guild_settings(guild))
+    }
+
+    /// How media shows and animates, from the user's settings; Discord's defaults where the
+    /// user set nothing. `DisplaySettingsChanged` says when to read it again.
+    pub fn display_settings(&self) -> DisplaySettings {
+        self.read(|inner| inner.state.display_settings())
     }
 
     /// Muted now by its own settings, for a thread by its own membership. Neither a muted

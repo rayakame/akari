@@ -47,6 +47,15 @@ struct EventBatchTests {
     }
 
     @Test
+    func displaySettingsChangedIsItsOwnFlag() {
+        let batch = EventBatch([.displaySettingsChanged])
+
+        #expect(batch.displaySettingsChanged)
+        #expect(!batch.guildListChanged)
+        #expect(!EventBatch([.serverListChanged]).displaySettingsChanged)
+    }
+
+    @Test
     func threadListingChangedRereadsTheList() {
         let batch = EventBatch([.threadListingChanged(guildId: id(1), threadId: id(14))])
 

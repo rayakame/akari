@@ -40,6 +40,9 @@ author; the rest show only their content.
 - Right after a day divider the space above it is smaller: its box starts 17.5 below the
   divider's line, its avatar 21.5 (measured 2026-10-14). *Akari: 6 instead of 16 below the
   divider's row; system messages there move up by the same 10.*
+- The avatar is the author's, 40 points, round, from the image tier ([images.md](images.md)):
+  the disc while it loads, Discord's default avatar for a user without one; an animated one
+  plays while any message of the group is hovered and the window is key.
 - Inside the box, measured at 2 px per point on 2026-10-14: the avatar (40) in the left column
   starts 4 below the box's top, the name's baseline sits 18.5 below it and the first text
   line's 41. *Akari: avatar and name line 4 into its 47 box (name baseline at 19), text

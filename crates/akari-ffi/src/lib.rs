@@ -41,8 +41,9 @@ pub use login::{
     QrEvent, QrLogin, ScannedUser,
 };
 pub use records::{
-    Attachment, Channel, ConnectionState, ContentStats, Delivery, Guild, Message, MessageReference,
-    MessageWindow, Slowmode, StarterMessage, User,
+    Attachment, Channel, ConnectionState, ContentStats, Delivery, DisplaySettings,
+    ExplicitContentFilter, ExplicitContentSettings, Guild, Message, MessageReference,
+    MessageWindow, Redaction, Slowmode, SpoilerSetting, StarterMessage, StickerAnimation, User,
 };
 pub use store::{Store, message_length};
 pub use subscription::{StoreEvent, StoreSubscription};

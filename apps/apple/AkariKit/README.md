@@ -26,7 +26,8 @@ compares checksums when the library loads, so committing either would only let t
   akari-core's error texts as `LocalizedError`. The generated code stays in its own target
   because it doesn't compile with MainActor as the default isolation.
 - `AkariKit`: re-exports `AkariFFI` and adds the platform glue (`KeychainTokenStore`,
-  `HostInfo.current`, `AccountMemory`) and the view models.
+  `HostInfo.current`, `AccountMemory`), the view models and the image tier (below). Its
+  `Resources/animated.webp` is the launch probe's input.
 
 How state crosses the boundary is described in `crates/akari-ffi/README.md`.
 
@@ -264,6 +265,35 @@ Rules every Apple app shows the same way, so they live here rather than in the a
 where its time went (including `parse`, the runtime's markdown parse for the page), and one
 per channel open. The formats are here, so every Apple app logs
 the same lines; the app adds the render time it measures.
+
+## Images
+
+The core hands out files (`Account.image(_:)`, `docs/protocol/cdn.md`); AkariKit decodes and
+plays them (`docs/ui/images.md`):
+
+- `ImageCache` (`session.images`, main actor): `image(spec)` decodes the file for an
+  `ImageSpec` (a key and the box's pixels) at those pixels off the main actor, covering the box
+  and never above the source, refusing sources over 64 MP from the header; keeps the result in
+  two LRUs bounded in bytes (identity images 16 MB, media 48 MB); shares one source call between
+  concurrent asks and cancels it with the last waiter; asks once more for a file the system
+  purged; `cached(_:)` answers synchronously; `pin`/`unpin` keep what a box shows;
+  `dropUnpinned` (a memory warning) and `dropMedia` (a hidden window, from
+  `setWindowVisible`). `animation(spec)` gives an `AnimationSource` (frames, delays, loop count)
+  for the animated form, its download cancelled with the task. `retryFailed()` (the session,
+  each time it comes online) posts `retryFailedNotification`: boxes whose image failed ask again.
+- `MotionPolicy` (`session.motion`, from the store's display settings and
+  `setReduceMotion`): `plays(place, context)` for each place's rule (avatars on hover; emoji,
+  stickers and GIFs by their settings and visibility), always false while the window isn't key
+  or the app isn't active (`session.focused`).
+- `FramePlayer` plays an `AnimationSource` into a callback on one `AnimationClock` (a 60 Hz
+  timer that runs only while a player is registered): each frame decoded at the box's pixels
+  off the main actor, shown at its delay, loops honoured, the last frame kept; `prepare()`
+  decodes ahead, and a start decodes nothing it already has. Past the frame budget (24 MB) only
+  a window of four frames ahead of the play head is kept; a released player ends its decoding.
+- `AnimatedFormatProbe.install()` runs once at launch: `current` is `.webP` where ImageIO
+  composites the shipped fixture right, `.gif` where it doesn't (macOS 14) or until it ran.
+- `ImageKey.canAnimate`: an `a_` hash or an animated emoji. `sameSubject(as:)`: the same user,
+  server, group, emoji or attachment, whatever the hash.
 
 ## Tests
 

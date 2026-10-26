@@ -18,6 +18,24 @@ struct MessageTableState: Equatable {
     var messageJump: MessageListModel.MessageJump?
     // Kept clear above the start's icon for what covers the list's top.
     var startRoom: CGFloat = 0
+    /// Where the rows' images come from; `nil` shows placeholders only.
+    var images = ImageCacheRef(nil)
+    var motion = MotionPolicy.default
+    /// The window is key and the app active: what every animation needs.
+    var focused = false
+}
+
+/// The session's cache by identity, so the state stays `Equatable`.
+struct ImageCacheRef: Equatable {
+    let cache: ImageCache?
+
+    init(_ cache: ImageCache?) {
+        self.cache = cache
+    }
+
+    static func == (lhs: ImageCacheRef, rhs: ImageCacheRef) -> Bool {
+        lhs.cache === rhs.cache
+    }
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -99,6 +117,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var ownChanges = 0
     private var lastClipOrigin = NSPoint.zero
     private var hovered: MessageTimeline.ItemId?
+    // The group whose header plays: the hovered row's first message.
+    private var hoveredGroup: MessageTimeline.ItemId?
     private weak var underlinedText: MessageTextView?
     private weak var hoveredBox: ThreadBoxView?
     // Paging posts willStart and didLive but no didEnd, so a live scroll also ends when its
@@ -229,6 +249,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reportLine()
         updateRelativeTimer()
+        if previous.focused != state.focused || previous.motion != state.motion
+            || previous.images != state.images
+        {
+            updateAvatarAnimation()
+        }
         let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
         if startChanged {
             remeasureStart()
@@ -772,6 +797,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func configure(_ cell: NSView, _ edge: MessageTimeline.Edge) {
         if let cell = cell as? ChannelStartCell {
+            cell.images = state.images.cache
             cell.show(state.start, room: state.startRoom)
         } else if let cell = cell as? PlaceholderCell {
             let failure: String? =
@@ -988,6 +1014,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             if let notice = row.noticeParts {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
+                cell.images = state.images.cache
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.onOpenThread = openThread
                 cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
@@ -1000,7 +1027,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell =
                 reuse(MessageCell.identifier) as? MessageCell
                 ?? Signposts.interval("message cell made") { MessageCell() }
+            cell.images = state.images.cache
             cell.isHovered = item.id == hovered
+            cell.animatesAvatar = startsGroup && avatarPlays(groupStartOf: index)
             cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
@@ -1442,6 +1471,57 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
             (cell as? MessageCell)?.isHovered = index == row
         }
+        // The table can briefly hold more rows than the timeline while it updates.
+        let group =
+            timeline.items.indices.contains(row)
+            ? groupStart(of: row).map { timeline.items[$0].id } : nil
+        if group != hoveredGroup {
+            hoveredGroup = group
+            updateAvatarAnimation()
+        }
+    }
+
+    // Hovering any message of a group animates the group's header avatar (Discord), while the
+    // window is key and the app active. Every row the table holds, on screen or prepared.
+    private func updateAvatarAnimation() {
+        tableView.enumerateAvailableRowViews { rowView, index in
+            guard let cell = rowView.view(atColumn: 0) as? MessageCell, cell.showsHeader else {
+                return
+            }
+            cell.animatesAvatar = avatarPlays(groupStartOf: index)
+        }
+    }
+
+    // Whether the header at `start` plays: a message of its group is hovered.
+    private func avatarPlays(groupStartOf start: Int) -> Bool {
+        guard let hoveredGroup, timeline.items.indices.contains(start),
+            timeline.items[start].id == hoveredGroup
+        else {
+            return false
+        }
+        return state.motion.plays(
+            .messageAvatar,
+            MotionPolicy.Context(windowKey: state.focused, appActive: state.focused, hovered: true))
+    }
+
+    // The row of the group's first message, for a message row; nil for anything else. The new
+    // messages line starts no group.
+    private func groupStart(of row: Int) -> Int? {
+        var index = row
+        while index >= 0 {
+            switch timeline.items[index] {
+            case .message(_, let startsGroup):
+                if startsGroup {
+                    return index
+                }
+            case .newMessages:
+                break
+            case .edge, .day:
+                return nil
+            }
+            index -= 1
+        }
+        return nil
     }
 
     @objc private func keyChanged(_ notification: Notification) {

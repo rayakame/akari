@@ -8,7 +8,10 @@ use serde_json::{Value, json};
 use super::fake::{FakeGateway, GENERAL, GUILD, VOICE, events_until, online};
 use super::gateway::send;
 use super::support::{USER, token};
-use crate::records::{Folder, GuildSettings, ServerListItem};
+use crate::records::{
+    DisplaySettings, ExplicitContentFilter, ExplicitContentSettings, Folder, GuildSettings,
+    Redaction, ServerListItem, SpoilerSetting, StickerAnimation,
+};
 use crate::subscription::StoreEvent;
 
 const DM: ChannelId = ChannelId::new(300_000_000_000_000_010);
@@ -205,5 +208,75 @@ async fn the_settings_events_carry_ids_only() {
         guild_id: Some(GUILD)
     }));
     assert!(events.contains(&StoreEvent::GuildSettingsChanged { guild_id: None }));
+    account.close();
+}
+
+// text_and_images (6): gif_auto_play (11) off, animate_emoji (14) off, animate_stickers (15)
+// never.
+fn quiet_display_proto() -> String {
+    let gif = bytes_field(11, &varint_field(1, 0));
+    let emoji = bytes_field(14, &varint_field(1, 0));
+    let stickers = bytes_field(15, &varint_field(1, 2));
+    STANDARD.encode(bytes_field(6, &[gif, emoji, stickers].concat()))
+}
+
+#[tokio::test]
+async fn display_settings_cross_with_their_event() {
+    let gateway = FakeGateway::start().await;
+    let account = gateway.client().account(token("t"), USER).unwrap();
+    let subscription = account.store().subscribe();
+    account.connect().unwrap();
+    let mut ws = gateway.serve_ready().await;
+    events_until(&subscription, online).await;
+    let store = account.store();
+
+    assert_eq!(
+        store.display_settings(),
+        DisplaySettings {
+            render_spoilers: SpoilerSetting::OnClick,
+            view_image_descriptions: false,
+            inline_attachment_media: true,
+            inline_embed_media: true,
+            gif_auto_play: true,
+            render_embeds: true,
+            animate_emoji: true,
+            animate_stickers: StickerAnimation::Always,
+            explicit_content_filter: ExplicitContentFilter::NonFriends,
+            explicit_content: ExplicitContentSettings {
+                guilds: Redaction::Unset,
+                friend_dm: Redaction::Unset,
+                non_friend_dm: Redaction::Unset,
+            },
+            gore: ExplicitContentSettings {
+                guilds: Redaction::Unset,
+                friend_dm: Redaction::Unset,
+                non_friend_dm: Redaction::Unset,
+            },
+            self_harm: ExplicitContentSettings {
+                guilds: Redaction::Unset,
+                friend_dm: Redaction::Unset,
+                non_friend_dm: Redaction::Unset,
+            },
+        }
+    );
+
+    send(
+        &mut ws,
+        json!({"op": 0, "s": 2, "t": "USER_SETTINGS_PROTO_UPDATE", "d": {
+            "settings": {"type": 1, "proto": quiet_display_proto()},
+            "partial": true,
+        }}),
+    )
+    .await;
+    events_until(&subscription, |event| {
+        *event == StoreEvent::DisplaySettingsChanged
+    })
+    .await;
+
+    let display = store.display_settings();
+    assert!(!display.gif_auto_play);
+    assert!(!display.animate_emoji);
+    assert_eq!(display.animate_stickers, StickerAnimation::Never);
+    assert!(display.render_embeds);
     account.close();
 }

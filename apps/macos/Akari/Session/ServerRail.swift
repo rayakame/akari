@@ -7,7 +7,7 @@ struct ServerRail: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 8) {
-                RailItem(selected: session.place == .home, help: "Direct Messages") { highlighted in
+                RailItem(selected: session.place == .home, help: "Direct Messages") { highlighted, _ in
                     RailIcon(highlighted: highlighted) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
                             .font(.system(size: 18))
@@ -21,8 +21,9 @@ struct ServerRail: View {
                         selected: session.messages?.channelId == conversation.id,
                         help: conversation.name,
                         badge: session.directMessages.badge(of: conversation.id)
-                    ) { _ in
-                        RailAvatar(conversation: conversation)
+                    ) { _, hovered in
+                        ConversationAvatar(
+                            conversation: conversation, size: 40, place: .railIcon, hovered: hovered)
                     } action: {
                         Self.open(conversation, in: session)
                     }
@@ -45,7 +46,7 @@ struct ServerRail: View {
                                     folder, expanded: expanded, place: session.place),
                                 help: FolderTile.help(folder),
                                 badge: session.servers.tileBadge(of: folder)
-                            ) { _ in
+                            ) { _, _ in
                                 FolderTile(item: folder, expanded: expanded)
                             } action: {
                                 session.servers.toggle(folder: folder.id)
@@ -90,8 +91,8 @@ struct ServerRail: View {
         RailItem(
             selected: session.place == .guild(guild.id), help: guild.name,
             badge: session.servers.badge(of: guild.id)
-        ) { highlighted in
-            GuildIcon(name: guild.name, highlighted: highlighted)
+        ) { highlighted, hovered in
+            GuildIcon(name: guild.name, icon: guild.icon, highlighted: highlighted, hovered: hovered)
         } action: {
             session.open(.guild(guild.id))
         }
@@ -105,14 +106,17 @@ struct RailItem<Icon: View>: View {
     let selected: Bool
     let help: String
     var badge = Badge(unread: false, mentions: 0)
-    @ViewBuilder let icon: (_ highlighted: Bool) -> Icon
+    @ViewBuilder let icon: (_ highlighted: Bool, _ hovered: Bool) -> Icon
     let action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
-            icon(selected || hovered)
+            icon(selected || hovered, hovered)
                 .mentionBadge(badge.mentions)
+                // An icon draws nothing under itself and its image takes no hits: the tile's
+                // shape is what clicks and hovers.
+                .contentShape(RoundedRectangle(cornerRadius: RailShape.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
@@ -169,19 +173,18 @@ struct RailIcon<Content: View>: View {
     }
 }
 
+/// A server on the rail: its icon, or its acronym tile (D137). A changed icon swaps once the
+/// new one is ready.
 struct GuildIcon: View {
     let name: String
+    var icon: ImageKey?
     let highlighted: Bool
+    var hovered = false
 
     var body: some View {
-        let initials = Initials.of(name)
-        RailIcon(highlighted: highlighted) {
-            Text(initials)
-                .font(.system(size: Self.fontSize(initials.count), weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .padding(.horizontal, 2)
-        }
+        ServerPicture(
+            name: name, icon: icon, size: 40, cornerRadius: RailShape.cornerRadius,
+            highlighted: highlighted, place: .railIcon, hovered: hovered)
     }
 
     static func fontSize(_ length: Int) -> CGFloat {
@@ -195,15 +198,48 @@ struct GuildIcon: View {
     }
 }
 
-/// A DM with unread mentions on the rail: the other person's avatar, or a group's.
-private struct RailAvatar: View {
-    let conversation: DirectMessageListModel.Conversation
+/// A server's picture at any size: its icon alone when it has one, nothing drawn under it while
+/// it loads or through its transparency, as the official client; the acronym tile (hover and
+/// selection fill it) without an icon, or when the icon failed: the icon is still asked again.
+struct ServerPicture: View {
+    let name: String
+    var icon: ImageKey?
+    var size: CGFloat = 40
+    var cornerRadius: CGFloat = RailShape.cornerRadius
+    var highlighted = false
+    var place = MotionPolicy.Place.userPanel
+    var hovered = false
+    @State private var failed = false
 
     var body: some View {
-        if conversation.channel.kind == .dm, let user = conversation.recipients.first {
-            InitialsAvatar(user, size: 40)
-        } else {
-            InitialsAvatar(name: conversation.name, id: conversation.id.rawValue, size: 40)
+        ZStack {
+            if icon == nil || failed {
+                tile
+            }
+            if let icon {
+                RemoteImage(
+                    key: icon, cornerRadius: cornerRadius, place: place, hovered: hovered,
+                    onFailure: { failed = $0 })
+            }
         }
+        .frame(width: size, height: size)
+        .onChange(of: icon) {
+            failed = false
+        }
+    }
+
+    private var tile: some View {
+        let initials = Initials.of(name)
+        return RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(Color(nsColor: highlighted ? Palette.brand : Palette.hoverBackground))
+            .overlay {
+                Text(initials)
+                    .font(.system(size: GuildIcon.fontSize(initials.count) * size / 40, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .padding(.horizontal, 2 * size / 40)
+                    .foregroundStyle(highlighted ? Color.white : Color(nsColor: Palette.textDefault))
+            }
+            .animation(.easeOut(duration: 0.2), value: highlighted)
     }
 }

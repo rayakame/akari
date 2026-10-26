@@ -109,6 +109,8 @@ pub enum StoreEvent {
     },
     /// The server list's order or folders changed; read `server_list` again.
     ServerListChanged,
+    /// The display settings changed; read `display_settings` again.
+    DisplaySettingsChanged,
     /// The notification settings for a guild (`None`: DMs) changed, or a timed mute in it
     /// ended. Mutes, highlights and hidden channels may have changed.
     GuildSettingsChanged {
@@ -226,6 +228,7 @@ impl StoreEvent {
                 guild_id: member.guild_id,
             },
             E::ServerListChanged => Self::ServerListChanged,
+            E::DisplaySettingsChanged => Self::DisplaySettingsChanged,
             E::GuildSettingsChanged { guild_id } => Self::GuildSettingsChanged { guild_id },
             E::BadgeChanged {
                 channel_id,

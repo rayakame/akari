@@ -35,7 +35,7 @@ struct RailUnreadTests {
     // icon's bottom right.
     func render(_ badge: Badge) throws -> Rendered {
         try Rendered(
-            RailItem(selected: false, help: "", badge: badge) { highlighted in
+            RailItem(selected: false, help: "", badge: badge) { highlighted, _ in
                 GuildIcon(name: "Lab", highlighted: highlighted)
             } action: {}
             .frame(width: SidebarWidth.rail, height: 56)
@@ -124,7 +124,8 @@ struct RailUnreadTests {
             size: NSSize(width: SidebarWidth.rail, height: 400))
 
         // Down the middle, the items are runs of pixels off the rail's color: Home (selected,
-        // brand) and each unread DM's avatar are in color, the separator below them isn't.
+        // brand) is in color, each unread DM's avatar shows the gray loading disc (no images
+        // here), and the separator below them is gray too.
         let middle = Int(SidebarWidth.rail / 2 * rail.scale)
         let background = rail.color(SidebarWidth.rail - 2, 1)
         var items: [(start: CGFloat, colored: Bool)] = []
@@ -144,7 +145,7 @@ struct RailUnreadTests {
             inside = item
         }
         try #require(items.count >= 4, "\(items)")
-        #expect(items.prefix(4).map(\.colored) == [true, true, true, false], "\(items)")
+        #expect(items.prefix(4).map(\.colored) == [true, false, false, false], "\(items)")
         // One 40 tall item after another, 8 apart, wherever the window's safe area puts Home.
         for pair in zip(items.prefix(3), items.dropFirst().prefix(2)) {
             #expect(abs(pair.1.start - pair.0.start - 48) <= 1, "\(items)")

@@ -146,8 +146,10 @@ struct SessionScreen: View {
                     } else {
                         session.channelFocused()
                     }
-                })
+                },
+                images: session.images, motion: session.motion, focused: session.focused)
         }
+        .imageEnvironment(session)
         .background(ReadingSignals.Attach(session: session))
         // A reconnect brings a new session for the same channel; without a new identity its
         // views would keep the old one's state and never open the channel.

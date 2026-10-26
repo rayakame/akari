@@ -107,8 +107,9 @@ enum Palette {
     static let newMessagesText = token("newMessagesText", dark: "#ffffff", light: "#ffffff")
     static let startIcon = token(
         "startIcon", dark: "#97979f", light: "#97979f", alpha: (0.08, 0.10))
-    static let avatars = ["#5865f2", "#3e8e7e", "#c06c2b", "#a352b5", "#c2445a", "#4f7fba"]
-        .map { NSColor(hex: $0) }
+    // The disc under a loading or failed avatar: Discord's background-mod-subtle.
+    static let avatarPlaceholder = token(
+        "avatarPlaceholder", dark: "#97979f", light: "#97979f", alpha: (31.0 / 255, 31.0 / 255))
 
     // AppKit can resolve colors off the main thread; MainActor isolation would trap there.
     nonisolated private static func token(

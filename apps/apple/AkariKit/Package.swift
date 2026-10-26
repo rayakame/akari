@@ -22,7 +22,9 @@ let package = Package(
                 .linkedLibrary("sqlite3"),
             ]
         ),
-        .target(name: "AkariKit", dependencies: ["AkariFFI"]),
+        // Resources/animated.webp: the launch probe's input (AnimatedFormatProbe).
+        .target(
+            name: "AkariKit", dependencies: ["AkariFFI"], resources: [.copy("Resources")]),
         .testTarget(
             name: "AkariKitTests",
             dependencies: ["AkariKit"],

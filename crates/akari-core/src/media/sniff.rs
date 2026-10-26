@@ -296,7 +296,7 @@ pub(crate) mod tests {
     #[test]
     fn the_fixtures_animated_webp_is_animated() {
         let bytes = include_bytes!(
-            "../../../../apps/apple/AkariKit/Tests/AkariKitTests/Fixtures/Images/animated.webp"
+            "../../../../apps/apple/AkariKit/Sources/AkariKit/Resources/animated.webp"
         );
 
         let inspected = inspect(bytes).unwrap();
