@@ -301,6 +301,40 @@ async fn a_slow_source_gives_up_and_the_next_doesnt_wait() {
     );
 }
 
+// The sticker lookups get the same limit as the emoji's source.
+#[tokio::test]
+async fn slow_sticker_lookups_give_up() {
+    let slow = |body: Value| {
+        ResponseTemplate::new(200)
+            .set_body_json(body)
+            .set_delay(Duration::from_secs(5))
+    };
+    let online = online_answering_all(vec![
+        (
+            format!("stickers/{STICKER}"),
+            slow(sticker_object(STICKER, json!({}))),
+        ),
+        (format!("stickers/{STICKER}/guild"), slow(json!({}))),
+        (format!("sticker-packs/{PACK}"), slow(json!({}))),
+    ])
+    .await;
+    let started = std::time::Instant::now();
+    let timed_out = |err: &RequestError| matches!(err, RequestError::Network(err) if err.kind() == crate::TransportErrorKind::Timeout);
+
+    let sticker = online.account.sticker(StickerId::new(STICKER)).await;
+    let guild = online.account.sticker_guild(StickerId::new(STICKER)).await;
+    let pack = online.account.sticker_pack(StickerPackId::new(PACK)).await;
+
+    assert!(sticker.as_ref().is_err_and(timed_out), "{sticker:?}");
+    assert!(guild.as_ref().is_err_and(timed_out), "{guild:?}");
+    assert!(pack.as_ref().is_err_and(timed_out), "{pack:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
 // A 404 is the popout's answer, nothing more: the account stays online.
 #[tokio::test]
 async fn a_404_leaves_the_connection_alone() {

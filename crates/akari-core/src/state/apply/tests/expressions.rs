@@ -99,3 +99,18 @@ fn a_ready_with_only_new_emoji_reports_no_guild_change() {
     );
     assert_eq!(emoji_guild(&state, WAVE), Some(G1));
 }
+
+// The update always carries the whole list: one without it doesn't decode, rather than emptying
+// the server's emoji.
+#[test]
+fn an_emoji_update_without_its_list_doesnt_decode() {
+    let payload = json!({"op": 0, "s": 1, "t": "GUILD_EMOJIS_UPDATE",
+                         "d": {"guild_id": G1.to_string()}});
+
+    let decoded = decode(payload.to_string().as_bytes());
+
+    assert!(
+        matches!(decoded, Err(crate::gateway::DecodeError::Dispatch { .. })),
+        "{decoded:?}"
+    );
+}

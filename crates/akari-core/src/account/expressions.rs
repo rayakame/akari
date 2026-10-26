@@ -16,25 +16,22 @@ impl Account {
         self.lookup("emoji_source", answer).map(EmojiSource::from)
     }
 
-    /// A sticker, and its pack or server.
+    /// A sticker, and its pack or server. Given 5 s like the emoji's source, as are the two below.
     pub async fn sticker(&self, sticker: StickerId) -> Result<StickerDetails, RequestError> {
-        self.lookup("sticker", self.shared.rest.sticker(sticker).await)
-            .map(StickerDetails::from)
+        let answer = self.within(self.shared.rest.sticker(sticker)).await;
+        self.lookup("sticker", answer).map(StickerDetails::from)
     }
 
     /// The discoverable server a sticker is from, with its stickers.
     pub async fn sticker_guild(&self, sticker: StickerId) -> Result<SourceGuild, RequestError> {
-        self.lookup(
-            "sticker_guild",
-            self.shared.rest.sticker_guild(sticker).await,
-        )
-        .map(SourceGuild::from)
+        let answer = self.within(self.shared.rest.sticker_guild(sticker)).await;
+        self.lookup("sticker_guild", answer).map(SourceGuild::from)
     }
 
     /// One of Discord's sticker packs, with its stickers.
     pub async fn sticker_pack(&self, pack: StickerPackId) -> Result<StickerPack, RequestError> {
-        self.lookup("sticker_pack", self.shared.rest.sticker_pack(pack).await)
-            .map(StickerPack::from)
+        let answer = self.within(self.shared.rest.sticker_pack(pack)).await;
+        self.lookup("sticker_pack", answer).map(StickerPack::from)
     }
 
     // Dropping the request at the limit lets its rate-limit lane go.

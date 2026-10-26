@@ -44,7 +44,7 @@ pub struct GuildRoleEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct GuildEmojisUpdate {
     pub guild_id: GuildId,
-    #[serde(default, deserialize_with = "skip_invalid")]
+    #[serde(deserialize_with = "skip_invalid")]
     pub emojis: Vec<EmojiRef>,
 }
 
