@@ -16,6 +16,23 @@ enum MessageFormat {
         return shortDate(calendar, locale).string(from: date)
     }
 
+    /// An embed's footer time in Discord's words (module 58703): "Today at", "Yesterday at" and
+    /// "Tomorrow at" the time; the short date and time for older days, the date for later ones.
+    static func footerTime(_ date: Date, now: Date, calendar: Calendar, locale: Locale) -> String {
+        let time = shortTime(date, calendar: calendar, locale: locale)
+        let days =
+            calendar.dateComponents(
+                [.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)
+            ).day ?? 0
+        switch days {
+        case 0: return "Today at \(time)"
+        case -1: return "Yesterday at \(time)"
+        case 1: return "Tomorrow at \(time)"
+        case ..<0: return shortDate(calendar, locale).string(from: date)
+        default: return date.formatted(style(calendar, locale).day().month(.twoDigits).year())
+        }
+    }
+
     // The locale's short date and time, "17.10.26, 16:02" (D123); a template can't give the short
     // style's digits. Formatters are costly to make, and this runs for every row.
     private static var formatters: [String: DateFormatter] = [:]

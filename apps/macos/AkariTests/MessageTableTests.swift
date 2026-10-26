@@ -1027,7 +1027,13 @@ struct MessageTableTests {
                 row(43, by: author(3), at: later + 30, content: "", componentsV2: true),
                 row(
                     44, by: author(3), at: later + 40, attachments: ["a.png", "b.txt"],
-                    embedCount: 2, stickers: ["wave"]),
+                    embeds: [
+                        embed(media: [embedImage(1200, 630)], footer: EmbedFooter(text: "Akari", icon: nil, timestamp: later)),
+                        embed(
+                            1, kind: .image, inline: true, title: nil, description: nil,
+                            media: [embedImage(640, 480, embed: 1)]),
+                        embed(2, fields: [field("A", "1"), field("B", "2"), field("C", "a longer value", inline: false)]),
+                    ], stickers: ["wave"]),
                 row(45, by: author(3), at: later + 50, content: "", attachments: ["c.zip"]),
                 row(46, by: author(3), at: later + 60, delivery: .pending),
                 row(47, by: author(3), at: later + 70, delivery: .failed),

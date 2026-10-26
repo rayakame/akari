@@ -25,8 +25,10 @@ the header's Threads button and its popout, the "See all threads" modal, and the
 "More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
 `ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), and the
 composer (a locked thread's banner), avatars and icons in every place (`docs/ui/images.md`), and a
-message's attachments with their covers and the age gate (`docs/ui/attachments.md`).
-Embeds, reactions, replies, voice, notifications and settings come later.
+message's attachments with their covers and the age gate (`docs/ui/attachments.md`), and its
+embeds: cards, media alone, galleries, GIFVs and the video pill, with their covers
+(`EmbedView.swift`, `docs/ui/embeds.md`).
+Reactions, replies, voice, notifications and settings come later.
 
 ## Images
 

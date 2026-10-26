@@ -198,7 +198,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
             id: last, channelId: threadId, kind: .default, author: user(FakeBrowserStore.ray),
             fromWebhook: false, content: "test",
             timestamp: FakeBrowserStore.date(last.rawValue), editedTimestamp: nil,
-            pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
+            pinned: false, mentionEveryone: false, attachments: [], embeds: [],
             stickers: [], componentsV2: false, delivery: .sent,
             formatted: formattedText(content: "test"),
             mentionsMe: false, reference: nil, hasThread: false, mentions: [], call: nil,
@@ -261,7 +261,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
                 id: id, channelId: channelId, kind: kind, author: user(author),
                 fromWebhook: false, content: content,
                 timestamp: FakeBrowserStore.date(id.rawValue), editedTimestamp: nil,
-                pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
+                pinned: false, mentionEveryone: false, attachments: [], embeds: [],
                 stickers: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: false,
                 reference: kind == .threadCreated

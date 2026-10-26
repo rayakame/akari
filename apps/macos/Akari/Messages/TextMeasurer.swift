@@ -15,6 +15,14 @@ final class TextMeasurer {
         return ceil(bounds.height) + padding.top + padding.bottom
     }
 
+    /// The widest line of `text` when nothing wraps it: what it needs to sit on one line each.
+    func width(_ text: NSAttributedString) -> CGFloat {
+        let bounds = text.boundingRect(
+            with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin])
+        return ceil(bounds.width)
+    }
+
     static func usedHeight(_ layoutManager: NSLayoutManager, _ container: NSTextContainer)
         -> CGFloat
     {

@@ -61,6 +61,8 @@ final class AttachmentsView: NSView {
     private(set) var tiles: [MediaTileView] = []
     private(set) var files: [FileRowView] = []
     private var attachments: [Attachment] = []
+    // The tiles' attachments, in order.
+    private var media: [Attachment] = []
     private var layoutCache: (width: CGFloat, layout: Layout)?
     var images: ImageCache? {
         didSet {
@@ -129,16 +131,19 @@ final class AttachmentsView: NSView {
         self.attachments = attachments
         layoutCache = nil
         let media = attachments.filter { $0.display == .media }
+        self.media = media
         let shownFiles = attachments.filter { $0.display == .file }
         while tiles.count < media.count {
             let tile = MediaTileView()
             tile.images = images
             tile.placeholders = placeholders
             tile.onAction = { [weak self, weak tile] action in
-                guard let self, let tile, let attachment = tile.content?.attachment else {
+                guard let self, let tile, let index = self.tiles.firstIndex(where: { $0 === tile }),
+                    index < self.media.count
+                else {
                     return
                 }
-                self.onMedia(attachment, action, tile)
+                self.onMedia(self.media[index], action, tile)
             }
             tiles.append(tile)
             mosaic.addSubview(tile)

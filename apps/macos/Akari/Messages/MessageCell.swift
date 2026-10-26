@@ -6,8 +6,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
 
     /// The session's reveals of a message's media and the alt-text setting.
     struct MediaState: Equatable {
-        var revealed: Set<AttachmentId> = []
-        var shownSensitive: Set<AttachmentId> = []
+        var revealed: Set<MediaKey.Item> = []
+        var shownSensitive: Set<MediaKey.Item> = []
         var showsAltText = false
     }
 
@@ -32,6 +32,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             avatar.images = newValue
             content.images = newValue
             attachments?.images = newValue
+            embeds?.images = newValue
             stickers?.images = newValue
             threadBox?.images = newValue
         }
@@ -57,9 +58,18 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     private let extras = MessageTextView()
     // Built for the first message with attachments, as the stickers.
     private(set) var attachments: AttachmentsView?
+    // Built for the first message with embeds.
+    private(set) var embeds: EmbedsView?
     var placeholders: PlaceholderCache? {
-        didSet { attachments?.placeholders = placeholders }
+        didSet {
+            attachments?.placeholders = placeholders
+            embeds?.placeholders = placeholders
+        }
     }
+    /// An embed's click or button.
+    var onEmbed: (Embed, EmbedView.Action) -> Void = { _, _ in }
+    /// Where a GIFV's video comes from.
+    var loopSource: (ImageKey) async -> URL? = { _ in nil }
     /// A media tile's click or button, with the tile.
     var onMedia: (Attachment, MediaTileView.Action, MediaTileView) -> Void = { _, _, _ in }
     var onOpenFile: (Attachment) -> Void = { _ in }
@@ -138,12 +148,12 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         startsGroup: Bool, followsDay: Bool = false, followsLine: Bool = false,
         groupTime: String, shortTime: String, fullDate: String,
         threadBox: (box: ThreadBox, content: NSAttributedString?, time: String?)? = nil,
-        media: MediaState = MediaState()
+        media: MediaState = MediaState(), embeds: [EmbedView.Shown] = []
     ) {
         configureAllButTheBody(
             message, authorName: authorName, startsGroup: startsGroup, followsDay: followsDay,
             followsLine: followsLine, groupTime: groupTime, shortTime: shortTime,
-            fullDate: fullDate, hasBox: threadBox != nil, media: media)
+            fullDate: fullDate, hasBox: threadBox != nil, media: media, embeds: embeds)
         if let threadBox {
             boxView().configure(threadBox.box, content: threadBox.content, time: threadBox.time)
         }
@@ -168,7 +178,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     private func configureAllButTheBody(
         _ message: Message, authorName: String? = nil, startsGroup: Bool, followsDay: Bool,
         followsLine: Bool, groupTime: String, shortTime: String, fullDate: String,
-        hasBox: Bool = false, media: MediaState = MediaState()
+        hasBox: Bool = false, media: MediaState = MediaState(), embeds shown: [EmbedView.Shown] = []
     ) {
         if hasBox {
             boxView().isHidden = false
@@ -197,7 +207,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         if message.editedTimestamp != nil, message.content.isEmpty {
             lines.append(CellText.editedMark())
         }
-        content.isHidden = message.content.isEmpty
+        // The link the one embed shows alone (Discord's hideSimpleEmbedContent).
+        content.isHidden = message.content.isEmpty || message.hidesContent
         extras.show(lines)
         extras.isHidden = lines.length == 0
         if message.attachments.isEmpty {
@@ -210,6 +221,14 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             view.configure(
                 message.attachments, covers: { Self.cover($0, media) },
                 showsAltText: media.showsAltText)
+        }
+        if shown.isEmpty {
+            embeds?.configure([])
+            embeds?.isHidden = true
+        } else {
+            let view = embedsView()
+            view.isHidden = false
+            view.configure(shown)
         }
         if message.stickers.isEmpty {
             // A reused cell lets its stickers go: no ask, no pin, no player.
@@ -237,9 +256,19 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     /// item the user showed keeps its eye to hide it again.
     static func cover(_ attachment: Attachment, _ media: MediaState) -> MediaTileView.Cover? {
         switch attachment.cover {
-        case .spoiler: media.revealed.contains(attachment.id) ? nil : .spoiler
+        case .spoiler: media.revealed.contains(.attachment(attachment.id)) ? nil : .spoiler
         case .pending: .pending
-        case .sensitive: .sensitive(shown: media.shownSensitive.contains(attachment.id))
+        case .sensitive: .sensitive(shown: media.shownSensitive.contains(.attachment(attachment.id)))
+        case nil: nil
+        }
+    }
+
+    /// An embed's cover with the session's reveals, as an attachment's.
+    static func cover(_ embed: Embed, _ media: MediaState) -> MediaTileView.Cover? {
+        switch embed.cover {
+        case .spoiler: media.revealed.contains(.embed(embed.index)) ? nil : .spoiler
+        case .pending: .pending
+        case .sensitive: .sensitive(shown: media.shownSensitive.contains(.embed(embed.index)))
         case nil: nil
         }
     }
@@ -257,13 +286,15 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     /// cell.
     static func height(
         _ message: Message, body: NSAttributedString, startsGroup: Bool, followsDay: Bool = false,
-        followsLine: Bool = false, hasBox: Bool = false, width: CGFloat
+        followsLine: Bool = false, hasBox: Bool = false, embeds: [EmbedView.Shown] = [],
+        width: CGFloat
     ) -> CGFloat {
         sizing.configureAllButTheBody(
             message, startsGroup: startsGroup, followsDay: followsDay, followsLine: followsLine,
-            groupTime: "", shortTime: "", fullDate: "", hasBox: hasBox)
+            groupTime: "", shortTime: "", fullDate: "", hasBox: hasBox, embeds: embeds)
         let textWidth = width - textLeading - textTrailing
-        let body = message.content.isEmpty ? 0 : TextMeasurer.shared.height(body, width: textWidth)
+        let shown = !message.content.isEmpty && !message.hidesContent
+        let body = shown ? TextMeasurer.shared.height(body, width: textWidth) : 0
         return sizing.height(width: width, body: body)
     }
 
@@ -275,7 +306,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     // The constraints of build() in arithmetic; the stack leaves hidden views out.
     private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
-        let shown = ([reply, header, content] + [attachments].compactMap { $0 } + [extras]
+        let shown = ([reply, header, content] + [attachments, embeds].compactMap { $0 } + [extras]
             + [stickers, threadBox, failed].compactMap { $0 })
             .filter { !$0.isHidden }
         let stacked =
@@ -286,6 +317,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
                         ? body
                         : view === attachments
                             ? attachments?.height(width: textWidth) ?? 0
+                        : view === embeds
+                            ? embeds?.height(width: textWidth) ?? 0
                         : view === extras
                             ? extrasHeight(width: textWidth)
                             : view === threadBox
@@ -354,6 +387,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
 
     override func layout() {
         attachments?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
+        embeds?.preferredWidth = max(0, bounds.width - Self.textLeading - Self.textTrailing)
         super.layout()
         flashView.frame = box
     }
@@ -446,6 +480,24 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         stack.insertView(view, at: after, in: .top)
         view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         attachments = view
+        return view
+    }
+
+    private func embedsView() -> EmbedsView {
+        if let embeds {
+            return embeds
+        }
+        let view = EmbedsView()
+        view.images = images
+        view.placeholders = placeholders
+        view.onAction = { [weak self] embed, action in self?.onEmbed(embed, action) }
+        view.onLink = { [weak self] url in self?.onLink(url) }
+        view.loopSource = { [weak self] key in await self?.loopSource(key) }
+        let anchor: NSView = attachments ?? content
+        let after = stack.views(in: .top).firstIndex(of: anchor).map { $0 + 1 } ?? 0
+        stack.insertView(view, at: after, in: .top)
+        view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        embeds = view
         return view
     }
 
@@ -542,10 +594,6 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             lines.append(
                 CellText.symbolLine(
                     "square.grid.2x2", "This message uses a layout Akari can't show yet"))
-        }
-        if message.embedCount > 0 {
-            let embeds = message.embedCount == 1 ? "1 embed" : "\(message.embedCount) embeds"
-            lines.append(CellText.symbolLine("rectangle.on.rectangle", embeds))
         }
         let joined = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {
