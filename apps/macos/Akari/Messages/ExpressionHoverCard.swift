@@ -14,6 +14,7 @@ final class ExpressionHoverCard {
     private(set) var shown: ExpressionCard?
     private(set) var panel: NSPanel?
     private var pending: (target: ExpressionTarget, rect: NSRect)?
+    private var presented: (motion: MotionPolicy, focused: Bool)?
     private var waiting: Task<Void, Never>?
     // Between the arrow's tip and the item, as measured in the official client.
     static let gap: CGFloat = 3
@@ -21,6 +22,9 @@ final class ExpressionHoverCard {
     /// The item under the pointer (its box in `window`'s coordinates), or `nil`.
     func hover(_ item: (target: ExpressionTarget, rect: NSRect)?, in window: NSWindow?) {
         if let item, let pending, pending.target == item.target, pending.rect == item.rect {
+            if let presented, presented != (motion, focused), let window {
+                present(item, in: window)
+            }
             return
         }
         hide()
@@ -41,6 +45,7 @@ final class ExpressionHoverCard {
         waiting?.cancel()
         waiting = nil
         pending = nil
+        presented = nil
         shown = nil
         if let panel {
             panel.parent?.removeChildWindow(panel)
@@ -100,6 +105,7 @@ final class ExpressionHoverCard {
         }
         panel.orderFront(nil)
         self.panel = panel
+        presented = (motion, focused)
         shown = card
     }
 

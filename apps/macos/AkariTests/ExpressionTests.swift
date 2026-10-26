@@ -96,9 +96,24 @@ final class ExpressionTests {
                         clickCount: 1, pressure: 1)), atStart: false)
         }
 
+        // What the queue holds at the click, for a failure's message.
+        var queued: [NSEvent] = []
+        while let next = NSApp.nextEvent(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp],
+            until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true)
+        {
+            queued.append(next)
+        }
+        for event in queued {
+            NSApp.postEvent(event, atStart: false)
+        }
+        let described = queued.map { "\($0.type.rawValue)@\($0.timestamp) w\($0.windowNumber) \($0.locationInWindow)" }
+
         try click(at: try point(at: 3, in: view), in: view, draining: false)
 
-        #expect(opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)], "\(scale)x: selection \(view.selectedRange())")
+        #expect(
+            opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)],
+            "\(scale)x: selection \(view.selectedRange()), window \(window.windowNumber), active \(NSApp.isActive), uptime \(ProcessInfo.processInfo.systemUptime), queued \(described)")
     }
 
     // Suites run side by side on the main actor: another window's release, even a newer one, isn't
@@ -205,6 +220,29 @@ final class ExpressionTests {
         list.pointer.location = try point(at: 0, in: view)
         list.controller.pointerMoved()
         #expect(panel.contentView == nil, "a hidden card lets go of its image")
+    }
+
+    // The window losing the key stops the card's emoji while the pointer rests on it; the card
+    // stays.
+    @Test
+    func theCardStopsWhenTheWindowLosesTheKey() async throws {
+        let images = ImageCacheRef(ImageCache(source: FakeImageSource.stalling()))
+        let rows = [row(1, at: list.noon, content: "hi <a:dance:6> there")]
+        list.show(MessageTableState(rows: rows, reachedOldest: true, images: images, focused: true))
+        let view = try text()
+        list.pointer.location = try point(at: 3, in: view)
+        list.controller.pointerMoved()
+        try await eventually { self.list.controller.hoverCard.shown != nil }
+        let layer = {
+            MessageMenuAreaTests.views(ImageLayerView.self, in: self.list.controller.hoverCard.panel?.contentView ?? NSView()).first
+        }
+        #expect(layer()?.animates == true)
+
+        list.show(MessageTableState(rows: rows, reachedOldest: true, images: images, focused: false))
+        list.controller.pointerMoved()
+
+        try await eventually { layer()?.animates == false }
+        #expect(list.controller.hoverCard.shown != nil)
     }
 
     @Test

@@ -125,7 +125,7 @@ final class StickerTests {
     }
 
     // `animate_stickers`: always plays while 70 % visible and the window key; on interaction
-    // plays while the message is hovered; never doesn't.
+    // plays while the message is hovered; never keeps the still.
     @Test
     func stickersPlayPerTheSettingAndTheHover() throws {
         let cache = ImageCache(source: FakeImageSource.stalling())
@@ -155,6 +155,19 @@ final class StickerTests {
         list.pointer.location = text.convert(NSPoint(x: 4, y: text.bounds.midY), to: nil)
         list.controller.pointerMoved()
         #expect(try !cell().animatesStickers)
+    }
+
+    // A thread's first row draws the message the thread started from, its stickers too, and
+    // plays them.
+    @Test
+    func aStartersStickersPlay() throws {
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        let original = row(20, at: list.noon - 600, content: "the original", stickers: ["wave"], stickerFormat: .apng)
+        let first = row(1, at: list.noon, kind: .threadStarterMessage, content: "")
+        list.show(state([MessageListModel.Row(id: first.id, message: first.message, starter: .loaded(original.message))], cache: cache))
+
+        #expect(try stickerViews(cell()).count == 1)
+        #expect(try cell().animatesStickers)
     }
 
     // A reused cell for a message without stickers lets its stickers go: no ask, no pin, no

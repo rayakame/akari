@@ -56,6 +56,21 @@ final class EmojiTests {
         return layout.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
     }
 
+    // An emoji in a hidden spoiler stays under the cover, with no box shown; revealed, it shows
+    // like any other.
+    @Test
+    func aHiddenSpoilersEmojiStaysCovered() throws {
+        let hidden = shown("hi ||<:wave:5>|| there")
+        #expect(emojiShapes(hidden).isEmpty)
+        let layers = emojiLayers(hidden)
+        #expect(layers.allSatisfy { $0.isHidden })
+
+        let message = row(1, at: now, content: "hi ||<:wave:5>|| there").message
+        hidden.show(MessageText.build(message, revealed: [0], now: now, times: times).text)
+        hidden.superview?.layoutSubtreeIfNeeded()
+        #expect(emojiShapes(hidden).map(\.box.name) == ["wave"])
+    }
+
     // Inline: 22 × 22 with its bottom on the line's bottom; jumbo: 48 × 48 centered on its line.
     @Test
     func theLayoutManagerGivesEachEmojiItsBox() throws {
