@@ -85,7 +85,8 @@ final class ExpressionTests {
         container.layoutSubtreeIfNeeded()
         var opened: [ExpressionTarget] = []
         view.onExpression = { target, _ in opened.append(target) }
-        // What CI leaves behind: another suite's drag and release nobody consumed, older than the press.
+        try settleEvents(in: window)
+        // A drag and a release nobody consumed, older than the press, don't end it.
         let stale = try point(at: 3, in: view)
         for type in [NSEvent.EventType.leftMouseDragged, .leftMouseUp] {
             NSApp.postEvent(
@@ -96,24 +97,9 @@ final class ExpressionTests {
                         clickCount: 1, pressure: 1)), atStart: false)
         }
 
-        // What the queue holds at the click, for a failure's message.
-        var queued: [NSEvent] = []
-        while let next = NSApp.nextEvent(
-            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp],
-            until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true)
-        {
-            queued.append(next)
-        }
-        for event in queued {
-            NSApp.postEvent(event, atStart: false)
-        }
-        let described = queued.map { "\($0.type.rawValue)@\($0.timestamp) w\($0.windowNumber) \($0.locationInWindow)" }
-
         try click(at: try point(at: 3, in: view), in: view, draining: false)
 
-        #expect(
-            opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)],
-            "\(scale)x: selection \(view.selectedRange()), window \(window.windowNumber), active \(NSApp.isActive), uptime \(ProcessInfo.processInfo.systemUptime), queued \(described)")
+        #expect(opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)], "\(scale)x: selection \(view.selectedRange())")
     }
 
     // Suites run side by side on the main actor: another window's release, even a newer one, isn't
@@ -439,11 +425,11 @@ final class ExpressionTests {
 
     func click(at point: NSPoint, in view: NSView, dragTo end: NSPoint? = nil, draining: Bool = true) throws {
         let window = try #require(view.window)
-        // Events other suites posted and nothing consumed (CI's test host isn't the active app)
-        // would join this click's tracking loop.
+        try settleEvents(in: window)
+        // Mouse events nothing consumed would join this click's tracking loop.
         while draining, NSApp.nextEvent(
-            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp],
-            until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true) != nil
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp], until: .distantPast,
+            inMode: .default, dequeue: true) != nil
         {}
         let start = ProcessInfo.processInfo.systemUptime
         let event = { (type: NSEvent.EventType, at: NSPoint, after: TimeInterval) in

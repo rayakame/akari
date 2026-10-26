@@ -69,6 +69,28 @@ func keyDown(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierF
 }
 
 // Escape and Cmd+. send the same command, cancelOperation(_:).
+/// Returns once the event queue gives back a location in `window` as it was posted. On macOS 26
+/// a mouse event for a window made in the same run-loop turn comes back at a wrong location until
+/// AppKit learns from the window server where the window is (seen on CI's runner, not on 27).
+func settleEvents(in window: NSWindow) throws {
+    let posted = NSPoint(x: 1, y: 1)
+    let deadline = Date(timeIntervalSinceNow: 5)
+    while true {
+        let marker = try #require(
+            NSEvent.mouseEvent(
+                with: .otherMouseUp, location: posted, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 0))
+        NSApp.postEvent(marker, atStart: true)
+        let read = NSApp.nextEvent(matching: .otherMouseUp, until: .distantPast, inMode: .default, dequeue: true)
+        if read?.locationInWindow == posted {
+            return
+        }
+        try #require(Date() < deadline, "events for window \(window.windowNumber) come back at \(String(describing: read?.locationInWindow))")
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+    }
+}
+
 func escapeKey(_ modifiers: NSEvent.ModifierFlags = []) -> NSEvent? {
     keyDown("\u{1b}", keyCode: 53, modifiers: modifiers)
 }
@@ -181,8 +203,8 @@ nonisolated let firstClicks = ProcessInfo.processInfo.isOperatingSystemAtLeast(
     OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0))
 
 extension View {
-    // A test's app never becomes active, and SwiftUI takes a click in an inactive app's window
-    // only as its activation.
+    // A test's app isn't always active (CI's is, a local run's often isn't), and SwiftUI takes a
+    // click in an inactive app's window only as its activation.
     @ViewBuilder
     func takingFirstClicks() -> some View {
         if #available(macOS 15.0, *) {
