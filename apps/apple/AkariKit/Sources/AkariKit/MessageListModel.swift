@@ -500,8 +500,9 @@ public final class MessageListModel {
         }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages
-        // How attachments show and what covers them come with the records.
-        let everyRow = namesChanged(batch) || batch.displaySettingsChanged
+        // How attachments show and what covers them come with the records; a new session
+        // brings new settings and conversations.
+        let everyRow = batch.everythingChanged || namesChanged(batch) || batch.displaySettingsChanged
         if batch.windowsChanged.contains(channelId) {
             reload(rereading: everyRow ? Set(rows.map(\.message.id)) : updated)
         } else if everyRow {

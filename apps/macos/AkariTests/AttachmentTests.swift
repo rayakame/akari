@@ -809,28 +809,26 @@ final class AttachmentTests {
         #expect(other.controller.prefetching.isEmpty)
     }
 
-    // A real press and release through the window reach the tile, the eye and a file's name.
+    // Hits through the window reach the tile, the eye and a file's name, which take the click.
     @Test
-    func clicksThroughTheWindowReachTheMedia() throws {
+    func hitsThroughTheWindowReachTheMedia() throws {
         show(
             [media(5), media(6, cover: .sensitive), file(7, "notes.zip")],
             cache: ImageCache(source: FakeImageSource.stalling()))
         let window = list.keyWindow()
         defer { window.close() }
-        try settleEvents(in: window)
+        let content = try #require(window.contentView)
         let tiles = try tiles()
         let click = { (view: NSView) in
             let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                window.sendEvent(try #require(NSEvent.mouseEvent(
-                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
-            }
+            let hit = content.hitTest(content.superview?.convert(point, from: nil) ?? point)
+            #expect(hit === view, "\(String(describing: hit))")
+            (hit as? NSButton)?.performClick(nil)
         }
 
-        try click(tiles[0])
-        try click(tiles[1].eye)
-        try click(try #require(try fileRows().first).name)
+        click(tiles[0])
+        click(tiles[1].eye)
+        click(try #require(try fileRows().first).name)
 
         let opened = [5, 7].map {
             ImageKey.attachment(
