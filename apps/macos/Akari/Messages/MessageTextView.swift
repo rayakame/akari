@@ -238,7 +238,8 @@ final class MessageTextView: NSTextView {
     }
 
     // A hidden code block reveals on a click anywhere on its cover, its padding included. A
-    // click on an emoji opens its popout once the tracking loop ends without a selection.
+    // press on an emoji is tracked here: released on it, its popout opens; dragged away, the
+    // press and what followed go to NSTextView, which selects.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let spoiler = decorations.cover(at: point),
@@ -247,14 +248,26 @@ final class MessageTextView: NSTextView {
             onLink(url)
             return
         }
-        if event.clickCount == 1, let hit = expression(at: point) {
-            super.mouseDown(with: event)
-            // A drag selected text. The release, when AppKit still has it, must be on the emoji.
-            let release = NSApp.currentEvent.flatMap { $0.type == .leftMouseUp ? $0 : nil }
-            let end = release.map { convert($0.locationInWindow, from: nil) } ?? point
-            if selectedRange().length == 0, hit.rect.contains(end) {
-                onExpression(hit.target, convert(hit.rect, to: nil))
+        if event.clickCount == 1, let hit = expression(at: point), let window {
+            var seen: [NSEvent] = []
+            while let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
+                seen.append(next)
+                let at = convert(next.locationInWindow, from: nil)
+                if next.type == .leftMouseUp {
+                    if hit.rect.contains(at) {
+                        setSelectedRange(NSRange(location: selectedRange().location, length: 0))
+                        onExpression(hit.target, convert(hit.rect, to: nil))
+                    }
+                    return
+                }
+                if hypot(at.x - point.x, at.y - point.y) > 3 {
+                    break
+                }
             }
+            for followed in seen.reversed() {
+                NSApp.postEvent(followed, atStart: true)
+            }
+            super.mouseDown(with: event)
             return
         }
         // NSTextView would start dragging the selection; a browser follows the link.
