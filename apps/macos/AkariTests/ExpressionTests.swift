@@ -96,24 +96,19 @@ final class ExpressionTests {
                         clickCount: 1, pressure: 1)), atStart: false)
         }
 
-        // What the queue holds at the click, for a failure's message.
-        var queued: [NSEvent] = []
-        while let next = NSApp.nextEvent(
-            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp],
-            until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true)
-        {
-            queued.append(next)
-        }
-        for event in queued {
-            NSApp.postEvent(event, atStart: false)
-        }
-        let described = queued.map { "\($0.type.rawValue)@\($0.timestamp) w\($0.windowNumber) \($0.locationInWindow)" }
-
+        let before = ProcessInfo.processInfo.systemUptime
         try click(at: try point(at: 3, in: view), in: view, draining: false)
 
-        #expect(
-            opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)],
-            "\(scale)x: selection \(view.selectedRange()), window \(window.windowNumber), active \(NSApp.isActive), uptime \(ProcessInfo.processInfo.systemUptime), queued \(described)")
+        // PROBE (temporary): what's left after the click; read after it, so the click is untouched.
+        var left: [String] = []
+        while let next = NSApp.nextEvent(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp], until: .distantPast,
+            inMode: .default, dequeue: true)
+        {
+            left.append("type \(next.type.rawValue) ts \(next.timestamp) w \(next.windowNumber) x \(next.locationInWindow.x)")
+        }
+        NSLog("PROBE stale test %@x: opened %@, selection %@, window %d, uptime before the click %f, left %@", "\(scale)", "\(opened)", "\(view.selectedRange())", window.windowNumber, before, "\(left)")
+        #expect(opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)], "\(scale)x: selection \(view.selectedRange())")
     }
 
     // Suites run side by side on the main actor: another window's release, even a newer one, isn't
