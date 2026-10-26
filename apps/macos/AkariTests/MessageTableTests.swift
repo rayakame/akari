@@ -900,25 +900,24 @@ struct MessageTableTests {
         #expect(actions.calls.filter { !$0.hasPrefix("more") } == ["escape"])
     }
 
-    // The lowest row of ink a view draws, in window points.
-    func inkBottom(of view: NSView) throws -> CGFloat {
+    // Halfway between the highest and lowest rows of ink a view draws, in window points.
+    func inkMiddle(of view: NSView) throws -> CGFloat {
         let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
-        let last = try #require(
-            (0..<rep.pixelsHigh).last { y in
-                (0..<rep.pixelsWide).contains { x in
-                    (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5
-                }
-            })
+        let inked = (0..<rep.pixelsHigh).filter { y in
+            (0..<rep.pixelsWide).contains { x in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 }
+        }
+        let first = try #require(inked.first)
+        let last = try #require(inked.last)
         let scale = CGFloat(rep.pixelsHigh) / view.bounds.height
-        let fromTop = CGFloat(last + 1) / scale
+        let fromTop = CGFloat(first + last + 1) / 2 / scale
         let y = view.isFlipped ? fromTop : view.bounds.height - fromTop
         return view.convert(NSPoint(x: 0, y: y), to: nil).y
     }
 
     @Test
-    func theHoverTimeSitsOnTheFirstLinesBaseline() throws {
-        show([row(1, at: noon), row(2, at: noon + 30, content: "xxxx xxxx")])
+    func theHoverTimeIsCenteredOnTheFirstLine() throws {
+        show([row(1, at: noon), row(2, at: noon + 30, content: "XXXX XXXX")])
         let cell = try #require(try cell(of: 2) as? MessageCell)
         cell.isHovered = true
         cell.layoutSubtreeIfNeeded()
@@ -926,10 +925,10 @@ struct MessageTableTests {
         let time = try #require(
             textFields(in: cell).first { !$0.isHiddenOrHasHiddenAncestor && $0.stringValue != "" })
 
-        // Neither "x" nor the time's digits reach below the baseline.
-        let textBottom = try inkBottom(of: text)
-        let timeBottom = try inkBottom(of: time)
-        #expect(abs(textBottom - timeBottom) <= 0.5, "time at \(timeBottom), text at \(textBottom)")
+        // Capitals and digits share a height, so their ink's middles meet.
+        let textMiddle = try inkMiddle(of: text)
+        let timeMiddle = try inkMiddle(of: time)
+        #expect(abs(textMiddle - timeMiddle) <= 0.5, "time at \(timeMiddle), text at \(textMiddle)")
     }
 
     @Test

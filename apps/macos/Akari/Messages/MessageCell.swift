@@ -457,9 +457,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             avatar.widthAnchor.constraint(equalToConstant: Self.avatarSize),
             avatar.heightAnchor.constraint(equalToConstant: Self.avatarSize),
             hoverTime.trailingAnchor.constraint(equalTo: leadingAnchor, constant: 56),
-            // Where a plain first line's baseline would be: a jumbo line or a sticker doesn't move it.
+            // Its digits centered on a plain first line's capitals: a jumbo line or a sticker doesn't move it.
             hoverTime.firstBaselineAnchor.constraint(
-                equalTo: stack.topAnchor, constant: MessageText.firstLineBaseline),
+                equalTo: stack.topAnchor,
+                constant: MessageText.firstLineMiddle + TypeScale.hoverTime.nsFont.capHeight / 2),
         ])
     }
 

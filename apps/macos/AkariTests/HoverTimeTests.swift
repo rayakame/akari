@@ -4,9 +4,9 @@ import Testing
 
 @testable import Akari
 
-// A follow-up's hover time sits where a plain first line's baseline would be, the same distance
-// below the row's top whatever the row holds, as in the official client: not on a jumbo line's
-// baseline, not above a sticker. Rendered at 2x.
+// A follow-up's hover time sits in the middle of a plain first line, the same distance below the
+// row's top whatever the row holds, as in the official client: centered on a one-line message's
+// text, not on a jumbo line, not above a sticker. Rendered at 2x.
 @MainActor @Suite
 final class HoverTimeTests {
     let noon = Date(timeIntervalSince1970: 1_800_000_000)
@@ -15,18 +15,40 @@ final class HoverTimeTests {
         calendar: Calendar(identifier: .gregorian))
     var retained: [NSWindow] = []
 
-    // Below the row's top, in points: 3 to the content, then a 16 pt line's baseline on its
-    // 22 pt line.
-    static let baseline: CGFloat = 19
+    // Below the row's top, in points: where a one-line follow-up's capitals are centered, 3 to
+    // its 22 line and the line's middle.
+    static let middle: CGFloat = 13.25
 
     struct Ink {
         let top: CGFloat
         let bottom: CGFloat
+        var middle: CGFloat { (top + bottom) / 2 }
     }
 
-    // Where the time's glyphs are in a hovered follow-up, from the row's top: the column left of
-    // the text holds nothing else.
-    func timeInk(content: String, stickers: [String] = [], attachments: [String] = []) throws -> Ink {
+    struct Row {
+        let rep: NSBitmapImageRep
+        let scale: CGFloat
+        let height: CGFloat
+
+        // The glyphs in `columns` (points from the left), from the row's top; antialiased edges
+        // count from half cover.
+        func ink(_ columns: Range<CGFloat>) -> Ink? {
+            let xs = Int(columns.lowerBound * scale)..<Int(columns.upperBound * scale)
+            let inked = (0..<rep.pixelsHigh).filter { y in
+                xs.contains { x in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 }
+            }
+            guard let first = inked.first, let last = inked.last else {
+                return nil
+            }
+            return Ink(top: CGFloat(first) / scale, bottom: CGFloat(last + 1) / scale)
+        }
+    }
+
+    // The time's column, left of the text, holds nothing else; the hover fill is translucent.
+    static let timeColumn: Range<CGFloat> = 0..<60
+    static let textColumn: Range<CGFloat> = 72..<300
+
+    func hovered(content: String, stickers: [String] = [], attachments: [String] = []) throws -> Row {
         let message = row(
             2, at: noon, content: content, attachments: attachments, stickers: stickers,
             stickerFormat: .png
@@ -50,15 +72,17 @@ final class HoverTimeTests {
         cell.cacheDisplay(in: cell.bounds, to: rep)
         let scale = CGFloat(rep.pixelsWide) / width
         #expect(scale == 2)
+        return Row(rep: rep, scale: scale, height: height)
+    }
 
-        // The hover fill is translucent; the digits are opaque.
-        let column = 0..<Int(60 * scale)
-        let inked = (0..<rep.pixelsHigh).filter { y in
-            column.contains { x in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 }
-        }
-        let first = try #require(inked.first, "no time in \(content.debugDescription), \(stickers)")
-        let last = try #require(inked.last)
-        return Ink(top: CGFloat(first) / scale, bottom: CGFloat(last + 1) / scale)
+    @Test
+    func theTimeIsCenteredOnAOneLineMessage() throws {
+        let row = try hovered(content: "HELLO")
+        let time = try #require(row.ink(Self.timeColumn), "no time")
+        let text = try #require(row.ink(Self.textColumn), "no text")
+
+        #expect(abs(time.middle - text.middle) <= 0.5, "time at \(time), text at \(text)")
+        #expect(abs(time.middle - row.height / 2) <= 0.5, "time at \(time), row \(row.height) tall")
     }
 
     @Test(arguments: [
@@ -68,15 +92,13 @@ final class HoverTimeTests {
         ("mixed", "hi <:wave:5> and :)", ["wave"], []),
         ("attachment", "", [], ["cat.png"]),
     ])
-    func theTimeSitsOnAFirstLinesBaseline(
+    func theTimeSitsAtTheSameHeightWhateverTheRowHolds(
         kind: String, content: String, stickers: [String], attachments: [String]
     ) throws {
-        let ink = try timeInk(content: content, stickers: stickers, attachments: attachments)
+        let row = try hovered(content: content, stickers: stickers, attachments: attachments)
+        let ink = try #require(row.ink(Self.timeColumn), "\(kind): no time")
 
-        // Digits sit on the baseline; antialiasing reaches a little past it.
-        #expect(
-            ink.bottom >= Self.baseline && ink.bottom <= Self.baseline + 1,
-            "\(kind): the time's glyphs end at \(ink.bottom)")
+        #expect(abs(ink.middle - Self.middle) <= 0.5, "\(kind): the time's glyphs are at \(ink)")
         // Whole, inside the row: an 11 pt digit is about 8 tall.
         #expect(ink.top > 0, "\(kind): starts at \(ink.top)")
         #expect(ink.bottom - ink.top >= 7, "\(kind): only \(ink.bottom - ink.top) tall")

@@ -62,21 +62,22 @@ enum MessageText {
 
     nonisolated static let codePadding: CGFloat = 8
 
-    /// Where a plain first line's baseline sits below the text's top, whatever the text holds:
-    /// a follow-up's hover time lines up with it.
-    static let firstLineBaseline: CGFloat = {
+    /// Where a plain first line's capitals are centered below the text's top, whatever the text
+    /// holds: a follow-up's hover time is centered there.
+    static let firstLineMiddle: CGFloat = {
         let view = MessageTextView()
         view.frame = NSRect(x: 0, y: 0, width: 400, height: 100)
         let face = Typeface.body
+        let font = face.font(bold: false, italic: false)
         view.show(
             NSAttributedString(
                 string: "0",
                 attributes: [
-                    .font: face.font(bold: false, italic: false),
+                    .font: font,
                     .paragraphStyle: ParagraphKey(line: face.line).style,
                     .baselineOffset: face.offset,
                 ]))
-        return view.firstBaselineOffsetFromTop
+        return view.firstBaselineOffsetFromTop - font.capHeight / 2
     }()
 
     static func build(
