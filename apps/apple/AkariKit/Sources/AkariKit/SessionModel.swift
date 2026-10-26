@@ -40,6 +40,10 @@ public final class SessionModel {
     public private(set) var currentUser: User?
     /// The decoded images of this account's boxes, over the account's files.
     public let images: ImageCache
+    /// Discord's placeholders under media while it loads.
+    public let placeholders = PlaceholderCache()
+    /// `view_image_descriptions`: media with a description shows its ALT button.
+    public private(set) var showsAltText = false
     /// Whether animations play: the display settings, read again when they change, and the
     /// system's Reduce Motion (`setReduceMotion`).
     public private(set) var motion = MotionPolicy.default
@@ -137,6 +141,8 @@ public final class SessionModel {
     @ObservationIgnored private let memory: AccountMemory
     @ObservationIgnored private var subscription: StoreSubscription?
     @ObservationIgnored private var lastChannels: [GuildId: ChannelId] = [:]
+    // Bumped when a gate may have changed, so views reading `ageGate(of:)` update.
+    private var ageGates = 0
     @ObservationIgnored private var lastHomeChannel: ChannelId?
     // Only channels opened here can hold this session's unsent messages.
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
@@ -270,9 +276,43 @@ public final class SessionModel {
     }
 
     private func readMotion() {
-        let next = MotionPolicy(settings: store.displaySettings(), reduceMotion: reduceMotion)
+        let settings = store.displaySettings()
+        let next = MotionPolicy(settings: settings, reduceMotion: reduceMotion)
         if next != motion {
             motion = next
+        }
+        if settings.viewImageDescriptions != showsAltText {
+            showsAltText = settings.viewImageDescriptions
+        }
+    }
+
+    /// Whether the channel's messages wait behind the age gate (D-10). Read in a view, it
+    /// follows the agreement, the channel's and server's restriction and the user's age.
+    public func ageGate(of channel: ChannelId) -> AgeGate {
+        _ = ageGates
+        return store.ageGate(channelId: channel)
+    }
+
+    /// Continue: the server's age-restricted channels open, now and in later sessions.
+    public func agreeToAgeRestricted(in channel: ChannelId) {
+        guard let guild = store.channel(id: channel)?.guildId else {
+            return
+        }
+        account.agreeToAgeRestricted(guildId: guild)
+        ageGates += 1
+        updateReading()
+    }
+
+    /// Go Back: the server's first channel unless it's gated too, else Home (the official
+    /// client's `nsfwReturnToSafety`).
+    public func leaveAgeGate() {
+        let safe = channels?.channels.first {
+            $0.opensMessageList && !$0.isThread && store.ageGate(channelId: $0.id) == .open
+        }
+        if case .guild = place, let safe {
+            open(channel: safe.id)
+        } else {
+            open(.home)
         }
     }
 
@@ -1041,6 +1081,11 @@ public final class SessionModel {
         if batch.everythingChanged || batch.displaySettingsChanged {
             readMotion()
         }
+        if batch.everythingChanged || batch.ageGatesChanged || batch.currentUserChanged
+            || !batch.guildsChanged.isEmpty || !batch.channelsChanged.isEmpty
+        {
+            ageGates += 1
+        }
         // A list the session replaces on its own isn't one the user chose to read.
         if case .guild(let id) = place, batch.ready || batch.guildListChanged,
             store.guild(id: id) == nil
@@ -1376,8 +1421,10 @@ public final class SessionModel {
         let reads =
             connection == .online && !suspended && engaged && appActive && windowKey
             && windowVisible && !ended
+        // A gated channel shows none of its messages: nothing is read.
         let lists = [messages, split].compactMap { $0 }.filter { list in
             reads && list.atPresentBottom && !waitingLists.contains(list.channelId)
+                && store.ageGate(channelId: list.channelId) == .open
         }
         for list in lists {
             list.readHere = true
