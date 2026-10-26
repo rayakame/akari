@@ -149,8 +149,11 @@ fn a_single_link_is_the_whole_content() {
         "<https://example.com/a.gif>",
         "[gif](https://example.com/a.gif)",
         "[||gif|| here](https://example.com/a.gif)",
+        // Review: Discord's top-level node is still the one link.
+        "[**gif**](https://example.com/a.gif)",
+        "[**gif** here](https://example.com/a.gif)",
     ] {
-        assert!(parse(source).is_single_link(), "{source}");
+        assert!(parse(source).is_single_link(source), "{source}");
     }
     for source in [
         "",
@@ -161,7 +164,7 @@ fn a_single_link_is_the_whole_content() {
         "> https://example.com/a.gif",
         "https://example.com/a.gif\n```\ncode\n```",
     ] {
-        assert!(!parse(source).is_single_link(), "{source}");
+        assert!(!parse(source).is_single_link(source), "{source}");
     }
 }
 
@@ -179,6 +182,8 @@ fn a_spoilered_link_is_found_anywhere() {
         "||spoiler|| https://example.com",
         "https://example.com",
         "||no link||",
+        // Review: a spoiler inside part of a link's text holds no link.
+        "[||gif|| here](https://example.com/a.gif)",
     ] {
         assert!(!parse(source).has_spoilered_link(), "{source}");
     }
@@ -207,7 +212,21 @@ fn plain_text_is_one_paragraph_of_text_and_breaks() {
     assert_eq!(inlines[1].0, InlineKind::Break);
     assert_eq!(inlines[2], text(18, 37));
     assert_eq!(inlines.len(), 3, "a last break shows nothing");
+    // Review: inner empty lines stay (pre-line); only the last break goes.
+    assert_eq!(crate::plain("a\n\n\n").blocks()[0].inlines.len(), 3);
     assert!(doc.links().is_empty());
     assert!(!doc.jumbo());
     assert!(crate::plain("").blocks().is_empty());
+}
+
+// Review: a title or field name has no line breaks (EMBED_TITLE_RULES omit `br`, and the bare
+// string of a non-rich title collapses them): a break shows as a space.
+#[test]
+fn a_title_is_one_line() {
+    assert_eq!(crate::one_line("Line one\nLine two"), "Line one Line two");
+    assert_eq!(crate::one_line("a \r\n\n b"), "a b");
+    assert!(matches!(
+        crate::one_line("plain"),
+        std::borrow::Cow::Borrowed("plain")
+    ));
 }

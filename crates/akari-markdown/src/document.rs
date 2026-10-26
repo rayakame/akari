@@ -49,9 +49,9 @@ impl Document {
         self.spoiler_count
     }
 
-    /// One link and nothing else (bare, in angle brackets or masked): Discord hides it under the
-    /// one image or GIF it embeds (module 521981).
-    pub fn is_single_link(&self) -> bool {
+    /// One link and nothing else in `source`, the content this was parsed from (bare, in angle
+    /// brackets or masked): Discord hides it under the one image or GIF it embeds (module 521981).
+    pub fn is_single_link(&self, source: &str) -> bool {
         let [block] = &*self.blocks else {
             return false;
         };
@@ -64,21 +64,33 @@ impl Document {
         let Some(link) = block.inlines.iter().find_map(|inline| inline.link) else {
             return false;
         };
-        // A spoiler inside part of a masked link's text leaves it one link, as Discord's tree has
-        // it; one around all of it can't be told from one around the link, so it covers.
-        block
-            .inlines
-            .iter()
-            .all(|inline| inline.link == Some(link) && (inline.style == Style::default()))
+        // Styles and spoilers inside a masked link's text leave it one link, as Discord's tree
+        // has it; around the link they don't: the link's source is then less than the content.
+        let content = source.trim();
+        let start = source.len() - source.trim_start().len();
+        block.inlines.iter().all(|inline| inline.link == Some(link))
+            && self.link_spans.get(usize::from(link.0))
+                == Some(&Span::new(start..start + content.len()))
     }
 
-    /// A link inside a spoiler, anywhere: Discord covers every embed of the message.
+    /// A link inside a spoiler, anywhere: Discord covers every embed of the message. A spoiler
+    /// inside part of a link's text holds no link; one around all of it can't be told from one
+    /// around the link, so it counts.
     pub fn has_spoilered_link(&self) -> bool {
-        self.blocks.iter().any(|block| {
-            block
-                .inlines
-                .iter()
-                .any(|inline| inline.link.is_some() && inline.spoiler.is_some())
+        let inlines = || {
+            self.blocks.iter().flat_map(|block| {
+                block
+                    .inlines
+                    .iter()
+                    .map(move |inline| (inline.link, inline.spoiler.or(block.spoiler)))
+            })
+        };
+        inlines().any(|(link, spoiler)| {
+            link.is_some()
+                && spoiler.is_some()
+                && inlines()
+                    .filter(|(other, _)| *other == link)
+                    .all(|(_, spoiler)| spoiler.is_some())
         })
     }
 }

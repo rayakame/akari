@@ -38,7 +38,7 @@ pub fn parse(source: &str) -> Document {
 }
 
 /// Which text of an embed, for its rules (canary 649848, modules 46054 and 999915).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EmbedText {
     /// A title or a field's name: styles, emoji and timestamps, no code blocks, mentions, lists,
     /// headings or subtext; `links` false when the title is itself a link.
@@ -78,6 +78,30 @@ pub fn parse_embed(source: &str, text: EmbedText) -> Document {
     flatten::flatten(&nodes, false)
 }
 
+/// A title or field name on one line, as Discord shows it: its line breaks, with the spaces
+/// around them, are one space.
+pub fn one_line(source: &str) -> std::borrow::Cow<'_, str> {
+    if !source.contains(['\n', '\r']) {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    let mut out = String::with_capacity(source.len());
+    for (index, line) in source.split(['\n', '\r']).enumerate() {
+        let line = if index == 0 {
+            line.trim_end()
+        } else {
+            line.trim()
+        };
+        if line.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(line);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// A non-rich embed's text as Discord shows it: the string itself, its line breaks kept and a
 /// last one dropped.
 pub fn plain(source: &str) -> Document {
@@ -111,7 +135,7 @@ pub fn plain(source: &str) -> Document {
             start..source.len(),
         ));
     }
-    while inlines
+    if inlines
         .last()
         .is_some_and(|last| last.kind == InlineKind::Break)
     {
