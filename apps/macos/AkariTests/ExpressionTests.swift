@@ -85,6 +85,16 @@ final class ExpressionTests {
         container.layoutSubtreeIfNeeded()
         var opened: [ExpressionTarget] = []
         view.onExpression = { target, _ in opened.append(target) }
+        // What CI leaves behind: another suite's drag and release nobody consumed.
+        let stale = try point(at: 3, in: view)
+        for type in [NSEvent.EventType.leftMouseDragged, .leftMouseUp] {
+            NSApp.postEvent(
+                try #require(
+                    NSEvent.mouseEvent(
+                        with: type, location: NSPoint(x: stale.x + 60, y: stale.y), modifierFlags: [],
+                        timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                        clickCount: 1, pressure: 1)), atStart: false)
+        }
 
         try click(at: try point(at: 3, in: view), in: view)
 
@@ -355,6 +365,12 @@ final class ExpressionTests {
 
     func click(at point: NSPoint, in view: NSView, dragTo end: NSPoint? = nil) throws {
         let window = try #require(view.window)
+        // Events other suites posted and nothing consumed (CI's test host isn't the active app)
+        // would join this click's tracking loop.
+        while NSApp.nextEvent(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp], until: .distantPast,
+            inMode: .default, dequeue: true) != nil
+        {}
         let event = { (type: NSEvent.EventType, at: NSPoint) in
             NSEvent.mouseEvent(
                 with: type, location: at, modifierFlags: [],
