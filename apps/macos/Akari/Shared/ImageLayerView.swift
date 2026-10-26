@@ -259,7 +259,7 @@ final class ImageLayerView: NSView {
             switch outcome {
             case .success(let image):
                 if self.fadesIn, self.still == nil {
-                    self.fade(quick: ContinuousClock.now - asked < .milliseconds(200))
+                    self.fade(duration: Self.fadeDuration(after: ContinuousClock.now - asked))
                 }
                 self.set(still: image)
                 self.updateAnimation()
@@ -299,11 +299,21 @@ final class ImageLayerView: NSView {
         content != nil && still == nil && !failed
     }
 
-    private func fade(quick: Bool) {
+    /// The still is shown (or an animation's frame over it).
+    var hasImage: Bool {
+        still != nil
+    }
+
+    /// Discord's fade for an image that came `elapsed` after it was asked for.
+    static func fadeDuration(after elapsed: Duration) -> TimeInterval {
+        elapsed < .milliseconds(200) ? quickFade : fade
+    }
+
+    private func fade(duration: TimeInterval) {
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0.0
         fade.toValue = 1.0
-        fade.duration = quick ? Self.quickFade : Self.fade
+        fade.duration = duration
         imageLayer.add(fade, forKey: "fade")
     }
 

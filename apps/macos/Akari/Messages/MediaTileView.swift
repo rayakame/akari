@@ -112,6 +112,8 @@ final class MediaTileView: NSButton {
         play.cornerRadius = 24
         play.opacity = 0.6
         playSymbol.contentsGravity = .center
+        // `playImage` is drawn at 2×: its 24 pt whatever the screen.
+        playSymbol.contentsScale = 2
         badge.text = "GIF"
         badge.font = .systemFont(ofSize: 11, weight: .bold)
         badge.padding = NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
@@ -201,11 +203,7 @@ final class MediaTileView: NSButton {
             attachment.flatMap { covered ? nil : ImageLayerView.Content(key: $0.key, canAnimate: $0.animated) })
         let thumbhash = attachment?.placeholder.flatMap { placeholders?.image($0) }
         placeholderLayer.contents = thumbhash
-        setAccessibilityLabel(attachment.map(Self.accessibilityLabel))
         update()
-        if !sameMedia {
-            scheduleSpinner()
-        }
     }
 
     static func hides(_ cover: Cover?) -> Bool {
@@ -215,9 +213,14 @@ final class MediaTileView: NSButton {
         }
     }
 
-    private static func accessibilityLabel(_ attachment: Attachment) -> String {
+    static func accessibilityLabel(_ attachment: Attachment, cover: Cover?) -> String {
         let kind = attachment.kind == .video ? "Video" : "Image"
-        return attachment.description.map { "\(kind), \($0)" } ?? kind
+        switch cover {
+        case .spoiler: return "Spoiler, \(kind)"
+        case .pending: return "\(kind), waiting for Discord's scan"
+        case .sensitive(shown: false): return "Sensitive content, \(kind)"
+        case nil, .sensitive(shown: true): return attachment.description.map { "\(kind), \($0)" } ?? kind
+        }
     }
 
     var isVideo: Bool { content?.attachment.kind == .video }
@@ -313,7 +316,7 @@ final class MediaTileView: NSButton {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         let scale = window?.backingScaleFactor ?? 2
-        for sublayer in [placeholderLayer, coverLayer, playSymbol] {
+        for sublayer in [placeholderLayer, coverLayer] {
             sublayer.contentsScale = scale
         }
         pill.contentsScale = scale
@@ -322,9 +325,7 @@ final class MediaTileView: NSButton {
     }
 
     private func imageChanged() {
-        if !picture.isLoading {
-            hideSpinner()
-        }
+        updateSpinner()
         update()
     }
 
@@ -333,8 +334,11 @@ final class MediaTileView: NSButton {
         let attachment = content?.attachment
         let cover = content.flatMap { Self.hides($0.cover) ? $0.cover : nil }
         let failed = picture.failed && cover == nil
+        // Only while there's no image: a transparent one would show them through.
+        let loaded = picture.hasImage
+        setAccessibilityLabel(attachment.map { Self.accessibilityLabel($0, cover: cover) })
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = NSColor.black.withAlphaComponent(0.04).cgColor
+            layer?.backgroundColor = loaded ? nil : NSColor.black.withAlphaComponent(0.04).cgColor
             pill.backgroundColor = NSColor.black.withAlphaComponent(isHovered ? 0.88 : 0.6).cgColor
             pill.foregroundColor = isHovered ? .white : NSColor(hex: "#e4e4e6")
             badge.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
@@ -348,7 +352,7 @@ final class MediaTileView: NSButton {
                 coverLayer.backgroundColor = nil
             }
         }
-        placeholderLayer.isHidden = attachment?.placeholder == nil || cover != nil
+        placeholderLayer.isHidden = attachment?.placeholder == nil || cover != nil || loaded
         coverLayer.isHidden = cover == nil
         coverLayer.contents = cover == .spoiler ? placeholderLayer.contents : nil
         pill.isHidden = cover != .spoiler
@@ -399,19 +403,26 @@ final class MediaTileView: NSButton {
         return symbol.cgImage(forProposedRect: &rect, context: nil, hints: [.ctm: AffineTransform(scale: 2)])
     }()
 
-    // Discord's spinner shows only for a load that takes over 2 s.
-    private func scheduleSpinner() {
-        spinnerTask?.cancel()
+    // Discord's spinner shows only for a load that takes over 2 s: a first one, a reveal's, a
+    // retry's.
+    private func updateSpinner() {
         guard picture.isLoading else {
+            hideSpinner()
+            return
+        }
+        guard spinnerTask == nil, !spinnerShown else {
             return
         }
         spinnerTask = Task { [weak self] in
             try? await Task.sleep(for: Self.spinnerDelay)
-            guard let self, !Task.isCancelled, self.picture.isLoading else {
+            guard let self, !Task.isCancelled else {
                 return
             }
-            self.spinnerShown = true
-            self.spinner.show()
+            self.spinnerTask = nil
+            if self.picture.isLoading {
+                self.spinnerShown = true
+                self.spinner.show()
+            }
         }
     }
 

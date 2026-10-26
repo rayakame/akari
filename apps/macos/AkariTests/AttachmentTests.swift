@@ -39,7 +39,8 @@ final class RecordingMediaActions: MessageListActions {
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class AttachmentTests {
     let images = TestImages()
-    let list = MessageTableTests()
+    // Prefetching waits for a window on screen; the test's never is.
+    let list = MessageTableTests(onScreen: { _ in true })
     let actions = RecordingMediaActions()
 
     init() {
@@ -238,6 +239,10 @@ final class AttachmentTests {
         try await eventually { view.imageLayer.contents != nil }
         #expect(view.imageLayer.animation(forKey: "fade")?.duration == 0.2)
 
+        // Discord's rule as a function, so the quick case doesn't hang on a busy runner's timing.
+        #expect(ImageLayerView.fadeDuration(after: .milliseconds(150)) == 0.05)
+        #expect(ImageLayerView.fadeDuration(after: .milliseconds(250)) == 0.2)
+
         let quick = ImageLayerView()
         window.contentView?.addSubview(quick)
         quick.frame = NSRect(x: 40, y: 0, width: 32, height: 32)
@@ -246,7 +251,7 @@ final class AttachmentTests {
         quick.show(ImageLayerView.Content(key: key, canAnimate: false))
         quick.layoutSubtreeIfNeeded()
         try await eventually { quick.imageLayer.contents != nil }
-        #expect(quick.imageLayer.animation(forKey: "fade")?.duration == 0.05)
+        #expect(quick.imageLayer.animation(forKey: "fade") != nil)
 
         // Asked again at new pixels, a shown image swaps without fading.
         quick.frame = NSRect(x: 40, y: 0, width: 33, height: 33)
@@ -293,6 +298,45 @@ final class AttachmentTests {
 
         try await eventually { source.count > asked }
         #expect(actions.opened.isEmpty, "a failed image doesn't open")
+    }
+
+    // Review: the placeholder and the 4 % fill go once the image is there (a transparent image
+    // would show them through).
+    @Test
+    func aLoadedImageHasNothingUnderIt() async throws {
+        let source = FakeImageSource.serving(try images.png("a", pixels: 640), pixels: 640)
+        show(
+            [media(5, placeholder: "3PcNNYSFeXh/d3eld0iHZoZgVwh2")], cache: ImageCache(source: source),
+            placeholders: PlaceholderCache())
+        let tile = try #require(try tiles().first)
+        #expect(tile.placeholderShown)
+
+        try await eventually { tile.picture.imageLayer.contents != nil }
+
+        #expect(!tile.placeholderShown)
+        #expect(tile.layer?.backgroundColor == nil)
+    }
+
+    // Review: a revealed spoiler that loads slowly gets the spinner too.
+    @Test
+    func aRevealedSpoilerThatLoadsSlowlyShowsTheSpinner() async throws {
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        show([media(5, cover: .spoiler)], cache: cache)
+        show([media(5, cover: .spoiler)], cache: cache, revealed: [key(5)])
+        let tile = try #require(try tiles().first)
+
+        try await eventually { tile.spinnerShown }
+    }
+
+    // Review: VoiceOver hears what covers the media.
+    @Test
+    func theLabelSaysWhatCoversTheMedia() throws {
+        show(
+            [media(5, cover: .spoiler), media(6, cover: .pending), media(7, cover: .sensitive), media(8, "clip.mp4", kind: .video)],
+            cache: ImageCache(source: FakeImageSource.stalling()))
+        let labels = try tiles().map { $0.accessibilityLabel() }
+
+        #expect(labels == ["Spoiler, Image", "Image, waiting for Discord's scan", "Sensitive content, Image", "Video"])
     }
 
     // MARK: Covers
@@ -461,6 +505,113 @@ final class AttachmentTests {
         #expect(!(try tiles().first!.animates), "not key")
     }
 
+    // Review: a GIF that a jump or the keyboard brings into view plays without the pointer.
+    @Test
+    func aGifScrolledIntoViewPlays() async throws {
+        var rows: [MessageListModel.Row] = []
+        for raw in UInt64(1)...40 {
+            let files = raw == 2 ? [media(20, "cat.gif", animated: true, message: 2)] : []
+            rows.append(row(raw, at: list.noon + Double(raw) * 60, content: "m \(raw)", files: files))
+        }
+        list.show(MessageTableState(rows: rows, reachedOldest: true, images: ImageCacheRef(ImageCache(source: FakeImageSource.stalling())), focused: true))
+        list.clip.scroll(to: NSPoint(x: 0, y: 0))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        list.window.layoutIfNeeded()
+
+        let cell = try #require(try list.cell(of: 2) as? MessageCell)
+        let tile = try #require(cell.attachments?.tiles.first)
+        try await eventually { tile.animates }
+    }
+
+    // Review: a reveal under a still pointer leaves the hover on the revealed tile.
+    @Test
+    func aRevealUnderThePointerKeepsItsHover() async throws {
+        let gif = [media(5, "cat.gif", animated: true, cover: .spoiler)]
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        var still = MotionPolicy.default
+        still.gifAutoPlay = false
+        show(gif, cache: cache, motion: still)
+        let tile = try #require(try tiles().first)
+        list.pointer.location = tile.convert(NSPoint(x: tile.bounds.midX, y: tile.bounds.midY), to: nil)
+        list.controller.pointerMoved()
+
+        show(gif, cache: cache, revealed: [key(5)], motion: still)
+
+        let revealed = try #require(try tiles().first)
+        #expect(revealed.isHovered)
+        #expect(revealed.animates, "hovered, it plays")
+    }
+
+    // Review: a reload's new views take the hover from where the pointer rests, though it
+    // didn't move.
+    @Test
+    func aReloadHoversWhatLiesUnderThePointer() async throws {
+        let gif = [media(5, "cat.gif", animated: true, cover: .spoiler)]
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        show(gif, cache: cache)
+        let tile = try #require(try tiles().first)
+        list.pointer.location = tile.convert(NSPoint(x: tile.bounds.midX, y: tile.bounds.midY), to: nil)
+
+        show(gif, cache: cache, revealed: [key(5)])
+
+        #expect(try #require(try tiles().first).isHovered)
+    }
+
+    // Review: a tile of another list over this one (a floating split's card) isn't this list's to
+    // hover.
+    @Test
+    func anotherListsTileIsntHovered() throws {
+        show([media(5)], cache: ImageCache(source: FakeImageSource.stalling()))
+        let content = try #require(list.window.contentView)
+        let foreign = MediaTileView()
+        foreign.frame = NSRect(x: 100, y: 100, width: 100, height: 100)
+        content.addSubview(foreign)
+        defer { foreign.removeFromSuperview() }
+        list.pointer.location = foreign.convert(NSPoint(x: 50, y: 50), to: nil)
+
+        list.controller.pointerMoved()
+
+        #expect(!foreign.isHovered)
+    }
+
+    // Review: a covered GIF never plays, hovered or not.
+    @Test
+    func aCoveredGifNeverPlays() async throws {
+        let source = FakeImageSource.serving(still: try images.png("s", pixels: 64), animation: try images.png("a", pixels: 64))
+        show([media(5, "cat.gif", animated: true, cover: .spoiler)], cache: ImageCache(source: source))
+        let tile = try #require(try tiles().first)
+        list.pointer.location = tile.convert(NSPoint(x: tile.bounds.midX, y: tile.bounds.midY), to: nil)
+        list.controller.pointerMoved()
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(tile.picture.player == nil)
+        #expect(source.count == 1, "only the author's avatar")
+    }
+
+    // Review: reveals key by the row, which keeps a pending message's key once Discord confirmed
+    // it.
+    @Test
+    func aConfirmedMessagesRevealKeysByItsRow() throws {
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        let pending = MediaKey(messageId: MessageId(rawValue: 500), attachmentId: AttachmentId(rawValue: 5))
+        let shownRow = { (revealed: Set<MediaKey>) in
+            self.list.show(MessageTableState(
+                rows: [row(1, at: self.list.noon, content: "hi", key: 500, files: [media(5, cover: .spoiler)])],
+                reachedOldest: true, revealedMedia: revealed, images: ImageCacheRef(cache)))
+        }
+        shownRow([])
+        let cell = try #require(try list.cell(of: 500) as? MessageCell)
+        let tile = try #require(cell.attachments?.tiles.first)
+
+        tile.performClick(nil)
+        #expect(actions.revealed == [pending])
+        shownRow([pending])
+
+        let after = try #require(try list.cell(of: 500) as? MessageCell)
+        let revealed = try #require(after.attachments?.tiles.first)
+        #expect(revealed.coverShown == nil)
+    }
+
     // MARK: Files and alt text
 
     @Test
@@ -496,7 +647,21 @@ final class AttachmentTests {
         let content = try #require(popover.contentViewController as? AltTextController)
         #expect(content.text == "a cat")
         #expect(AltTextController.title == "IMAGE DESCRIPTION (ALT TEXT)")
+
+        // Review: it doesn't outlive its row's reload, nor its row's place on screen.
+        let resting = list.clip.bounds.origin
+        show(
+            [media(5, description: "a cat"), media(6, cover: .spoiler, description: "a dog")], cache: cache,
+            revealed: [key(6)], altText: true)
+        #expect(list.clip.bounds.origin == resting, "no scroll closed it")
+        #expect(list.controller.altText == nil)
         popover.close()
+        try self.tiles()[0].alt.performClick(nil)
+        let reopened = try #require(list.controller.altText)
+        list.clip.scroll(to: NSPoint(x: 0, y: list.clip.bounds.minY + 1))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        #expect(list.controller.altText == nil)
+        reopened.close()
     }
 
     // MARK: Prefetch
@@ -548,11 +713,125 @@ final class AttachmentTests {
         try await eventually { asked(next) }
         let far = try #require(rawOf(min(screen.location + screen.length + 3, table.numberOfRows - 1)))
         #expect(!asked(far), "two screens away")
-        let spoiler = ImageKey.attachment(
-            channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 4),
-            attachmentId: AttachmentId(rawValue: 40))
-        let prefetched: [ImageKey] = list.controller.prefetching.keys.map(\.key)
-        #expect(!prefetched.contains(spoiler), "a spoiler isn't asked")
+
+    }
+
+    func attachmentKey(_ raw: UInt64) -> ImageKey {
+        .attachment(
+            channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: raw),
+            attachmentId: AttachmentId(rawValue: raw * 10))
+    }
+
+    func asked(_ source: FakeImageSource, _ raw: UInt64) -> Int {
+        mediaRequests(source).filter { $0.key == attachmentKey(raw) }.count
+    }
+
+    func mediaRows(_ count: UInt64, spoiler: UInt64? = nil, spoilerKey: UInt64? = nil) -> [MessageListModel.Row] {
+        var rows: [MessageListModel.Row] = []
+        for raw in UInt64(1)...count {
+            let cover: MediaCover? = raw == spoiler ? .spoiler : nil
+            rows.append(row(
+                raw, at: list.noon + Double(raw) * 60, content: "m", key: raw == spoiler ? spoilerKey : nil,
+                files: [media(raw * 10, cover: cover, message: raw)]))
+        }
+        return rows
+    }
+
+    // Review: a spoiler just below what shows isn't asked; the row after it is.
+    @Test
+    func aSpoilerAScreenAwayIsntAsked() async throws {
+        let source = FakeImageSource.stalling()
+        let cache = ImageCache(source: source)
+        list.show(MessageTableState(rows: mediaRows(60), reachedOldest: true, images: ImageCacheRef(cache)))
+        list.clip.scroll(to: NSPoint(x: 0, y: 0))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        let visible = list.table.rows(in: list.table.visibleRect)
+        guard case .message(let below, _) = list.controller.timeline.items[visible.location + visible.length] else {
+            Issue.record("a message row below")
+            return
+        }
+        let next = below.message.id.rawValue
+
+        list.show(MessageTableState(rows: mediaRows(60, spoiler: next), reachedOldest: true, images: ImageCacheRef(cache)))
+        list.controller.prefetchMedia()
+
+        try await eventually { self.asked(source, next + 1) > 0 }
+        #expect(asked(source, next) == 0)
+
+        // Revealed, it is, by its row's key: a confirmed message keeps the one it was sent with.
+        let revealed = MediaKey(messageId: MessageId(rawValue: 9000), attachmentId: AttachmentId(rawValue: next * 10))
+        list.show(MessageTableState(
+            rows: mediaRows(60, spoiler: next, spoilerKey: 9000), reachedOldest: true, revealedMedia: [revealed],
+            images: ImageCacheRef(cache)))
+        list.controller.prefetchMedia()
+        try await eventually { self.asked(source, next) > 0 }
+    }
+
+    // Review: a prefetch that failed isn't asked again on every change, and none runs while the
+    // window doesn't show.
+    @Test
+    func aFailedPrefetchWaitsAndAHiddenWindowPrefetchesNothing() async throws {
+        let source = FakeImageSource.failing()
+        let cache = ImageCache(source: source)
+        let rows = mediaRows(60)
+        list.show(MessageTableState(rows: rows, reachedOldest: true, images: ImageCacheRef(cache)))
+        list.clip.scroll(to: NSPoint(x: 0, y: 0))
+        list.controller.scrollView.reflectScrolledClipView(list.clip)
+        let visible = list.table.rows(in: list.table.visibleRect)
+        guard case .message(let below, _) = list.controller.timeline.items[visible.location + visible.length] else {
+            Issue.record("a message row below")
+            return
+        }
+        let next = below.message.id.rawValue
+        try await eventually { self.asked(source, next) == 1 }
+        try await Task.sleep(for: .milliseconds(50))
+
+        list.controller.prefetchMedia()
+        list.controller.prefetchMedia()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(asked(source, next) == 1, "remembered until the cache says retry")
+        cache.retryFailed()
+        list.controller.prefetchMedia()
+        try await eventually { self.asked(source, next) == 2 }
+
+        let hidden = FakeImageSource.stalling()
+        let other = MessageTableTests(onScreen: { _ in false })
+        other.controller.show(MessageTableState(rows: rows, reachedOldest: true, images: ImageCacheRef(ImageCache(source: hidden))))
+        other.controller.prefetchMedia()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(other.controller.prefetching.isEmpty)
+    }
+
+    // A real press and release through the window reach the tile, the eye and a file's name.
+    @Test
+    func clicksThroughTheWindowReachTheMedia() throws {
+        show(
+            [media(5), media(6, cover: .sensitive), file(7, "notes.zip")],
+            cache: ImageCache(source: FakeImageSource.stalling()))
+        let window = list.keyWindow()
+        defer { window.close() }
+        try settleEvents(in: window)
+        let tiles = try tiles()
+        let click = { (view: NSView) in
+            let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(try #require(NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+            }
+        }
+
+        try click(tiles[0])
+        try click(tiles[1].eye)
+        try click(try #require(try fileRows().first).name)
+
+        let opened = [5, 7].map {
+            ImageKey.attachment(
+                channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 1),
+                attachmentId: AttachmentId(rawValue: UInt64($0)))
+        }
+        #expect(actions.opened == opened)
+        #expect(actions.toggled == [key(6)])
     }
 
     // An older page lands above while the list keeps its place: its media is asked too.
@@ -616,6 +895,26 @@ struct AttachmentDrawingTests {
             layer.render(in: context)
         }
         return rep
+    }
+
+    // Review: the Play symbol keeps its 24 pt inside the 48 pt circle on every screen.
+    @Test(arguments: [1, 2] as [CGFloat])
+    func playKeepsItsSize(scale: CGFloat) throws {
+        let tile = MediaTileView()
+        tile.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        let window = ScaledWindow(scale: scale)
+        window.setContentSize(tile.frame.size)
+        window.contentView = tile
+        tile.configure(MediaTileView.Content(attachment: media(5, "clip.mp4", kind: .video)))
+        // AppKit puts the subviews' layers into the tree when the window displays.
+        window.displayIfNeeded()
+
+        let rep = try Self.layerImage(of: tile, scale: scale)
+        // 18 right of the middle: inside the circle, outside the 24 pt symbol.
+        let beside = try #require(rep.colorAt(x: Int((150 + 18) * scale), y: Int(100 * scale)))
+        #expect(beside.redComponent < 0.5, "the dark circle, not the symbol: \(beside)")
+        let middle = try #require(rep.colorAt(x: Int(151 * scale), y: Int(100 * scale)))
+        #expect(middle.redComponent > 0.8, "the symbol: \(middle)")
     }
 
     // The spoiler pill: 15/600 uppercase, 12 and 8 around, radius 20, black .6.

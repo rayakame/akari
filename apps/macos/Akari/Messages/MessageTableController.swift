@@ -136,6 +136,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private(set) var altText: NSPopover?
     // The media of the rows a screen above and below what shows, asked before it scrolls in.
     private(set) var prefetching: [ImageSpec: Task<Void, Never>] = [:]
+    private var prefetchFailed: Set<ImageSpec> = []
     // Paging posts willStart and didLive but no didEnd, so a live scroll also ends when its
     // notifications stop.
     private var liveScrollEnded = true
@@ -474,8 +475,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         ownChanges += 1
         defer { ownChanges -= 1 }
+        altText?.close()
+        altText = nil
         tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
         tableView.noteHeightOfRows(withIndexesChanged: rows)
+        // The reloaded rows' views are new: the hover goes to them.
+        updatePointer()
     }
 
     private func follow(_ url: URL, in row: MessageListModel.Row) {
@@ -1063,7 +1068,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onExpression = { [weak self] target, rect in self?.openExpression(target, at: rect) }
             cell.placeholders = state.images.placeholders
             cell.onMedia = { [weak self] attachment, action, tile in
-                self?.media(action, attachment, of: row.message.id, tile: tile)
+                self?.media(action, attachment, of: row.id, tile: tile)
             }
             cell.onOpenFile = { [weak self] attachment in self?.actions?.openMedia(attachment.key) }
             cell.onOpenThread = openThread
@@ -1073,7 +1078,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
-                fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.message.id))
+                fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id))
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
             return cell
@@ -1310,7 +1315,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.didLayout = { [weak self] in
             self?.settle()
             self?.reportLine()
+            // A jump or the keyboard brings rows in without the pointer: their GIFs decide here.
+            self?.updateMediaAnimation()
         }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(retryFailedImages), name: ImageCache.retryFailedNotification,
+            object: nil)
         // The composer below grows and shrinks the list without a layout of the table.
         scrollView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(
@@ -1409,12 +1419,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     // D135: the media of rows within a screen above and below the visible ones, at the pixels
     // their tiles will ask; what leaves that range is let go. Covered media isn't asked.
     func prefetchMedia() {
-        guard let images = state.images.cache, let scale = tableView.window?.backingScaleFactor,
+        guard let images = state.images.cache, let window = tableView.window, onScreen(window),
             let column = tableView.tableColumns.first
         else {
             cancelPrefetches()
             return
         }
+        let scale = window.backingScaleFactor
         let visible = tableView.visibleRect
         let shown = tableView.rows(in: visible)
         let near = tableView.rows(in: visible.insetBy(dx: 0, dy: -visible.height))
@@ -1432,7 +1443,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 continue
             }
             let cells = AttachmentsView.layout(attachments, width: width).cells
-            let state = mediaState(of: row.message.id)
+            let state = mediaState(of: row.id)
             for (attachment, cell) in zip(media, cells)
             where !MediaTileView.hides(MessageCell.cover(attachment, state)) {
                 let pixels = ImageLayerView.pixels(cell.size, scale: scale)
@@ -1443,14 +1454,27 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             task.cancel()
             prefetching[spec] = nil
         }
-        for spec in wanted where prefetching[spec] == nil && images.cached(spec) == nil {
+        for spec in wanted
+        where prefetching[spec] == nil && !prefetchFailed.contains(spec) && images.cached(spec) == nil {
             prefetching[spec] = Task { [weak self] in
-                _ = try? await images.image(spec, tier: .media)
-                if !Task.isCancelled {
-                    self?.prefetching[spec] = nil
+                let failed = (try? await images.image(spec, tier: .media)) == nil
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                prefetching[spec] = nil
+                // Asked again once the cache says failed images may retry.
+                if failed {
+                    prefetchFailed.insert(spec)
                 }
             }
         }
+    }
+
+    @objc private func retryFailedImages(_ notification: Notification) {
+        guard notification.object as AnyObject === state.images.cache else {
+            return
+        }
+        prefetchFailed.removeAll()
     }
 
     private func cancelPrefetches() {
@@ -1717,9 +1741,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return nil
         }
         var view = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
-        while let current = view {
+        while let current = view, current !== tableView {
             if let tile = current as? MediaTileView {
-                return tile
+                return tile.isDescendant(of: tableView) ? tile : nil
             }
             view = current.superview
         }
@@ -1826,6 +1850,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     @objc private func clipMoved(_ notification: Notification) {
         let origin = scrollView.contentView.bounds.origin
+        if origin != lastClipOrigin {
+            altText?.close()
+            altText = nil
+        }
         defer { lastClipOrigin = origin }
         ScrollLog.log(
             "table \(number) y \(origin.y) range \(clipView.originRange) rows "
