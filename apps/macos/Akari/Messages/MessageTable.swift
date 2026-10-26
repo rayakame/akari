@@ -21,6 +21,10 @@ struct MessageTable: NSViewRepresentable {
         link.controller = context.coordinator
         context.coordinator.show(state)
     }
+
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: MessageTableController) {
+        coordinator.dismantle()
+    }
 }
 
 // Lets the SwiftUI parts around the table (jump bar, composer) reach its controller.
@@ -56,6 +60,8 @@ struct MessageArea: View {
     // A message of this list that can start a thread, and its "Create Thread".
     var canStartThread: (MessageId) -> Bool = { _ in false }
     var createThread: (MessageId) -> Void = { _ in }
+    // A clicked emoji's or sticker's popout.
+    var expressions: (ExpressionTarget) -> ExpressionPopoutModel? = { _ in nil }
     let openGuild: (GuildId) -> Void
     // The open channel, as its menu would.
     let markRead: () -> Void
@@ -66,13 +72,17 @@ struct MessageArea: View {
     var autoFocus = true
     var focusNow = false
     var onFocused: () -> Void = {}
+    var images: ImageCache?
+    var motion = MotionPolicy.default
+    var focused = false
     @State private var link = MessageTableLink()
 
     var body: some View {
         let bridge = MessageListBridge(
             messages: messages, link: link, links: links, go: go, openThread: openThread,
             openThreads: openThreads, openGuild: openGuild, markServerRead: markServerRead,
-            escapeAll: escape, canStartThread: canStartThread, startThread: createThread)
+            escapeAll: escape, canStartThread: canStartThread, startThread: createThread,
+            expressions: expressions)
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 MessageTable(state: state, actions: bridge, link: link)
@@ -134,7 +144,8 @@ struct MessageArea: View {
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
             revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
-            startRoom: messages.composer.locked ? LockedBanner.room : 0)
+            startRoom: messages.composer.locked ? LockedBanner.room : 0,
+            images: ImageCacheRef(images), motion: motion, focused: focused)
     }
 }
 
@@ -150,6 +161,7 @@ final class MessageListBridge: MessageListActions {
     let escapeAll: (() -> Void)?
     let canStartThread: (MessageId) -> Bool
     let startThread: (MessageId) -> Void
+    let expressions: (ExpressionTarget) -> ExpressionPopoutModel?
 
     init(
         messages: MessageListModel, link: MessageTableLink, links: LinkFollower,
@@ -160,7 +172,8 @@ final class MessageListBridge: MessageListActions {
         markServerRead: @escaping () -> Void,
         escapeAll: (() -> Void)? = nil,
         canStartThread: @escaping (MessageId) -> Bool = { _ in false },
-        startThread: @escaping (MessageId) -> Void = { _ in }
+        startThread: @escaping (MessageId) -> Void = { _ in },
+        expressions: @escaping (ExpressionTarget) -> ExpressionPopoutModel? = { _ in nil }
     ) {
         self.messages = messages
         self.link = link
@@ -173,6 +186,11 @@ final class MessageListBridge: MessageListActions {
         self.escapeAll = escapeAll
         self.canStartThread = canStartThread
         self.startThread = startThread
+        self.expressions = expressions
+    }
+
+    func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? {
+        expressions(target)
     }
 
     func retry(_ message: MessageId) {

@@ -41,3 +41,37 @@ fn no_emoji_is_longer_than_the_search() {
         .unwrap();
     assert!(longest < MAX_EMOJI_LEN, "{longest} bytes");
 }
+
+// A Unicode emoji's name as Discord shows it in its hover card and popout: gemoji's word, a skin
+// tone as `_tone{n}`, a flag as `flag_xx`; ©, ®, ™ and text aren't emoji.
+#[test]
+fn unicode_emoji_have_discords_names() {
+    for (emoji, name) in [
+        ("😀", "grinning"),
+        ("🍕", "pizza"),
+        ("👍", "thumbsup"),
+        ("👍🏽", "thumbsup_tone3"),
+        ("👋🏿", "wave_tone5"),
+        ("🇩🇪", "flag_de"),
+        ("🇯🇵", "flag_jp"),
+        ("🇦", "regional_indicator_a"),
+        ("❤️", "heart"),
+        ("✔️", "heavy_check_mark"),
+        ("👨‍💻", "man_technologist"),
+        ("🧑🏻‍🤝‍🧑🏼", "people_holding_hands_tone1_tone2"),
+        ("🫱🏻‍🫲🏿", "handshake_tone1_tone5"),
+        ("1️⃣", "one"),
+        // Not in gemoji: Unicode's name.
+        ("🙂‍↔️", "head_shaking_horizontally"),
+    ] {
+        assert_eq!(
+            crate::emoji_shortcode(emoji).as_deref(),
+            Some(name),
+            "{emoji}"
+        );
+    }
+    // The parser's rule: a text-presentation symbol without its variation selector is text.
+    for text in ["a", "", "™", "©", "😀😀", "1", "❤", "✔", "▶", "♥", "☀", "⚠"] {
+        assert_eq!(crate::emoji_shortcode(text), None, "{text:?}");
+    }
+}

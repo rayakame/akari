@@ -24,8 +24,42 @@ thread row's menu, the Threads browser (`ThreadBrowser.swift`, `ThreadBrowserCon
 the header's Threads button and its popout, the "See all threads" modal, and the channel list's
 "More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
 `ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), and the
-composer (a locked thread's banner). Images, attachments, reactions,
-replies, voice, notifications and settings come later.
+composer (a locked thread's banner), and avatars and icons in every place (`docs/ui/images.md`).
+Attachments, embeds, reactions, replies, voice, notifications and settings come later.
+
+## Images
+
+- `ImageLayerView` (`Shared/`) shows one image as a layer: it asks the session's `ImageCache`
+  at the box's pixels on the window's backing scale once it has a size in a window (a table's
+  cells get theirs after joining), sets the decoded bitmap as contents on whole backing pixels
+  of the window (1:1, never resampled), clips with the layer, cancels its ask when the box shows
+  something else or leaves the window, asks again when the scale changes or the cache says
+  failed boxes may retry, and plays the animated form through AkariKit's `FramePlayer` while its
+  owner says so. A box recycled for another subject clears at once; the same subject's new
+  picture keeps the old until the new decoded. It draws nothing and tracks no pointer. `RemoteImage` wraps it for SwiftUI (`UserAvatar`, `ConversationAvatar`,
+  the rail's `GuildIcon`), fed through the environment (`imageEnvironment(session)`: the cache,
+  the motion policy and whether the window is key and the app active).
+- The message list's cells get the cache with the table's state; the controller's hover
+  decides which group's header avatar plays, by the policy, as it decides the cursor, and per
+  row whether its custom emoji and stickers play (the settings, how much of the row shows, the
+  100 nearest the bottom for emoji, the row's hover).
+- A custom emoji is a text attachment whose cell only takes room (`MessageText.EmojiBox` on
+  the character; the cell is as wide as the box and no taller than the font's ascent, so string
+  drawing and the view agree on heights); `MessageLayoutManager.blocks()` places each box on its
+  line and `EmojiOverlay`, above the text view (the selection's fill is opaque), hosts an
+  `ImageLayerView` on it, `:name:` as its fallback text. A
+  message's stickers are a `StickerRow` of `StickerView`s (160, 8 apart) in the cell's stack
+  under the text; a Lottie or failed sticker shows a box with a symbol and a caption
+  (`docs/ui/emoji.md`). Emoji and stickers fit inside their box (`ImageFit.contain`).
+- Over an emoji or a sticker the list's authority shows the hand (`MessageTextView.expression(at:)`;
+  a sticker is a button) and `ExpressionHoverCard` its card after 300 ms, a borderless child
+  window that takes no mouse events; a click (the text view's, once its tracking ends without a
+  selection) opens `ExpressionPopoutPresenter`'s panel in `ChildWindows` beside the item.
+- A loading or failed avatar shows the `avatarPlaceholder` disc; a server's icon is drawn
+  alone (`ServerPicture`: the rail, the folder minis, the title bar), its initials' tile only
+  without an icon or after a failure. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).
+- `ReadingSignals` also feeds the system's Reduce Motion to the session, and `Launch` runs
+  AkariKit's `AnimatedFormatProbe` once (WebP or GIF for animations on this Mac).
 
 ## Messages and the composer
 

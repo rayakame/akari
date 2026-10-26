@@ -27,9 +27,18 @@ struct QrPanel: View {
             QrTile { ProgressView().tint(.black) }
         case .code(let url):
             QrTile { QrCodeView(url: url) }
-        case .scanned(let user):
-            InitialsAvatar(name: user.username, id: user.id.rawValue, size: 96)
+        case .scanned:
+            // No account yet, so no image pipeline for the scanned user's avatar: the disc.
+            Circle()
+                .fill(Color(nsColor: Palette.avatarPlaceholder))
+                .frame(width: 96, height: 96)
+                .overlay {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(Color(nsColor: Palette.textMuted))
+                }
                 .frame(width: 176, height: 176)
+                .accessibilityHidden(true)
         case .captchaUnsupported, .failed:
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 48))

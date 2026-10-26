@@ -22,7 +22,7 @@ func row(
     let message = Message(
         id: id(raw), channelId: id(10), kind: kind, author: author, fromWebhook: webhook,
         content: content, timestamp: time, editedTimestamp: nil, pinned: false,
-        mentionEveryone: false, attachments: [], embedCount: 0, stickerNames: [],
+        mentionEveryone: false, attachments: [], embedCount: 0, stickers: [],
         componentsV2: false, delivery: delivery, formatted: formattedText(content: content),
         mentionsMe: false, reference: nil, hasThread: hasThread, mentions: [], call: nil,
         roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,

@@ -40,6 +40,9 @@ author; the rest show only their content.
 - Right after a day divider the space above it is smaller: its box starts 17.5 below the
   divider's line, its avatar 21.5 (measured 2026-10-14). *Akari: 6 instead of 16 below the
   divider's row; system messages there move up by the same 10.*
+- The avatar is the author's, 40 points, round, from the image tier ([images.md](images.md)):
+  the disc while it loads, Discord's default avatar for a user without one; an animated one
+  plays while any message of the group is hovered and the window is key.
 - Inside the box, measured at 2 px per point on 2026-10-14: the avatar (40) in the left column
   starts 4 below the box's top, the name's baseline sits 18.5 below it and the first text
   line's 41. *Akari: avatar and name line 4 into its 47 box (name baseline at 19), text
@@ -55,7 +58,11 @@ author; the rest show only their content.
 **The other messages:** no avatar and no name. Hovering one shows its time (hours and minutes)
 in the left column, right-aligned in a 56 wide space. Their text sits where the first text line
 of a group start sits in its line: its baseline 19 below the box's top (derived from the group
-start's measurement; *Akari: 3 above the text, 1 below*).
+start's measurement; *Akari: 3 above the text, 1 below*). The time is centered on that first
+line, its digits' middle on the middle of the line's capitals, so it sits about 2 above the
+text's baseline and in the middle of a one-line message (*Akari: 13.25 below the box's top*).
+It stays there whatever the message holds: a jumbo emoji line, a sticker, a file or an embed
+doesn't move it (observed 2026-10-26).
 
 ### When a new group starts
 

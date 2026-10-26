@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use akari_core::model::{ChannelId, GuildId, MessageId, Permissions, UserId};
+use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, Permissions, UserId};
 use akari_core::state;
 
 use crate::contents::{Contents, Found};
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
-    Badge, Channel, ChannelBadge, ConnectionState, ContentStats, Guild, GuildBadge, GuildSettings,
-    Message, MessageWindow, ReadState, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
-    ThreadCreation, User,
+    Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings, Guild,
+    GuildBadge, GuildSettings, Message, MessageWindow, Nitro, ReadState, ServerListItem, Slowmode,
+    StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -80,6 +80,11 @@ impl Store {
         GuildSettings::new(&settings, self.core.guild_muted(guild_id))
     }
 
+    /// How media shows and animates; `DisplaySettingsChanged` says to read it again.
+    pub fn display_settings(&self) -> DisplaySettings {
+        self.core.display_settings().into()
+    }
+
     /// Of `ids`, the channels muted now by their own settings, in the order given; a thread by
     /// its own membership. A muted category or guild doesn't mute its channels, nor a muted
     /// channel its threads.
@@ -140,6 +145,18 @@ impl Store {
 
     pub fn guild(&self, id: GuildId) -> Option<Guild> {
         self.core.guild(id).map(|guild| Guild::from(&*guild))
+    }
+
+    /// The server a custom emoji is from, among the user's servers.
+    pub fn emoji_guild(&self, emoji_id: EmojiId) -> Option<GuildId> {
+        self.core.emoji_guild(emoji_id)
+    }
+
+    /// The current user's Nitro subscription; `None` before READY too.
+    pub fn nitro(&self) -> Nitro {
+        self.core
+            .current_user()
+            .map_or(Nitro::None, |current| current.premium_type.into())
     }
 
     /// Guilds that are down or blocked in the user's region.

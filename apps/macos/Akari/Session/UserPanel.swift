@@ -8,7 +8,7 @@ struct UserPanel: View {
     var body: some View {
         HStack(spacing: 8) {
             if let user {
-                InitialsAvatar(user, size: 32)
+                UserAvatar(user, size: 32, place: .userPanel)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(user.displayName)
                         .font(TypeScale.panelName.font)

@@ -45,7 +45,7 @@ struct MessageBoxTests {
             [view] + view.subviews.flatMap(views)
         }
         let shown = views(cell).filter { !$0.isHiddenOrHasHiddenAncestor }
-        let avatar = shown.first { $0 is AvatarView }.map { fromBoxTop($0, 0) }
+        let avatar = shown.first { $0 is ImageLayerView }.map { fromBoxTop($0, 0) }
         let name = shown.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Mira" }
             .map { fromBoxTop($0, $0.firstBaselineOffsetFromTop) }
         let text = try #require(shown.compactMap { $0 as? MessageTextView }.first)

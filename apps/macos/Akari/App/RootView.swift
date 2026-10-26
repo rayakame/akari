@@ -129,6 +129,7 @@ struct SessionScreen: View {
                 createThread: { [session] in
                     session.openThreadForm(in: messages.channelId, from: $0, location: .message)
                 },
+                expressions: { [session] in session.expressionPopout($0, in: messages.channelId) },
                 openGuild: { [session] in session.open(.guild($0)) },
                 markRead: { [session] in session.markRead(channel: messages.channelId) },
                 markServerRead: { [session] in session.markServerRead() },
@@ -146,8 +147,10 @@ struct SessionScreen: View {
                     } else {
                         session.channelFocused()
                     }
-                })
+                },
+                images: session.images, motion: session.motion, focused: session.focused)
         }
+        .imageEnvironment(session)
         .background(ReadingSignals.Attach(session: session))
         // A reconnect brings a new session for the same channel; without a new identity its
         // views would keep the old one's state and never open the channel.

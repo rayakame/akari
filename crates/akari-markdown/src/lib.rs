@@ -26,6 +26,7 @@ pub use document::{
 };
 
 pub use cache::Cache;
+pub use emoji::emoji_shortcode;
 pub use source_range::source_range;
 
 use parse::{Ctx, Input, Parser};

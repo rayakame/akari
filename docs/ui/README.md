@@ -29,6 +29,10 @@ app can mirror it and Discord users can switch with zero relearning.
   system messages, loading history, the channel's start, jump to present, edits and deletes
 - [markdown.md](markdown.md): message formatting: Discord's markdown, mentions and tokens, and
   the cases still to observe
+- [images.md](images.md): avatars, icons and the other pictures: sizes per place, sharpness,
+  animation, memory
+- [emoji.md](emoji.md): custom emoji in the text (the box, jumbo, the name, animation, failure)
+  and stickers under it (the row, formats, animation, Lottie, failure)
 - [theme.md](theme.md): the dark and light color tokens
 - [typography.md](typography.md): the type scale, every text style's size and weight, and how
   they were matched to the official client

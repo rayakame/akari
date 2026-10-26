@@ -22,7 +22,7 @@ struct NoticeWordingTests {
             id: id(raw), channelId: id(10), kind: kind, author: author ?? ray, fromWebhook: false,
             content: content, timestamp: sent, editedTimestamp: nil, pinned: false,
             mentionEveryone: false, attachments: [], embedCount: fields.isEmpty ? 0 : 1,
-            stickerNames: [], componentsV2: false, delivery: .sent,
+            stickers: [], componentsV2: false, delivery: .sent,
             formatted: formattedText(content: content), mentionsMe: false, reference: reference,
             hasThread: false, mentions: mentions, call: call, roleSubscription: subscription,
             purchasedProduct: product, actor: actor, applicationName: application,
@@ -230,7 +230,7 @@ struct NoticeWordingTests {
     func aBotsJoinNamesWhoAddedIt() {
         let bot = User(
             id: id(9), username: "akaribot", globalName: nil, displayName: "Akari Bot", bot: true,
-            system: false)
+            system: false, avatar: .defaultAvatar(index: 0))
 
         #expect(message(.userJoin, by: bot, actor: mira).noticeParts(in: context()) == [
             .actor("Mira"), .text(" has added "), .strong("Akari Bot"), .text(" to the server."),

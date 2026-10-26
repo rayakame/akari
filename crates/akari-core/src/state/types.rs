@@ -2,10 +2,11 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::settings::NotificationLevel;
+use crate::media::ImageKey;
 use crate::model::{
-    AttachmentId, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageReferenceType,
-    MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake, StickerFormatType,
-    StickerId, Timestamp, UserId, WebhookId,
+    AttachmentId, ChannelId, ChannelType, EmojiId, GenericMarker, GuildId, MessageId,
+    MessageReferenceType, MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake,
+    StickerFormatType, StickerId, Timestamp, UserId, WebhookId,
 };
 
 /// The logged-in user.
@@ -26,8 +27,7 @@ pub struct User {
     pub username: Box<str>,
     /// The display name.
     pub global_name: Option<Box<str>>,
-    /// 0 for users on the new username system.
-    pub discriminator: u16,
+    pub discriminator: Discriminator,
     pub avatar: Option<ImageHash>,
     pub bot: bool,
     pub system: bool,
@@ -38,6 +38,59 @@ impl User {
     /// The global name, or the username if there is none.
     pub fn display_name(&self) -> &str {
         self.global_name.as_deref().unwrap_or(&self.username)
+    }
+
+    /// Which of Discord's six default avatars the user shows without one, in the client's
+    /// order: a bot with "0000" and no avatar gets 0 (webhooks); a legacy tag gives
+    /// `tag % 5`; otherwise the ID's timestamp bits give `(id >> 22) % 6`.
+    pub fn default_avatar_index(&self) -> u8 {
+        if self.bot && self.discriminator == Discriminator::Zeros && self.avatar.is_none() {
+            return 0;
+        }
+        match self.discriminator {
+            Discriminator::Tag(tag) => (tag % 5) as u8,
+            Discriminator::Migrated | Discriminator::Zeros => ((self.id.get() >> 22) % 6) as u8,
+        }
+    }
+
+    /// The image every view asks for: the avatar, or the default avatar without one. A hash
+    /// that isn't the CDN's (the client's bundled bot avatars) counts as none.
+    pub fn avatar_key(&self) -> ImageKey {
+        match &self.avatar {
+            Some(hash) if hash.is_cdn_hash() => ImageKey::Avatar {
+                user: self.id,
+                hash: hash.clone(),
+            },
+            _ => ImageKey::DefaultAvatar {
+                index: self.default_avatar_index(),
+            },
+        }
+    }
+}
+
+/// The four digits after a user's name, as Discord sends them: "0" for the username system,
+/// "0000" for webhooks and some bots, a tag for legacy users.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Discriminator {
+    /// "0": a user on the new username system.
+    Migrated,
+    /// "0000": webhooks and crossposts, some bots.
+    Zeros,
+    /// A legacy tag, 1–9999.
+    Tag(u16),
+}
+
+impl Discriminator {
+    /// Anything else (junk, out of range) reads as `Migrated`.
+    pub fn parse(text: &str) -> Self {
+        if text == "0000" {
+            return Self::Zeros;
+        }
+        match text.parse::<u16>() {
+            Ok(tag) if (1..=9999).contains(&tag) => Self::Tag(tag),
+            _ => Self::Migrated,
+        }
     }
 }
 
@@ -59,6 +112,46 @@ pub struct Guild {
     pub default_message_notifications: NotificationLevel,
     /// A community server, where the user can choose its channels ("Channels & Roles").
     pub community: bool,
+    /// Its custom emoji, sorted: which server an emoji in a message is from.
+    pub emojis: Box<[EmojiId]>,
+}
+
+impl Guild {
+    /// Equal in all a host shows: its emoji list aside, which nothing shows.
+    pub(crate) fn shows_the_same(&self, other: &Self) -> bool {
+        let Self {
+            id,
+            name,
+            icon,
+            banner,
+            owner_id,
+            roles,
+            member_count,
+            large,
+            default_message_notifications,
+            community,
+            emojis: _,
+        } = self;
+        *id == other.id
+            && *name == other.name
+            && *icon == other.icon
+            && *banner == other.banner
+            && *owner_id == other.owner_id
+            && *roles == other.roles
+            && *member_count == other.member_count
+            && *large == other.large
+            && *default_message_notifications == other.default_message_notifications
+            && *community == other.community
+    }
+
+    /// The icon's image; `None` without one (the app shows initials).
+    pub fn icon_key(&self) -> Option<ImageKey> {
+        let hash = self.icon.as_ref().filter(|hash| hash.is_cdn_hash())?;
+        Some(ImageKey::GuildIcon {
+            guild: self.id,
+            hash: hash.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +234,15 @@ pub struct ThreadCreation {
 const PINNED: u64 = 1 << 1;
 
 impl Channel {
+    /// A group DM's icon; `None` without one.
+    pub fn icon_key(&self) -> Option<ImageKey> {
+        let hash = self.icon.as_ref().filter(|hash| hash.is_cdn_hash())?;
+        Some(ImageKey::GroupIcon {
+            channel: self.id,
+            hash: hash.clone(),
+        })
+    }
+
     /// When a thread's "Hide After Inactivity" window ends: `auto_archive_duration` minutes after
     /// its newest message or its archive timestamp, whichever is later. `None` for pinned forum
     /// posts, which have none, and for channels that aren't threads.
@@ -473,6 +575,17 @@ pub struct Sticker {
     pub format: StickerFormatType,
 }
 
+impl Sticker {
+    /// The sticker's image in its format. A Lottie sticker's key is asked for like any other;
+    /// the media layer answers `Unsupported` until Akari has a renderer.
+    pub fn image_key(&self) -> ImageKey {
+        ImageKey::Sticker {
+            id: self.id,
+            format: self.format,
+        }
+    }
+}
+
 /// An avatar, icon or banner hash. The usual 32-hex-digit hashes take 17 bytes.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ImageHash(Repr);
@@ -504,6 +617,12 @@ impl ImageHash {
             Repr::Hex { animated, .. } => *animated,
             Repr::Text(text) => text.starts_with(ANIMATED),
         }
+    }
+
+    /// One of the CDN's hashes (32 hex digits, `a_` or not), which has an image behind it;
+    /// other text (`clyde`, the client's bundled avatars) doesn't.
+    pub fn is_cdn_hash(&self) -> bool {
+        matches!(self.0, Repr::Hex { .. })
     }
 }
 
@@ -576,21 +695,174 @@ mod tests {
         assert!(ImageHash::parse("a_gif").is_animated());
     }
 
-    #[test]
-    fn display_name_prefers_the_global_name() {
-        let mut user = User {
-            id: Snowflake::new(1),
+    fn user(id: u64) -> User {
+        User {
+            id: Snowflake::new(id),
             username: "mira".into(),
             global_name: Some("Mira".into()),
-            discriminator: 0,
+            discriminator: Discriminator::Migrated,
             avatar: None,
             bot: false,
             system: false,
             public_flags: 0,
-        };
+        }
+    }
+
+    #[test]
+    fn display_name_prefers_the_global_name() {
+        let mut user = user(1);
         assert_eq!(user.display_name(), "Mira");
 
         user.global_name = None;
         assert_eq!(user.display_name(), "mira");
+    }
+
+    // The client's order (canary 649848, module 486020): a bot with "0000" and no avatar first,
+    // then a legacy tag mod 5, then the ID's timestamp bits mod 6.
+    #[test]
+    fn the_default_avatar_index_follows_the_client() {
+        let legacy = |tag| User {
+            discriminator: Discriminator::Tag(tag),
+            ..user(80_351_110_224_678_912)
+        };
+        assert_eq!(legacy(1337).default_avatar_index(), 2);
+        assert_eq!(legacy(5).default_avatar_index(), 0);
+        assert_eq!(legacy(9999).default_avatar_index(), 4);
+
+        for (id, index) in [
+            (1_299_999_999_991_480_320, 0),
+            (1_299_999_999_995_674_624, 1),
+            (1_299_999_999_999_868_928, 2),
+            (1_300_000_000_004_063_232, 3),
+            (1_300_000_000_008_257_536, 4),
+            (1_300_000_000_012_451_840, 5),
+            (80_351_110_224_678_912, 5),
+        ] {
+            assert_eq!(user(id).default_avatar_index(), index, "{id}");
+        }
+
+        let webhook = User {
+            bot: true,
+            discriminator: Discriminator::Zeros,
+            ..user(1_300_000_000_012_451_840)
+        };
+        assert_eq!(webhook.default_avatar_index(), 0);
+        let webhook_with_avatar = User {
+            avatar: Some(ImageHash::parse("0123456789abcdef0123456789abcdef")),
+            ..webhook.clone()
+        };
+        assert_eq!(webhook_with_avatar.default_avatar_index(), 5);
+        let bot = User {
+            bot: true,
+            ..user(1_300_000_000_012_451_840)
+        };
+        assert_eq!(bot.default_avatar_index(), 5);
+        let zeros_not_bot = User {
+            discriminator: Discriminator::Zeros,
+            ..user(1_300_000_000_012_451_840)
+        };
+        assert_eq!(zeros_not_bot.default_avatar_index(), 5);
+        assert_eq!(user(0).default_avatar_index(), 0);
+    }
+
+    #[test]
+    fn a_stickers_key_carries_its_format() {
+        let sticker = Sticker {
+            id: StickerId::new(7),
+            name: "wave".into(),
+            format: StickerFormatType::Lottie,
+        };
+        assert_eq!(
+            sticker.image_key(),
+            ImageKey::Sticker {
+                id: StickerId::new(7),
+                format: StickerFormatType::Lottie,
+            }
+        );
+    }
+
+    #[test]
+    fn the_avatar_key_is_the_avatar_or_the_default() {
+        let hash = ImageHash::parse("0123456789abcdef0123456789abcdef");
+        let with = User {
+            avatar: Some(hash.clone()),
+            ..user(7)
+        };
+        assert_eq!(
+            with.avatar_key(),
+            ImageKey::Avatar {
+                user: Snowflake::new(7),
+                hash
+            }
+        );
+        assert_eq!(
+            user(1_300_000_000_012_451_840).avatar_key(),
+            ImageKey::DefaultAvatar { index: 5 }
+        );
+        // The client's bundled bot avatars aren't CDN hashes.
+        let clyde = User {
+            bot: true,
+            avatar: Some(ImageHash::parse("clyde")),
+            ..user(1_300_000_000_012_451_840)
+        };
+        assert_eq!(clyde.avatar_key(), ImageKey::DefaultAvatar { index: 5 });
+    }
+
+    #[test]
+    fn guild_and_group_icons_have_keys_when_set() {
+        let hash = ImageHash::parse("a_0123456789abcdef0123456789abcdef");
+        let mut guild = Guild {
+            id: Snowflake::new(3),
+            name: "Lab".into(),
+            icon: Some(hash.clone()),
+            banner: None,
+            owner_id: None,
+            roles: Arc::from(Vec::new()),
+            member_count: None,
+            large: false,
+            default_message_notifications: NotificationLevel::AllMessages,
+            community: false,
+            emojis: Box::new([]),
+        };
+        assert_eq!(
+            guild.icon_key(),
+            Some(ImageKey::GuildIcon {
+                guild: Snowflake::new(3),
+                hash: hash.clone()
+            })
+        );
+        guild.icon = Some(ImageHash::parse("not-a-hash"));
+        assert_eq!(guild.icon_key(), None);
+        guild.icon = None;
+        assert_eq!(guild.icon_key(), None);
+
+        let group = Channel {
+            id: Snowflake::new(9),
+            kind: ChannelType::GroupDm,
+            guild_id: None,
+            parent_id: None,
+            name: Some("Weekend plans".into()),
+            position: 0,
+            topic: None,
+            nsfw: false,
+            rate_limit_per_user: 0,
+            default_auto_archive_duration: None,
+            last_message_id: None,
+            permission_overwrites: Box::new([]),
+            recipients: Box::new([]),
+            icon: Some(hash.clone()),
+            owner_id: None,
+            thread: None,
+            flags: 0,
+            message_request: false,
+            spam: false,
+        };
+        assert_eq!(
+            group.icon_key(),
+            Some(ImageKey::GroupIcon {
+                channel: Snowflake::new(9),
+                hash
+            })
+        );
     }
 }

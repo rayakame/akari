@@ -18,8 +18,8 @@ struct TitleBarTests {
             WindowTitle.at(.home, server: nil, conversation: nil)
                 == WindowTitle(text: "Direct Messages", icon: .home))
         #expect(
-            WindowTitle.at(.home, server: nil, conversation: (name: "Mira", avatarId: 7))
-                == WindowTitle(text: "Mira", icon: .avatar(name: "Mira", id: 7)))
+            WindowTitle.at(.home, server: nil, conversation: (name: "Mira", avatar: .avatar(7)))
+                == WindowTitle(text: "Mira", icon: .avatar(.avatar(7))))
         // Before READY the store doesn't know the server yet.
         #expect(WindowTitle.at(.guild(server), server: nil, conversation: nil).text == "Akari")
     }

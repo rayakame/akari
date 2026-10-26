@@ -3,8 +3,8 @@ use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 
 use super::dispatch::{
-    ChannelDelete, GuildDelete, GuildRoleDelete, GuildRoleEvent, MessageDelete, MessageDeleteBulk,
-    ReadySupplemental, ThreadListSync, ThreadMemberUpdate, ThreadMembersUpdate,
+    ChannelDelete, GuildDelete, GuildEmojisUpdate, GuildRoleDelete, GuildRoleEvent, MessageDelete,
+    MessageDeleteBulk, ReadySupplemental, ThreadListSync, ThreadMemberUpdate, ThreadMembersUpdate,
 };
 use super::guild::GatewayGuild;
 use super::hello::Hello;
@@ -50,6 +50,7 @@ pub enum DispatchEvent {
     GuildRoleCreate(Box<GuildRoleEvent>),
     GuildRoleUpdate(Box<GuildRoleEvent>),
     GuildRoleDelete(GuildRoleDelete),
+    GuildEmojisUpdate(Box<GuildEmojisUpdate>),
     GuildMemberUpdate(Box<GuildMemberUpdate>),
     ChannelCreate(Box<Channel>),
     ChannelUpdate(Box<ChannelUpdate>),
@@ -92,6 +93,7 @@ impl DispatchEvent {
             Self::GuildRoleCreate(_) => "GUILD_ROLE_CREATE",
             Self::GuildRoleUpdate(_) => "GUILD_ROLE_UPDATE",
             Self::GuildRoleDelete(_) => "GUILD_ROLE_DELETE",
+            Self::GuildEmojisUpdate(_) => "GUILD_EMOJIS_UPDATE",
             Self::GuildMemberUpdate(_) => "GUILD_MEMBER_UPDATE",
             Self::ChannelCreate(_) => "CHANNEL_CREATE",
             Self::ChannelUpdate(_) => "CHANNEL_UPDATE",
@@ -213,6 +215,7 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
         "GUILD_ROLE_CREATE" => parse(json).map(|role| E::GuildRoleCreate(Box::new(role))),
         "GUILD_ROLE_UPDATE" => parse(json).map(|role| E::GuildRoleUpdate(Box::new(role))),
         "GUILD_ROLE_DELETE" => parse(json).map(E::GuildRoleDelete),
+        "GUILD_EMOJIS_UPDATE" => parse(json).map(|update| E::GuildEmojisUpdate(Box::new(update))),
         "GUILD_MEMBER_UPDATE" => parse(json).map(|update| E::GuildMemberUpdate(Box::new(update))),
         "CHANNEL_CREATE" => parse(json).map(|channel| E::ChannelCreate(Box::new(channel))),
         "CHANNEL_UPDATE" => parse(json).map(|update| E::ChannelUpdate(Box::new(update))),

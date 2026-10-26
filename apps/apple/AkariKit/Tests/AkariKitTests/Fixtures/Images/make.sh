@@ -1,7 +1,9 @@
 #!/bin/sh
-# Rebuilds the image fixtures; needs img2webp and webpmux (`brew install webp`) and perl.
+# Rebuilds AkariKit's animated WebP (Sources/AkariKit/Resources/animated.webp): the launch
+# probe's input and the tests' fixture. Needs img2webp and webpmux (`brew install webp`) and perl.
 set -eu
 cd "$(dirname "$0")"
+out="$(cd ../../../../Sources/AkariKit/Resources && pwd)/animated.webp"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -29,4 +31,4 @@ img2webp -loop 3 -lossless \
     -o "$work/opaque-background.webp"
 # A transparent canvas background, so disposing to it must clear, whether or not a decoder
 # honors the color (img2webp writes opaque white).
-webpmux -set bgcolor 0,0,0,0 "$work/opaque-background.webp" -o animated.webp
+webpmux -set bgcolor 0,0,0,0 "$work/opaque-background.webp" -o "$out"

@@ -40,7 +40,7 @@ struct ChannelName: Equatable {
                 subtitle: owner.map { _ in "Started by " }, subtitleName: owner)
         case .direct(let user):
             ChannelStart(
-                icon: .avatar(name: name, id: user?.id.rawValue ?? 0), title: name,
+                icon: .avatar(user?.avatar), title: name,
                 username: user?.username,
                 subtitle: "This is the beginning of your direct message history with \(name).")
         case .group:
@@ -54,7 +54,8 @@ struct ChannelName: Equatable {
 struct ChannelStart: Equatable {
     enum Icon: Equatable {
         case symbol(String)
-        case avatar(name: String, id: UInt64)
+        /// The other person's avatar, 80 points; `nil` while the store doesn't know them.
+        case avatar(ImageKey?)
     }
 
     let icon: Icon

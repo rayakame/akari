@@ -12,6 +12,8 @@ struct MessageTableTests {
         var inserts = 0
         var reloaded: [IndexSet] = []
         var afterReload: (IndexSet) -> Void = { _ in }
+        // Runs while the timeline already holds fewer rows than the table, as a clip move can.
+        var beforeRemove: () -> Void = {}
 
         override func reloadData() {
             fullReloads += 1
@@ -27,6 +29,7 @@ struct MessageTableTests {
         override func removeRows(at indexes: IndexSet, withAnimation options: AnimationOptions = [])
         {
             removes += 1
+            beforeRemove()
             super.removeRows(at: indexes, withAnimation: options)
         }
 
@@ -897,25 +900,24 @@ struct MessageTableTests {
         #expect(actions.calls.filter { !$0.hasPrefix("more") } == ["escape"])
     }
 
-    // The lowest row of ink a view draws, in window points.
-    func inkBottom(of view: NSView) throws -> CGFloat {
+    // Halfway between the highest and lowest rows of ink a view draws, in window points.
+    func inkMiddle(of view: NSView) throws -> CGFloat {
         let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
-        let last = try #require(
-            (0..<rep.pixelsHigh).last { y in
-                (0..<rep.pixelsWide).contains { x in
-                    (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5
-                }
-            })
+        let inked = (0..<rep.pixelsHigh).filter { y in
+            (0..<rep.pixelsWide).contains { x in (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 }
+        }
+        let first = try #require(inked.first)
+        let last = try #require(inked.last)
         let scale = CGFloat(rep.pixelsHigh) / view.bounds.height
-        let fromTop = CGFloat(last + 1) / scale
+        let fromTop = CGFloat(first + last + 1) / 2 / scale
         let y = view.isFlipped ? fromTop : view.bounds.height - fromTop
         return view.convert(NSPoint(x: 0, y: y), to: nil).y
     }
 
     @Test
-    func theHoverTimeSitsOnTheFirstLinesBaseline() throws {
-        show([row(1, at: noon), row(2, at: noon + 30, content: "xxxx xxxx")])
+    func theHoverTimeIsCenteredOnTheFirstLine() throws {
+        show([row(1, at: noon), row(2, at: noon + 30, content: "XXXX XXXX")])
         let cell = try #require(try cell(of: 2) as? MessageCell)
         cell.isHovered = true
         cell.layoutSubtreeIfNeeded()
@@ -923,10 +925,10 @@ struct MessageTableTests {
         let time = try #require(
             textFields(in: cell).first { !$0.isHiddenOrHasHiddenAncestor && $0.stringValue != "" })
 
-        // Neither "x" nor the time's digits reach below the baseline.
-        let textBottom = try inkBottom(of: text)
-        let timeBottom = try inkBottom(of: time)
-        #expect(abs(textBottom - timeBottom) <= 0.5, "time at \(timeBottom), text at \(textBottom)")
+        // Capitals and digits share a height, so their ink's middles meet.
+        let textMiddle = try inkMiddle(of: text)
+        let timeMiddle = try inkMiddle(of: time)
+        #expect(abs(textMiddle - timeMiddle) <= 0.5, "time at \(timeMiddle), text at \(textMiddle)")
     }
 
     @Test
@@ -1227,6 +1229,29 @@ struct MessageTableTests {
         func createThread(from message: MessageId) {
             calls.append("create thread from \(message.rawValue)")
         }
+
+        var popouts: [ExpressionTarget] = []
+
+        func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? {
+            popouts.append(target)
+            return ExpressionPopoutModel(
+                target: target, channelGuild: nil, store: PopoutStore(), lookups: PopoutLookups())
+        }
+    }
+
+    // A store and lookups for a popout: the emoji is from server 50, which the user is in.
+    struct PopoutStore: ExpressionStore {
+        func emojiGuild(emojiId: EmojiId) -> GuildId? { GuildId(rawValue: 50) }
+        func guild(id: GuildId) -> Guild? { id.rawValue == 50 ? Guild(id: id, name: "Emoji Hub") : nil }
+        func nitro() -> Nitro { .none }
+        func unavailableGuildIds() -> [GuildId] { [] }
+    }
+
+    final class PopoutLookups: ExpressionLookups {
+        func emojiSource(emojiId: EmojiId) async throws -> EmojiSource { throw RequestError.UnexpectedResponse }
+        func sticker(stickerId: StickerId) async throws -> StickerDetails { throw RequestError.UnexpectedResponse }
+        func stickerGuild(stickerId: StickerId) async throws -> SourceGuild { throw RequestError.UnexpectedResponse }
+        func stickerPack(packId: StickerPackId) async throws -> StickerPack { throw RequestError.UnexpectedResponse }
     }
 
     // At the middle of message `raw`'s box.
@@ -2197,7 +2222,7 @@ struct MessageTableTests {
         let divider = try #require(try cell(at: day) as? DayDividerCell)
         let message = try cell(of: 1)
         let date = try #require(textFields(in: divider).first)
-        let avatar = try #require(message.subviews.first { $0 is AvatarView })
+        let avatar = try #require(message.subviews.first { $0 is ImageLayerView })
 
         let line = date.convert(date.bounds, to: table).midY
         let avatarTop = avatar.convert(avatar.bounds, to: table).minY

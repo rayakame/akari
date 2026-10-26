@@ -12,7 +12,7 @@ use super::permissions::compute;
 use super::read_states::{Ack, ReadStates};
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
-    GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
+    DisplaySettings, GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
 };
 use super::threads::ThreadIndex;
 use super::types::{
@@ -24,11 +24,11 @@ use super::windows::{
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
-    GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready, ThreadListSync,
-    ThreadMemberUpdate, ThreadMembersUpdate, UserUpdate,
+    GuildEmojisUpdate, GuildMemberUpdate, GuildRoleDelete, GuildRoleEvent, GuildUpdate, Ready,
+    ThreadListSync, ThreadMemberUpdate, ThreadMembersUpdate, UserUpdate,
 };
 use crate::load_report::PageOutcome;
-use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
+use crate::model::{self, ChannelId, EmojiId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -438,7 +438,7 @@ impl State {
     }
 
     pub(crate) fn replace(&mut self, mut next: Entities, events: &mut Vec<StoreEvent>) {
-        self.keep_folders(&mut next);
+        self.keep_unreadable_settings(&mut next);
         self.keep_memberships(&mut next);
         self.keep_known_threads(&mut next);
         let derived = Derived::build(&next, self.now_millis());
@@ -446,10 +446,12 @@ impl State {
         self.swap(next, derived, diff, events);
     }
 
-    // A READY whose settings proto didn't decode keeps the folders the store had.
-    pub(crate) fn keep_folders(&self, next: &mut Entities) {
-        if std::mem::take(&mut next.settings.unreadable_folders) {
+    // A READY whose settings proto didn't decode keeps the folders and display settings the
+    // store had.
+    pub(crate) fn keep_unreadable_settings(&self, next: &mut Entities) {
+        if std::mem::take(&mut next.settings.unreadable) {
             next.settings.folders = self.entities.settings.folders.clone();
+            next.settings.display = self.entities.settings.display;
         }
     }
 
@@ -637,7 +639,7 @@ impl State {
             match (old.guilds.get(&id), next.guilds.get(&id)) {
                 (Some(before), Some(after)) => {
                     kept.insert(id);
-                    if before != after {
+                    if !before.shows_the_same(after) {
                         events.push(StoreEvent::GuildUpdated(after.clone()));
                     }
                 }
@@ -665,6 +667,9 @@ impl State {
 
         if old.server_list() != next.server_list() {
             events.push(StoreEvent::ServerListChanged);
+        }
+        if old.settings.display != next.settings.display {
+            events.push(StoreEvent::DisplaySettingsChanged);
         }
         let settings: BTreeSet<Option<GuildId>> = [&old.settings.guilds, &next.settings.guilds]
             .into_iter()
@@ -732,6 +737,7 @@ impl State {
             }
             E::GuildRoleCreate(event) | E::GuildRoleUpdate(event) => self.put_role(*event, events),
             E::GuildRoleDelete(delete) => self.delete_role(delete, events),
+            E::GuildEmojisUpdate(update) => self.put_emojis(*update),
             E::GuildMemberUpdate(update) => self.member_update(*update, events),
             E::ChannelCreate(channel) => self.put_channel(*channel, events),
             E::ThreadCreate(thread) => {
@@ -812,8 +818,10 @@ impl State {
                 }
             }
             E::UserSettingsProtoUpdate(update) => {
-                self.tracking_server_list(events, |state, _| {
-                    state.entities.settings.apply_proto(*update);
+                self.tracking_server_list(events, |state, events| {
+                    if state.entities.settings.apply_proto(*update) {
+                        events.push(StoreEvent::DisplaySettingsChanged);
+                    }
                 });
             }
             E::NotificationSettingsUpdate(settings) => {
@@ -1204,7 +1212,7 @@ impl State {
         self.follow_guild_threads(id, &mut next, events);
         match self.entities.guilds.get(&id).cloned() {
             Some(before) => {
-                if before != after {
+                if !before.shows_the_same(&after) {
                     events.push(StoreEvent::GuildUpdated(after));
                 }
                 if let Some(member) = next.members.get(&id)
@@ -1358,6 +1366,16 @@ impl State {
         let mut next = (*known).clone();
         next.roles = roles.into();
         self.put_guild(next, &known, events);
+    }
+
+    // Nothing shows the list, so no event.
+    fn put_emojis(&mut self, update: GuildEmojisUpdate) {
+        let Some(known) = self.entities.guilds.get(&update.guild_id) else {
+            return;
+        };
+        let mut next = (**known).clone();
+        next.emojis = super::convert::emoji_ids(&update.emojis);
+        self.entities.guilds.insert(update.guild_id, Arc::new(next));
     }
 
     fn delete_role(&mut self, delete: GuildRoleDelete, events: &mut Vec<StoreEvent>) {
@@ -1622,6 +1640,14 @@ impl State {
         self.entities.guilds.get(&id).cloned()
     }
 
+    pub(crate) fn emoji_guild(&self, emoji: EmojiId) -> Option<GuildId> {
+        self.entities
+            .guilds
+            .values()
+            .find(|guild| guild.emojis.binary_search(&emoji).is_ok())
+            .map(|guild| guild.id)
+    }
+
     pub(crate) fn unavailable_guilds(&self) -> Vec<GuildId> {
         let mut ids: Vec<GuildId> = self.entities.unavailable.iter().copied().collect();
         ids.sort_unstable();
@@ -1642,6 +1668,10 @@ impl State {
             .guild(guild)
             .cloned()
             .unwrap_or_default()
+    }
+
+    pub(crate) fn display_settings(&self) -> DisplaySettings {
+        self.entities.settings.display
     }
 
     pub(crate) fn channel_muted_at(&self, channel: ChannelId, now: Timestamp) -> bool {

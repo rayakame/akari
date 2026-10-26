@@ -1,10 +1,11 @@
+import AkariKit
 import CoreGraphics
 import Foundation
 import ImageIO
 import Testing
 
-// What Akari relies on ImageIO for with animated WebP, the CDN's animated form. Self-contained
-// (no AkariKit), so it also runs alone on the deployment target's macOS.
+// What Akari relies on ImageIO for with animated WebP, the CDN's animated form, checked on the
+// fixture the launch probe decodes (AnimatedFormatProbe).
 @Suite(.timeLimit(.minutes(1)))
 struct ImageIOWebPTests {
     // Fixtures/Images/make.sh: 32 × 32, five frames, three loops, lossless.
@@ -21,8 +22,7 @@ struct ImageIOWebPTests {
     ]
 
     static func url() throws -> URL {
-        try #require(Bundle.module.url(
-            forResource: "animated", withExtension: "webp", subdirectory: "Fixtures/Images"))
+        try #require(AnimatedFormatProbe.fixtureURL)
     }
 
     static func source() throws -> CGImageSource {

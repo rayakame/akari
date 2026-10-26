@@ -36,7 +36,8 @@ struct SessionView<MessageArea: View>: View {
                 {
                     ChildWindowsHost(
                         content: AnyView(
-                            ThreadBrowserPanel(browser: browser, session: session, size: frame.size)),
+                            ThreadBrowserPanel(browser: browser, session: session, size: frame.size)
+                                .imageEnvironment(session)),
                         frame: frame, browser: true, dimmed: browser.presentation == .modal,
                         label: ThreadsButton.label, onClose: session.closeThreadBrowser,
                         refocus: session.refocusChannel
@@ -103,7 +104,8 @@ struct SessionView<MessageArea: View>: View {
         .onHover { hover.hoverPopout($0) }
         .firstClicks()
         return ChildWindowsHost(
-            content: AnyView(popout), frame: frame, fitsWidth: true, onClose: hover.dismiss)
+            content: AnyView(popout.imageEnvironment(session)), frame: frame, fitsWidth: true,
+            onClose: hover.dismiss)
     }
 
     private var threadsButton: ThreadsButton? {
@@ -340,18 +342,19 @@ struct SessionView<MessageArea: View>: View {
     }
 
     private var windowTitle: WindowTitle {
-        let server: String? =
+        let server: Guild? =
             switch session.place {
             case .home: nil
-            case .guild(let guildId): session.servers.guilds.first { $0.id == guildId }?.name
+            case .guild(let guildId): session.servers.guilds.first { $0.id == guildId }
             }
-        // The avatar the DM list shows for it.
+        // The picture the DM list shows for it: the person's avatar, or a group's icon.
         let open = conversation.map { conversation in
             let person = conversation.channel.kind == .dm ? conversation.recipients.first : nil
-            let avatarId = person?.id.rawValue ?? conversation.id.rawValue
-            return (name: conversation.name, avatarId: avatarId)
+            let avatar = person?.avatar ?? conversation.channel.icon
+            return (name: conversation.name, avatar: avatar)
         }
-        return WindowTitle.at(session.place, server: server, conversation: open)
+        return WindowTitle.at(
+            session.place, server: server?.name, serverIcon: server?.icon, conversation: open)
     }
 
     private var conversation: DirectMessageListModel.Conversation? {

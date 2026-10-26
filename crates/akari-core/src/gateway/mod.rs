@@ -20,8 +20,9 @@ pub(crate) mod settings_proto;
 pub(crate) use connection::fake;
 pub use connection::{ConnectionEvent, DisconnectReason, Gateway, GatewayError, SendError};
 pub use dispatch::{
-    ChannelDelete, GuildDelete, GuildRoleDelete, GuildRoleEvent, MessageDelete, MessageDeleteBulk,
-    ReadySupplemental, SupplementalGuild, ThreadListSync, ThreadMemberUpdate, ThreadMembersUpdate,
+    ChannelDelete, GuildDelete, GuildEmojisUpdate, GuildRoleDelete, GuildRoleEvent, MessageDelete,
+    MessageDeleteBulk, ReadySupplemental, SupplementalGuild, ThreadListSync, ThreadMemberUpdate,
+    ThreadMembersUpdate,
 };
 pub use guild::{AvailableGuild, GatewayGuild, UnavailableGuild};
 pub use hello::Hello;

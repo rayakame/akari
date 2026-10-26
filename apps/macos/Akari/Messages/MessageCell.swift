@@ -17,12 +17,38 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             hoverTime.isHidden = !isHovered || showsHeader
         }
     }
-    private let avatar = AvatarView()
+    private let avatar = ImageLayerView()
+    /// Where the avatar comes from; the controller sets it with the state.
+    var images: ImageCache? {
+        get { avatar.images }
+        set {
+            avatar.images = newValue
+            content.images = newValue
+            stickers?.images = newValue
+            threadBox?.images = newValue
+        }
+    }
+    /// The list's say: the group is hovered and the policy lets the avatar play.
+    var animatesAvatar: Bool {
+        get { avatar.animates }
+        set { avatar.animates = newValue }
+    }
+    /// The list's say: this message's custom emoji play (the setting, visibility, hover).
+    var animatesEmoji: Bool {
+        get { content.animatesEmoji }
+        set { content.animatesEmoji = newValue }
+    }
+    /// The list's say: this message's stickers play (`animate_stickers`, visibility, hover).
+    var animatesStickers = false {
+        didSet { stickers?.animates = animatesStickers }
+    }
     private let reply = CellText.label()
     private let header = HeaderRow()
     private let hoverTime = CellText.label()
     private let content = MessageTextView()
     private let extras = MessageTextView()
+    // Built for the first message with stickers; most messages have none.
+    private var stickers: StickerRow?
     // Built for the first message with a thread, as the failed line is: buttons cost.
     private var threadBox: ThreadBoxView?
     var onOpenThread: () -> Void = {}
@@ -33,6 +59,12 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     var onRetry: () -> Void = {}
     var onDelete: () -> Void = {}
     var onLink: (URL) -> Void = { _ in }
+    /// A click on an emoji or a sticker, with its box in window coordinates.
+    var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
+    /// The text's emoji offer hover cards and popouts; not in the New Thread form's preview.
+    var expressionsEnabled = true {
+        didSet { content.detectsExpressions = expressionsEnabled }
+    }
     private var message: Message?
     private var mentioned = false {
         didSet {
@@ -136,8 +168,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         avatarBottom?.isActive = startsGroup
         top?.constant = startsGroup ? spacing + Self.groupInset : Self.continuationTop
         bottom?.constant = -(startsGroup ? Self.groupBottom : Self.continuationBottom)
-        avatar.name = name
-        avatar.userId = message.author.id.rawValue
+        avatar.show(startsGroup ? ImageLayerView.Content(key: message.author.avatar) : nil)
         header.show(
             name: name, tagged: message.author.bot || message.fromWebhook,
             time: groupTime, fullDate: fullDate)
@@ -152,6 +183,15 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         content.isHidden = message.content.isEmpty
         extras.show(lines)
         extras.isHidden = lines.length == 0
+        if message.stickers.isEmpty {
+            // A reused cell lets its stickers go: no ask, no pin, no player.
+            stickers?.configure([])
+            stickers?.isHidden = true
+        } else {
+            let row = stickerRow()
+            row.isHidden = false
+            row.configure(message.stickers)
+        }
         let isFailed = message.delivery == .failed
         if isFailed && failed == nil {
             let line = FailedLine()
@@ -191,7 +231,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     // The constraints of build() in arithmetic; the stack leaves hidden views out.
     private func height(width: CGFloat, body: CGFloat) -> CGFloat {
         let textWidth = width - Self.textLeading - Self.textTrailing
-        let shown = ([reply, header, content, extras] + [threadBox, failed].compactMap { $0 })
+        let shown = ([reply, header, content, extras] + [stickers, threadBox, failed].compactMap { $0 })
             .filter { !$0.isHidden }
         let stacked =
             shown.map { view in
@@ -333,18 +373,37 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             return threadBox
         }
         let box = ThreadBoxView()
+        box.images = images
         box.topInset = Self.boxGap - Self.spacing
         box.target = self
         box.action = #selector(threadBoxClicked)
-        let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
+        let anchor: NSView = stickers ?? extras
+        let after = stack.views(in: .top).firstIndex(of: anchor).map { $0 + 1 } ?? 0
         stack.insertView(box, at: after, in: .top)
         box.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         threadBox = box
         return box
     }
 
+    private func stickerRow() -> StickerRow {
+        if let stickers {
+            return stickers
+        }
+        let row = StickerRow()
+        row.images = images
+        row.animates = animatesStickers
+        row.onSticker = { [weak self] sticker, rect in self?.onExpression(.sticker(sticker), rect) }
+        let after = stack.views(in: .top).firstIndex(of: extras).map { $0 + 1 } ?? 0
+        stack.insertView(row, at: after, in: .top)
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        stickers = row
+        return row
+    }
+
     private func build() {
         content.onLink = { [weak self] url in self?.onLink(url) }
+        content.onExpression = { [weak self] target, rect in self?.onExpression(target, rect) }
+        content.detectsExpressions = expressionsEnabled
         content.messageMenu = { [weak self] in
             guard let self, let message else {
                 return []
@@ -352,6 +411,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             return MessageMenu.items(for: message, createThread: threadAction())
         }
         avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatar.placeholder = .disc
+        avatar.cornerRadius = Self.avatarSize / 2
         reply.attributedStringValue = CellText.symbolLine(
             "arrowshape.turn.up.left", "Replying to an earlier message")
         hoverTime.font = TypeScale.hoverTime.nsFont
@@ -396,7 +457,10 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             avatar.widthAnchor.constraint(equalToConstant: Self.avatarSize),
             avatar.heightAnchor.constraint(equalToConstant: Self.avatarSize),
             hoverTime.trailingAnchor.constraint(equalTo: leadingAnchor, constant: 56),
-            hoverTime.firstBaselineAnchor.constraint(equalTo: content.firstBaselineAnchor),
+            // Its digits centered on a plain first line's capitals: a jumbo line or a sticker doesn't move it.
+            hoverTime.firstBaselineAnchor.constraint(
+                equalTo: stack.topAnchor,
+                constant: MessageText.firstLineMiddle + TypeScale.hoverTime.nsFont.capHeight / 2),
         ])
     }
 
@@ -423,9 +487,6 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         if message.embedCount > 0 {
             let embeds = message.embedCount == 1 ? "1 embed" : "\(message.embedCount) embeds"
             lines.append(CellText.symbolLine("rectangle.on.rectangle", embeds))
-        }
-        for sticker in message.stickerNames {
-            lines.append(CellText.symbolLine("seal", "Sticker: \(sticker)"))
         }
         let joined = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {

@@ -232,6 +232,7 @@ pub(crate) struct Shared {
     cache: Option<(CacheThread, UserId)>,
     preparer: RwLock<Option<Arc<dyn MessagePreparer>>>,
     images: Arc<Images>,
+    lookup_timeout: Duration,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -1086,6 +1087,7 @@ impl Account {
         }
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
         let images = Images::new(&client, user, store.clone(), rest.clone(), &runtime);
+        let lookup_timeout = timing.lookup_timeout;
         let gateway = Gateway::start(client, token, timing)?;
         let shared = Arc::new_cyclic(|weak: &Weak<Shared>| {
             let unauthorized = {
@@ -1119,6 +1121,7 @@ impl Account {
                 cache: thread,
                 preparer: RwLock::new(None),
                 images,
+                lookup_timeout,
             }
         });
         // Built before the task starts, so it runs even if the task is never polled.
@@ -1738,6 +1741,7 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
 
 mod acks;
 mod deadlines;
+mod expressions;
 
 #[cfg(test)]
 mod tests;

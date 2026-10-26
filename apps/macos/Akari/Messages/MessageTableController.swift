@@ -18,6 +18,24 @@ struct MessageTableState: Equatable {
     var messageJump: MessageListModel.MessageJump?
     // Kept clear above the start's icon for what covers the list's top.
     var startRoom: CGFloat = 0
+    /// Where the rows' images come from; `nil` shows placeholders only.
+    var images = ImageCacheRef(nil)
+    var motion = MotionPolicy.default
+    /// The window is key and the app active: what every animation needs.
+    var focused = false
+}
+
+/// The session's cache by identity, so the state stays `Equatable`.
+struct ImageCacheRef: Equatable {
+    let cache: ImageCache?
+
+    init(_ cache: ImageCache?) {
+        self.cache = cache
+    }
+
+    static func == (lhs: ImageCacheRef, rhs: ImageCacheRef) -> Bool {
+        lhs.cache === rhs.cache
+    }
 }
 
 // Row updates only: a full reloadData() would lose the scroll position.
@@ -30,6 +48,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     let scrollView = NSScrollView()
     // Strong: the bridge that implements it holds nothing that leads back here.
     var actions: MessageListActions?
+    /// The card over a hovered emoji or sticker, and a clicked one's popout.
+    let hoverCard = ExpressionHoverCard()
+    let expressionPopout = ExpressionPopoutPresenter()
     private let clipView = BottomClipView()
     private static var created = 0
     // Tells tables apart in the scroll log, so a replaced scroll view shows.
@@ -99,6 +120,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var ownChanges = 0
     private var lastClipOrigin = NSPoint.zero
     private var hovered: MessageTimeline.ItemId?
+    // The group whose header plays: the hovered row's first message.
+    private var hoveredGroup: MessageTimeline.ItemId?
     private weak var underlinedText: MessageTextView?
     private weak var hoveredBox: ThreadBoxView?
     // Paging posts willStart and didLive but no didEnd, so a live scroll also ends when its
@@ -229,6 +252,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         reportLine()
         updateRelativeTimer()
+        if previous.focused != state.focused || previous.motion != state.motion
+            || previous.images != state.images
+        {
+            updateAvatarAnimation()
+            updateMediaAnimation()
+        }
         let startChanged = previous.start != state.start || previous.startRoom != state.startRoom
         if startChanged {
             remeasureStart()
@@ -772,6 +801,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func configure(_ cell: NSView, _ edge: MessageTimeline.Edge) {
         if let cell = cell as? ChannelStartCell {
+            cell.images = state.images.cache
             cell.show(state.start, room: state.startRoom)
         } else if let cell = cell as? PlaceholderCell {
             let failure: String? =
@@ -988,6 +1018,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             if let notice = row.noticeParts {
                 let cell = reuse(NoticeCell.identifier) as? NoticeCell ?? NoticeCell()
+                cell.images = state.images.cache
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.onOpenThread = openThread
                 cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
@@ -1000,10 +1031,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell =
                 reuse(MessageCell.identifier) as? MessageCell
                 ?? Signposts.interval("message cell made") { MessageCell() }
+            cell.images = state.images.cache
             cell.isHovered = item.id == hovered
+            cell.animatesAvatar = startsGroup && avatarPlays(groupStartOf: index)
+            let visible = tableView.visibleRect
+            cell.animatesEmoji = emojiPlays(at: index, visible: visible, nearBottom: nearBottomStart())
+            cell.animatesStickers = stickersPlay(at: index, visible: visible)
             cell.onRetry = { [weak self] in self?.actions?.retry(row.message.id) }
             cell.onDelete = { [weak self] in self?.actions?.delete(row.message.id) }
             cell.onLink = { [weak self] url in self?.follow(url, in: row) }
+            cell.onExpression = { [weak self] target, rect in self?.openExpression(target, at: rect) }
             cell.onOpenThread = openThread
             cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
             cell.configure(
@@ -1386,6 +1423,50 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         box?.hovered = true
         hoveredBox = box
         target?.cursor.set()
+        hoverCard.images = state.images.cache
+        hoverCard.motion = state.motion
+        hoverCard.focused = state.focused
+        hoverCard.hover(
+            expressionPopout.windows.panel == nil ? location.flatMap { hoverItem(at: $0, over: target?.view) } : nil,
+            in: tableView.window)
+    }
+
+    // The emoji or sticker under the pointer, with the part of its box the list shows, in
+    // window coordinates.
+    private func hoverItem(at location: NSPoint, over view: NSView?) -> (target: ExpressionTarget, rect: NSRect)? {
+        let item: (ExpressionTarget, NSRect)? =
+            if let text = view as? MessageTextView,
+                let hit = text.expression(at: text.convert(location, from: nil))
+            {
+                (hit.target, text.convert(hit.rect, to: nil))
+            } else if let sticker = view as? StickerView, let shown = sticker.sticker {
+                (.sticker(shown), sticker.convert(sticker.bounds, to: nil))
+            } else {
+                nil
+            }
+        guard let (target, rect) = item else {
+            return nil
+        }
+        let shown = rect.intersection(tableView.convert(tableView.visibleRect, to: nil))
+        return shown.isEmpty ? nil : (target, shown)
+    }
+
+    // A click on an emoji or a sticker: its popout, beside it.
+    private func openExpression(_ target: ExpressionTarget, at rect: NSRect) {
+        hoverCard.hide()
+        guard let window = tableView.window, let model = actions?.expressionPopout(target) else {
+            return
+        }
+        expressionPopout.openGuild = { [weak self] in self?.actions?.openGuild($0) }
+        expressionPopout.motion = state.motion
+        expressionPopout.focused = state.focused
+        expressionPopout.show(model, anchor: rect, in: window, images: state.images.cache)
+    }
+
+    /// The table leaves: its card and popout go with it.
+    func dismantle() {
+        hoverCard.hide()
+        expressionPopout.close()
     }
 
     /// The cursor the list shows at `location` (window coordinates): the I-beam over a message's
@@ -1442,6 +1523,120 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
             (cell as? MessageCell)?.isHovered = index == row
         }
+        // The table can briefly hold more rows than the timeline while it updates.
+        let group =
+            timeline.items.indices.contains(row)
+            ? groupStart(of: row).map { timeline.items[$0].id } : nil
+        if group != hoveredGroup {
+            hoveredGroup = group
+            updateAvatarAnimation()
+        }
+        updateMediaAnimation()
+    }
+
+    // Custom emoji play by the setting while at least 70 % of their message shows and it is
+    // among the 100 nearest the bottom, or while the message is hovered (D139); stickers by
+    // `animate_stickers` and the hover (D140); the window key for both.
+    private func updateMediaAnimation() {
+        let visible = tableView.visibleRect
+        let nearBottom = nearBottomStart()
+        tableView.enumerateAvailableRowViews { rowView, index in
+            guard let cell = rowView.view(atColumn: 0) as? MessageCell else {
+                return
+            }
+            cell.animatesEmoji = emojiPlays(at: index, visible: visible, nearBottom: nearBottom)
+            cell.animatesStickers = stickersPlay(at: index, visible: visible)
+        }
+    }
+
+    private func emojiPlays(at index: Int, visible: NSRect, nearBottom: Int) -> Bool {
+        guard let context = mediaContext(at: index, visible: visible, nearBottom: index >= nearBottom)
+        else {
+            return false
+        }
+        return state.motion.plays(.emoji, context)
+    }
+
+    private func stickersPlay(at index: Int, visible: NSRect) -> Bool {
+        // The table can briefly hold more rows than the timeline while it updates.
+        guard timeline.items.indices.contains(index), case .message(let row, _) = timeline.items[index],
+            !row.shown.stickers.isEmpty,
+            let context = mediaContext(at: index, visible: visible, nearBottom: true)
+        else {
+            return false
+        }
+        return state.motion.plays(.sticker, context)
+    }
+
+    // What the policy asks about a message row: hovered, how much of it shows.
+    private func mediaContext(at index: Int, visible: NSRect, nearBottom: Bool) -> MotionPolicy.Context? {
+        guard timeline.items.indices.contains(index), case .message = timeline.items[index] else {
+            return nil
+        }
+        let rect = tableView.rect(ofRow: index)
+        let shown = rect.intersection(visible)
+        let fraction = rect.height > 0 && !shown.isNull ? shown.height / rect.height : 0
+        return MotionPolicy.Context(
+            windowKey: state.focused, appActive: state.focused,
+            hovered: timeline.items[index].id == hovered, visibleFraction: fraction,
+            nearBottom: nearBottom)
+    }
+
+    // The row of the 100th message from the bottom; rows before it are too far up.
+    private func nearBottomStart() -> Int {
+        var remaining = 100
+        for index in timeline.items.indices.reversed() {
+            if case .message = timeline.items[index] {
+                remaining -= 1
+                if remaining == 0 {
+                    return index
+                }
+            }
+        }
+        return 0
+    }
+
+    // Hovering any message of a group animates the group's header avatar (Discord), while the
+    // window is key and the app active. Every row the table holds, on screen or prepared.
+    private func updateAvatarAnimation() {
+        tableView.enumerateAvailableRowViews { rowView, index in
+            guard let cell = rowView.view(atColumn: 0) as? MessageCell, cell.showsHeader else {
+                return
+            }
+            cell.animatesAvatar = avatarPlays(groupStartOf: index)
+        }
+    }
+
+    // Whether the header at `start` plays: a message of its group is hovered.
+    private func avatarPlays(groupStartOf start: Int) -> Bool {
+        guard let hoveredGroup, timeline.items.indices.contains(start),
+            timeline.items[start].id == hoveredGroup
+        else {
+            return false
+        }
+        return state.motion.plays(
+            .messageAvatar,
+            MotionPolicy.Context(windowKey: state.focused, appActive: state.focused, hovered: true))
+    }
+
+    // The row of the group's first message, for a message row; nil for anything else. The new
+    // messages line starts no group.
+    private func groupStart(of row: Int) -> Int? {
+        var index = row
+        while index >= 0 {
+            switch timeline.items[index] {
+            case .message(_, let startsGroup):
+                if startsGroup {
+                    return index
+                }
+            case .newMessages:
+                break
+            case .edge, .day:
+                return nil
+            }
+            index -= 1
+        }
+        return nil
     }
 
     @objc private func keyChanged(_ notification: Notification) {

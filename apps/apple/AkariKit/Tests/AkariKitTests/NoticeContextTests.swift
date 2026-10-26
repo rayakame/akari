@@ -178,7 +178,7 @@ struct NoticeContextTests {
     func headersAndLinesNameAPersonAlike() {
         let raw = User(
             id: id(4), username: "noa", globalName: nil, displayName: "noa", bot: false,
-            system: false)
+            system: false, avatar: .defaultAvatar(index: 0))
         store.update { $0.channels[id(20)] = thread(20, in: 10) }
 
         let added = row(in: id(20), message(1, in: 20, by: raw, kind: .recipientAdd, mentions: [mira]))

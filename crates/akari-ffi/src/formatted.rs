@@ -1,4 +1,4 @@
-use akari_core::model::{ChannelId, ChannelType, GuildId, MessageId, RoleId, UserId};
+use akari_core::model::{ChannelId, ChannelType, EmojiId, GuildId, MessageId, RoleId, UserId};
 use akari_core::state;
 use akari_markdown::utf16::Utf16Map;
 use akari_markdown::{
@@ -6,14 +6,22 @@ use akari_markdown::{
     Style,
 };
 
+use crate::images::ImageKey;
 use crate::names::Names;
+
+/// A Unicode emoji's name as Discord's hover card and popout show it, without colons
+/// (`grinning`, `thumbsup_tone3`, `flag_de`); `None` for anything that isn't one emoji.
+#[uniffi::export]
+pub fn emoji_shortcode(emoji: String) -> Option<String> {
+    akari_markdown::emoji_shortcode(&emoji)
+}
 
 /// A message's content as Discord formats it. Offsets are UTF-16 code units into `content`.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct FormattedText {
     pub blocks: Vec<TextBlock>,
     pub links: Vec<TextLink>,
-    /// 1–27 emoji and whitespace, nothing else: shown large.
+    /// 1–30 emoji and whitespace, nothing else: shown large.
     pub jumbo: bool,
 }
 
@@ -110,6 +118,8 @@ pub enum SpanKind {
         name: String,
         id: u64,
         animated: bool,
+        /// The image to show in the text, animated when `animated` says so.
+        key: ImageKey,
     },
     Timestamp {
         seconds: i64,
@@ -314,6 +324,10 @@ fn span_kind(
             name: text(name),
             id,
             animated,
+            key: ImageKey::Emoji {
+                emoji_id: EmojiId::new(id),
+                animated,
+            },
         },
         InlineKind::Timestamp { seconds, style } => SpanKind::Timestamp {
             seconds,

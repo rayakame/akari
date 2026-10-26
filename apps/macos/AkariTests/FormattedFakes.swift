@@ -5,6 +5,8 @@ import os
 // One server with two text channels (1001, 1002) of formatted messages; a channel's window can
 // grow while it isn't shown, as when messages arrive.
 nonisolated final class FormattedAccount: Account, @unchecked Sendable {
+    override func requestImage(request: ImageRequest) -> PendingImage { UnavailableImage() }
+
     let formattedStore: FormattedStore
 
     // `locked`: 1001 is a locked thread under 1002, where the user can't send. `pinned`: each
@@ -64,6 +66,8 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
 }
 
 nonisolated final class FormattedStore: Store, @unchecked Sendable {
+    override func displaySettings() -> DisplaySettings { displayDefaults() }
+
     static let channelIds = [ChannelId(rawValue: 1001), ChannelId(rawValue: 1002)]
     static let threadId = ChannelId(rawValue: 1003)
 
@@ -113,7 +117,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
     private func person(_ raw: UInt64) -> User {
         User(
             id: UserId(rawValue: raw), username: "user\(raw)", globalName: nil,
-            displayName: "User \(raw)", bot: false, system: false)
+            displayName: "User \(raw)", bot: false, system: false,
+            avatar: .defaultAvatar(index: UInt8(raw % 6)))
     }
 
     override func subscribe() -> StoreSubscription {
@@ -245,7 +250,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                 fromWebhook: false, content: content,
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(number) * 600),
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-                embedCount: 0, stickerNames: [], componentsV2: false, delivery: .sent,
+                embedCount: 0, stickers: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: mentioned,
                 reference: pin, hasThread: false, mentions: [],
                 call: nil, roleSubscription: nil, purchasedProduct: nil, actor: nil,

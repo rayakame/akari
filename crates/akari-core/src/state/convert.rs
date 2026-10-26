@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use super::settings::NotificationLevel;
 use super::types::{
-    Attachment, Call, Channel, CurrentUser, Delivery, Embed, EmbedAuthor, EmbedField, EmbedFooter,
-    EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message, MessageReference,
-    PermissionOverwrite, ReferencedMessage, Role, RoleSubscription, Sticker, SystemData,
-    ThreadInfo, ThreadMembership, User,
+    Attachment, Call, Channel, CurrentUser, Delivery, Discriminator, Embed, EmbedAuthor,
+    EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message,
+    MessageReference, PermissionOverwrite, ReferencedMessage, Role, RoleSubscription, Sticker,
+    SystemData, ThreadInfo, ThreadMembership, User,
 };
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
 };
 use crate::model::{
-    self, ChannelId, GenericMarker, GuildId, MessageId, Snowflake, Timestamp, UserId,
+    self, ChannelId, EmojiId, GenericMarker, GuildId, MessageId, Snowflake, Timestamp, UserId,
 };
 
 fn text(value: String) -> Box<str> {
@@ -36,7 +36,7 @@ impl User {
             id: user.id,
             username: text(user.username),
             global_name: optional_text(user.global_name),
-            discriminator: user.discriminator.parse().unwrap_or(0),
+            discriminator: Discriminator::parse(&user.discriminator),
             avatar: image(user.avatar),
             bot: user.bot,
             system: user.system,
@@ -65,7 +65,7 @@ impl CurrentUser {
             user.global_name = optional_text(global_name);
         }
         if let Some(discriminator) = update.discriminator {
-            user.discriminator = discriminator.parse().unwrap_or(0);
+            user.discriminator = Discriminator::parse(&discriminator);
         }
         if let Some(avatar) = update.avatar {
             user.avatar = image(avatar);
@@ -94,6 +94,7 @@ impl Guild {
             large: guild.large,
             default_message_notifications: default_level(properties.default_message_notifications),
             community: community(&properties.features),
+            emojis: emoji_ids(&guild.emojis),
         }
     }
 
@@ -120,6 +121,13 @@ impl Guild {
         }
         next
     }
+}
+
+pub(crate) fn emoji_ids(emojis: &[model::EmojiRef]) -> Box<[EmojiId]> {
+    let mut ids: Vec<EmojiId> = emojis.iter().map(|emoji| emoji.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into()
 }
 
 fn community(features: &[String]) -> bool {
@@ -610,10 +618,13 @@ mod tests {
             ))
         };
 
-        assert_eq!(user("0").discriminator, 0);
-        assert_eq!(user("0000").discriminator, 0);
-        assert_eq!(user("1234").discriminator, 1234);
-        assert_eq!(user("abc").discriminator, 0);
+        assert_eq!(user("0").discriminator, Discriminator::Migrated);
+        assert_eq!(user("0000").discriminator, Discriminator::Zeros);
+        assert_eq!(user("1234").discriminator, Discriminator::Tag(1234));
+        assert_eq!(user("0005").discriminator, Discriminator::Tag(5));
+        assert_eq!(user("abc").discriminator, Discriminator::Migrated);
+        assert_eq!(user("10000").discriminator, Discriminator::Migrated);
+        assert_eq!(user("").discriminator, Discriminator::Migrated);
     }
 
     #[test]

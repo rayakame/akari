@@ -28,13 +28,16 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
     var threadSlowmode: Slowmode?
     /// Ray's "hello" says it `longFirstLine` times, a line each.
     var longFirstLine = 1
+    /// Ray's first line ends in a custom emoji.
+    var firstLineEmoji = false
     private(set) var account: BrowserAccount?
 
     @MainActor
     func session() -> SessionModel {
         let store = BrowserStore(
             empty: empty, extra: extra, more: more, lines: lines, creation: creation,
-            threadSlowmode: threadSlowmode, longFirstLine: longFirstLine)
+            threadSlowmode: threadSlowmode, longFirstLine: longFirstLine,
+            firstLineEmoji: firstLineEmoji)
         let account = BrowserAccount(store: store, holdsLoads: holdsLoads)
         self.account = account
         let session = SessionModel(
@@ -56,6 +59,8 @@ nonisolated final class FakeBrowserStore: @unchecked Sendable {
 }
 
 nonisolated final class BrowserAccount: Account, @unchecked Sendable {
+    override func requestImage(request: ImageRequest) -> PendingImage { UnavailableImage() }
+
     private let browserStore: BrowserStore
     private let holdsLoads: Bool
 
@@ -107,12 +112,15 @@ nonisolated final class BrowserAccount: Account, @unchecked Sendable {
 }
 
 nonisolated final class BrowserStore: Store, @unchecked Sendable {
+    override func displaySettings() -> DisplaySettings { displayDefaults() }
+
     private let empty: Bool
     private let more: Bool
     private let lines: Bool
     private let creation: ThreadCreation
     private let slowmode: Slowmode?
     private let longFirstLine: Int
+    private let firstLineEmoji: Bool
     private let channelsById: [ChannelId: Channel]
     private let joined: [ChannelId]
     static let lineIds = (1...3).map {
@@ -122,9 +130,10 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     init(
         empty: Bool, extra: Int = 0, more: Bool = false, lines: Bool = false,
         creation: ThreadCreation = ThreadCreation(public: false, private: false),
-        threadSlowmode: Slowmode? = nil, longFirstLine: Int = 1
+        threadSlowmode: Slowmode? = nil, longFirstLine: Int = 1, firstLineEmoji: Bool = false
     ) {
         self.longFirstLine = longFirstLine
+        self.firstLineEmoji = firstLineEmoji
         self.empty = empty
         self.more = more
         self.lines = lines
@@ -189,7 +198,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
             fromWebhook: false, content: "test",
             timestamp: FakeBrowserStore.date(last.rawValue), editedTimestamp: nil,
             pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
-            stickerNames: [], componentsV2: false, delivery: .sent,
+            stickers: [], componentsV2: false, delivery: .sent,
             formatted: formattedText(content: "test"),
             mentionsMe: false, reference: nil, hasThread: false, mentions: [], call: nil,
             roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
@@ -199,7 +208,8 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
     private func user(_ id: UserId) -> User {
         let name = id == FakeBrowserStore.me ? "rayakame" : "Ray"
         return User(
-            id: id, username: name, globalName: nil, displayName: name, bot: false, system: false)
+            id: id, username: name, globalName: nil, displayName: name, bot: false, system: false,
+            avatar: .defaultAvatar(index: UInt8(id.rawValue % 6)))
     }
 
     override func connection() -> ConnectionState { .online }
@@ -241,6 +251,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
                     (
                         FakeBrowserStore.ray, .default,
                         Array(repeating: "hello", count: longFirstLine).joined(separator: "\n")
+                            + (firstLineEmoji ? " <:pog:5>" : "")
                     )
                 case 1: (FakeBrowserStore.ray, .threadCreated, "b1")
                 default: (FakeBrowserStore.me, .default, "test")
@@ -250,7 +261,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
                 fromWebhook: false, content: content,
                 timestamp: FakeBrowserStore.date(id.rawValue), editedTimestamp: nil,
                 pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
-                stickerNames: [], componentsV2: false, delivery: .sent,
+                stickers: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: false,
                 reference: kind == .threadCreated
                     ? MessageReference(

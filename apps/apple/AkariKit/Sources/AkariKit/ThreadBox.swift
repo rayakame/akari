@@ -92,7 +92,7 @@ public struct ThreadBox: Equatable, Sendable {
         guard message.content.isEmpty else {
             return nil
         }
-        if !message.stickerNames.isEmpty {
+        if !message.stickers.isEmpty {
             return "Click to see sticker"
         }
         if message.kind == .chatInputCommand || message.kind == .contextMenuCommand {

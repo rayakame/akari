@@ -82,7 +82,36 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
                 }
             }
         }
+        storage.enumerateAttribute(.akariEmoji, in: whole) { value, range, _ in
+            guard let box = value as? MessageText.EmojiBox else {
+                return
+            }
+            // A hidden spoiler's emoji stay under the cover, unasked.
+            let spoiler = storage.attribute(.akariSpoiler, at: range.location, effectiveRange: nil)
+            if let spoiler = spoiler as? MessageText.Spoiler, spoiler.hidden {
+                return
+            }
+            // Equal neighbours form one run; each character is a box of its own.
+            for index in range.location..<NSMaxRange(range) {
+                if let rect = emojiRect(index, box) {
+                    shapes.append(.emoji(rect, box))
+                }
+            }
+        }
         return shapes.filter { !$0.rect.isEmpty }
+    }
+
+    // The box at the attachment's place on its line: its bottom on the line's bottom, or
+    // centered on the line (jumbo), in the container's coordinates.
+    private func emojiRect(_ index: Int, _ box: MessageText.EmojiBox) -> NSRect? {
+        let glyph = glyphIndexForCharacter(at: index)
+        guard glyph < numberOfGlyphs else {
+            return nil
+        }
+        let line = lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let x = line.minX + location(forGlyphAt: glyph).x
+        let y = box.centered ? line.midY - box.side / 2 : line.maxY - box.side
+        return NSRect(x: x, y: y, width: box.side, height: box.side)
     }
 
     private func codeBox(_ range: NSRange, _ storage: NSTextStorage, _ container: NSTextContainer)
@@ -161,11 +190,13 @@ nonisolated enum MessageBlockShape: Equatable {
     case cover(NSRect, UInt16)
     case revealed(NSRect)
     case pill(NSRect, MessageText.Pill)
+    /// A custom emoji's box, for an image layer.
+    case emoji(NSRect, MessageText.EmojiBox)
 
     var rect: NSRect {
         switch self {
         case .codeBox(let rect), .quoteBar(let rect), .cover(let rect, _), .revealed(let rect),
-            .pill(let rect, _):
+            .pill(let rect, _), .emoji(let rect, _):
             rect
         }
     }

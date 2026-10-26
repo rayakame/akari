@@ -146,6 +146,10 @@ fn settings_changes(
         writer.put_notification_flags(new.notification_flags)?;
         counts.0 += 1;
     }
+    if old.display != new.display {
+        writer.put_display_settings(&new.display)?;
+        counts.0 += 1;
+    }
     Ok(counts)
 }
 

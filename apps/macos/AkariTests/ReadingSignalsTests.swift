@@ -15,6 +15,7 @@ final class ReadingSignalsTests {
     var active = true
     var key = true
     var visible = true
+    var reducesMotion = false
 
     init() {
         session = SessionModel(
@@ -29,7 +30,22 @@ final class ReadingSignalsTests {
         ReadingSignals(
             session: session, window: window, center: center, workspace: workspace,
             isActive: { [unowned self] in active }, isKey: { [unowned self] _ in key },
-            isVisible: { [unowned self] _ in visible }, monitors: monitors)
+            isVisible: { [unowned self] _ in visible },
+            reducesMotion: { [unowned self] in reducesMotion }, monitors: monitors)
+    }
+
+    // The system's Reduce Motion reaches the session's motion policy, live.
+    @Test
+    func reduceMotionReachesTheSession() {
+        reducesMotion = true
+        let signals = signals()
+        _ = signals
+        #expect(session.motion.reduceMotion)
+
+        reducesMotion = false
+        workspace.post(
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        #expect(!session.motion.reduceMotion)
     }
 
     func click(in window: NSWindow) throws -> NSEvent {

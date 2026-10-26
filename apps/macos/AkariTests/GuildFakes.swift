@@ -4,6 +4,8 @@ import os
 
 // One server with one text channel (11), and no messages.
 nonisolated final class GuildAccount: Account, @unchecked Sendable {
+    override func requestImage(request: ImageRequest) -> PendingImage { UnavailableImage() }
+
     // Holding loads keeps the channel unloaded: its first page never lands.
     init(holdsLoads: Bool = false) {
         self.holdsLoads = holdsLoads
@@ -50,6 +52,8 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
 
 // One server with one text channel, and no messages.
 nonisolated final class GuildStore: Store, @unchecked Sendable {
+    override func displaySettings() -> DisplaySettings { displayDefaults() }
+
     private let channel = Channel(
         id: ChannelId(rawValue: 11), kind: .guildText, guildId: GuildId(rawValue: 1),
         parentId: nil, name: "general", position: 0, topic: nil, nsfw: false,

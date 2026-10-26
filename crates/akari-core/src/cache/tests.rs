@@ -13,11 +13,12 @@ use crate::model::{
 };
 use crate::state::apply::Entities;
 use crate::state::{
-    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Embed, EmbedAuthor,
-    EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, FolderEntry, Guild, GuildSettings,
-    ImageHash, Member, Message, MessageReference, NotificationLevel, PermissionOverwrite,
-    ReferencedMessage, Role, RoleSubscription, Sticker, SystemData, ThreadInfo, ThreadMembership,
-    Unreads, User, UserSettings,
+    Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
+    DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
+    ExplicitContentSettings, FolderEntry, Guild, GuildSettings, ImageHash, Member, Message,
+    MessageReference, NotificationLevel, PermissionOverwrite, Redaction, ReferencedMessage, Role,
+    RoleSubscription, SpoilerSetting, Sticker, StickerAnimation, SystemData, ThreadInfo,
+    ThreadMembership, Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -68,7 +69,7 @@ pub(crate) fn user(id: u64, name: &str) -> User {
         id: Snowflake::new(id),
         username: name.to_lowercase().into(),
         global_name: Some(name.into()),
-        discriminator: 0,
+        discriminator: Discriminator::Migrated,
         avatar: Some(ImageHash::parse("a_0123456789abcdef0123456789abcdef")),
         bot: false,
         system: false,
@@ -115,6 +116,11 @@ pub(crate) fn guild(id: u64, name: &str) -> Guild {
         large: true,
         default_message_notifications: crate::state::NotificationLevel::OnlyMentions,
         community: id == 100,
+        emojis: if id == 100 {
+            [Snowflake::new(7001), Snowflake::new(7002)].into()
+        } else {
+            Box::new([])
+        },
     }
 }
 
@@ -370,6 +376,7 @@ fn write_entities(cache: &mut Cache, entities: &Entities) {
             }
             writer.put_folders(entities.settings.folders.as_deref())?;
             writer.put_notification_flags(entities.settings.notification_flags)?;
+            writer.put_display_settings(&entities.settings.display)?;
             Ok(())
         })
         .unwrap();
@@ -395,6 +402,17 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
         ..ChannelSettings::default()
     };
     entities.settings = UserSettings {
+        display: DisplaySettings {
+            gif_auto_play: false,
+            animate_stickers: StickerAnimation::OnInteraction,
+            render_spoilers: SpoilerSetting::Always,
+            explicit_content: ExplicitContentSettings {
+                guilds: Redaction::Show,
+                friend_dm: Redaction::Blur,
+                non_friend_dm: Redaction::Block,
+            },
+            ..DisplaySettings::default()
+        },
         folders: Some(Arc::from(vec![
             FolderEntry {
                 id: Some(7),
@@ -434,7 +452,7 @@ pub(crate) fn with_settings(mut entities: Entities) -> Entities {
         ]
         .into(),
         notification_flags: 16,
-        unreadable_folders: false,
+        unreadable: false,
     };
     entities
 }

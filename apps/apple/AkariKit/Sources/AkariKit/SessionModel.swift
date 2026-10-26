@@ -38,6 +38,13 @@ public final class SessionModel {
     public let userId: UserId
     public private(set) var connection: ConnectionState = .offline
     public private(set) var currentUser: User?
+    /// The decoded images of this account's boxes, over the account's files.
+    public let images: ImageCache
+    /// Whether animations play: the display settings, read again when they change, and the
+    /// system's Reduce Motion (`setReduceMotion`).
+    public private(set) var motion = MotionPolicy.default
+    /// The window is key and the app active: what every animation needs besides its own rule.
+    public private(set) var focused = false
     public let servers: ServerListModel
     public let directMessages: DirectMessageListModel
     /// Collapsed categories, Akari's own: Discord's clients don't sync them.
@@ -166,6 +173,7 @@ public final class SessionModel {
     @ObservationIgnored private var toldReading: [ChannelId] = []
     // On a 401 the core has stopped reading itself, and close() can come inside that batch.
     @ObservationIgnored private var accountClosed = false
+    @ObservationIgnored private var reduceMotion = false
     // The list reports from inside the table's scroll callbacks, too often for a call into the
     // core each; it hears the last value.
     @ObservationIgnored private(set) var pendingReading: Task<Void, Never>?
@@ -194,6 +202,7 @@ public final class SessionModel {
         spotToRestore = memory.lastSpot(of: userId)
         splits = memory.splits(of: userId)
         store = account.store()
+        images = ImageCache(source: account)
         servers = ServerListModel(store: store, account: userId, memory: memory)
         directMessages = DirectMessageListModel(store: store)
         collapsed = memory.collapsedCategories()
@@ -212,6 +221,7 @@ public final class SessionModel {
         self.subscription = subscription
         connection = store.connection()
         currentUser = store.currentUser()
+        readMotion()
         servers.reload()
         directMessages.reload()
         // Restored before this subscription, so no event will say so.
@@ -248,6 +258,22 @@ public final class SessionModel {
         // Reopening the last place counts as opening it, also when the cache or READY does.
         engage()
         updateReading()
+    }
+
+    /// The system's Reduce Motion, which the app reads and follows live.
+    public func setReduceMotion(_ reduceMotion: Bool) {
+        guard reduceMotion != self.reduceMotion else {
+            return
+        }
+        self.reduceMotion = reduceMotion
+        motion.reduceMotion = reduceMotion
+    }
+
+    private func readMotion() {
+        let next = MotionPolicy(settings: store.displaySettings(), reduceMotion: reduceMotion)
+        if next != motion {
+            motion = next
+        }
     }
 
     /// The hosts the account trusts for masked links, kept with the rest of its memory.
@@ -673,6 +699,14 @@ public final class SessionModel {
     }
 
     /// Opens `parent`'s Threads browser, in place of one already open.
+    /// A clicked emoji's or sticker's popout, for a message in `channel` ("this server" is the
+    /// channel's).
+    public func expressionPopout(_ target: ExpressionTarget, in channel: ChannelId) -> ExpressionPopoutModel {
+        ExpressionPopoutModel(
+            target: target, channelGuild: store.channel(id: channel)?.guildId, store: store,
+            lookups: account)
+    }
+
     public func openThreadBrowser(of parent: ChannelId, as presentation: ThreadBrowserModel.Presentation) {
         engage()
         threadBrowser = ThreadBrowserModel(
@@ -887,18 +921,30 @@ public final class SessionModel {
     public func setAppActive(_ active: Bool) {
         let lost = appActive && !active
         appActive = active
+        updateFocused()
         readingInputChanged(lost: lost)
     }
 
     public func setWindowKey(_ key: Bool) {
         let lost = windowKey && !key
         windowKey = key
+        updateFocused()
         readingInputChanged(lost: lost)
+    }
+
+    private func updateFocused() {
+        let next = appActive && windowKey
+        if next != focused {
+            focused = next
+        }
     }
 
     public func setWindowVisible(_ visible: Bool) {
         let lost = windowVisible && !visible
         windowVisible = visible
+        if lost {
+            images.dropMedia()
+        }
         readingInputChanged(lost: lost)
     }
 
@@ -979,14 +1025,21 @@ public final class SessionModel {
             if case .closed(let error) = state {
                 closed(error)
             } else {
+                let cameOnline = state == .online && connection != .online
                 connection = state
                 if state == .online {
                     wasOnline = true
+                }
+                if cameOnline {
+                    images.retryFailed()
                 }
             }
         }
         if batch.everythingChanged || batch.currentUserChanged {
             currentUser = store.currentUser()
+        }
+        if batch.everythingChanged || batch.displaySettingsChanged {
+            readMotion()
         }
         // A list the session replaces on its own isn't one the user chose to read.
         if case .guild(let id) = place, batch.ready || batch.guildListChanged,

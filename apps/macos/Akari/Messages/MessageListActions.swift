@@ -38,9 +38,12 @@ protocol MessageListActions: AnyObject {
     // A message's "Create Thread": whether it shows, and the form it opens.
     func canCreateThread(from message: MessageId) -> Bool
     func createThread(from message: MessageId)
+    // A clicked emoji's or sticker's popout; nil where there's none to show.
+    func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel?
 }
 
 extension MessageListActions {
     func canCreateThread(from message: MessageId) -> Bool { false }
     func createThread(from message: MessageId) {}
+    func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? { nil }
 }

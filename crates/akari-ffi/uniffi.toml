@@ -35,6 +35,10 @@ lower = "{}.rawValue"
 lift = "StickerId(rawValue: {})"
 lower = "{}.rawValue"
 
+[bindings.swift.custom_types.StickerPackId]
+lift = "StickerPackId(rawValue: {})"
+lower = "{}.rawValue"
+
 [bindings.swift.custom_types.Permissions]
 lift = "Permissions(rawValue: {})"
 lower = "{}.rawValue"

@@ -12,7 +12,7 @@ use super::events::{ConnectionState, StoreEvent};
 use super::order;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
-use super::settings::{GuildSettings, NotificationLevel, ServerListItem};
+use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{
     Channel, CurrentUser, Guild, Member, Message, StarterMessage, ThreadBrowser, ThreadCreation,
     User,
@@ -25,7 +25,7 @@ use super::windows::{
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
 use crate::load_report::PageOutcome;
-use crate::model::{self, ChannelId, GuildId, MessageId, Permissions, Timestamp, UserId};
+use crate::model::{self, ChannelId, EmojiId, GuildId, MessageId, Permissions, Timestamp, UserId};
 
 #[cfg(test)]
 thread_local! {
@@ -385,7 +385,7 @@ impl Store {
         #[cfg(test)]
         Self::park_in(&self.shared.diff_park);
         let diff = self.read(|inner| {
-            inner.state.keep_folders(&mut entities);
+            inner.state.keep_unreadable_settings(&mut entities);
             // Known since the first pass; the diff mustn't report them removed.
             for thread in inner.state.keep_known_threads(&mut entities) {
                 derived.add_thread(&thread);
@@ -865,6 +865,12 @@ impl Store {
         self.read(|inner| inner.state.guild_settings(guild))
     }
 
+    /// How media shows and animates, from the user's settings; Discord's defaults where the
+    /// user set nothing. `DisplaySettingsChanged` says when to read it again.
+    pub fn display_settings(&self) -> DisplaySettings {
+        self.read(|inner| inner.state.display_settings())
+    }
+
     /// Muted now by its own settings, for a thread by its own membership. Neither a muted
     /// category nor a muted guild makes its channels muted, nor a muted channel its threads;
     /// see [`guild_settings`](Self::guild_settings).
@@ -898,6 +904,12 @@ impl Store {
 
     pub fn guild(&self, id: GuildId) -> Option<Arc<Guild>> {
         self.read(|inner| inner.state.guild(id))
+    }
+
+    /// The server a custom emoji is from, among the user's available servers; `None` for an
+    /// emoji from a server the user isn't in, or one that's down.
+    pub fn emoji_guild(&self, emoji: EmojiId) -> Option<GuildId> {
+        self.read(|inner| inner.state.emoji_guild(emoji))
     }
 
     /// Guilds that are down or blocked in the user's region.

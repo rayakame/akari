@@ -1,3 +1,4 @@
+import AkariKit
 import AppKit
 
 /// Selectable, not editable, laid out by TextKit 1: a message's body, and the other text Discord
@@ -7,12 +8,28 @@ final class MessageTextView: NSTextView {
     private var padding: (top: CGFloat, bottom: CGFloat) = (0, 0)
     private var linkElements: [LinkElement]?
     var onLink: (URL) -> Void = { _ in }
+    /// A click on a custom or Unicode emoji, with its box in window coordinates.
+    var onExpression: (ExpressionTarget, NSRect) -> Void = { _, _ in }
+    /// A message's own text, whose emoji show the hand, a hover card and a popout.
+    var detectsExpressions = false
     /// On a link Discord underlines while the pointer is over it.
     static let underlinesOnHover = NSAttributedString.Key("akari.underlinesOnHover")
     private var underlined: NSRange?
     // The message's own items, above the text's.
     var messageMenu: () -> [NSMenuItem] = { [] }
     let decorations = MessageDecorations()
+    // Above the text: the selection's fill is opaque, and an emoji stays visible when selected.
+    let emojiOverlay = EmojiOverlay()
+    /// Where the custom emoji's images come from.
+    var images: ImageCache? {
+        get { emojiOverlay.images }
+        set { emojiOverlay.images = newValue }
+    }
+    /// The list's say: this message's custom emoji play.
+    var animatesEmoji: Bool {
+        get { emojiOverlay.animates }
+        set { emojiOverlay.animates = newValue }
+    }
 
     init() {
         let storage = NSTextStorage()
@@ -60,6 +77,7 @@ final class MessageTextView: NSTextView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         decorations.frame = frame
+        emojiOverlay.frame = frame
         if newSize.width != measuredWidth {
             measuredWidth = newSize.width
             linkElements = nil
@@ -98,26 +116,34 @@ final class MessageTextView: NSTextView {
     override func viewWillMove(toSuperview newSuperview: NSView?) {
         super.viewWillMove(toSuperview: newSuperview)
         decorations.removeFromSuperview()
+        emojiOverlay.removeFromSuperview()
     }
 
     override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         superview?.addSubview(decorations, positioned: .below, relativeTo: self)
+        superview?.addSubview(emojiOverlay, positioned: .above, relativeTo: self)
         decorations.frame = frame
+        emojiOverlay.frame = frame
     }
 
     override func setFrameOrigin(_ newOrigin: NSPoint) {
         super.setFrameOrigin(newOrigin)
         decorations.frame = frame
+        emojiOverlay.frame = frame
     }
 
     override var isHidden: Bool {
-        didSet { decorations.isHidden = isHidden }
+        didSet {
+            decorations.isHidden = isHidden
+            emojiOverlay.isHidden = isHidden
+        }
     }
 
     private func updateDecorations() {
         let shapes = (layoutManager as? MessageLayoutManager)?.blocks() ?? []
         decorations.show(shapes, at: textContainerOrigin)
+        emojiOverlay.show(shapes, at: textContainerOrigin)
     }
 
     // The table routes Akari's own links and asks before masked ones; super would open them.
@@ -211,13 +237,51 @@ final class MessageTextView: NSTextView {
         return hides
     }
 
-    // A hidden code block reveals on a click anywhere on its cover, its padding included.
+    // A hidden code block reveals on a click anywhere on its cover, its padding included. A
+    // press on an emoji is tracked here: released on it, its popout opens; dragged away, the
+    // press and what followed go to NSTextView, which selects.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let spoiler = decorations.cover(at: point),
             let url = URL(string: "akari://spoiler/\(spoiler)")
         {
             onLink(url)
+            return
+        }
+        if event.clickCount == 1, let hit = expression(at: point), let window {
+            var seen: [NSEvent] = []
+            var others: [NSEvent] = []
+            defer {
+                for other in others.reversed() {
+                    NSApp.postEvent(other, atStart: true)
+                }
+            }
+            while let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
+                // Another window's events go back to it; older ones were never this press's.
+                if next.windowNumber != window.windowNumber {
+                    others.append(next)
+                    continue
+                }
+                guard next.timestamp >= event.timestamp else {
+                    continue
+                }
+                seen.append(next)
+                let at = convert(next.locationInWindow, from: nil)
+                if next.type == .leftMouseUp {
+                    if hit.rect.contains(at) {
+                        setSelectedRange(NSRange(location: selectedRange().location, length: 0))
+                        onExpression(hit.target, convert(hit.rect, to: nil))
+                    }
+                    return
+                }
+                if hypot(at.x - point.x, at.y - point.y) > 3 {
+                    break
+                }
+            }
+            for followed in seen.reversed() {
+                NSApp.postEvent(followed, atStart: true)
+            }
+            super.mouseDown(with: event)
             return
         }
         // NSTextView would start dragging the selection; a browser follows the link.
@@ -294,7 +358,62 @@ final class MessageTextView: NSTextView {
     /// text: the pointing hand over a link or a hidden block, the I-beam over text, the arrow
     /// around it.
     func cursor(at point: NSPoint) -> NSCursor {
-        cursorAreas.last { $0.rect.contains(point) }?.cursor ?? .arrow
+        if expression(at: point) != nil {
+            return .pointingHand
+        }
+        return cursorAreas.last { $0.rect.contains(point) }?.cursor ?? .arrow
+    }
+
+    /// A custom or Unicode emoji under `point` (this view's coordinates), with its box: one in
+    /// a link, inline code, a code block or a hidden spoiler is that, not an emoji.
+    func expression(at point: NSPoint) -> (target: ExpressionTarget, rect: NSRect)? {
+        guard detectsExpressions, let layoutManager, let textContainer, let storage = textStorage,
+            storage.length > 0
+        else {
+            return nil
+        }
+        if let (box, rect) = emojiOverlay.box(at: point) {
+            guard let index = character(at: point) ?? emojiIndex(near: point),
+                storage.attribute(.link, at: index, effectiveRange: nil) == nil
+            else {
+                return nil
+            }
+            return (.customEmoji(id: box.id, name: box.name, animated: box.animated), rect)
+        }
+        guard let index = character(at: point) else {
+            return nil
+        }
+        let attributes = storage.attributes(at: index, effectiveRange: nil)
+        let code = (attributes[.akariBlock] as? MessageText.Block)?.contains(.code) == true
+            || attributes[.akariPill] as? MessageText.Pill == .code
+        guard attributes[.link] == nil, !code, attributes[.akariEmoji] == nil else {
+            return nil
+        }
+        let range = (storage.string as NSString).rangeOfComposedCharacterSequence(at: index)
+        let glyph = (storage.string as NSString).substring(with: range)
+        // A lone ASCII character is never an emoji (a keycap is a digit and two more); the name
+        // lookup crosses into Rust.
+        let scalars = glyph.unicodeScalars
+        guard scalars.count > 1 || scalars.first.map({ $0.value >= 0xA9 }) == true,
+            let name = emojiShortcode(emoji: glyph)
+        else {
+            return nil
+        }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+            .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+        return (.unicodeEmoji(glyph, name: name), rect)
+    }
+
+    // The attachment character a custom emoji's box stands on, for a point in the box above the
+    // attachment's own (shorter) glyph.
+    private func emojiIndex(near point: NSPoint) -> Int? {
+        guard let layoutManager, let textContainer else {
+            return nil
+        }
+        let inside = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        return layoutManager.characterIndexForGlyph(
+            at: layoutManager.glyphIndex(for: inside, in: textContainer))
     }
 
     // Each line's text runs, links apart, and the hidden blocks' covers, in this view's
@@ -456,6 +575,80 @@ nonisolated final class LinkElement: NSAccessibilityElement {
     }
 }
 
+/// The custom emoji's image layers on their boxes (D139), over a message's text: one
+/// `ImageLayerView` per box, `:name:` as its fallback. Takes no clicks.
+final class EmojiOverlay: NSView {
+    private var shapes: [MessageBlockShape] = []
+    private var origin = NSPoint.zero
+    private(set) var emojiViews: [ImageLayerView] = []
+    var images: ImageCache? {
+        didSet {
+            if images !== oldValue {
+                emojiViews.forEach { $0.images = images }
+            }
+        }
+    }
+    var animates = false {
+        didSet {
+            if animates != oldValue {
+                emojiViews.forEach { $0.animates = animates }
+            }
+        }
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    /// The emoji whose box holds `point` (the text view's coordinates).
+    func box(at point: NSPoint) -> (MessageText.EmojiBox, NSRect)? {
+        for shape in shapes {
+            if case .emoji(let rect, let box) = shape {
+                let placed = rect.offsetBy(dx: origin.x, dy: origin.y)
+                if placed.contains(point) {
+                    return (box, placed)
+                }
+            }
+        }
+        return nil
+    }
+
+    func show(_ all: [MessageBlockShape], at origin: NSPoint) {
+        let shapes = all.filter { if case .emoji = $0 { true } else { false } }
+        guard shapes != self.shapes || origin != self.origin else {
+            return
+        }
+        self.shapes = shapes
+        self.origin = origin
+        for (index, shape) in shapes.enumerated() {
+            guard case .emoji(let rect, let box) = shape else {
+                continue
+            }
+            let view: ImageLayerView
+            if index < emojiViews.count {
+                view = emojiViews[index]
+            } else {
+                view = ImageLayerView()
+                view.fit = .contain
+                view.images = images
+                view.animates = animates
+                emojiViews.append(view)
+                addSubview(view)
+            }
+            view.frame = rect.offsetBy(dx: origin.x, dy: origin.y)
+            view.fallbackText = ":\(box.name):"
+            view.show(ImageLayerView.Content(key: box.key, canAnimate: box.animated))
+        }
+        for view in emojiViews.dropFirst(shapes.count) {
+            view.show(nil)
+            view.removeFromSuperview()
+        }
+        emojiViews.removeLast(emojiViews.count - shapes.count)
+    }
+}
+
 /// Code boxes, quote bars, pills and spoilers' backgrounds as layers behind a message's text,
 /// kept out of the text's bitmap (apps/macos/README.md, Performance).
 final class MessageDecorations: NSView {
@@ -488,7 +681,8 @@ final class MessageDecorations: NSView {
         return nil
     }
 
-    func show(_ shapes: [MessageBlockShape], at origin: NSPoint) {
+    func show(_ all: [MessageBlockShape], at origin: NSPoint) {
+        let shapes = all.filter { if case .emoji = $0 { false } else { true } }
         guard shapes != self.shapes || origin != self.origin else {
             return
         }
@@ -560,6 +754,8 @@ private final class BlockView: NSView {
                 layer.backgroundColor = Palette.spoilerRevealed.cgColor
                 layer.borderWidth = 0
                 layer.cornerRadius = 3
+            case .emoji:
+                layer.backgroundColor = nil
             case .pill(_, let pill):
                 layer.borderWidth = 0
                 layer.cornerRadius = 3

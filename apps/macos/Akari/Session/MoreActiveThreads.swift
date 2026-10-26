@@ -205,10 +205,10 @@ struct PeekRow: View {
     @ViewBuilder private var leading: some View {
         if let peek {
             if let owner = peek.owner {
-                InitialsAvatar(owner, size: 16)
+                UserAvatar(owner, size: 16, place: .facepile)
             } else {
                 Circle()
-                    .fill(Color(nsColor: InitialsAvatar.color(peek.ownerId?.rawValue ?? 0)))
+                    .fill(Color(nsColor: Palette.avatarPlaceholder))
             }
         } else {
             Image(systemName: ChannelSymbols.name(for: .publicThread))

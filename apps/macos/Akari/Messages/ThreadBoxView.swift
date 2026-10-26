@@ -23,6 +23,11 @@ final class ThreadBoxView: NSButton {
     private(set) var box: ThreadBox?
     private var content: NSAttributedString?
     private var time: String?
+    let avatarView = ImageLayerView()
+    var images: ImageCache? {
+        get { avatarView.images }
+        set { avatarView.images = newValue }
+    }
     /// Kept clear above the box: the gap to the message's text. The view's height rounds up to a
     /// whole point, as row heights do.
     var topInset: CGFloat = 0 {
@@ -44,6 +49,27 @@ final class ThreadBoxView: NSButton {
         setButtonType(.momentaryChange)
         translatesAutoresizingMaskIntoConstraints = false
         setContentHuggingPriority(.defaultLow, for: .horizontal)
+        avatarView.placeholder = .disc
+        avatarView.cornerRadius = Self.avatar / 2
+        avatarView.isHidden = true
+        addSubview(avatarView)
+    }
+
+    override func layout() {
+        super.layout()
+        placeAvatar()
+    }
+
+    // The avatar's place follows the parts; the view sits where the drawn avatar was.
+    private func placeAvatar() {
+        guard let part = parts.first(where: { $0.avatar != nil }) else {
+            avatarView.isHidden = true
+            avatarView.show(nil)
+            return
+        }
+        avatarView.isHidden = false
+        avatarView.frame = part.rect
+        avatarView.show(part.avatar.map { ImageLayerView.Content(key: $0) })
     }
 
     required init?(coder: NSCoder) {
@@ -68,6 +94,7 @@ final class ThreadBoxView: NSButton {
         // A reused cell's box may be elsewhere now; the list says after its update.
         hovered = false
         needsDisplay = true
+        placeAvatar()
     }
 
     /// The box itself, within the view.
@@ -125,12 +152,8 @@ final class ThreadBoxView: NSButton {
             roundedRect: frame.insetBy(dx: inset, dy: inset), xRadius: Self.radius - inset,
             yRadius: Self.radius - inset
         ).fill()
-        for part in parts {
-            if let avatar = part.avatar {
-                AvatarView.draw(name: avatar.name, userId: avatar.id, in: part.rect)
-            } else {
-                Self.draw(part.text, in: part.rect)
-            }
+        for part in parts where part.avatar == nil {
+            Self.draw(part.text, in: part.rect)
         }
     }
 
@@ -178,6 +201,20 @@ final class ThreadBoxView: NSButton {
     // spoilers covered.
     static func content(_ built: NSAttributedString) -> NSAttributedString {
         let text = NSMutableAttributedString(attributedString: built)
+        // A custom emoji reads as its name on the line; the box has no image layers.
+        var emoji: [(NSRange, String)] = []
+        text.enumerateAttribute(.akariEmoji, in: NSRange(location: 0, length: text.length)) {
+            value, range, _ in
+            if let box = value as? MessageText.EmojiBox {
+                emoji.append((range, String(repeating: ":\(box.name):", count: range.length)))
+            }
+        }
+        for (range, name) in emoji.reversed() {
+            var attributes = text.attributes(at: range.location, effectiveRange: nil)
+            attributes[.attachment] = nil
+            attributes[.akariEmoji] = nil
+            text.replaceCharacters(in: range, with: NSAttributedString(string: name, attributes: attributes))
+        }
         let whole = NSRange(location: 0, length: text.length)
         text.removeAttribute(.link, range: whole)
         text.removeAttribute(.toolTip, range: whole)
@@ -245,7 +282,7 @@ final class ThreadBoxView: NSButton {
         let text: NSAttributedString
         let rect: NSRect
         let line: Int
-        var avatar: (name: String, id: UInt64)?
+        var avatar: ImageKey?
     }
 
     private var boxWidth: CGFloat {
@@ -344,7 +381,7 @@ final class ThreadBoxView: NSButton {
             parts.append(
                 Part(
                     text: NSAttributedString(), rect: avatarRect, line: 1,
-                    avatar: (second[1].string, latest.author.id.rawValue)))
+                    avatar: latest.author.avatar))
             x += Self.avatar + Self.avatarGap
             let authorWidth = max(0, min(Self.width(second[1]), end - x))
             parts.append(Part(text: second[1], rect: line(x, secondTop, authorWidth), line: 1))
