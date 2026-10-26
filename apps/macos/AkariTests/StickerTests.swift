@@ -170,6 +170,27 @@ final class StickerTests {
         #expect(try cell().animatesStickers)
     }
 
+    // While rows go, the table holds more of them than the timeline for a moment; a pointer
+    // update then (the clip moves under the pointer) asks only about rows the timeline has.
+    @Test
+    func rowsWithStickersCanGoUnderThePointer() throws {
+        let cache = ImageCache(source: FakeImageSource.stalling())
+        let rows = (1...30).map { raw in
+            row(
+                UInt64(raw), at: list.noon + Double(raw) * 60, content: "message \(raw)",
+                stickers: raw > 24 ? ["wave"] : [], stickerFormat: .apng)
+        }
+        list.show(state(rows, cache: cache))
+        let bottom = NSPoint(x: 300, y: list.table.visibleRect.maxY - 30)
+        list.pointer.location = list.table.convert(bottom, to: nil)
+        list.controller.pointerMoved()
+        list.table.beforeRemove = { [list] in list.controller.pointerMoved() }
+
+        list.show(state(Array(rows.prefix(20)), cache: cache))
+
+        #expect(list.table.removes == 1)
+    }
+
     // A reused cell for a message without stickers lets its stickers go: no ask, no pin, no
     // player, and the list's say turns off.
     @Test

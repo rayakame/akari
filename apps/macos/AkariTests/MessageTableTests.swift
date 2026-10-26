@@ -12,6 +12,8 @@ struct MessageTableTests {
         var inserts = 0
         var reloaded: [IndexSet] = []
         var afterReload: (IndexSet) -> Void = { _ in }
+        // Runs while the timeline already holds fewer rows than the table, as a clip move can.
+        var beforeRemove: () -> Void = {}
 
         override func reloadData() {
             fullReloads += 1
@@ -27,6 +29,7 @@ struct MessageTableTests {
         override func removeRows(at indexes: IndexSet, withAnimation options: AnimationOptions = [])
         {
             removes += 1
+            beforeRemove()
             super.removeRows(at: indexes, withAnimation: options)
         }
 

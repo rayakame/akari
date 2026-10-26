@@ -1558,7 +1558,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func stickersPlay(at index: Int, visible: NSRect) -> Bool {
-        guard case .message(let row, _) = timeline.items[index], !row.shown.stickers.isEmpty,
+        // The table can briefly hold more rows than the timeline while it updates.
+        guard timeline.items.indices.contains(index), case .message(let row, _) = timeline.items[index],
+            !row.shown.stickers.isEmpty,
             let context = mediaContext(at: index, visible: visible, nearBottom: true)
         else {
             return false
