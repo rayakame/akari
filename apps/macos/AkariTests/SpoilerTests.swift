@@ -19,6 +19,27 @@ struct SpoilerTests {
             as? MessageText.Spoiler
     }
 
+    // `render_spoilers` "Always" (or "If moderator" with Manage Messages): the core says the
+    // channel's spoilers show, in the text as in the media.
+    @Test
+    func aChannelThatShowsSpoilersBuildsThemUncovered() throws {
+        var message = row(1, at: .now, content: "a ||one|| b ||`two`||").message
+        message.spoilersShown = true
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+
+        let text = MessageText.build(message, revealed: [], now: .now, times: times).text
+        var hidden: [Bool] = []
+        text.enumerateAttribute(.akariSpoiler, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+            if let spoiler = value as? MessageText.Spoiler {
+                hidden.append(spoiler.hidden)
+            }
+        }
+
+        #expect(!hidden.isEmpty)
+        #expect(hidden.allSatisfy { !$0 })
+        #expect(text.string.contains("one") && text.string.contains("two"))
+    }
+
     @Test
     func aHiddenSpoilerIsCovered() throws {
         let drawing = MessageTextDrawingTests()
