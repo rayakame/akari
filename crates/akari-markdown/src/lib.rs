@@ -78,6 +78,58 @@ pub fn parse_embed(source: &str, text: EmbedText) -> Document {
     flatten::flatten(&nodes, false)
 }
 
+/// A non-rich embed's text as Discord shows it: the string itself, its line breaks kept and a
+/// last one dropped.
+pub fn plain(source: &str) -> Document {
+    if u32::try_from(source.len()).is_err() {
+        return Document::default();
+    }
+    let inline = |kind, range: std::ops::Range<usize>| Inline {
+        kind,
+        style: Style::default(),
+        spoiler: None,
+        link: None,
+        source: Span::new(range),
+    };
+    let mut inlines = Vec::new();
+    let mut start = 0;
+    for (index, _) in source.match_indices('\n') {
+        let end = if source[..index].ends_with('\r') {
+            index - 1
+        } else {
+            index
+        };
+        if end > start {
+            inlines.push(inline(InlineKind::Text(Span::new(start..end)), start..end));
+        }
+        inlines.push(inline(InlineKind::Break, end..index + 1));
+        start = index + 1;
+    }
+    if start < source.len() {
+        inlines.push(inline(
+            InlineKind::Text(Span::new(start..source.len())),
+            start..source.len(),
+        ));
+    }
+    while inlines
+        .last()
+        .is_some_and(|last| last.kind == InlineKind::Break)
+    {
+        inlines.pop();
+    }
+    if inlines.is_empty() {
+        return Document::default();
+    }
+    let block = Block {
+        kind: BlockKind::Paragraph,
+        containers: Box::new([]),
+        spoiler: None,
+        inlines: inlines.into(),
+        source: Span::new(0..source.len()),
+    };
+    Document::new(vec![block], Vec::new(), false, 0)
+}
+
 /// At most this many steps per byte of input, plus one (D73). About 100 at worst: 64 nested
 /// italics, each reading its content again.
 #[cfg(any(test, feature = "fuzzing"))]

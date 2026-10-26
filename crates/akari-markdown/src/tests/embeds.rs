@@ -183,3 +183,31 @@ fn a_spoilered_link_is_found_anywhere() {
         assert!(!parse(source).has_spoilered_link(), "{source}");
     }
 }
+
+// A non-rich embed's text (an article's title, a link's description) is plain: no styles, no
+// links, its line breaks kept (module 91688 renders it as the string, `white-space: pre-line`).
+#[test]
+fn plain_text_is_one_paragraph_of_text_and_breaks() {
+    let doc = crate::plain("**not bold** <@1>\nhttps://example.com\r\n");
+
+    assert_eq!(kinds(&doc), [BlockKind::Paragraph]);
+    let inlines: Vec<_> = doc.blocks()[0]
+        .inlines
+        .iter()
+        .map(|inline| (inline.kind, inline.style, inline.link))
+        .collect();
+    let text = |start, end| {
+        (
+            InlineKind::Text(crate::Span { start, end }),
+            crate::Style::default(),
+            None,
+        )
+    };
+    assert_eq!(inlines[0], text(0, 17));
+    assert_eq!(inlines[1].0, InlineKind::Break);
+    assert_eq!(inlines[2], text(18, 37));
+    assert_eq!(inlines.len(), 3, "a last break shows nothing");
+    assert!(doc.links().is_empty());
+    assert!(!doc.jumbo());
+    assert!(crate::plain("").blocks().is_empty());
+}
