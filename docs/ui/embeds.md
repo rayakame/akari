@@ -11,9 +11,10 @@ runtime like every image ([images.md](images.md)). Where Akari differs, the diff
 - Only a user's message shows embeds (default, reply, slash command, context menu command);
   the lines of system messages read their embeds' fields themselves.
 - Never drawn: AutoMod, safety and age verification notices, application news, post previews,
-  voice channel and poll result embeds, gifts.
+  voice channel and poll result embeds, gifts, and the article cards of Discord's own shop and
+  game pages (the client draws those as cards of its own).
 - Embeds of one link merge: the first keeps everything, the others give only their image, up to
-  four, as a gallery.
+  four, as a gallery. A gallery of bare images shows alone, as one image would.
 - "Show embeds and preview website links pasted into chat" (`render_embeds`) off: no embeds, the
   link stays. *Discord's own "Remove all embeds" isn't offered yet.*
 
@@ -38,22 +39,24 @@ runtime like every image ([images.md](images.md)). Where Akari differs, the diff
 | Box | Discord's raised surface, a 1 pt subtle border, corners 4, a 4 pt bar on the left in the embed's color (none or white: the border's color); inside, 2 above, 12 left, 16 right and below |
 | Rows | provider, author, title, description, fields, then the footer, each 8 below the one before |
 | Provider | 12, regular; a link in the muted interactive color when it has one |
-| Author | a round 24 pt icon, 8 from the name; the name 14 semibold in the strong text color, a link when it has one |
+| Author | a round 24 pt icon, 8 from the name, centered on a row as tall as the icon; the name 14 semibold in the strong text color, a link when it has one |
 | Title | 16 semibold, strong; with a URL it's a link in the link color |
 | Description | 14 on 18 lines; not for image, video and GIFV embeds |
-| Fields | up to three side by side, 8 apart, 8 between rows; a field that isn't inline has a row of its own; the name 14 semibold, 2 above the value (14 regular) |
+| Fields | up to three side by side in equal columns, 8 apart, 8 between rows; a field that isn't inline has a row of its own; the name 14 semibold, 2 above the value (14 regular) |
 | Media | 16 below the text, the card's full width beside a thumbnail |
 | Thumbnail | fitted into 80 × 80 on the right, 16 from the text, 8 down, corners 4; on a rich card beside its image, on others only without media |
-| Footer | a round 20 pt icon, 8 from the text; 12 medium; the text, " • " and the time |
+| Footer | a round 20 pt icon, 8 from the text, on a row as tall as the icon; 12 medium; the text, " • " and the time |
 
 - The card is as wide as its content, at most 516 inside. An image at least 300 wide, or a
   video, makes the card as wide as the media with the card's padding and borders. *Discord's
   card is 32 wider than the media, which shrinks the media by 1; Akari keeps the media's width.*
 - Markdown only on rich embeds: titles and field names with styles, emoji and timestamps (no
-  code blocks, mentions, lists, headings or line breaks, and no links when the title is one);
+  code blocks, mentions, lists, headings or line breaks, and no links when the embed has a URL
+  of its own, which the title links to); *no quotes either*;
   descriptions and field values as messages, lists and headings only for messages after
-  2023-03-22 and never a heading in a field. Emoji are 18, never jumbo. Other embeds' text is
-  plain, its line breaks kept.
+  2023-03-22 (by the edit's time when edited) and never a heading in a field. Emoji are 18,
+  never jumbo. Other embeds' text is plain, its line breaks kept. A title's or field name's line
+  breaks show as spaces. Relative timestamps count down as in the message's text.
 - The footer's time in Discord's words: "Today at 3:15 PM", "Yesterday at …", "Tomorrow at …",
   "10/24/2026 3:15 PM" for older days, "10/30/2026" for later ones, in the user's 12 or 24 hour
   clock.
@@ -74,7 +77,10 @@ runtime like every image ([images.md](images.md)). Where Akari differs, the diff
 - A link inside a spoiler (`||https://…||`) covers every embed of the message: a card under the
   spoiler color with the "SPOILER" pill, its bar gone, *nothing of its text showing* (Discord
   blurs it 44 px); media alone as attachments are covered. A click reveals it until the channel
-  closes. `render_spoilers` applies as to attachments.
+  closes. `render_spoilers` applies as to attachments. *A reveal holds for the embed at its place
+  with its link, so an edit that brings another embed there starts covered.* A spoiler inside
+  part of a link's text (`[||x|| y](url)`) covers nothing; *one around all of it can't be told
+  from one around the link, and covers.*
 - Flagged embeds (explicit or gore by the embed's own flags) and media still waiting for
   Discord's scan (people's embeds, not bots') take the same covers as attachments
   ([attachments.md](attachments.md)), by the same settings: on a card the whole card is black
