@@ -85,7 +85,7 @@ final class ExpressionTests {
         container.layoutSubtreeIfNeeded()
         var opened: [ExpressionTarget] = []
         view.onExpression = { target, _ in opened.append(target) }
-        // What CI leaves behind: another suite's drag and release nobody consumed.
+        // What CI leaves behind: another suite's drag and release nobody consumed, older than the press.
         let stale = try point(at: 3, in: view)
         for type in [NSEvent.EventType.leftMouseDragged, .leftMouseUp] {
             NSApp.postEvent(
@@ -96,7 +96,7 @@ final class ExpressionTests {
                         clickCount: 1, pressure: 1)), atStart: false)
         }
 
-        try click(at: try point(at: 3, in: view), in: view)
+        try click(at: try point(at: 3, in: view), in: view, draining: false)
 
         #expect(opened == [.customEmoji(id: EmojiId(rawValue: 5), name: "wave", animated: false)], "\(scale)x: selection \(view.selectedRange())")
     }
@@ -363,28 +363,29 @@ final class ExpressionTests {
         #expect(view.selectedRange().length > 0)
     }
 
-    func click(at point: NSPoint, in view: NSView, dragTo end: NSPoint? = nil) throws {
+    func click(at point: NSPoint, in view: NSView, dragTo end: NSPoint? = nil, draining: Bool = true) throws {
         let window = try #require(view.window)
         // Events other suites posted and nothing consumed (CI's test host isn't the active app)
         // would join this click's tracking loop.
-        while NSApp.nextEvent(
-            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp], until: .distantPast,
-            inMode: .default, dequeue: true) != nil
+        while draining, NSApp.nextEvent(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp],
+            until: Date(timeIntervalSinceNow: 0.05), inMode: .default, dequeue: true) != nil
         {}
-        let event = { (type: NSEvent.EventType, at: NSPoint) in
+        let start = ProcessInfo.processInfo.systemUptime
+        let event = { (type: NSEvent.EventType, at: NSPoint, after: TimeInterval) in
             NSEvent.mouseEvent(
-                with: type, location: at, modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+                with: type, location: at, modifierFlags: [], timestamp: start + after,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: 1)
         }
-        if let end, let dragged = event(.leftMouseDragged, end) {
+        if let end, let dragged = event(.leftMouseDragged, end, 0.01) {
             NSApp.postEvent(dragged, atStart: false)
         }
-        if let up = event(.leftMouseUp, end ?? point) {
+        if let up = event(.leftMouseUp, end ?? point, 0.02) {
             NSApp.postEvent(up, atStart: false)
         }
         // As the window gives it to the text view; the release waits for its tracking loop.
-        view.mouseDown(with: try #require(event(.leftMouseDown, point)))
+        view.mouseDown(with: try #require(event(.leftMouseDown, point, 0)))
         window.layoutIfNeeded()
     }
 }

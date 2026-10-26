@@ -251,6 +251,10 @@ final class MessageTextView: NSTextView {
         if event.clickCount == 1, let hit = expression(at: point), let window {
             var seen: [NSEvent] = []
             while let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
+                // Older than the press: not this press's.
+                guard next.timestamp >= event.timestamp else {
+                    continue
+                }
                 seen.append(next)
                 let at = convert(next.locationInWindow, from: nil)
                 if next.type == .leftMouseUp {
