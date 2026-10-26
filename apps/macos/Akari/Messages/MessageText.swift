@@ -62,6 +62,23 @@ enum MessageText {
 
     nonisolated static let codePadding: CGFloat = 8
 
+    /// Where a plain first line's baseline sits below the text's top, whatever the text holds:
+    /// a follow-up's hover time lines up with it.
+    static let firstLineBaseline: CGFloat = {
+        let view = MessageTextView()
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 100)
+        let face = Typeface.body
+        view.show(
+            NSAttributedString(
+                string: "0",
+                attributes: [
+                    .font: face.font(bold: false, italic: false),
+                    .paragraphStyle: ParagraphKey(line: face.line).style,
+                    .baselineOffset: face.offset,
+                ]))
+        return view.firstBaselineOffsetFromTop
+    }()
+
     static func build(
         _ message: Message, revealed: Set<UInt16>, now: Date, times: TimestampText
     ) -> Built {
