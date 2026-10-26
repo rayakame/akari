@@ -113,6 +113,12 @@ jobs:
       - run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: xcodebuild -version && swift --version
+      # The icon files come from assets/app-icon.svg; a change to it brings them along.
+      - name: Icon files match the master
+        run: |
+          swift apps/macos/make-icons.swift
+          git status --porcelain -- apps/macos/Akari
+          test -z "$(git status --porcelain -- apps/macos/Akari)"
       # This runner's architecture is enough to build the app and run its tests.
       - run: apps/apple/build-ffi.sh --host-only
       # A pinned release; the checksum is GitHub's published digest for this asset.
