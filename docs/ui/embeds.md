@@ -14,7 +14,8 @@ runtime like every image ([images.md](images.md)). Where Akari differs, the diff
   voice channel and poll result embeds, gifts, and the article cards of Discord's own shop and
   game pages (the client draws those as cards of its own).
 - Embeds of one link merge: the first keeps everything, the others give only their image, up to
-  four, as a gallery. A gallery of bare images shows alone, as one image would.
+  four, as a gallery, which takes the strongest cover of its images. A gallery of bare images
+  shows alone, as one image would.
 - "Show embeds and preview website links pasted into chat" (`render_embeds`) off: no embeds, the
   link stays. *Discord's own "Remove all embeds" isn't offered yet.*
 
@@ -65,7 +66,8 @@ runtime like every image ([images.md](images.md)). Where Akari differs, the diff
 
 - A GIFV plays muted and looping while GIFs play by the same rule as attachments (the window
   key, at least 60 % shown and "Play GIFs when Discord is focused" on, or the pointer over it);
-  its poster and *Akari's own "GIF" badge* show otherwise.
+  its poster and *Akari's own "GIF" badge* show otherwise. Only Discord's copy plays: a GIFV
+  without one shows its poster, so nothing is fetched from another site.
 - A video shows its poster, cropped to fill, at least 150 × 144, with Discord's pill in the
   middle: a black capsule at 60 %, 48 tall, with Play and Open Link (Open Link alone when the
   video can't play). *Both open the link in the browser: Akari has no inline player yet (D145).*

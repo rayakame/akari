@@ -177,6 +177,7 @@ pub(crate) fn shown_embeds(
                     }
                     if into.gallery.len() < GALLERY_MAX {
                         into.gallery.push(image);
+                        into.cover = stronger(into.cover, cover(embed));
                     }
                 }
                 continue;
@@ -247,6 +248,17 @@ fn record(embed: &Embed, place: u8, rules: EmbedTextRules) -> ShownEmbed {
             || embed.timestamp.is_some(),
         cover: None,
     }
+}
+
+// The cover a merged gallery takes: the strongest of its images' (294520's order).
+fn stronger(a: Option<MediaCover>, b: Option<MediaCover>) -> Option<MediaCover> {
+    let rank = |cover| match cover {
+        Some(MediaCover::Sensitive) => 3,
+        Some(MediaCover::Pending) => 2,
+        Some(MediaCover::Spoiler) => 1,
+        _ => 0,
+    };
+    if rank(b) > rank(a) { b } else { a }
 }
 
 // Module 659674 `p6, V, G8, Xk`: articles for Discord's own shop and game pages draw as their

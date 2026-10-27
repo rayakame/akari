@@ -630,8 +630,9 @@ final class EmbedView: NSView {
                 self.tileAction(action, tile)
             }
             tile.loopSource = { [weak self, weak tile] in
+                // Only Discord's copy: an unproxied video would come from a third party's host.
                 guard let self, let key = tile?.content?.media.key, let video = self.shown?.embed.video,
-                    video.poster.key == key
+                    video.proxied, video.poster.key == key
                 else {
                     return nil
                 }

@@ -557,3 +557,37 @@ fn embed_media_animates_as_discords_client_says() {
     assert!(at("https://example.com/a.avif", 32).is_animated());
     assert!(!at("https://example.com/a.png", 32).is_animated());
 }
+
+// CodeRabbit: an image a later embed of the link gives the gallery brings its cover; the strongest
+// shows (sensitive, then a scan to come, then a spoiler).
+#[test]
+fn a_merged_image_keeps_its_cover() {
+    let image = |n: u32, flags: u64| {
+        let mut image = embed("image");
+        image.thumbnail = Some(media(600 + n, 400));
+        image.flags = flags;
+        image
+    };
+    let cover = |embed: &Embed| match embed.flags {
+        16 => Some(MediaCover::Sensitive),
+        1 => Some(MediaCover::Pending),
+        2 => Some(MediaCover::Spoiler),
+        _ => None,
+    };
+    let shown = |embeds| shown_embeds(&message(embeds), &DisplaySettings::default(), cover);
+
+    assert_eq!(
+        shown(vec![image(0, 0), image(1, 16)])[0].cover,
+        Some(MediaCover::Sensitive)
+    );
+    assert_eq!(
+        shown(vec![image(0, 2), image(1, 1)])[0].cover,
+        Some(MediaCover::Pending)
+    );
+    assert_eq!(
+        shown(vec![image(0, 16), image(1, 2)])[0].cover,
+        Some(MediaCover::Sensitive)
+    );
+    let full: Vec<Embed> = (0..4).map(|n| image(n, 0)).chain([image(9, 16)]).collect();
+    assert_eq!(shown(full)[0].cover, None, "a fifth image isn't shown");
+}

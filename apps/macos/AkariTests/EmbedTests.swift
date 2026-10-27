@@ -478,6 +478,22 @@ final class EmbedTests {
         #expect(revealed.subviews.compactMap { $0 as? MediaTileView }.filter { !$0.isHidden && $0.coverShown != nil }.isEmpty)
     }
 
+    // CodeRabbit: a GIFV without Discord's copy doesn't loop: its video would come from a third
+    // party's host.
+    @Test
+    func anUnproxiedGifvDoesntLoop() async throws {
+        actions.video = URL(fileURLWithPath: "/dev/null")
+        let gifv = embed(
+            kind: .gifv, inline: true, title: nil, description: nil,
+            video: EmbedVideo(
+                poster: embedImage(498, 280, slot: .thumbnail), width: 498, height: 280, proxied: false,
+                key: .embedMedia(channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 1), embed: 0, slot: .video)))
+        show([gifv])
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(actions.videos.isEmpty)
+    }
+
     // MARK: Text
 
     // Discord's footer time (module 58703).
