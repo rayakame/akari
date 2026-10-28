@@ -160,15 +160,15 @@ struct ResizeCursorTests {
                 pressure: 1)
         }
         let end = NSPoint(x: start.x + distance, y: start.y)
-        let down = try #require(event(.leftMouseDown, start, 0))
+        // Sent, not posted: macOS 26 moves a posted event's location by its window's place on the
+        // screen, and the gap's gesture takes events as they come, without a tracking loop.
+        window.sendEvent(try #require(event(.leftMouseDown, start, 0)))
         for (step, point) in [NSPoint(x: start.x + distance / 2, y: start.y), end].enumerated() {
-            let moved = try #require(event(.leftMouseDragged, point, Double(step + 1)))
-            NSApp.postEvent(moved, atStart: false)
+            window.sendEvent(try #require(event(.leftMouseDragged, point, Double(step + 1))))
         }
         if release {
-            NSApp.postEvent(try #require(event(.leftMouseUp, end, 3)), atStart: false)
+            window.sendEvent(try #require(event(.leftMouseUp, end, 3)))
         }
-        window.sendEvent(down)
     }
 
     @Test(.enabled(if: firstClicks))
@@ -204,7 +204,7 @@ struct ResizeCursorTests {
                 with: .leftMouseUp, location: NSPoint(x: -36, y: 50), modifierFlags: [],
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
-        NSApp.postEvent(up, atStart: false)
+        window.sendEvent(up)
         while cursor.pushed, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
