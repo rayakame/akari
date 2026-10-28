@@ -146,7 +146,7 @@ jobs:
       - run: >-
           xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari -destination 'platform=macOS'
           -test-timeouts-enabled YES -default-test-execution-time-allowance 60
-          -maximum-test-execution-time-allowance 120 -only-testing:AkariTests/ZZDragProbeTests
+          -maximum-test-execution-time-allowance 120 -only-testing:AkariTests/ZZDragProbeTests -only-testing:AkariTests/ResizeCursorTests -only-testing:AkariTests/SessionScreenTests
         timeout-minutes: 10
         env:
           TEST_RUNNER_AKARI_SCREEN_TESTS: "1"
