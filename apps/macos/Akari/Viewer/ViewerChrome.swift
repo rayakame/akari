@@ -92,6 +92,12 @@ final class ViewerButton: NSButton {
         isHovered = false
     }
 
+    // Leaving the bar under the pointer, it gets no exit.
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        isHovered = false
+    }
+
     private func updateColors() {
         contentTintColor = isHovered ? ViewerColors.iconHover : ViewerColors.icon
         switch style {
@@ -106,12 +112,16 @@ final class ViewerButton: NSButton {
     }
 }
 
-/// The top bar's left: the author's avatar, name and time (F-9). Clicks pass through it, as
-/// Discord's `pointer-events: none` does.
-final class ViewerAuthor: NSView {
+/// The top bar's left: the author's avatar, name and time with the full date as its tooltip
+/// (F-9). A click on it closes the viewer, as Discord's passes through to the modal's root.
+final class ViewerAuthor: NSView, NSViewToolTipOwner {
     let avatar = ImageLayerView()
     let name = NSTextField(labelWithString: "")
     let time = NSTextField(labelWithString: "")
+    var fullDate = ""
+    var onClose: () -> Void = {}
+    private var tip: NSView.ToolTipTag?
+    private var pressed: NSPoint?
 
     init() {
         super.init(frame: .zero)
@@ -134,9 +144,32 @@ final class ViewerAuthor: NSView {
 
     override var isFlipped: Bool { true }
 
-    // The time keeps its tooltip; nothing here takes a click.
+    // One view under the pointer, so the time's tooltip shows and the click is the block's.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
+        !isHidden && frame.contains(point) ? self : nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        pressed = convert(event.locationInWindow, from: nil)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let pressed else {
+            return
+        }
+        self.pressed = nil
+        let point = convert(event.locationInWindow, from: nil)
+        if hypot(point.x - pressed.x, point.y - pressed.y) < ViewerStage.clickSlop {
+            onClose()
+        }
+    }
+
+    func view(
+        _ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?
+    ) -> String {
+        fullDate
     }
 
     /// `author` is the block beside the avatar, both in this view's space.
@@ -148,6 +181,10 @@ final class ViewerAuthor: NSView {
         name.frame = NSRect(x: author.minX, y: y, width: author.width, height: nameHeight)
         y += nameHeight
         time.frame = NSRect(x: author.minX, y: y, width: author.width, height: timeHeight)
+        if let tip {
+            removeToolTip(tip)
+        }
+        tip = addToolTip(time.frame, owner: self, userData: nil)
     }
 }
 

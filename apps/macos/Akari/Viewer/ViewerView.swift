@@ -28,7 +28,8 @@ final class ViewerTopBar: NSView {
         guard !isHidden else {
             return nil
         }
-        return actionBar.hitTest(convert(point, from: superview))
+        let local = convert(point, from: superview)
+        return actionBar.hitTest(local) ?? author.hitTest(local)
     }
 }
 
@@ -60,6 +61,11 @@ final class ViewerView: NSView {
     }
 
     private var tracking: NSTrackingArea?
+    // Open in Browser and the copies; a save the user placed goes on.
+    private var tasks: [Task<Void, Never>] = []
+    /// Where the pointer is, in the window's space; the window's own when unset.
+    var pointer: (() -> NSPoint)?
+    var setCursor: (NSCursor) -> Void = { $0.set() }
     static let chromeFade: TimeInterval = 0.15
     // Discord's bar stays while it has the focus: zoomed from its own button.
     private var keepsBar = false
@@ -91,7 +97,8 @@ final class ViewerView: NSView {
         let now = Date()
         topBar.time.stringValue = MessageFormat.groupTime(
             model.timestamp, now: now, calendar: .current, locale: .current)
-        topBar.time.toolTip = MessageFormat.fullDate(model.timestamp, calendar: .current, locale: .current)
+        topBar.author.fullDate = MessageFormat.fullDate(model.timestamp, calendar: .current, locale: .current)
+        topBar.author.onClose = { [weak self] in self?.onClose() }
         close.onPress = { [weak self] in self?.onClose() }
         previous.onPress = { [weak self] in self?.go { $0.previous() } }
         next.onPress = { [weak self] in self?.go { $0.next() } }
@@ -102,7 +109,7 @@ final class ViewerView: NSView {
             self.keepsBar = !self.stage.zoomed
             self.stage.setZoomed(!self.stage.zoomed, at: nil)
         }
-        saveButton.onPress = { [weak self] in self?.run { await $0.save() } }
+        saveButton.onPress = { [weak self] in self?.run(keeps: true) { await $0.save() } }
         browserButton.onPress = { [weak self] in self?.run { await $0.openInBrowser() } }
         moreButton.onPress = { [weak self] in self?.showMore() }
         // A hidden strip would still ask for its thumbnails.
@@ -124,8 +131,12 @@ final class ViewerView: NSView {
         update()
     }
 
-    private func run(_ action: @escaping (ViewerActions) async -> Void) {
-        Task { [actions] in await action(actions) }
+    private func run(keeps: Bool = false, _ action: @escaping (ViewerActions) async -> Void) {
+        let task = Task { [actions] in await action(actions) }
+        if !keeps {
+            tasks.removeAll { $0.isCancelled }
+            tasks.append(task)
+        }
     }
 
     private func update() {
@@ -134,6 +145,8 @@ final class ViewerView: NSView {
         updateButtons()
         updateChrome(animated: false)
         needsLayout = true
+        layoutSubtreeIfNeeded()
+        updateCursor()
     }
 
     private func updateButtons() {
@@ -207,9 +220,12 @@ final class ViewerView: NSView {
         let frames = ViewerLayout.frames(in: bounds.size, items: model.items.count, buttons: topBar.buttons.count)
         let top = frames.close.minY
         topBar.frame = NSRect(x: 0, y: top, width: bounds.width, height: ViewerLayout.row)
-        topBar.author.frame = topBar.bounds
+        // Only the block: the bar's empty space and media behind it stay the stage's.
+        let block = frames.avatar.union(frames.author)
+        topBar.author.frame = block.offsetBy(dx: 0, dy: -top)
         topBar.author.place(
-            avatar: frames.avatar.offsetBy(dx: 0, dy: -top), author: frames.author.offsetBy(dx: 0, dy: -top))
+            avatar: frames.avatar.offsetBy(dx: -block.minX, dy: -block.minY),
+            author: frames.author.offsetBy(dx: -block.minX, dy: -block.minY))
         topBar.actionBar.frame = (frames.actions ?? .zero).offsetBy(dx: 0, dy: -top)
         close.frame = frames.close
         previous.frame = frames.previous ?? .zero
@@ -240,10 +256,12 @@ final class ViewerView: NSView {
     }
 
     private func updateCursor() {
-        guard let window else {
+        guard let location = pointer?() ?? window?.mouseLocationOutsideOfEventStream,
+            let cursor = cursor(at: convert(location, from: nil))
+        else {
             return
         }
-        cursor(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))?.set()
+        setCursor(cursor)
     }
 
     /// The cursor at `point` (this view's space); nil over a video, whose player sets its own.
@@ -276,20 +294,34 @@ final class ViewerView: NSView {
         return true
     }
 
+    // The keys the viewer doesn't use stay with it, without a beep.
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {}
+
     // The app's shortcuts are off while the viewer shows; ⌘Q and ⌘H still reach the menu.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard event.modifierFlags.contains(.command) else {
-            return super.performKeyEquivalent(with: event)
-        }
-        switch event.charactersIgnoringModifiers?.lowercased() {
-        case "q", "h":
-            return false
-        case "w":
-            onClose()
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // A layout with a ⌘ keymap (Russian, Dvorak – QWERTY ⌘) has the menu's letter in
+        // `characters` only.
+        let letters = Set([event.characters, event.charactersIgnoringModifiers].compactMap { $0?.lowercased() })
+        if flags.contains(.command) {
+            if !letters.isDisjoint(with: ["q", "h"]) {
+                return false
+            }
+            if letters.contains("w") {
+                onClose()
+            }
             return true
-        default:
+        }
+        if !flags.isDisjoint(with: [.control, .option]) {
             return true
         }
+        // Fn-F and the like; the arrows' function-key characters go on to the panel.
+        if flags.contains(.function), letters.contains(where: { $0.unicodeScalars.allSatisfy(\.properties.isAlphabetic) }) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     private func showMore() {
@@ -330,8 +362,10 @@ final class ViewerView: NSView {
         return menu
     }
 
-    /// Lets every image and video go.
+    /// Lets every image and video go, and what the buttons started but a save.
     func stop() {
+        tasks.forEach { $0.cancel() }
+        tasks = []
         stage.stop()
         strip.set([], images: nil)
         topBar.avatar.show(nil)

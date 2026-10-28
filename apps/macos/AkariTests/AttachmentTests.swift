@@ -505,6 +505,32 @@ final class AttachmentTests {
         #expect(actions.opened == [keys[3]])
     }
 
+    // D143: what a cover hides stays out (a spoiler not revealed, flagged media not shown, media
+    // waiting for its scan); what the user uncovered goes in.
+    @Test
+    func theViewerTakesWhatTheUserSees() throws {
+        actions.viewerAccount = ViewerAccount()
+        let files = [media(5), media(6, cover: .spoiler), media(7, cover: .pending), media(8, cover: .sensitive)]
+        let viewer = list.controller.viewer
+        defer { viewer.close() }
+        let keys = [5, 6, 7, 8].map {
+            ImageKey.attachment(
+                channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 1),
+                attachmentId: AttachmentId(rawValue: UInt64($0)))
+        }
+
+        show(files, cache: ImageCache(source: FakeImageSource.stalling()))
+        try tiles()[0].performClick(nil)
+        #expect(viewer.view?.model.items.map(\.key) == [keys[0]])
+        viewer.close()
+
+        show(
+            files, cache: ImageCache(source: FakeImageSource.stalling()), revealed: [key(6)],
+            shownSensitive: [key(8)])
+        try tiles()[0].performClick(nil)
+        #expect(viewer.view?.model.items.map(\.key) == [keys[0], keys[1], keys[3]])
+    }
+
     // The Play button and the GIF badge draw over the loaded image, not under it.
     @Test
     func playAndTheBadgeShowOverTheImage() async throws {

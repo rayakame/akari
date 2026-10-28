@@ -51,7 +51,8 @@ struct ViewerLayoutTests {
         #expect(ViewerLayout.clamp(NSPoint(x: 120, y: 0), media: scaled, in: window) == NSPoint(x: 120, y: 0))
     }
 
-    // The fitted size at the screen's pixels; zoomed, 2.5 × that, never above the source or 4096.
+    // The fitted size at the screen's pixels; zoomed, 2.5 × that, never above the source (but never
+    // below the unzoomed ask) or 4096.
     @Test
     func theRequestFollowsTheZoom() {
         let fitted = NSSize(width: 832, height: 624)
@@ -61,5 +62,8 @@ struct ViewerLayoutTests {
         #expect(ViewerLayout.pixels(fitted, scale: 1, source: source, zoomed: true) == NSSize(width: 2080, height: 1560))
         let huge = NSSize(width: 10000, height: 5000)
         #expect(ViewerLayout.pixels(NSSize(width: 1200, height: 600), scale: 2, source: huge, zoomed: true) == NSSize(width: 4096, height: 2048))
+        // A source smaller than the screen's pixels: zoomed asks what unzoomed did, never fewer.
+        let small = NSSize(width: 800, height: 600)
+        #expect(ViewerLayout.pixels(small, scale: 2, source: small, zoomed: true) == NSSize(width: 1600, height: 1200))
     }
 }

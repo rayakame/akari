@@ -95,6 +95,31 @@ final class ImageLayerViewTests {
         #expect(source.requests.withLock { $0.last?.width } == UInt32(100 * scale))
     }
 
+    // The same image asked again at another size that fails keeps the one shown: a failure only
+    // replaces nothing.
+    @Test
+    func aFailedReAskKeepsTheShownImage() async throws {
+        let png = try images.png("a", pixels: 80)
+        let source = FakeImageSource { request in
+            guard request.width <= 80 else {
+                throw ImageError.Unavailable
+            }
+            return ImageFile(path: png.path, width: 80, height: 80, animated: false, fromDisk: false)
+        }
+        let view = shown(ImageCache(source: source), size: 80 / scale)
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        view.layoutSubtreeIfNeeded()
+        try await eventually { view.hasImage }
+
+        view.setFrameSize(NSSize(width: 200, height: 200))
+        try await eventually { source.count == 2 }
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(view.hasImage)
+        #expect(!view.failed)
+        #expect(view.imageLayer.contents != nil)
+    }
+
     // A recycled box showing another user or server clears at once: the disc, never the
     // previous subject's picture, until the new one decoded. The same subject's new hash keeps
     // the old image (D137).

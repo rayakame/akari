@@ -15,6 +15,7 @@ final class ViewerStage: NSView {
     private var preloadItems: [ViewerModel.Item] = []
     private var player: AVPlayerView?
     private var playerTask: Task<Void, Never>?
+    private var readiness: NSKeyValueObservation?
     private var press: (point: NSPoint, offset: NSPoint, onMedia: Bool)?
     private var pinch: CGFloat = 0
     var images: ImageCache? {
@@ -34,6 +35,8 @@ final class ViewerStage: NSView {
     var playSource: (ViewerModel.Item) async -> URL? = { _ in nil }
 
     static let clickSlop: CGFloat = 20
+    /// A mouse wheel's line, in points (NSScrollView's).
+    static let lineScroll: CGFloat = 10
 
     init() {
         super.init(frame: .zero)
@@ -157,6 +160,12 @@ final class ViewerStage: NSView {
         preload([])
     }
 
+    // The cap is in pixels: another display's scale asks again.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsLayout = true
+    }
+
     override func layout() {
         super.layout()
         for (view, item) in zip(preloads, preloadItems) {
@@ -185,7 +194,7 @@ final class ViewerStage: NSView {
         guard !isHidden, frame.contains(point) else {
             return nil
         }
-        if let player, player.frame.contains(convert(point, from: superview)) {
+        if let player, !player.isHidden, player.frame.contains(convert(point, from: superview)) {
             return player.hitTest(convert(point, from: superview)) ?? player
         }
         return self
@@ -219,12 +228,12 @@ final class ViewerStage: NSView {
             }
             return
         }
-        if tile.picture.failed {
-            tile.picture.retry()
-        } else if zoomed {
+        if zoomed {
             if moved < Self.clickSlop {
                 setZoomed(false, at: nil)
             }
+        } else if tile.picture.failed {
+            tile.picture.retry()
         } else {
             setZoomed(true, at: point)
         }
@@ -235,7 +244,9 @@ final class ViewerStage: NSView {
         guard zoomed, !event.modifierFlags.contains(.control) else {
             return
         }
-        offset = clamped(NSPoint(x: offset.x + event.scrollingDeltaX, y: offset.y + event.scrollingDeltaY))
+        let factor = event.hasPreciseScrollingDeltas ? 1 : Self.lineScroll
+        offset = clamped(
+            NSPoint(x: offset.x + event.scrollingDeltaX * factor, y: offset.y + event.scrollingDeltaY * factor))
         layoutMedia()
     }
 
@@ -268,7 +279,8 @@ final class ViewerStage: NSView {
         if #available(macOS 15, *) { .zoomOut } else { .arrow }
     }
 
-    // F-6: autoplay with sound, no loop, the Mac's controls; the poster shows until it plays.
+    // F-6: autoplay with sound, no loop, the Mac's controls; the poster shows until the first
+    // frame does.
     private func startPlayer(_ item: ViewerModel.Item) {
         playerTask = Task { [weak self] in
             guard let url = await self?.playSource(item), let self, !Task.isCancelled,
@@ -284,6 +296,18 @@ final class ViewerStage: NSView {
             player.preventsDisplaySleepDuringVideoPlayback = true
             view.player = player
             view.frame = self.mediaFrame
+            // The initial call comes at once, before the view shows; later ones may come from
+            // AVFoundation's queue.
+            self.readiness = view.observe(\.isReadyForDisplay, options: [.initial, .new]) { view, _ in
+                nonisolated(unsafe) let view = view
+                guard Thread.isMainThread else {
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated { view.isHidden = !view.isReadyForDisplay }
+                    }
+                    return
+                }
+                MainActor.assumeIsolated { view.isHidden = !view.isReadyForDisplay }
+            }
             self.addSubview(view, positioned: .above, relativeTo: self.tile)
             self.player = view
             player.play()
@@ -293,7 +317,10 @@ final class ViewerStage: NSView {
     private func stopPlayer() {
         playerTask?.cancel()
         playerTask = nil
+        readiness = nil
         player?.player?.pause()
+        // The item holds the download.
+        player?.player?.replaceCurrentItem(with: nil)
         player?.player = nil
         player?.removeFromSuperview()
         player = nil

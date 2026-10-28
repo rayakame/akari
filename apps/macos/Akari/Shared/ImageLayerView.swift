@@ -97,6 +97,8 @@ final class ImageLayerView: NSView {
     let fallbackLayer = CATextLayer()
     private(set) var player: FramePlayer?
     private var still: CGImage?
+    // What `still` shows: a failed ask for the same image at other pixels keeps it.
+    private var stillKey: ImageKey?
     private var stillTask: Task<Void, Never>?
     private var animationTask: Task<Void, Never>?
     private var pinned: ImageSpec?
@@ -284,6 +286,8 @@ final class ImageLayerView: NSView {
                 self.updateAnimation()
             case .failure(is CancellationError):
                 break
+            case .failure where self.still != nil && self.stillKey == spec.key:
+                break
             case .failure:
                 self.failed = true
                 self.clearImage()
@@ -338,6 +342,7 @@ final class ImageLayerView: NSView {
 
     private func set(still image: CGImage) {
         still = image
+        stillKey = content?.key
         imageLayer.contentsScale = window?.backingScaleFactor ?? 1
         if player == nil {
             imageLayer.contents = image
@@ -350,6 +355,7 @@ final class ImageLayerView: NSView {
 
     private func clearImage() {
         still = nil
+        stillKey = nil
         imageLayer.contents = nil
         imageLayer.isHidden = true
     }

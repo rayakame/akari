@@ -16,6 +16,8 @@ final class MediaViewer {
     /// Where Save writes; the save panel on the viewer when unset.
     var chooseSaveURL: ((String) async -> URL?)?
     var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    /// Whether GIFs and GIFVs play in the panel: key, in the active app.
+    var plays: (NSWindow) -> Bool = { $0.isKeyWindow && NSApp.isActive }
 
     static let label = "Media Viewer"
     // F-10: Discord's 200 ms fade, the media growing from 0.9.
@@ -41,6 +43,7 @@ final class MediaViewer {
         view.reducesMotion = reducesMotion
         view.onClose = { [weak self] in self?.close() }
         panel.contentView = view
+        panel.makeFirstResponder(view)
         panel.onEscape = { [weak self] in self?.close() }
         panel.onKey = { [weak view] event in view?.handleKey(event) ?? false }
         panel.setFrame(parent.frame, display: false)
@@ -95,6 +98,13 @@ final class MediaViewer {
         }
         self.panel = nil
         self.view = nil
+        if let sheet = panel.attachedSheet {
+            panel.endSheet(sheet)
+        }
+        // Fading, it takes nothing: a click or key meant for the list isn't eaten or acted on.
+        panel.ignoresMouseEvents = true
+        panel.onKey = { _ in true }
+        panel.onEscape = {}
         let finish = {
             view.stop()
             panel.parent?.removeChildWindow(panel)
@@ -154,7 +164,7 @@ final class MediaViewer {
     // D136's rule for media under the pointer: it plays while the viewer is key and the app
     // active.
     private func updateMotion() {
-        view?.animates = (panel?.isKeyWindow ?? false) && NSApp.isActive
+        view?.animates = panel.map(plays) ?? false
     }
 
     private func saveURL(for name: String) async -> URL? {
@@ -171,14 +181,14 @@ final class MediaViewer {
         return response == .OK ? save.url : nil
     }
 
+    // On the viewer, or its window once it closed (a save that failed after).
     private func fail(_ message: String) {
+        guard let window = panel ?? parent.flatMap({ $0.isVisible ? $0 : nil }) else {
+            return
+        }
         let alert = NSAlert()
         alert.messageText = message
         alert.alertStyle = .warning
-        if let panel {
-            alert.beginSheetModal(for: panel)
-        } else {
-            alert.runModal()
-        }
+        alert.beginSheetModal(for: window)
     }
 }

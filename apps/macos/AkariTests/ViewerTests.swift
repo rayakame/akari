@@ -11,6 +11,9 @@ import os
 nonisolated final class ViewerAccount: Account, @unchecked Sendable {
     let links = OSAllocatedUnfairLock<[ImageKey: String]>(initialState: [:])
     let saves = OSAllocatedUnfairLock<[(ImageKey, String)]>(initialState: [])
+    /// Holds every link back until it fires.
+    let linkGate = OSAllocatedUnfairLock<Gate?>(initialState: nil)
+    let failsSaves = OSAllocatedUnfairLock(initialState: false)
 
     init() {
         super.init(noHandle: NoHandle())
@@ -21,6 +24,9 @@ nonisolated final class ViewerAccount: Account, @unchecked Sendable {
     }
 
     override func originalUrl(key: ImageKey) async throws -> String {
+        if let gate = linkGate.withLock({ $0 }) {
+            await gate.wait()
+        }
         guard let link = links.withLock({ $0[key] }) else {
             throw ImageError.Unavailable
         }
@@ -29,15 +35,17 @@ nonisolated final class ViewerAccount: Account, @unchecked Sendable {
 
     override func saveOriginal(key: ImageKey, destination: String) -> PendingSave {
         saves.withLock { $0.append((key, destination)) }
-        return WrittenSave(destination: destination)
+        return WrittenSave(destination: destination, fails: failsSaves.withLock { $0 })
     }
 }
 
 nonisolated final class WrittenSave: PendingSave, @unchecked Sendable {
     let destination: String
+    let fails: Bool
 
-    init(destination: String) {
+    init(destination: String, fails: Bool = false) {
         self.destination = destination
+        self.fails = fails
         super.init(noHandle: NoHandle())
     }
 
@@ -46,6 +54,9 @@ nonisolated final class WrittenSave: PendingSave, @unchecked Sendable {
     }
 
     override func result() async throws -> UInt64 {
+        if fails {
+            throw ImageError.Unavailable
+        }
         // A 2 × 2 PNG, as the core writes the original.
         let image = NSImage(size: NSSize(width: 2, height: 2), flipped: false) { rect in
             NSColor.red.setFill()
@@ -219,19 +230,26 @@ final class ViewerTests {
     func shortcutsStayWithTheViewer() throws {
         _ = try open([item(1)])
         let view = try view()
-        let command = { (characters: String, code: UInt16) in
+        let press = { (flags: NSEvent.ModifierFlags, characters: String, ignoring: String?, code: UInt16) in
             try #require(
                 NSEvent.keyEvent(
-                    with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+                    with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
                     windowNumber: 0, context: nil, characters: characters,
-                    charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+                    charactersIgnoringModifiers: ignoring ?? characters, isARepeat: false, keyCode: code))
         }
 
-        #expect(view.performKeyEquivalent(with: try command("k", 40)))
-        #expect(!view.performKeyEquivalent(with: try command("q", 12)))
-        #expect(!view.performKeyEquivalent(with: try command("h", 4)))
+        #expect(view.performKeyEquivalent(with: try press(.command, "k", nil, 40)))
+        #expect(view.performKeyEquivalent(with: try press(.control, "k", nil, 40)))
+        #expect(view.performKeyEquivalent(with: try press(.option, "˚", "k", 40)))
+        #expect(view.performKeyEquivalent(with: try press(.function, "f", nil, 3)), "Fn-F, full screen")
+        #expect(!view.performKeyEquivalent(with: try press([.function, .numericPad], "\u{F703}", nil, 124)))
+        #expect(!view.performKeyEquivalent(with: try press(.command, "q", nil, 12)))
+        #expect(!view.performKeyEquivalent(with: try press(.command, "h", nil, 4)))
+        // A Russian layout's ⌘ keymap: the letter is Latin with ⌘ only.
+        #expect(!view.performKeyEquivalent(with: try press(.command, "q", "й", 12)))
+        #expect(!view.performKeyEquivalent(with: try press([.command, .option], "h", "р", 4)))
         #expect(viewer.panel != nil)
-        #expect(view.performKeyEquivalent(with: try command("w", 13)))
+        #expect(view.performKeyEquivalent(with: try press(.command, "w", "ц", 13)))
         #expect(viewer.panel == nil)
     }
 
@@ -310,16 +328,90 @@ final class ViewerTests {
         mediaRequests().first { $0.key == item(raw).key && CGFloat($0.width) > width + 1 }
     }
 
-    // Closing lets every request go.
+    // Closing lets every request, pin and player go.
     @Test
     func closingLetsEverythingGo() async throws {
-        _ = try open([item(1), item(2), item(3)])
-        try await eventually { self.cache.inflightCount > 0 }
+        let video = item(4, "clip.mp4", kind: .video)
+        account.links.withLock { $0[video.key] = "https://cdn.discordapp.com/attachments/10/4/clip.mp4" }
+        _ = try open([video, item(2), item(3)])
+        let view = try view()
+        try await eventually { self.cache.inflightCount > 0 && view.stage.playerView != nil }
+        let player = try #require(view.stage.playerView?.player)
 
         viewer.close()
 
         #expect(viewer.panel == nil)
         try await eventually { self.cache.inflightCount == 0 }
+        #expect(nothingPinned())
+        #expect(view.stage.playerView == nil)
+        #expect(player.currentItem == nil)
+    }
+
+    func nothingPinned() -> Bool {
+        source.requests.withLock { $0 }.allSatisfy {
+            !cache.isPinned(ImageSpec(key: $0.key, width: Int($0.width), height: Int($0.height)))
+        }
+    }
+
+    // With motion the panel fades out over 0.2 s: it takes no click or key meanwhile, and lets
+    // everything go once gone.
+    @Test
+    func theFadingPanelTakesNothing() async throws {
+        viewer.reducesMotion = { false }
+        let model = try open([item(1), item(2)])
+        let panel = try #require(viewer.panel)
+        try await eventually { self.cache.inflightCount > 0 }
+
+        viewer.close()
+
+        #expect(panel.ignoresMouseEvents)
+        panel.sendEvent(
+            try #require(
+                NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: panel.windowNumber, context: nil, characters: " ",
+                    charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)))
+        #expect(model.index == 0)
+        try await eventually { !panel.isVisible }
+        try await eventually { self.cache.inflightCount == 0 }
+        #expect(nothingPinned())
+    }
+
+    // A sheet on the viewer ends with it; a failure after it closed shows on its window.
+    @Test
+    func sheetsGoWithTheViewer() async throws {
+        _ = try open([item(1)])
+        let panel = try #require(viewer.panel)
+        let actions = try view().actions
+
+        actions.onFailure(ViewerActions.saveFailed)
+        try await eventually { panel.attachedSheet != nil }
+        viewer.close()
+        #expect(panel.attachedSheet == nil)
+
+        actions.onFailure(ViewerActions.saveFailed)
+        try await eventually { self.window.attachedSheet != nil }
+        if let sheet = window.attachedSheet {
+            window.endSheet(sheet)
+        }
+    }
+
+    // What a button started and hadn't done yet goes with the viewer.
+    @Test
+    func pressedActionsGoWithTheViewer() async throws {
+        let first = item(1)
+        let gate = Gate()
+        account.links.withLock { $0[first.key] = "https://cdn.discordapp.com/attachments/10/1/a.png" }
+        account.linkGate.withLock { $0 = gate }
+        _ = try open([first])
+        let browser = try #require(try view().topBar.buttons.first { $0.label == "Open in Browser" })
+
+        browser.performClick(nil)
+        viewer.close()
+        gate.fire()
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(opened.isEmpty)
     }
 
     // The top bar: the author's avatar, the list's name, the time as the group's header with
@@ -331,8 +423,16 @@ final class ViewerTests {
 
         #expect(bar.name.stringValue == "Ray")
         #expect(!bar.time.stringValue.isEmpty)
-        #expect(bar.time.toolTip?.isEmpty == false)
+        let time = NSPoint(x: bar.time.frame.midX, y: bar.time.frame.midY)
+        #expect(bar.author.hitTest(bar.author.convert(time, to: bar.author.superview)) === bar.author)
+        let tip = bar.author.view(bar.author, stringForToolTip: 0, point: time, userData: nil)
+        #expect(tip == MessageFormat.fullDate(try view().model.timestamp, calendar: .current, locale: .current))
         #expect(bar.avatar.content?.key == author(2, "Ray").avatar)
+
+        // The author block is the modal's root's: a click there closes.
+        let avatar = bar.avatar.convert(NSPoint(x: bar.avatar.bounds.midX, y: bar.avatar.bounds.midY), to: try view())
+        try click(at: avatar)
+        #expect(viewer.panel == nil)
     }
 
     // Module 947056's buttons by the item; hidden download options leave Zoom.
@@ -391,6 +491,35 @@ final class ViewerTests {
         try? FileManager.default.removeItem(at: destination)
     }
 
+    // A cancelled save panel saves nothing; a failed save says so; an embed's image is saved
+    // under its link's name.
+    @Test
+    func savingCancelledFailedAndNamed() async throws {
+        let image = EmbedImage(
+            key: .embedMedia(channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 1), embed: 0, slot: .image),
+            width: 640, height: 480, placeholder: nil, animated: false)
+        account.links.withLock { $0[image.key] = "https://media.discordapp.net/external/abc/https/example.com/photo.jpg" }
+        var names: [String] = []
+        var destination: URL?
+        viewer.chooseSaveURL = { name in
+            names.append(name)
+            return destination
+        }
+        _ = try open([ViewerModel.Item(image)])
+        let actions = try view().actions
+        var failures: [String] = []
+        actions.onFailure = { failures.append($0) }
+
+        await actions.save()
+        #expect(names == ["photo.jpg"])
+        #expect(account.saves.withLock { $0.isEmpty }, "cancelled")
+
+        destination = FileManager.default.temporaryDirectory.appendingPathComponent("viewer-\(UUID().uuidString).jpg")
+        account.failsSaves.withLock { $0 = true }
+        await actions.save()
+        #expect(failures == [ViewerActions.saveFailed])
+    }
+
     // Module 947056 asks for the previous item with two or more and the next with three or more,
     // at their fitted pixels, so they show at once.
     @Test
@@ -405,6 +534,8 @@ final class ViewerTests {
 
         try key(124, "\u{F703}")
         #expect(view.stage.preloadKeys == [item(1).key, item(3).key])
+        view.layoutSubtreeIfNeeded()
+        #expect(mediaRequests().filter { $0.key == item(2).key && $0.width == pixels }.count == 1, "the same ask")
     }
 
     // Zoomed, the author, the arrows, the strip and the action bar fade (module 947056); Close
@@ -482,15 +613,20 @@ final class ViewerTests {
         let view = try view()
 
         try await eventually { view.stage.playerView != nil }
+        #expect(view.stage.playerView?.isHidden == true, "hidden as it joins")
         let player = try #require(view.stage.playerView?.player)
         #expect((player.currentItem?.asset as? AVURLAsset)?.url == URL(string: url))
-        #expect(player.actionAtItemEnd == .pause)
+        #expect(player.rate > 0, "playing")
         #expect(!player.isMuted)
         #expect(view.stage.playerView?.frame == view.stage.mediaFrame)
+        #expect(view.stage.playerView?.isHidden == true, "the poster until the first frame")
+        let middle = NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY)
+        #expect(view.stage.hitTest(view.stage.convert(middle, to: view)) === view.stage)
 
         try key(49, " ")
         #expect(view.stage.playerView == nil)
         #expect(player.rate == 0)
+        #expect(player.currentItem == nil)
     }
 
     // A GIFV loops its video over its poster while the viewer may animate.
@@ -501,13 +637,18 @@ final class ViewerTests {
             width: 498, height: 280, placeholder: nil, animated: false)
         let video = ImageKey.embedMedia(channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 1), embed: 0, slot: .video)
         account.links.withLock { $0[video] = "file:///dev/null" }
+        var plays = false
+        viewer.plays = { _ in plays }
         _ = try open([ViewerModel.Item(poster, video: video)])
         let view = try view()
+        let panel = try #require(viewer.panel)
         #expect(!view.stage.tile.isLooping, "the panel isn't key")
 
-        view.animates = true
+        plays = true
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: panel)
         try await eventually { view.stage.tile.isLooping }
-        view.animates = false
+        plays = false
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
         #expect(!view.stage.tile.isLooping)
     }
 
@@ -548,7 +689,7 @@ final class ViewerTests {
         _ = try open([item(1)])
         let panel = try #require(viewer.panel)
         #expect(try view().stage.tile.layer?.animation(forKey: "open") != nil)
-        #expect(panel.alphaValue < 1 || panel.animations.isEmpty == false)
+        #expect(panel.alphaValue < 1, "fading in")
         viewer.close()
         #expect(viewer.panel == nil)
     }
@@ -616,5 +757,138 @@ final class ViewerTests {
         try click(at: NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY))
         let zoomed = UInt32(box.width * ViewerLayout.zoom * window.backingScaleFactor)
         try await eventually { self.mediaRequests().contains { $0.width >= min(zoomed, 4096) - 1 } }
+    }
+
+    // A zoomed ask that fails keeps the image shown, and a click still zooms out.
+    @Test
+    func aFailedZoomedAskKeepsTheImage() async throws {
+        let images = TestImages()
+        let photo = try images.png("photo", width: 400, height: 300)
+        // Above the fitted ask (832 points wide), below the zoomed one, on either scale.
+        let fitted: CGFloat = 2000
+        let failing = FakeImageSource { request in
+            guard CGFloat(request.width) <= fitted else {
+                throw ImageError.Unavailable
+            }
+            return ImageFile(path: photo.path, width: 400, height: 300, animated: false, fromDisk: false)
+        }
+        _ = try open([item(1)], images: ImageCache(source: failing))
+        let view = try view()
+        let picture = view.stage.tile.picture
+        try await eventually { picture.hasImage }
+
+        try click(at: NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY))
+        try await eventually { failing.requests.withLock { $0.contains { CGFloat($0.width) > fitted } } }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(picture.hasImage)
+        #expect(!picture.failed)
+
+        try click(at: NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY))
+        #expect(!view.stage.zoomed)
+    }
+
+    // A zoomed image smaller than the window leaves scrim around it: a click there closes.
+    @Test
+    func theScrimClosesWhileZoomed() throws {
+        _ = try open([item(1, width: 300, height: 200)])
+        let view = try view()
+        try click(at: NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY))
+        #expect(view.stage.zoomed)
+        #expect(view.stage.mediaFrame.width < view.bounds.width)
+
+        try click(at: NSPoint(x: 5, y: view.bounds.height - 5))
+        #expect(viewer.panel == nil)
+    }
+
+    // The pointer's cursor follows what's under it after a key moves to another item too.
+    @Test
+    func theCursorFollowsTheKeys() throws {
+        _ = try open([item(1), item(2, "clip.mp4", kind: .video)])
+        let view = try view()
+        let middle = NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY)
+        var set: [NSCursor] = []
+        view.pointer = { view.convert(middle, to: nil) }
+        view.setCursor = { set.append($0) }
+
+        try key(124, "\u{F703}")
+        #expect(set.last === NSCursor.arrow, "a video doesn't zoom")
+        try key(124, "\u{F703}")
+        #expect(set.last === ViewerStage.zoomIn)
+    }
+
+    // A move to another display asks at its scale.
+    @Test
+    func aDisplayChangeAsksAgain() throws {
+        _ = try open([item(1)])
+        let stage = try view().stage
+        stage.tile.picture.maxPixels = nil
+        stage.viewDidChangeBackingProperties()
+        stage.layoutSubtreeIfNeeded()
+        #expect(stage.tile.picture.maxPixels != nil)
+    }
+
+    // A mouse wheel's deltas are lines: each pans a line's height.
+    @Test
+    func aMouseWheelPansByLines() throws {
+        _ = try open([item(1)])
+        let view = try view()
+        try click(at: NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY))
+        let start = view.stage.offset
+        let wheel = try #require(
+            CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -2, wheel2: 0, wheel3: 0))
+        let event = try #require(NSEvent(cgEvent: wheel))
+        #expect(!event.hasPreciseScrollingDeltas)
+
+        view.stage.scrollWheel(with: event)
+        #expect(view.stage.offset.y == start.y + event.scrollingDeltaY * ViewerStage.lineScroll)
+    }
+
+    // The viewer takes the keys it doesn't use, so they don't beep; a button that leaves under the
+    // pointer forgets its hover.
+    @Test
+    func keysStayAndButtonsForgetTheirHover() throws {
+        _ = try open([item(1), item(2, "clip.mp4", kind: .video)])
+        let view = try view()
+        #expect(viewer.panel?.firstResponder === view)
+        let zoom = try #require(view.topBar.buttons.first)
+        zoom.mouseEntered(with: try #require(NSEvent.enterExitEvent(
+            with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+            context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)))
+        #expect(zoom.isHovered)
+
+        try key(124, "\u{F703}")
+        #expect(zoom.superview == nil)
+        #expect(!zoom.isHovered)
+    }
+
+    // Zoomed before the image ever came, a failure shows; a click there still zooms out first.
+    @Test
+    func aClickOnZoomedFailedMediaZoomsOut() async throws {
+        let gate = Gate()
+        let failing = FakeImageSource { _ in
+            await gate.wait()
+            throw ImageError.Unavailable
+        }
+        _ = try open([item(1)], images: ImageCache(source: failing))
+        let view = try view()
+        let middle = NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY)
+        try click(at: middle)
+        #expect(view.stage.zoomed)
+
+        gate.fire()
+        try await eventually { view.stage.tile.picture.failed }
+        try click(at: NSPoint(x: view.stage.mediaFrame.midX, y: view.stage.mediaFrame.midY))
+        #expect(!view.stage.zoomed)
+    }
+
+    // The author block takes its clicks (and the time its tooltip); they close the viewer.
+    @Test
+    func theAuthorBlockIsHit() throws {
+        _ = try open([item(1)])
+        let view = try view()
+        let author = view.topBar.author
+        let name = author.convert(NSPoint(x: author.name.frame.midX, y: author.name.frame.midY), to: view)
+        #expect(view.hitTest(view.convert(name, to: view.superview)) === author)
+        #expect(view.hitTest(view.convert(NSPoint(x: 400, y: ViewerLayout.marginY + 20), to: view.superview)) === view.stage)
     }
 }

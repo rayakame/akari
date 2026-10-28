@@ -27,13 +27,13 @@ final class ViewerActions {
     }
 
     func openInBrowser() async {
-        if let url = await model.originalURL(of: model.current) {
+        if let url = await model.originalURL(of: model.current), !Task.isCancelled {
             openURL(url)
         }
     }
 
     func copyLink() async {
-        if let url = await model.originalURL(of: model.current) {
+        if let url = await model.originalURL(of: model.current), !Task.isCancelled {
             copy(url.absoluteString)
         }
     }
@@ -76,6 +76,9 @@ final class ViewerActions {
             return
         } catch {
             onFailure(Self.copyFailed)
+            return
+        }
+        guard !Task.isCancelled else {
             return
         }
         guard let image = NSImage(contentsOf: file) else {

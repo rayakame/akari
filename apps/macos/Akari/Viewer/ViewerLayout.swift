@@ -108,13 +108,18 @@ nonisolated enum ViewerLayout {
     }
 
     /// The pixels the media is asked at: the fitted box on this screen, 2.5 × that zoomed, never
-    /// above the source or 4096 a side.
+    /// above the source (nor below the unzoomed ask, which the cache already has) or 4096 a side.
     static func pixels(_ fitted: NSSize, scale: CGFloat, source: NSSize, zoomed: Bool) -> NSSize {
-        let factor = scale * (zoomed ? zoom : 1)
-        var wanted = NSSize(
-            width: (fitted.width * factor).rounded(.up), height: (fitted.height * factor).rounded(.up))
-        if zoomed, wanted.width > source.width || wanted.height > source.height {
-            wanted = source
+        let unzoomed = NSSize(
+            width: (fitted.width * scale).rounded(.up), height: (fitted.height * scale).rounded(.up))
+        var wanted = unzoomed
+        if zoomed {
+            wanted = NSSize(
+                width: (fitted.width * scale * zoom).rounded(.up),
+                height: (fitted.height * scale * zoom).rounded(.up))
+            if wanted.width > source.width || wanted.height > source.height {
+                wanted = source.width >= unzoomed.width && source.height >= unzoomed.height ? source : unzoomed
+            }
         }
         let cap = min(1, maxPixels / max(wanted.width, 1), maxPixels / max(wanted.height, 1))
         return NSSize(width: (wanted.width * cap).rounded(), height: (wanted.height * cap).rounded())
