@@ -370,8 +370,9 @@ final class FakeAccount: Account, @unchecked Sendable {
         -> [ChannelId]?
     {
         log.append(.searchPosts(forumId, name, view))
+        // UniFFI's calls run on whatever happens to the task that awaits them.
         if holdPostSearches.current {
-            _ = await postSearchEntries.next()
+            _ = await Task { [postSearchEntries] in await postSearchEntries.next() }.value
         }
         return try postSearchReply.current.get()
     }

@@ -140,7 +140,8 @@ public final class ForumModel {
     // Clearing the search makes one still on its way stale.
     @ObservationIgnored private var searchGeneration = 0
     @ObservationIgnored private var listedIds: Set<ChannelId> = []
-    @ObservationIgnored private var shownCards: Set<ChannelId> = []
+    // How many of each card's views show: one may appear before another goes.
+    @ObservationIgnored private var shownCards: [ChannelId: Int] = [:]
     // `nil` inside: the store has no first message for the post.
     @ObservationIgnored private var previews: [ChannelId: PostPreview?] = [:]
 
@@ -264,6 +265,7 @@ public final class ForumModel {
         resultIds = nil
         search = .none
         reread()
+        loadFirstPageIfForgotten()
     }
 
     private func scheduleSearch() {
@@ -320,12 +322,13 @@ public final class ForumModel {
     /// A card came on screen: one without its first message asks for it and the next 4 of the
     /// active list, as the official client's card does.
     public func cardShown(_ id: ChannelId) {
-        shownCards.insert(id)
+        shownCards[id, default: 0] += 1
         askPreviews(for: [id])
     }
 
     public func cardHidden(_ id: ChannelId) {
-        shownCards.remove(id)
+        let left = (shownCards[id] ?? 1) - 1
+        shownCards[id] = left > 0 ? left : nil
     }
 
     private func askPreviews(for shown: Set<ChannelId>) {
@@ -361,19 +364,21 @@ public final class ForumModel {
     // MARK: Changes
 
     func apply(_ batch: EventBatch) {
-        if batch.everythingChanged {
+        // Covers follow the display settings.
+        if batch.everythingChanged || batch.displaySettingsChanged {
             previews = [:]
         } else {
             for post in batch.previewsChanged {
                 previews[post] = nil
             }
         }
-        if batch.everythingChanged || batch.forumsChanged.contains(forumId)
+        if batch.everythingChanged || batch.displaySettingsChanged
+            || batch.forumsChanged.contains(forumId)
             || batch.threadBrowsersChanged.contains(forumId)
             || !batch.previewsChanged.isDisjoint(with: listedIds) || touches(batch)
         {
             reread()
-            askPreviews(for: shownCards)
+            askPreviews(for: Set(shownCards.keys))
         }
         loadFirstPageIfForgotten()
     }
@@ -384,7 +389,6 @@ public final class ForumModel {
         }
     }
 
-    // The forum, a post it shows, or the user's permissions.
     private func touches(_ batch: EventBatch) -> Bool {
         guard let guildId else {
             return false

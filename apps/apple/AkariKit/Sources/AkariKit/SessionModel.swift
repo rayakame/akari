@@ -81,10 +81,7 @@ public final class SessionModel {
                 return
             }
             channels?.setOpen(openChannelId)
-            account.openForum(forumId: forum?.forumId)
-            if let forum {
-                account.viewChannel(channelId: forum.forumId)
-            }
+            tellOpenForum()
         }
     }
     /// The channel the window shows: the message list's or the forum's.
@@ -167,6 +164,8 @@ public final class SessionModel {
     // Only channels opened here can hold this session's unsent messages.
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var forumSettings: [ChannelId: ForumModel.Settings] = [:]
+    // The forum the core was told shows: none while the age gate stands before it.
+    @ObservationIgnored private var toldForum: ChannelId?
     @ObservationIgnored private var clickedThread: ChannelId?
     // Each channel's thread in the split view, with the channel's server, kept across launches.
     @ObservationIgnored private var splits: [ChannelId: AccountMemory.Split]
@@ -279,8 +278,12 @@ public final class SessionModel {
         // The store keeps a window for a channel it doesn't know yet, so the last channel's
         // messages load while the gateway connects; READY then places it.
         if let channel = spotToRestore?.channel {
-            openedChannels.insert(channel)
-            messages = list(of: channel)
+            if store.channel(id: channel)?.opensForum == true {
+                forum = forumPage(of: channel)
+            } else {
+                openedChannels.insert(channel)
+                messages = list(of: channel)
+            }
         }
         // Reopening the last place counts as opening it, also when the cache or READY does.
         engage()
@@ -321,6 +324,7 @@ public final class SessionModel {
         }
         account.agreeToAgeRestricted(guildId: guild)
         ageGates += 1
+        tellOpenForum()
         updateReading()
     }
 
@@ -1202,6 +1206,7 @@ public final class SessionModel {
         updateCreateHere()
         messages?.apply(batch)
         split?.apply(batch)
+        tellOpenForum()
         forum?.apply(batch)
         for form in formModels.values {
             form.apply(batch)
@@ -1405,6 +1410,18 @@ public final class SessionModel {
         }
     }
 
+    private func tellOpenForum() {
+        let shown = forum.map(\.forumId).flatMap { store.ageGate(channelId: $0) == .open ? $0 : nil }
+        guard shown != toldForum else {
+            return
+        }
+        toldForum = shown
+        account.openForum(forumId: shown)
+        if let shown {
+            account.viewChannel(channelId: shown)
+        }
+    }
+
     private func closePage() {
         forum = nil
         messages = nil
@@ -1421,21 +1438,26 @@ public final class SessionModel {
             rememberSpot()
             updateReading()
         }
-        guard openChannelId != id else {
+        // A channel opened before the store knew it as a forum, at launch, turns into its page.
+        let opensForum = store.channel(id: id)?.opensForum == true
+        guard (opensForum ? forum?.forumId : messages?.channelId) != id else {
             return
         }
-        if store.channel(id: id)?.opensForum == true {
-            forum = ForumModel(
-                forumId: id, settings: forumSettings[id], store: store, account: account
-            ) { [weak self] settings in
-                self?.forumSettings[id] = settings
-            }
+        if opensForum {
+            forum = forumPage(of: id)
             messages = nil
             return
         }
         openedChannels.insert(id)
         forum = nil
         messages = list(of: id)
+    }
+
+    private func forumPage(of id: ChannelId) -> ForumModel {
+        ForumModel(forumId: id, settings: forumSettings[id], store: store, account: account) {
+            [weak self] settings in
+            self?.forumSettings[id] = settings
+        }
     }
 
     private func list(of channel: ChannelId) -> MessageListModel {

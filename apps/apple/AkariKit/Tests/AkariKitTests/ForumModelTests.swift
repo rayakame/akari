@@ -171,6 +171,44 @@ final class ForumModelTests {
         session.close()
     }
 
+    // A relaunch on the forum opens its page, whether the cache knew the forum or READY brings it.
+    @Test
+    func aRelaunchOnTheForumOpensItsPage() async throws {
+        let memory = AccountMemory(defaults: MemoryDefaults())
+        memory.remember(.init(place: .guild(id(1)), channel: forumId), of: id(1))
+        var known = FakeStore.State()
+        store.update { state in
+            known = state
+            state.currentUser = nil
+            state.channels[id(13)] = nil
+        }
+        list([41])
+        let session = SessionModel(userId: id(1), account: account, memory: memory) { _ in }
+        session.start()
+
+        store.update { $0 = known }
+        store.subscription.send(.ready)
+        await store.subscription.batches.pulled(2)
+
+        #expect(session.forum?.forumId == forumId)
+        #expect(session.messages == nil)
+        session.close()
+    }
+
+    @Test
+    func aRelaunchOnACachedForumOpensItsPage() throws {
+        let memory = AccountMemory(defaults: MemoryDefaults())
+        memory.remember(.init(place: .guild(id(1)), channel: forumId), of: id(1))
+        list([41])
+        let session = SessionModel(userId: id(1), account: account, memory: memory) { _ in }
+
+        session.start()
+
+        #expect(session.forum?.forumId == forumId)
+        #expect(session.messages == nil)
+        session.close()
+    }
+
     // MARK: Sort & View
 
     @Test
@@ -646,6 +684,187 @@ final class ForumModelTests {
         #expect(forum.searchDenied)
         #expect(waited.current.isEmpty)
         #expect(searches.isEmpty)
+        session.close()
+    }
+
+    // MARK: Review
+
+    // Clearing a search shows the list again with the filter's first page, also for tags chosen
+    // while the results showed.
+    @Test
+    func clearingASearchLoadsTheNewFiltersFirstPage() async throws {
+        let loaded = ForumPosts(active: [id(41)], archived: [], older: .all, newPosts: 0)
+        let fresh = ForumPosts(active: [], archived: [], older: .notLoaded, newPosts: 0)
+        store.update { $0.forumPages[id(13)] = { view in view.tags.isEmpty ? loaded : fresh } }
+        let session = inForum()
+        let forum = try forum(session)
+        await forum.open()
+        forum.setQuery("x")
+        await settle(forum)
+        forum.toggle(tag: bug)
+        await settle(forum)
+
+        forum.clearSearch()
+
+        try await eventually { self.olderLoads.count == 1 }
+        #expect(olderLoads == [ForumView(sort: .creationDate, tags: [bug], matching: .all)])
+    }
+
+    @Test
+    func aSearchClearedWhileItRunsShowsNothing() async throws {
+        account.postSearchReply.withLock { $0 = .success([id(42)]) }
+        account.holdPostSearches.withLock { $0 = true }
+        list([41, 42])
+        let session = inForum()
+        let forum = try forum(session)
+        forum.setQuery("x")
+        try await eventually { forum.search == .searching }
+
+        forum.clearSearch()
+        account.postSearchEntries.send(())
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(forum.search == .none)
+        #expect(forum.posts.map(\.id) == [id(41), id(42)])
+        session.close()
+    }
+
+    // A query typed while a search runs is searched once it's answered.
+    @Test
+    func aQueryTypedWhileASearchRunsIsSearchedAfter() async throws {
+        account.holdPostSearches.withLock { $0 = true }
+        list([41])
+        let session = inForum()
+        let forum = try forum(session)
+        forum.setQuery("a")
+        try await eventually { forum.search == .searching }
+
+        forum.setQuery("ab")
+        await settle(forum)
+        account.postSearchEntries.send(())
+        try await eventually { self.searches.count == 2 }
+        account.postSearchEntries.send(())
+        try await eventually { forum.search == .found }
+
+        #expect(searches == ["a", "ab"])
+        session.close()
+    }
+
+    @Test
+    func nothingOlderLoadsWhileResultsShow() async throws {
+        list([41], older: .more)
+        let session = inForum()
+        let forum = try forum(session)
+        forum.setQuery("x")
+        await settle(forum)
+
+        await forum.loadMore()
+
+        #expect(olderLoads.isEmpty)
+        session.close()
+    }
+
+    // A post's newest message or count changes without the post's own event.
+    @Test
+    func aPostsActivityRereadsItsCard() throws {
+        list([41])
+        let session = inForum()
+        let forum = try forum(session)
+
+        store.update { $0.channels[id(41)]?.thread?.messageCount = 9 }
+        session.apply(EventBatch([.threadActivity(guildId: id(1), parentId: forumId, threadId: id(41))]))
+
+        #expect(forum.posts.first?.count == "9")
+        session.close()
+    }
+
+    // A new connection or the display settings (spoilers, sensitive media) read the cards'
+    // first messages again.
+    @Test(arguments: [StoreEvent.ready, .displaySettingsChanged])
+    func firstMessagesAreReadAgain(after event: StoreEvent) throws {
+        let first = message(41, in: 41, content: "old")
+        store.update { $0.postPreviews[id(41)] = .loaded(message: first) }
+        list([41])
+        let session = inForum()
+        let forum = try forum(session)
+        let next = message(41, in: 41, content: "new")
+
+        store.update { $0.postPreviews[id(41)] = .loaded(message: next) }
+        session.apply(EventBatch([event]))
+
+        #expect(forum.posts.first?.preview == .message(next, authorName: "someone"))
+        session.close()
+    }
+
+    @Test
+    func losingReadMessageHistoryStopsTheSearches() throws {
+        list([41])
+        let session = inForum()
+        let forum = try forum(session)
+
+        store.update { $0.permissions[id(13)] = [.viewChannel] }
+        session.apply(EventBatch([.guildUpdated(guildId: id(1))]))
+
+        #expect(!forum.canReadHistory)
+        session.close()
+    }
+
+    // Each forum keeps its own Sort & View.
+    @Test
+    func eachForumKeepsItsOwnSettings() throws {
+        var other = channel(15, kind: .guildForum, name: "help")
+        other.forum = ForumSettings(
+            tags: [], defaultReaction: nil, sort: .latestActivity, layout: .list,
+            tagMatching: .some, postSlowmode: 0, template: nil)
+        store.update { state in
+            state.channels[id(15)] = other
+            state.channelLists[id(1)]?.append(id(15))
+        }
+        let session = inForum()
+        try forum(session).setLayout(.list)
+
+        session.open(channel: id(15))
+        #expect(try forum(session).settings.layout == .list)
+        try forum(session).setLayout(.gallery)
+        session.open(channel: forumId)
+
+        #expect(try forum(session).settings.layout == .list)
+        session.open(channel: id(15))
+        #expect(try forum(session).settings.layout == .gallery)
+        session.close()
+    }
+
+    // A card that shows twice for a moment (a section change) still counts as shown.
+    @Test
+    func aCardShownTwiceStaysShownUntilBothGo() throws {
+        list([41])
+        let session = inForum()
+        let forum = try forum(session)
+        forum.cardShown(id(41))
+        forum.cardShown(id(41))
+        forum.cardHidden(id(41))
+        account.log.forget()
+
+        session.apply(EventBatch([.forumPostsChanged(forumId: forumId)]))
+
+        #expect(previewRequests == [[id(41)]])
+        session.close()
+    }
+
+    // Behind the age gate the forum isn't opened, and nothing is asked for it.
+    @Test
+    func aGatedForumOpensOnceTheUserAgrees() throws {
+        store.update { $0.ageGates[id(13)] = .ask(server: false) }
+        list([41])
+        let session = inForum()
+        #expect(!account.log.actions.contains(.openForum(forumId)))
+        #expect(!account.log.actions.contains(.view(forumId)))
+
+        store.update { $0.ageGates[id(13)] = .open }
+        session.apply(EventBatch([.ageGateChanged(guildId: id(1))]))
+
+        #expect(account.log.actions.contains(.openForum(forumId)))
+        #expect(account.log.actions.contains(.view(forumId)))
         session.close()
     }
 
