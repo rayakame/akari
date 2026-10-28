@@ -6,9 +6,7 @@ import Testing
 
 @MainActor
 struct MessageTextDrawingTests {
-    let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled],
-        backing: .buffered, defer: false)
+    let window = TestWindow.make(size: NSSize(width: 500, height: 300))
 
     // The chat's background under the text, so sampled pixels are opaque and compare closely.
     final class Backdrop: NSView {

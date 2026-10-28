@@ -10,9 +10,7 @@ struct ConnectionBarTests {
     // On screen, since SwiftUI starts a view's tasks only once it appears.
     func shownHeight(_ notice: ConnectionNotice, after wait: Duration) async throws -> CGFloat {
         let host = NSHostingView(rootView: ConnectionBar(notice: notice) {}.frame(width: 400))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 60), styleMask: [.borderless],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 400, height: 60), style: [.borderless])
         window.contentView = host
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }

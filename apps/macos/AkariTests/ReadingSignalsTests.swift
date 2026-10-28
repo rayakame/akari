@@ -7,9 +7,7 @@ import Testing
 @MainActor
 final class ReadingSignalsTests {
     let session: SessionModel
-    let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
-        backing: .buffered, defer: false)
+    let window = TestWindow.make(size: NSSize(width: 400, height: 300))
     let center = NotificationCenter()
     let workspace = NotificationCenter()
     var active = true
@@ -110,9 +108,7 @@ final class ReadingSignalsTests {
         let signals = signals()
         let channel = try #require(session.messages?.channelId)
         leaveAndComeBack()
-        let other = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let other = TestWindow.make(size: NSSize(width: 200, height: 100))
 
         signals.handle(try click(in: other))
         #expect(session.reading.isEmpty)
@@ -177,9 +173,7 @@ final class ReadingSignalsTests {
         let signals = signals(monitors: true)
         #expect(signals.isMonitoring)
         let channel = try #require(session.messages?.channelId)
-        let other = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let other = TestWindow.make(size: NSSize(width: 200, height: 100))
 
         leaveAndComeBack()
         NSApp.sendEvent(try rightClick(in: other))
@@ -252,19 +246,17 @@ final class ReadingSignalsTests {
 // channel stays read behind it, as behind Discord's popout, and what the user does in it counts.
 @MainActor
 struct ReadingBesideTheBrowserTests {
-    final class KeyPanel: NSPanel {
+    final class KeyPanel: OutOfSightPanel {
         override var isKeyWindow: Bool { true }
     }
 
     func windows() -> (NSWindow, NSWindow, NSPanel) {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
-            backing: .buffered, defer: false)
-        let shield = NSPanel(
-            contentRect: window.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        let panel = KeyPanel(
-            contentRect: NSRect(x: 40, y: 40, width: 100, height: 100), styleMask: [.borderless],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 400, height: 300))
+        let shield = TestWindow.panel(size: window.frame.size, style: [.borderless])
+        let panel = TestWindow.hide(
+            KeyPanel(
+                contentRect: NSRect(origin: NSPoint(x: 40, y: 40), size: NSSize(width: 100, height: 100)), styleMask: [.borderless],
+                backing: .buffered, defer: false))
         window.addChildWindow(shield, ordered: .above)
         shield.addChildWindow(panel, ordered: .above)
         return (window, shield, panel)
@@ -273,9 +265,7 @@ struct ReadingBesideTheBrowserTests {
     @Test
     func aPanelAttachedAboveTheWindowIsOfItsFamily() {
         let (window, shield, panel) = windows()
-        let other = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 50, height: 50), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let other = TestWindow.make(size: NSSize(width: 50, height: 50))
 
         #expect(panel.isFamily(of: window) && shield.isFamily(of: window) && window.isFamily(of: window))
         #expect(!other.isFamily(of: window) && !window.isFamily(of: panel))

@@ -45,9 +45,7 @@ final class ExpressionTests {
 
     func standalone(_ content: String) -> MessageTextView {
         let view = MessageTextView()
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 200), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 600, height: 200))
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
         window.contentView = container
         container.addSubview(view)
@@ -69,7 +67,7 @@ final class ExpressionTests {
     // A click on an emoji opens it at either backing scale (CI's displays are 1x).
     @Test(arguments: [1, 2] as [CGFloat])
     func aClickOnAnEmojiInTextOpensIt(_ scale: CGFloat) throws {
-        let window = ScaledWindow(scale: scale)
+        let window = ScaledWindow.make(scale: scale)
         retained.append(window)
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
         window.contentView = container
@@ -106,8 +104,8 @@ final class ExpressionTests {
     // this press's, and its window still gets it.
     @Test
     func anotherWindowsReleaseDoesntEndThePress() throws {
-        let window = ScaledWindow(scale: 1)
-        let other = ScaledWindow(scale: 1)
+        let window = ScaledWindow.make(scale: 1)
+        let other = ScaledWindow.make(scale: 1)
         retained += [window, other]
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
         window.contentView = container
