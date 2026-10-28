@@ -182,6 +182,8 @@ struct ChannelRow: View {
                 Spacer(minLength: 0)
                 if badge.mentions > 0 {
                     MentionBadge(count: badge.mentions)
+                } else if let posts = badge.posts {
+                    PostCountText(count: posts)
                 }
             }
             .padding(.vertical, 4)
