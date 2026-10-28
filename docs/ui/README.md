@@ -24,6 +24,8 @@ app can mirror it and Discord users can switch with zero relearning.
   "See all threads" modal, their sections, search and older threads, and "More Active Threads"
 - [thread-create.md](thread-create.md): creating a thread: where it starts, the New Thread form,
   the default name, refusals and closing
+- [forum.md](forum.md): a forum's page: its frozen list and the pill, search, the tag filter,
+  Sort & View, list and gallery cards, older posts, and the row's counts
 - [cursors.md](cursors.md): which cursor shows where, and the one authority for each region
 - [message-list.md](message-list.md): message layout, the grouping rule, times, day dividers,
   system messages, loading history, the channel's start, jump to present, edits and deletes

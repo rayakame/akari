@@ -287,6 +287,46 @@ rest move up by one); the official client pages the same way. They're logged at 
 IDs and counts only. The official client doesn't use the archived-threads routes
 (`threads/archived/public`, `…/private`, `users/@me/threads/archived/private`) for its browser.
 
+### Forums
+
+A forum or media channel ([forum.md](../ui/forum.md)) keeps `available_tags` (a tag with a
+malformed ID is left out), `default_reaction_emoji`, `default_sort_order`,
+`default_forum_layout`, `default_tag_setting`, `default_thread_rate_limit_per_user` and
+`template`, missing or unknown values as Discord's defaults (Recently Active, List, Match
+Some); its posts keep `applied_tags` and `total_message_sent`. CHANNEL_UPDATE and THREAD_UPDATE
+replace what they carry and keep what they leave out.
+
+`Account::open_forum(forum)` names the forum whose page shows (`None` closes it). Its list,
+`Store::forum_posts(forum, view)`, is the official client's ForumActivePostStore [207777]:
+the forum's active posts the store has, pinned first, by the view's sort, filtered by its tags
+on the client, frozen between refreshes (opening, `Account::refresh_forum`, READY, a
+THREAD_LIST_SYNC of its guild): a deletion drops a post and a pin change re-sorts, nothing else
+moves a card. THREAD_CREATE with `newly_created` by someone else counts toward `new_posts` (the
+pill); the user's own post joins. `ForumPostsChanged { forum_id }` says to read it again.
+
+`Account::load_older_posts(forum, view)` asks for a page of archived posts as the official
+client's [472456]:
+`GET /channels/{forum}/threads/search?archived=true&sort_by=last_message_time&sort_order=desc&limit=25&tag={a}%2C{b}&tag_setting={match_some|match_all}&offset={n}`,
+the tags comma-joined in one value (left out without a filter), the newest message first whatever
+the sort. Each (tags, matching) pages on its own, at most 50 such keys (the oldest dropped);
+Match All counts only with tags. A failure or a 202 fails that key until the next connection.
+The archived section is every archived post of the forum the store has that passes the filter,
+down to the loaded pages' oldest. `Account::search_posts(forum, name, view)` sends
+`?name={name}[&tag=…]&tag_setting=…`: active and archived posts, at most 25, in Discord's order;
+`None` for a 202. Both keep what they bring as the Threads browser's requests do, and the
+answers' `first_messages` as the posts' first messages.
+
+**First messages** ([module 473503]): `Account::request_post_previews(forum, posts)` queues
+posts whose cards show without their first message; one worker per account sends
+`POST /channels/{forum}/post-data` with `{"thread_ids": ["…"]}`, at most 10 of one forum a
+request, one request at a time. The answer `{"threads": {id: {"first_message", "owner"}}}`
+fills `Store::post_preview(post)` (`Deleted` when Discord says the message is gone) and the
+owners as users; `PostPreviewChanged { post_id }` says when. A post asked already isn't asked
+again, and one Discord didn't answer for (or a failed request's) not for 30 s (the official
+client asks again on the card's next render, without a pause). MESSAGE_CREATE, MESSAGE_UPDATE
+and MESSAGE_DELETE of a post's first message (its ID is the post's) and the window's message
+with the post's ID keep it current. Opening the forum asks for its first 10.
+
 ## Large guilds
 
 The reference says the gateway stops "sending non-stateful events for guilds without a
@@ -447,6 +487,5 @@ doesn't bring an event for every active channel.
   without a window: the channel, the message ID, and whether it mentions the current user
   (directly, through a role, or `@everyone`). Each channel's `last_message_id` is already
   tracked; only that event is missing.
-- **THREAD_LIST_SYNC for forums:** the forum view needs the active set per forum and its
-  `first_messages` from thread search; READY threads' `most_recent_message` isn't read (the
-  sync after the subscription brings them).
+- **Forum posts' newest messages:** READY threads' and post-data's `most_recent_message`
+  aren't read; the official client keeps post-data's but reads it nowhere.

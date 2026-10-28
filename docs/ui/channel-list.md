@@ -73,7 +73,9 @@ Observed in the official desktop client on 2026-10-14:
 - **Voice and stage channels never look unread from their text chat:** a message there
   leaves the row as it was, with no bright name and no pill. The gray count the support
   article describes isn't what the client shows. **Unverified:** what a mention there shows.
-- **A forum or media channel** looks unread when a new post appears, without a count.
+- **A forum or media channel** looks unread when a new post appears. Without mentions its row
+  shows "N New" in the brand's color for new posts when its unreads resolve to All Messages,
+  else the muted count of posts with unread activity ([forum.md](forum.md#the-forums-row)).
 - **Threads the user joined** are listed under their parent channel, each with its own unread
   state and count (observed 2026-10-15). The parent's row doesn't change for them; the server's
   pill and badge do ([Threads](#threads)).
@@ -118,8 +120,8 @@ row's was not observed. *Akari: disables both when nothing is unread.*
   NSFW channels get a small warning badge on their symbol. The private
   variant needs the channel's permission overwrites, which the app doesn't receive yet; rules
   channels need the server's rules channel ID, which it doesn't receive either.
-- Voice, stage, forum, media and directory channels are listed but don't open anything; their
-  tooltip says the kind isn't supported yet.
+- A forum opens its page ([forum.md](forum.md)). Voice, stage, media and directory channels
+  are listed but don't open anything; their tooltip says the kind isn't supported yet.
 - Muted rows and categories are drawn at half opacity, except a row's mention count, which
   stays full red. A muted channel that is selected keeps full opacity. VoiceOver reads a row's
   mute, unread state and count after its name ("muted, unread, 2 mentions"), and a thread row as
