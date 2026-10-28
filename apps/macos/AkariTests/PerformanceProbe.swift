@@ -121,7 +121,7 @@ struct PerformanceProbe {
         let before = Self.footprint()
         let controller = MessageTableController(
             calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
-        let window = TestWindow.make(size: NSSize(width: 1000, height: 900), style: [.titled, .resizable], at: NSPoint(x: 100, y: 100))
+        let window = TestWindow.visible(size: NSSize(width: 1000, height: 900), style: [.titled, .resizable])
         window.contentView = controller.scrollView
         window.isReleasedWhenClosed = false
         window.orderFrontRegardless()
@@ -204,7 +204,7 @@ struct PerformanceProbe {
         for round in 0..<30 {
             let controller = MessageTableController(
                 calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
-            let window = TestWindow.make(size: NSSize(width: 1000, height: 900), style: [.titled, .resizable], at: NSPoint(x: 100, y: 100))
+            let window = TestWindow.visible(size: NSSize(width: 1000, height: 900), style: [.titled, .resizable])
             window.isReleasedWhenClosed = false
             window.contentView = controller.scrollView
             window.orderFrontRegardless()
@@ -234,7 +234,7 @@ struct PerformanceProbe {
     func pagingTenPagesAndJumpingToThePresent() async throws {
         let controller = MessageTableController(
             calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
-        let window = TestWindow.make(size: NSSize(width: 1000, height: 900), style: [.titled, .resizable], at: NSPoint(x: 100, y: 100))
+        let window = TestWindow.visible(size: NSSize(width: 1000, height: 900), style: [.titled, .resizable])
         window.isReleasedWhenClosed = false
         window.contentView = controller.scrollView
         window.orderFrontRegardless()

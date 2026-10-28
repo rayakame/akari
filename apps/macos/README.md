@@ -188,9 +188,10 @@ activates it, and never activates or makes a window key by itself. Every test wi
 `TestWindow` (`AkariTests/TestWindow.swift`): transparent and beyond every screen's frame, where
 it still lays out, draws into bitmaps, hit-tests and takes sent events; the host's own window is
 hidden the same way, and the app's child windows follow theirs out of sight. CI rejects a test
-window made any other way. A test that truly needs the screen or the app active is tagged
-`.onScreen` and `.enabled(if: TestWindow.screenTests)`; it runs on CI, and locally only when
-asked for:
+window made any other way; the performance probe, which measures an on-screen window and only
+runs when asked, makes its own with `TestWindow.visible`. A test that truly needs the screen or
+the app active is tagged `.onScreen` and `.enabled(if: TestWindow.screenTests)`; it runs on CI,
+and locally only when asked for:
 
 ```sh
 TEST_RUNNER_AKARI_SCREEN_TESTS=1 xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari -destination 'platform=macOS'

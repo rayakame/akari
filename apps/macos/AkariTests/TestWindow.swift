@@ -51,6 +51,16 @@ enum TestWindow {
                 defer: false), at: origin)
     }
 
+    /// A window on the main screen, shown: only for what's measured on screen and run when asked
+    /// (the performance probe), never for a test of the suite.
+    static func visible(size: NSSize, style: NSWindow.StyleMask) -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(origin: NSPoint(x: 100, y: 100), size: size), styleMask: style,
+            backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        return window
+    }
+
     /// Whether `.onScreen` tests run.
     nonisolated static var screenTests: Bool { TestHost.showsWindows }
 
