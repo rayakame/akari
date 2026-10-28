@@ -394,6 +394,10 @@ pub(crate) struct State {
     generation: u64,
     // The channel whose Threads browser is open.
     browsing: Option<ChannelId>,
+    // The forum whose page shows, as its list last refreshed.
+    forum_list: Option<forum::ForumList>,
+    // Each forum tag filter's pages of archived posts in this connection.
+    forum_pages: HashMap<forum::PageKey, forum::ForumPages>,
     page_tickets: u64,
     // Explicit content scans asked and given up on this session.
     scans: super::media::Scans,
@@ -432,6 +436,8 @@ impl State {
             older: HashMap::new(),
             generation: 0,
             browsing: None,
+            forum_list: None,
+            forum_pages: HashMap::new(),
             page_tickets: 0,
             scans: super::media::Scans::default(),
             clock,
@@ -450,6 +456,7 @@ impl State {
         let derived = Derived::build(&next, self.now_millis());
         let diff = self.ready_diff(&next, &derived);
         self.swap(next, derived, diff, events);
+        self.refresh_open_forum(None, events);
     }
 
     // A READY whose settings proto didn't decode keeps the folders and display settings the
@@ -752,8 +759,10 @@ impl State {
             E::ChannelCreate(channel) => self.put_channel(*channel, events),
             E::ThreadCreate(thread) => {
                 let (id, parent) = (thread.id, thread.parent_id);
+                let (owner, newly_created) = (thread.owner_id, thread.newly_created);
                 self.put_channel(*thread, events);
                 self.note_post(parent, id);
+                self.forum_post_created(id, parent, owner, newly_created, events);
             }
             E::ChannelUpdate(update) | E::ThreadUpdate(update) => {
                 self.channel_update(*update, events);
@@ -1025,10 +1034,11 @@ impl State {
             self.threads.remove(&known);
             self.threads.add(&next);
             self.entities.channels.insert(id, next.clone());
-            events.push(StoreEvent::ChannelUpdated(next));
+            events.push(StoreEvent::ChannelUpdated(next.clone()));
             if self.drop_stale_latest(id, known.last_message_id) {
                 self.reread_boxes(id, events);
             }
+            self.forum_post_updated(&known, &next, events);
         }
     }
 
@@ -1069,6 +1079,7 @@ impl State {
     // As the official client reads it: it adds and updates threads, keeps the ones it doesn't
     // list, and its members are the user's own memberships.
     fn thread_list_sync(&mut self, sync: ThreadListSync, events: &mut Vec<StoreEvent>) {
+        let guild = sync.guild_id;
         for thread in sync.threads {
             self.put_thread(thread, events);
         }
@@ -1085,6 +1096,9 @@ impl State {
             if self.note_latest(message) {
                 self.reread_boxes(message.channel_id, events);
             }
+        }
+        if let Some(guild) = guild {
+            self.refresh_open_forum(Some(guild), events);
         }
     }
 
@@ -1171,12 +1185,14 @@ impl State {
         self.latest.remove(&removed.id);
         self.unconfirmed.remove(&removed.id);
         self.older.remove(&removed.id);
+        self.forum_pages.retain(|key, _| key.forum != removed.id);
         self.entities.read_states.forget(removed.id);
         self.dirty.channel(removed.id);
         events.push(StoreEvent::ChannelRemoved {
             channel_id: removed.id,
             guild_id: removed.guild_id,
         });
+        self.forum_post_deleted(removed.id, events);
         let threads: Vec<ChannelId> = self.threads.of(removed.id).collect();
         self.threads.remove(&removed);
         for thread in threads {
@@ -2053,10 +2069,12 @@ pub(crate) fn wall_millis() -> i64 {
 mod boxes;
 mod browser;
 mod creating;
+mod forum;
 mod media;
 mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
+pub(crate) use forum::PageKey;
 
 #[cfg(test)]
 pub(crate) mod tests;

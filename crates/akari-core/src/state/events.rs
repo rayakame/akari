@@ -81,6 +81,12 @@ pub enum StoreEvent {
     OlderThreadsChanged {
         parent_id: ChannelId,
     },
+    /// The open forum's list changed: it refreshed, a post was deleted or pinned, someone posted,
+    /// or loading its archived posts moved on. Read
+    /// [`Store::forum_posts`](super::Store::forum_posts) again.
+    ForumPostsChanged {
+        forum_id: ChannelId,
+    },
     /// Discord refused the thread a line in the guild names, or it is gone: see
     /// [`Store::thread_unavailable`](super::Store::thread_unavailable).
     ThreadUnavailable {

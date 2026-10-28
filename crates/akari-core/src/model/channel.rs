@@ -92,6 +92,9 @@ pub struct Channel {
     /// Every message ever sent in a thread, deleted ones included.
     #[serde(default, deserialize_with = "default_on_error")]
     pub total_message_sent: Option<u32>,
+    /// THREAD_CREATE for a thread just created, not one the user has only just come to see.
+    #[serde(default)]
+    pub newly_created: bool,
 }
 
 /// A forum or media channel's tag.

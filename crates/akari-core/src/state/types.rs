@@ -229,6 +229,40 @@ pub struct Channel {
     pub spam: bool,
 }
 
+/// How the forum's page shows its posts: the user's choice, the channel's defaults until then.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct ForumView {
+    pub sort: ForumSort,
+    /// Only posts with these tags; none for every post.
+    pub tags: Box<[TagId]>,
+    pub matching: TagMatching,
+}
+
+impl ForumView {
+    pub fn new(sort: ForumSort, tags: Box<[TagId]>, matching: TagMatching) -> Self {
+        Self {
+            sort,
+            tags,
+            matching,
+        }
+    }
+}
+
+/// A forum's page: see [`Store::forum_posts`](super::Store::forum_posts).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct ForumPosts {
+    /// Active posts, pinned first, then by the view's sort. While the forum is open, who's listed
+    /// and in what order changes only when the list refreshes, a post is deleted or pinned.
+    pub active: Vec<Arc<Channel>>,
+    /// Archived posts down to the oldest the loaded pages brought, by the view's sort.
+    pub archived: Vec<Arc<Channel>>,
+    pub older: OlderThreads,
+    /// Others' posts created since the list last refreshed.
+    pub new_posts: u32,
+}
+
 /// What a forum or media channel sets for its posts.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -394,9 +428,10 @@ pub struct ThreadBrowser {
 }
 
 /// Where loading a channel's archived threads stands in this connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum OlderThreads {
+    #[default]
     NotLoaded,
     Loading,
     /// Discord has more after the loaded pages.

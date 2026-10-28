@@ -17,8 +17,8 @@ use crate::rest::{
     AccountRest, CreateMessage, CreateThread, Failure, Page, Query, RequestError, uri_component,
 };
 use crate::state::{
-    Ack, ConnectionState, Cursor, Learned, LoadKind, LoadTicket, Message, OLDER_PAGE, StarterFetch,
-    Store, WindowLimits, message_length,
+    Ack, ConnectionState, Cursor, ForumView, Learned, LoadKind, LoadTicket, Message, OLDER_PAGE,
+    PageKey, StarterFetch, Store, WindowLimits, message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 use acks::{AckSender, Pace, Refusal};
@@ -168,6 +168,36 @@ impl Drop for PendingPage<'_> {
             self.store.abandon_older_threads(self.parent, page);
         }
     }
+}
+
+struct PendingPosts<'a> {
+    store: &'a Store,
+    key: &'a PageKey,
+    page: Option<crate::state::OlderPage>,
+}
+
+impl Drop for PendingPosts<'_> {
+    fn drop(&mut self) {
+        if let Some(page) = self.page.take() {
+            self.store.abandon_older_posts(self.key, page);
+        }
+    }
+}
+
+// Module 472456: the tags comma-joined in one value, the matching always.
+fn tag_query(key: &PageKey) -> String {
+    let mut query = String::new();
+    if !key.tags.is_empty() {
+        let tags: Vec<String> = key.tags.iter().map(|tag| tag.get().to_string()).collect();
+        query.push_str("&tag=");
+        query.push_str(&uri_component(&tags.join(",")));
+    }
+    query.push_str(if key.match_all {
+        "&tag_setting=match_all"
+    } else {
+        "&tag_setting=match_some"
+    });
+    query
 }
 
 fn kind_name(kind: LoadKind) -> &'static str {
@@ -1360,6 +1390,106 @@ impl Account {
                 Err(err)
             }
         }
+    }
+
+    /// The forum whose page shows, `None` once it closes. Opening one refreshes its list: while
+    /// it stays open, who's listed and in what order change only with [`refresh_forum`], a new
+    /// connection or the guild's thread sync, a deletion or a pin (G-1).
+    ///
+    /// [`refresh_forum`]: Self::refresh_forum
+    pub fn open_forum(&self, forum: Option<ChannelId>) {
+        self.shared.store.open_forum(forum);
+    }
+
+    /// The open forum's list as the store has it now: others' new posts join, the count starts
+    /// over (the official client's "N New Posts" pill).
+    pub fn refresh_forum(&self, forum: ChannelId) {
+        self.shared.store.refresh_forum(forum);
+    }
+
+    /// Loads the next page of the forum's archived posts for `view`'s tags, as the official
+    /// client's "Older Posts": 25 at a time, the newest message first whatever the sort, each tag
+    /// filter paging on its own. Nothing is asked while a page loads, after the last one, or after
+    /// a failure or Discord's "not indexed yet" until the next connection.
+    pub async fn load_older_posts(
+        &self,
+        forum: ChannelId,
+        view: &ForumView,
+    ) -> Result<(), RequestError> {
+        let shared = &self.shared;
+        let key = PageKey::new(forum, view);
+        let Some(page) = shared.store.begin_older_posts(&key) else {
+            return Ok(());
+        };
+        let mut pending = PendingPosts {
+            store: &shared.store,
+            key: &key,
+            page: Some(page),
+        };
+        let query = format!(
+            "archived=true&sort_by=last_message_time&sort_order=desc&limit={OLDER_PAGE}{}&offset={}",
+            tag_query(&key),
+            page.offset
+        );
+        match shared.rest.search_threads(forum, &query).await {
+            Ok(results) => {
+                tracing::debug!(
+                    target: "akari_core::load",
+                    channel_id = forum.get(),
+                    offset = page.offset,
+                    tags = key.tags.len(),
+                    posts = results.threads.as_ref().map(Vec::len),
+                    more = results.has_more,
+                    "archived posts loaded"
+                );
+                pending.page = None;
+                shared.store.finish_older_posts(&key, page, results);
+                Ok(())
+            }
+            Err(err) => {
+                tracing::debug!(
+                    target: "akari_core::load",
+                    channel_id = forum.get(),
+                    offset = page.offset,
+                    outcome = err.kind(),
+                    "archived posts failed"
+                );
+                shared.failed(&err);
+                pending.page = None;
+                shared.store.fail_older_posts(&key, page);
+                Err(err)
+            }
+        }
+    }
+
+    /// Searches the forum's posts, active and archived, by name within `view`'s tags, as the
+    /// official client does: Discord's first 25 matches in its order, kept in the store. `None`
+    /// while Discord hasn't indexed the forum yet.
+    pub async fn search_posts(
+        &self,
+        forum: ChannelId,
+        name: &str,
+        view: &ForumView,
+    ) -> Result<Option<Vec<ChannelId>>, RequestError> {
+        let shared = &self.shared;
+        let asked = shared.store.generation();
+        let key = PageKey::new(forum, view);
+        let query = format!("name={}{}", uri_component(name), tag_query(&key));
+        let results = match shared.rest.search_threads(forum, &query).await {
+            Ok(results) => results,
+            Err(err) => {
+                shared.failed(&err);
+                return Err(err);
+            }
+        };
+        let found = shared.store.keep_found_threads(results, asked);
+        tracing::debug!(
+            target: "akari_core::load",
+            channel_id = forum.get(),
+            found = found.as_ref().map(Vec::len),
+            "posts searched"
+        );
+        Ok(found)
     }
 
     /// The channel whose Threads browser is open, `None` once it closes. A new connection lets
