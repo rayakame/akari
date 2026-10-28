@@ -6,7 +6,9 @@ use tokio::runtime::Runtime;
 use crate::contents::Contents;
 use crate::errors::{CreateThreadError, GatewayError, ImageError, RequestError};
 use crate::images::{ImageKey, ImageRequest, PendingImage, PendingSave};
-use crate::records::{EmojiSource, LoadReport, SourceGuild, StickerDetails, StickerPack};
+use crate::records::{
+    EmojiSource, ForumView, LoadReport, SourceGuild, StickerDetails, StickerPack,
+};
 use crate::runtime::run;
 use crate::store::Store;
 
@@ -204,6 +206,60 @@ impl Account {
     /// line); the open browser's stay.
     pub fn set_browsing(&self, parent_id: Option<ChannelId>) {
         self.core.set_browsing(parent_id);
+    }
+
+    /// The forum whose page shows, `None` once it closes. Opening one refreshes its list and asks
+    /// for its first 10 posts' messages; while it stays open, who's listed and in what order
+    /// change only with `refresh_forum`, a new connection or the guild's thread sync, a deletion
+    /// or a pin.
+    pub fn open_forum(&self, forum_id: Option<ChannelId>) {
+        self.core.open_forum(forum_id);
+    }
+
+    /// The open forum's list as the store has it now: others' new posts join, the count starts
+    /// over (the "N New Posts" pill).
+    pub fn refresh_forum(&self, forum_id: ChannelId) {
+        self.core.refresh_forum(forum_id);
+    }
+
+    /// Loads the next page of the forum's archived posts for `view`'s tags, 25 at a time, each
+    /// tag filter paging on its own. Nothing is asked while a page loads, after the last one, or
+    /// after a failure until the next connection.
+    pub async fn load_older_posts(
+        &self,
+        forum_id: ChannelId,
+        view: ForumView,
+    ) -> Result<(), RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.load_older_posts(forum_id, &(&view).into()).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Searches the forum's posts, active and archived, by name within `view`'s tags: Discord's
+    /// first 25 matches in its order, kept in the store. `None` while Discord hasn't indexed the
+    /// forum yet.
+    pub async fn search_posts(
+        &self,
+        forum_id: ChannelId,
+        name: String,
+        view: ForumView,
+    ) -> Result<Option<Vec<ChannelId>>, RequestError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.search_posts(forum_id, &name, &(&view).into()).await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Asks for the first messages of `post_ids`, whose cards show without them: 10 a request,
+    /// one request at a time; a post asked already, or that failed in the last 30 s, isn't asked
+    /// again. `Store::post_preview` has them; `PostPreviewChanged` says when.
+    pub fn request_post_previews(&self, forum_id: ChannelId, post_ids: Vec<ChannelId>) {
+        self.core.request_post_previews(forum_id, &post_ids);
     }
 
     /// Searches `parent_id`'s threads, active and archived, by name, as the official client

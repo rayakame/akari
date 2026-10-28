@@ -37,10 +37,12 @@ async fn badges_cross_in_one_read_each() {
     let unread = Badge {
         unread: true,
         mentions: 2,
+        posts: None,
     };
     let none = Badge {
         unread: false,
         mentions: 0,
+        posts: None,
     };
 
     let channels = store.channel_badges(vec![GENERAL, VOICE, ChannelId::new(1)]);

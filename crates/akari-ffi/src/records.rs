@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use akari_core::model::{
     AttachmentId, ChannelId, ChannelType, EmojiId, GuildId, MessageId, MessageType, PremiumType,
-    StickerFormatType, StickerId, StickerPackId, Timestamp, UserId,
+    StickerFormatType, StickerId, StickerPackId, TagId, Timestamp, UserId,
 };
 use akari_core::state;
 
@@ -105,6 +105,20 @@ pub struct Badge {
     pub unread: bool,
     /// The red count, shown also when muted.
     pub mentions: u32,
+    /// A forum's or media channel's count beside its name; `None` shows nothing (as while
+    /// muted).
+    #[uniffi(default = None)]
+    pub posts: Option<PostCount>,
+}
+
+/// What a forum's row counts beside its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PostCount {
+    /// "N New", in the brand color: posts the user neither joined nor opened since the forum's
+    /// ack, when its unread setting is All Messages.
+    New { count: u32 },
+    /// Posts with unread activity after the forum's ack, in the muted color.
+    Unread { count: u32 },
 }
 
 impl From<state::Badge> for Badge {
@@ -112,6 +126,11 @@ impl From<state::Badge> for Badge {
         Self {
             unread: badge.unread,
             mentions: badge.mentions,
+            posts: match badge.posts {
+                state::PostCount::New(count) => Some(PostCount::New { count }),
+                state::PostCount::Unread(count) => Some(PostCount::Unread { count }),
+                _ => None,
+            },
         }
     }
 }
@@ -310,6 +329,162 @@ pub struct Channel {
     pub icon: Option<ImageKey>,
     /// Set for threads.
     pub thread: Option<ThreadInfo>,
+    /// Set for forum and media channels.
+    #[uniffi(default = None)]
+    pub forum: Option<ForumSettings>,
+}
+
+/// What a forum or media channel sets for its posts.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ForumSettings {
+    pub tags: Vec<ForumTag>,
+    /// The reaction a post's card offers before it has any.
+    pub default_reaction: Option<TagEmoji>,
+    /// The post list's order, view and tag matching until the user picks others.
+    pub sort: ForumSort,
+    pub layout: ForumLayout,
+    pub tag_matching: TagMatching,
+    /// Slowmode in seconds for the messages of a new post.
+    pub post_slowmode: u32,
+    /// What a new post's message starts with.
+    pub template: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ForumTag {
+    pub id: TagId,
+    pub name: String,
+    /// Only members who can manage threads apply it.
+    pub moderated: bool,
+    pub emoji: Option<TagEmoji>,
+}
+
+/// A tag's or a default reaction's emoji.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum TagEmoji {
+    Custom { id: EmojiId, key: ImageKey },
+    Unicode { emoji: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum ForumSort {
+    /// The newest message first.
+    #[default]
+    LatestActivity,
+    /// The newest post first.
+    CreationDate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum ForumLayout {
+    #[default]
+    List,
+    Gallery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum TagMatching {
+    /// A post with any of the tags.
+    #[default]
+    Some,
+    /// A post with all of them.
+    All,
+}
+
+/// How the forum's page shows its posts.
+#[derive(Debug, Clone, PartialEq, Eq, Default, uniffi::Record)]
+pub struct ForumView {
+    pub sort: ForumSort,
+    /// Only posts with these tags; none for every post.
+    pub tags: Vec<TagId>,
+    pub matching: TagMatching,
+}
+
+impl From<&ForumView> for state::ForumView {
+    fn from(view: &ForumView) -> Self {
+        state::ForumView::new(
+            match view.sort {
+                ForumSort::LatestActivity => state::ForumSort::LatestActivity,
+                ForumSort::CreationDate => state::ForumSort::CreationDate,
+            },
+            view.tags.clone().into(),
+            match view.matching {
+                TagMatching::Some => state::TagMatching::Some,
+                TagMatching::All => state::TagMatching::All,
+            },
+        )
+    }
+}
+
+/// A forum's page: see `Store::forum_posts`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ForumPosts {
+    /// Active posts, pinned first, then by the view's sort; frozen while the forum is open.
+    pub active: Vec<ChannelId>,
+    /// Archived posts the loaded pages reach, by the view's sort.
+    pub archived: Vec<ChannelId>,
+    pub older: OlderThreads,
+    /// Others' posts created since the list last refreshed: the "N New Posts" pill.
+    pub new_posts: u32,
+}
+
+impl From<state::ForumPosts> for ForumPosts {
+    fn from(posts: state::ForumPosts) -> Self {
+        let ids = |posts: Vec<Arc<state::Channel>>| posts.iter().map(|post| post.id).collect();
+        Self {
+            active: ids(posts.active),
+            archived: ids(posts.archived),
+            older: older(posts.older),
+            new_posts: posts.new_posts,
+        }
+    }
+}
+
+fn tag_emoji(emoji: &state::TagEmoji) -> Option<TagEmoji> {
+    match emoji {
+        state::TagEmoji::Custom(id) => Some(TagEmoji::Custom {
+            id: *id,
+            key: akari_core::media::ImageKey::Emoji {
+                id: *id,
+                animated: false,
+            }
+            .into(),
+        }),
+        state::TagEmoji::Unicode(emoji) => Some(TagEmoji::Unicode {
+            emoji: emoji.to_string(),
+        }),
+        _ => None,
+    }
+}
+
+fn forum_settings(settings: &state::ForumSettings) -> ForumSettings {
+    ForumSettings {
+        tags: settings
+            .tags
+            .iter()
+            .map(|tag| ForumTag {
+                id: tag.id,
+                name: tag.name.to_string(),
+                moderated: tag.moderated,
+                emoji: tag.emoji.as_ref().and_then(tag_emoji),
+            })
+            .collect(),
+        default_reaction: settings.default_reaction.as_ref().and_then(tag_emoji),
+        sort: match settings.sort {
+            state::ForumSort::CreationDate => ForumSort::CreationDate,
+            _ => ForumSort::LatestActivity,
+        },
+        layout: match settings.layout {
+            state::ForumLayout::Gallery => ForumLayout::Gallery,
+            _ => ForumLayout::List,
+        },
+        tag_matching: match settings.tag_matching {
+            state::TagMatching::All => TagMatching::All,
+            _ => TagMatching::Some,
+        },
+        post_slowmode: settings.post_slowmode,
+        template: settings.template.as_deref().map(str::to_owned),
+    }
 }
 
 /// A thread's state.
@@ -338,6 +513,15 @@ pub struct ThreadInfo {
     pub member_ids_preview: Vec<UserId>,
     /// When it was last archived or unarchived.
     pub archived_at: SystemTime,
+    /// A forum post's tags.
+    #[uniffi(default = [])]
+    pub applied_tags: Vec<TagId>,
+    /// Every message ever sent in it, deleted ones included.
+    #[uniffi(default = None)]
+    pub total_message_sent: Option<u32>,
+    /// A forum post pinned to the top of its forum.
+    #[uniffi(default = false)]
+    pub pinned: bool,
 }
 
 /// What a channel's Threads browser lists: see `Store::thread_browser`.
@@ -372,14 +556,18 @@ impl From<state::ThreadBrowser> for ThreadBrowser {
             joined: ids(browser.joined),
             others: ids(browser.others),
             archived: ids(browser.archived),
-            older: match browser.older {
-                state::OlderThreads::NotLoaded => OlderThreads::NotLoaded,
-                state::OlderThreads::Loading => OlderThreads::Loading,
-                state::OlderThreads::More => OlderThreads::More,
-                state::OlderThreads::All => OlderThreads::All,
-                _ => OlderThreads::Failed,
-            },
+            older: older(browser.older),
         }
+    }
+}
+
+fn older(older: state::OlderThreads) -> OlderThreads {
+    match older {
+        state::OlderThreads::NotLoaded => OlderThreads::NotLoaded,
+        state::OlderThreads::Loading => OlderThreads::Loading,
+        state::OlderThreads::More => OlderThreads::More,
+        state::OlderThreads::All => OlderThreads::All,
+        _ => OlderThreads::Failed,
     }
 }
 
@@ -409,10 +597,17 @@ impl From<&state::Channel> for Channel {
                 member_count: info.member_count,
                 member_ids_preview: info.member_ids_preview.to_vec(),
                 archived_at: system_time(info.archive_timestamp),
+                applied_tags: info.applied_tags.to_vec(),
+                total_message_sent: info.total_message_sent,
+                pinned: channel.flags & PINNED != 0,
             }),
+            forum: channel.forum.as_deref().map(forum_settings),
         }
     }
 }
+
+// A forum post pinned to the top of its forum.
+const PINNED: u64 = 1 << 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Message {
@@ -497,6 +692,18 @@ pub struct MessageReference {
 }
 
 /// A thread's first message when it started from a message in its parent channel.
+/// A forum post's first message, for its card: see `Store::post_preview`.
+// Copied across once per read; UniFFI can't lower a boxed record.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum PostPreview {
+    Loaded {
+        message: Message,
+    },
+    /// Discord says the first message is gone: "Original message was deleted".
+    Deleted,
+}
+
 // Copied across once per read; UniFFI can't lower a boxed record.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
