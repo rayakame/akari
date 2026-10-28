@@ -66,7 +66,8 @@ explicit and gore settings per conversation, media waiting for Discord's content
 account asks for in viewed channels and stops waiting for after 3 s), how its embeds show
 (Discord's merge by link, promotion and filters, a card or the media alone, the link text hidden
 under its one image, and the same covers, a spoilered link covering them all), and whether a
-channel waits behind the age gate, with the user's agreement per server in the cache;
+channel waits behind the age gate, with the user's agreement per server in the cache, and whether
+a media or forum post hides download options;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, show where a channel's unread state and mentions come from, and get an image as the app
 would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
@@ -74,9 +75,9 @@ and the message APIs, including the send rules, the read calls and `end_session`
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
 emoji span's key, the display settings, attachments with their kind, size, placeholder, key,
 place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
-agreement), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+agreement, the hidden download options), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
-login, session, server, channel, DM and message lists, and the composer), the message
+login, session, server, channel, DM and message lists, the composer and the media viewer), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
@@ -98,11 +99,13 @@ box and animated by their settings, visibility and the message's hover, with the
 and a click's popout (where an emoji or sticker is from, Discord's words); a message's attachments
 under its text (Discord's mosaic from sizes alone with placeholders, the fade, the spinner, failure
 and retry, GIFs by the motion policy, video posters, file rows, ALT buttons, spoiler and sensitive
-covers with the eye, the media a screen away asked early; a click opens the original in the
-browser until the viewer), its embeds under them (Discord's card with its rows, fields and
-thumbnail, media alone, galleries, GIFVs that loop by the motion policy, a video's Play/Open Link
-pill, the link text hidden, the covers) and the age gate in place of a gated channel's list and
-composer; a thread
+covers with the eye, the media a screen away asked early), its embeds under them (Discord's card
+with its rows, fields and thumbnail, media alone, galleries, GIFVs that loop by the motion policy, a
+video's Play/Open Link pill, the link text hidden, the covers), the media viewer that a click on
+an image, a video or a GIFV opens (a key panel over the window with Discord's scrim, fit and grid,
+zoom at the pointer, pan, the arrows, keys and strip, the author and time, videos in AVKit, Save,
+Open in Browser, Copy Image, Copy Media Link and View Details, the neighbours asked early) and the
+age gate in place of a gated channel's list and composer; a thread
 opens with its header ("# channel › thread"), its start and starter message, and a locked
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
 its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message

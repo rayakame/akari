@@ -37,6 +37,8 @@ app can mirror it and Discord users can switch with zero relearning.
   and videos, file rows, alt text, spoilers, sensitive media and the age gate
 - [embeds.md](embeds.md): link previews and bots' cards: which show, media alone or a card, the
   card's rows, GIFVs and videos, the link text hidden, covers
+- [viewer.md](viewer.md): the media viewer: what opens it, its layout, the media's size, zoom
+  and pan, keys, videos, actions, motion and loading
 - [theme.md](theme.md): the dark and light color tokens
 - [typography.md](typography.md): the type scale, every text style's size and weight, and how
   they were matched to the official client
