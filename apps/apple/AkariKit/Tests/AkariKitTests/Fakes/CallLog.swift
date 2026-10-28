@@ -58,6 +58,7 @@ final class CallLog: Sendable {
         case guildBadges([GuildId])
         case readState(ChannelId)
         case unreadPrivateChannels
+        case hidesMediaDownloads(ChannelId)
     }
 
     private let state = Locked<(calls: [Call], offMainThread: Int)>(([], 0))

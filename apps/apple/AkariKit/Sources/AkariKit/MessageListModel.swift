@@ -455,6 +455,16 @@ public final class MessageListModel {
         return URL(string: link)
     }
 
+    /// The viewer on `row`'s media from `index`, by its author at its time; the shown message's
+    /// channel says whether downloads are offered.
+    public func viewer(_ items: [ViewerModel.Item], at index: Int, of row: Row) -> ViewerModel? {
+        let shown = row.shown
+        return ViewerModel(
+            items: items, index: index, author: shown.author, authorName: row.authorName,
+            timestamp: shown.timestamp,
+            hidesDownloads: store.hidesMediaDownloads(channelId: shown.channelId), account: account)
+    }
+
     // Marked read or a send: only a message newer than what is known now starts the next line.
     func endNewMessagesLine() {
         // A latest load would overtake a running jump too, but at the present none runs.
