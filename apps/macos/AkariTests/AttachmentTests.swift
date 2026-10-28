@@ -784,11 +784,11 @@ final class AttachmentTests {
         }
         let next = below.message.id.rawValue
         try await eventually { self.asked(source, next) == 1 }
-        try await Task.sleep(for: .milliseconds(50))
+        try await eventually { self.list.controller.prefetching.isEmpty }
 
         list.controller.prefetchMedia()
         list.controller.prefetchMedia()
-        try await Task.sleep(for: .milliseconds(50))
+        try await eventually { self.list.controller.prefetching.isEmpty }
         #expect(asked(source, next) == 1, "remembered until the cache says retry")
         cache.retryFailed()
         list.controller.prefetchMedia()
