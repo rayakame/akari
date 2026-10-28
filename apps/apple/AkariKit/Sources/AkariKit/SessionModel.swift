@@ -40,6 +40,10 @@ public final class SessionModel {
     public private(set) var currentUser: User?
     /// The decoded images of this account's boxes, over the account's files.
     public let images: ImageCache
+    /// Discord's placeholders under media while it loads.
+    public let placeholders = PlaceholderCache()
+    /// `view_image_descriptions`: media with a description shows its ALT button.
+    public private(set) var showsAltText = false
     /// Whether animations play: the display settings, read again when they change, and the
     /// system's Reduce Motion (`setReduceMotion`).
     public private(set) var motion = MotionPolicy.default
@@ -137,6 +141,10 @@ public final class SessionModel {
     @ObservationIgnored private let memory: AccountMemory
     @ObservationIgnored private var subscription: StoreSubscription?
     @ObservationIgnored private var lastChannels: [GuildId: ChannelId] = [:]
+    // A link's channel being fetched before it opens.
+    @ObservationIgnored private var goingTo: ChannelId?
+    // Bumped when a gate may have changed, so views reading `ageGate(of:)` update.
+    private var ageGates = 0
     @ObservationIgnored private var lastHomeChannel: ChannelId?
     // Only channels opened here can hold this session's unsent messages.
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
@@ -270,9 +278,43 @@ public final class SessionModel {
     }
 
     private func readMotion() {
-        let next = MotionPolicy(settings: store.displaySettings(), reduceMotion: reduceMotion)
+        let settings = store.displaySettings()
+        let next = MotionPolicy(settings: settings, reduceMotion: reduceMotion)
         if next != motion {
             motion = next
+        }
+        if settings.viewImageDescriptions != showsAltText {
+            showsAltText = settings.viewImageDescriptions
+        }
+    }
+
+    /// Whether the channel's messages wait behind the age gate (D-10). Read in a view, it
+    /// follows the agreement, the channel's and server's restriction and the user's age.
+    public func ageGate(of channel: ChannelId) -> AgeGate {
+        _ = ageGates
+        return store.ageGate(channelId: channel)
+    }
+
+    /// Continue: the server's age-restricted channels open, now and in later sessions.
+    public func agreeToAgeRestricted(in channel: ChannelId) {
+        guard let guild = store.channel(id: channel)?.guildId else {
+            return
+        }
+        account.agreeToAgeRestricted(guildId: guild)
+        ageGates += 1
+        updateReading()
+    }
+
+    /// Go Back: the server's first channel unless it's gated too, else Home (the official
+    /// client's `nsfwReturnToSafety`).
+    public func leaveAgeGate() {
+        let safe = channels?.channels.first {
+            $0.opensMessageList && !$0.isThread && store.ageGate(channelId: $0.id) == .open
+        }
+        if case .guild = place, let safe {
+            open(channel: safe.id)
+        } else {
+            open(.home)
         }
     }
 
@@ -284,6 +326,7 @@ public final class SessionModel {
     /// A guild opens the channel last opened there, else its first text channel; home opens
     /// the conversation last opened there while it's listed.
     public func open(_ place: Place) {
+        goingTo = nil
         engage()
         enter(place)
     }
@@ -307,19 +350,35 @@ public final class SessionModel {
     /// Opens a channel where it lives: in its guild, or at home for a conversation. A channel
     /// the store doesn't have opens where the user is; one without a message list doesn't open.
     public func go(to channel: ChannelId) {
+        guard let found = store.channel(id: channel) else {
+            fetchThenGo(to: channel)
+            return
+        }
         // The place opens its own last or first channel on the way, which isn't being read.
         readingOnce {
-            if let found = store.channel(id: channel) {
-                guard found.opensMessageList else {
-                    return
-                }
-                let place: Place = found.guildId.map { .guild($0) } ?? .home
-                if place != self.place {
-                    open(place)
-                }
+            guard found.opensMessageList else {
+                return
+            }
+            let place: Place = found.guildId.map { .guild($0) } ?? .home
+            if place != self.place {
+                open(place)
             }
             engage()
             show(channel: channel)
+        }
+    }
+
+    // A link's channel the store doesn't have (an unsynced thread, one the user can't see) opens
+    // once Discord gave it: the age gate needs its parent, and Discord may refuse it. Nothing
+    // opens when the user went elsewhere meanwhile.
+    private func fetchThenGo(to channel: ChannelId) {
+        goingTo = channel
+        Task { [weak self, account] in
+            let found = (try? await account.fetchThread(parentId: channel, threadId: channel)) ?? false
+            guard let self, found, goingTo == channel, store.channel(id: channel) != nil else {
+                return
+            }
+            go(to: channel)
         }
     }
 
@@ -473,7 +532,7 @@ public final class SessionModel {
         let allowed =
             message.map { store.canStartThread(channelId: parent, messageId: $0) }
             ?? (creation.public || creation.private)
-        guard allowed else {
+        guard allowed, store.ageGate(channelId: parent) == .open else {
             return
         }
         engage()
@@ -687,7 +746,8 @@ public final class SessionModel {
     /// announcement channel, or the parent of a thread open full width; `nil` elsewhere (forums,
     /// voice, DMs), where it doesn't show.
     public var threadsButtonParent: ChannelId? {
-        guard let open = messages?.channelId, let channels, let shown = channels.channel(open)
+        guard let open = messages?.channelId, ageGate(of: open) == .open, let channels,
+            let shown = channels.channel(open)
         else {
             return nil
         }
@@ -708,6 +768,10 @@ public final class SessionModel {
     }
 
     public func openThreadBrowser(of parent: ChannelId, as presentation: ThreadBrowserModel.Presentation) {
+        // Its rows show the channel's messages.
+        guard store.ageGate(channelId: parent) == .open else {
+            return
+        }
         engage()
         threadBrowser = ThreadBrowserModel(
             parentId: parent, presentation: presentation, userId: userId, store: store,
@@ -1041,6 +1105,11 @@ public final class SessionModel {
         if batch.everythingChanged || batch.displaySettingsChanged {
             readMotion()
         }
+        if batch.everythingChanged || batch.ageGatesChanged || batch.currentUserChanged
+            || !batch.guildsChanged.isEmpty || !batch.channelsChanged.isEmpty
+        {
+            ageGates += 1
+        }
         // A list the session replaces on its own isn't one the user chose to read.
         if case .guild(let id) = place, batch.ready || batch.guildListChanged,
             store.guild(id: id) == nil
@@ -1318,6 +1387,7 @@ public final class SessionModel {
 
     private func show(channel id: ChannelId) {
         spotToRestore = nil
+        goingTo = nil
         switch place {
         case .guild(let guildId): lastChannels[guildId] = id
         case .home: lastHomeChannel = id
@@ -1376,8 +1446,10 @@ public final class SessionModel {
         let reads =
             connection == .online && !suspended && engaged && appActive && windowKey
             && windowVisible && !ended
+        // A gated channel shows none of its messages: nothing is read.
         let lists = [messages, split].compactMap { $0 }.filter { list in
             reads && list.atPresentBottom && !waitingLists.contains(list.channelId)
+                && store.ageGate(channelId: list.channelId) == .open
         }
         for list in lists {
             list.readHere = true

@@ -149,7 +149,11 @@ struct SessionScreen: View {
                         session.channelFocused()
                     }
                 },
-                images: session.images, motion: session.motion, focused: session.focused)
+                images: session.images, placeholders: session.placeholders, motion: session.motion,
+                focused: session.focused, showsAltText: session.showsAltText,
+                ageGate: session.ageGate(of: messages.channelId),
+                agreeToAgeGate: { [session] in session.agreeToAgeRestricted(in: messages.channelId) },
+                leaveAgeGate: { [session] in session.leaveAgeGate() })
         }
         .imageEnvironment(session)
         .background(ReadingSignals.Attach(session: session))

@@ -166,6 +166,17 @@ sticker is from (`EmojiSource`, `StickerDetails`, `SourceGuild`, `StickerPack`),
 names the user's own server an emoji is from, `Store.nitro()` the user's tier, and
 `emoji_shortcode` a Unicode emoji's name.
 
+`Message.attachments` are in the order they show (the mosaic's images and videos, then the
+files; thumbnails left out), each an `Attachment` with its `kind`, pixel size (0 unknown),
+`placeholder` thumbhash, `spoiler` and `animated` flags, alt text, the `key` its image (a video's
+poster) is asked by, its `display` (`Media` or `File`) and its `cover` (`Sensitive`, `Pending`,
+`Spoiler`), decided by the core from the user's settings, the conversation and Discord's scan;
+`Message.spoilers_shown` says the channel's spoilers show without a click. Covers can change
+without a message event: a host rereads its messages after `DisplaySettingsChanged` and `Ready`,
+and the core sends `MessageUpdated` when a scan's wait ends. `Store.age_gate(channel)` says
+whether a channel waits behind the age gate; `Account.agree_to_age_restricted(guild)` is
+Continue, and `AgeGateChanged` follows it.
+
 Names and `mentions_me` can change without a message event, so a host rereads the messages it
 shows after `GuildUpdated` (role names and colors), `ChannelUpdated` (channel names, access),
 `UserUpdated`, `CurrentUserUpdated` and `CurrentMemberUpdated` (the user's roles: their

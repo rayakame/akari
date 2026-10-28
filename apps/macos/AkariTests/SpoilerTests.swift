@@ -19,6 +19,27 @@ struct SpoilerTests {
             as? MessageText.Spoiler
     }
 
+    // `render_spoilers` "Always" (or "If moderator" with Manage Messages): the core says the
+    // channel's spoilers show, in the text as in the media.
+    @Test
+    func aChannelThatShowsSpoilersBuildsThemUncovered() throws {
+        var message = row(1, at: .now, content: "a ||one|| b ||`two`||").message
+        message.spoilersShown = true
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+
+        let text = MessageText.build(message, revealed: [], now: .now, times: times).text
+        var hidden: [Bool] = []
+        text.enumerateAttribute(.akariSpoiler, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+            if let spoiler = value as? MessageText.Spoiler {
+                hidden.append(spoiler.hidden)
+            }
+        }
+
+        #expect(!hidden.isEmpty)
+        #expect(hidden.allSatisfy { !$0 })
+        #expect(text.string.contains("one") && text.string.contains("two"))
+    }
+
     @Test
     func aHiddenSpoilerIsCovered() throws {
         let drawing = MessageTextDrawingTests()
@@ -122,6 +143,7 @@ struct SpoilerTests {
 
     // Down and up on the word, through the text view's own handling.
     func press(_ shown: String, in view: MessageTextView) throws {
+        try settleEvents(in: try #require(view.window))
         let word = try glyphs(of: shown, in: view)
         let point = NSPoint(x: word.midX, y: word.midY)
         NSApp.postEvent(try click(.leftMouseUp, at: point, in: view), atStart: false)
@@ -150,6 +172,7 @@ struct SpoilerTests {
         var clicked: [URL] = []
         view.onLink = { clicked.append($0) }
 
+        try settleEvents(in: try #require(view.window))
         // Ends the text view's tracking loop, should the click reach it.
         NSApp.postEvent(try click(.leftMouseUp, at: NSPoint(x: 300, y: 3), in: view), atStart: false)
         view.mouseDown(with: try click(.leftMouseDown, at: NSPoint(x: 300, y: 3), in: view))

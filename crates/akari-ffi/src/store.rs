@@ -7,7 +7,7 @@ use crate::contents::{Contents, Found};
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
-    Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings, Guild,
+    AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings, Guild,
     GuildBadge, GuildSettings, Message, MessageWindow, Nitro, ReadState, ServerListItem, Slowmode,
     StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
@@ -37,7 +37,13 @@ impl Store {
             *misses += 1;
         }
         let formatted = FormattedText::new(&document, &message.content, names, Some(message));
-        Message::new(message, formatted, self.core.mentions_me(message))
+        Message::new(
+            message,
+            formatted,
+            self.core.mentions_me(message),
+            self.core.shown_attachments(message),
+            self.core.spoilers_shown(message.channel_id),
+        )
     }
 }
 
@@ -83,6 +89,12 @@ impl Store {
     /// How media shows and animates; `DisplaySettingsChanged` says to read it again.
     pub fn display_settings(&self) -> DisplaySettings {
         self.core.display_settings().into()
+    }
+
+    /// Whether the channel's messages wait behind the age gate; `AgeGateChanged` says to read
+    /// it again.
+    pub fn age_gate(&self, channel_id: ChannelId) -> AgeGate {
+        self.core.age_gate(channel_id).into()
     }
 
     /// Of `ids`, the channels muted now by their own settings, in the order given; a thread by

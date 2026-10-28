@@ -64,6 +64,7 @@ pub(crate) struct ReadStates {
     counted: HashMap<ChannelId, MessageId>,
     blocked: HashSet<UserId>,
     ignored: HashSet<UserId>,
+    friends: HashSet<UserId>,
 }
 
 impl ReadStates {
@@ -131,6 +132,11 @@ impl ReadStates {
         let blocked = relationship.kind == RelationshipType::Blocked;
         set(&mut self.blocked, relationship.id, blocked);
         set(
+            &mut self.friends,
+            relationship.id,
+            relationship.kind == RelationshipType::Friend,
+        );
+        set(
             &mut self.ignored,
             relationship.id,
             relationship.user_ignored,
@@ -146,6 +152,11 @@ impl ReadStates {
     pub(crate) fn unrelate(&mut self, user: UserId) {
         self.blocked.remove(&user);
         self.ignored.remove(&user);
+        self.friends.remove(&user);
+    }
+
+    pub(crate) fn is_friend(&self, user: UserId) -> bool {
+        self.friends.contains(&user)
     }
 
     // With `recount`, an ack at the stored position sets the count: a replay kept READY's there.

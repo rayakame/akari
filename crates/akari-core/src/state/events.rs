@@ -41,6 +41,11 @@ pub enum StoreEvent {
     /// The display settings changed: read
     /// [`Store::display_settings`](super::Store::display_settings) again.
     DisplaySettingsChanged,
+    /// The user agreed to see the guild's age-restricted channels: read
+    /// [`Store::age_gate`](super::Store::age_gate) again.
+    AgeGateChanged {
+        guild_id: GuildId,
+    },
     /// The user's notification settings for a guild changed (`None`: for DMs), or a timed
     /// mute in it ended. Mutes, what counts as a mention and which channels are hidden may
     /// have changed.

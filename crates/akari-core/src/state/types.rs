@@ -17,6 +17,8 @@ pub struct CurrentUser {
     pub premium_type: PremiumType,
     pub mfa_enabled: bool,
     pub verified: bool,
+    /// `Some(false)` for a user Discord knows is under 18; `None` while it doesn't know.
+    pub nsfw_allowed: Option<bool>,
 }
 
 /// Another user, as a DM recipient or a message author.
@@ -114,6 +116,8 @@ pub struct Guild {
     pub community: bool,
     /// Its custom emoji, sorted: which server an emoji in a message is from.
     pub emojis: Box<[EmojiId]>,
+    /// Its owner marked it explicit or age-restricted: every channel is behind the age gate.
+    pub age_restricted: bool,
 }
 
 impl Guild {
@@ -131,6 +135,7 @@ impl Guild {
             default_message_notifications,
             community,
             emojis: _,
+            age_restricted,
         } = self;
         *id == other.id
             && *name == other.name
@@ -142,6 +147,7 @@ impl Guild {
             && *large == other.large
             && *default_message_notifications == other.default_message_notifications
             && *community == other.community
+            && *age_restricted == other.age_restricted
     }
 
     /// The icon's image; `None` without one (the app shows initials).
@@ -497,6 +503,8 @@ pub struct MessageReference {
 pub struct Attachment {
     pub id: AttachmentId,
     pub filename: Box<str>,
+    /// The name without its extension, when Discord had to change the file's name.
+    pub title: Option<Box<str>>,
     /// Alt text.
     pub description: Option<Box<str>>,
     pub content_type: Option<Box<str>>,
@@ -507,6 +515,81 @@ pub struct Attachment {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub flags: u64,
+    /// A thumbhash to show while the image loads (Discord's placeholder version 1).
+    pub placeholder: Option<Box<str>>,
+    /// The explicit content scan that looked at it; `None` until one did, 0 when none can.
+    pub content_scan_version: Option<u32>,
+}
+
+/// What an attachment is, by its file name's extension as the official client decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum AttachmentKind {
+    Image,
+    Video,
+    Audio,
+    /// Anything else, SVGs too: a file row.
+    File,
+}
+
+const IS_THUMBNAIL: u64 = 1 << 1;
+const IS_SPOILER: u64 = 1 << 3;
+const IS_ANIMATED: u64 = 1 << 5;
+
+impl Attachment {
+    pub fn kind(&self) -> AttachmentKind {
+        AttachmentKind::of(&self.extension())
+    }
+
+    /// An image or video the message shows as media: its size known, and not a 1×1 pixel.
+    pub fn is_visual(&self) -> bool {
+        let (Some(width), Some(height)) = (self.width, self.height) else {
+            return false;
+        };
+        matches!(self.kind(), AttachmentKind::Image | AttachmentKind::Video)
+            && width > 0
+            && height > 0
+            && (width, height) != (1, 1)
+    }
+
+    pub fn is_spoiler(&self) -> bool {
+        self.flags & IS_SPOILER != 0
+    }
+
+    /// A media post's chosen tile; the message itself doesn't show it.
+    pub fn is_thumbnail(&self) -> bool {
+        self.flags & IS_THUMBNAIL != 0
+    }
+
+    /// A GIF, or a WebP or AVIF Discord marks as animated.
+    pub fn is_animated(&self) -> bool {
+        match self.extension().as_str() {
+            "gif" => true,
+            "webp" | "avif" => self.flags & IS_ANIMATED != 0,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn extension(&self) -> String {
+        self.filename
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+            .unwrap_or_default()
+    }
+}
+
+impl AttachmentKind {
+    // Module 127038's lists; videos also need the proxy, which every attachment has.
+    pub(crate) fn of(extension: &str) -> Self {
+        match extension {
+            "png" | "jpg" | "jpeg" | "jfif" | "webp" | "gif" | "heic" | "heif" | "dng" | "avif" => {
+                Self::Image
+            }
+            "mp4" | "webm" | "mov" | "qt" => Self::Video,
+            "mp3" | "m4a" | "ogg" | "opus" | "wav" | "flac" => Self::Audio,
+            _ => Self::File,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -695,6 +778,70 @@ mod tests {
         assert!(ImageHash::parse("a_gif").is_animated());
     }
 
+    fn file(name: &str, size: Option<(u32, u32)>, flags: u64) -> Attachment {
+        Attachment {
+            id: Snowflake::new(1),
+            filename: name.into(),
+            title: None,
+            description: None,
+            content_type: None,
+            size: 1,
+            url: "https://cdn.discordapp.com/attachments/1/1/a".into(),
+            proxy_url: "https://media.discordapp.net/attachments/1/1/a".into(),
+            width: size.map(|size| size.0),
+            height: size.map(|size| size.1),
+            flags,
+            placeholder: None,
+            content_scan_version: None,
+        }
+    }
+
+    // The official client's lists (module 127038): by extension, whatever the content type.
+    #[test]
+    fn attachments_have_discords_kinds_by_extension() {
+        for name in [
+            "a.png", "a.JPG", "a.jpeg", "a.jfif", "a.webp", "a.gif", "a.heic", "a.heif", "a.dng",
+            "a.avif",
+        ] {
+            assert_eq!(file(name, None, 0).kind(), AttachmentKind::Image, "{name}");
+        }
+        for name in ["a.mp4", "a.webm", "a.MOV", "a.qt"] {
+            assert_eq!(file(name, None, 0).kind(), AttachmentKind::Video, "{name}");
+        }
+        for name in ["a.mp3", "a.m4a", "a.ogg", "a.opus", "a.wav", "a.flac"] {
+            assert_eq!(file(name, None, 0).kind(), AttachmentKind::Audio, "{name}");
+        }
+        for name in ["a.svg", "a.zip", "a.txt", "png", "a.png.exe", ""] {
+            assert_eq!(file(name, None, 0).kind(), AttachmentKind::File, "{name}");
+        }
+    }
+
+    // Shown as media only with its size known; a 1×1 image is a tracking pixel.
+    #[test]
+    fn only_sized_images_and_videos_are_visual() {
+        assert!(file("a.png", Some((640, 480)), 0).is_visual());
+        assert!(file("a.mp4", Some((1920, 1080)), 0).is_visual());
+        assert!(!file("a.png", None, 0).is_visual());
+        assert!(!file("a.png", Some((0, 480)), 0).is_visual());
+        assert!(!file("a.png", Some((1, 1)), 0).is_visual());
+        assert!(file("a.png", Some((1, 2)), 0).is_visual());
+        assert!(!file("a.zip", Some((640, 480)), 0).is_visual());
+        assert!(!file("a.mp3", Some((640, 480)), 0).is_visual());
+    }
+
+    #[test]
+    fn attachment_flags_read_as_discord_sets_them() {
+        assert!(file("a.png", None, 1 << 3).is_spoiler());
+        assert!(!file("a.png", None, 0).is_spoiler());
+        assert!(file("a.png", None, 1 << 1).is_thumbnail());
+        // GIFs animate; WebP and AVIF only when Discord says so.
+        assert!(file("a.gif", None, 0).is_animated());
+        assert!(file("a.webp", None, 1 << 5).is_animated());
+        assert!(file("a.avif", None, 1 << 5).is_animated());
+        assert!(!file("a.webp", None, 0).is_animated());
+        assert!(!file("a.png", None, 1 << 5).is_animated());
+    }
+
     fn user(id: u64) -> User {
         User {
             id: Snowflake::new(id),
@@ -823,6 +970,7 @@ mod tests {
             default_message_notifications: NotificationLevel::AllMessages,
             community: false,
             emojis: Box::new([]),
+            age_restricted: false,
         };
         assert_eq!(
             guild.icon_key(),

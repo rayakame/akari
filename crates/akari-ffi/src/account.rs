@@ -96,6 +96,11 @@ impl Account {
         run(self.runtime, async move { core.flush_cache().await }).await;
     }
 
+    /// The user agreed to see the guild's age-restricted channels; kept with the account.
+    pub fn agree_to_age_restricted(&self, guild_id: GuildId) {
+        self.core.agree_to_age_restricted(guild_id);
+    }
+
     /// Keeps the channel's messages and adds new ones from the gateway.
     pub fn view_channel(&self, channel_id: ChannelId) {
         self.core.view_channel(channel_id);

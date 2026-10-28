@@ -69,6 +69,8 @@ fn describe(event: &StoreEvent) -> String {
             format!("ChannelRemoved({})", channel_id.get())
         }
         StoreEvent::MessageInserted(message) => format!("MessageInserted({})", message.id.get()),
+        StoreEvent::MessageUpdated(message) => format!("MessageUpdated({})", message.id.get()),
+        StoreEvent::AgeGateChanged { guild_id } => format!("AgeGateChanged({})", guild_id.get()),
         StoreEvent::MessageDeleted { message_id, .. } => {
             format!("MessageDeleted({})", message_id.get())
         }
@@ -1106,6 +1108,7 @@ fn a_window_opened_before_the_first_ready_survives_it() {
 mod acks;
 mod badges;
 mod expressions;
+mod media;
 mod read_states;
 mod thread_boxes;
 mod thread_browser;

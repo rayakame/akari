@@ -110,6 +110,8 @@ nonisolated enum TypeScale {
 
     static let loginTitle = TextStyle(24, .semibold)
     static let qrTitle = TextStyle(20, .semibold)
+    static let gateTitle = TextStyle(20, .semibold)
+    static let gateText = TextStyle(16, .medium)
     static let sheetTitle = TextStyle(17, .semibold)
     static let fieldLabel = TextStyle(12, .bold)
     static let button = TextStyle(16, .medium)

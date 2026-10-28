@@ -4199,6 +4199,7 @@ mod preparer {
 mod expressions;
 mod images;
 mod reading;
+mod scans;
 mod starters;
 mod thread_create;
 mod thread_fetch;

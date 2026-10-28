@@ -12,6 +12,17 @@ public struct SpoilerKey: Hashable, Sendable {
     }
 }
 
+/// One attachment of one message.
+public struct MediaKey: Hashable, Sendable {
+    public let messageId: MessageId
+    public let attachmentId: AttachmentId
+
+    public init(messageId: MessageId, attachmentId: AttachmentId) {
+        self.messageId = messageId
+        self.attachmentId = attachmentId
+    }
+}
+
 /// A channel's messages, as the store's window holds them.
 @MainActor @Observable
 public final class MessageListModel {
@@ -158,6 +169,10 @@ public final class MessageListModel {
     public private(set) var openedFrom = Origin.network
     /// Revealed for as long as the model lives: through rereads and loads, not a channel switch.
     public private(set) var revealedSpoilers: Set<SpoilerKey> = []
+    /// Spoilered media the user revealed, as long as the model lives (D143: no re-hiding).
+    public private(set) var revealedMedia: Set<MediaKey> = []
+    /// Sensitive media the user showed with its eye; a second click hides it again (D144).
+    public private(set) var shownSensitive: Set<MediaKey> = []
     /// Whether the view is scrolled to the bottom of its rows, as it reports; a list opens there.
     public private(set) var atBottom = true
     /// At the present, not stale, and scrolled to its bottom: where the user reads new messages.
@@ -409,6 +424,24 @@ public final class MessageListModel {
         revealedSpoilers.insert(key)
     }
 
+    public func reveal(media key: MediaKey) {
+        revealedMedia.insert(key)
+    }
+
+    public func toggleSensitive(_ key: MediaKey) {
+        if shownSensitive.remove(key) == nil {
+            shownSensitive.insert(key)
+        }
+    }
+
+    /// A fresh link to the original, for the browser; `nil` when the core can't give one now.
+    public func originalURL(_ key: ImageKey) async -> URL? {
+        guard let link = try? await account.originalUrl(key: key) else {
+            return nil
+        }
+        return URL(string: link)
+    }
+
     // Marked read or a send: only a message newer than what is known now starts the next line.
     func endNewMessagesLine() {
         // A latest load would overtake a running jump too, but at the present none runs.
@@ -454,9 +487,12 @@ public final class MessageListModel {
         }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages
+        // How attachments show and what covers them come with the records; a new session
+        // brings new settings and conversations.
+        let everyRow = batch.everythingChanged || namesChanged(batch) || batch.displaySettingsChanged
         if batch.windowsChanged.contains(channelId) {
-            reload(rereading: namesChanged(batch) ? Set(rows.map(\.message.id)) : updated)
-        } else if namesChanged(batch) {
+            reload(rereading: everyRow ? Set(rows.map(\.message.id)) : updated)
+        } else if everyRow {
             reread(Set(rows.map(\.message.id)))
         } else if !updated.isEmpty {
             reread(updated)

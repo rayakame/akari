@@ -246,7 +246,12 @@ struct ThreadBoxTests {
         #expect(
             placeholder {
                 $0.attachments = [
-                    Attachment(id: id(1), filename: "a.png", contentType: nil, size: 1)
+                    Attachment(
+                        id: id(1), filename: "a.png", title: nil, description: nil,
+                        contentType: nil, size: 1, kind: .image, width: 4, height: 4,
+                        placeholder: nil, spoiler: false, animated: false,
+                        key: .attachment(channelId: id(20), messageId: id(25), attachmentId: id(1)),
+                        display: .media, cover: nil)
                 ]
             } == "Click to see attachment")
         let wave = Sticker(

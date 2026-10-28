@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Discord's primary button: the brand fill, darker while hovered and pressed, a faint white
-/// border; small (32) in a header, medium (40) on its own.
+/// border; small (32) in a header, medium (40) on its own. The secondary one is gray.
 struct BrandButton: View {
     enum Size {
         case small, medium
@@ -14,6 +14,7 @@ struct BrandButton: View {
 
     let title: String
     var size = Size.medium
+    var secondary = false
     let action: () -> Void
     @State private var hovered = false
 
@@ -21,7 +22,7 @@ struct BrandButton: View {
         Button(action: action) {
             Text(title)
         }
-        .buttonStyle(Style(size: size, hovered: hovered))
+        .buttonStyle(Style(size: size, secondary: secondary, hovered: hovered))
         .onHover { hovered = $0 }
         .background(CursorArea(.pointingHand))
     }
@@ -34,19 +35,25 @@ struct BrandButton: View {
 
     private struct Style: ButtonStyle {
         let size: Size
+        let secondary: Bool
         let hovered: Bool
+
+        private func fill(pressed: Bool) -> NSColor {
+            if secondary {
+                return pressed || hovered ? Palette.backgroundModStrong : Palette.backgroundModNormal
+            }
+            return pressed ? Palette.brandPressed : hovered ? Palette.brandHover : Palette.brand
+        }
 
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
                 .font(size.style.font)
-                .foregroundStyle(.white)
+                .foregroundStyle(secondary ? Color(nsColor: Palette.textStrong) : .white)
                 .lineLimit(1)
                 .padding(.horizontal, size.padding)
                 .frame(minWidth: size.minWidth, minHeight: size.height, maxHeight: size.height)
                 .background(
-                    Color(
-                        nsColor: configuration.isPressed
-                            ? Palette.brandPressed : hovered ? Palette.brandHover : Palette.brand),
+                    Color(nsColor: fill(pressed: configuration.isPressed)),
                     in: RoundedRectangle(cornerRadius: 8)
                 )
                 .overlay {

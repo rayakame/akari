@@ -293,6 +293,7 @@ struct MessageMenuAreaTests {
             }
         }
         defer { NotificationCenter.default.removeObserver(observer) }
+        try settleEvents(in: window)
 
         for (view, point, items) in points {
             shown = []

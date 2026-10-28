@@ -40,10 +40,19 @@ protocol MessageListActions: AnyObject {
     func createThread(from message: MessageId)
     // A clicked emoji's or sticker's popout; nil where there's none to show.
     func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel?
+    // An image, a video's Play or a file's name: the original in the browser until the viewer.
+    func openMedia(_ key: ImageKey)
+    // A spoilered attachment's click, for the session.
+    func revealMedia(_ key: MediaKey)
+    // A sensitive attachment's eye.
+    func toggleSensitive(_ key: MediaKey)
 }
 
 extension MessageListActions {
     func canCreateThread(from message: MessageId) -> Bool { false }
     func createThread(from message: MessageId) {}
     func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? { nil }
+    func openMedia(_ key: ImageKey) {}
+    func revealMedia(_ key: MediaKey) {}
+    func toggleSensitive(_ key: MediaKey) {}
 }

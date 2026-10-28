@@ -2,7 +2,7 @@ use reqwest::Url;
 
 use super::{AnimatedFormat, ImageError, ImageKey};
 use crate::model::StickerFormatType;
-use crate::state::{Attachment, EmbedMedia, ImageHash};
+use crate::state::{Attachment, AttachmentKind, EmbedMedia, ImageHash};
 
 // The sizes the official client asks for (canary 649848, module 776231).
 pub(crate) const LADDER: [u32; 31] = [
@@ -12,7 +12,6 @@ pub(crate) const LADDER: [u32; 31] = [
 pub(crate) const MAX_SIZE: u32 = 4096;
 // Proxy sizes start here, so nearby boxes share a file.
 const PROXY_FLOOR: u32 = 128;
-const IS_ANIMATED: u64 = 1 << 5;
 const EXTERNAL_HOSTS: [&str; 2] = ["images-ext-1.discordapp.net", "images-ext-2.discordapp.net"];
 // The proxy's own size and form parameters, replaced by Akari's.
 const SIZING: [&str; 7] = [
@@ -375,8 +374,11 @@ impl Hosts {
         if width == 0 || height == 0 {
             return Err(ImageError::NotAnImage);
         }
-        let extension = extension(&attachment.filename);
-        let kind = Kind::of(&extension).ok_or(ImageError::NotAnImage)?;
+        let extension = attachment.extension();
+        let kind = attachment.kind();
+        if !matches!(kind, AttachmentKind::Image | AttachmentKind::Video) {
+            return Err(ImageError::NotAnImage);
+        }
         let proxy = Url::parse(&attachment.proxy_url).map_err(|_| ImageError::NotAnImage)?;
         if !self.allows(&proxy) {
             return Err(ImageError::Unsupported);
@@ -385,13 +387,8 @@ impl Hosts {
             .ok()
             .filter(|url| self.allows(url));
         let form = match (kind, animated) {
-            (Kind::Image, Some(_)) if extension == "gif" => Form::Gif,
-            (Kind::Image, Some(_))
-                if matches!(extension.as_str(), "webp" | "avif")
-                    && attachment.flags & IS_ANIMATED != 0 =>
-            {
-                Form::WebP
-            }
+            (AttachmentKind::Image, Some(_)) if extension == "gif" => Form::Gif,
+            (AttachmentKind::Image, Some(_)) if attachment.is_animated() => Form::WebP,
             _ => Form::Still,
         };
         Ok(Self::proxied(
@@ -520,25 +517,6 @@ impl Hosts {
             source: Some(longest),
             url,
             signed,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Image,
-    Video,
-}
-
-impl Kind {
-    // By extension, as the official client decides (module 127038); SVGs are files.
-    fn of(extension: &str) -> Option<Self> {
-        match extension {
-            "png" | "jpg" | "jpeg" | "jfif" | "webp" | "gif" | "heic" | "heif" | "dng" | "avif" => {
-                Some(Self::Image)
-            }
-            "mp4" | "webm" | "mov" | "qt" => Some(Self::Video),
-            _ => None,
         }
     }
 }
