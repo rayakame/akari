@@ -13,26 +13,34 @@ struct ThreadsHoverTests {
     final class Gate: @unchecked Sendable {
         var waits: [Duration] = []
         private var waiting: [CheckedContinuation<Void, Never>] = []
+        private var released = 0
+        private var returned = 0
 
         func wait(_ duration: Duration) async {
             await withCheckedContinuation { continuation in
                 waits.append(duration)
                 waiting.append(continuation)
             }
+            returned += 1
         }
 
-        // Ends every wait so far; the hover's timers run on the main actor's next turns.
+        // Ends every wait so far and returns once each is back in its hover, which acts in that
+        // same turn; how many turns that takes depends on the machine's load.
         func release() async {
-            let released = waiting
+            let resumed = waiting
             waiting = []
-            released.forEach { $0.resume() }
-            for _ in 0..<5 {
-                await Task.yield()
-            }
+            released += resumed.count
+            resumed.forEach { $0.resume() }
+            await until { self.returned == self.released }
         }
 
         func waitStarted(_ count: Int) async {
-            for _ in 0..<100 where waits.count < count {
+            await until { self.waits.count >= count }
+        }
+
+        private func until(_ condition: () -> Bool) async {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !condition(), ContinuousClock.now < deadline {
                 await Task.yield()
             }
         }
