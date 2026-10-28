@@ -263,6 +263,15 @@ pub struct ForumPosts {
     pub new_posts: u32,
 }
 
+/// A forum post's first message, for its card: see [`Store::post_preview`](super::Store::post_preview).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PostPreview {
+    Loaded(Arc<Message>),
+    /// Discord says the first message is gone.
+    Deleted,
+}
+
 /// What a forum or media channel sets for its posts.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]

@@ -16,8 +16,8 @@ use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::types::{
-    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, StarterMessage,
-    ThreadBrowser, ThreadCreation, User,
+    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostPreview,
+    StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
@@ -554,6 +554,36 @@ impl Store {
 
     pub(crate) fn set_browsing(&self, parent: Option<ChannelId>) {
         self.write("browsing", |inner, _| inner.state.set_browsing(parent));
+    }
+
+    /// A forum post's first message for its card: from post-data, a search, its own messages or
+    /// its window; `None` until one of them has it ([`Account::request_post_previews`]).
+    /// `PostPreviewChanged` says to read it again.
+    ///
+    /// [`Account::request_post_previews`]: crate::Account::request_post_previews
+    pub fn post_preview(&self, post: ChannelId) -> Option<PostPreview> {
+        self.read(|inner| inner.state.post_preview(post))
+    }
+
+    pub(crate) fn want_post_previews(&self, forum: ChannelId, posts: &[ChannelId]) -> bool {
+        self.write("post previews", |inner, events| {
+            inner.state.want_post_previews(forum, posts, events)
+        })
+    }
+
+    pub(crate) fn next_post_batch(&self) -> Option<(ChannelId, Vec<ChannelId>)> {
+        self.write("post previews", |inner, _| inner.state.next_post_batch())
+    }
+
+    pub(crate) fn finish_post_batch(
+        &self,
+        forum: ChannelId,
+        asked: &[ChannelId],
+        answer: Option<model::PostData>,
+    ) {
+        self.write("post previews", |inner, events| {
+            inner.state.finish_post_batch(forum, asked, answer, events);
+        });
     }
 
     pub(crate) fn open_forum(&self, forum: Option<ChannelId>) {

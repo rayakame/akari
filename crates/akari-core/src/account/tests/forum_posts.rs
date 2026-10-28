@@ -267,3 +267,86 @@ async fn a_search_asks_with_the_name_and_the_tags() {
         vec![OLD_A, OLD_B]
     );
 }
+
+// Module 473503 (G-4): the posts' first messages 10 a request, one request at a time, the IDs as
+// strings.
+#[tokio::test]
+async fn previews_are_asked_ten_at_a_time_one_after_the_other() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let posts: Vec<u64> = (0..15)
+        .map(|offset| 300_000_000_000_000_100 + offset)
+        .collect();
+    let answer = |ids: &[u64]| {
+        let threads: serde_json::Map<String, Value> = ids
+            .iter()
+            .map(|id| {
+                (
+                    id.to_string(),
+                    json!({"first_message": {
+                        "id": id.to_string(), "channel_id": id.to_string(), "type": 0,
+                        "content": format!("post {id}"),
+                        "author": {"id": "100000000000000002", "username": "mira", "discriminator": "0"},
+                        "timestamp": "2024-03-01T08:33:00.000000+00:00", "edited_timestamp": null,
+                        "tts": false, "mention_everyone": false, "mentions": [], "mention_roles": [],
+                        "attachments": [], "embeds": [], "pinned": false, "flags": 0,
+                    }, "owner": null}),
+                )
+            })
+            .collect();
+        ResponseTemplate::new(200)
+            .set_body_json(json!({"threads": threads}))
+            .set_delay(Duration::from_millis(50))
+    };
+    for chunk in [&posts[..10], &posts[10..]] {
+        Mock::given(method("POST"))
+            .and(path("/api/v9/channels/300000000000000050/post-data"))
+            .respond_with(answer(chunk))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+    }
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    connection.send(forum_create(2)).await;
+    for (seq, id) in posts.iter().enumerate() {
+        let mut thread = post(*id, *id, &[]);
+        thread["thread_metadata"]["archived"] = false.into();
+        connection
+            .send(json!({"op": 0, "s": seq + 3, "t": "THREAD_CREATE", "d": thread}))
+            .await;
+    }
+    for _ in 0..200 {
+        if account.store().channel(Snowflake::new(posts[14])).is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let ids: Vec<ChannelId> = posts.iter().copied().map(Snowflake::new).collect();
+    account.request_post_previews(forum(), &ids);
+    for _ in 0..300 {
+        if account.store().post_preview(ids[14]).is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let bodies: Vec<Value> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|request| request.url.path().ends_with("/post-data"))
+        .map(|request| serde_json::from_slice(&request.body).unwrap())
+        .collect();
+    let expected =
+        |ids: &[u64]| json!({"thread_ids": ids.iter().map(u64::to_string).collect::<Vec<_>>()});
+    assert_eq!(bodies, vec![expected(&posts[..10]), expected(&posts[10..])]);
+    assert!(
+        ids.iter()
+            .all(|id| account.store().post_preview(*id).is_some())
+    );
+}

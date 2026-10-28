@@ -1,13 +1,37 @@
 use std::cmp::Reverse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::State;
+use super::boxes::known_user;
 use super::browser::{OLDER_PAGE, OlderPage, OlderPages, newest, newest_on_wire};
-use crate::model::{ChannelId, GuildId, Permissions, TagId, ThreadSearchResults, UserId};
-use crate::state::{
-    Channel, ForumPosts, ForumSort, ForumView, OlderThreads, StoreEvent, TagMatching,
+use crate::gateway::MessageUpdate;
+use crate::model::{
+    self, ChannelId, GuildId, MessageId, Permissions, PostData, TagId, ThreadSearchResults, UserId,
 };
+use crate::state::{
+    Channel, ForumPosts, ForumSort, ForumView, Message, OlderThreads, PostPreview, StoreEvent,
+    TagMatching,
+};
+
+// Module 473503 asks at most this many posts a request.
+const POST_BATCH: usize = 10;
+// A post Discord didn't answer for is asked again after this, while its card shows (the official
+// client asks again on the card's next render).
+const RETRY_MILLIS: i64 = 30_000;
+
+/// Forum posts' first messages from post-data and searches, and what's asked.
+#[derive(Debug, Default)]
+#[cfg_attr(test, derive(PartialEq))]
+pub(super) struct Previews {
+    // `None`: Discord said the first message is gone.
+    messages: HashMap<ChannelId, Option<Arc<Message>>>,
+    queue: VecDeque<(ChannelId, ChannelId)>,
+    // Queued or being asked.
+    asked: HashSet<ChannelId>,
+    // When a post Discord didn't answer for may be asked again.
+    retry: HashMap<ChannelId, i64>,
+}
 
 // The official client keeps the pages of at most this many filters.
 const KEPT_FILTERS: usize = 50;
@@ -405,5 +429,159 @@ impl State {
             return;
         }
         self.refresh_forum(forum, events);
+    }
+
+    /// A post's first message: what post-data, a search or its own messages brought, else its
+    /// window's; `None` until one of them has it.
+    pub(crate) fn post_preview(&self, post: ChannelId) -> Option<PostPreview> {
+        if let Some(known) = self.previews.messages.get(&post) {
+            return Some(
+                known
+                    .clone()
+                    .map_or(PostPreview::Deleted, PostPreview::Loaded),
+            );
+        }
+        self.windows
+            .message(post, post.cast())
+            .map(PostPreview::Loaded)
+    }
+
+    /// Queues the posts whose cards show without a first message, unless asked already or failed
+    /// within the last 30 s; `true` when one was queued.
+    pub(crate) fn want_post_previews(
+        &mut self,
+        forum: ChannelId,
+        posts: &[ChannelId],
+        _events: &mut Vec<StoreEvent>,
+    ) -> bool {
+        let now = self.now_millis();
+        let mut queued = false;
+        for post in posts {
+            if self.post_preview(*post).is_some()
+                || self.previews.asked.contains(post)
+                || self
+                    .previews
+                    .retry
+                    .get(post)
+                    .is_some_and(|until| *until > now)
+            {
+                continue;
+            }
+            self.previews.asked.insert(*post);
+            self.previews.queue.push_back((forum, *post));
+            queued = true;
+        }
+        queued
+    }
+
+    /// The next request: up to 10 posts of the first forum waiting.
+    pub(crate) fn next_post_batch(&mut self) -> Option<(ChannelId, Vec<ChannelId>)> {
+        let (forum, _) = *self.previews.queue.front()?;
+        let mut batch = Vec::with_capacity(POST_BATCH);
+        self.previews.queue.retain(|(queued, post)| {
+            if *queued == forum && batch.len() < POST_BATCH {
+                batch.push(*post);
+                false
+            } else {
+                true
+            }
+        });
+        Some((forum, batch))
+    }
+
+    /// What post-data answered for `asked`, or `None` when the request failed.
+    pub(crate) fn finish_post_batch(
+        &mut self,
+        _forum: ChannelId,
+        asked: &[ChannelId],
+        answer: Option<PostData>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let mut threads = answer.map(|answer| answer.threads).unwrap_or_default();
+        let retry = self.now_millis() + RETRY_MILLIS;
+        for post in asked {
+            self.previews.asked.remove(post);
+            let Some(entry) = threads.remove(post) else {
+                self.previews.retry.insert(*post, retry);
+                continue;
+            };
+            if let Some(user) = entry.owner.and_then(|owner| owner.user) {
+                self.put_user(user, events);
+            }
+            let users = &self.entities.users;
+            let message = entry.first_message.map(|message| {
+                Arc::new(Message::from_wire(message, &mut |user| {
+                    known_user(user, users)
+                }))
+            });
+            self.previews.messages.insert(*post, message);
+            self.previews.retry.remove(post);
+            events.push(StoreEvent::PostPreviewChanged { post_id: *post });
+        }
+    }
+
+    // A forum post's first message has the post's ID.
+    fn is_post(&self, channel: ChannelId) -> bool {
+        self.entities
+            .channels
+            .get(&channel)
+            .and_then(|post| post.parent_id)
+            .and_then(|parent| self.entities.channels.get(&parent))
+            .is_some_and(|parent| parent.forum.is_some())
+    }
+
+    pub(super) fn note_first_message(
+        &mut self,
+        message: &model::Message,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if message.id.get() != message.channel_id.get() || !self.is_post(message.channel_id) {
+            return;
+        }
+        let users = &self.entities.users;
+        let first = Message::from_wire(message.clone(), &mut |user| known_user(user, users));
+        self.previews
+            .messages
+            .insert(message.channel_id, Some(Arc::new(first)));
+        self.previews.retry.remove(&message.channel_id);
+        events.push(StoreEvent::PostPreviewChanged {
+            post_id: message.channel_id,
+        });
+    }
+
+    pub(super) fn update_first_message(
+        &mut self,
+        update: &MessageUpdate,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let Some(Some(known)) = self.previews.messages.get(&update.channel_id) else {
+            return;
+        };
+        if known.id != update.id {
+            return;
+        }
+        let users = &self.entities.users;
+        let next = known.patch(update.clone(), &mut |user| known_user(user, users));
+        if next != **known {
+            self.previews
+                .messages
+                .insert(update.channel_id, Some(Arc::new(next)));
+            events.push(StoreEvent::PostPreviewChanged {
+                post_id: update.channel_id,
+            });
+        }
+    }
+
+    pub(super) fn delete_first_message(
+        &mut self,
+        channel: ChannelId,
+        message: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if message.get() != channel.get() || !self.is_post(channel) {
+            return;
+        }
+        self.previews.messages.insert(channel, None);
+        events.push(StoreEvent::PostPreviewChanged { post_id: channel });
     }
 }

@@ -97,6 +97,24 @@ pub struct Channel {
     pub newly_created: bool,
 }
 
+/// Post Data's answer: each forum post's first message and owner, by the post's ID.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[non_exhaustive]
+pub struct PostData {
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub threads: std::collections::HashMap<Snowflake<ChannelMarker>, PostDataEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[non_exhaustive]
+pub struct PostDataEntry {
+    /// `null` once the first message is deleted.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub first_message: Option<Message>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub owner: Option<GuildMember>,
+}
+
 /// A forum or media channel's tag.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[non_exhaustive]
@@ -139,6 +157,9 @@ pub struct ThreadSearchResults {
     /// The newest message of each thread that has one; undocumented, read by Discord's client.
     #[serde(default, deserialize_with = "skip_invalid")]
     pub most_recent_messages: Vec<Message>,
+    /// Forum posts' first messages.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub first_messages: Vec<Message>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

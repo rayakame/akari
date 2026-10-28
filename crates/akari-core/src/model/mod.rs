@@ -11,8 +11,8 @@ mod timestamp;
 mod user;
 
 pub use channel::{
-    Channel, ChannelType, DefaultReaction, ForumTag, OverwriteType, PermissionOverwrite,
-    ThreadMember, ThreadMetadata, ThreadMuteConfig, ThreadSearchResults,
+    Channel, ChannelType, DefaultReaction, ForumTag, OverwriteType, PermissionOverwrite, PostData,
+    PostDataEntry, ThreadMember, ThreadMetadata, ThreadMuteConfig, ThreadSearchResults,
 };
 pub use expression::{
     EmojiSource, EmojiSourceApplication, EmojiSourceGuild, Sticker, StickerGuild, StickerPack,

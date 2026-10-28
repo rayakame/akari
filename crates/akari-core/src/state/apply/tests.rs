@@ -92,6 +92,9 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::ForumPostsChanged { forum_id } => {
             format!("ForumPostsChanged({})", forum_id.get())
         }
+        StoreEvent::PostPreviewChanged { post_id } => {
+            format!("PostPreviewChanged({})", post_id.get())
+        }
         StoreEvent::OlderThreadsChanged { parent_id } => {
             format!("OlderThreadsChanged({})", parent_id.get())
         }

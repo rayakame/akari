@@ -285,6 +285,9 @@ impl State {
                 self.reread_boxes(message.channel_id, events);
             }
         }
+        for message in &results.first_messages {
+            self.note_first_message(message, events);
+        }
         self.settle(self.now_millis(), events);
         Some(found)
     }

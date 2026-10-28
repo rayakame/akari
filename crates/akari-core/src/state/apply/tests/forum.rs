@@ -1,6 +1,9 @@
 use super::*;
+use crate::model::ChannelId;
 use crate::model::{EmojiId, TagId};
-use crate::state::{ForumLayout, ForumSort, ForumTag, ForumView, TagEmoji, TagMatching};
+use crate::state::{
+    ForumLayout, ForumSort, ForumTag, ForumView, PostPreview, StoreEvent, TagEmoji, TagMatching,
+};
 
 const FORUM: u64 = 300_000_000_000_000_050;
 const POST: u64 = 300_000_000_000_000_051;
@@ -377,4 +380,139 @@ fn a_sync_refreshes_the_open_forum() {
     let mut events = Vec::new();
     state.open_forum(None, &mut events);
     assert_eq!(state.forum_posts(Snowflake::new(FORUM), &any).new_posts, 0);
+}
+
+// Post data (task 169, G-4): a card's first message, from post-data, a search answer, the post's
+// own messages.
+
+fn starter(post: u64, content: &str) -> Value {
+    let mut message = fixture(include_str!(
+        "../../../../tests/fixtures/message_create.json"
+    ));
+    message["id"] = post.to_string().into();
+    message["channel_id"] = post.to_string().into();
+    message["content"] = content.into();
+    message
+}
+
+fn preview(state: &State, post: u64) -> Option<String> {
+    state
+        .post_preview(Snowflake::new(post))
+        .map(|preview| match preview {
+            PostPreview::Loaded(message) => message.content.to_string(),
+            PostPreview::Deleted => "deleted".to_owned(),
+        })
+}
+
+// The post's first message has the post's ID: it arrives with the post, changes and goes.
+#[test]
+fn a_posts_first_message_follows_its_own_events() {
+    let mut state = forum_with_posts();
+    assert_eq!(preview(&state, OLD), None, "not loaded");
+
+    let events = apply(&mut state, "MESSAGE_CREATE", starter(OLD, "how do I…"));
+    assert!(
+        events.contains(&format!("PostPreviewChanged({OLD})")),
+        "{events:?}"
+    );
+    assert_eq!(preview(&state, OLD).as_deref(), Some("how do I…"));
+
+    apply(
+        &mut state,
+        "MESSAGE_UPDATE",
+        json!({"id": OLD.to_string(), "channel_id": OLD.to_string(), "content": "how do I build?"}),
+    );
+    assert_eq!(preview(&state, OLD).as_deref(), Some("how do I build?"));
+
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": OLD.to_string(), "channel_id": OLD.to_string()}),
+    );
+    assert_eq!(preview(&state, OLD).as_deref(), Some("deleted"));
+}
+
+// Module 473503: at most 10 a request, all of one forum, each post asked once while it's being
+// asked; a post that has its preview isn't asked.
+#[test]
+fn previews_are_asked_ten_at_a_time() {
+    let mut state = forum_with_posts();
+    let mut events = Vec::new();
+    apply(&mut state, "MESSAGE_CREATE", starter(OLD, "known"));
+    let posts: Vec<ChannelId> = (0..15)
+        .map(|offset| Snowflake::new(LATER + 10 + offset))
+        .chain([Snowflake::new(OLD)])
+        .collect();
+
+    assert!(state.want_post_previews(Snowflake::new(FORUM), &posts, &mut events));
+    assert!(
+        !state.want_post_previews(Snowflake::new(FORUM), &posts, &mut events),
+        "already asked"
+    );
+
+    let (forum, first) = state.next_post_batch().expect("a batch");
+    assert_eq!(forum, Snowflake::new(FORUM));
+    assert_eq!(first, posts[..10]);
+    let (_, second) = state.next_post_batch().expect("the rest");
+    assert_eq!(second, posts[10..15], "OLD has its preview");
+    assert_eq!(state.next_post_batch(), None);
+}
+
+// What the answer brings fills the previews; a post it leaves out, or a failed request's, is asked
+// again only after 30 s.
+#[tokio::test(start_paused = true)]
+async fn an_answer_fills_previews_and_a_miss_waits() {
+    let mut state = forum_with_posts();
+    let mut events = Vec::new();
+    let asked = [Snowflake::new(OLD), Snowflake::new(NEWEST)];
+    state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events);
+    let (forum, batch) = state.next_post_batch().expect("a batch");
+
+    let answer: crate::model::PostData = serde_json::from_str(
+        &json!({
+            "threads": {
+                OLD.to_string(): {"first_message": starter(OLD, "first"), "owner": null},
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    events.clear();
+    state.finish_post_batch(forum, &batch, Some(answer), &mut events);
+    assert_eq!(preview(&state, OLD).as_deref(), Some("first"));
+    assert_eq!(preview(&state, NEWEST), None);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        StoreEvent::PostPreviewChanged { post_id } if post_id.get() == OLD
+    )));
+
+    assert!(!state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events));
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+    assert!(state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events));
+    assert_eq!(
+        state.next_post_batch().map(|(_, posts)| posts),
+        Some(vec![Snowflake::new(NEWEST)])
+    );
+}
+
+// Archived pages and searches bring their posts' first messages.
+#[test]
+fn a_search_brings_first_messages() {
+    let mut state = forum_with_posts();
+    let mut events = Vec::new();
+    let results: crate::model::ThreadSearchResults = serde_json::from_str(
+        &json!({
+            "threads": [listed_post(LATER, 400_000_000_000_001_000, &[])],
+            "members": [],
+            "first_messages": [starter(LATER, "found")],
+            "has_more": false,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let generation = state.generation();
+    state.keep_found_threads(results, generation, &mut events);
+
+    assert_eq!(preview(&state, LATER).as_deref(), Some("found"));
 }

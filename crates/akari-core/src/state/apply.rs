@@ -398,6 +398,8 @@ pub(crate) struct State {
     forum_list: Option<forum::ForumList>,
     // Each forum tag filter's pages of archived posts in this connection.
     forum_pages: HashMap<forum::PageKey, forum::ForumPages>,
+    // Forum posts' first messages from post-data and searches (`None`: deleted), and what's asked.
+    previews: forum::Previews,
     page_tickets: u64,
     // Explicit content scans asked and given up on this session.
     scans: super::media::Scans,
@@ -438,6 +440,7 @@ impl State {
             browsing: None,
             forum_list: None,
             forum_pages: HashMap::new(),
+            previews: forum::Previews::default(),
             page_tickets: 0,
             scans: super::media::Scans::default(),
             clock,
@@ -785,6 +788,7 @@ impl State {
                 if boxed {
                     self.reread_boxes(channel, events);
                 }
+                self.note_first_message(&message, events);
                 self.read_message(&message);
                 self.dirty.channel(channel);
                 let forced = self.forced_through(&message);
@@ -807,6 +811,7 @@ impl State {
                 if self.update_latest(&update) {
                     self.reread_boxes(update.channel_id, events);
                 }
+                self.update_first_message(&update, events);
                 self.windows.update(*update, &self.entities.users, events);
             }
             E::MessageDelete(delete) => {
@@ -815,6 +820,7 @@ impl State {
                 {
                     self.reread_boxes(delete.channel_id, events);
                 }
+                self.delete_first_message(delete.channel_id, delete.id, events);
                 self.windows.delete(delete.channel_id, delete.id, events);
             }
             E::MessageDeleteBulk(delete) => {
