@@ -59,7 +59,8 @@ runtime like every image ([images.md](images.md)). Where Akari differs, the diff
   never jumbo. Other embeds' text is plain, its line breaks kept. A title's or field name's line
   breaks show as spaces. Relative timestamps count down as in the message's text.
 - The footer's time in Discord's words: "Today at 3:15 PM", "Yesterday at …", "Tomorrow at …",
-  "10/24/2026 3:15 PM" for older days, "10/30/2026" for later ones, in the user's 12 or 24 hour
+  the locale's short date and time for older days ("10/24/26, 3:15 PM", as a message's full date,
+  [message-list.md](message-list.md)), "10/30/2026" for later ones, in the user's 12- or 24-hour
   clock.
 
 ## GIFVs and videos
