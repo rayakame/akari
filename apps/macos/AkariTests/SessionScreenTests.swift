@@ -30,9 +30,7 @@ struct SessionScreenTests {
         let second = GuildAccount()
         let host = NSHostingView(
             rootView: AnyView(SessionScreen(session: session(first, defaults: defaults))))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 1100, height: 600))
         window.contentView = host
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }
@@ -90,9 +88,7 @@ struct SessionScreenTests {
     }
 
     func shownWindow(_ host: NSView) -> NSWindow {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 1100, height: 600))
         window.contentView = host
         window.orderFrontRegardless()
         return window
@@ -265,9 +261,7 @@ struct SessionScreenTests {
         let account = GuildAccount(holdsLoads: true)
         let host = NSHostingView(
             rootView: SessionScreen(session: session(account, defaults: defaults)))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 1100, height: 600))
         window.contentView = host
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }

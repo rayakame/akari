@@ -75,7 +75,7 @@ nonisolated final class WrittenSave: PendingSave, @unchecked Sendable {
 // pointer, keys, the strip, the top bar and its actions; nothing it asked outlives it.
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class ViewerTests {
-    final class KeyWindow: NSWindow {
+    final class KeyWindow: OutOfSightWindow {
         override var isKeyWindow: Bool { true }
         override var canBecomeKey: Bool { true }
     }
@@ -90,9 +90,10 @@ final class ViewerTests {
     var keyed: [NSWindow] = []
 
     init() {
-        window = KeyWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        window = TestWindow.hide(
+            KeyWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled],
+                backing: .buffered, defer: false))
         window.isReleasedWhenClosed = false
         window.animationBehavior = .none
         window.contentView = NSView()
