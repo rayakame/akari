@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{Ack, AckBody, Badge, LoadKind, ReadState};
+use crate::state::{Ack, AckBody, Badge, LoadKind, PostCount, ReadState};
 
 const FORUM: u64 = 300_000_000_000_000_030;
 const MEDIA: u64 = 300_000_000_000_000_032;
@@ -116,7 +116,8 @@ fn reading_an_unread_channel_acks_it_locally() {
         badge(&state, GENERAL),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
 
@@ -970,7 +971,8 @@ fn a_refused_ack_restores_the_channel() {
         badge(&state, GENERAL),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
     assert!(

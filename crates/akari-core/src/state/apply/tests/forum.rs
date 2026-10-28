@@ -2,7 +2,8 @@ use super::*;
 use crate::model::ChannelId;
 use crate::model::{EmojiId, TagId};
 use crate::state::{
-    ForumLayout, ForumSort, ForumTag, ForumView, PostPreview, StoreEvent, TagEmoji, TagMatching,
+    ForumLayout, ForumSort, ForumTag, ForumView, PostCount, PostPreview, StoreEvent, TagEmoji,
+    TagMatching,
 };
 
 const FORUM: u64 = 300_000_000_000_000_050;
@@ -515,4 +516,96 @@ fn a_search_brings_first_messages() {
     state.keep_found_threads(results, generation, &mut events);
 
     assert_eq!(preview(&state, LATER).as_deref(), Some("found"));
+}
+
+// The forum's row (task 170, G-8): "N New" for posts newer than the forum's ack that the user
+// neither joined nor opened, when its unread setting is All Messages; else the count of posts
+// with unread activity; nothing while muted.
+
+const FORUM_ACK: u64 = 300_000_000_000_000_055;
+
+fn read_ack(channel: u64, message: u64) -> Value {
+    json!({"channel_id": channel.to_string(), "message_id": message.to_string(), "version": 1})
+}
+
+fn forum_with_new_posts() -> State {
+    // Without the new notifications every channel's unread setting is All Messages.
+    let mut ready = ready_value();
+    ready["notification_settings"]["flags"] = 0.into();
+    ready["user_guild_settings"]["entries"][0]["flags"] = 0.into();
+    let mut state = state_from(&ready);
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    apply(&mut state, "MESSAGE_ACK", read_ack(FORUM, FORUM_ACK));
+    // OLD and MIDDLE are newer than the ack; MIDDLE is joined; NEWEST is opened (read).
+    for id in [OLD, MIDDLE, NEWEST] {
+        let mut post = listed_post(id, id + 1, &[]);
+        if id == MIDDLE {
+            post["member"] = json!({"id": id.to_string(), "user_id": ME.to_string(), "join_timestamp": "2026-10-01T00:00:00+00:00", "flags": 1});
+        }
+        apply(&mut state, "THREAD_CREATE", post);
+    }
+    apply(&mut state, "MESSAGE_ACK", read_ack(NEWEST, NEWEST + 1));
+    apply(&mut state, "MESSAGE_ACK", read_ack(MIDDLE, MIDDLE + 1));
+    state
+}
+
+fn posts_count(state: &State) -> PostCount {
+    state.channel_badge(Snowflake::new(FORUM)).posts
+}
+
+#[test]
+fn the_row_counts_new_posts() {
+    let state = forum_with_new_posts();
+
+    assert_eq!(posts_count(&state), PostCount::New(1), "OLD alone");
+}
+
+// Opening a post (its read state) or the forum's ack moving past it takes it off the count.
+#[test]
+fn an_opened_post_is_no_longer_new() {
+    let mut state = forum_with_new_posts();
+
+    let events = apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 1));
+    assert!(
+        events.contains(&format!("BadgeChanged({FORUM})")),
+        "{events:?}"
+    );
+    assert_eq!(posts_count(&state), PostCount::None);
+}
+
+#[test]
+fn a_muted_forum_counts_nothing() {
+    let mut state = forum_with_new_posts();
+    apply(
+        &mut state,
+        "USER_GUILD_SETTINGS_UPDATE",
+        json!({
+            "guild_id": G1.to_string(),
+            "channel_overrides": [{"channel_id": FORUM.to_string(), "muted": true, "message_notifications": 3}],
+        }),
+    );
+
+    assert_eq!(posts_count(&state), PostCount::None);
+}
+
+// With the new notifications and the forum's unreads set to only mentions, the row counts posts
+// with unread activity in the muted color instead.
+#[test]
+fn only_mentions_counts_unread_posts() {
+    let mut ready = ready_value();
+    ready["notification_settings"]["flags"] = 16.into();
+    let mut state = state_from(&ready);
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    apply(&mut state, "MESSAGE_ACK", read_ack(FORUM, FORUM_ACK));
+    apply(&mut state, "THREAD_CREATE", listed_post(OLD, OLD + 1, &[]));
+    apply(
+        &mut state,
+        "USER_GUILD_SETTINGS_UPDATE",
+        json!({
+            "guild_id": G1.to_string(),
+            "channel_overrides": [{"channel_id": FORUM.to_string(), "muted": false, "message_notifications": 1, "flags": 512}],
+        }),
+    );
+
+    assert_eq!(posts_count(&state), PostCount::Unread(1));
 }

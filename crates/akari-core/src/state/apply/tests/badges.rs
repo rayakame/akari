@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::Badge;
+use crate::state::{Badge, PostCount};
 
 const CATEGORY: u64 = 300_000_000_000_000_001;
 const ROLE: u64 = 500_000_000_000_000_002;
@@ -7,7 +7,11 @@ const FORUM: u64 = 300_000_000_000_000_030;
 const AFTER_JOIN: u64 = 1_300_000_000_000_000_000;
 
 fn badge(unread: bool, mentions: u32) -> Badge {
-    Badge { unread, mentions }
+    Badge {
+        unread,
+        mentions,
+        posts: PostCount::None,
+    }
 }
 
 fn channel_badge(state: &State, channel: u64) -> Badge {

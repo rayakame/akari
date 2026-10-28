@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::gateway::{GatewayEvent, decode};
 use crate::model::{self, Permissions, Snowflake};
-use crate::state::wall_millis;
+use crate::state::{PostCount, wall_millis};
 
 const G1: u64 = 200_000_000_000_000_001;
 const G3: u64 = 200_000_000_000_000_003;
@@ -1679,14 +1679,16 @@ fn badges_cross_the_store() {
         store.channel_badge(Snowflake::new(300_000_000_000_000_002)),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
     assert_eq!(
         store.guild_badge(Snowflake::new(200_000_000_000_000_001)),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
     assert!(store.unread_private_channels().is_empty());
@@ -1793,6 +1795,7 @@ fn badge_batches_read_in_the_order_given() {
     let unread = Badge {
         unread: true,
         mentions: 2,
+        posts: PostCount::None,
     };
 
     let channels = store.channel_badges(&[
