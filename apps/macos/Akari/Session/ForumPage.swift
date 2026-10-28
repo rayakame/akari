@@ -21,13 +21,13 @@ struct ForumPage: View {
                         header
                             .id(Self.top)
                             .padding(.horizontal, ForumMeasures.inset)
-                        sections(size: proxy.size)
+                        sections(size: ForumMeasures.content(proxy.size))
                             .padding(.horizontal, inset)
                     }
                     .padding(.top, ForumMeasures.top)
                     .padding(.bottom, ForumMeasures.bottom)
                     .background {
-                        ScrollEnd(distance: loadDistance(width: proxy.size.width)) {
+                        ScrollEnd(distance: loadDistance(width: ForumMeasures.content(proxy.size).width)) {
                             if forum.older == .more {
                                 Task { await forum.loadMore() }
                             }
@@ -74,7 +74,8 @@ struct ForumPage: View {
                 forum: forum,
                 guidelines: forum.channel?.topic?.isEmpty == false
                     ? { withAnimation(.easeInOut(duration: 0.3)) { guidelinesOpen.toggle() } }
-                    : nil)
+                    : nil,
+                shiftEscape: session.markServerRead)
             if guidelinesOpen, let topic = forum.channel?.topic, !topic.isEmpty {
                 ForumGuidelines(topic: topic) {
                     withAnimation(.easeInOut(duration: 0.3)) { guidelinesOpen = false }
@@ -155,6 +156,7 @@ struct ForumPage: View {
 struct ForumSearchRow: View {
     let forum: ForumModel
     let guidelines: (() -> Void)?
+    var shiftEscape: () -> Void = {}
     @State private var query = ""
     @FocusState private var focused: Bool
 
@@ -184,7 +186,13 @@ struct ForumSearchRow: View {
                 .font(TypeScale.forumField.font)
                 .foregroundStyle(Color(nsColor: Palette.textStrong))
                 .focused($focused)
-                .onExitCommand { query = "" }
+                .onExitCommand {
+                    if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+                        shiftEscape()
+                    } else {
+                        query = ""
+                    }
+                }
                 .accessibilityLabel(Self.placeholder)
                 .padding(.trailing, 12)
                 if let guidelines {
@@ -226,7 +234,13 @@ struct ForumSearchRow: View {
                 .strokeBorder(
                     Color(nsColor: focused ? Palette.brand : Palette.borderSubtle), lineWidth: 1)
         }
-        .onChange(of: query) { _, text in forum.setQuery(text) }
+        .onChange(of: query) { _, text in
+            forum.setQuery(text)
+            // Past 100 characters the model's query stays: the field follows it.
+            if forum.query != text {
+                query = forum.query
+            }
+        }
         .onChange(of: forum.query) { _, text in
             if text != query {
                 query = text
@@ -327,6 +341,23 @@ struct ForumTagsBar: View {
     let forum: ForumModel
     @State private var selecting = false
 
+    static let gap: CGFloat = 8
+
+    /// The tags whose pills fit before "All" in `width`; the others aren't in the row at all, so
+    /// neither VoiceOver nor Tab reaches them.
+    static func fitting(_ tags: [ForumTag], in width: CGFloat) -> [ForumTag] {
+        var used = AllTagsButton.width
+        var shown: [ForumTag] = []
+        for tag in tags {
+            used += ForumTagPill.width(tag) + gap
+            guard used <= width else {
+                break
+            }
+            shown.append(tag)
+        }
+        return shown
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             ForumSortMenu(forum: forum)
@@ -335,16 +366,19 @@ struct ForumTagsBar: View {
                     .fill(Color(nsColor: Palette.borderSubtle))
                     .frame(width: 2, height: 24)
                     .padding(.horizontal, 16)
-                FirstRow(gap: 8) {
-                    ForEach(forum.tags, id: \.id) { tag in
-                        TagFilterPill(
-                            tag: tag, selected: forum.settings.tags.contains(tag.id)
-                        ) { forum.toggle(tag: tag.id) }
-                    }
-                    AllTagsButton(count: forum.settings.tags.count) { selecting = true }
-                        .popover(isPresented: $selecting, arrowEdge: .bottom) {
-                            SelectTags(forum: forum)
+                GeometryReader { proxy in
+                    HStack(spacing: Self.gap) {
+                        ForEach(Self.fitting(forum.tags, in: proxy.size.width), id: \.id) { tag in
+                            TagFilterPill(
+                                tag: tag, selected: forum.settings.tags.contains(tag.id)
+                            ) { forum.toggle(tag: tag.id) }
                         }
+                        AllTagsButton(count: forum.settings.tags.count) { selecting = true }
+                            .popover(isPresented: $selecting, arrowEdge: .bottom) {
+                                SelectTags(forum: forum)
+                            }
+                    }
+                    .frame(height: ForumMeasures.control)
                 }
                 .frame(height: ForumMeasures.control)
             }
@@ -376,6 +410,9 @@ struct TagFilterPill: View {
 struct AllTagsButton: View {
     let count: Int
     let action: () -> Void
+
+    // At least 52 inside and 8 at each side: "All" and the count both fit.
+    static let width: CGFloat = 52 + 2 * 8
 
     var body: some View {
         Button(action: action) {
@@ -429,7 +466,11 @@ struct SelectTags: View {
                     .font(TypeScale.forumStatusAction.font)
                     .foregroundStyle(Color(nsColor: Palette.textLink))
                     .disabled(forum.settings.tags.isEmpty)
-                    .background(CursorArea(.pointingHand))
+                    .background {
+                        if !forum.settings.tags.isEmpty {
+                            CursorArea(.pointingHand)
+                        }
+                    }
             }
             FlowRows(gap: 8) {
                 ForEach(forum.tags, id: \.id) { tag in
@@ -506,43 +547,6 @@ struct ForumSortMenu: View {
         _ path: KeyPath<ForumModel.Settings, Value>, _ set: @escaping (Value) -> Void
     ) -> Binding<Value> {
         Binding(get: { forum.settings[keyPath: path] }, set: set)
-    }
-}
-
-/// Subviews on one row while they fit, the last one (the "All" button) always, right after the
-/// last that fits; the rest lie past the row's end, clipped.
-struct FirstRow: Layout {
-    let gap: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let height = subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
-        let width =
-            proposal.width
-            ?? subviews.map { $0.sizeThatFits(.unspecified).width }.reduce(0, +)
-            + gap * CGFloat(max(subviews.count - 1, 0))
-        return CGSize(width: width, height: height)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) {
-        guard let last = subviews.last else {
-            return
-        }
-        let trailing = last.sizeThatFits(.unspecified).width
-        var x = bounds.minX
-        var fits = true
-        for subview in subviews.dropLast() {
-            let size = subview.sizeThatFits(.unspecified)
-            fits = fits && x + size.width + gap + trailing <= bounds.maxX
-            let origin = fits ? x : bounds.maxX + 10_000
-            subview.place(
-                at: CGPoint(x: origin, y: bounds.midY), anchor: .leading, proposal: .unspecified)
-            if fits {
-                x += size.width + gap
-            }
-        }
-        last.place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading, proposal: .unspecified)
     }
 }
 

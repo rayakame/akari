@@ -41,6 +41,15 @@ enum ForumMeasures {
     static func placeholderCards(height: CGFloat) -> Int {
         max(Int(((height - 200) / 118).rounded()), 1)
     }
+
+    /// What the page's content gets of `size`: legacy scrollers take their width from it.
+    static func content(_ size: CGSize) -> CGSize {
+        guard NSScroller.preferredScrollerStyle == .legacy else {
+            return size
+        }
+        let scroller = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        return CGSize(width: size.width - scroller, height: size.height)
+    }
 }
 
 /// A post's card in the list: its tags, title, first message and count, the first media at the
@@ -70,7 +79,6 @@ struct ForumListCard: View {
                     ForumCardMessage(preview: card.preview)
                         .frame(height: TypeScale.forumMessage.line)
                     ForumCardFooter(card: card, now: now)
-                        .padding(.top, 8)
                 }
                 .padding(.bottom, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -100,6 +108,7 @@ struct ForumListCard: View {
 struct ForumCardStyle: ButtonStyle {
     let hovered: Bool
     var radius = ForumMeasures.radius
+    var border = Palette.borderSubtle
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius)
@@ -110,7 +119,7 @@ struct ForumCardStyle: ButtonStyle {
             .background(Color(nsColor: fill), in: shape)
             .overlay {
                 shape.strokeBorder(
-                    Color(nsColor: hovered ? Palette.borderNormal : Palette.borderSubtle),
+                    Color(nsColor: hovered ? Palette.borderNormal : border),
                     lineWidth: 1)
             }
             .shadow(color: .black.opacity(hovered ? 0.16 : 0), radius: 2, y: 1)
@@ -122,6 +131,8 @@ struct ForumCardStyle: ButtonStyle {
 struct ForumCardTags: View {
     let card: ForumModel.Card
     let filter: Set<TagId>
+    /// Over the gallery's media: opaque pills.
+    var onMedia = false
 
     static let shown = 3
 
@@ -141,7 +152,8 @@ struct ForumCardTags: View {
             }
             ForEach(card.tags.prefix(Self.shown), id: \.id) { tag in
                 ForumTagPill(
-                    tag: tag, size: .small, look: filter.contains(tag.id) ? .inFilter : .onCard)
+                    tag: tag, size: .small,
+                    look: filter.contains(tag.id) ? .inFilter : onMedia ? .onMedia : .onCard)
             }
             if card.tags.count > Self.shown {
                 let rest = card.tags.dropFirst(Self.shown)
@@ -178,12 +190,28 @@ struct ForumTagPill: View {
         case onCard
         /// On a card, in the filter: the lowest background.
         case inFilter
+        /// Over a gallery card's media: `surface-high`, opaque.
+        case onMedia
     }
 
     let tag: ForumTag
     var size = Size.medium
     var look = Look.idle
     var hovered = false
+
+    /// The pill's width for `tag`, as it lays out.
+    static func width(_ tag: ForumTag, size: Size = .medium) -> CGFloat {
+        let name = (tag.name as NSString).size(withAttributes: [.font: size.style.nsFont]).width
+        let emoji: CGFloat =
+            switch tag.emoji {
+            case .unicode(let text)?:
+                (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size.emoji)])
+                    .width + 6
+            case .custom?: size.emoji + 6
+            case nil: 0
+            }
+        return (name + emoji).rounded(.up) + 2 * size.padding
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -214,6 +242,7 @@ struct ForumTagPill: View {
         switch look {
         case .selected: Color(nsColor: Palette.brand).opacity(0.15)
         case .inFilter: Color(nsColor: Palette.baseLowest)
+        case .onMedia: Color(nsColor: Palette.surfaceHigh)
         case .idle, .onCard:
             Color(nsColor: hovered ? Palette.backgroundModStrong : Palette.backgroundModNormal)
         }
@@ -411,7 +440,7 @@ struct ForumGalleryCard: View {
                     .padding(.horizontal, 12)
                     .overlay(alignment: .bottomLeading) {
                         if card.pinned || !card.tags.isEmpty {
-                            ForumCardTags(card: card, filter: filter)
+                            ForumCardTags(card: card, filter: filter, onMedia: true)
                                 .padding(.leading, 18)
                                 .offset(y: 12 - 2)
                         }
@@ -423,7 +452,7 @@ struct ForumGalleryCard: View {
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
         }
-        .buttonStyle(ForumCardStyle(hovered: hovered))
+        .buttonStyle(ForumCardStyle(hovered: hovered, border: Palette.borderMuted))
         .onHover { hovered = $0 }
         .background(CursorArea(.pointingHand))
         .accessibilityLabel(ForumListCard.label(card))
@@ -458,7 +487,6 @@ struct ForumGalleryCard: View {
         }
     }
 
-    // The message's start, fading out at the bottom.
     private var preview: some View {
         Group {
             switch card.preview {
