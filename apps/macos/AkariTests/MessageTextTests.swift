@@ -246,24 +246,41 @@ struct MessageTextTests {
         #expect(text.string == "\u{FFFC}No Access")
     }
 
-    // The sidebar doesn't open them either: no message list for forums, voice or categories.
+    // The sidebar doesn't open them either: no page yet for media channels, voice or categories.
     @Test
-    func aChannelWithoutAMessageListIsntALink() throws {
+    func aChannelWithoutAPageIsntALink() throws {
         let text = built("<#5> https://discord.com/channels/1/6") { kind in
             if case .channel(let id, _, _) = kind {
-                kind = .channel(id: id, name: .known(name: "help"), kind: .guildForum)
+                kind = .channel(id: id, name: .known(name: "help"), kind: .guildMedia)
             }
         }.text
         var message = message("https://discord.com/channels/1/6")
         message.formatted.links[0].channel?.name = .known(name: "help")
-        message.formatted.links[0].channel?.kind = .guildForum
+        message.formatted.links[0].channel?.kind = .guildMedia
         let link = MessageText.build(message, revealed: [], now: now, times: times).text
 
         let mention = try attributes(text, of: "help")
         #expect(mention[.akariPill] as? MessageText.Pill == .mention)
         #expect(mention[.link] == nil)
-        #expect(mention[.toolTip] as? String == ChannelSymbols.unsupported(.guildForum))
+        #expect(mention[.toolTip] as? String == ChannelSymbols.unsupported(.guildMedia))
         #expect(try attributes(link, of: "help")[.link] == nil)
+    }
+
+    // A forum's mention and link open its page.
+    @Test
+    func aForumIsALink() throws {
+        let text = built("<#5> https://discord.com/channels/1/6") { kind in
+            if case .channel(let id, _, _) = kind {
+                kind = .channel(id: id, name: .known(name: "ideas"), kind: .guildForum)
+            }
+        }.text
+        var message = message("https://discord.com/channels/1/6")
+        message.formatted.links[0].channel?.name = .known(name: "ideas")
+        message.formatted.links[0].channel?.kind = .guildForum
+        let link = MessageText.build(message, revealed: [], now: now, times: times).text
+
+        #expect(try attributes(text, of: "ideas")[.link] as? URL == URL(string: "akari://channel/5"))
+        #expect(try attributes(link, of: "ideas")[.link] as? URL == URL(string: "akari://channel/6"))
     }
 
     @Test
