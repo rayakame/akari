@@ -56,9 +56,12 @@ final class MessageAvatarTests {
         #expect(avatar.frame.size == NSSize(width: 40, height: 40))
         #expect(avatar.cornerRadius == 20)
         let scale = list.window.backingScaleFactor
-        #expect(source.requests.withLock { $0.first }?.width == UInt32((40 * scale).rounded(.up)))
-        #expect(source.requests.withLock { $0.first }?.key == .avatar(2, animated: true))
-        #expect(source.requests.withLock { $0.first }?.animated == nil, "the still")
+        // Every row's avatar loads on its own task, in no set order (the core downloads the newest
+        // ask first): look for Ray's.
+        let request = try #require(
+            source.requests.withLock { $0.first { $0.key == .avatar(2, animated: true) } })
+        #expect(request.width == UInt32((40 * scale).rounded(.up)))
+        #expect(request.animated == nil, "the still")
     }
 
     @Test
