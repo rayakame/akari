@@ -446,22 +446,29 @@ fn a_friendship_updates_the_covers_of_the_authors_dm_media() {
     assert_eq!(cover(&state, DM, 10), Some(MediaCover::Pending));
 }
 
-// Module 207133: a media channel's "Show Option to Save and Copy Embedded Media" off sets
-// HIDE_MEDIA_DOWNLOAD_OPTIONS (1 << 15); Discord reads it for the channel's posts, from their
-// parent, and for nothing else.
+// Module 207133: HIDE_MEDIA_DOWNLOAD_OPTIONS (1 << 15) on a forum or media channel; Discord reads
+// it for the channel's posts, from their parent, and for nothing else.
 #[test]
 fn a_media_channels_posts_hide_download_options() {
     const MEDIA: u64 = 300_000_000_000_000_040;
     const POST: u64 = 300_000_000_000_000_041;
-    const TEXT_THREAD: u64 = 300_000_000_000_000_042;
+    const FORUM: u64 = 300_000_000_000_000_042;
+    const FORUM_POST: u64 = 300_000_000_000_000_043;
+    const OPEN_MEDIA: u64 = 300_000_000_000_000_044;
+    const OPEN_POST: u64 = 300_000_000_000_000_045;
+    const FLAGGED_TEXT: u64 = 300_000_000_000_000_046;
+    const TEXT_THREAD: u64 = 300_000_000_000_000_047;
+    const ORPHAN: u64 = 300_000_000_000_000_048;
     let mut state = ready_state();
-    let mut media = fixture(include_str!(
-        "../../../../tests/fixtures/channel_guild_text.json"
-    ));
-    media["id"] = MEDIA.to_string().into();
-    media["type"] = 16.into();
-    media["flags"] = (1u64 << 15).into();
-    apply(&mut state, "CHANNEL_CREATE", media);
+    let channel = |id: u64, kind: u8, flags: u64| {
+        let mut channel = fixture(include_str!(
+            "../../../../tests/fixtures/channel_guild_text.json"
+        ));
+        channel["id"] = id.to_string().into();
+        channel["type"] = kind.into();
+        channel["flags"] = flags.into();
+        channel
+    };
     let thread = |id: u64, parent: u64| {
         let mut thread = fixture(include_str!(
             "../../../../tests/fixtures/channel_thread.json"
@@ -470,18 +477,39 @@ fn a_media_channels_posts_hide_download_options() {
         thread["parent_id"] = parent.to_string().into();
         thread
     };
-    apply(&mut state, "THREAD_CREATE", thread(POST, MEDIA));
-    let mut flagged = fixture(include_str!(
-        "../../../../tests/fixtures/channel_guild_text.json"
-    ));
-    flagged["id"] = NSFW.to_string().into();
-    flagged["flags"] = (1u64 << 15).into();
-    apply(&mut state, "CHANNEL_CREATE", flagged);
-    apply(&mut state, "THREAD_CREATE", thread(TEXT_THREAD, NSFW));
+    for (parent, kind, flags, post) in [
+        (MEDIA, 16, 1u64 << 15, POST),
+        (FORUM, 15, 1 << 15, FORUM_POST),
+        (OPEN_MEDIA, 16, 0, OPEN_POST),
+        (FLAGGED_TEXT, 0, 1 << 15, TEXT_THREAD),
+    ] {
+        apply(&mut state, "CHANNEL_CREATE", channel(parent, kind, flags));
+        apply(&mut state, "THREAD_CREATE", thread(post, parent));
+    }
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        thread(ORPHAN, 300_000_000_000_000_099),
+    );
 
-    let hides = |id: u64| state.hides_media_downloads(Snowflake::new(id));
-    assert!(hides(POST));
-    assert!(!hides(MEDIA), "the channel itself shows no messages");
-    assert!(!hides(TEXT_THREAD), "a text channel's thread isn't a post");
-    assert!(!hides(GENERAL));
+    let hides = |state: &State, id: u64| state.hides_media_downloads(Snowflake::new(id));
+    assert!(hides(&state, POST));
+    assert!(hides(&state, FORUM_POST));
+    assert!(!hides(&state, OPEN_POST), "the option is on");
+    assert!(
+        !hides(&state, MEDIA),
+        "the channel itself shows no messages"
+    );
+    assert!(
+        !hides(&state, TEXT_THREAD),
+        "a text channel's thread isn't a post"
+    );
+    assert!(!hides(&state, ORPHAN), "its parent isn't known");
+    assert!(!hides(&state, GENERAL));
+
+    apply(&mut state, "CHANNEL_UPDATE", channel(MEDIA, 16, 0));
+    assert!(
+        !hides(&state, POST),
+        "the channel turned the option back on"
+    );
 }

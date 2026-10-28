@@ -78,14 +78,13 @@ impl State {
         )
     }
 
-    /// HIDE_MEDIA_DOWNLOAD_OPTIONS (1 << 15) as the client reads it (module 207133): a forum or
-    /// media channel's post takes it from its parent; nothing else has it.
+    // Module 207133 reads the flag for a forum post (a forum or media channel's thread) from its
+    // parent; only threads have such a parent.
     pub(crate) fn hides_media_downloads(&self, channel: ChannelId) -> bool {
         let Some(parent) = self
             .entities
             .channels
             .get(&channel)
-            .filter(|channel| channel.thread.is_some())
             .and_then(|post| post.parent_id)
             .and_then(|parent| self.entities.channels.get(&parent))
         else {

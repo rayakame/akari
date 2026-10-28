@@ -112,8 +112,8 @@ impl Store {
         self.core.age_gate(channel_id).into()
     }
 
-    /// The channel hides its media's download options (Save, Copy Image, Open in Browser in
-    /// the viewer): a media channel's post whose channel turned them off.
+    /// The channel hides its media's download options: a forum or media channel's post whose
+    /// channel turned them off. The parent's `ChannelUpdated` says to read it again.
     pub fn hides_media_downloads(&self, channel_id: ChannelId) -> bool {
         self.core.hides_media_downloads(channel_id)
     }
