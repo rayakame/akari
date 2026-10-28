@@ -59,9 +59,7 @@ final class TimeRefreshTests {
             pointer: { nil }, notifications: center,
             schedule: { [timers] date, fire in timers.schedule(date, fire) },
             onScreen: { [screen] _ in screen.shows })
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
-            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window = TestWindow.make(size: NSSize(width: 600, height: 400), style: [.titled, .resizable])
         window.contentView = controller.scrollView
         window.layoutIfNeeded()
     }
@@ -281,9 +279,7 @@ final class TimeRefreshTests {
                 calendar: { [clock] in clock.calendar }, locale: { [clock] in clock.locale },
                 now: { [clock] in clock.now }, pointer: { nil }, notifications: center,
                 schedule: { date, fire in timers.schedule(date, fire) }, onScreen: { _ in true })
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
-                backing: .buffered, defer: false)
+            let window = TestWindow.make(size: NSSize(width: 600, height: 400))
             window.contentView = controller.scrollView
             controller.show(MessageTableState(rows: relativeRows(10), reachedOldest: true))
             window.layoutIfNeeded()

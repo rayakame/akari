@@ -160,9 +160,7 @@ struct BrowserButtonTests {
 
     func handAreas<Content: View>(in view: Content, size: NSSize) -> [NSRect] {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: size)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         func areas(_ view: NSView) -> [CursorArea.Area] {

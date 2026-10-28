@@ -193,6 +193,21 @@ starts nothing under tests: no client, no Keychain and no network. Their setting
 `MemoryDefaults`, never in the app's defaults or a suite. The logic the iOS app will share
 lives in AkariKit and is tested there with `swift test`.
 
+The suites run while someone works at the Mac, so they stay out of the way (`TestHost`): the
+host is an accessory app (no Dock icon, no menu bar) that hands the focus back when launching
+activates it, and never activates or makes a window key by itself. Every test window comes from
+`TestWindow` (`AkariTests/TestWindow.swift`): transparent and beyond every screen's frame, where
+it still lays out, draws into bitmaps, hit-tests and takes sent events; the host's own window is
+hidden the same way, and the app's child windows follow theirs out of sight. CI rejects a test
+window made any other way; the performance probe, which measures an on-screen window and only
+runs when asked, makes its own with `TestWindow.visible`. A test that truly needs the screen or
+the app active is tagged `.onScreen` and `.enabled(if: TestWindow.screenTests)`; it runs on CI,
+and locally only when asked for:
+
+```sh
+TEST_RUNNER_AKARI_SCREEN_TESTS=1 xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari -destination 'platform=macOS'
+```
+
 ## Logs and launch time
 
 The `-AkariLog <filter>` launch argument sends akari-core's logs to stderr, in every build.

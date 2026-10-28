@@ -237,8 +237,8 @@ struct MessageMenuAreaTests {
     // blank space, the thread box and a button. A Control-click can't take it here: a test's
     // app is never active, so its window offers a first press to the view's acceptsFirstMouse
     // and drops it. An active app's window asks the view under the pointer for its menu, as the
-    // tests above do.
-    @Test
+    // tests above do. AppKit pops the real menu onto a screen: `.onScreen`.
+    @Test(.tags(.onScreen), .enabled(if: TestWindow.screenTests))
     func aRightClickInTheWindowShowsTheMenu() throws {
         actions.startsThreads = [1, 2, 4, 5]
         list.show([

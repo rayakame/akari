@@ -68,9 +68,7 @@ struct MessageTableTests {
         controller = MessageTableController(
             tableView: table, calendar: { berlin }, now: now,
             pointer: { [pointer] in pointer.location }, onScreen: onScreen)
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
-            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window = TestWindow.make(size: NSSize(width: 600, height: 400), style: [.titled, .resizable])
         window.contentView = controller.scrollView
         window.layoutIfNeeded()
     }
@@ -363,9 +361,7 @@ struct MessageTableTests {
             let controller = MessageTableController(
                 calendar: { berlin }, now: { berlinTime(2026, 10, 12, 15, 0) }, pointer: { nil })
             controller.show(MessageTableState(rows: formattedMix(count), reachedOldest: true))
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 725, height: 431), styleMask: [.titled],
-                backing: .buffered, defer: false)
+            let window = TestWindow.make(size: NSSize(width: 725, height: 431))
             let container = try #require(window.contentView)
             container.addSubview(controller.scrollView)
             controller.scrollView.frame = container.bounds
@@ -543,9 +539,7 @@ struct MessageTableTests {
         let controller = MessageTableController(
             tableView: table, calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) },
             pointer: { pointer.location }, notifications: center)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 600, height: 400))
         window.contentView = controller.scrollView
         controller.scrollView.scrollerStyle = .overlay
         // Highlighted, so a box that changes shows.
@@ -659,17 +653,17 @@ struct MessageTableTests {
 
     // A test's window never becomes key, and a window that isn't hands a first click to no text
     // view; this one says it is, so clicks reach views as the user's would.
-    final class KeyWindow: NSWindow {
+    final class KeyWindow: OutOfSightWindow {
         override var isKeyWindow: Bool { true }
         override var canBecomeKey: Bool { true }
     }
 
     // The list, moved into a window that takes clicks as a key window does.
     func keyWindow() -> NSWindow {
-        let key = KeyWindow(
-            contentRect: window.contentRect(forFrameRect: window.frame), styleMask: window.styleMask,
-            backing: .buffered, defer: false)
-        key.isReleasedWhenClosed = false
+        let key = TestWindow.hide(
+            KeyWindow(
+                contentRect: NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size), styleMask: window.styleMask,
+                backing: .buffered, defer: false))
         key.contentView = controller.scrollView
         key.orderFront(nil)
         key.layoutIfNeeded()
@@ -1427,9 +1421,7 @@ struct MessageTableTests {
     func aPageLandingAboveATallFlingStaysExactlyInPlace() {
         let controller = MessageTableController(
             calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 900),
-            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 1000, height: 900), style: [.titled, .resizable])
         window.contentView = controller.scrollView
         window.layoutIfNeeded()
         let clip = controller.scrollView.contentView
