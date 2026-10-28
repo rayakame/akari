@@ -230,9 +230,7 @@ struct ThreadFormViewTests {
 struct ThreadFormFieldTests {
     func hosted(_ session: SessionModel) throws -> (NSWindow, NSTextField) {
         let form = try #require(session.threadForm)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 700),
-            styleMask: [.titled], backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 480, height: 700))
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: ThreadFormView(form: form, session: session))
         window.contentView?.layoutSubtreeIfNeeded()
@@ -458,9 +456,7 @@ struct ThreadFormFocusTests {
         let host = NSHostingView(rootView: ThreadFormView(form: form, session: session))
         host.frame = NSRect(x: 0, y: 0, width: 480, height: 700)
         host.layoutSubtreeIfNeeded()
-        let window = NSWindow(
-            contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = TestWindow.make(size: host.frame.size)
 
         window.contentView = host
         for _ in 0..<100 where session.focusThreadForm {
@@ -484,9 +480,7 @@ struct ThreadFormKeysTests {
         let session = screen.formattedSession(account)
         session.openThreadForm(in: FormattedStore.channelIds[0], location: .keyboardShortcut)
         let host = NSHostingView(rootView: SessionScreen(session: session))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: width, height: 600))
         window.isReleasedWhenClosed = false
         window.contentView = host
         window.orderFrontRegardless()
@@ -628,9 +622,7 @@ struct ThreadFormPreviewTests {
         let form = try #require(session.threadForm)
         let host = NSHostingView(
             rootView: ThreadFormView(form: form, session: session).frame(width: 480, height: height))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: height), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 480, height: height))
         window.isReleasedWhenClosed = false
         window.contentView = host
         host.layoutSubtreeIfNeeded()
@@ -676,9 +668,7 @@ struct ThreadFormPreviewTests {
         let host = NSHostingView(
             rootView: ThreadFormView(form: form, session: session).frame(width: 480, height: 468)
                 .environment(\.imageCache, cache))
-        let own = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 468), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let own = TestWindow.make(size: NSSize(width: 480, height: 468))
         own.isReleasedWhenClosed = false
         defer { own.close() }
         own.contentView = host

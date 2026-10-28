@@ -109,9 +109,7 @@ struct Rendered {
         _ view: Content, appearance: NSAppearance.Name = .darkAqua,
         size: NSSize = NSSize(width: 1100, height: 600)
     ) throws {
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        let window = TestWindow.make(size: size, style: [.titled, .fullSizeContentView])
         window.titlebarAppearsTransparent = true
         window.appearance = NSAppearance(named: appearance)
         let host = NSHostingView(rootView: view)

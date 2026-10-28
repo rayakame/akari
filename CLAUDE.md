@@ -223,6 +223,7 @@ swift test --package-path apps/apple/AkariKit
 # The macOS app (needs XcodeGen, `brew install xcodegen`, after build-ffi.sh)
 xcodegen generate --spec apps/macos/project.yml
 xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari -destination 'platform=macOS'
+# Its windows stay out of sight; with TEST_RUNNER_AKARI_SCREEN_TESTS=1 the .onScreen tests run too (CI does)
 
 # Banned dependencies (needs cargo-deny)
 cargo deny check bans

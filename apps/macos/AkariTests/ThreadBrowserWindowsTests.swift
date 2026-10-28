@@ -11,7 +11,7 @@ import Testing
 @MainActor
 final class ThreadBrowserWindowsTests {
     // The session's window says it's key, so its composer takes the focus as the app's does.
-    final class KeyWindow: NSWindow {
+    final class KeyWindow: OutOfSightWindow {
         var minimized = 0
         var fullScreens = 0
 
@@ -38,9 +38,10 @@ final class ThreadBrowserWindowsTests {
         store.holdsLoads = true
         session = store.session()
         session.open(channel: FakeBrowserStore.parent)
-        window = KeyWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 813),
-            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        window = TestWindow.hide(
+            KeyWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 1100, height: 813)), styleMask: [.titled, .fullSizeContentView],
+                backing: .buffered, defer: false))
         window.isReleasedWhenClosed = false
         // The window server reports an opening window's bounds scaled while it animates.
         window.animationBehavior = .none
@@ -403,7 +404,7 @@ final class ThreadBrowserWindowsTests {
         try await opened(.modal)
         let cover = try #require(self.shield)
 
-        window.setFrame(NSRect(x: 0, y: 0, width: 1300, height: 900), display: true)
+        window.setFrame(NSRect(origin: window.frame.origin, size: NSSize(width: 1300, height: 900)), display: true)
 
         try await waitUntil("followed") {
             cover.frame == window.frame

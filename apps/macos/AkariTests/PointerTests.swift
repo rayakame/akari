@@ -323,9 +323,7 @@ struct CursorAreaTests {
 
     @Test
     func anAreaTracksThePointerItselfKeyOrNot() throws {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 200, height: 100))
         let content = try #require(window.contentView)
         let hand = area(.pointingHand, at: NSRect(x: 20, y: 20, width: 60, height: 30), in: content)
 

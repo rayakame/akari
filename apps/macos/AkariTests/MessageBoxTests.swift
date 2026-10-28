@@ -9,9 +9,7 @@ import Testing
 // line starts at the same place within its line.
 @MainActor
 struct MessageBoxTests {
-    let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 600, height: 300), styleMask: [.titled],
-        backing: .buffered, defer: false)
+    let window = TestWindow.make(size: NSSize(width: 600, height: 300))
 
     struct Laid {
         let cell: MessageCell

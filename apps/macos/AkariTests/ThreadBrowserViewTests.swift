@@ -297,9 +297,7 @@ struct ThreadBrowserLiveTests {
 
     func host(_ session: SessionModel) throws -> (NSWindow, NSHostingView<AnyView>) {
         let browser = try #require(session.threadBrowser)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 651),
-            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 480, height: 651), style: [.titled, .fullSizeContentView])
         let host = NSHostingView(
             rootView: AnyView(
                 ThreadBrowserView(browser: browser, session: session, now: FakeBrowserStore.now)

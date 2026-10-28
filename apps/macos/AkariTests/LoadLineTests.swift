@@ -20,9 +20,7 @@ struct LoadLineTests {
     init() {
         controller = MessageTableController(
             calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
-            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window = TestWindow.make(size: NSSize(width: 600, height: 400), style: [.titled, .resizable])
         window.contentView = controller.scrollView
         window.layoutIfNeeded()
     }

@@ -249,9 +249,7 @@ struct MoreActiveThreadsScreenTests {
         let session = store.session()
         session.open(channel: FakeBrowserStore.parent)
         let hover = ThreadsHover(wait: { [gate] in await gate.wait($0) })
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 813),
-            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 1100, height: 813), style: [.titled, .fullSizeContentView])
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(
             rootView: SessionScreen(session: session, splitWidth: SplitWidth(), hover: hover)

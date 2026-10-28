@@ -20,9 +20,7 @@ final class ComposerTextViewTests {
 
     init() {
         (scrollView, textView) = ComposerTextView.scrollable()
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        window = TestWindow.make(size: NSSize(width: 500, height: 400))
         scrollView.frame = NSRect(x: 0, y: 0, width: 500, height: 56)
         window.contentView?.addSubview(scrollView)
         textView.onSubmit = { [unowned self] in submits += 1 }
