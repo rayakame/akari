@@ -4,7 +4,9 @@ use super::guild::GuildMember;
 use super::int_enum::int_enum;
 use super::message::Message;
 use super::permissions::Permissions;
-use super::snowflake::{ChannelMarker, GenericMarker, GuildMarker, Snowflake, UserMarker};
+use super::snowflake::{
+    ChannelMarker, EmojiMarker, GenericMarker, GuildMarker, Snowflake, TagMarker, UserMarker,
+};
 use super::timestamp::Timestamp;
 use super::user::User;
 use crate::lenient::{default_on_error, skip_invalid, skip_invalid_option};
@@ -63,6 +65,58 @@ pub struct Channel {
     pub is_spam: bool,
     #[serde(default)]
     pub flags: u64,
+    /// A forum or media channel's tags.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub available_tags: Vec<ForumTag>,
+    /// The reaction a forum's post cards offer before they have any.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub default_reaction_emoji: Option<DefaultReaction>,
+    /// 0 latest activity, 1 creation date.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub default_sort_order: Option<u8>,
+    /// 0 not set, 1 list, 2 gallery.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub default_forum_layout: Option<u8>,
+    /// `match_some` or `match_all`.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub default_tag_setting: Option<String>,
+    /// Slowmode in seconds for the messages of a new post or thread.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub default_thread_rate_limit_per_user: Option<u32>,
+    /// What a new post's message starts with.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub template: Option<String>,
+    /// A post's tags.
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub applied_tags: Vec<Snowflake<TagMarker>>,
+    /// Every message ever sent in a thread, deleted ones included.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub total_message_sent: Option<u32>,
+}
+
+/// A forum or media channel's tag.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct ForumTag {
+    pub id: Snowflake<TagMarker>,
+    pub name: String,
+    /// Only members who can manage threads apply it.
+    #[serde(default)]
+    pub moderated: bool,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub emoji_id: Option<Snowflake<EmojiMarker>>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub emoji_name: Option<String>,
+}
+
+/// A forum's default reaction: a custom emoji's ID or a Unicode emoji.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct DefaultReaction {
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub emoji_id: Option<Snowflake<EmojiMarker>>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub emoji_name: Option<String>,
 }
 
 /// Search Threads' answer. Discord answers 202 without `threads` while it hasn't indexed the

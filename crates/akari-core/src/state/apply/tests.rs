@@ -1109,6 +1109,7 @@ mod acks;
 mod badges;
 mod embeds;
 mod expressions;
+mod forum;
 mod media;
 mod read_states;
 mod thread_boxes;

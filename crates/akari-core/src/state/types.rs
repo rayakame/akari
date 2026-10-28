@@ -6,7 +6,7 @@ use crate::media::ImageKey;
 use crate::model::{
     AttachmentId, ChannelId, ChannelType, EmojiId, GenericMarker, GuildId, MessageId,
     MessageReferenceType, MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake,
-    StickerFormatType, StickerId, Timestamp, UserId, WebhookId,
+    StickerFormatType, StickerId, TagId, Timestamp, UserId, WebhookId,
 };
 
 /// The logged-in user.
@@ -220,11 +220,78 @@ pub struct Channel {
     pub owner_id: Option<UserId>,
     /// Set for threads.
     pub thread: Option<Box<ThreadInfo>>,
+    /// Set for forum and media channels.
+    pub forum: Option<Box<ForumSettings>>,
     pub flags: u64,
     /// A DM from someone the user hasn't accepted yet. The official client lists neither
     /// these nor `spam` DMs.
     pub message_request: bool,
     pub spam: bool,
+}
+
+/// What a forum or media channel sets for its posts.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct ForumSettings {
+    pub tags: Box<[ForumTag]>,
+    /// The reaction a post's card offers before it has any.
+    pub default_reaction: Option<TagEmoji>,
+    /// The post list's order until the user picks another.
+    pub sort: ForumSort,
+    /// The post list's view until the user picks another.
+    pub layout: ForumLayout,
+    /// How a filter of several tags matches until the user picks another.
+    pub tag_matching: TagMatching,
+    /// Slowmode in seconds for the messages of a new post.
+    pub post_slowmode: u32,
+    /// What a new post's message starts with.
+    pub template: Option<Box<str>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ForumTag {
+    pub id: TagId,
+    pub name: Box<str>,
+    /// Only members who can manage threads apply it.
+    pub moderated: bool,
+    pub emoji: Option<TagEmoji>,
+}
+
+/// A tag's or a default reaction's emoji.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TagEmoji {
+    Custom(EmojiId),
+    Unicode(Box<str>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ForumSort {
+    /// The newest message first.
+    #[default]
+    LatestActivity,
+    /// The newest post first.
+    CreationDate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ForumLayout {
+    #[default]
+    List,
+    Gallery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum TagMatching {
+    /// A post with any of the tags.
+    #[default]
+    Some,
+    /// A post with all of them.
+    All,
 }
 
 /// Which threads the user may create in a channel, see `Store::thread_creation`.
@@ -299,6 +366,10 @@ pub struct ThreadInfo {
     pub member_count: Option<u32>,
     /// Some of its members, as Discord picks them; not kept in the disk cache.
     pub member_ids_preview: Box<[UserId]>,
+    /// A forum post's tags.
+    pub applied_tags: Box<[TagId]>,
+    /// Every message ever sent in it, deleted ones included.
+    pub total_message_sent: Option<u32>,
 }
 
 impl ThreadInfo {
@@ -1025,6 +1096,7 @@ mod tests {
             icon: Some(hash.clone()),
             owner_id: None,
             thread: None,
+            forum: None,
             flags: 0,
             message_request: false,
             spam: false,
