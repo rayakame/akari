@@ -161,7 +161,7 @@ struct ChannelRow: View {
 
     var body: some View {
         Button {
-            if channel.opensMessageList {
+            if channel.opensPage {
                 open()
             }
         } label: {
@@ -200,7 +200,7 @@ struct ChannelRow: View {
         }
         .anchorPreference(key: PeekRowBounds.self, value: .bounds) { peeking ? $0 : nil }
         .help(
-            channel.opensMessageList
+            channel.opensPage
                 ? channel.topic ?? "" : ChannelSymbols.unsupported(channel.kind)
         )
         .accessibilityValue(MentionBadge.accessibilityValue(badge, muted: muted))
