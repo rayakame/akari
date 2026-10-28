@@ -111,11 +111,17 @@ final class MediaViewer {
             panel.orderOut(nil)
         }
         if animated, panel.isVisible {
+            let end = Once(finish)
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = Self.fade
                 panel.animator().alphaValue = 0
             } completionHandler: {
-                MainActor.assumeIsolated(finish)
+                MainActor.assumeIsolated { end.run() }
+            }
+            // A window no screen shows (a display asleep, off every screen) may never finish it.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(Self.fade + 0.1))
+                end.run()
             }
         } else {
             finish()
@@ -190,5 +196,21 @@ final class MediaViewer {
         alert.messageText = message
         alert.alertStyle = .warning
         alert.beginSheetModal(for: window)
+    }
+}
+
+// Runs its action the first time only.
+@MainActor
+private final class Once {
+    private var action: (() -> Void)?
+
+    init(_ action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    func run() {
+        let action = self.action
+        self.action = nil
+        action?()
     }
 }
