@@ -222,7 +222,7 @@ final class AttachmentTests {
         let gate = Gate()
         let slow = FakeImageSource.serving(url, pixels: 128, gate: gate)
         let view = ImageLayerView()
-        let window = ScaledWindow(scale: 2)
+        let window = ScaledWindow.make(scale: 2)
         window.contentView?.addSubview(view)
         view.frame = NSRect(x: 0, y: 0, width: 32, height: 32)
         view.fadesIn = true
@@ -867,7 +867,7 @@ final class AttachmentTests {
 struct AttachmentDrawingTests {
     // The layer tree as Core Animation composites it at `scale`, read from the top left.
     func drawn(_ view: NSView, scale: CGFloat) throws -> NSBitmapImageRep {
-        let window = ScaledWindow(scale: scale)
+        let window = ScaledWindow.make(scale: scale)
         window.appearance = NSAppearance(named: .darkAqua)
         window.setContentSize(view.frame.size)
         window.contentView = view
@@ -900,7 +900,7 @@ struct AttachmentDrawingTests {
     func playKeepsItsSize(scale: CGFloat) throws {
         let tile = MediaTileView()
         tile.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
-        let window = ScaledWindow(scale: scale)
+        let window = ScaledWindow.make(scale: scale)
         window.setContentSize(tile.frame.size)
         window.contentView = tile
         tile.configure(MediaTileView.Content(attachment: media(5, "clip.mp4", kind: .video)))
