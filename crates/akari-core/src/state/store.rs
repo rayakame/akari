@@ -1114,6 +1114,12 @@ impl Store {
         self.read(|inner| inner.state.age_gate(channel))
     }
 
+    /// The channel hides its media's download options (Save, Copy Image, Open in Browser): a
+    /// media channel's post whose channel turned them off.
+    pub fn hides_media_downloads(&self, channel: ChannelId) -> bool {
+        self.read(|inner| inner.state.hides_media_downloads(channel))
+    }
+
     pub(crate) fn agree_to_age_restricted(&self, guild: GuildId) {
         self.write("age", |inner, events| {
             inner.state.agree_to_age_restricted(guild, events);

@@ -445,3 +445,43 @@ fn a_friendship_updates_the_covers_of_the_authors_dm_media() {
     assert_eq!(events, ["MessageUpdated(10)"]);
     assert_eq!(cover(&state, DM, 10), Some(MediaCover::Pending));
 }
+
+// Module 207133: a media channel's "Show Option to Save and Copy Embedded Media" off sets
+// HIDE_MEDIA_DOWNLOAD_OPTIONS (1 << 15); Discord reads it for the channel's posts, from their
+// parent, and for nothing else.
+#[test]
+fn a_media_channels_posts_hide_download_options() {
+    const MEDIA: u64 = 300_000_000_000_000_040;
+    const POST: u64 = 300_000_000_000_000_041;
+    const TEXT_THREAD: u64 = 300_000_000_000_000_042;
+    let mut state = ready_state();
+    let mut media = fixture(include_str!(
+        "../../../../tests/fixtures/channel_guild_text.json"
+    ));
+    media["id"] = MEDIA.to_string().into();
+    media["type"] = 16.into();
+    media["flags"] = (1u64 << 15).into();
+    apply(&mut state, "CHANNEL_CREATE", media);
+    let thread = |id: u64, parent: u64| {
+        let mut thread = fixture(include_str!(
+            "../../../../tests/fixtures/channel_thread.json"
+        ));
+        thread["id"] = id.to_string().into();
+        thread["parent_id"] = parent.to_string().into();
+        thread
+    };
+    apply(&mut state, "THREAD_CREATE", thread(POST, MEDIA));
+    let mut flagged = fixture(include_str!(
+        "../../../../tests/fixtures/channel_guild_text.json"
+    ));
+    flagged["id"] = NSFW.to_string().into();
+    flagged["flags"] = (1u64 << 15).into();
+    apply(&mut state, "CHANNEL_CREATE", flagged);
+    apply(&mut state, "THREAD_CREATE", thread(TEXT_THREAD, NSFW));
+
+    let hides = |id: u64| state.hides_media_downloads(Snowflake::new(id));
+    assert!(hides(POST));
+    assert!(!hides(MEDIA), "the channel itself shows no messages");
+    assert!(!hides(TEXT_THREAD), "a text channel's thread isn't a post");
+    assert!(!hides(GENERAL));
+}

@@ -112,6 +112,12 @@ impl Store {
         self.core.age_gate(channel_id).into()
     }
 
+    /// The channel hides its media's download options (Save, Copy Image, Open in Browser in
+    /// the viewer): a media channel's post whose channel turned them off.
+    pub fn hides_media_downloads(&self, channel_id: ChannelId) -> bool {
+        self.core.hides_media_downloads(channel_id)
+    }
+
     /// Of `ids`, the channels muted now by their own settings, in the order given; a thread by
     /// its own membership. A muted category or guild doesn't mute its channels, nor a muted
     /// channel its threads.
