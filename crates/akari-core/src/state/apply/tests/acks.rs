@@ -500,9 +500,13 @@ fn forums_and_media_channels_are_acked_at_now() {
         channel_of(16, MEDIA, AFTER_JOIN + 2),
     );
 
+    let before = MessageId::from_unix_millis(crate::state::apply::wall_millis(), 0).get();
+
     assert_eq!(mark_read(&mut state, FORUM), at_now(FORUM, AFTER_JOIN + 1));
     assert_eq!(mark_read(&mut state, MEDIA), at_now(MEDIA, AFTER_JOIN + 2));
-    assert_eq!(read_state(&state, FORUM), Some((Some(AFTER_JOIN + 1), 0)));
+    let (acked, mentions) = read_state(&state, FORUM).expect("a read state");
+    assert!(acked >= Some(before), "locally at now: {acked:?}");
+    assert_eq!(mentions, 0);
 }
 
 // Never past the rows the list shows, and never at "now", even with a stale cursor.

@@ -1,6 +1,7 @@
 use super::*;
-use crate::model::ChannelId;
+use crate::model::{ChannelId, MessageId};
 use crate::model::{EmojiId, TagId};
+use crate::state::apply::wall_millis;
 use crate::state::{
     ForumLayout, ForumSort, ForumTag, ForumView, PostCount, PostPreview, StoreEvent, TagEmoji,
     TagMatching,
@@ -608,4 +609,87 @@ fn only_mentions_counts_unread_posts() {
     );
 
     assert_eq!(posts_count(&state), PostCount::Unread(1));
+}
+
+// The forum's page is read like a channel (G-9): reading it acks it at "now" while a post is newer
+// than its ack or has unread activity past it, and again as such posts come; locally its ack is
+// "now" too, so the row's counts clear.
+
+fn snowflake_at(millis: i64) -> u64 {
+    MessageId::from_unix_millis(millis, 0).get()
+}
+
+fn read_forum(state: &mut State) -> Vec<crate::state::Ack> {
+    state.set_reading(&[Snowflake::new(FORUM)], &mut Vec::new())
+}
+
+fn forum_ack(state: &State) -> Option<u64> {
+    state
+        .read_state(Snowflake::new(FORUM))
+        .and_then(|read| read.acked)
+        .map(Snowflake::get)
+}
+
+#[test]
+fn reading_the_forum_acks_it_at_now() {
+    let mut state = forum_with_new_posts();
+    let newest = state
+        .channel(Snowflake::new(FORUM))
+        .and_then(|forum| forum.last_message_id)
+        .map(Snowflake::cast);
+    let before = snowflake_at(wall_millis());
+
+    let acks = read_forum(&mut state);
+
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    assert!(acks[0].now);
+    assert_eq!(acks[0].cursor, newest, "never below its newest post");
+    assert!(forum_ack(&state) >= Some(before), "{:?}", forum_ack(&state));
+    assert_eq!(posts_count(&state), PostCount::None);
+}
+
+#[test]
+fn reading_a_read_forum_acks_nothing() {
+    let mut state = forum_with_new_posts();
+    read_forum(&mut state);
+    state.set_reading(&[], &mut Vec::new());
+
+    assert!(read_forum(&mut state).is_empty());
+}
+
+#[test]
+fn a_new_post_while_the_forum_is_read_acks_it_again() {
+    let mut state = forum_with_new_posts();
+    read_forum(&mut state);
+    let later = snowflake_at(wall_millis() + 60_000);
+
+    apply(&mut state, "THREAD_CREATE", listed_post(later, later, &[]));
+
+    let acks = state.take_reading_acks();
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    assert!(acks[0].now);
+    assert!(forum_ack(&state) >= Some(later));
+}
+
+#[test]
+fn activity_in_an_unread_post_while_the_forum_is_read_acks_it_again() {
+    let mut state = forum_with_new_posts();
+    read_forum(&mut state);
+    let later = snowflake_at(wall_millis() + 60_000);
+
+    apply(&mut state, "MESSAGE_CREATE", message(later, OLD));
+
+    assert_eq!(state.take_reading_acks().len(), 1);
+    assert!(state.take_reading_acks().is_empty(), "once");
+}
+
+#[test]
+fn a_forum_not_read_is_not_acked() {
+    let mut state = forum_with_new_posts();
+    let later = snowflake_at(wall_millis() + 60_000);
+
+    apply(&mut state, "THREAD_CREATE", listed_post(later, later, &[]));
+
+    assert!(state.take_reading_acks().is_empty());
+    assert_eq!(forum_ack(&state), Some(FORUM_ACK));
 }

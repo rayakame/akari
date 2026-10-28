@@ -304,7 +304,11 @@ impl State {
                     continue;
                 }
                 self.reading[index].read = true;
-                acks.extend(seen.and_then(|shown| self.read_shown(channel, shown)));
+                if self.is_forum(channel) {
+                    acks.extend(self.read_forum(channel));
+                } else {
+                    acks.extend(seen.and_then(|shown| self.read_shown(channel, shown)));
+                }
             }
         }
         self.refresh_badges(self.now_millis(), events);
@@ -316,6 +320,13 @@ impl State {
     pub(super) fn follow_reading(&mut self) {
         for index in 0..self.reading.len() {
             let Reading { channel, seen, .. } = self.reading[index];
+            if self.is_forum(channel) {
+                if let Some(ack) = self.read_forum(channel) {
+                    self.due.retain(|due| due.channel != channel);
+                    self.due.push(ack);
+                }
+                continue;
+            }
             let shown = self.windows.newest_at_present(channel);
             if shown == seen {
                 continue;
@@ -341,6 +352,37 @@ impl State {
                 read: false,
             };
         }
+    }
+
+    fn is_forum(&self, channel: ChannelId) -> bool {
+        self.entities
+            .channels
+            .get(&channel)
+            .is_some_and(|stored| stored.is_forum())
+    }
+
+    // The official client acks the forum its page shows at "now" whenever a post is newer than
+    // the forum's ack or an active post has unread activity past it (ACK_FORUM_ACTIVE_THREADS).
+    fn read_forum(&mut self, forum: ChannelId) -> Option<Ack> {
+        if !self.ready {
+            return None;
+        }
+        let stored = self.entities.channels.get(&forum)?;
+        let ack = self.entities.read_position(stored);
+        let unread_post = || {
+            self.threads
+                .of(forum)
+                .filter_map(|post| self.entities.channels.get(&post))
+                .any(|post| {
+                    post.thread.as_deref().is_some_and(|info| !info.archived)
+                        && post.last_message_id.is_some_and(|last| last.get() > ack)
+                        && self.entities.unread(post)
+                })
+        };
+        if !self.entities.needs_ack(stored) && !unread_post() {
+            return None;
+        }
+        self.read_locally(forum)
     }
 
     // Up to the list's newest row and never further, so a channel whose cursor is past it stays
@@ -407,7 +449,11 @@ impl State {
     fn read_locally(&mut self, channel: ChannelId) -> Option<Ack> {
         let stored = self.entities.channels.get(&channel)?;
         let mut ack = self.ack_of(stored);
-        if self.entities.needs_ack(stored) {
+        if stored.is_forum() {
+            // Discord gets its own clock's "now"; the Mac's moves the local counts.
+            let now = MessageId::from_unix_millis(self.now_millis(), 0);
+            self.read_up_to(channel, ack.cursor.max(Some(now)));
+        } else if self.entities.needs_ack(stored) {
             self.read_up_to(channel, ack.cursor);
         }
         ack.after = self.entities.read_states.get(channel);
@@ -496,12 +542,7 @@ impl State {
         Ack {
             channel: channel.id,
             cursor: channel.last_message_id.map(Snowflake::cast),
-            now: !self.ready
-                || matches!(
-                    channel.kind,
-                    ChannelType::GuildForum | ChannelType::GuildMedia
-                )
-                || self.stale_cursors.contains(&channel.id),
+            now: !self.ready || channel.is_forum() || self.stale_cursors.contains(&channel.id),
             before: self.entities.read_states.get(channel.id),
             after: None,
             body: AckBody::of(channel),
@@ -535,10 +576,7 @@ impl State {
             {
                 continue;
             }
-            if matches!(
-                channel.kind,
-                ChannelType::GuildForum | ChannelType::GuildMedia
-            ) {
+            if channel.is_forum() {
                 if self
                     .entities
                     .permissions(channel.id, now_millis)
@@ -585,11 +623,7 @@ impl State {
         let Some(stored) = parent.and_then(|parent| self.entities.channels.get_mut(&parent)) else {
             return;
         };
-        if matches!(
-            stored.kind,
-            ChannelType::GuildForum | ChannelType::GuildMedia
-        ) && Arc::make_mut(stored).note_message(thread.cast())
-        {
+        if stored.is_forum() && Arc::make_mut(stored).note_message(thread.cast()) {
             self.dirty.channel(stored.id);
         }
     }

@@ -382,6 +382,11 @@ impl Channel {
             ChannelType::NewsThread | ChannelType::PublicThread | ChannelType::PrivateThread
         )
     }
+
+    /// Forum and media channels, whose page lists their posts.
+    pub fn is_forum(&self) -> bool {
+        matches!(self.kind, ChannelType::GuildForum | ChannelType::GuildMedia)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

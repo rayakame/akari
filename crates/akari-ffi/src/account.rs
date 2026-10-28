@@ -111,7 +111,8 @@ impl Account {
     /// The channels the user is reading at their newest messages, at most two (a channel and
     /// the thread beside it); further ones are ignored, and an empty list reads none. Each is
     /// acked up to the newest message its list shows at the present, and again as that list
-    /// grows, paced per channel. Hosts name a channel only while the user is engaged with it at
+    /// grows, paced per channel; a forum, whose page shows, at "now" while it has new posts or
+    /// posts with unread activity. Hosts name a channel only while the user is engaged with it at
     /// the bottom of its list. A dropped connection clears them: set them again once online and
     /// the lists are refreshed.
     pub fn set_reading(&self, channel_ids: Vec<ChannelId>) {
