@@ -11,9 +11,7 @@ import os
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class ImageLayerViewTests {
     let images = TestImages()
-    let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled],
-        backing: .buffered, defer: false)
+    let window = TestWindow.make(size: NSSize(width: 300, height: 200))
 
     var scale: CGFloat { window.backingScaleFactor }
 
@@ -227,8 +225,8 @@ final class ImageLayerViewTests {
             return ImageFile(path: file.path, width: 256, height: 256, animated: false, fromDisk: false)
         }
         let cache = ImageCache(source: source)
-        let one = ScaledWindow(scale: 1)
-        let two = ScaledWindow(scale: 2)
+        let one = ScaledWindow.make(scale: 1)
+        let two = ScaledWindow.make(scale: 2)
         let view = ImageLayerView()
         view.images = cache
         view.frame = NSRect(x: 10, y: 10, width: 40, height: 40)
@@ -457,14 +455,16 @@ final class ImageLayerViewTests {
 }
 
 /// A window whose backing scale is what the test says.
-final class ScaledWindow: NSWindow {
-    private let scale: CGFloat
+final class ScaledWindow: OutOfSightWindow {
+    private(set) var scale: CGFloat = 1
 
-    init(scale: CGFloat) {
-        self.scale = scale
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled],
-            backing: .buffered, defer: false)
+    static func make(scale: CGFloat) -> ScaledWindow {
+        let window = TestWindow.hide(
+            ScaledWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 300, height: 200)), styleMask: [.titled],
+                backing: .buffered, defer: false))
+        window.scale = scale
+        return window
     }
 
     override var backingScaleFactor: CGFloat { scale }

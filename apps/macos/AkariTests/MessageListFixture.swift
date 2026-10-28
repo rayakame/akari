@@ -20,9 +20,7 @@ final class MessageListFixture {
         controller = MessageTableController(
             calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil },
             build: build)
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window = TestWindow.make(size: NSSize(width: width, height: height), style: [.titled, .resizable])
         window.contentView = controller.scrollView
         controller.actions = actions
         window.layoutIfNeeded()

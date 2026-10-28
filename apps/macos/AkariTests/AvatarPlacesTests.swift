@@ -17,9 +17,7 @@ final class AvatarPlacesTests {
         -> [ImageLayerView]
     {
         let host = NSHostingView(rootView: view)
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: size)
         windows.append(window)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
@@ -82,10 +80,8 @@ final class AvatarPlacesTests {
                 .background(Color(nsColor: Self.backdrop))
                 .environment(\.imageCache, cache))
         let side = size + 2 * Self.margin
-        let window = scale.map { ScaledWindow(scale: $0) as NSWindow }
-            ?? NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: side, height: side), styleMask: [.titled],
-                backing: .buffered, defer: false)
+        let window = scale.map { ScaledWindow.make(scale: $0) as NSWindow }
+            ?? TestWindow.make(size: NSSize(width: side, height: side))
         window.setContentSize(NSSize(width: side, height: side))
         windows.append(window)
         window.appearance = NSAppearance(named: .darkAqua)
@@ -154,9 +150,10 @@ final class AvatarPlacesTests {
     func railClicks<Icon: View>(source: FakeImageSource, settle: Bool = true, @ViewBuilder icon: @escaping (Bool, Bool) -> Icon) async throws -> Int {
         var clicks = 0
         let cache = ImageCache(source: source)
-        let window = ThreadBrowserWindowsTests.KeyWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 72, height: 60), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.hide(
+            ThreadBrowserWindowsTests.KeyWindow(
+                contentRect: NSRect(origin: NSPoint(x: 100, y: 100), size: NSSize(width: 72, height: 60)), styleMask: [.titled],
+                backing: .buffered, defer: false))
         window.isReleasedWhenClosed = false
         window.animationBehavior = .none
         windows.append(window)

@@ -181,9 +181,10 @@ struct ResizeCursorTests {
                 .frame(width: SplitWidth.gap, height: 100)
                 .frame(width: 100, height: 100, alignment: .leading)
                 .takingFirstClicks())
-        let window = MessageTableTests.KeyWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.hide(
+            MessageTableTests.KeyWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 100, height: 100)), styleMask: [.titled],
+                backing: .buffered, defer: false))
         window.isReleasedWhenClosed = false
         window.contentView = host
         window.orderFrontRegardless()
@@ -219,9 +220,7 @@ struct ResizeCursorTests {
             rootView: AnyView(
                 SplitGap(split: SplitWidth(), page: 1200, cursor: cursor)
                     .frame(width: SplitWidth.gap, height: 100)))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 100, height: 100))
         window.contentView = host
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }
@@ -436,9 +435,7 @@ extension SessionScreenTests {
     }
 
     func wideWindow(_ host: NSView, width: CGFloat) -> NSWindow {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: width, height: 600))
         window.contentView = host
         window.orderFrontRegardless()
         return window
@@ -512,9 +509,10 @@ extension SessionScreenTests {
         let session = formattedSession(account)
         let host = NSHostingView(rootView: SessionScreen(session: session))
         // A test's window never becomes key on its own.
-        let window = MessageTableTests.KeyWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1440, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.hide(
+            MessageTableTests.KeyWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 1440, height: 600)), styleMask: [.titled],
+                backing: .buffered, defer: false))
         window.isReleasedWhenClosed = false
         window.contentView = host
         window.orderFrontRegardless()
@@ -548,9 +546,10 @@ extension SessionScreenTests {
 
     func keyWindow(_ host: NSView, width: CGFloat) -> NSWindow {
         // A test's window never becomes key on its own.
-        let window = MessageTableTests.KeyWindow(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.hide(
+            MessageTableTests.KeyWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: width, height: 600)), styleMask: [.titled],
+                backing: .buffered, defer: false))
         window.isReleasedWhenClosed = false
         window.contentView = host
         window.orderFrontRegardless()
@@ -697,9 +696,7 @@ extension SessionScreenTests {
         let account = FormattedAccount(contents: ["test"], thread: true)
         let session = await splitSession(account)
         let host = NSHostingView(rootView: SessionScreen(session: session))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: 600),
-            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: width, height: 600), style: [.titled, .fullSizeContentView])
         window.titlebarAppearsTransparent = true
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = host

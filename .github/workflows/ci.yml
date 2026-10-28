@@ -129,12 +129,27 @@ jobs:
           unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
       - run: xcodegen generate --spec apps/macos/project.yml
+      # Test windows stay out of sight through TestWindow (apps/macos/README.md, "Tests").
+      - name: Test windows go through TestWindow
+        run: |
+          for file in apps/macos/AkariTests/*.swift; do
+            [ "$file" = apps/macos/AkariTests/TestWindow.swift ] && continue
+            awk -v file="$file" '
+              /contentRect:|(NSWindow|NSPanel)\(contentViewController/ && $0 !~ /TestWindow\.hide\(/ \
+                && previous !~ /TestWindow\.hide\(/ && before !~ /TestWindow\.hide\(/ { print file ":" FNR ": " $0; bad = 1 }
+              /class [A-Za-z]+: (NSWindow|NSPanel) / { print file ":" FNR ": " $0; bad = 1 }
+              { before = previous; previous = $0 }
+              END { exit bad }' "$file" || exit 1
+          done
       # A test that runs past its allowance fails and is named; a host that never exits hits the step's limit.
+      # The runner has nobody at the screen: the tests that need it on screen run too.
       - run: >-
           xcodebuild test -project apps/macos/Akari.xcodeproj -scheme Akari -destination 'platform=macOS'
           -test-timeouts-enabled YES -default-test-execution-time-allowance 60
           -maximum-test-execution-time-allowance 120
         timeout-minutes: 10
+        env:
+          TEST_RUNNER_AKARI_SCREEN_TESTS: "1"
       - name: Where the test host hangs
         if: failure()
         run: |

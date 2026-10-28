@@ -10,9 +10,7 @@ import Testing
 final class RowDrawingTests {
     // The controller of a table-hosted test, alive while the test reads its cells.
     var hold: MessageTableController?
-    let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
-        styleMask: [.titled], backing: .buffered, defer: false)
+    let window = TestWindow.make(size: NSSize(width: 800, height: 700))
 
     func shown(_ view: NSView, appearance: NSAppearance.Name = .darkAqua) -> NSView {
         window.appearance = NSAppearance(named: appearance)
@@ -195,7 +193,7 @@ final class RowDrawingTests {
 // a long log message on the frame it happens in.
 @MainActor
 struct ConstraintConflictTests {
-    final class RecordingWindow: NSWindow {
+    final class RecordingWindow: OutOfSightWindow {
         var conflicts = 0
 
         override func visualizeConstraints(_ constraints: [NSLayoutConstraint]?) {
@@ -218,9 +216,10 @@ struct ConstraintConflictTests {
         }
         let controller = MessageTableController(
             calendar: { berlin }, now: { berlinTime(2026, 10, 10, 15, 0) }, pointer: { nil })
-        let window = RecordingWindow(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = TestWindow.hide(
+            RecordingWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: width, height: height)), styleMask: [.titled, .resizable],
+                backing: .buffered, defer: false))
         window.contentView = controller.scrollView
         window.layoutIfNeeded()
         for step in steps {
@@ -251,9 +250,10 @@ struct ConstraintConflictTests {
         defer {
             UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         }
-        let window = RecordingWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 200), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.hide(
+            RecordingWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 600, height: 200)), styleMask: [.titled],
+                backing: .buffered, defer: false))
         let cell = MessageCell()
         window.contentView = cell
 
