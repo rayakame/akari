@@ -589,7 +589,7 @@ extension NSView {
 @MainActor
 struct EmbedDrawingTests {
     func drawn(_ view: NSView, size: NSSize, scale: CGFloat) throws -> NSBitmapImageRep {
-        let window = ScaledWindow(scale: scale)
+        let window = ScaledWindow.make(scale: scale)
         window.appearance = NSAppearance(named: .darkAqua)
         view.frame = NSRect(origin: .zero, size: size)
         window.setContentSize(size)

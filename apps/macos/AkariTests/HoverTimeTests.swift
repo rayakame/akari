@@ -56,7 +56,7 @@ final class HoverTimeTests {
         let body = MessageText.build(message, revealed: [], now: noon, times: times).text
         let width: CGFloat = 600
         let height = MessageCell.height(message, body: body, startsGroup: false, width: width)
-        let window = ScaledWindow(scale: 2)
+        let window = ScaledWindow.make(scale: 2)
         retained.append(window)
         window.appearance = NSAppearance(named: .darkAqua)
         window.setContentSize(NSSize(width: width, height: height))

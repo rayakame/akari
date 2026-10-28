@@ -50,9 +50,7 @@ struct RowTextTests {
         controller.show(MessageTableState(rows: rows(1...50), reachedOldest: true))
         #expect(builds.counts.isEmpty, "\(builds.counts)")
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 725, height: 431), styleMask: [.titled],
-            backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 725, height: 431))
         let container = try #require(window.contentView)
         container.addSubview(controller.scrollView)
         #expect(builds.counts.isEmpty, "\(builds.counts)")

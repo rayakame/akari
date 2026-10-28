@@ -80,9 +80,7 @@ struct SessionLayoutTests {
         } else {
             session.open(.guild(CrowdedStore.guildIds[0]))
         }
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 600),
-            styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        let window = TestWindow.make(size: NSSize(width: 1100, height: 600), style: [.titled, .fullSizeContentView])
         window.titlebarAppearsTransparent = true
         let host = NSHostingView(rootView: SessionScreen(session: session))
         window.contentView = host

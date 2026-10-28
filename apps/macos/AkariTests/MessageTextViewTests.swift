@@ -5,9 +5,7 @@ import Testing
 
 @MainActor
 struct MessageTextViewTests {
-    let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 900, height: 400), styleMask: [.titled],
-        backing: .buffered, defer: false)
+    let window = TestWindow.make(size: NSSize(width: 900, height: 400))
 
     func shown(_ text: NSAttributedString, width: CGFloat) -> MessageTextView {
         let view = MessageTextView()

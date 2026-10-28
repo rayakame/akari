@@ -15,9 +15,7 @@ final class EmojiTests {
         locale: Locale(identifier: "en_US"), timeZone: TimeZone(identifier: "Europe/Berlin")!,
         calendar: Calendar(identifier: .gregorian))
     let now = Date(timeIntervalSince1970: 1_800_000_000 - 300)
-    let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled],
-        backing: .buffered, defer: false)
+    let window = TestWindow.make(size: NSSize(width: 600, height: 400))
 
     func text(_ content: String) -> NSAttributedString {
         let message = row(1, at: now, content: content).message

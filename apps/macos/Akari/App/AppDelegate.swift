@@ -6,6 +6,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var limit: Duration = .seconds(1)
     var reply: (Bool) -> Void = { NSApp.reply(toApplicationShouldTerminate: $0) }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if Launch.isTesting {
+            TestHost.start()
+        }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let quit else {
             return .terminateNow
