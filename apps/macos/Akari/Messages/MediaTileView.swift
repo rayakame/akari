@@ -1,3 +1,4 @@
+import AVFoundation
 import AkariKit
 import AppKit
 
@@ -22,13 +23,62 @@ final class MediaTileView: NSButton {
         case altText
     }
 
+    /// What a tile shows: an attachment's image or video, or an embed's.
+    struct Media: Equatable {
+        let key: ImageKey
+        var video = false
+        var animated = false
+        /// What VoiceOver calls it; "Video" or "Image" by default.
+        var noun: String?
+        /// A video's own Play; off where something else plays it (an embed's pill).
+        var ownPlay = true
+        /// A GIFV: its video plays muted and looping over the poster, as a GIF would.
+        var loops = false
+        /// Discord's thumbhash.
+        var placeholder: String?
+        /// Alt text.
+        var description: String?
+
+        /// A cover's stand-in: nothing of it loads while covered.
+        init(key: ImageKey, noun: String? = nil) {
+            self.key = key
+            self.noun = noun
+        }
+
+        init(_ attachment: Attachment) {
+            key = attachment.key
+            video = attachment.kind == .video
+            animated = attachment.animated
+            placeholder = attachment.placeholder
+            description = attachment.description
+        }
+
+        init(_ image: EmbedImage, video: Bool = false) {
+            key = image.key
+            self.video = video
+            animated = image.animated
+            placeholder = image.placeholder
+        }
+    }
+
     struct Content: Equatable {
-        let attachment: Attachment
+        let media: Media
         var cover: Cover?
         /// The ALT button for media with a description (`view_image_descriptions`).
         var showsAltText = false
         /// Alone in its message: a sensitive cover says why where it fits.
         var single = false
+
+        init(media: Media, cover: Cover? = nil, showsAltText: Bool = false, single: Bool = false) {
+            self.media = media
+            self.cover = cover
+            self.showsAltText = showsAltText
+            self.single = single
+        }
+
+        init(attachment: Attachment, cover: Cover? = nil, showsAltText: Bool = false, single: Bool = false) {
+            self.init(media: Media(attachment), cover: cover, showsAltText: showsAltText, single: single)
+        }
     }
 
     static let spinnerDelay: Duration = .seconds(2)
@@ -62,7 +112,13 @@ final class MediaTileView: NSButton {
     var cornerRadius: CGFloat = 0 {
         didSet { update() }
     }
+    var spoilerRadius: CGFloat = 8 {
+        didSet { update() }
+    }
     var onAction: (Action) -> Void = { _ in }
+    /// Where a GIFV's video comes from; asked when it starts to play.
+    var loopSource: (() async -> URL?)?
+    private var loop: VideoLoop?
     /// Set by the list, which knows what's under the pointer.
     var isHovered = false {
         didSet {
@@ -173,7 +229,7 @@ final class MediaTileView: NSButton {
 
     /// The overlay buttons take their own clicks; everything else is the tile's.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard frame.contains(point) else {
+        guard !isHidden, frame.contains(point) else {
             return nil
         }
         let local = convert(point, from: superview)
@@ -192,18 +248,26 @@ final class MediaTileView: NSButton {
         guard content != self.content else {
             return
         }
-        let sameMedia = content?.attachment == self.content?.attachment
+        let sameMedia = content?.media == self.content?.media
         self.content = content
         if !sameMedia {
             hideSpinner()
+            loop?.stop()
+            loop = nil
         }
-        let attachment = content?.attachment
+        let media = content?.media
         let covered = content.map { Self.hides($0.cover) } ?? true
         picture.show(
-            attachment.flatMap { covered ? nil : ImageLayerView.Content(key: $0.key, canAnimate: $0.animated) })
-        let thumbhash = attachment?.placeholder.flatMap { placeholders?.image($0) }
+            media.flatMap { covered ? nil : ImageLayerView.Content(key: $0.key, canAnimate: $0.animated) })
+        let thumbhash = media?.placeholder.flatMap { placeholders?.image($0) }
         placeholderLayer.contents = thumbhash
+        updateLoop()
         update()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateLoop()
     }
 
     static func hides(_ cover: Cover?) -> Bool {
@@ -213,17 +277,17 @@ final class MediaTileView: NSButton {
         }
     }
 
-    static func accessibilityLabel(_ attachment: Attachment, cover: Cover?) -> String {
-        let kind = attachment.kind == .video ? "Video" : "Image"
+    static func accessibilityLabel(_ media: Media, cover: Cover?) -> String {
+        let kind = media.noun ?? (media.video ? "Video" : "Image")
         switch cover {
         case .spoiler: return "Spoiler, \(kind)"
         case .pending: return "\(kind), waiting for Discord's scan"
         case .sensitive(shown: false): return "Sensitive content, \(kind)"
-        case nil, .sensitive(shown: true): return attachment.description.map { "\(kind), \($0)" } ?? kind
+        case nil, .sensitive(shown: true): return media.description.map { "\(kind), \($0)" } ?? kind
         }
     }
 
-    var isVideo: Bool { content?.attachment.kind == .video }
+    var isVideo: Bool { content?.media.video == true }
     var showsGifBadge: Bool { !badge.isHidden }
     var showsPlay: Bool { !play.isHidden }
     var coverShown: Cover? { content.flatMap { Self.hides($0.cover) ? $0.cover : nil } }
@@ -275,6 +339,7 @@ final class MediaTileView: NSButton {
         super.layout()
         updateSensitiveText()
         picture.frame = bounds
+        loop?.frame = bounds
         overlay.frame = bounds
         placeholderLayer.frame = bounds
         coverLayer.frame = bounds
@@ -331,12 +396,12 @@ final class MediaTileView: NSButton {
 
     // The black 4 % box shows while nothing has loaded (Discord's image wrapper).
     private func update() {
-        let attachment = content?.attachment
+        let media = content?.media
         let cover = content.flatMap { Self.hides($0.cover) ? $0.cover : nil }
         let failed = picture.failed && cover == nil
         // Only while there's no image: a transparent one would show them through.
         let loaded = picture.hasImage
-        setAccessibilityLabel(attachment.map { Self.accessibilityLabel($0, cover: cover) })
+        setAccessibilityLabel(media.map { Self.accessibilityLabel($0, cover: cover) })
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = loaded ? nil : NSColor.black.withAlphaComponent(0.04).cgColor
             pill.backgroundColor = NSColor.black.withAlphaComponent(isHovered ? 0.88 : 0.6).cgColor
@@ -352,7 +417,7 @@ final class MediaTileView: NSButton {
                 coverLayer.backgroundColor = nil
             }
         }
-        placeholderLayer.isHidden = attachment?.placeholder == nil || cover != nil || loaded
+        placeholderLayer.isHidden = media?.placeholder == nil || cover != nil || loaded
         coverLayer.isHidden = cover == nil
         coverLayer.contents = cover == .spoiler ? placeholderLayer.contents : nil
         pill.isHidden = cover != .spoiler
@@ -364,16 +429,17 @@ final class MediaTileView: NSButton {
         eye.setAccessibilityLabel(sensitive ? "Reveal sensitive content" : "Hide sensitive content")
         failure.isHidden = !failed
         failureLabel.isHidden = !failed
-        let video = attachment?.kind == .video
-        play.isHidden = !video || cover != nil || failed
+        let video = media?.video == true
+        play.isHidden = !video || media?.ownPlay == false || cover != nil || failed
         playSymbol.isHidden = play.isHidden
         playSymbol.contents = Self.playImage
-        badge.isHidden = attachment?.animated != true || video || cover != nil || failed || animates
+        let moves = media?.animated == true || media?.loops == true
+        badge.isHidden = !moves || video || cover != nil || failed || animates
         alt.isHidden =
-            content?.showsAltText != true || attachment?.description?.isEmpty != false || cover != nil
-        // Hidden cells take Discord's 8 pt corners; shown ones the mosaic's.
-        layer?.cornerRadius = cover == .spoiler ? 8 : cornerRadius
-        isEnabled = attachment != nil && (cover == nil || cover == .spoiler || cover == .sensitive(shown: true))
+            content?.showsAltText != true || media?.description?.isEmpty != false || cover != nil
+        // Hidden cells take Discord's 8 pt corners (an embed's 4); shown ones the mosaic's.
+        layer?.cornerRadius = cover == .spoiler ? spoilerRadius : cornerRadius
+        isEnabled = media != nil && (cover == nil || cover == .spoiler || cover == .sensitive(shown: true))
         needsLayout = true
     }
 
@@ -387,9 +453,36 @@ final class MediaTileView: NSButton {
     }
 
     private func updateMotion() {
-        picture.animates = animates && content?.attachment.animated == true
+        picture.animates = animates && content?.media.animated == true
+        updateLoop()
         update()
     }
+
+    private func updateLoop() {
+        let plays =
+            animates && content?.media.loops == true && !Self.hides(content?.cover) && window != nil
+        guard plays else {
+            loop?.stop()
+            loop = nil
+            return
+        }
+        guard loop == nil, let source = loopSource else {
+            return
+        }
+        let loop = VideoLoop()
+        loop.frame = bounds
+        addSubview(loop, positioned: .below, relativeTo: overlay)
+        self.loop = loop
+        Task { [weak self, weak loop] in
+            let url = await source()
+            guard let self, let loop, self.loop === loop, let url else {
+                return
+            }
+            loop.play(url)
+        }
+    }
+
+    var isLooping: Bool { loop != nil }
 
     private static let playImage: CGImage? = {
         let configuration = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
@@ -437,6 +530,53 @@ final class MediaTileView: NSButton {
 }
 
 // Hosts the covers, the badge, Play and the spinner; takes no clicks.
+/// A GIFV's video, muted and looping, over its poster while it plays.
+private final class VideoLoop: NSView {
+    private let playerLayer = AVPlayerLayer()
+    private var player: AVQueuePlayer?
+    private var looper: AVPlayerLooper?
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        playerLayer.videoGravity = .resizeAspectFill
+        playerLayer.actions = ["bounds": NSNull(), "position": NSNull()]
+        layer?.addSublayer(playerLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        playerLayer.frame = bounds
+    }
+
+    func play(_ url: URL) {
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        player.preventsDisplaySleepDuringVideoPlayback = false
+        looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        playerLayer.player = player
+        self.player = player
+        player.play()
+    }
+
+    func stop() {
+        player?.pause()
+        playerLayer.player = nil
+        looper?.disableLooping()
+        looper = nil
+        player = nil
+        removeFromSuperview()
+    }
+}
+
 private final class OverlayView: NSView {
     override var isFlipped: Bool { true }
 

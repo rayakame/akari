@@ -63,15 +63,18 @@ user's custom emoji is from and asks Discord where other emoji and stickers are 
 popouts); it says how each message's attachments show (the media mosaic or file rows, Discord's
 order) and what covers each (a spoiler by `render_spoilers`, sensitive media by the user's
 explicit and gore settings per conversation, media waiting for Discord's content scan, which the
-account asks for in viewed channels and stops waiting for after 3 s), and whether a channel waits
-behind the age gate, with the user's agreement per server in the cache;
+account asks for in viewed channels and stops waiting for after 3 s), how its embeds show
+(Discord's merge by link, promotion and filters, a card or the media alone, the link text hidden
+under its one image, and the same covers, a spoilered link covering them all), and whether a
+channel waits behind the age gate, with the user's agreement per server in the cache;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, show where a channel's unread state and mentions come from, and get an image as the app
 would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
 emoji span's key, the display settings, attachments with their kind, size, placeholder, key,
-place and cover, the age gate and the agreement), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
+agreement), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, and the composer), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
@@ -96,7 +99,10 @@ and a click's popout (where an emoji or sticker is from, Discord's words); a mes
 under its text (Discord's mosaic from sizes alone with placeholders, the fade, the spinner, failure
 and retry, GIFs by the motion policy, video posters, file rows, ALT buttons, spoiler and sensitive
 covers with the eye, the media a screen away asked early; a click opens the original in the
-browser until the viewer) and the age gate in place of a gated channel's list and composer; a thread
+browser until the viewer), its embeds under them (Discord's card with its rows, fields and
+thumbnail, media alone, galleries, GIFVs that loop by the motion policy, a video's Play/Open Link
+pill, the link text hidden, the covers) and the age gate in place of a gated channel's list and
+composer; a thread
 opens with its header ("# channel › thread"), its start and starter message, and a locked
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
 its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message
@@ -110,7 +116,7 @@ connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
 messages, which the macOS app restores before the gateway connects. `akari-markdown` parses
 Discord's message markdown (the rules, a flat document with source spans, a source map, UTF-16
-offsets, jumbo for up to 30 emoji and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
+offsets, jumbo for up to 30 emoji, Discord's rule sets for embed text and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
 on Akari's runtime through akari-core's message preparer hook; the macOS app renders it (styles,
 code, quotes, lists, mentions, timestamps, spoilers and links), drawing boxes, pills and spoiler
 backgrounds as layers behind the text. The other app folders contain only a README.

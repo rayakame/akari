@@ -423,6 +423,7 @@ impl Hosts {
         let extension = extension(proxy.path());
         let form = match animated {
             Some(_) if extension == "gif" => Form::Gif,
+            Some(_) if media.is_animated() => Form::WebP,
             _ => Form::Still,
         };
         // An embedded attachment link: its CDN link is the one to refresh.

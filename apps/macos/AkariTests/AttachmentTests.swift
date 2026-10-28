@@ -10,6 +10,9 @@ final class RecordingMediaActions: MessageListActions {
     var opened: [ImageKey] = []
     var revealed: [MediaKey] = []
     var toggled: [MediaKey] = []
+    var links: [(URL, masked: Bool)] = []
+    var videos: [ImageKey] = []
+    var video: URL?
 
     func retry(_ message: MessageId) {}
     func delete(_ message: MessageId) {}
@@ -27,7 +30,11 @@ final class RecordingMediaActions: MessageListActions {
     func openThreads(of channel: ChannelId) {}
     func jump(to message: MessageId) {}
     func openGuild(_ id: GuildId) {}
-    func openLink(_ url: URL, masked: Bool) {}
+    func openLink(_ url: URL, masked: Bool) { links.append((url, masked)) }
+    func mediaURL(_ key: ImageKey) async -> URL? {
+        videos.append(key)
+        return video
+    }
     func openMedia(_ key: ImageKey) { opened.append(key) }
     func revealMedia(_ key: MediaKey) { revealed.append(key) }
     func toggleSensitive(_ key: MediaKey) { toggled.append(key) }

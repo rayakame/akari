@@ -108,6 +108,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private let onScreen: @MainActor (NSWindow) -> Bool
     private let build: Build
     // Shared by the height pass and the cell, so a row's text is built once per change (D71).
+    // A row's embeds with their texts built, for its cell and its height.
+    private var embedTexts:
+        [MessageId: (message: Message, revealed: Set<UInt16>, media: MessageCell.MediaState, shown: [EmbedView.Shown])] =
+            [:]
     private var texts: [MessageId: (message: Message, revealed: Set<UInt16>, built: MessageText.Built)] =
         [:]
     // A thread box's newest message as the box shows it, and when the box's time changes.
@@ -410,6 +414,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         locale = localeSource()
         times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)
         texts.removeAll()
+        embedTexts.removeAll()
         boxContents.removeAll()
         let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
         if let place {
@@ -490,6 +495,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         if url.host() == "threads" {
             actions?.openThreads(of: row.message.channelId)
+            return
+        }
+        if url.host() == "masked" {
+            let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "url" }?.value
+            if let target = value.flatMap(URL.init(string:)) {
+                actions?.openLink(target, masked: true)
+            }
             return
         }
         guard let value = url.pathComponents.last.flatMap({ UInt64($0) }) else {
@@ -647,6 +660,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             if case .message(let row, _) = timeline.items[index] {
                 relativeTimes[row.id] = nil
                 texts[row.id] = nil
+                embedTexts[row.id] = nil
                 boxContents[row.id] = nil
                 boxTimes[row.id] = nil
             }
@@ -997,7 +1011,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                followsLine: followsLine, hasBox: hasBox, width: width)
+                followsLine: followsLine, hasBox: hasBox, embeds: embeds(row), width: width)
         }
     }
 
@@ -1071,6 +1085,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 self?.media(action, attachment, of: row.id, tile: tile)
             }
             cell.onOpenFile = { [weak self] attachment in self?.actions?.openMedia(attachment.key) }
+            cell.onEmbed = { [weak self] embed, action in self?.embed(action, embed, of: row.id) }
+            cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
             cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
             cell.configure(
@@ -1078,18 +1094,65 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
-                fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id))
+                fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id),
+                embeds: embeds(row))
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
             return cell
         }
     }
 
+    private func embeds(_ row: MessageListModel.Row) -> [EmbedView.Shown] {
+        let message = row.shown
+        guard !message.embeds.isEmpty else {
+            return []
+        }
+        let revealed = revealed[row.id] ?? []
+        let media = mediaState(of: row.id)
+        if let cached = embedTexts[row.id], cached.message == message, cached.revealed == revealed,
+            cached.media == media
+        {
+            return cached.shown
+        }
+        let now = now()
+        let shown = message.embeds.map { embed in
+            EmbedView.shown(
+                embed, cover: MessageCell.cover(embed, media), spoilersShown: message.spoilersShown,
+                revealed: revealed, now: now, times: times,
+                footerTime: embed.footer?.timestamp.map {
+                    MessageFormat.footerTime($0, now: now, calendar: calendar, locale: locale)
+                })
+        }
+        embedTexts[row.id] = (message, revealed, media, shown)
+        noteRelativeTime(of: row.id)
+        return shown
+    }
+
+    // A row's next relative time change, in its text or its embeds'.
+    private func noteRelativeTime(of row: MessageId) {
+        let body = texts[row]?.built.nextChange
+        let embeds = embedTexts[row]?.shown.compactMap(\.nextChange).min()
+        relativeTimes[row] = [body, embeds].compactMap { $0 }.min()
+    }
+
+    private func embed(_ action: EmbedView.Action, _ embed: Embed, of message: MessageId) {
+        let key = MediaKey(messageId: message, embed: embed.index, url: embed.url)
+        switch action {
+        case .open(let image):
+            actions?.openMedia(image)
+        case .openLink(let url):
+            actions?.openLink(url, masked: false)
+        case .reveal:
+            actions?.revealMedia(key)
+        case .toggleSensitive:
+            actions?.toggleSensitive(key)
+        }
+    }
+
     private func mediaState(of message: MessageId) -> MessageCell.MediaState {
         MessageCell.MediaState(
-            revealed: Set(state.revealedMedia.filter { $0.messageId == message }.map(\.attachmentId)),
-            shownSensitive: Set(
-                state.shownSensitive.filter { $0.messageId == message }.map(\.attachmentId)),
+            revealed: Set(state.revealedMedia.filter { $0.messageId == message }.map(\.item)),
+            shownSensitive: Set(state.shownSensitive.filter { $0.messageId == message }.map(\.item)),
             showsAltText: state.showsAltText)
     }
 
@@ -1130,7 +1193,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let built = build(row.shown, revealed, now, times)
         texts[row.id] = (row.shown, revealed, built)
-        relativeTimes[row.id] = built.nextChange
+        noteRelativeTime(of: row.id)
         return built.text
     }
 
@@ -1250,6 +1313,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 remeasured.insert(index)
                 rowHeights[item.id] = nil
                 texts[row.id] = nil
+                embedTexts[row.id] = nil
             }
             if body || box {
                 due.insert(index)
@@ -1714,11 +1778,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     // Each GIF by how much of it shows and whether the pointer is over it.
     private func updateMedia(of cell: MessageCell, at index: Int, visible: NSRect) {
-        guard let tiles = cell.attachments?.tiles, timeline.items.indices.contains(index) else {
+        let tiles = (cell.attachments?.tiles ?? []) + (cell.embeds?.tiles ?? [])
+        guard !tiles.isEmpty, timeline.items.indices.contains(index) else {
             return
         }
         for tile in tiles where !tile.isHidden {
-            guard tile.content?.attachment.animated == true, tile.window != nil else {
+            let moves = tile.content.map { $0.media.animated || $0.media.loops } ?? false
+            guard moves, tile.window != nil else {
                 tile.animates = false
                 continue
             }

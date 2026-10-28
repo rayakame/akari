@@ -177,6 +177,18 @@ and the core sends `MessageUpdated` when a scan's wait ends. `Store.age_gate(cha
 whether a channel waits behind the age gate; `Account.agree_to_age_restricted(guild)` is
 Continue, and `AgeGateChanged` follows it.
 
+`Message.embeds` are the embeds as they show, after Discord's merge by URL (later embeds of one
+link give their image to a gallery), promotion and filters: each an `Embed` with its `index`
+among the message's embeds (its images' keys carry it), `kind`, `inline` (the media alone, no
+card), the bar's `color`, `url`, provider, author (with its icon's key), `title`, `description`
+and `fields` as `RichText` (the text and its `FormattedText`: Discord's embed rules for a rich
+embed, the plain string for others; spoilers numbered after the content's, so one reveal set
+covers both), `media` (an image, or two to four of a gallery), `video` (its poster, size,
+whether Discord's proxy has a copy that plays, and the key whose original that copy is),
+`thumbnail`, `footer` (text, icon, time), `tall` (TikTok and portrait YouTube fit 400 × 450)
+and `cover`. `Message.hides_content` says the content is one link shown alone as an image or GIF
+by the one embed (Discord hides it).
+
 Names and `mentions_me` can change without a message event, so a host rereads the messages it
 shows after `GuildUpdated` (role names and colors), `ChannelUpdated` (channel names, access),
 `UserUpdated`, `CurrentUserUpdated` and `CurrentMemberUpdated` (the user's roles: their
@@ -345,7 +357,8 @@ pixels.
   does, into at most 32 × 32 RGBA.
 - Layout from sizes alone (points), so a row's height is final before anything loads:
   `media_contain`, `media_cover`, `media_box`, `media_mosaic`, `media_fit_width`,
-  `sticker_size`, `embed_image_size`, `embed_thumbnail_size`, `gallery_columns`,
+  `sticker_size`, `embed_image_size`, `embed_media_size`, `embed_video_size`,
+  `embed_thumbnail_size`, `gallery_columns`,
   `gallery_card_height`.
 
 ## Changing the API

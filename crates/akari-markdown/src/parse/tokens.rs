@@ -52,15 +52,23 @@ impl Parser {
             .or_else(|| self.custom_emoji(input, at, range))
     }
 
+    // Without `mentions` (an embed's title), only slash commands.
     pub(super) fn angle_mention(
         &mut self,
         input: &Input,
         at: usize,
         range: &Range<usize>,
+        mentions: bool,
     ) -> Option<Match> {
         let text = &input.text[..range.end];
         let bytes = text.as_bytes();
         let rest = &text[at..];
+        if !mentions {
+            return rest
+                .starts_with("</")
+                .then(|| self.command(input, at, range))
+                .flatten();
+        }
         let (prefix, make): (usize, fn(u64) -> InlineKind) = if rest.starts_with("<@!") {
             (3, InlineKind::UserMention)
         } else if rest.starts_with("<@&") {

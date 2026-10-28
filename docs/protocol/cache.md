@@ -59,11 +59,12 @@ every other target builds rusqlite's bundled copy.
   THREAD_LIST_SYNC and the refreshed pages bring them again.
 - **Snowflakes** are stored as SQLite integers; timestamps as Unix nanoseconds, which keeps
   the microseconds Discord sends.
-- **Version:** `PRAGMA user_version`, 6 since attachments keep their placeholder and the version
-  of Discord's content scan; 5 brought a thread member's join time, which orders the channel
+- **Version:** `PRAGMA user_version`, 7 since embeds keep their flags and the version of
+  Discord's content scan, and their media its flags and placeholder; 6 did the same for
+  attachments; 5 brought a thread member's join time, which orders the channel
   list; 4 the membership (its mute and level) instead of `joined`; 3 the read states. Older
-  files are deleted once, so the first launch after such an update starts empty: a version 5
-  file's attachments have no scan version, which would cover their media as waiting for a scan,
+  files are deleted once, so the first launch after such an update starts empty: a version 6
+  file's embeds and a version 5 file's attachments have no scan version, which would cover their media as waiting for a scan,
   a version 3 file would restore every joined thread as unjoined, and a version 2 file would
   restore without read states. A file with any other version is deleted and started empty: the
   cache refills from Discord, so a file is only upgraded when a field's default covers the

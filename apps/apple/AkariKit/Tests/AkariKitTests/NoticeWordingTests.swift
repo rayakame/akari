@@ -21,7 +21,7 @@ struct NoticeWordingTests {
         Message(
             id: id(raw), channelId: id(10), kind: kind, author: author ?? ray, fromWebhook: false,
             content: content, timestamp: sent, editedTimestamp: nil, pinned: false,
-            mentionEveryone: false, attachments: [], embedCount: fields.isEmpty ? 0 : 1,
+            mentionEveryone: false, attachments: [], embeds: [],
             stickers: [], componentsV2: false, delivery: .sent,
             formatted: formattedText(content: content), mentionsMe: false, reference: reference,
             hasThread: false, mentions: mentions, call: call, roleSubscription: subscription,

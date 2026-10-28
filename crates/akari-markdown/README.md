@@ -22,6 +22,14 @@ link and source range. `source_range` maps a selection back to its source withou
 token, and `utf16::Utf16Map` converts offsets for hosts that count UTF-16. `Cache` keeps
 parsed documents by key.
 
+An embed's text has rules of its own (`parse_embed`): a title or field name keeps styles, emoji
+and timestamps but no code blocks, quotes, lists, headings, subtext or mentions, and no links when
+the title is itself one; a description or field value has the message's rules, lists and
+headings only for messages after 2023-03-22 and never a heading in a field. `plain` is a non-rich
+embed's text as Discord shows it, its line breaks kept. A `Document` says whether it's one link
+and nothing else (`is_single_link`) and whether a link sits in a spoiler (`has_spoilered_link`),
+which decide an embed's link text and cover.
+
 ## Which behavior counts
 
 Most of Discord's rules aren't documented. The rules follow

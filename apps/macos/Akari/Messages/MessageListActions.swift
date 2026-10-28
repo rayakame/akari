@@ -46,6 +46,8 @@ protocol MessageListActions: AnyObject {
     func revealMedia(_ key: MediaKey)
     // A sensitive attachment's eye.
     func toggleSensitive(_ key: MediaKey)
+    // A GIFV's video, which plays in the list.
+    func mediaURL(_ key: ImageKey) async -> URL?
 }
 
 extension MessageListActions {
@@ -55,4 +57,5 @@ extension MessageListActions {
     func openMedia(_ key: ImageKey) {}
     func revealMedia(_ key: MediaKey) {}
     func toggleSensitive(_ key: MediaKey) {}
+    func mediaURL(_ key: ImageKey) async -> URL? { nil }
 }

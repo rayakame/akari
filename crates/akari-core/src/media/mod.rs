@@ -110,6 +110,9 @@ pub enum EmbedSlot {
     Thumbnail,
     AuthorIcon,
     FooterIcon,
+    /// A video: its still from Discord's media proxy where it has no thumbnail; its original is
+    /// Discord's copy, which plays.
+    Video,
 }
 
 /// The form an animation is asked in; the host picks what its decoder shows right.

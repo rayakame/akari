@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::{Entities, State};
 use crate::model::{ChannelId, ChannelType, GuildId, MessageId, UserId};
+use crate::state::embeds::{self, ShownEmbed};
 use crate::state::events::StoreEvent;
 use crate::state::media::{self, AgeGate, Covered, MediaCover, Scan, ShownAttachment};
 use crate::state::types::{Message, StarterMessage};
@@ -20,6 +21,26 @@ impl State {
         media::shown_attachments(message, display, |attachment| {
             media::media_cover(attachment, covered, scan, spoilers)
         })
+    }
+
+    /// `spoilered_link`: the content has a link inside a spoiler, which covers every embed.
+    pub(crate) fn shown_embeds(
+        &self,
+        message: &Message,
+        spoilered_link: bool,
+        now_millis: i64,
+    ) -> Vec<ShownEmbed> {
+        let covered = self.covered(message);
+        let scan = self.scan(message.id);
+        let bot = message.author.bot;
+        let spoilered = spoilered_link && !self.spoilers_shown(message.channel_id, now_millis);
+        embeds::shown_embeds(message, &self.entities.settings.display, |embed| {
+            embeds::embed_cover(embed, covered, scan, bot, spoilered)
+        })
+    }
+
+    pub(crate) fn embeds_hide_link(&self, shown: &[ShownEmbed], single_link: bool) -> bool {
+        embeds::hides_link(shown, &self.entities.settings.display, single_link)
     }
 
     pub(crate) fn spoilers_shown(&self, channel: ChannelId, now_millis: i64) -> bool {
@@ -189,10 +210,11 @@ impl State {
                     .iter()
                     .filter(|message| {
                         message.author.id == user
-                            && message
+                            && (message
                                 .attachments
                                 .iter()
                                 .any(|attachment| attachment.is_visual())
+                                || !message.embeds.is_empty())
                     })
                     .cloned()
                     .map(StoreEvent::MessageUpdated),
@@ -203,10 +225,17 @@ impl State {
     // The user's own messages, pending and failed ones among them, never wait.
     fn waits(&self, message: &Message, scan: Scan) -> bool {
         let covered = self.covered(message);
-        message.attachments.iter().any(|attachment| {
+        let attachments = message.attachments.iter().any(|attachment| {
             attachment.is_visual()
                 && media::media_cover(attachment, covered, scan, true) == Some(MediaCover::Pending)
-        })
+        });
+        attachments
+            || (!message.author.bot
+                && embeds::shows_embeds(message, &self.entities.settings.display)
+                && message
+                    .embeds
+                    .iter()
+                    .any(|embed| embeds::waits_for_scan(embed, covered, scan)))
     }
 
     // What the message's place covers; nothing of the user's own.

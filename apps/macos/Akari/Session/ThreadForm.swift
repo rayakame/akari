@@ -588,15 +588,35 @@ struct MessagePreview: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MessagePreviewView, context: Context) {
+        view.cell.images = images
+        Self.configure(view.cell, with: message, now: now)
+    }
+
+    static func configure(_ cell: MessageCell, with message: Message, now: Date) {
         let calendar = Calendar.current
         let locale = Locale.current
-        view.cell.images = images
-        view.cell.configure(
+        cell.configure(
             message, body: Self.text(message, now: now), startsGroup: true,
             groupTime: MessageFormat.groupTime(
                 message.timestamp, now: now, calendar: calendar, locale: locale),
             shortTime: MessageFormat.shortTime(message.timestamp, calendar: calendar, locale: locale),
-            fullDate: MessageFormat.fullDate(message.timestamp, calendar: calendar, locale: locale))
+            fullDate: MessageFormat.fullDate(message.timestamp, calendar: calendar, locale: locale),
+            embeds: embeds(message, now: now))
+    }
+
+    // As the list shows them, nothing revealed.
+    private static func embeds(_ message: Message, now: Date) -> [EmbedView.Shown] {
+        let calendar = Calendar.current
+        let locale = Locale.current
+        let times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)
+        return message.embeds.map { embed in
+            EmbedView.shown(
+                embed, cover: MessageCell.cover(embed, MessageCell.MediaState()),
+                spoilersShown: message.spoilersShown, revealed: [], now: now, times: times,
+                footerTime: embed.footer?.timestamp.map {
+                    MessageFormat.footerTime($0, now: now, calendar: calendar, locale: locale)
+                })
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: MessagePreviewView, context: Context)
@@ -607,7 +627,10 @@ struct MessagePreview: NSViewRepresentable {
     }
 
     static func height(of message: Message, width: CGFloat) -> CGFloat {
-        MessageCell.height(message, body: text(message, now: Date()), startsGroup: true, width: width)
+        let now = Date()
+        return MessageCell.height(
+            message, body: text(message, now: now), startsGroup: true, embeds: embeds(message, now: now),
+            width: width)
     }
 
     private static func text(_ message: Message, now: Date) -> NSAttributedString {

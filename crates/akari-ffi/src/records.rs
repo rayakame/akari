@@ -7,6 +7,7 @@ use akari_core::model::{
 };
 use akari_core::state;
 
+use crate::embeds::Embed;
 use crate::errors::GatewayError;
 use crate::formatted::FormattedText;
 use crate::images::ImageKey;
@@ -431,8 +432,12 @@ pub struct Message {
     /// The channel's spoilers show without a click (`render_spoilers`).
     #[uniffi(default = false)]
     pub spoilers_shown: bool,
-    /// Embeds aren't rendered yet; the count is enough for a placeholder.
-    pub embed_count: u32,
+    /// In the order they show, after Discord's merge and filters.
+    pub embeds: Vec<Embed>,
+    /// The content is one link that the one embed shows alone as an image or GIF: Discord
+    /// hides the text.
+    #[uniffi(default = false)]
+    pub hides_content: bool,
     pub stickers: Vec<Sticker>,
     /// Laid out with Components V2, which Akari can't show yet; such a message has no content.
     pub components_v2: bool,
@@ -512,6 +517,8 @@ impl Message {
         mentions_me: bool,
         shown: Vec<state::ShownAttachment>,
         spoilers_shown: bool,
+        embeds: Vec<Embed>,
+        hides_content: bool,
     ) -> Self {
         let system = message.system.as_deref();
         Self {
@@ -530,7 +537,8 @@ impl Message {
                 .filter_map(|shown| Attachment::new(message, shown))
                 .collect(),
             spoilers_shown,
-            embed_count: u32::try_from(message.embeds.len()).unwrap_or(u32::MAX),
+            embeds,
+            hides_content,
             stickers: message.stickers.iter().map(Sticker::from).collect(),
             components_v2: message.uses_components_v2(),
             delivery: message.delivery.into(),
@@ -589,7 +597,7 @@ impl Message {
     }
 }
 
-fn system_time(timestamp: Timestamp) -> SystemTime {
+pub(crate) fn system_time(timestamp: Timestamp) -> SystemTime {
     let millis = timestamp.unix_millis();
     let offset = Duration::from_millis(millis.unsigned_abs());
     if millis >= 0 {

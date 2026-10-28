@@ -1,0 +1,232 @@
+// Discord's embed rule sets (canary 649848, modules 46054 and 999915): titles and field names
+// without code blocks, line breaks, mentions or subtext, and without links when the title is one;
+// descriptions and field values with the message's rules, lists and headings only for messages
+// after 2023-03-22, never headings in a field's value.
+
+use crate::{BlockKind, Container, Document, EmbedText, InlineKind, parse, parse_embed};
+
+fn kinds(doc: &Document) -> Vec<BlockKind> {
+    doc.blocks().iter().map(|block| block.kind).collect()
+}
+
+fn has_inline(doc: &Document, test: impl Fn(&InlineKind) -> bool) -> bool {
+    doc.blocks()
+        .iter()
+        .flat_map(|block| block.inlines.iter())
+        .any(|inline| test(&inline.kind))
+}
+
+fn in_list(doc: &Document) -> bool {
+    doc.blocks().iter().any(|block| {
+        block
+            .containers
+            .iter()
+            .any(|c| matches!(c, Container::ListItem { .. }))
+    })
+}
+
+fn in_quote(doc: &Document) -> bool {
+    doc.blocks()
+        .iter()
+        .any(|block| block.containers.contains(&Container::Quote))
+}
+
+const MIXED: &str = "**bold** <@1> <@&2> <#3> [x](https://example.com) https://example.org";
+
+#[test]
+fn a_title_keeps_styles_but_no_mentions_or_blocks() {
+    let title = parse_embed(MIXED, EmbedText::Title { links: true });
+
+    assert!(has_inline(&title, |kind| matches!(
+        kind,
+        InlineKind::Text(_)
+    )));
+    assert!(
+        title.blocks()[0]
+            .inlines
+            .iter()
+            .any(|inline| inline.style.contains(crate::Style::BOLD)),
+        "bold"
+    );
+    assert!(!has_inline(&title, |kind| matches!(
+        kind,
+        InlineKind::UserMention(_) | InlineKind::RoleMention(_) | InlineKind::ChannelMention(_)
+    )));
+    assert_eq!(
+        title.links().len(),
+        2,
+        "links stay while the title isn't one"
+    );
+    let everyone = parse_embed("@everyone @here", EmbedText::Title { links: true });
+    assert!(!has_inline(&everyone, |kind| matches!(
+        kind,
+        InlineKind::Everyone | InlineKind::Here
+    )));
+    for source in [
+        "```\ncode\n```",
+        "# heading",
+        "- item",
+        "-# small",
+        "> quote",
+    ] {
+        let doc = parse_embed(source, EmbedText::Title { links: true });
+        assert_eq!(kinds(&doc), [BlockKind::Paragraph], "{source}");
+        assert!(!in_list(&doc) && !in_quote(&doc), "{source}");
+    }
+}
+
+#[test]
+fn a_linked_title_has_no_links_of_its_own() {
+    let title = parse_embed(MIXED, EmbedText::Title { links: false });
+
+    assert!(title.links().is_empty());
+    for source in [
+        "<https://example.com>",
+        "<mail@example.com>",
+        "<+1 555 0100>",
+    ] {
+        assert!(
+            !parse(source).links().is_empty(),
+            "a link in a message: {source}"
+        );
+        let title = parse_embed(source, EmbedText::Title { links: false });
+        assert!(title.links().is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn a_description_has_the_messages_rules() {
+    let description = parse_embed(MIXED, EmbedText::Description { lists: true });
+
+    assert_eq!(description, parse(MIXED));
+    let code = parse_embed("```\ncode\n```", EmbedText::Description { lists: false });
+    assert!(matches!(kinds(&code)[0], BlockKind::CodeBlock { .. }));
+}
+
+#[test]
+fn lists_and_headings_follow_the_messages_date() {
+    let source = "# heading\n- item";
+    let new = parse_embed(source, EmbedText::Description { lists: true });
+    assert!(matches!(kinds(&new)[0], BlockKind::Heading(_)));
+    assert!(in_list(&new));
+
+    let old = parse_embed(source, EmbedText::Description { lists: false });
+    assert!(
+        kinds(&old).iter().all(|kind| *kind == BlockKind::Paragraph),
+        "{:?}",
+        kinds(&old)
+    );
+    assert!(!in_list(&old));
+    for list in ["* item", "1. item"] {
+        assert!(
+            in_list(&parse_embed(list, EmbedText::Description { lists: true })),
+            "{list}"
+        );
+        assert!(
+            !in_list(&parse_embed(list, EmbedText::Description { lists: false })),
+            "{list}"
+        );
+    }
+}
+
+#[test]
+fn a_fields_value_never_has_headings() {
+    let value = parse_embed("# heading\n- item", EmbedText::FieldValue { lists: true });
+
+    assert!(
+        kinds(&value)
+            .iter()
+            .all(|kind| !matches!(kind, BlockKind::Heading(_)))
+    );
+    assert!(in_list(&value), "lists stay");
+}
+
+// Module 521981: exactly one top-level link, bare, in angle brackets or masked.
+#[test]
+fn a_single_link_is_the_whole_content() {
+    for source in [
+        "https://example.com/a.gif",
+        "<https://example.com/a.gif>",
+        "[gif](https://example.com/a.gif)",
+        "[||gif|| here](https://example.com/a.gif)",
+        // Review: Discord's top-level node is still the one link.
+        "[**gif**](https://example.com/a.gif)",
+        "[**gif** here](https://example.com/a.gif)",
+    ] {
+        assert!(parse(source).is_single_link(source), "{source}");
+    }
+    for source in [
+        "",
+        "look https://example.com/a.gif",
+        "https://example.com/a https://example.com/b",
+        "||https://example.com/a.gif||",
+        "**https://example.com/a.gif**",
+        "> https://example.com/a.gif",
+        "https://example.com/a.gif\n```\ncode\n```",
+    ] {
+        assert!(!parse(source).is_single_link(source), "{source}");
+    }
+}
+
+// Module 521981 `u`: any link inside a spoiler, anywhere in the content.
+#[test]
+fn a_spoilered_link_is_found_anywhere() {
+    for source in [
+        "||https://example.com||",
+        "see ||the [clip](https://example.com)||",
+        "> quote ||https://example.com||",
+    ] {
+        assert!(parse(source).has_spoilered_link(), "{source}");
+    }
+    for source in [
+        "||spoiler|| https://example.com",
+        "https://example.com",
+        "||no link||",
+        // Review: a spoiler inside part of a link's text holds no link.
+        "[||gif|| here](https://example.com/a.gif)",
+    ] {
+        assert!(!parse(source).has_spoilered_link(), "{source}");
+    }
+}
+
+// A non-rich embed's text (an article's title, a link's description) is plain: no styles, no
+// links, its line breaks kept (module 91688 renders it as the string, `white-space: pre-line`).
+#[test]
+fn plain_text_is_one_paragraph_of_text_and_breaks() {
+    let doc = crate::plain("**not bold** <@1>\nhttps://example.com\r\n");
+
+    assert_eq!(kinds(&doc), [BlockKind::Paragraph]);
+    let inlines: Vec<_> = doc.blocks()[0]
+        .inlines
+        .iter()
+        .map(|inline| (inline.kind, inline.style, inline.link))
+        .collect();
+    let text = |start, end| {
+        (
+            InlineKind::Text(crate::Span { start, end }),
+            crate::Style::default(),
+            None,
+        )
+    };
+    assert_eq!(inlines[0], text(0, 17));
+    assert_eq!(inlines[1].0, InlineKind::Break);
+    assert_eq!(inlines[2], text(18, 37));
+    assert_eq!(inlines.len(), 3, "a last break shows nothing");
+    // Review: inner empty lines stay (pre-line); only the last break goes.
+    assert_eq!(crate::plain("a\n\n\n").blocks()[0].inlines.len(), 3);
+    assert!(doc.links().is_empty());
+    assert!(!doc.jumbo());
+    assert!(crate::plain("").blocks().is_empty());
+}
+
+// Review: a title or field name has no line breaks (EMBED_TITLE_RULES omit `br`, and the bare
+// string of a non-rich title collapses them): a break shows as a space.
+#[test]
+fn a_title_is_one_line() {
+    assert_eq!(crate::one_line("Line one\nLine two"), "Line one Line two");
+    assert_eq!(crate::one_line("a \r\n\n b"), "a b");
+    assert!(matches!(
+        crate::one_line("plain"),
+        std::borrow::Cow::Borrowed("plain")
+    ));
+}

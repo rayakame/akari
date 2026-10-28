@@ -303,6 +303,8 @@ fn full_message() -> Message {
                 proxy_url: Some("https://media.example/i.png".into()),
                 width: Some(10),
                 height: Some(20),
+                flags: 32,
+                placeholder: Some("3PcNNYSFeXh/d3eld0iHZoZgVwh2".into()),
             }),
             thumbnail: None,
             video: None,
@@ -319,6 +321,8 @@ fn full_message() -> Message {
                 },
             ]
             .into(),
+            flags: 16,
+            content_scan_version: Some(4),
         }]
         .into(),
         stickers: vec![Sticker {
@@ -673,10 +677,11 @@ fn the_settings_tables_exist() {
     }
 }
 
-// Their attachments have no scan version, which would cover their media as pending scans.
+// Their attachments (before 6) and embeds (before 7) have no scan version, which would cover
+// their media as pending scans.
 #[test]
-fn files_from_before_attachments_kept_their_scans_are_discarded() {
-    for version in [4, 5] {
+fn files_from_before_media_kept_their_scans_are_discarded() {
+    for version in [4, 5, 6] {
         let dir = TempDir::new();
         let mut cache = open(&dir);
         write_entities(&mut cache, &entities());

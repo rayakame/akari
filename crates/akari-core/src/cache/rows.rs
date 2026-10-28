@@ -516,6 +516,14 @@ struct EmbedMediaRow {
     width: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     height: Option<u32>,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    flags: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    placeholder: Option<Box<str>>,
+}
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
 }
 
 impl From<&EmbedMedia> for EmbedMediaRow {
@@ -525,6 +533,8 @@ impl From<&EmbedMedia> for EmbedMediaRow {
             proxy_url: media.proxy_url.clone(),
             width: media.width,
             height: media.height,
+            flags: media.flags,
+            placeholder: media.placeholder.clone(),
         }
     }
 }
@@ -536,6 +546,8 @@ impl From<EmbedMediaRow> for EmbedMedia {
             proxy_url: row.proxy_url,
             width: row.width,
             height: row.height,
+            flags: row.flags,
+            placeholder: row.placeholder,
         }
     }
 }
@@ -605,6 +617,10 @@ struct EmbedRow {
     video: Option<EmbedMediaRow>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     fields: Vec<EmbedFieldRow>,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    flags: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_scan_version: Option<u32>,
 }
 
 impl From<&Embed> for EmbedRow {
@@ -641,6 +657,8 @@ impl From<&Embed> for EmbedRow {
                     inline: field.inline,
                 })
                 .collect(),
+            flags: embed.flags,
+            content_scan_version: embed.content_scan_version,
         }
     }
 }
@@ -679,6 +697,8 @@ impl From<EmbedRow> for Embed {
                     inline: field.inline,
                 })
                 .collect(),
+            flags: row.flags,
+            content_scan_version: row.content_scan_version,
         }
     }
 }

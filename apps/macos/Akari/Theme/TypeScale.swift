@@ -128,4 +128,12 @@ nonisolated enum TypeScale {
     static let formNote = TextStyle(12, line: 16)
     static let formAlert = TextStyle(14, .medium, line: 18)
     static let formStrip = TextStyle(12, .medium, line: 16)
+    // An embed's card (Discord's embed CSS): text-xs provider and footer, text-sm description
+    // and fields; title and author on the markup's 22 line.
+    static let embedProvider = TextStyle(12, line: 16)
+    static let embedAuthor = TextStyle(14, .semibold, line: 22)
+    static let embedTitle = TextStyle(16, .semibold, line: 22)
+    static let embedText = TextStyle(14, line: 18)
+    static let embedFieldName = TextStyle(14, .semibold, line: 18)
+    static let embedFooter = TextStyle(12, .medium, line: 16)
 }

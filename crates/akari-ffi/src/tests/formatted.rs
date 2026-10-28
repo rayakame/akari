@@ -665,3 +665,256 @@ async fn the_age_gate_and_the_agreement_cross() {
     assert_eq!(store.age_gate(GENERAL), AgeGate::Open);
     loaded.account.close();
 }
+
+fn embed_image(width: u32, height: u32) -> Value {
+    json!({
+        "url": "https://example.com/a.png",
+        "proxy_url": "https://images-ext-1.discordapp.net/external/x/https/example.com/a.png",
+        "width": width, "height": height,
+    })
+}
+
+fn embed_key(slot: crate::images::EmbedSlot, embed: u8) -> ImageKey {
+    ImageKey::EmbedMedia {
+        channel_id: GENERAL,
+        message_id: MessageId::new(400_000_000_000_000_014),
+        embed,
+        slot,
+    }
+}
+
+// A rich card crosses with its text parsed by Discord's embed rules, its images' keys, its footer
+// and its bar's color (white is none).
+#[tokio::test]
+async fn a_rich_embed_crosses_as_its_card() {
+    use crate::embeds::EmbedKind;
+    use crate::images::EmbedSlot;
+
+    let mut message = page_message(400_000_000_000_000_014, "look", json!([]));
+    message["timestamp"] = "2026-10-26T12:00:00.000000+00:00".into();
+    message["embeds"] = json!([{
+        "type": "rich", "url": "https://example.com/", "color": 0xFF_FF_FF,
+        "title": "**Release** [x](https://example.org)",
+        "description": "- one\n- two",
+        "author": {"name": "Akari", "url": "https://example.com/a",
+                   "proxy_icon_url": "https://images-ext-1.discordapp.net/external/i/a.png"},
+        "provider": {"name": "Example"},
+        "fields": [{"name": "A", "value": "1", "inline": true},
+                   {"name": "B", "value": "# 2", "inline": false}],
+        "image": embed_image(1200, 630),
+        "thumbnail": embed_image(80, 80),
+        "footer": {"text": "Akari", "proxy_icon_url": "https://images-ext-1.discordapp.net/external/f/a.png"},
+        "timestamp": "2026-10-26T12:00:00.000000+00:00",
+    }]);
+    let loaded = loaded(vec![message], |_| {}).await;
+    let message = &loaded.messages[0];
+    let [card] = &message.embeds[..] else {
+        panic!("one embed: {:?}", message.embeds);
+    };
+
+    assert_eq!(card.kind, EmbedKind::Rich);
+    assert!(!card.inline);
+    assert_eq!(card.color, None, "white draws the border's color");
+    let title = card.title.as_ref().expect("a title");
+    assert!(
+        title.formatted.links.is_empty(),
+        "no links in a title that is one"
+    );
+    assert!(title.formatted.blocks[0].spans[0].bold);
+    let description = card.description.as_ref().expect("a description");
+    assert!(
+        matches!(
+            description.formatted.blocks[0].containers[..],
+            [TextContainer::ListItem { .. }]
+        ),
+        "lists after 2023-03-22"
+    );
+    assert_eq!(card.fields.len(), 2);
+    assert!(card.fields[0].inline && !card.fields[1].inline);
+    assert!(
+        !matches!(
+            card.fields[1].value.formatted.blocks[0].kind,
+            TextBlockKind::Heading { .. }
+        ),
+        "never a heading in a field"
+    );
+    assert_eq!(card.media.len(), 1);
+    assert_eq!(card.media[0].key, embed_key(EmbedSlot::Image, 0));
+    assert_eq!((card.media[0].width, card.media[0].height), (1200, 630));
+    assert_eq!(
+        card.thumbnail.as_ref().map(|image| image.key.clone()),
+        Some(embed_key(EmbedSlot::Thumbnail, 0))
+    );
+    assert_eq!(
+        card.author.as_ref().and_then(|author| author.icon.clone()),
+        Some(embed_key(EmbedSlot::AuthorIcon, 0))
+    );
+    assert_eq!(
+        card.provider
+            .as_ref()
+            .map(|provider| provider.name.as_str()),
+        Some("Example")
+    );
+    let footer = card.footer.as_ref().expect("a footer");
+    assert_eq!(footer.text.as_deref(), Some("Akari"));
+    assert_eq!(footer.icon, Some(embed_key(EmbedSlot::FooterIcon, 0)));
+    assert!(footer.timestamp.is_some());
+    assert!(!message.hides_content);
+    loaded.account.close();
+}
+
+// Embeds of one link merge into a gallery; their spoilers number after the content's; a link
+// under its one image hides the content; a spoilered link covers the embeds.
+#[tokio::test]
+async fn embeds_merge_number_their_spoilers_and_hide_their_link() {
+    let gallery = |id: u64, content: &str| {
+        let mut message = page_message(id, content, json!([]));
+        let image = |n: u32| {
+            json!({"type": "rich", "url": "https://example.com/post",
+                                    "image": embed_image(600 + n, 400)})
+        };
+        let mut first = image(0);
+        first["title"] = "Post".into();
+        first["description"] = "||b||".into();
+        message["embeds"] = json!([first, image(1), image(2)]);
+        message
+    };
+    let mut lone = page_message(
+        400_000_000_000_000_016,
+        "https://example.com/a.png",
+        json!([]),
+    );
+    lone["embeds"] = json!([{"type": "image", "url": "https://example.com/a.png",
+                             "thumbnail": embed_image(640, 480)}]);
+    let loaded = loaded(
+        vec![
+            lone,
+            gallery(400_000_000_000_000_015, "||https://example.com/post||"),
+            gallery(400_000_000_000_000_014, "||a|| https://example.com/post"),
+        ],
+        |_| {},
+    )
+    .await;
+    let by_id = |id: u64| {
+        loaded
+            .messages
+            .iter()
+            .find(|message| message.id == MessageId::new(id))
+            .expect("the message")
+    };
+
+    let merged = by_id(400_000_000_000_000_014);
+    let [post] = &merged.embeds[..] else {
+        panic!("merged: {:?}", merged.embeds);
+    };
+    assert_eq!(post.media.len(), 3);
+    assert_eq!(
+        post.media[2].key,
+        embed_key(crate::images::EmbedSlot::Image, 2)
+    );
+    let spoiler = post
+        .description
+        .as_ref()
+        .expect("a description")
+        .formatted
+        .blocks[0]
+        .spans[0]
+        .spoiler;
+    assert_eq!(spoiler, Some(1), "after the content's 0");
+    assert_eq!(post.cover, None);
+
+    assert_eq!(
+        by_id(400_000_000_000_000_015).embeds[0].cover,
+        Some(MediaCover::Spoiler),
+        "a spoilered link covers them"
+    );
+
+    let image = by_id(400_000_000_000_000_016);
+    assert!(image.hides_content);
+    assert!(image.embeds[0].inline);
+    loaded.account.close();
+}
+
+// Module 768570 and 581619: images, videos and GIFVs show no description; only a rich embed
+// shows fields; other embeds' text is plain.
+#[tokio::test]
+async fn descriptions_and_fields_follow_the_kind() {
+    let mut message = page_message(400_000_000_000_000_017, "look", json!([]));
+    message["embeds"] = json!([
+        {"type": "image", "url": "https://example.com/a.png", "title": "A picture",
+         "description": "Not shown", "thumbnail": embed_image(640, 480)},
+        {"type": "article", "url": "https://example.com/post", "title": "**Plain** title",
+         "description": "An article", "fields": [{"name": "A", "value": "1", "inline": true}]},
+    ]);
+    let loaded = loaded(vec![message], |_| {}).await;
+    let message = &loaded.messages[0];
+    let [image, article] = &message.embeds[..] else {
+        panic!("two embeds: {:?}", message.embeds);
+    };
+
+    assert_eq!(image.description, None);
+    assert!(article.fields.is_empty(), "fields only on a rich embed");
+    assert_eq!(
+        article.description.as_ref().map(|text| text.text.as_str()),
+        Some("An article")
+    );
+    let title = article.title.as_ref().expect("a title");
+    assert!(
+        title.formatted.blocks[0]
+            .spans
+            .iter()
+            .all(|span| !span.bold),
+        "plain"
+    );
+    loaded.account.close();
+}
+
+// Review: titles and field names are one line; field names follow the title's link rule (the
+// client's renderTitle with the embed); lists only for messages from 2023-03-22, by their edit.
+#[tokio::test]
+async fn titles_are_one_line_and_lists_follow_the_date() {
+    let embed = json!({
+        "type": "rich", "url": "https://example.com/",
+        "title": "Line one\nLine two",
+        "description": "- one\n- two",
+        "fields": [{"name": "[Docs](https://example.org)", "value": "1"}],
+    });
+    let mut old = page_message(400_000_000_000_000_018, "", json!([]));
+    old["timestamp"] = "2022-01-01T12:00:00.000000+00:00".into();
+    old["embeds"] = json!([embed.clone()]);
+    let mut edited = old.clone();
+    edited["id"] = "400000000000000019".into();
+    edited["edited_timestamp"] = "2024-01-01T12:00:00.000000+00:00".into();
+    let loaded = loaded(vec![edited, old], |_| {}).await;
+    let by_id = |id: u64| {
+        loaded
+            .messages
+            .iter()
+            .find(|message| message.id == MessageId::new(id))
+            .expect("the message")
+    };
+    let card = &by_id(400_000_000_000_000_018).embeds[0];
+
+    assert_eq!(
+        card.title.as_ref().map(|title| title.text.as_str()),
+        Some("Line one Line two")
+    );
+    assert!(
+        card.fields[0].name.formatted.links.is_empty(),
+        "the embed has a URL"
+    );
+    let in_list = |embed: &crate::embeds::Embed| {
+        embed.description.as_ref().is_some_and(|text| {
+            matches!(
+                text.formatted.blocks[0].containers[..],
+                [TextContainer::ListItem { .. }]
+            )
+        })
+    };
+    assert!(!in_list(card), "2022");
+    assert!(
+        in_list(&by_id(400_000_000_000_000_019).embeds[0]),
+        "edited 2024"
+    );
+    loaded.account.close();
+}

@@ -285,7 +285,7 @@ async fn an_update_without_an_edit_reuses_the_document() {
     .await;
     let read = read_all(&online.account);
 
-    assert_eq!(read[1].embed_count, 1);
+    assert_eq!(read[1].embeds.len(), 1);
     let stats = stats(&online.account);
     assert_eq!((stats.misses, stats.event_parses, stats.parsed), (0, 0, 3));
     online.account.close();
@@ -520,5 +520,37 @@ async fn a_same_length_update_without_an_edit_time_is_parsed_again() {
     assert_eq!(read[0].edited_timestamp, None);
     let span = &read[0].formatted.blocks[0].spans[0];
     assert!(span.underline && !span.bold, "{span:?}");
+    online.account.close();
+}
+
+// Review: an embed's texts are parsed on the runtime with their page, as the content is, and a
+// read takes them from the cache.
+#[tokio::test]
+async fn embed_texts_are_prepared_with_their_page() {
+    let mut message = page_message(400_000_000_000_000_010, "plain");
+    message["embeds"] = json!([{
+        "type": "rich", "title": "**Title**", "description": "A description",
+        "fields": [{"name": "A", "value": "1", "inline": true}],
+    }]);
+    let online = online_with(Value::Array(vec![message])).await;
+    load(&online.account).await;
+
+    let first = read_all(&online.account);
+    let again = read_all(&online.account);
+
+    assert_eq!(
+        first[0].embeds[0]
+            .title
+            .as_ref()
+            .map(|title| title.text.as_str()),
+        Some("**Title**")
+    );
+    assert_eq!(first, again);
+    let stats = stats(&online.account);
+    assert_eq!(
+        (stats.misses, stats.event_parses, stats.parsed),
+        (0, 0, 5),
+        "the content and four embed texts, once"
+    );
     online.account.close();
 }

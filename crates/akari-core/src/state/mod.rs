@@ -4,6 +4,7 @@ pub(crate) mod apply;
 mod badges;
 mod clock;
 mod convert;
+mod embeds;
 mod events;
 mod expressions;
 mod media;
@@ -19,6 +20,9 @@ mod windows;
 
 pub(crate) use apply::{Learned, OLDER_PAGE, OlderPage, wall_millis};
 pub use badges::Badge;
+pub use embeds::{
+    EmbedKind, EmbedMediaRef, EmbedTextRules, ShownEmbed, ShownVideo, embed_text_rules,
+};
 pub use events::{ConnectionState, StoreEvent};
 pub use expressions::{
     EmojiSource, SourceEmoji, SourceGuild, StickerDetails, StickerOrigin, StickerPack,

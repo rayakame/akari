@@ -226,6 +226,10 @@ final class MessageListBridge: MessageListActions {
         messages.reveal(media: key)
     }
 
+    func mediaURL(_ key: ImageKey) async -> URL? {
+        await messages.originalURL(key)
+    }
+
     func toggleSensitive(_ key: MediaKey) {
         messages.toggleSensitive(key)
     }
