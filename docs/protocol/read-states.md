@@ -393,9 +393,12 @@ modules 573163, 435470, 863005, 543465); the sequence on the wire is **unverifie
   like a channel (`Account::set_reading`): the forum is acked at "now" when it is read and a post
   is newer than its ack or an active post has unread activity past it, and again as such posts
   come while it stays read, paced as reading. It isn't acked after a refresh with nothing new.
-- **The local ack.** Discord gets its clock's "now" (never below the forum's newest post); the
-  store moves the forum's ack to the Mac's "now", so the row's counts clear at once. Escape, the
-  menus and the bulk do the same.
+- **The local ack.** Discord gets its clock's "now", never below the forum's newest post or an
+  active post's newest message; the store moves the forum's ack to the later of that and the
+  Mac's "now", so the row's counts clear at once and nothing it covers asks again. Escape and the
+  menus ack a forum by the same rule (a new post, or a post's unread activity), the bulk every
+  viewable forum. A Mac running ahead of Discord covers what comes within the difference until the
+  next READY brings Discord's ack.
 - **Not sent:** the official client's second ack, at the forum's newest post, after the user
   opens posts ("ACK_FORUM_CHANNEL_NO_UNREAD_POSTS"), which moves the ack back from "now"; with the
   forum acked at "now" while shown it would add nothing (O4 to observe).

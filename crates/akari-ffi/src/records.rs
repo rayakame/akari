@@ -444,11 +444,7 @@ fn tag_emoji(emoji: &state::TagEmoji) -> Option<TagEmoji> {
     match emoji {
         state::TagEmoji::Custom(id) => Some(TagEmoji::Custom {
             id: *id,
-            key: akari_core::media::ImageKey::Emoji {
-                id: *id,
-                animated: false,
-            }
-            .into(),
+            key: emoji.image_key()?.into(),
         }),
         state::TagEmoji::Unicode(emoji) => Some(TagEmoji::Unicode {
             emoji: emoji.to_string(),
@@ -599,15 +595,12 @@ impl From<&state::Channel> for Channel {
                 archived_at: system_time(info.archive_timestamp),
                 applied_tags: info.applied_tags.to_vec(),
                 total_message_sent: info.total_message_sent,
-                pinned: channel.flags & PINNED != 0,
+                pinned: channel.is_pinned(),
             }),
             forum: channel.forum.as_deref().map(forum_settings),
         }
     }
 }
-
-// A forum post pinned to the top of its forum.
-const PINNED: u64 = 1 << 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Message {
@@ -691,7 +684,6 @@ pub struct MessageReference {
     pub guild_id: Option<GuildId>,
 }
 
-/// A thread's first message when it started from a message in its parent channel.
 /// A forum post's first message, for its card: see `Store::post_preview`.
 // Copied across once per read; UniFFI can't lower a boxed record.
 #[allow(clippy::large_enum_variant)]
@@ -704,6 +696,7 @@ pub enum PostPreview {
     Deleted,
 }
 
+/// A thread's first message when it started from a message in its parent channel.
 // Copied across once per read; UniFFI can't lower a boxed record.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]

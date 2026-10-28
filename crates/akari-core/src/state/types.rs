@@ -309,6 +309,19 @@ pub enum TagEmoji {
     Unicode(Box<str>),
 }
 
+impl TagEmoji {
+    /// A custom emoji's image, still: Discord's pills don't animate.
+    pub fn image_key(&self) -> Option<ImageKey> {
+        match self {
+            Self::Custom(id) => Some(ImageKey::Emoji {
+                id: *id,
+                animated: false,
+            }),
+            Self::Unicode(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum ForumSort {
@@ -364,7 +377,7 @@ impl Channel {
     /// posts, which have none, and for channels that aren't threads.
     pub fn window_end(&self) -> Option<Timestamp> {
         let info = self.thread.as_deref()?;
-        if self.flags & PINNED != 0 {
+        if self.is_pinned() {
             return None;
         }
         let newest = self.last_message_id.map_or(0, Snowflake::unix_millis);
@@ -381,6 +394,11 @@ impl Channel {
             self.kind,
             ChannelType::NewsThread | ChannelType::PublicThread | ChannelType::PrivateThread
         )
+    }
+
+    /// A forum post pinned to the top of its forum.
+    pub fn is_pinned(&self) -> bool {
+        self.flags & PINNED != 0
     }
 
     /// Forum and media channels, whose page lists their posts.

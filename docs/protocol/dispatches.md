@@ -299,9 +299,13 @@ replace what they carry and keep what they leave out.
 `Account::open_forum(forum)` names the forum whose page shows (`None` closes it). Its list,
 `Store::forum_posts(forum, view)`, is the official client's ForumActivePostStore [207777]:
 the forum's active posts the store has, pinned first, by the view's sort, filtered by its tags
-on the client, frozen between refreshes (opening, `Account::refresh_forum`, READY, a
-THREAD_LIST_SYNC of its guild): a deletion drops a post and a pin change re-sorts, nothing else
-moves a card. THREAD_CREATE with `newly_created` by someone else counts toward `new_posts` (the
+on the client, frozen between refreshes (opening, `Account::refresh_forum`, a THREAD_LIST_SYNC of
+its guild): a deletion or an archive drops a post, a pin change re-sorts and adds a newly pinned
+post, a tag change filters at once, new activity moves nothing, and a post unarchived meanwhile
+waits for the next refresh. A new connection keeps the list: the store keeps unjoined posts
+across READY, unconfirmed, and the guild's THREAD_LIST_SYNC that follows the subscription
+refreshes it (a refresh at READY would show the joined posts alone until then); a GUILD_CREATE
+starts the guild's forums' pages again. THREAD_CREATE with `newly_created` by someone else counts toward `new_posts` (the
 pill); the user's own post joins. `ForumPostsChanged { forum_id }` says to read it again.
 
 `Account::load_older_posts(forum, view)` asks for a page of archived posts as the official
@@ -310,8 +314,8 @@ client's [472456]:
 the tags comma-joined in one value (left out without a filter), the newest message first whatever
 the sort. Each (tags, matching) pages on its own, at most 50 such keys (the oldest dropped);
 Match All counts only with tags. A failure or a 202 fails that key until the next connection.
-The archived section is every archived post of the forum the store has that passes the filter,
-down to the loaded pages' oldest. `Account::search_posts(forum, name, view)` sends
+The archived section is every archived post of the forum the store has that passes the filter
+(not one a READY or GUILD_CREATE kept unconfirmed), down to the loaded pages' oldest. `Account::search_posts(forum, name, view)` sends
 `?name={name}[&tag=…]&tag_setting=…`: active and archived posts, at most 25, in Discord's order;
 `None` for a 202. Both keep what they bring as the Threads browser's requests do, and the
 answers' `first_messages` as the posts' first messages.
@@ -321,11 +325,13 @@ posts whose cards show without their first message; one worker per account sends
 `POST /channels/{forum}/post-data` with `{"thread_ids": ["…"]}`, at most 10 of one forum a
 request, one request at a time. The answer `{"threads": {id: {"first_message", "owner"}}}`
 fills `Store::post_preview(post)` (`Deleted` when Discord says the message is gone) and the
-owners as users; `PostPreviewChanged { post_id }` says when. A post asked already isn't asked
-again, and one Discord didn't answer for (or a failed request's) not for 30 s (the official
+owners as users; `PostPreviewChanged { post_id }` says when. They're kept for the open forum's
+posts (and those known already): opening another forum lets the others go, and a deleted post's
+goes with it. Opening a forum asks for its first 10 posts by its default sort. A post asked
+already isn't asked again, and one Discord didn't answer for (or a failed request's) not for 30 s (the official
 client asks again on the card's next render, without a pause). MESSAGE_CREATE, MESSAGE_UPDATE
 and MESSAGE_DELETE of a post's first message (its ID is the post's) and the window's message
-with the post's ID keep it current. Opening the forum asks for its first 10.
+with the post's ID keep it current, and MESSAGE_DELETE_BULK.
 
 ## Large guilds
 

@@ -5,6 +5,7 @@ use super::apply::Entities;
 use super::events::StoreEvent;
 use super::read_states::ReadState;
 use super::settings::{NotificationLevel, Unreads};
+use super::threads::ThreadIndex;
 use super::types::Channel;
 use crate::model::{ChannelId, ChannelType, GuildId, MessageId, Permissions, Timestamp};
 
@@ -140,7 +141,7 @@ pub(crate) struct Badges {
 }
 
 impl Badges {
-    pub(crate) fn build(entities: &Entities, now_millis: i64) -> Self {
+    pub(crate) fn build(entities: &Entities, threads: &ThreadIndex, now_millis: i64) -> Self {
         #[cfg(test)]
         hooks::built();
         let now = Timestamp::from_unix_millis(now_millis);
@@ -157,7 +158,7 @@ impl Badges {
             badges.set_muted(*guild, guild_muted(entities, *guild, now));
         }
         for channel in entities.channels.values() {
-            if let Some(slot) = compute(entities, channel, now_millis) {
+            if let Some(slot) = compute(entities, threads, channel, now_millis) {
                 badges.add(channel.id, slot);
             }
         }
@@ -274,12 +275,13 @@ impl Badges {
     pub(crate) fn update(
         &mut self,
         entities: &Entities,
+        threads: &ThreadIndex,
         dirty: Dirty,
         now_millis: i64,
         events: &mut Vec<StoreEvent>,
     ) {
         if dirty.all {
-            let next = Self::build(entities, now_millis);
+            let next = Self::build(entities, threads, now_millis);
             self.diff(&next, events);
             *self = next;
             return;
@@ -334,7 +336,7 @@ impl Badges {
             let new = entities
                 .channels
                 .get(&channel)
-                .and_then(|stored| compute(entities, stored, now_millis));
+                .and_then(|stored| compute(entities, threads, stored, now_millis));
             for slot in old.iter().chain(&new) {
                 if let Some(guild) = slot.guild {
                     before.entry(guild).or_insert_with(|| self.guild(guild));
@@ -457,7 +459,12 @@ fn guild_muted(entities: &Entities, guild: GuildId, now: Timestamp) -> bool {
 }
 
 // `None` for channels that never show a badge: categories, directories and the like.
-fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Slot> {
+fn compute(
+    entities: &Entities,
+    threads: &ThreadIndex,
+    channel: &Channel,
+    now_millis: i64,
+) -> Option<Slot> {
     let kind = Kind::of(channel)?;
     let now = Timestamp::from_unix_millis(now_millis);
     let read_state = entities.read_states.get(channel.id);
@@ -532,7 +539,7 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
     let posts = if muted {
         PostCount::None
     } else {
-        post_count(entities, channel, shows_unreads(entities, channel))
+        post_count(entities, threads, channel, shows_unreads(entities, channel))
     };
     Some(Slot {
         badge: Badge {
@@ -562,7 +569,12 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
 
 // Module 863005: new posts are active, unjoined, newer than the forum's ack (or the user's join
 // to the guild) and never opened; the muted count is unread active posts with activity after it.
-fn post_count(entities: &Entities, forum: &Channel, all_messages: bool) -> PostCount {
+fn post_count(
+    entities: &Entities,
+    threads: &ThreadIndex,
+    forum: &Channel,
+    all_messages: bool,
+) -> PostCount {
     if !matches!(
         forum.kind,
         ChannelType::GuildForum | ChannelType::GuildMedia
@@ -579,11 +591,14 @@ fn post_count(entities: &Entities, forum: &Channel, all_messages: bool) -> PostC
         })
         .map_or(0, MessageId::get);
     let (mut new, mut unread) = (0, 0);
-    for post in entities.channels.values() {
+    for post in threads
+        .of(forum.id)
+        .filter_map(|id| entities.channels.get(&id))
+    {
         let Some(info) = post.thread.as_deref() else {
             continue;
         };
-        if post.parent_id != Some(forum.id) || info.archived {
+        if info.archived {
             continue;
         }
         let opened = entities

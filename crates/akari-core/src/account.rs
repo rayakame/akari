@@ -264,7 +264,7 @@ pub(crate) struct Shared {
     images: Arc<Images>,
     lookup_timeout: Duration,
     // Wakes the post-data task when cards want their posts' first messages.
-    previews: Arc<tokio::sync::Notify>,
+    previews: Arc<previews::Wake>,
 }
 
 // A new session starts at `unknown`, so the chosen status is sent after every READY; after
@@ -1040,6 +1040,7 @@ impl Shared {
         self.gateway.close();
         self.rest.close();
         self.acks.close();
+        self.previews.close();
         if let Some(flusher) = &self.flusher {
             if self.expired() {
                 flusher.delete();
@@ -1158,7 +1159,7 @@ impl Account {
                 preparer: RwLock::new(None),
                 images,
                 lookup_timeout,
-                previews: Arc::new(tokio::sync::Notify::new()),
+                previews: Arc::default(),
             }
         });
         // Built before the task starts, so it runs even if the task is never polled.
@@ -1407,19 +1408,9 @@ impl Account {
     ///
     /// [`refresh_forum`]: Self::refresh_forum
     pub fn open_forum(&self, forum: Option<ChannelId>) {
-        self.shared.store.open_forum(forum);
-        // The official client asks the first 10 posts' data as the user presses on the forum's
-        // row (module 473503), so the first cards show with their message.
+        let first = self.shared.store.open_forum(forum);
+        // So the first cards show with their message.
         if let Some(forum) = forum {
-            let first: Vec<ChannelId> = self
-                .shared
-                .store
-                .forum_posts(forum, &ForumView::default())
-                .active
-                .iter()
-                .take(10)
-                .map(|post| post.id)
-                .collect();
             self.request_post_previews(forum, &first);
         }
     }
@@ -1430,7 +1421,7 @@ impl Account {
     /// asked again. [`Store::post_preview`] has them; `PostPreviewChanged` says when.
     pub fn request_post_previews(&self, forum: ChannelId, posts: &[ChannelId]) {
         if self.shared.store.want_post_previews(forum, posts) {
-            self.shared.previews.notify_one();
+            self.shared.previews.wake();
         }
     }
 

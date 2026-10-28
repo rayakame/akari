@@ -3,8 +3,8 @@ use crate::model::{ChannelId, MessageId};
 use crate::model::{EmojiId, TagId};
 use crate::state::apply::wall_millis;
 use crate::state::{
-    ForumLayout, ForumSort, ForumTag, ForumView, PostCount, PostPreview, StoreEvent, TagEmoji,
-    TagMatching,
+    ForumLayout, ForumSort, ForumTag, ForumView, OlderThreads, PostCount, PostPreview, StoreEvent,
+    TagEmoji, TagMatching,
 };
 
 const FORUM: u64 = 300_000_000_000_000_050;
@@ -692,4 +692,354 @@ fn a_forum_not_read_is_not_acked() {
 
     assert!(state.take_reading_acks().is_empty());
     assert_eq!(forum_ack(&state), Some(FORUM_ACK));
+}
+
+// A new connection keeps the open forum's list as it was until its guild's THREAD_LIST_SYNC, which
+// drops a post that went while offline and takes in one that came: Akari keeps unjoined posts
+// across READY, unconfirmed, where refreshing at READY would leave only the joined ones.
+#[test]
+fn a_new_connection_keeps_the_list_until_the_sync() {
+    let mut state = forum_with_posts();
+    let any = view(ForumSort::LatestActivity, &[], TagMatching::Some);
+    let mut ready = ready_value();
+    if let Some(channels) = ready["guilds"][0]["channels"].as_array_mut() {
+        channels.push(forum());
+    }
+
+    apply(&mut state, "READY", ready);
+    assert_eq!(
+        active(&state, &any),
+        [MIDDLE, OLD, NEWEST],
+        "kept through READY"
+    );
+
+    let mut pinned = listed_post(MIDDLE, 400_000_000_000_000_200, &[BUG]);
+    pinned["flags"] = PINNED.into();
+    let sync = json!({
+        "guild_id": G1.to_string(),
+        "channel_ids": [FORUM.to_string()],
+        "threads": [
+            listed_post(OLD, 400_000_000_000_000_900, &[BUG, STAFF]),
+            pinned,
+            listed_post(LATER, 400_000_000_000_001_000, &[]),
+        ],
+        "members": [],
+    });
+    apply(&mut state, "THREAD_LIST_SYNC", sync);
+    assert_eq!(active(&state, &any), [MIDDLE, LATER, OLD]);
+}
+
+#[test]
+fn a_deleted_post_leaves_its_forums_count() {
+    let mut state = forum_with_new_posts();
+    assert_eq!(posts_count(&state), PostCount::New(1));
+
+    let events = apply(
+        &mut state,
+        "THREAD_DELETE",
+        json!({"id": OLD.to_string(), "guild_id": G1.to_string(), "parent_id": FORUM.to_string(), "type": 11}),
+    );
+
+    assert!(
+        events.contains(&format!("BadgeChanged({FORUM})")),
+        "{events:?}"
+    );
+    assert_eq!(posts_count(&state), PostCount::None);
+}
+
+// A guild back from an outage, or sent again, starts its forums' pages again, as its channels'
+// Threads browsers do.
+#[test]
+fn a_guild_create_starts_its_forums_pages_again() {
+    let mut state = forum_with_posts();
+    let any = view(ForumSort::LatestActivity, &[], TagMatching::Some);
+    let key = crate::state::PageKey::new(Snowflake::new(FORUM), &any);
+    let mut events = Vec::new();
+    let page = state
+        .begin_older_posts(key.clone(), &mut events)
+        .expect("a first page");
+    let results = serde_json::from_str(r#"{"threads": [], "members": [], "has_more": false}"#)
+        .expect("search results");
+    state.finish_older_posts(&key, page, results, &mut events);
+    assert_eq!(
+        state.forum_posts(Snowflake::new(FORUM), &any).older,
+        OlderThreads::All
+    );
+    let mut guild = ready_value()["guilds"][0].clone();
+    if let Some(channels) = guild["channels"].as_array_mut() {
+        channels.push(forum());
+    }
+
+    let events = apply(&mut state, "GUILD_CREATE", guild);
+
+    assert_eq!(
+        state.forum_posts(Snowflake::new(FORUM), &any).older,
+        OlderThreads::NotLoaded
+    );
+    assert!(
+        events.contains(&format!("ForumPostsChanged({FORUM})")),
+        "{events:?}"
+    );
+}
+
+fn archived_post(id: u64, last_message: u64) -> Value {
+    let mut post = listed_post(id, last_message, &[]);
+    post["thread_metadata"]["archived"] = true.into();
+    post
+}
+
+// An archived post a GUILD_CREATE kept but didn't list (its messages show) may be gone: only a
+// page brings it back.
+#[test]
+fn an_archived_post_kept_unconfirmed_waits_for_a_page() {
+    let mut state = forum_with_posts();
+    let any = view(ForumSort::LatestActivity, &[], TagMatching::Some);
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        archived_post(LATER, 400_000_000_000_000_800),
+    );
+    load_page(
+        &mut state,
+        LATER,
+        crate::state::LoadKind::Latest,
+        &[LATER],
+        true,
+    );
+    let mut guild = ready_value()["guilds"][0].clone();
+    if let Some(channels) = guild["channels"].as_array_mut() {
+        channels.push(forum());
+    }
+    apply(&mut state, "GUILD_CREATE", guild);
+    let key = crate::state::PageKey::new(Snowflake::new(FORUM), &any);
+    let mut events = Vec::new();
+    let page = state
+        .begin_older_posts(key.clone(), &mut events)
+        .expect("a first page");
+    let other = archived_post(300_000_000_000_000_064, 400_000_000_000_000_700);
+    let results = serde_json::from_str(
+        &json!({"threads": [other], "members": [], "has_more": true}).to_string(),
+    )
+    .expect("search results");
+
+    state.finish_older_posts(&key, page, results, &mut events);
+
+    let archived: Vec<u64> = state
+        .forum_posts(Snowflake::new(FORUM), &any)
+        .archived
+        .iter()
+        .map(|post| post.id.get())
+        .collect();
+    assert_eq!(archived, [300_000_000_000_000_064]);
+}
+
+// Escape and the menus mark a forum read whose only news is a post's activity.
+#[test]
+fn marking_a_forum_read_covers_its_posts_activity() {
+    let mut state = forum_with_new_posts();
+    read_forum(&mut state);
+    state.set_reading(&[], &mut Vec::new());
+    let later = snowflake_at(wall_millis() + 60_000);
+    apply(&mut state, "MESSAGE_CREATE", message(later, OLD));
+
+    let ack = state.mark_read(Snowflake::new(FORUM), &mut Vec::new());
+
+    let ack = ack.expect("an ack");
+    assert!(ack.now);
+    assert_eq!(
+        ack.cursor.map(Snowflake::get),
+        Some(later),
+        "never below the newest activity"
+    );
+    assert!(forum_ack(&state) >= Some(later));
+}
+
+// A message past the Mac's "now" (its clock behind Discord's) is acked once, not on every write.
+#[test]
+fn activity_past_the_macs_now_is_acked_once() {
+    let mut state = forum_with_new_posts();
+    read_forum(&mut state);
+    let ahead = snowflake_at(wall_millis() + 3_600_000);
+    apply(&mut state, "MESSAGE_CREATE", message(ahead, OLD));
+    assert_eq!(state.take_reading_acks().len(), 1);
+
+    apply(
+        &mut state,
+        "TYPING_START",
+        json!({"channel_id": OLD.to_string(), "user_id": MIRA.to_string(), "timestamp": 1}),
+    );
+    apply(&mut state, "MESSAGE_ACK", read_ack(NEWEST, NEWEST + 2));
+
+    assert!(state.take_reading_acks().is_empty());
+}
+
+// The pill refreshes the open forum only; a forum that isn't open lists its posts as they come.
+#[test]
+fn refreshing_a_forum_that_isnt_open_changes_nothing() {
+    let mut state = forum_with_posts();
+    let any = view(ForumSort::LatestActivity, &[], TagMatching::Some);
+    let mut events = Vec::new();
+    state.open_forum(None, &mut events);
+
+    state.refresh_forum(Snowflake::new(FORUM), &mut events);
+    let mut created = listed_post(LATER, 400_000_000_000_001_000, &[]);
+    created["newly_created"] = true.into();
+    apply(&mut state, "THREAD_CREATE", created);
+
+    let posts = state.forum_posts(Snowflake::new(FORUM), &any);
+    assert_eq!(posts.new_posts, 0);
+    assert_eq!(active(&state, &any), [MIDDLE, LATER, OLD, NEWEST]);
+}
+
+// Opening asks for the first 10 cards as the forum shows them first: by its default sort.
+#[test]
+fn opening_a_forum_names_its_first_cards_by_its_default_sort() {
+    let mut state = forum_with_posts();
+    let mut events = Vec::new();
+
+    let first = state.open_forum(Some(Snowflake::new(FORUM)), &mut events);
+
+    let first: Vec<u64> = first.iter().map(|post| post.get()).collect();
+    assert_eq!(first, [MIDDLE, NEWEST, OLD], "pinned, then by creation");
+}
+
+// First messages are kept for the open forum's cards only: a forum that isn't open asks again
+// when it opens.
+#[test]
+fn first_messages_are_kept_for_the_open_forum_only() {
+    let mut state = forum_with_posts();
+    apply(&mut state, "MESSAGE_CREATE", starter(OLD, "kept"));
+    let mut events = Vec::new();
+
+    state.open_forum(Some(Snowflake::new(300_000_000_000_000_099)), &mut events);
+    assert_eq!(preview(&state, OLD), None, "another forum opened");
+    apply(&mut state, "MESSAGE_CREATE", starter(NEWEST, "not kept"));
+    assert_eq!(preview(&state, NEWEST), None, "its forum isn't open");
+}
+
+#[test]
+fn a_deleted_post_forgets_its_first_message() {
+    let mut state = forum_with_posts();
+    apply(&mut state, "MESSAGE_CREATE", starter(OLD, "kept"));
+
+    apply(
+        &mut state,
+        "THREAD_DELETE",
+        json!({"id": OLD.to_string(), "guild_id": G1.to_string(), "parent_id": FORUM.to_string(), "type": 11}),
+    );
+
+    assert_eq!(preview(&state, OLD), None);
+}
+
+#[test]
+fn a_bulk_delete_of_a_first_message_says_it_went() {
+    let mut state = forum_with_posts();
+    apply(&mut state, "MESSAGE_CREATE", starter(OLD, "kept"));
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_DELETE_BULK",
+        json!({"ids": [OLD.to_string()], "channel_id": OLD.to_string(), "guild_id": G1.to_string()}),
+    );
+
+    assert_eq!(preview(&state, OLD).as_deref(), Some("deleted"));
+    assert!(
+        events.contains(&format!("PostPreviewChanged({OLD})")),
+        "{events:?}"
+    );
+}
+
+// A deleted archived post of the open forum leaves its page too.
+#[test]
+fn a_deleted_archived_post_changes_the_open_forums_page() {
+    let mut state = forum_with_posts();
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        archived_post(LATER, 400_000_000_000_000_800),
+    );
+
+    let events = apply(
+        &mut state,
+        "THREAD_DELETE",
+        json!({"id": LATER.to_string(), "guild_id": G1.to_string(), "parent_id": FORUM.to_string(), "type": 11}),
+    );
+
+    assert!(
+        events.contains(&format!("ForumPostsChanged({FORUM})")),
+        "{events:?}"
+    );
+}
+
+// A page given up (the request dropped) can be asked again.
+#[test]
+fn an_abandoned_first_page_can_be_asked_again() {
+    let mut state = forum_with_posts();
+    let any = view(ForumSort::LatestActivity, &[], TagMatching::Some);
+    let key = crate::state::PageKey::new(Snowflake::new(FORUM), &any);
+    let mut events = Vec::new();
+    let page = state
+        .begin_older_posts(key.clone(), &mut events)
+        .expect("a first page");
+    assert!(!state.can_load_older_posts(&key), "one at a time");
+
+    state.abandon_older_posts(&key, page, &mut events);
+
+    assert!(state.can_load_older_posts(&key));
+    assert_eq!(
+        state.forum_posts(Snowflake::new(FORUM), &any).older,
+        OlderThreads::NotLoaded
+    );
+}
+
+// As the official client: the pages of at most 50 filters, the least recently asked dropped.
+#[test]
+fn the_pages_of_50_filters_are_kept() {
+    let mut state = forum_with_posts();
+    let mut events = Vec::new();
+    let keys: Vec<crate::state::PageKey> = (0..51)
+        .map(|tag| {
+            crate::state::PageKey::new(
+                Snowflake::new(FORUM),
+                &view(ForumSort::LatestActivity, &[600 + tag], TagMatching::Some),
+            )
+        })
+        .collect();
+    for key in &keys {
+        let page = state
+            .begin_older_posts(key.clone(), &mut events)
+            .expect("a first page");
+        let results = serde_json::from_str(r#"{"threads": [], "members": [], "has_more": false}"#)
+            .expect("search results");
+        state.finish_older_posts(key, page, results, &mut events);
+    }
+
+    assert!(
+        state.can_load_older_posts(&keys[0]),
+        "the first filter's pages went"
+    );
+    assert!(
+        !state.can_load_older_posts(&keys[1]),
+        "the second's are all loaded"
+    );
+    assert!(!state.can_load_older_posts(&keys[50]));
+}
+
+// A post pinned while the list is frozen joins it at the top, also one it didn't list.
+#[test]
+fn a_newly_pinned_post_joins_the_frozen_list() {
+    let mut state = forum_with_posts();
+    let any = view(ForumSort::LatestActivity, &[], TagMatching::Some);
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        listed_post(LATER, 400_000_000_000_001_000, &[]),
+    );
+    assert_eq!(active(&state, &any), [MIDDLE, OLD, NEWEST], "frozen");
+
+    let mut pinned = listed_post(LATER, 400_000_000_000_001_000, &[]);
+    pinned["flags"] = PINNED.into();
+    apply(&mut state, "THREAD_UPDATE", pinned);
+
+    assert_eq!(active(&state, &any), [LATER, MIDDLE, OLD, NEWEST]);
 }

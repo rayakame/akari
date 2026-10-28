@@ -15,6 +15,7 @@ use super::order;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
+use super::threads::ThreadIndex;
 use super::types::{
     Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostPreview,
     StarterMessage, ThreadBrowser, ThreadCreation, User,
@@ -351,7 +352,7 @@ impl Store {
         let Some(next) = self.read(|inner| inner.state.with_notification_flags(flags)) else {
             return;
         };
-        let badges = Badges::build(&next, self.now_millis());
+        let badges = Badges::build(&next, &ThreadIndex::build(&next), self.now_millis());
         drop(next);
         self.write("NOTIFICATION_SETTINGS_UPDATE", |inner, events| {
             let current = self.shared.changes.load(Ordering::SeqCst) == start;
@@ -586,10 +587,10 @@ impl Store {
         });
     }
 
-    pub(crate) fn open_forum(&self, forum: Option<ChannelId>) {
+    pub(crate) fn open_forum(&self, forum: Option<ChannelId>) -> Vec<ChannelId> {
         self.write("forum", |inner, events| {
             inner.state.open_forum(forum, events)
-        });
+        })
     }
 
     pub(crate) fn refresh_forum(&self, forum: ChannelId) {

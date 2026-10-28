@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use super::{Entities, State};
@@ -335,6 +335,22 @@ impl State {
         for parent in parents {
             self.older.remove(&parent);
             events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
+        }
+        let forums: BTreeSet<ChannelId> = self
+            .forum_pages
+            .keys()
+            .map(|key| key.forum)
+            .filter(|forum| {
+                next.channels.contains_key(forum)
+                    || channels
+                        .get(forum)
+                        .is_some_and(|channel| channel.guild_id == Some(guild))
+            })
+            .collect();
+        self.forum_pages
+            .retain(|key, _| !forums.contains(&key.forum));
+        for forum in forums {
+            events.push(StoreEvent::ForumPostsChanged { forum_id: forum });
         }
     }
 

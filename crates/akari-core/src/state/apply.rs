@@ -313,9 +313,10 @@ pub(crate) struct Derived {
 
 impl Derived {
     pub(crate) fn build(entities: &Entities, now_millis: i64) -> Self {
+        let threads = ThreadIndex::build(entities);
         Self {
-            badges: Badges::build(entities, now_millis),
-            threads: ThreadIndex::build(entities),
+            badges: Badges::build(entities, &threads, now_millis),
+            threads,
             late: Vec::new(),
         }
     }
@@ -459,7 +460,6 @@ impl State {
         let derived = Derived::build(&next, self.now_millis());
         let diff = self.ready_diff(&next, &derived);
         self.swap(next, derived, diff, events);
-        self.refresh_open_forum(None, events);
     }
 
     // A READY whose settings proto didn't decode keeps the folders and display settings the
@@ -720,7 +720,7 @@ impl State {
         }
         let dirty = std::mem::take(&mut self.dirty);
         self.badges
-            .update(&self.entities, dirty, now_millis, events);
+            .update(&self.entities, &self.threads, dirty, now_millis, events);
     }
 
     // The channel, and its threads, whose permissions follow its overwrites.
@@ -832,6 +832,7 @@ impl State {
                     self.reread_boxes(delete.channel_id, events);
                 }
                 for id in delete.ids {
+                    self.delete_first_message(delete.channel_id, id, events);
                     self.windows.delete(delete.channel_id, id, events);
                 }
             }
@@ -1104,7 +1105,7 @@ impl State {
             }
         }
         if let Some(guild) = guild {
-            self.refresh_open_forum(Some(guild), events);
+            self.refresh_open_forum(guild, events);
         }
     }
 
@@ -1194,11 +1195,16 @@ impl State {
         self.forum_pages.retain(|key, _| key.forum != removed.id);
         self.entities.read_states.forget(removed.id);
         self.dirty.channel(removed.id);
+        // Gone from the store, a post no longer leads the badges to its forum.
+        if let Some(parent) = removed.parent_id {
+            self.dirty.channel(parent);
+        }
         events.push(StoreEvent::ChannelRemoved {
             channel_id: removed.id,
             guild_id: removed.guild_id,
         });
-        self.forum_post_deleted(removed.id, events);
+        self.forget_first_message(removed.id);
+        self.forum_post_deleted(&removed, events);
         let threads: Vec<ChannelId> = self.threads.of(removed.id).collect();
         self.threads.remove(&removed);
         for thread in threads {
@@ -1208,6 +1214,7 @@ impl State {
             self.windows.drop_channel(thread);
             self.latest.remove(&thread);
             self.unconfirmed.remove(&thread);
+            self.forget_first_message(thread);
             self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {

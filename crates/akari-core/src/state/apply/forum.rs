@@ -16,6 +16,9 @@ use crate::state::{
 
 // Module 473503 asks at most this many posts a request.
 const POST_BATCH: usize = 10;
+// The official client asks the first 10 posts' data as the user presses the forum's row
+// (module 473503).
+const FIRST_POSTS: usize = 10;
 // A post Discord didn't answer for is asked again after this, while its card shows (the official
 // client asks again on the card's next render).
 const RETRY_MILLIS: i64 = 30_000;
@@ -67,9 +70,6 @@ pub(crate) struct ForumPages {
     used: u64,
 }
 
-// A forum post pinned to the top of its forum.
-const PINNED: u64 = 1 << 1;
-
 /// The open forum's list as it last refreshed: who's in it and the activity each was sorted by.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -77,10 +77,6 @@ pub(super) struct ForumList {
     forum: ChannelId,
     posts: HashMap<ChannelId, u64>,
     new_posts: u32,
-}
-
-fn pinned(channel: &Channel) -> bool {
-    channel.flags & PINNED != 0
 }
 
 fn archived(channel: &Channel) -> bool {
@@ -104,15 +100,54 @@ fn matches(channel: &Channel, view: &ForumView) -> bool {
 
 impl State {
     /// The forum whose page shows, `None` once it closes: opening one refreshes its list.
-    pub(crate) fn open_forum(&mut self, forum: Option<ChannelId>, events: &mut Vec<StoreEvent>) {
-        match forum {
-            Some(forum) => self.refresh_forum(forum, events),
-            None => self.forum_list = None,
+    /// Returns its first 10 posts as its default view shows them.
+    pub(crate) fn open_forum(
+        &mut self,
+        forum: Option<ChannelId>,
+        events: &mut Vec<StoreEvent>,
+    ) -> Vec<ChannelId> {
+        let Some(forum) = forum else {
+            self.forum_list = None;
+            return Vec::new();
+        };
+        // Another forum's cards are gone; reopening this one keeps its own.
+        let channels = &self.entities.channels;
+        let of_forum = |post: &ChannelId| {
+            channels
+                .get(post)
+                .is_some_and(|post| post.parent_id == Some(forum))
+        };
+        self.previews.messages.retain(|post, _| of_forum(post));
+        self.previews.retry.retain(|post, _| of_forum(post));
+        self.list_forum(forum, events);
+        let view = self
+            .entities
+            .channels
+            .get(&forum)
+            .and_then(|channel| channel.forum.as_deref())
+            .map(|settings| ForumView::new(settings.sort, Box::default(), settings.tag_matching))
+            .unwrap_or_default();
+        self.forum_posts(forum, &view)
+            .active
+            .iter()
+            .take(FIRST_POSTS)
+            .map(|post| post.id)
+            .collect()
+    }
+
+    /// The open forum's list as the store has it now; the new-post count starts over. A forum
+    /// that isn't open changes nothing.
+    pub(crate) fn refresh_forum(&mut self, forum: ChannelId, events: &mut Vec<StoreEvent>) {
+        if self
+            .forum_list
+            .as_ref()
+            .is_some_and(|list| list.forum == forum)
+        {
+            self.list_forum(forum, events);
         }
     }
 
-    /// The open forum's list as the store has it now; the new-post count starts over.
-    pub(crate) fn refresh_forum(&mut self, forum: ChannelId, events: &mut Vec<StoreEvent>) {
+    fn list_forum(&mut self, forum: ChannelId, events: &mut Vec<StoreEvent>) {
         let posts = self
             .listable_posts(forum)
             .map(|post| (post.id, newest(post)))
@@ -163,7 +198,7 @@ impl State {
                 ForumSort::LatestActivity => *newest,
                 ForumSort::CreationDate => post.id.get(),
             };
-            (Reverse(pinned(post)), Reverse(order), Reverse(post.id))
+            (Reverse(post.is_pinned()), Reverse(order), Reverse(post.id))
         });
         let pages = self
             .forum_pages
@@ -181,6 +216,8 @@ impl State {
             .filter_map(|id| self.entities.channels.get(&id))
             .filter(|post| {
                 archived(post)
+                    // A READY or GUILD_CREATE may have kept it after it went meanwhile.
+                    && !self.unconfirmed.contains(&post.id)
                     && cut.is_some_and(|cut| newest(post) >= cut)
                     && matches(post, view)
                     && self
@@ -364,9 +401,9 @@ impl State {
         });
     }
 
-    pub(super) fn forum_post_deleted(&mut self, post: ChannelId, events: &mut Vec<StoreEvent>) {
+    pub(super) fn forum_post_deleted(&mut self, post: &Channel, events: &mut Vec<StoreEvent>) {
         if let Some(list) = self.forum_list.as_mut()
-            && list.posts.remove(&post).is_some()
+            && (list.posts.remove(&post.id).is_some() || post.parent_id == Some(list.forum))
         {
             events.push(StoreEvent::ForumPostsChanged {
                 forum_id: list.forum,
@@ -382,7 +419,7 @@ impl State {
         after: &Channel,
         events: &mut Vec<StoreEvent>,
     ) {
-        if pinned(before) == pinned(after) {
+        if before.is_pinned() == after.is_pinned() {
             return;
         }
         let Some(forum) = self
@@ -400,7 +437,7 @@ impl State {
         let Some(list) = self.forum_list.as_mut() else {
             return;
         };
-        if pinned(after) && current.contains_key(&after.id) {
+        if after.is_pinned() && current.contains_key(&after.id) {
             list.posts.insert(after.id, 0);
         }
         for (id, activity) in &mut list.posts {
@@ -411,13 +448,9 @@ impl State {
         events.push(StoreEvent::ForumPostsChanged { forum_id: forum });
     }
 
-    // THREAD_LIST_SYNC for the open forum's guild, or a new connection (`None`): the list
-    // refreshes; a forum that's gone closes.
-    pub(super) fn refresh_open_forum(
-        &mut self,
-        guild: Option<GuildId>,
-        events: &mut Vec<StoreEvent>,
-    ) {
+    // THREAD_LIST_SYNC for the open forum's guild, which also follows each new connection: the
+    // list refreshes; a forum that's gone closes.
+    pub(super) fn refresh_open_forum(&mut self, guild: GuildId, events: &mut Vec<StoreEvent>) {
         let Some(forum) = self.forum_list.as_ref().map(|list| list.forum) else {
             return;
         };
@@ -425,10 +458,10 @@ impl State {
             self.forum_list = None;
             return;
         };
-        if guild.is_some_and(|guild| channel.guild_id != Some(guild)) {
+        if channel.guild_id != Some(guild) {
             return;
         }
-        self.refresh_forum(forum, events);
+        self.list_forum(forum, events);
     }
 
     /// A post's first message: what post-data, a search or its own messages brought, else its
@@ -521,13 +554,26 @@ impl State {
     }
 
     // A forum post's first message has the post's ID.
-    fn is_post(&self, channel: ChannelId) -> bool {
-        self.entities
+    // The cards that show, and those known already: other forums ask when they open.
+    fn keeps_first_message(&self, post: ChannelId) -> bool {
+        if self.previews.messages.contains_key(&post) {
+            return true;
+        }
+        let parent = self
+            .entities
             .channels
-            .get(&channel)
-            .and_then(|post| post.parent_id)
-            .and_then(|parent| self.entities.channels.get(&parent))
-            .is_some_and(|parent| parent.forum.is_some())
+            .get(&post)
+            .and_then(|post| post.parent_id);
+        parent.is_some_and(|parent| {
+            self.forum_list
+                .as_ref()
+                .is_some_and(|list| list.forum == parent)
+        })
+    }
+
+    pub(super) fn forget_first_message(&mut self, post: ChannelId) {
+        self.previews.messages.remove(&post);
+        self.previews.retry.remove(&post);
     }
 
     pub(super) fn note_first_message(
@@ -535,7 +581,9 @@ impl State {
         message: &model::Message,
         events: &mut Vec<StoreEvent>,
     ) {
-        if message.id.get() != message.channel_id.get() || !self.is_post(message.channel_id) {
+        if message.id.get() != message.channel_id.get()
+            || !self.keeps_first_message(message.channel_id)
+        {
             return;
         }
         let users = &self.entities.users;
@@ -578,7 +626,7 @@ impl State {
         message: MessageId,
         events: &mut Vec<StoreEvent>,
     ) {
-        if message.get() != channel.get() || !self.is_post(channel) {
+        if message.get() != channel.get() || !self.keeps_first_message(channel) {
             return;
         }
         self.previews.messages.insert(channel, None);

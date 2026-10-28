@@ -294,9 +294,11 @@ async fn previews_are_asked_ten_at_a_time_one_after_the_other() {
                 )
             })
             .collect();
+        // The first answer comes slowly: the second request must wait for it.
+        let delay = if ids.len() == 10 { 300 } else { 50 };
         ResponseTemplate::new(200)
             .set_body_json(json!({"threads": threads}))
-            .set_delay(Duration::from_millis(50))
+            .set_delay(Duration::from_millis(delay))
     };
     for chunk in [&posts[..10], &posts[10..]] {
         Mock::given(method("POST"))
@@ -327,6 +329,23 @@ async fn previews_are_asked_ten_at_a_time_one_after_the_other() {
 
     let ids: Vec<ChannelId> = posts.iter().copied().map(Snowflake::new).collect();
     account.request_post_previews(forum(), &ids);
+    let asked = || async {
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|request| request.url.path().ends_with("/post-data"))
+            .count()
+    };
+    for _ in 0..200 {
+        if asked().await > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(asked().await, 1, "one request at a time");
     for _ in 0..300 {
         if account.store().post_preview(ids[14]).is_some() {
             break;
@@ -349,4 +368,28 @@ async fn previews_are_asked_ten_at_a_time_one_after_the_other() {
         ids.iter()
             .all(|id| account.store().post_preview(*id).is_some())
     );
+}
+
+// The post-data worker ends with the account, letting go of its store and its client.
+#[tokio::test]
+async fn the_post_data_worker_ends_with_the_account() {
+    let fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    let account = start_with(&fake, &server);
+    let wake = account.shared.previews.clone();
+    assert_eq!(
+        Arc::strong_count(&wake),
+        3,
+        "the account's, the worker's and this one"
+    );
+
+    account.close();
+
+    for _ in 0..200 {
+        if Arc::strong_count(&wake) == 2 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the worker still runs");
 }

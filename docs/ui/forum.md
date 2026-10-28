@@ -27,9 +27,11 @@ differences are marked *Akari:*.
   pinned first, then by last activity (the newest message, else the post's ID) under Recently
   Active, by creation under Date Posted.
 - **Frozen between refreshes**: which posts show and their order change only when the list
-  refreshes: opening the forum, a new connection's READY, a THREAD_LIST_SYNC of its guild, and
-  the pill. A deleted post leaves at once and a pin change re-sorts; new activity doesn't move a
-  card.
+  refreshes: opening the forum, a THREAD_LIST_SYNC of its guild (which follows every new
+  connection), and the pill. A deleted or archived post leaves at once, a pin change re-sorts and
+  brings a newly pinned post, the tag filter applies at once; new activity doesn't move a card.
+  *Akari: a new connection keeps the list until that sync, where Discord rebuilds it at once
+  from the joined posts.*
 - **"N New Posts"**: someone else's new post raises the pill at the bottom center
   ("1 New Post", "3 New Posts"; 36 tall, radius 36, `surface-high`, `border-subtle`, the brand's
   text); a click refreshes the list and scrolls to the top. The user's own post joins at once.
