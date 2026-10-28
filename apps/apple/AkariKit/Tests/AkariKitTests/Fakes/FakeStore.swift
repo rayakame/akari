@@ -36,6 +36,9 @@ final class FakeStore: Store, @unchecked Sendable {
         var threadSlowmodes: [ChannelId: Slowmode] = [:]
         var ageGates: [ChannelId: AgeGate] = [:]
         var hidingDownloads: Set<ChannelId> = []
+        // Each forum's page for a view; none: nothing listed, nothing loaded.
+        var forumPages: [ChannelId: @Sendable (ForumView) -> ForumPosts] = [:]
+        var postPreviews: [ChannelId: PostPreview] = [:]
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -238,5 +241,16 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func hidesMediaDownloads(channelId: ChannelId) -> Bool {
         read(.hidesMediaDownloads(channelId)) { $0.hidingDownloads.contains(channelId) }
+    }
+
+    override func forumPosts(forumId: ChannelId, view: ForumView) -> ForumPosts {
+        read(.forumPosts(forumId, view)) { state in
+            state.forumPages[forumId]?(view)
+                ?? ForumPosts(active: [], archived: [], older: .notLoaded, newPosts: 0)
+        }
+    }
+
+    override func postPreview(postId: ChannelId) -> PostPreview? {
+        read(.postPreview(postId)) { $0.postPreviews[postId] }
     }
 }

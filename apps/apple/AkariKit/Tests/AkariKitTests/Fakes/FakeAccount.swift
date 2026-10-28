@@ -341,6 +341,45 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.setBrowsing(parentId))
     }
 
+    // What loading older posts leaves in the store, as akari-core would.
+    let afterOlderPosts = Locked<(@Sendable (ForumView) -> Void)?>(nil)
+    let olderPostsError = Locked<RequestError?>(nil)
+    // A post search's answer: Discord's IDs, `nil` while not indexed; an error fails it.
+    let postSearchReply = Locked<Result<[ChannelId]?, RequestError>>(.success([]))
+    // While set, each post search waits here before answering.
+    let holdPostSearches = Locked(false)
+    let postSearchEntries = AsyncQueue<Void>()
+
+    override func openForum(forumId: ChannelId?) {
+        log.append(.openForum(forumId))
+    }
+
+    override func refreshForum(forumId: ChannelId) {
+        log.append(.refreshForum(forumId))
+    }
+
+    override func loadOlderPosts(forumId: ChannelId, view: ForumView) async throws {
+        log.append(.loadOlderPosts(forumId, view))
+        if let error = olderPostsError.current {
+            throw error
+        }
+        afterOlderPosts.current?(view)
+    }
+
+    override func searchPosts(forumId: ChannelId, name: String, view: ForumView) async throws
+        -> [ChannelId]?
+    {
+        log.append(.searchPosts(forumId, name, view))
+        if holdPostSearches.current {
+            _ = await postSearchEntries.next()
+        }
+        return try postSearchReply.current.get()
+    }
+
+    override func requestPostPreviews(forumId: ChannelId, postIds: [ChannelId]) {
+        log.append(.requestPostPreviews(forumId, postIds))
+    }
+
     let membershipError = Locked<RequestError?>(nil)
 
     override func joinThread(threadId: ChannelId, location: ThreadLocation) async throws {

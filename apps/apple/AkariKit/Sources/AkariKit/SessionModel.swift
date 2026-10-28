@@ -56,7 +56,7 @@ public final class SessionModel {
     public private(set) var place: Place = .home
     /// The open guild's channels; `nil` at home.
     public private(set) var channels: ChannelListModel? {
-        didSet { channels?.setOpen(messages?.channelId) }
+        didSet { channels?.setOpen(openChannelId) }
     }
     /// The open channel's messages. The session can replace it on its own, when the open channel
     /// is deleted or hidden, and a new model loads nothing until the view calls `open()`, e.g.
@@ -64,7 +64,7 @@ public final class SessionModel {
     public private(set) var messages: MessageListModel? {
         didSet {
             oldValue?.retire()
-            channels?.setOpen(messages?.channelId)
+            channels?.setOpen(openChannelId)
             if oldValue?.channelId != messages?.channelId {
                 threadBrowser = nil
             }
@@ -72,6 +72,24 @@ public final class SessionModel {
             syncForm()
             updateCreateHere()
         }
+    }
+    /// The open forum's page, in the message list's place; `nil` otherwise. Its Sort & View and
+    /// tag filter stay with the forum for the session.
+    public private(set) var forum: ForumModel? {
+        didSet {
+            guard oldValue?.forumId != forum?.forumId else {
+                return
+            }
+            channels?.setOpen(openChannelId)
+            account.openForum(forumId: forum?.forumId)
+            if let forum {
+                account.viewChannel(channelId: forum.forumId)
+            }
+        }
+    }
+    /// The channel the window shows: the message list's or the forum's.
+    public var openChannelId: ChannelId? {
+        messages?.channelId ?? forum?.forumId
     }
     /// The thread beside the open channel, in the split view. Each channel keeps its own:
     /// opening another channel hides it, coming back shows it again, and so does a relaunch,
@@ -148,6 +166,7 @@ public final class SessionModel {
     @ObservationIgnored private var lastHomeChannel: ChannelId?
     // Only channels opened here can hold this session's unsent messages.
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
+    @ObservationIgnored private var forumSettings: [ChannelId: ForumModel.Settings] = [:]
     @ObservationIgnored private var clickedThread: ChannelId?
     // Each channel's thread in the split view, with the channel's server, kept across launches.
     @ObservationIgnored private var splits: [ChannelId: AccountMemory.Split]
@@ -356,7 +375,7 @@ public final class SessionModel {
         }
         // The place opens its own last or first channel on the way, which isn't being read.
         readingOnce {
-            guard found.opensMessageList else {
+            guard found.opensPage else {
                 return
             }
             let place: Place = found.guildId.map { .guild($0) } ?? .home
@@ -903,7 +922,7 @@ public final class SessionModel {
             // The session starts at home, so choosing home before READY cancels a server restore.
             if case .guild = spotToRestore?.place {
                 spotToRestore = nil
-                messages = nil
+                closePage()
                 rememberSpot()
             }
             return
@@ -919,7 +938,7 @@ public final class SessionModel {
             {
                 show(channel: last)
             } else {
-                messages = nil
+                closePage()
             }
             return
         }
@@ -1117,7 +1136,7 @@ public final class SessionModel {
             engaged = false
             enter(.home)
         }
-        let open = messages?.channelId
+        let open = openChannelId
         // An open thread stays open when it stops being listed, as in the official client.
         let wasListed = open.flatMap(listed).map { !$0.isThread } ?? false
         // A thread needs its parent's VIEW_CHANNEL; losing it sends no THREAD_DELETE.
@@ -1156,7 +1175,7 @@ public final class SessionModel {
             if case .guild(let guildId) = place, let list = channels {
                 openListedChannel(in: list, guildId: guildId)
             } else {
-                messages = nil
+                closePage()
                 rememberSpot()
             }
         }
@@ -1183,6 +1202,7 @@ public final class SessionModel {
         updateCreateHere()
         messages?.apply(batch)
         split?.apply(batch)
+        forum?.apply(batch)
         for form in formModels.values {
             form.apply(batch)
         }
@@ -1348,7 +1368,7 @@ public final class SessionModel {
         switch spot.place {
         case .guild(let guildId):
             guard servers.guilds.contains(where: { $0.id == guildId }) else {
-                messages = nil
+                closePage()
                 rememberSpot()
                 return
             }
@@ -1363,26 +1383,31 @@ public final class SessionModel {
             {
                 show(channel: channel)
             } else {
-                messages = nil
+                closePage()
                 rememberSpot()
             }
         }
     }
 
     private func rememberSpot() {
-        memory.remember(.init(place: place, channel: messages?.channelId), of: userId)
+        memory.remember(.init(place: place, channel: openChannelId), of: userId)
     }
 
     private func openListedChannel(in list: ChannelListModel, guildId: GuildId) {
         let last = lastChannels[guildId].flatMap { last in
-            list.channels.first { $0.id == last && $0.opensMessageList }
+            list.channels.first { $0.id == last && $0.opensPage }
         }
         let first = list.channels.first { $0.opensMessageList && !$0.isThread }
         if let channel = last ?? first {
             show(channel: channel.id)
         } else {
-            messages = nil
+            closePage()
         }
+    }
+
+    private func closePage() {
+        forum = nil
+        messages = nil
     }
 
     private func show(channel id: ChannelId) {
@@ -1396,10 +1421,20 @@ public final class SessionModel {
             rememberSpot()
             updateReading()
         }
-        guard messages?.channelId != id else {
+        guard openChannelId != id else {
+            return
+        }
+        if store.channel(id: id)?.opensForum == true {
+            forum = ForumModel(
+                forumId: id, settings: forumSettings[id], store: store, account: account
+            ) { [weak self] settings in
+                self?.forumSettings[id] = settings
+            }
+            messages = nil
             return
         }
         openedChannels.insert(id)
+        forum = nil
         messages = list(of: id)
     }
 
@@ -1454,7 +1489,11 @@ public final class SessionModel {
         for list in lists {
             list.readHere = true
         }
-        let channels = Set(lists.map(\.channelId))
+        // The forum's page is read like a channel: the core acks it at "now".
+        let forums = [forum?.forumId].compactMap { $0 }.filter {
+            reads && store.ageGate(channelId: $0) == .open
+        }
+        let channels = Set(lists.map(\.channelId) + forums)
         if channels != reading {
             reading = channels
         }
@@ -1474,7 +1513,8 @@ public final class SessionModel {
     }
 
     private func tellReading() {
-        let channels = [messages, split].compactMap { $0?.channelId }.filter(reading.contains)
+        let channels = [messages?.channelId, split?.channelId, forum?.forumId].compactMap { $0 }
+            .filter(reading.contains)
         guard !accountClosed, channels != toldReading || resendReading else {
             return
         }

@@ -464,13 +464,13 @@ final class SessionModelTests {
         session.close()
     }
 
-    // As in the sidebar: forums, voice channels and categories have no message list yet.
+    // As in the sidebar: media and voice channels and categories don't open yet.
     @Test
-    func goingToAChannelWithoutAMessageListDoesNothing() {
+    func goingToAChannelWithoutAPageDoesNothing() {
         store.update { state in
             state.add(guild(1), guild(2))
             state.list([channel(13)], in: 1)
-            state.list([channel(20, guild: 2, kind: .guildForum), channel(21, guild: 2)], in: 2)
+            state.list([channel(20, guild: 2, kind: .guildMedia), channel(21, guild: 2)], in: 2)
         }
         let session = makeSession()
         session.start()
