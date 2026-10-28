@@ -345,39 +345,43 @@ struct ForumTime: View {
     }
 }
 
-/// The first media at a card's right, 72 square: covered media shows only its placeholder and
-/// the eye, as Discord blurs it.
+/// A card's media, filling the box it's given: covered media shows only its placeholder and the
+/// eye, where Discord blurs it.
 struct ForumThumbnail: View {
     let media: Attachment
     let placeholders: PlaceholderCache?
     var radius: CGFloat = 8
 
     var body: some View {
-        ZStack {
-            Color(nsColor: Palette.backgroundModMuted)
-            if let blurred = media.placeholder.flatMap({ placeholders?.image($0) }) {
-                Image(decorative: blurred, scale: 1)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+        Color(nsColor: Palette.backgroundModMuted)
+            .overlay {
+                if let blurred = media.placeholder.flatMap({ placeholders?.image($0) }) {
+                    Image(decorative: blurred, scale: 1)
+                        .resizable()
+                        .scaledToFill()
+                }
             }
-            if media.cover == nil {
-                RemoteImage(key: media.key, place: .gif, fit: .cover)
-            } else {
-                Image(systemName: "eye.slash.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 2)
+            .overlay {
+                if media.cover == nil {
+                    RemoteImage(key: media.key, place: .gif, fit: .cover)
+                } else {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.white)
+                        .shadow(radius: 2)
+                }
             }
-            if media.kind == .video {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white)
-                    .padding(6)
-                    .background(.black.opacity(0.6), in: Circle())
+            .overlay {
+                if media.kind == .video {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white)
+                        .padding(6)
+                        .background(.black.opacity(0.6), in: Circle())
+                }
             }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: radius))
-        .accessibilityHidden(true)
+            .clipShape(RoundedRectangle(cornerRadius: radius))
+            .accessibilityHidden(true)
     }
 }
 
@@ -392,25 +396,30 @@ struct ForumGalleryCard: View {
     @State private var hovered = false
     @Environment(\.placeholders) private var placeholders
 
+    private static let header: CGFloat = 60
+    private static let gap: CGFloat = 24
+    private static let footer: CGFloat = 36
+
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                    .frame(height: 60 - 22, alignment: .topLeading)
                     .padding(EdgeInsets(top: 12, leading: 12, bottom: 10, trailing: 12))
-                content(height: size.height - 60 - 24 - 36)
+                    .frame(height: Self.header, alignment: .topLeading)
+                content
+                    .frame(height: size.height - Self.header - Self.gap - Self.footer)
                     .padding(.horizontal, 12)
                     .overlay(alignment: .bottomLeading) {
-                        if !card.tags.isEmpty {
+                        if card.pinned || !card.tags.isEmpty {
                             ForumCardTags(card: card, filter: filter)
                                 .padding(.leading, 18)
                                 .offset(y: 12 - 2)
                         }
                     }
-                Spacer(minLength: 24)
+                    .padding(.bottom, Self.gap)
                 ForumCardCount(count: card.count, size: 16, muted: true)
-                    .padding(12)
-                    .frame(height: 36 + 12, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .frame(height: Self.footer)
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
         }
@@ -441,13 +450,11 @@ struct ForumGalleryCard: View {
         }
     }
 
-    @ViewBuilder private func content(height: CGFloat) -> some View {
+    @ViewBuilder private var content: some View {
         if card.media.isEmpty {
             preview
-                .frame(maxWidth: .infinity, maxHeight: height, alignment: .topLeading)
         } else {
             ForumMosaic(media: card.media, placeholders: placeholders)
-                .frame(height: height)
         }
     }
 

@@ -13,7 +13,7 @@ struct ChannelSidebar: View {
             ListHeader(title: guildName)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    let open = session.messages?.channelId
+                    let open = session.openChannelId
                     let rows = collapsed.visible(list.shown(open: open), in: list.guildId) {
                         list.staysWhenCollapsed($0, open: open)
                     }
