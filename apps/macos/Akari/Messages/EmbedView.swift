@@ -666,7 +666,8 @@ final class EmbedView: NSView {
         }
         switch action {
         case .open:
-            if embed.video != nil {
+            // A GIFV opens in the viewer as Discord's does; other videos play at their link.
+            if embed.video != nil, embed.kind != .gifv {
                 openVideo()
             } else if let key = tile.content?.media.key {
                 act(.open(key))

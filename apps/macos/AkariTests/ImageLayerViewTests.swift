@@ -71,6 +71,30 @@ final class ImageLayerViewTests {
         #expect(source.count == 1)
     }
 
+    // The viewer's zoom (D146): a box larger than what it may ask for asks at most that, its
+    // shape kept.
+    @Test
+    func aCapLimitsThePixelsAskedFor() async throws {
+        let source = FakeImageSource.stalling()
+        let cache = ImageCache(source: source)
+        let view = ImageLayerView()
+        view.images = cache
+        view.maxPixels = NSSize(width: 60, height: 30)
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        view.frame = NSRect(x: 10, y: 10, width: 100, height: 40)
+        window.contentView?.addSubview(view)
+        view.layoutSubtreeIfNeeded()
+
+        try await eventually { source.count == 1 }
+        let factor = min(60 / (100 * scale), 30 / (40 * scale))
+        #expect(source.requests.withLock { $0.first?.width } == UInt32((100 * scale * factor).rounded()))
+        #expect(source.requests.withLock { $0.first?.height } == UInt32((40 * scale * factor).rounded()))
+
+        view.maxPixels = nil
+        try await eventually { source.count == 2 }
+        #expect(source.requests.withLock { $0.last?.width } == UInt32(100 * scale))
+    }
+
     // A recycled box showing another user or server clears at once: the disc, never the
     // previous subject's picture, until the new one decoded. The same subject's new hash keeps
     // the old image (D137).

@@ -272,6 +272,40 @@ final class EmbedTests {
         #expect(!tile.isLooping, "the window isn't key")
     }
 
+    // D146: an embed's gallery opens the viewer on its images, a GIFV alone; a video's poster
+    // keeps its link.
+    @Test
+    func aClickOpensTheViewer() throws {
+        actions.viewerAccount = ViewerAccount()
+        let viewer = list.controller.viewer
+        defer { viewer.close() }
+        let gallery = [embedImage(640, 480), embedImage(640, 480, embed: 1), embedImage(640, 480, embed: 2)]
+        show([embed(kind: .image, inline: true, title: nil, description: nil, media: gallery)])
+
+        try #require(try views().first?.tiles[1]).performClick(nil)
+
+        #expect(viewer.view?.model.items.map(\.key) == gallery.map(\.key))
+        #expect(viewer.view?.model.index == 1)
+        viewer.close()
+
+        let video = EmbedVideo(
+            poster: embedImage(498, 280, slot: .thumbnail), width: 498, height: 280, proxied: true,
+            key: .embedMedia(channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 1), embed: 0, slot: .video))
+        show([embed(kind: .gifv, inline: true, title: nil, description: nil, video: video)])
+        try #require(try views().first?.tiles.first).performClick(nil)
+        #expect(viewer.view?.model.items.map(\.kind) == [.gifv])
+        viewer.close()
+
+        show([
+            embed(
+                kind: .video, inline: true, title: nil, description: nil, url: "https://example.com/clip",
+                video: video)
+        ])
+        try #require(try views().first?.tiles.first).performClick(nil)
+        #expect(viewer.view == nil)
+        #expect(actions.links.map(\.0) == [URL(string: "https://example.com/clip")!])
+    }
+
     // MARK: Review
 
     // Review: clicks and the list's cursor reach what's under them; a hidden cover or a reused

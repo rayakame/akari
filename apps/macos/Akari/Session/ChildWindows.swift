@@ -33,6 +33,9 @@ extension EnvironmentValues {
 /// while it shows, so typing, Tab and Escape stay in it) or "More Active Threads" (never key).
 final class ContainerPanel: NSPanel {
     var onEscape: () -> Void = {}
+    /// Sees each key press before the first responder; true when it took it (the viewer's arrows,
+    /// which a video's player would otherwise seek with).
+    var onKey: (NSEvent) -> Bool = { _ in false }
     private let keyable: Bool
 
     init(keyable: Bool) {
@@ -109,6 +112,9 @@ final class ContainerPanel: NSPanel {
             (firstResponder as? NSTextView)?.hasMarkedText() != true
         {
             onEscape()
+            return
+        }
+        if event.type == .keyDown, onKey(event) {
             return
         }
         super.sendEvent(event)
