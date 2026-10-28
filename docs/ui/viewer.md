@@ -46,10 +46,11 @@ bottom and 24 at the sides:
   the window less 24 at each side (76 with arrows) and 176 in height, or the centre column (the
   window less 544) less 36 at the top and bottom (88 with arrows).
 - It's asked at the fitted box's pixels on the window's screen (2× on Retina), at most 4096 a
-  side.
+  side, and again when the window moves to a screen of another scale.
 - *Zoomed, it's asked at 2.5 × those pixels, never above the original's size or 4096 a side,
   through the media proxy (D132: nothing on screen fetches an original; Discord zooms to the CDN
-  original).*
+  original). An original smaller than the screen's pixels isn't asked for again. If the zoomed
+  ask fails, the picture stays as it was.*
 - It follows the window's size.
 
 ## Zoom and pan
@@ -57,7 +58,7 @@ bottom and 24 at the sides:
 - A click on an image zooms it 2.5 × at the pointer: the clicked point stays under the pointer.
   A click on zoomed media zooms out, unless the pointer moved 20 points or more (a drag).
 - Zoomed, dragging and scrolling pan it, until its edge meets the window's; along an axis where
-  it's smaller than the window it stays centred.
+  it's smaller than the window it stays centred. A mouse wheel pans 10 points a line.
 - Zoom In / Zoom Out zooms around the middle.
 - Moving to another item zooms out. Escape closes, zoomed or not.
 - The pointer is the zoom-in or zoom-out cursor over zoomable media (*the arrow before macOS 15,
@@ -72,13 +73,15 @@ bottom and 24 at the sides:
 
 - → ↓ Space: the next item; ← ↑: the previous; both wrap.
 - Escape and ⌘W close.
-- While it shows, the app's other shortcuts are off (Discord replaces them with the viewer's).
-  *⌘Q and ⌘H still work.*
+- While it shows, the app's other shortcuts are off (Discord replaces them with the viewer's):
+  ⌘, ⌃, ⌥ and Fn combinations go nowhere, and other keys don't beep. *⌘Q and ⌘H still work,
+  whatever the keyboard layout.* Menus chosen with the pointer still work.
 
 ## Videos and GIFVs
 
 - A video plays at once with sound, once, in the Mac's player (*AVKit's controls, not Discord's
-  bar*); its poster shows until it plays. Space and the arrows still move between items.
+  bar*); its poster shows until the first frame does. Space and the arrows still move between
+  items.
 - A GIFV plays muted and looping over its poster, zoomable as an image. *Only Discord's copy
   plays; without one the poster shows as an image.*
 - GIFs and GIFVs play while the viewer is the key window and the app is active.
@@ -98,8 +101,10 @@ bottom and 24 at the sides:
   toasts after a copy (Akari has none yet).*
 - In a media or forum channel's post whose channel hides download options, an attachment keeps
   only Zoom, and a video has no action bar; embeds keep theirs.
-- Clicks on the scrim or on the top bar's empty space close the viewer; clicks on the media,
-  the buttons, the arrows, the strip or a video don't.
+- Clicks on the scrim, the author or the top bar's empty space close the viewer; clicks on the
+  media, the buttons, the arrows, the strip or a video don't.
+- Open in Browser or a copy that hasn't finished when the viewer closes is dropped; a save the
+  user placed goes on, and says so on the window if it fails.
 
 ## The top bar
 
@@ -109,8 +114,9 @@ bottom and 24 at the sides:
 
 ## Motion, loading and preloading
 
-- It fades in over 0.2 s while the media grows from 0.9; closing fades it out. Moving between
-  items has no transition. With Reduce Motion, none of it.
+- It fades in over 0.2 s while the media grows from 0.9; closing fades it out, taking no click
+  or key meanwhile, and ends a sheet on it (the save panel, an alert). Moving between items has
+  no transition. With Reduce Motion, none of it.
 - Loading is as in the message list ([attachments.md](attachments.md)): the placeholder, the
   fade, the spinner after 2 s, "Image failed to load." with *Akari's symbol*; *a click on the
   failure retries (Discord retries on its own)*.
