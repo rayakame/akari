@@ -566,7 +566,11 @@ impl Store {
         self.read(|inner| inner.state.post_preview(post))
     }
 
+    // Read first, as `begin_older_threads`: cards ask on every scroll.
     pub(crate) fn want_post_previews(&self, forum: ChannelId, posts: &[ChannelId]) -> bool {
+        if !self.read(|inner| inner.state.wants_post_previews(posts)) {
+            return false;
+        }
         self.write("post previews", |inner, events| {
             inner.state.want_post_previews(forum, posts, events)
         })

@@ -1175,10 +1175,16 @@ impl Account {
             shared.store.subscribe(),
             scan_timing,
         ));
+        let weak = Arc::downgrade(&shared);
         runtime.spawn(previews::run_post_data(
             shared.store.clone(),
             shared.rest.clone(),
             shared.previews.clone(),
+            move || {
+                if let Some(shared) = weak.upgrade() {
+                    shared.failed(&RequestError::Unauthorized);
+                }
+            },
         ));
         Ok(Self { shared })
     }

@@ -490,14 +490,7 @@ impl State {
         let now = self.now_millis();
         let mut queued = false;
         for post in posts {
-            if self.post_preview(*post).is_some()
-                || self.previews.asked.contains(post)
-                || self
-                    .previews
-                    .retry
-                    .get(post)
-                    .is_some_and(|until| *until > now)
-            {
+            if !self.wants_post_preview(*post, now) {
                 continue;
             }
             self.previews.asked.insert(*post);
@@ -505,6 +498,21 @@ impl State {
             queued = true;
         }
         queued
+    }
+
+    pub(crate) fn wants_post_previews(&self, posts: &[ChannelId]) -> bool {
+        let now = self.now_millis();
+        posts.iter().any(|post| self.wants_post_preview(*post, now))
+    }
+
+    fn wants_post_preview(&self, post: ChannelId, now: i64) -> bool {
+        self.post_preview(post).is_none()
+            && !self.previews.asked.contains(&post)
+            && self
+                .previews
+                .retry
+                .get(&post)
+                .is_none_or(|until| *until <= now)
     }
 
     /// The next request: up to 10 posts of the first forum waiting.

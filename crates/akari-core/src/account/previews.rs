@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::Notify;
 
-use crate::rest::AccountRest;
+use crate::rest::{AccountRest, RequestError};
 use crate::state::Store;
 
 #[derive(Default)]
@@ -29,7 +29,12 @@ impl Wake {
 
 // Module 473503: one post-data request at a time for the whole account, a forum's posts 10 at a
 // time, in the order their cards asked.
-pub(crate) async fn run_post_data(store: Store, rest: Arc<AccountRest>, wake: Arc<Wake>) {
+pub(crate) async fn run_post_data(
+    store: Store,
+    rest: Arc<AccountRest>,
+    wake: Arc<Wake>,
+    unauthorized: impl Fn() + Send + 'static,
+) {
     loop {
         wake.notify.notified().await;
         if wake.closed() {
@@ -39,6 +44,9 @@ pub(crate) async fn run_post_data(store: Store, rest: Arc<AccountRest>, wake: Ar
             let answer = match rest.post_data(forum, &posts).await {
                 Ok(answer) => Some(answer),
                 Err(err) => {
+                    if matches!(err, RequestError::Unauthorized) {
+                        unauthorized();
+                    }
                     tracing::debug!(
                         target: "akari_core::load",
                         channel_id = forum.get(),

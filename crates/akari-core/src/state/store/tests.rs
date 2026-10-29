@@ -2251,3 +2251,25 @@ fn a_ready_before_the_restore_keeps_the_cached_agreements() {
         )]
     );
 }
+
+// Cards ask on every scroll: a post that's asked or waits out its retry takes no write, which
+// would make the cache flusher snapshot for nothing.
+#[test]
+fn asking_for_post_previews_again_writes_nothing() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let forum = Snowflake::new(300_000_000_000_000_050);
+    let posts = [
+        Snowflake::new(300_000_000_000_000_100),
+        Snowflake::new(300_000_000_000_000_101),
+    ];
+    assert!(store.want_post_previews(forum, &posts));
+    let asked = store.changes();
+    assert!(!store.want_post_previews(forum, &posts));
+    assert_eq!(store.changes(), asked, "asked");
+
+    let (_, batch) = store.next_post_batch().unwrap();
+    store.finish_post_batch(forum, &batch, None);
+    let failed = store.changes();
+    assert!(!store.want_post_previews(forum, &posts));
+    assert_eq!(store.changes(), failed, "waiting out the retry");
+}

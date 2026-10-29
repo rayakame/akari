@@ -393,3 +393,24 @@ async fn the_post_data_worker_ends_with_the_account() {
     }
     panic!("the worker still runs");
 }
+
+// A 401 on post-data means the token is gone, as on every other request.
+#[tokio::test]
+async fn a_401_on_post_data_closes_the_account() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v9/channels/300000000000000050/post-data"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+
+    account.request_post_previews(forum(), &[Snowflake::new(300_000_000_000_000_100)]);
+
+    assert_eq!(connection.client_close_code().await, Some(1000));
+    events_until(&subscription, "Closed(AuthenticationFailed)").await;
+}
