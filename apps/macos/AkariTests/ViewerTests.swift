@@ -333,7 +333,7 @@ final class ViewerTests {
     @Test
     func closingLetsEverythingGo() async throws {
         let video = item(4, "clip.mp4", kind: .video)
-        account.links.withLock { $0[video.key] = "https://cdn.discordapp.com/attachments/10/4/clip.mp4" }
+        account.links.withLock { $0[video.key] = "file:///dev/null" }
         _ = try open([video, item(2), item(3)])
         let view = try view()
         try await eventually { self.cache.inflightCount > 0 && view.stage.playerView != nil }
@@ -608,7 +608,7 @@ final class ViewerTests {
     @Test
     func aVideoPlaysItsOriginalOnce() async throws {
         let video = item(2, "clip.mp4", kind: .video, width: 1280, height: 720)
-        let url = "https://cdn.discordapp.com/attachments/10/2/clip.mp4"
+        let url = "file:///dev/null"
         account.links.withLock { $0[video.key] = url }
         _ = try open([video, item(1)])
         let view = try view()
