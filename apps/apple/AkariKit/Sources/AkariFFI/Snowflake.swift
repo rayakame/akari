@@ -26,6 +26,7 @@ public enum AttachmentMarker {}
 public enum EmojiMarker {}
 public enum StickerMarker {}
 public enum StickerPackMarker {}
+public enum TagMarker {}
 
 public typealias UserId = Snowflake<UserMarker>
 public typealias GuildId = Snowflake<GuildMarker>
@@ -36,3 +37,4 @@ public typealias AttachmentId = Snowflake<AttachmentMarker>
 public typealias EmojiId = Snowflake<EmojiMarker>
 public typealias StickerId = Snowflake<StickerMarker>
 public typealias StickerPackId = Snowflake<StickerPackMarker>
+public typealias TagId = Snowflake<TagMarker>

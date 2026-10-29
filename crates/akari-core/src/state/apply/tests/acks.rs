@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{Ack, AckBody, Badge, LoadKind, ReadState};
+use crate::state::{Ack, AckBody, Badge, LoadKind, PostCount, ReadState};
 
 const FORUM: u64 = 300_000_000_000_000_030;
 const MEDIA: u64 = 300_000_000_000_000_032;
@@ -116,7 +116,8 @@ fn reading_an_unread_channel_acks_it_locally() {
         badge(&state, GENERAL),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
 
@@ -499,9 +500,13 @@ fn forums_and_media_channels_are_acked_at_now() {
         channel_of(16, MEDIA, AFTER_JOIN + 2),
     );
 
+    let before = MessageId::from_unix_millis(crate::state::apply::wall_millis(), 0).get();
+
     assert_eq!(mark_read(&mut state, FORUM), at_now(FORUM, AFTER_JOIN + 1));
     assert_eq!(mark_read(&mut state, MEDIA), at_now(MEDIA, AFTER_JOIN + 2));
-    assert_eq!(read_state(&state, FORUM), Some((Some(AFTER_JOIN + 1), 0)));
+    let (acked, mentions) = read_state(&state, FORUM).expect("a read state");
+    assert!(acked >= Some(before), "locally at now: {acked:?}");
+    assert_eq!(mentions, 0);
 }
 
 // Never past the rows the list shows, and never at "now", even with a stale cursor.
@@ -970,7 +975,8 @@ fn a_refused_ack_restores_the_channel() {
         badge(&state, GENERAL),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
     assert!(

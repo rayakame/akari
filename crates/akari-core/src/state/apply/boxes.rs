@@ -228,7 +228,7 @@ impl State {
     }
 }
 
-fn known_user(user: model::User, users: &HashMap<UserId, Arc<User>>) -> Arc<User> {
+pub(super) fn known_user(user: model::User, users: &HashMap<UserId, Arc<User>>) -> Arc<User> {
     let user = User::from_wire(user);
     match users.get(&user.id) {
         Some(known) if **known == user => known.clone(),

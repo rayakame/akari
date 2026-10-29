@@ -657,7 +657,7 @@ private struct Builder {
 
     private func target(_ link: TextLink, index: UInt16) -> URL? {
         if let channel = link.channel, case .known = channel.name,
-            channel.kind?.opensMessageList ?? true
+            channel.kind?.opensPage ?? true
         {
             return URL(string: "akari://channel/\(channel.channelId.rawValue)")
         }
@@ -666,7 +666,7 @@ private struct Builder {
 
     private func embedTarget(_ link: TextLink) -> URL? {
         if let channel = link.channel, case .known = channel.name,
-            channel.kind?.opensMessageList ?? true
+            channel.kind?.opensPage ?? true
         {
             return URL(string: "akari://channel/\(channel.channelId.rawValue)")
         }
@@ -716,7 +716,7 @@ private struct Builder {
         var attributes = attributes
         attributes[.font] = style.face.font(bold: span.bold, italic: span.italic, medium: true)
         attributes[.foregroundColor] = Palette.mentionText
-        if kind?.opensMessageList ?? true {
+        if kind?.opensPage ?? true {
             attributes[.link] = URL(string: "akari://channel/\(id.rawValue)")
             attributes[.toolTip] = nil
         } else {

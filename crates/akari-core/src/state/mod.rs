@@ -18,8 +18,8 @@ mod threads;
 mod types;
 mod windows;
 
-pub(crate) use apply::{Learned, OLDER_PAGE, OlderPage, wall_millis};
-pub use badges::Badge;
+pub(crate) use apply::{Learned, OLDER_PAGE, OlderPage, PageKey, wall_millis};
+pub use badges::{Badge, PostCount};
 pub use embeds::{
     EmbedKind, EmbedMediaRef, EmbedTextRules, ShownEmbed, ShownVideo, embed_text_rules,
 };

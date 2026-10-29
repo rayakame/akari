@@ -89,6 +89,12 @@ fn describe(event: &StoreEvent) -> String {
             thread_id,
             ..
         } => format!("ThreadActivity({}, {})", parent_id.get(), thread_id.get()),
+        StoreEvent::ForumPostsChanged { forum_id } => {
+            format!("ForumPostsChanged({})", forum_id.get())
+        }
+        StoreEvent::PostPreviewChanged { post_id } => {
+            format!("PostPreviewChanged({})", post_id.get())
+        }
         StoreEvent::OlderThreadsChanged { parent_id } => {
             format!("OlderThreadsChanged({})", parent_id.get())
         }
@@ -1109,6 +1115,7 @@ mod acks;
 mod badges;
 mod embeds;
 mod expressions;
+mod forum;
 mod media;
 mod read_states;
 mod thread_boxes;

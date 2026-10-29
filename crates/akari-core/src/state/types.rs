@@ -6,7 +6,7 @@ use crate::media::ImageKey;
 use crate::model::{
     AttachmentId, ChannelId, ChannelType, EmojiId, GenericMarker, GuildId, MessageId,
     MessageReferenceType, MessageType, OverwriteType, Permissions, PremiumType, RoleId, Snowflake,
-    StickerFormatType, StickerId, Timestamp, UserId, WebhookId,
+    StickerFormatType, StickerId, TagId, Timestamp, UserId, WebhookId,
 };
 
 /// The logged-in user.
@@ -220,11 +220,134 @@ pub struct Channel {
     pub owner_id: Option<UserId>,
     /// Set for threads.
     pub thread: Option<Box<ThreadInfo>>,
+    /// Set for forum and media channels.
+    pub forum: Option<Box<ForumSettings>>,
     pub flags: u64,
     /// A DM from someone the user hasn't accepted yet. The official client lists neither
     /// these nor `spam` DMs.
     pub message_request: bool,
     pub spam: bool,
+}
+
+/// How the forum's page shows its posts: the user's choice, the channel's defaults until then.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct ForumView {
+    pub sort: ForumSort,
+    /// Only posts with these tags; none for every post.
+    pub tags: Box<[TagId]>,
+    pub matching: TagMatching,
+}
+
+impl ForumView {
+    pub fn new(sort: ForumSort, tags: Box<[TagId]>, matching: TagMatching) -> Self {
+        Self {
+            sort,
+            tags,
+            matching,
+        }
+    }
+}
+
+/// A forum's page: see [`Store::forum_posts`](super::Store::forum_posts).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct ForumPosts {
+    /// Active posts, pinned first, then by the view's sort. While the forum is open, who's listed
+    /// and in what order changes only when the list refreshes, a post is deleted or pinned.
+    pub active: Vec<Arc<Channel>>,
+    /// Archived posts down to the oldest the loaded pages brought, by the view's sort.
+    pub archived: Vec<Arc<Channel>>,
+    pub older: OlderThreads,
+    /// Others' posts created since the list last refreshed.
+    pub new_posts: u32,
+}
+
+/// A forum post's first message, for its card: see [`Store::post_preview`](super::Store::post_preview).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PostPreview {
+    Loaded(Arc<Message>),
+    /// Discord says the first message is gone.
+    Deleted,
+}
+
+/// What a forum or media channel sets for its posts.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct ForumSettings {
+    pub tags: Box<[ForumTag]>,
+    /// The reaction a post's card offers before it has any.
+    pub default_reaction: Option<TagEmoji>,
+    /// The post list's order until the user picks another.
+    pub sort: ForumSort,
+    /// The post list's view until the user picks another.
+    pub layout: ForumLayout,
+    /// How a filter of several tags matches until the user picks another.
+    pub tag_matching: TagMatching,
+    /// Slowmode in seconds for the messages of a new post.
+    pub post_slowmode: u32,
+    /// What a new post's message starts with.
+    pub template: Option<Box<str>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ForumTag {
+    pub id: TagId,
+    pub name: Box<str>,
+    /// Only members who can manage threads apply it.
+    pub moderated: bool,
+    pub emoji: Option<TagEmoji>,
+}
+
+/// A tag's or a default reaction's emoji.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TagEmoji {
+    Custom(EmojiId),
+    Unicode(Box<str>),
+}
+
+impl TagEmoji {
+    /// A custom emoji's image, still: Discord's pills don't animate.
+    pub fn image_key(&self) -> Option<ImageKey> {
+        match self {
+            Self::Custom(id) => Some(ImageKey::Emoji {
+                id: *id,
+                animated: false,
+            }),
+            Self::Unicode(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ForumSort {
+    /// The newest message first.
+    #[default]
+    LatestActivity,
+    /// The newest post first.
+    CreationDate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ForumLayout {
+    #[default]
+    List,
+    Gallery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum TagMatching {
+    /// A post with any of the tags.
+    #[default]
+    Some,
+    /// A post with all of them.
+    All,
 }
 
 /// Which threads the user may create in a channel, see `Store::thread_creation`.
@@ -254,7 +377,7 @@ impl Channel {
     /// posts, which have none, and for channels that aren't threads.
     pub fn window_end(&self) -> Option<Timestamp> {
         let info = self.thread.as_deref()?;
-        if self.flags & PINNED != 0 {
+        if self.is_pinned() {
             return None;
         }
         let newest = self.last_message_id.map_or(0, Snowflake::unix_millis);
@@ -271,6 +394,16 @@ impl Channel {
             self.kind,
             ChannelType::NewsThread | ChannelType::PublicThread | ChannelType::PrivateThread
         )
+    }
+
+    /// A forum post pinned to the top of its forum.
+    pub fn is_pinned(&self) -> bool {
+        self.flags & PINNED != 0
+    }
+
+    /// Forum and media channels, whose page lists their posts.
+    pub fn is_forum(&self) -> bool {
+        matches!(self.kind, ChannelType::GuildForum | ChannelType::GuildMedia)
     }
 }
 
@@ -299,6 +432,10 @@ pub struct ThreadInfo {
     pub member_count: Option<u32>,
     /// Some of its members, as Discord picks them; not kept in the disk cache.
     pub member_ids_preview: Box<[UserId]>,
+    /// A forum post's tags.
+    pub applied_tags: Box<[TagId]>,
+    /// Every message ever sent in it, deleted ones included.
+    pub total_message_sent: Option<u32>,
 }
 
 impl ThreadInfo {
@@ -323,9 +460,10 @@ pub struct ThreadBrowser {
 }
 
 /// Where loading a channel's archived threads stands in this connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum OlderThreads {
+    #[default]
     NotLoaded,
     Loading,
     /// Discord has more after the loaded pages.
@@ -1025,6 +1163,7 @@ mod tests {
             icon: Some(hash.clone()),
             owner_id: None,
             thread: None,
+            forum: None,
             flags: 0,
             message_request: false,
             spam: false,

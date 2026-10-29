@@ -5,8 +5,9 @@ use super::apply::Entities;
 use super::events::StoreEvent;
 use super::read_states::ReadState;
 use super::settings::{NotificationLevel, Unreads};
+use super::threads::ThreadIndex;
 use super::types::Channel;
-use crate::model::{ChannelId, ChannelType, GuildId, Permissions, Timestamp};
+use crate::model::{ChannelId, ChannelType, GuildId, MessageId, Permissions, Timestamp};
 
 const USE_NEW_NOTIFICATIONS: u64 = 1 << 4;
 const WEEK_MILLIS: i64 = 7 * 24 * 60 * 60 * 1000;
@@ -20,6 +21,21 @@ pub struct Badge {
     pub unread: bool,
     /// The red count, shown also when muted.
     pub mentions: u32,
+    /// A forum's or media channel's count beside its name.
+    pub posts: PostCount,
+}
+
+/// What a forum's row counts beside its name, as the official client (G-8); nothing while muted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PostCount {
+    #[default]
+    None,
+    /// "N New", in the brand color: posts newer than the forum's ack that the user neither
+    /// joined nor opened, when its unread setting is All Messages.
+    New(u32),
+    /// Posts with activity after the forum's ack that are unread, in the muted color.
+    Unread(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +96,7 @@ impl Sum {
         Badge {
             unread: !self.muted && self.dots > 0,
             mentions: self.mentions,
+            posts: PostCount::None,
         }
     }
 }
@@ -124,7 +141,7 @@ pub(crate) struct Badges {
 }
 
 impl Badges {
-    pub(crate) fn build(entities: &Entities, now_millis: i64) -> Self {
+    pub(crate) fn build(entities: &Entities, threads: &ThreadIndex, now_millis: i64) -> Self {
         #[cfg(test)]
         hooks::built();
         let now = Timestamp::from_unix_millis(now_millis);
@@ -141,7 +158,7 @@ impl Badges {
             badges.set_muted(*guild, guild_muted(entities, *guild, now));
         }
         for channel in entities.channels.values() {
-            if let Some(slot) = compute(entities, channel, now_millis) {
+            if let Some(slot) = compute(entities, threads, channel, now_millis) {
                 badges.add(channel.id, slot);
             }
         }
@@ -258,12 +275,13 @@ impl Badges {
     pub(crate) fn update(
         &mut self,
         entities: &Entities,
+        threads: &ThreadIndex,
         dirty: Dirty,
         now_millis: i64,
         events: &mut Vec<StoreEvent>,
     ) {
         if dirty.all {
-            let next = Self::build(entities, now_millis);
+            let next = Self::build(entities, threads, now_millis);
             self.diff(&next, events);
             *self = next;
             return;
@@ -295,12 +313,30 @@ impl Badges {
                     .map(|(id, _)| *id),
             );
         }
+        // A post's change moves its forum's count.
+        let forums: Vec<ChannelId> = channels
+            .iter()
+            .filter_map(|channel| {
+                let parent = entities.channels.get(channel)?.parent_id?;
+                entities
+                    .channels
+                    .get(&parent)
+                    .filter(|parent| {
+                        matches!(
+                            parent.kind,
+                            ChannelType::GuildForum | ChannelType::GuildMedia
+                        )
+                    })
+                    .map(|parent| parent.id)
+            })
+            .collect();
+        channels.extend(forums);
         for channel in channels {
             let old = self.channels.remove(&channel);
             let new = entities
                 .channels
                 .get(&channel)
-                .and_then(|stored| compute(entities, stored, now_millis));
+                .and_then(|stored| compute(entities, threads, stored, now_millis));
             for slot in old.iter().chain(&new) {
                 if let Some(guild) = slot.guild {
                     before.entry(guild).or_insert_with(|| self.guild(guild));
@@ -423,7 +459,12 @@ fn guild_muted(entities: &Entities, guild: GuildId, now: Timestamp) -> bool {
 }
 
 // `None` for channels that never show a badge: categories, directories and the like.
-fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Slot> {
+fn compute(
+    entities: &Entities,
+    threads: &ThreadIndex,
+    channel: &Channel,
+    now_millis: i64,
+) -> Option<Slot> {
     let kind = Kind::of(channel)?;
     let now = Timestamp::from_unix_millis(now_millis);
     let read_state = entities.read_states.get(channel.id);
@@ -434,6 +475,7 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
             badge: Badge {
                 unread: !muted && entities.unread(channel),
                 mentions,
+                posts: PostCount::None,
             },
             read_state,
             guild: None,
@@ -494,8 +536,17 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
     // The guild counts the threads its list shows, whatever their parent's mute.
     let counted = !hidden && (kind != Kind::Thread || listed);
     let parent_muted = kind != Kind::Thread && under_muted_parent(entities, channel, now);
+    let posts = if muted {
+        PostCount::None
+    } else {
+        post_count(entities, threads, channel, shows_unreads(entities, channel))
+    };
     Some(Slot {
-        badge: Badge { unread, mentions },
+        badge: Badge {
+            unread,
+            mentions,
+            posts,
+        },
         read_state,
         guild: Some(guild),
         dot: counted && unread && !parent_muted,
@@ -514,6 +565,60 @@ fn compute(entities: &Entities, channel: &Channel, now_millis: i64) -> Option<Sl
             .filter(|member| member.muted)
             .and_then(|member| member.mute_ends),
     })
+}
+
+// Module 863005: new posts are active, unjoined, newer than the forum's ack (or the user's join
+// to the guild) and never opened; the muted count is unread active posts with activity after it.
+fn post_count(
+    entities: &Entities,
+    threads: &ThreadIndex,
+    forum: &Channel,
+    all_messages: bool,
+) -> PostCount {
+    if !matches!(
+        forum.kind,
+        ChannelType::GuildForum | ChannelType::GuildMedia
+    ) {
+        return PostCount::None;
+    }
+    let ack = entities
+        .read_states
+        .get(forum.id)
+        .and_then(|state| state.acked)
+        .or_else(|| {
+            let joined = entities.members.get(&forum.guild_id?)?.joined_at?;
+            Some(MessageId::from_unix_millis(joined.unix_millis(), 0))
+        })
+        .map_or(0, MessageId::get);
+    let (mut new, mut unread) = (0, 0);
+    for post in threads
+        .of(forum.id)
+        .filter_map(|id| entities.channels.get(&id))
+    {
+        let Some(info) = post.thread.as_deref() else {
+            continue;
+        };
+        if info.archived {
+            continue;
+        }
+        let opened = entities
+            .read_states
+            .get(post.id)
+            .is_some_and(|state| !state.estimated);
+        if post.id.get() > ack && !info.joined() && !opened {
+            new += 1;
+        }
+        if post.last_message_id.is_some_and(|last| last.get() > ack) && entities.unread(post) {
+            unread += 1;
+        }
+    }
+    if all_messages && new > 0 {
+        PostCount::New(new)
+    } else if unread > 0 {
+        PostCount::Unread(unread)
+    } else {
+        PostCount::None
+    }
 }
 
 fn opt_in_enabled(entities: &Entities, guild: GuildId) -> bool {

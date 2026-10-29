@@ -8,9 +8,10 @@ use crate::embeds;
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
-    AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings, Guild,
-    GuildBadge, GuildSettings, Message, MessageWindow, Nitro, ReadState, ServerListItem, Slowmode,
-    StarterMessage, ThreadBrowser, ThreadCreation, User,
+    AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings,
+    ForumPosts, ForumView, Guild, GuildBadge, GuildSettings, Message, MessageWindow, Nitro,
+    PostPreview, ReadState, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
+    ThreadCreation, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -214,6 +215,28 @@ impl Store {
     /// again.
     pub fn thread_browser(&self, parent_id: ChannelId) -> ThreadBrowser {
         self.core.thread_browser(parent_id).into()
+    }
+
+    /// A forum's page for `view`: its active posts (frozen while it's the open forum, see
+    /// `Account::open_forum`), its archived posts down to the loaded pages for the view's tags,
+    /// the count of others' new posts. `ForumPostsChanged` says to read it again, as does
+    /// `ChannelUpdated` for its posts.
+    pub fn forum_posts(&self, forum_id: ChannelId, view: ForumView) -> ForumPosts {
+        self.core.forum_posts(forum_id, &(&view).into()).into()
+    }
+
+    /// A forum post's first message for its card; `None` until Akari has it
+    /// (`Account::request_post_previews`). `PostPreviewChanged` says to read it again.
+    pub fn post_preview(&self, post_id: ChannelId) -> Option<PostPreview> {
+        Some(match self.core.post_preview(post_id)? {
+            state::PostPreview::Loaded(message) => {
+                let names = Names::new(&self.core, message.channel_id);
+                PostPreview::Loaded {
+                    message: self.message(&message, &names, &mut 0),
+                }
+            }
+            _ => PostPreview::Deleted,
+        })
     }
 
     /// DMs and group DMs, the latest conversation first.

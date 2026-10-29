@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tokio::sync::{Mutex, Notify, mpsc};
 
-use super::apply::{Derived, Entities, Learned, OlderPage, ReadyDiff, State};
+use super::apply::{Derived, Entities, Learned, OlderPage, PageKey, ReadyDiff, State};
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
 use super::embeds::ShownEmbed;
@@ -15,9 +15,10 @@ use super::order;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
+use super::threads::ThreadIndex;
 use super::types::{
-    Channel, CurrentUser, Guild, Member, Message, StarterMessage, ThreadBrowser, ThreadCreation,
-    User,
+    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostPreview,
+    StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
@@ -351,7 +352,7 @@ impl Store {
         let Some(next) = self.read(|inner| inner.state.with_notification_flags(flags)) else {
             return;
         };
-        let badges = Badges::build(&next, self.now_millis());
+        let badges = Badges::build(&next, &ThreadIndex::build(&next), self.now_millis());
         drop(next);
         self.write("NOTIFICATION_SETTINGS_UPDATE", |inner, events| {
             let current = self.shared.changes.load(Ordering::SeqCst) == start;
@@ -554,6 +555,85 @@ impl Store {
 
     pub(crate) fn set_browsing(&self, parent: Option<ChannelId>) {
         self.write("browsing", |inner, _| inner.state.set_browsing(parent));
+    }
+
+    /// A forum post's first message for its card: from post-data, a search, its own messages or
+    /// its window; `None` until one of them has it ([`Account::request_post_previews`]).
+    /// `PostPreviewChanged` says to read it again.
+    ///
+    /// [`Account::request_post_previews`]: crate::Account::request_post_previews
+    pub fn post_preview(&self, post: ChannelId) -> Option<PostPreview> {
+        self.read(|inner| inner.state.post_preview(post))
+    }
+
+    // Read first, as `begin_older_threads`: cards ask on every scroll.
+    pub(crate) fn want_post_previews(&self, forum: ChannelId, posts: &[ChannelId]) -> bool {
+        if !self.read(|inner| inner.state.wants_post_previews(posts)) {
+            return false;
+        }
+        self.write("post previews", |inner, events| {
+            inner.state.want_post_previews(forum, posts, events)
+        })
+    }
+
+    pub(crate) fn next_post_batch(&self) -> Option<(ChannelId, Vec<ChannelId>)> {
+        self.write("post previews", |inner, _| inner.state.next_post_batch())
+    }
+
+    pub(crate) fn finish_post_batch(
+        &self,
+        forum: ChannelId,
+        asked: &[ChannelId],
+        answer: Option<model::PostData>,
+    ) {
+        self.write("post previews", |inner, events| {
+            inner.state.finish_post_batch(forum, asked, answer, events);
+        });
+    }
+
+    pub(crate) fn open_forum(&self, forum: Option<ChannelId>) -> Vec<ChannelId> {
+        self.write("forum", |inner, events| {
+            inner.state.open_forum(forum, events)
+        })
+    }
+
+    pub(crate) fn refresh_forum(&self, forum: ChannelId) {
+        self.write("forum", |inner, events| {
+            inner.state.refresh_forum(forum, events)
+        });
+    }
+
+    // Read first, as `begin_older_threads`.
+    pub(crate) fn begin_older_posts(&self, key: &PageKey) -> Option<OlderPage> {
+        if !self.read(|inner| inner.state.can_load_older_posts(key)) {
+            return None;
+        }
+        self.write("older posts", |inner, events| {
+            inner.state.begin_older_posts(key.clone(), events)
+        })
+    }
+
+    pub(crate) fn finish_older_posts(
+        &self,
+        key: &PageKey,
+        page: OlderPage,
+        results: model::ThreadSearchResults,
+    ) {
+        self.write("older posts", |inner, events| {
+            inner.state.finish_older_posts(key, page, results, events);
+        });
+    }
+
+    pub(crate) fn fail_older_posts(&self, key: &PageKey, page: OlderPage) {
+        self.write("older posts", |inner, events| {
+            inner.state.fail_older_posts(key, page, events);
+        });
+    }
+
+    pub(crate) fn abandon_older_posts(&self, key: &PageKey, page: OlderPage) {
+        self.write("older posts", |inner, events| {
+            inner.state.abandon_older_posts(key, page, events);
+        });
     }
 
     pub(crate) fn learn_thread(&self, thread: model::Channel) -> Learned {
@@ -1051,6 +1131,17 @@ impl Store {
     /// [`Account::load_older_threads`]: crate::Account::load_older_threads
     pub fn thread_browser(&self, parent: ChannelId) -> ThreadBrowser {
         self.read(|inner| inner.state.thread_browser(parent))
+    }
+
+    /// A forum's page for `view`: its active posts (frozen while it's the open forum, see
+    /// [`Account::open_forum`]), its archived posts down to the loaded pages for the view's tags
+    /// ([`Account::load_older_posts`]) and the count of others' new posts. `ForumPostsChanged`
+    /// says to read it again, as do `ChannelUpdated` for its posts.
+    ///
+    /// [`Account::open_forum`]: crate::Account::open_forum
+    /// [`Account::load_older_posts`]: crate::Account::load_older_posts
+    pub fn forum_posts(&self, forum: ChannelId, view: &ForumView) -> ForumPosts {
+        self.read(|inner| inner.state.forum_posts(forum, view))
     }
 
     /// DMs and group DMs, in no particular order.

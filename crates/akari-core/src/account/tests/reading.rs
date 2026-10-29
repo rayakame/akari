@@ -3,7 +3,7 @@ use wiremock::{Mock, MockServer, Request as Received, Respond, ResponseTemplate}
 
 use super::*;
 use crate::account::acks::{AckTarget, Handed, Pace};
-use crate::state::Badge;
+use crate::state::{Badge, PostCount};
 
 const ACK_ROUTE: &str = r"^/api/v9/channels/\d+/messages/\d+/ack$";
 const BULK: &str = "/api/v9/read-states/ack-bulk";
@@ -1086,14 +1086,16 @@ async fn a_refused_bulk_entry_shows_its_channel_unread_again() {
         badge(&online.account, GENERAL),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
     assert_eq!(
         online.account.store().guild_badge(g1()),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
 }

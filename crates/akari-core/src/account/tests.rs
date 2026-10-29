@@ -4197,6 +4197,7 @@ mod preparer {
 }
 
 mod expressions;
+mod forum_posts;
 mod images;
 mod reading;
 mod scans;

@@ -38,7 +38,8 @@ struct ChannelHeader: View {
                     .font(TypeScale.channelHeader.font)
                     .foregroundStyle(Color(nsColor: Palette.textStrong))
                     .lineLimit(1)
-                if let topic = channel.topic, !topic.isEmpty {
+                // A forum's topic is its guidelines, on its page.
+                if !channel.opensForum, let topic = channel.topic, !topic.isEmpty {
                     Rectangle()
                         .fill(Color(nsColor: Palette.borderSubtle))
                         .frame(width: 1, height: 24)

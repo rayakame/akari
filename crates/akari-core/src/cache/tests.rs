@@ -15,10 +15,11 @@ use crate::state::apply::Entities;
 use crate::state::{
     Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
-    ExplicitContentSettings, FolderEntry, Guild, GuildSettings, ImageHash, Member, Message,
-    MessageReference, NotificationLevel, PermissionOverwrite, Redaction, ReferencedMessage, Role,
-    RoleSubscription, SpoilerSetting, Sticker, StickerAnimation, SystemData, ThreadInfo,
-    ThreadMembership, Unreads, User, UserSettings,
+    ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings, ForumSort, ForumTag, Guild,
+    GuildSettings, ImageHash, Member, Message, MessageReference, NotificationLevel,
+    PermissionOverwrite, Redaction, ReferencedMessage, Role, RoleSubscription, SpoilerSetting,
+    Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership,
+    Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -171,6 +172,7 @@ pub(crate) fn channel(id: u64, guild: Option<u64>, name: &str) -> Channel {
         icon: None,
         owner_id: None,
         thread: None,
+        forum: None,
         flags: 0,
         message_request: guild.is_none(),
         spam: false,
@@ -192,9 +194,57 @@ pub(crate) fn thread(id: u64, guild: u64, parent: u64) -> Channel {
             message_count: Some(12),
             member_count: Some(3),
             member_ids_preview: Box::default(),
+            applied_tags: Box::default(),
+            total_message_sent: None,
         })),
         ..channel(id, Some(guild), "a thread")
     }
+}
+
+// Every forum setting set, none at its default.
+pub(crate) fn forum(id: u64, guild: u64) -> Channel {
+    Channel {
+        kind: ChannelType::GuildForum,
+        forum: Some(Box::new(ForumSettings {
+            tags: [
+                ForumTag {
+                    id: Snowflake::new(500),
+                    name: "Bug".into(),
+                    moderated: true,
+                    emoji: Some(TagEmoji::Custom(Snowflake::new(600))),
+                },
+                ForumTag {
+                    id: Snowflake::new(501),
+                    name: "Idea".into(),
+                    moderated: false,
+                    emoji: Some(TagEmoji::Unicode("💡".into())),
+                },
+                ForumTag {
+                    id: Snowflake::new(502),
+                    name: "Plain".into(),
+                    moderated: false,
+                    emoji: None,
+                },
+            ]
+            .into(),
+            default_reaction: Some(TagEmoji::Unicode("👍".into())),
+            sort: ForumSort::CreationDate,
+            layout: ForumLayout::Gallery,
+            tag_matching: TagMatching::All,
+            post_slowmode: 30,
+            template: Some("Steps:".into()),
+        })),
+        ..channel(id, Some(guild), "a forum")
+    }
+}
+
+pub(crate) fn post(id: u64, guild: u64, forum: u64) -> Channel {
+    let mut post = thread(id, guild, forum);
+    if let Some(info) = post.thread.as_deref_mut() {
+        info.applied_tags = [Snowflake::new(500), Snowflake::new(502)].into();
+        info.total_message_sent = Some(14);
+    }
+    post
 }
 
 pub(crate) fn entities() -> Entities {
@@ -211,6 +261,8 @@ pub(crate) fn entities() -> Entities {
             channel(11, Some(200), "random"),
             thread(12, 100, 10),
             channel(13, None, ""),
+            forum(15, 100),
+            post(16, 100, 15),
         ]
         .map(|channel| (channel.id, Arc::new(channel)))
         .into(),

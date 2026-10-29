@@ -195,6 +195,7 @@ mod tests {
             icon: None,
             owner_id: None,
             thread: None,
+            forum: None,
             flags: 0,
             message_request: false,
             spam: false,
@@ -216,7 +217,10 @@ mod tests {
                 message_count: None,
                 member_count: None,
                 member_ids_preview: Box::default(),
+                applied_tags: Box::default(),
+                total_message_sent: None,
             })),
+            forum: None,
             ..channel(Vec::new())
         }
     }

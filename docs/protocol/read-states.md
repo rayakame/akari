@@ -201,7 +201,7 @@ one past it (above).
 Escape, the menus and Shift+Escape ack each channel's newest message, as the official client
 sends. A "now" snowflake (a timestamp, the low 22 bits zero) goes instead for:
 
-- forum and media channels, as observed;
+- forum and media channels, as observed ([Forums](#forums));
 - channels whose newest message came from a PASSIVE_UPDATE_V2 or CHANNEL_UNREAD_UPDATE, which
   arrive once and may be behind Discord's (see [Large guilds](#large-guilds)). A READY, a
   history page that reaches the present, or a MESSAGE_CREATE that moves the newest message
@@ -380,6 +380,34 @@ Observed in the official web client on 2026-10-17, with the second account and a
   `{"token":null,"last_viewed":4308,"flags":2}`. Opening an unjoined thread with new messages
   acked `{"token":null,"flags":2}`, without `last_viewed`. Opening the parent also acked its
   "started a thread" message, like any message.
+
+## Forums
+
+A forum or media channel's read state is the forum's own ack, whose cursor the official client
+moves to a snowflake of "now", never a post's message. Read from its code (canary 653948,
+modules 573163, 435470, 863005, 543465); the sequence on the wire is **unverified**.
+
+- **Reading the page.** While the forum's page shows, the official client acks the forum at
+  "now" whenever an active post has unread activity past the forum's ack, or the list refreshed
+  since the last forum ack (ACK_FORUM_ACTIVE_THREADS). Akari's reading signal names the forum
+  like a channel (`Account::set_reading`): the forum is acked at "now" when it is read and a post
+  is newer than its ack or an active post has unread activity past it, and again as such posts
+  come while it stays read, paced as reading. It isn't acked after a refresh with nothing new.
+- **The local ack.** Discord gets its clock's "now", never below the forum's newest post or an
+  active post's newest message; the store moves the forum's ack to the later of that and the
+  Mac's "now", so the row's counts clear at once and nothing it covers asks again. Escape and the
+  menus ack a forum by the same rule (a new post, or a post's unread activity), the bulk every
+  viewable forum. A Mac running ahead of Discord covers what comes within the difference until the
+  next READY brings Discord's ack.
+- **Not sent:** the official client's second ack, at the forum's newest post, after the user
+  opens posts ("ACK_FORUM_CHANNEL_NO_UNREAD_POSTS"), which moves the ack back from "now"; with the
+  forum acked at "now" while shown it would add nothing (O4 to observe).
+- **The row** (`Badge.posts`): when its unread setting resolves to All Messages (as the dot's),
+  `New(n)` counts active posts the user neither joined nor opened (no read state of their own)
+  newer than the forum's ack, or than the guild join without one; else `Unread(n)` counts
+  active posts with activity after the forum's ack that are unread; nothing while muted. A post's
+  change recomputes its forum's badge. Discord's selected forum keeps its "N New" until the user
+  leaves, counting from the ack when it was selected; Akari's follows the current ack.
 
 ## The disk cache
 

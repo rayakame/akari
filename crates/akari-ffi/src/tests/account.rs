@@ -81,6 +81,7 @@ async fn store_reads_convert_after_ready() {
             recipient_ids: Vec::new(),
             icon: None,
             thread: None,
+            forum: None,
         })
     );
     let me = store.current_user().unwrap();
