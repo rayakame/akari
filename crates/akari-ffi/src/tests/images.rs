@@ -326,7 +326,22 @@ async fn releasing_a_pending_image_nobody_waits_for_cancels_it() {
     arrived(&online).await;
 
     drop(pending);
-    let next = online.account.request_image(avatar()).result().await;
+    // The abort lands at the task's next poll on Akari's runtime: a request before that joins
+    // the slow download, so it gives up and asks again.
+    let next = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let next = online.account.request_image(avatar());
+            if let Ok(answer) =
+                tokio::time::timeout(Duration::from_millis(500), next.result()).await
+            {
+                return answer;
+            }
+            next.cancel();
+            let _ = next.result().await;
+        }
+    })
+    .await
+    .expect("the released request kept its download");
 
     assert!(next.is_ok(), "{next:?}");
     assert_eq!(online.downloads().await, 2);

@@ -138,6 +138,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private weak var hoveredFileName: FileNameButton?
     /// An ALT button's description, open beside it.
     private(set) var altText: NSPopover?
+    let viewer = MediaViewer()
     // The media of the rows a screen above and below what shows, asked before it scrolls in.
     private(set) var prefetching: [ImageSpec: Task<Void, Never>] = [:]
     private var prefetchFailed: Set<ImageSpec> = []
@@ -1082,10 +1083,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onExpression = { [weak self] target, rect in self?.openExpression(target, at: rect) }
             cell.placeholders = state.images.placeholders
             cell.onMedia = { [weak self] attachment, action, tile in
-                self?.media(action, attachment, of: row.id, tile: tile)
+                self?.media(action, attachment, of: row, tile: tile)
             }
             cell.onOpenFile = { [weak self] attachment in self?.actions?.openMedia(attachment.key) }
-            cell.onEmbed = { [weak self] embed, action in self?.embed(action, embed, of: row.id) }
+            cell.onEmbed = { [weak self] embed, action in self?.embed(action, embed, of: row) }
             cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
             cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
@@ -1135,10 +1136,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         relativeTimes[row] = [body, embeds].compactMap { $0 }.min()
     }
 
-    private func embed(_ action: EmbedView.Action, _ embed: Embed, of message: MessageId) {
-        let key = MediaKey(messageId: message, embed: embed.index, url: embed.url)
+    private func embed(_ action: EmbedView.Action, _ embed: Embed, of row: MessageListModel.Row) {
+        let key = MediaKey(messageId: row.id, embed: embed.index, url: embed.url)
         switch action {
         case .open(let image):
+            if let opened = ViewerModel.embed(embed, from: image), view(opened, of: row) {
+                return
+            }
             actions?.openMedia(image)
         case .openLink(let url):
             actions?.openLink(url, masked: false)
@@ -1157,12 +1161,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     private func media(
-        _ action: MediaTileView.Action, _ attachment: Attachment, of message: MessageId,
+        _ action: MediaTileView.Action, _ attachment: Attachment, of row: MessageListModel.Row,
         tile: MediaTileView
     ) {
-        let key = MediaKey(messageId: message, attachmentId: attachment.id)
+        let key = MediaKey(messageId: row.id, attachmentId: attachment.id)
         switch action {
         case .open:
+            let media = mediaState(of: row.id)
+            let opened = ViewerModel.attachments(of: row.shown, from: attachment.id) {
+                !MediaTileView.hides(MessageCell.cover($0, media))
+            }
+            if let opened, view(opened, of: row) {
+                return
+            }
             actions?.openMedia(attachment.key)
         case .reveal:
             actions?.revealMedia(key)
@@ -1171,6 +1182,17 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         case .altText:
             showAltText(attachment.description ?? "", from: tile.alt)
         }
+    }
+
+    // Over the list's window; false when there's no viewer to open.
+    private func view(_ opened: (items: [ViewerModel.Item], index: Int), of row: MessageListModel.Row) -> Bool {
+        guard let window = tableView.window,
+            let model = actions?.viewer(opened.items, at: opened.index, of: row)
+        else {
+            return false
+        }
+        viewer.open(model, in: window, images: state.images.cache, placeholders: state.images.placeholders)
+        return true
     }
 
     // Discord's popout: to the right of the button, its title over the description.
@@ -1691,6 +1713,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         hoverCard.hide()
         expressionPopout.close()
         altText?.close()
+        viewer.close()
         cancelPrefetches()
     }
 

@@ -27,6 +27,7 @@ tracking event comes first.
 | A floating split's card over the channel's list | What lies there | The list asks `CursorArea.cursor(at:in:)` for what isn't its own: an area, another authority, the I-beam over editable text, else the arrow |
 | The shield under the browser | Arrow | Its own tracking area (`ShieldWindow`) |
 | More Active Threads (never key): its rows and "See All" | Pointing hand | `CursorArea` |
+| The media viewer (key): zoomable media; its buttons, arrows and strip; a video; the scrim | Zoom in or zoom out (the arrow before macOS 15); pointing hand; the player's own; arrow | The viewer's tracking area (`ViewerView`): it hit-tests on every move and zoom |
 | An emoji's or sticker's popout (key): a server row that opens, "Show More" | Pointing hand | `CursorArea` |
 | The hover card over an emoji or sticker | None of its own: it takes no mouse events | The list keeps deciding under it |
 | Everything else: the server rail, the channel and DM lists, the user panel, the title bar, menus, alerts, the login screen (its fields: AppKit's I-beam) | Arrow | AppKit's default |

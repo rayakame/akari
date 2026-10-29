@@ -13,6 +13,9 @@ final class RecordingMediaActions: MessageListActions {
     var links: [(URL, masked: Bool)] = []
     var videos: [ImageKey] = []
     var video: URL?
+    /// Set, a click opens the viewer instead of the browser.
+    var viewerAccount: Account?
+    var viewed: [(keys: [ImageKey], index: Int)] = []
 
     func retry(_ message: MessageId) {}
     func delete(_ message: MessageId) {}
@@ -36,6 +39,14 @@ final class RecordingMediaActions: MessageListActions {
         return video
     }
     func openMedia(_ key: ImageKey) { opened.append(key) }
+    func viewer(_ items: [ViewerModel.Item], at index: Int, of row: MessageListModel.Row) -> ViewerModel? {
+        viewed.append((items.map(\.key), index))
+        return viewerAccount.flatMap {
+            ViewerModel(
+                items: items, index: index, author: row.shown.author, authorName: row.authorName,
+                timestamp: row.shown.timestamp, hidesDownloads: false, account: $0)
+        }
+    }
     func revealMedia(_ key: MediaKey) { revealed.append(key) }
     func toggleSensitive(_ key: MediaKey) { toggled.append(key) }
 }
@@ -462,6 +473,62 @@ final class AttachmentTests {
                 attachmentId: AttachmentId(rawValue: UInt64($0)))
         }
         #expect(actions.opened == keys)
+    }
+
+    // D146: an image or a video opens the viewer on the message's media the user sees, from the
+    // clicked one; a file's name still opens the browser.
+    @Test
+    func aClickOpensTheViewer() throws {
+        actions.viewerAccount = ViewerAccount()
+        show(
+            [media(5), media(6, cover: .sensitive), media(7, "clip.mp4", kind: .video), file(8, "notes.zip")],
+            cache: ImageCache(source: FakeImageSource.stalling()))
+        let viewer = list.controller.viewer
+        defer { viewer.close() }
+        let keys = [5, 6, 7, 8].map {
+            ImageKey.attachment(
+                channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 1),
+                attachmentId: AttachmentId(rawValue: UInt64($0)))
+        }
+
+        try tiles()[2].performClick(nil)
+
+        let shown = try #require(viewer.view)
+        #expect(shown.model.items.map(\.key) == [keys[0], keys[2]], "the sensitive one stays out")
+        #expect(shown.model.index == 1)
+        #expect(shown.model.authorName == "Mira")
+        #expect(viewer.panel?.parent === list.window)
+        #expect(actions.opened.isEmpty)
+
+        viewer.close()
+        try #require(try fileRows().first).name.performClick(nil)
+        #expect(actions.opened == [keys[3]])
+    }
+
+    // D143: what a cover hides stays out (a spoiler not revealed, flagged media not shown, media
+    // waiting for its scan); what the user uncovered goes in.
+    @Test
+    func theViewerTakesWhatTheUserSees() throws {
+        actions.viewerAccount = ViewerAccount()
+        let files = [media(5), media(6, cover: .spoiler), media(7, cover: .pending), media(8, cover: .sensitive)]
+        let viewer = list.controller.viewer
+        defer { viewer.close() }
+        let keys = [5, 6, 7, 8].map {
+            ImageKey.attachment(
+                channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: 1),
+                attachmentId: AttachmentId(rawValue: UInt64($0)))
+        }
+
+        show(files, cache: ImageCache(source: FakeImageSource.stalling()))
+        try tiles()[0].performClick(nil)
+        #expect(viewer.view?.model.items.map(\.key) == [keys[0]])
+        viewer.close()
+
+        show(
+            files, cache: ImageCache(source: FakeImageSource.stalling()), revealed: [key(6)],
+            shownSensitive: [key(8)])
+        try tiles()[0].performClick(nil)
+        #expect(viewer.view?.model.items.map(\.key) == [keys[0], keys[1], keys[3]])
     }
 
     // The Play button and the GIF badge draw over the loaded image, not under it.

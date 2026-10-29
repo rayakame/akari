@@ -8,6 +8,8 @@ use crate::state::events::StoreEvent;
 use crate::state::media::{self, AgeGate, Covered, MediaCover, Scan, ShownAttachment};
 use crate::state::types::{Message, StarterMessage};
 
+const HIDE_MEDIA_DOWNLOAD_OPTIONS: u64 = 1 << 15;
+
 impl State {
     pub(crate) fn shown_attachments(
         &self,
@@ -74,6 +76,24 @@ impl State {
             self.nsfw_allowed(),
             self.entities.settings.age_agreements.contains(&guild),
         )
+    }
+
+    // Module 207133 reads the flag for a forum post (a forum or media channel's thread) from its
+    // parent; only threads have such a parent.
+    pub(crate) fn hides_media_downloads(&self, channel: ChannelId) -> bool {
+        let Some(parent) = self
+            .entities
+            .channels
+            .get(&channel)
+            .and_then(|post| post.parent_id)
+            .and_then(|parent| self.entities.channels.get(&parent))
+        else {
+            return false;
+        };
+        matches!(
+            parent.kind,
+            ChannelType::GuildForum | ChannelType::GuildMedia
+        ) && parent.flags & HIDE_MEDIA_DOWNLOAD_OPTIONS != 0
     }
 
     pub(crate) fn agree_to_age_restricted(&mut self, guild: GuildId, events: &mut Vec<StoreEvent>) {

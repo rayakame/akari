@@ -27,7 +27,7 @@ the header's Threads button and its popout, the "See all threads" modal, and the
 composer (a locked thread's banner), avatars and icons in every place (`docs/ui/images.md`), and a
 message's attachments with their covers and the age gate (`docs/ui/attachments.md`), and its
 embeds: cards, media alone, galleries, GIFVs and the video pill, with their covers
-(`EmbedView.swift`, `docs/ui/embeds.md`).
+(`EmbedView.swift`, `docs/ui/embeds.md`), and the media viewer (`Viewer/`, `docs/ui/viewer.md`).
 Reactions, replies, voice, notifications and settings come later.
 
 ## Images
@@ -68,6 +68,15 @@ Reactions, replies, voice, notifications and settings come later.
   media of rows within a screen above and below (`prefetchMedia`). `MessageCell.cover` applies
   the session's reveals to the core's cover. A gated channel's `MessageArea` shows
   `AgeGateView` and never opens its list.
+- The media viewer (`MediaViewer`) is a key `ContainerPanel` attached over the whole session
+  window, following its size: `ViewerView` draws the scrim and holds `ViewerStage` (a
+  `MediaTileView` at the fitted box, zoomed by resizing it so the image asks again at more
+  pixels, capped by `ImageLayerView.maxPixels`; an `AVPlayerView` for videos; hidden
+  `ImageLayerView`s asking the neighbours), the top bar, Close, the arrows and the strip, laid
+  out by `ViewerLayout` from Discord's numbers. The panel hands the arrows and Space to the view
+  before a video's player sees them, and the view swallows the app's shortcuts but ⌘Q and ⌘H.
+  `ViewerActions` saves, copies and opens the original. The table's controller owns one viewer
+  and opens it from tiles and embeds through `MessageListActions.viewer`.
 - A loading or failed avatar shows the `avatarPlaceholder` disc; a server's icon is drawn
   alone (`ServerPicture`: the rail, the folder minis, the title bar), its initials' tile only
   without an icon or after a failure. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).

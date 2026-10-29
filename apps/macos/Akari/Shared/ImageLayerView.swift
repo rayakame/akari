@@ -73,6 +73,15 @@ final class ImageLayerView: NSView {
     var fallbackText: String? {
         didSet { updateFallback() }
     }
+    /// The most pixels the box asks for, its shape kept (the viewer's zoom: never above the
+    /// source or 4096 a side).
+    var maxPixels: NSSize? {
+        didSet {
+            if maxPixels != oldValue {
+                askIfPixelsChanged()
+            }
+        }
+    }
     /// The decoded tier the image is kept in: a message's media has its own budget.
     var tier = ImageTier.identity
     /// Discord's fade for media (D142): 0.2 s, 0.05 s for an image that came within 200 ms,
@@ -88,6 +97,8 @@ final class ImageLayerView: NSView {
     let fallbackLayer = CATextLayer()
     private(set) var player: FramePlayer?
     private var still: CGImage?
+    // What `still` shows: a failed ask for the same image at other pixels keeps it.
+    private var stillKey: ImageKey?
     private var stillTask: Task<Void, Never>?
     private var animationTask: Task<Void, Never>?
     private var pinned: ImageSpec?
@@ -220,8 +231,18 @@ final class ImageLayerView: NSView {
     }
 
     private var pixelsIfSized: (Int, Int)? {
-        let pixels = Self.pixels(bounds.size, scale: window?.backingScaleFactor ?? 1)
-        return pixels.0 > 0 && pixels.1 > 0 ? pixels : nil
+        var pixels = Self.pixels(bounds.size, scale: window?.backingScaleFactor ?? 1)
+        guard pixels.0 > 0, pixels.1 > 0 else {
+            return nil
+        }
+        if let maxPixels {
+            let factor = min(1, maxPixels.width / CGFloat(pixels.0), maxPixels.height / CGFloat(pixels.1))
+            pixels = (
+                max(1, Int((CGFloat(pixels.0) * factor).rounded())),
+                max(1, Int((CGFloat(pixels.1) * factor).rounded()))
+            )
+        }
+        return pixels
     }
 
     private func spec(animated: AnimatedFormat? = nil) -> ImageSpec? {
@@ -264,6 +285,8 @@ final class ImageLayerView: NSView {
                 self.set(still: image)
                 self.updateAnimation()
             case .failure(is CancellationError):
+                break
+            case .failure where self.still != nil && self.stillKey == spec.key:
                 break
             case .failure:
                 self.failed = true
@@ -319,6 +342,7 @@ final class ImageLayerView: NSView {
 
     private func set(still image: CGImage) {
         still = image
+        stillKey = content?.key
         imageLayer.contentsScale = window?.backingScaleFactor ?? 1
         if player == nil {
             imageLayer.contents = image
@@ -331,6 +355,7 @@ final class ImageLayerView: NSView {
 
     private func clearImage() {
         still = nil
+        stillKey = nil
         imageLayer.contents = nil
         imageLayer.isHidden = true
     }

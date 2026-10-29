@@ -57,22 +57,10 @@ final class FileRowView: NSView {
             systemSymbolName: FileType.symbol(forFileNamed: attachment.filename),
             accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 26, weight: .light))
-        name.show(Self.shownName(attachment))
+        name.show(FileType.shownName(attachment))
         size.stringValue = FileSize.text(attachment.size)
         name.setAccessibilityLabel("\(attachment.filename), \(FileSize.text(attachment.size))")
         needsLayout = true
-    }
-
-    /// The name Discord shows: the title with the file's extension when it gave one.
-    static func shownName(_ attachment: Attachment) -> String {
-        guard let title = attachment.title, !title.isEmpty else {
-            return attachment.filename
-        }
-        let parts = attachment.filename.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count > 1, let last = parts.last else {
-            return title
-        }
-        return "\(title).\(last)"
     }
 
     var shownSize: String { size.stringValue }

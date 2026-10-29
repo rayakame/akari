@@ -18,6 +18,7 @@ struct MessageTable: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.actions = actions
+        context.coordinator.viewer.focus = context.environment.windowFocus
         link.controller = context.coordinator
         context.coordinator.show(state)
     }
@@ -220,6 +221,10 @@ final class MessageListBridge: MessageListActions {
                 NSWorkspace.shared.open(url)
             }
         }
+    }
+
+    func viewer(_ items: [ViewerModel.Item], at index: Int, of row: MessageListModel.Row) -> ViewerModel? {
+        messages.viewer(items, at: index, of: row)
     }
 
     func revealMedia(_ key: MediaKey) {

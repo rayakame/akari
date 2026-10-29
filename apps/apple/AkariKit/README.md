@@ -96,6 +96,13 @@ screen, so views render from them without calling into Rust.
   `submit()` sends the trimmed draft unless it is blank, too long or held back by slowmode,
   and clears it only once the core has queued the message;
   `retry(_:)` and `discard(_:)` act on failed messages.
+- `ViewerModel` is the media viewer's (`docs/ui/viewer.md`): `attachments(of:from:shows:)` and
+  `embed(_:from:)` pick the items a click opens (a message's shown images and videos, an embed's
+  gallery, its image or GIFV alone), and `messages.viewer(_:at:of:)` makes the model with the
+  row's author and time and whether the channel hides download options. `next()`,
+  `previous()` and `select(_:)` move (wrapping), `preloads` names the neighbours to ask for early,
+  `actions` and `details(of:)` say what the buttons and View Details offer, and
+  `originalURL(of:)` and `save(_:to:)` reach the original.
 - `CollapsedCategories` (`session.collapsed`) keeps the collapsed categories per guild across
   launches; `visible(_:in:keeps:)` leaves out a collapsed category's channels except those the
   channel list keeps: the open channel, channels with mentions, and unread channels unless the

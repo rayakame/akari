@@ -65,8 +65,8 @@ Discord's numbers, from sizes alone, so a row is as tall before its media loads 
   badge* sits top left, 6 in, while it doesn't play.
 - A video shows its poster (the proxy's still) with Discord's Play button in the middle: a black
   48 pt circle at 60 %, its symbol nudged 1 right.
-- *Until the media viewer, a click on an image or a video opens the original in the browser
-  (a fresh signed link). Discord opens its viewer for images and plays a single video in place.*
+- A click on an image or a video opens the media viewer at it ([viewer.md](viewer.md)). *A
+  single video opens it too (Discord plays it in place).*
 
 ## File rows
 
@@ -79,7 +79,8 @@ Discord's numbers, from sizes alone, so a row is as tall before its media loads 
   file a title, the name is the title and the extension.
 - The size in Discord's words: base 1024, "512 bytes" (no singular), then two decimals
   ("1.50 MB"), a comma for thousands.
-- *No Download button on hover yet: the name's link downloads, and Save comes with the viewer.*
+- *No Download button on hover yet: the name's link downloads; the viewer saves images and
+  videos.*
 - Audio files and voice messages are file rows until Akari has a player.
 - Three files, 8 apart; the first 12 under the mosaic, or 10 under the text.
 

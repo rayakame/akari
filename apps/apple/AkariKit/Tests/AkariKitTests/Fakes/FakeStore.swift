@@ -35,6 +35,7 @@ final class FakeStore: Store, @unchecked Sendable {
         var startable: Set<MessageId> = []
         var threadSlowmodes: [ChannelId: Slowmode] = [:]
         var ageGates: [ChannelId: AgeGate] = [:]
+        var hidingDownloads: Set<ChannelId> = []
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -233,5 +234,9 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func unreadPrivateChannels() -> [ChannelId] {
         read(.unreadPrivateChannels) { $0.unreadPrivateChannels }
+    }
+
+    override func hidesMediaDownloads(channelId: ChannelId) -> Bool {
+        read(.hidesMediaDownloads(channelId)) { $0.hidingDownloads.contains(channelId) }
     }
 }

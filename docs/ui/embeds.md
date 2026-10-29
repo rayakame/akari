@@ -72,7 +72,8 @@ runtime like every image ([images.md](images.md)). Where Akari differs, the diff
 - A video shows its poster, cropped to fill, at least 150 × 144, with Discord's pill in the
   middle: a black capsule at 60 %, 48 tall, with Play and Open Link (Open Link alone when the
   video can't play). *Both open the link in the browser: Akari has no inline player yet (D145).*
-- A click on an image opens the original in the browser, as on attachments.
+- A click on an image opens the media viewer on the gallery, or the image alone; a click on a
+  GIFV opens it alone ([viewer.md](viewer.md)).
 - *Embed media is asked when its row is laid out, not a screen ahead as attachments' is.*
 
 ## Covers
