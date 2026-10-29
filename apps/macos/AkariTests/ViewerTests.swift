@@ -630,6 +630,22 @@ final class ViewerTests {
         #expect(player.currentItem == nil)
     }
 
+    // F-6: the poster gives way to the video once its first frame is ready, and it plays.
+    @Test
+    func theFirstFrameShowsTheVideo() async throws {
+        let clip = try await writeClip()
+        defer { try? FileManager.default.removeItem(at: clip) }
+        let video = item(2, "clip.mp4", kind: .video, width: 64, height: 64)
+        account.links.withLock { $0[video.key] = clip.absoluteString }
+        _ = try open([video])
+        let view = try view()
+
+        try await eventually { view.stage.playerView?.isHidden == false }
+        let player = try #require(view.stage.playerView?.player)
+        #expect(player.currentItem?.status == .readyToPlay)
+        try await eventually { player.currentTime() > .zero }
+    }
+
     // A GIFV loops its video over its poster while the viewer may animate.
     @Test
     func aGifvLoops() async throws {
@@ -892,4 +908,40 @@ final class ViewerTests {
         #expect(view.hitTest(view.convert(name, to: view.superview)) === author)
         #expect(view.hitTest(view.convert(NSPoint(x: 400, y: ViewerLayout.marginY + 20), to: view.superview)) === view.stage)
     }
+}
+
+/// A second of plain 64 × 64 frames: the tests write their video rather than keep one.
+func writeClip() async throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("viewer-clip-\(UUID().uuidString).mp4")
+    let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+    let input = AVAssetWriterInput(
+        mediaType: .video,
+        outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64])
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+        assetWriterInput: input,
+        sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64,
+        ])
+    writer.add(input)
+    #expect(writer.startWriting())
+    writer.startSession(atSourceTime: .zero)
+    for frame in 0..<30 {
+        while !input.isReadyForMoreMediaData {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        var buffer: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(nil, try #require(adaptor.pixelBufferPool), &buffer)
+        let pixels = try #require(buffer)
+        CVPixelBufferLockBaseAddress(pixels, [])
+        memset(CVPixelBufferGetBaseAddress(pixels), Int32(frame * 8), CVPixelBufferGetDataSize(pixels))
+        CVPixelBufferUnlockBaseAddress(pixels, [])
+        #expect(adaptor.append(pixels, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30)))
+    }
+    input.markAsFinished()
+    await withCheckedContinuation { done in
+        writer.finishWriting { done.resume() }
+    }
+    #expect(writer.status == .completed)
+    return url
 }
