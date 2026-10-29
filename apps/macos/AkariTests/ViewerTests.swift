@@ -924,10 +924,11 @@ func writeClip() async throws -> URL {
             kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64,
         ])
     writer.add(input)
-    #expect(writer.startWriting())
+    try #require(writer.startWriting())
     writer.startSession(atSourceTime: .zero)
     for frame in 0..<30 {
         while !input.isReadyForMoreMediaData {
+            try #require(writer.status == .writing)
             try await Task.sleep(for: .milliseconds(1))
         }
         var buffer: CVPixelBuffer?
@@ -936,12 +937,12 @@ func writeClip() async throws -> URL {
         CVPixelBufferLockBaseAddress(pixels, [])
         memset(CVPixelBufferGetBaseAddress(pixels), Int32(frame * 8), CVPixelBufferGetDataSize(pixels))
         CVPixelBufferUnlockBaseAddress(pixels, [])
-        #expect(adaptor.append(pixels, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30)))
+        try #require(adaptor.append(pixels, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30)))
     }
     input.markAsFinished()
     await withCheckedContinuation { done in
         writer.finishWriting { done.resume() }
     }
-    #expect(writer.status == .completed)
+    try #require(writer.status == .completed)
     return url
 }
