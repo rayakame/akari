@@ -16,8 +16,8 @@ struct MessageTableState: Equatable {
     var revealedMedia: Set<MediaKey> = []
     var shownSensitive: Set<MediaKey> = []
     var showsAltText = false
-    /// The channel's option: its videos and audio offer no Download.
-    var hidesDownloads = false
+    /// The rows' channels whose videos and audio offer no Download (Discord's channel option).
+    var hiddenDownloads: Set<ChannelId> = []
     var newMessages: MessageId?
     var unreadJumps = 0
     var messageJump: MessageListModel.MessageJump?
@@ -261,7 +261,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             .union(previous.revealedMedia.symmetricDifference(state.revealedMedia).map(\.messageId))
             .union(previous.shownSensitive.symmetricDifference(state.shownSensitive).map(\.messageId))
             .union(previous.showsAltText != state.showsAltText ? messageIds() : [])
-            .union(previous.hidesDownloads != state.hidesDownloads ? messageIds() : [])
+            .union(rows(from: previous.hiddenDownloads.symmetricDifference(state.hiddenDownloads)))
         let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
@@ -465,6 +465,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         revealed = Dictionary(grouping: new, by: \.messageId).mapValues { Set($0.map(\.index)) }
         return Set(old.symmetricDifference(new).map(\.messageId))
+    }
+
+    // The rows showing a message from one of `channels`.
+    private func rows(from channels: Set<ChannelId>) -> Set<MessageId> {
+        channels.isEmpty ? [] : Set(state.rows.filter { channels.contains($0.shown.channelId) }.map(\.id))
     }
 
     private func messageIds() -> Set<MessageId> {

@@ -159,7 +159,7 @@ struct MessageArea: View {
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
             revealedSpoilers: messages.revealedSpoilers, revealedMedia: messages.revealedMedia,
             shownSensitive: messages.shownSensitive, showsAltText: showsAltText,
-            hidesDownloads: messages.hidesMediaDownloads,
+            hiddenDownloads: messages.channelsHidingDownloads,
             newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
             startRoom: messages.composer.locked ? LockedBanner.room : 0,

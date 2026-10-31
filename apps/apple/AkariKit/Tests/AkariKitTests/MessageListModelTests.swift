@@ -597,11 +597,11 @@ struct MessageListModelTests {
         shown(window([1]))
         let model = loaded()
         await model.open()
-        #expect(!model.hidesMediaDownloads)
+        #expect(model.channelsHidingDownloads.isEmpty)
 
         store.update { $0.hidingDownloads = [here] }
         model.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
 
-        #expect(model.hidesMediaDownloads)
+        #expect(model.channelsHidingDownloads == [here])
     }
 }

@@ -975,11 +975,11 @@ final class AttachmentDownloadTests {
         list.controller.onSaveFailure = { [unowned self] in failures.append($0) }
     }
 
-    func show(_ files: [AkariFFI.Attachment], hidesDownloads: Bool = false) {
+    func show(_ files: [AkariFFI.Attachment], hidingDownloads: Set<ChannelId> = []) {
         var state = MessageTableState(
             rows: [row(1, at: list.noon, content: "hi", files: files)], reachedOldest: true,
             images: ImageCacheRef(ImageCache(source: FakeImageSource.stalling()), placeholders: nil))
-        state.hidesDownloads = hidesDownloads
+        state.hiddenDownloads = hidingDownloads
         list.show(state)
     }
 
@@ -1169,7 +1169,7 @@ final class AttachmentDownloadTests {
         #expect(video.showsDownload)
 
         actions.hidesDownloads = true
-        show(clip, hidesDownloads: true)
+        show(clip, hidingDownloads: [ChannelId(rawValue: 10)])
 
         let now = try #require(try attachments().tiles.first)
         hover(now, at: NSPoint(x: now.bounds.midX, y: now.bounds.midY))

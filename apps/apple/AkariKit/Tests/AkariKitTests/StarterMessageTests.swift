@@ -50,6 +50,22 @@ struct StarterMessageTests {
         #expect(model.rows.last?.shown == model.rows.last?.message)
     }
 
+    // CodeRabbit on #61: the starter's row shows the parent's message, so the parent's download
+    // option is the one it follows, also when it changes.
+    @Test
+    func theParentsDownloadOptionReachesTheStartersRow() {
+        starts(.loaded(message: original))
+        let model = makeModel()
+        #expect(model.channelsHidingDownloads.isEmpty)
+
+        store.update { $0.hidingDownloads = [id(10)] }
+        model.apply(EventBatch([.channelUpdated(channelId: id(10), guildId: id(1))]))
+
+        #expect(model.channelsHidingDownloads == [id(10)])
+        #expect(model.hidesDownloads(of: model.rows[0]))
+        #expect(!model.hidesDownloads(of: model.rows[1]))
+    }
+
     @Test
     func anUnavailableStarterSaysSorryWeCouldntLoadIt() {
         starts(.unavailable)
