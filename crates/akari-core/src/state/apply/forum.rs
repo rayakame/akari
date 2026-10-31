@@ -178,13 +178,19 @@ impl State {
 
     pub(crate) fn forum_posts(&self, forum: ChannelId, view: &ForumView) -> ForumPosts {
         let open = self.forum_list.as_ref().filter(|list| list.forum == forum);
+        let now = self.now_millis();
+        let visible = |post: &Channel| {
+            self.permissions(post.id, now)
+                .is_some_and(|permissions| permissions.contains(Permissions::VIEW_CHANNEL))
+        };
         let mut active: Vec<(Arc<Channel>, u64)> = match open {
+            // The frozen order stays; a post the user can no longer see goes.
             Some(list) => list
                 .posts
                 .iter()
                 .filter_map(|(id, newest)| {
                     let post = self.entities.channels.get(id)?;
-                    (!archived(post)).then(|| (post.clone(), *newest))
+                    (!archived(post) && visible(post)).then(|| (post.clone(), *newest))
                 })
                 .collect(),
             None => self
@@ -209,7 +215,6 @@ impl State {
             OlderThreads::All => Some(0),
             _ => pages.oldest,
         };
-        let now = self.now_millis();
         let mut older: Vec<Arc<Channel>> = self
             .threads
             .of(forum)
@@ -220,9 +225,7 @@ impl State {
                     && !self.unconfirmed.contains(&post.id)
                     && cut.is_some_and(|cut| newest(post) >= cut)
                     && matches(post, view)
-                    && self
-                        .permissions(post.id, now)
-                        .is_some_and(|permissions| permissions.contains(Permissions::VIEW_CHANNEL))
+                    && visible(post)
             })
             .cloned()
             .collect();
@@ -491,6 +494,14 @@ impl State {
                 })
             })
             .collect()
+    }
+
+    pub(crate) fn preview_message(&self, post: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+        self.previews
+            .messages
+            .get(&post)?
+            .clone()
+            .filter(|message| message.id == id)
     }
 
     /// Queues the posts whose cards show without a first message, unless asked already or failed

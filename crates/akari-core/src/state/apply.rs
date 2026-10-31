@@ -1668,8 +1668,11 @@ impl State {
         self.windows.pending(channel, id)
     }
 
+    // A post's first message can be here from post-data alone: its card's media asks for it.
     pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
-        self.windows.message(channel, id)
+        self.windows
+            .message(channel, id)
+            .or_else(|| self.preview_message(channel, id))
     }
 
     pub(crate) fn current_user(&self) -> Option<Arc<CurrentUser>> {

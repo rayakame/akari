@@ -1174,3 +1174,61 @@ fn a_post_without_its_metadata_is_unread_from_its_start() {
     );
     assert!(state.unread(Snowflake::new(POST)));
 }
+
+// CodeRabbit on #61: a card's media resolves through its first message, which post-data can bring
+// without the post's own messages.
+#[test]
+fn a_posts_first_message_from_its_preview_is_a_message_too() {
+    let mut state = forum_with_posts();
+
+    apply(&mut state, "MESSAGE_CREATE", starter(OLD, "with a picture"));
+
+    let found = state.message(Snowflake::new(OLD), Snowflake::new(OLD));
+    assert_eq!(
+        found.map(|message| message.content.to_string()).as_deref(),
+        Some("with a picture")
+    );
+    assert!(
+        state
+            .message(Snowflake::new(OLD), Snowflake::new(OLD + 1))
+            .is_none()
+    );
+}
+
+// CodeRabbit on #61: the open forum's frozen list keeps its order, not posts the user can no
+// longer see.
+#[test]
+fn the_frozen_list_drops_posts_the_user_can_no_longer_see() {
+    let mut ready = ready_value();
+    ready["guilds"][0]["properties"]["owner_id"] = MIRA.to_string().into();
+    ready["merged_members"][0][0]["roles"] = json!([]);
+    let mut state = state_from(&ready);
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        listed_post(OLD, 400_000_000_000_000_900, &[]),
+    );
+    state.open_forum(Some(Snowflake::new(FORUM)), &mut Vec::new());
+    let view = view(ForumSort::LatestActivity, &[], TagMatching::Some);
+    assert_eq!(
+        state.forum_posts(Snowflake::new(FORUM), &view).active.len(),
+        1
+    );
+
+    apply(
+        &mut state,
+        "CHANNEL_UPDATE",
+        json!({
+            "id": FORUM.to_string(),
+            "permission_overwrites": [{"id": G1.to_string(), "type": 0, "allow": "0", "deny": "1024"}]
+        }),
+    );
+
+    assert!(
+        state
+            .forum_posts(Snowflake::new(FORUM), &view)
+            .active
+            .is_empty()
+    );
+}
