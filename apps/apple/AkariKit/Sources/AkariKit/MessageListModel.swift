@@ -455,6 +455,18 @@ public final class MessageListModel {
         return URL(string: link)
     }
 
+    /// Whether the shown message's channel hides downloads of its media (Discord's channel
+    /// option): videos and audio lose their Download, files keep theirs.
+    public func hidesDownloads(of row: Row) -> Bool {
+        store.hidesMediaDownloads(channelId: row.shown.channelId)
+    }
+
+    /// Saves the original to `destination` (an attachment's Download); cancelling the task leaves
+    /// the file as it was. Returns the bytes written.
+    public func saveOriginal(_ key: ImageKey, to destination: URL) async throws -> UInt64 {
+        try await account.saveOriginal(key, to: destination)
+    }
+
     /// The viewer on `row`'s media from `index`, by its author at its time; the shown message's
     /// channel says whether downloads are offered.
     public func viewer(_ items: [ViewerModel.Item], at index: Int, of row: Row) -> ViewerModel? {

@@ -105,6 +105,12 @@ final class FakeAccount: Account, @unchecked Sendable {
     }
 
     let originalLinks = Locked<[ImageKey: String]>([:])
+    let saves = Locked<[(key: ImageKey, destination: String)]>([])
+
+    override func saveOriginal(key: ImageKey, destination: String) -> PendingSave {
+        saves.withLock { $0.append((key, destination)) }
+        return FakeSave()
+    }
 
     override func originalUrl(key: ImageKey) async throws -> String {
         guard let link = originalLinks.current[key] else {
@@ -472,4 +478,18 @@ final class FakePendingImage: PendingImage, @unchecked Sendable {
     override func cancel() {
         work.current?.cancel()
     }
+}
+
+/// A save that wrote 7 bytes.
+final class FakeSave: PendingSave, @unchecked Sendable {
+    init() {
+        super.init(noHandle: NoHandle())
+    }
+
+    required init(unsafeFromHandle handle: UInt64) {
+        fatalError("a fake has no Rust object")
+    }
+
+    override func result() async throws -> UInt64 { 7 }
+    override func cancel() {}
 }
