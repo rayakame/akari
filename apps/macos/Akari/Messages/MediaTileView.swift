@@ -246,7 +246,8 @@ final class MediaTileView: NSButton {
             return nil
         }
         let local = convert(point, from: superview)
-        for button in [eye, alt, download] as [NSView] where !button.isHidden && button.frame.contains(local) {
+        // Topmost first: Download can lie over the eye on a short video.
+        for button in [download, alt, eye] as [NSView] where !button.isHidden && button.frame.contains(local) {
             return button
         }
         return self

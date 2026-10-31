@@ -77,8 +77,8 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     var onMedia: (Attachment, MediaTileView.Action, MediaTileView) -> Void = { _, _, _ in }
     var onOpenFile: (Attachment) -> Void = { _ in }
     var onDownloadFile: (Attachment) -> Void = { _ in }
-    /// The shown message's channel hides downloads of media; set before `configure`.
-    var hidesDownloads = false
+    /// What offers Download, set by the list before `configure`; nothing elsewhere.
+    var downloads = AttachmentsView.Downloads.none
     // Built for the first message with stickers; most messages have none.
     private var stickers: StickerRow?
     // Built for the first message with a thread, as the failed line is: buttons cost.
@@ -230,7 +230,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             view.isHidden = false
             view.configure(
                 message.attachments, covers: { Self.cover($0, media) },
-                showsAltText: media.showsAltText, hidesDownloads: hidesDownloads)
+                showsAltText: media.showsAltText, downloads: downloads)
         }
         if shown.isEmpty {
             embeds?.configure([])

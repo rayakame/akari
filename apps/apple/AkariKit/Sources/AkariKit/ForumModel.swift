@@ -427,7 +427,7 @@ public final class ForumModel {
             if let resultIds {
                 (cards(resultIds), [Card]())
             } else {
-                (cards(page.active), cards(page.archived))
+                (cards(page.active), cards(page.archived, archived: true))
             }
         if posts != self.posts {
             self.posts = posts
@@ -438,11 +438,12 @@ public final class ForumModel {
         listedIds = Set(posts.map(\.id) + archived.map(\.id))
     }
 
-    private func cards(_ ids: [ChannelId]) -> [Card] {
+    // An archived post never shows unread: the store isn't asked.
+    private func cards(_ ids: [ChannelId], archived: Bool = false) -> [Card] {
         guard !ids.isEmpty else {
             return []
         }
-        let unread = Set(store.unreadPosts(postIds: ids))
+        let unread = archived ? [] : Set(store.unreadPosts(postIds: ids))
         return store.channels(ids: ids).compactMap { card($0, unread: unread.contains($0.id)) }
     }
 

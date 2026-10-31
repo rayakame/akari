@@ -102,9 +102,10 @@ struct ForumListCard: View {
         .accessibilityLabel(ForumListCard.label(card))
     }
 
-    /// "Post {title}, {count} message(s)", as Discord's.
+    /// "Post {title}, {count} message(s)", as Discord's, and whether it's unread.
     static func label(_ card: ForumModel.Card) -> String {
         "Post \(card.title), \(card.count) \(card.count == "1" ? "message" : "messages")"
+            + (card.unread ? ", unread" : "")
     }
 }
 
@@ -474,7 +475,7 @@ struct ForumGalleryCard: View {
             HStack(spacing: 6) {
                 if case .message(_, let author) = card.preview {
                     Text(author)
-                        .font(TypeScale.forumAuthor.font)
+                        .font(TypeScale.forumGalleryAuthor.font)
                         .foregroundStyle(Color(nsColor: Palette.textMuted))
                         .lineLimit(1)
                 }
@@ -508,7 +509,7 @@ struct ForumGalleryCard: View {
             case .deleted:
                 Text(ForumCardMessage.deleted)
                     .font(TypeScale.forumMessage.font)
-                    .foregroundStyle(Color(nsColor: Palette.textMuted))
+                    .foregroundStyle(Color(nsColor: card.unread ? Palette.textDefault : Palette.textMuted))
             case .loading:
                 Color.clear
             }

@@ -31,7 +31,10 @@ final class FileRowView: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        card.actions = ["bounds": NSNull(), "position": NSNull(), "shadowPath": NSNull()]
+        card.actions = [
+            "bounds": NSNull(), "position": NSNull(), "shadowPath": NSNull(), "backgroundColor": NSNull(),
+            "borderColor": NSNull(), "shadowColor": NSNull(),
+        ]
         card.cornerRadius = 8
         card.borderWidth = 1
         card.shadowOpacity = 1
@@ -81,6 +84,7 @@ final class FileRowView: NSView {
         name.show(FileType.shownName(attachment))
         size.stringValue = FileSize.text(attachment.size)
         name.setAccessibilityLabel("\(attachment.filename), \(FileSize.text(attachment.size))")
+        download.setAccessibilityLabel("\(HoverActionButton.download) \(attachment.filename)")
         needsLayout = true
     }
 

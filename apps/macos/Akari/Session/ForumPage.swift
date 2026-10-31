@@ -676,8 +676,8 @@ struct ForumEmptyState: View {
     }
 }
 
-/// Loading cards: base-low, 102 tall, 8 apart, at 0.33, 1 and 0.66 by turns; gallery tiles for
-/// the window's rows.
+/// Loading cards: base-low, 102 tall, as far apart as cards, at 0.33, 1 and 0.66 by turns; gallery
+/// tiles for the window's rows.
 struct ForumPlaceholders: View {
     let layout: ForumLayout
     let size: CGSize

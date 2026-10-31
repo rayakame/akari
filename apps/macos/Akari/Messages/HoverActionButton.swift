@@ -1,9 +1,7 @@
 import AppKit
 
-/// Discord's hover button on media and files (module 96782, CSS 830560): 32 square on base-low
-/// with corners 5, a 20 pt symbol in the interactive text color, the hover fill and text under
-/// the pointer. It shows while its media or file card is under the pointer, which the list says;
-/// on a file card it overhangs the corner, ringed 1 pt in the chat's color.
+/// Discord's hover button on media and files (module 96782): shown while the list says its media
+/// or card is under the pointer; on a file card it overhangs the corner in a ring.
 final class HoverActionButton: NSButton {
     static let size: CGFloat = 32
     static let download = "Download"

@@ -428,8 +428,22 @@ final class ForumModelTests {
 
         let forum = try forum(session)
         #expect(forum.posts.map(\.unread) == [true, false])
-        #expect(forum.archived.map(\.unread) == [true])
+        #expect(forum.archived.map(\.unread) == [false], "an archived post never shows unread")
         #expect(account.log.reads.contains(.unreadPosts([id(41), id(42)])))
+        #expect(!account.log.reads.contains(.unreadPosts([id(43)])))
+        session.close()
+    }
+
+    @Test
+    func aBadgeChangeOfAPostNotListedRereadsNothing() throws {
+        list([41])
+        let session = inForum()
+        _ = try forum(session)
+        account.log.forget()
+
+        session.apply(EventBatch([.badgeChanged(channelId: id(46), guildId: id(1))]))
+
+        #expect(!account.log.reads.contains { if case .forumPosts = $0 { true } else { false } })
         session.close()
     }
 

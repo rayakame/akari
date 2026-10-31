@@ -54,11 +54,13 @@ final class RecordingMediaActions: MessageListActions {
     var saved: [(key: ImageKey, destination: URL)] = []
     var failsSaves = false
     var hidesDownloadsAsked = 0
+    var saveAttempts = 0
     func hidesDownloads(of row: MessageListModel.Row) -> Bool {
         hidesDownloadsAsked += 1
         return hidesDownloads
     }
     func saveOriginal(_ key: ImageKey, to destination: URL) async throws {
+        saveAttempts += 1
         if failsSaves {
             throw ImageError.Unavailable
         }
@@ -139,8 +141,9 @@ final class AttachmentTests {
         // 309 + 12 + 74 + 8 + 74.
         let expected: CGFloat = 477
         #expect(mixed.height == expected)
+        // A narrow column keeps Download's 8 overhang and its ring inside it.
         let onlyFiles = AttachmentsView.layout([file(2, "a.zip")], width: 300)
-        #expect(onlyFiles.files == [NSRect(x: 0, y: 8, width: 300, height: 74)])
+        #expect(onlyFiles.files == [NSRect(x: 0, y: 8, width: 291, height: 74)])
         #expect(onlyFiles.mosaic == nil)
     }
 
@@ -951,10 +954,8 @@ final class AttachmentTests {
     }
 }
 
-// Discord's hover button (module 96782, CSS 830560): Download on files always, on videos and
-// audio unless the channel hides downloads, never on images; 4 inside a video's top right, 8
-// past a file card's top right corner; shown while its media or card, or itself, is under the
-// pointer. A click saves the original where the save panel says, as the viewer does.
+// Discord's hover Download (module 96782) on files, videos and audio, shown under the pointer;
+// a click saves the original where the save panel says.
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class AttachmentDownloadTests {
     let list = MessageTableTests(onScreen: { _ in true })
@@ -1062,6 +1063,99 @@ final class AttachmentDownloadTests {
         show([media(5, "clip.mp4", kind: .video)])
 
         #expect(actions.hidesDownloadsAsked > 0)
+    }
+
+    // In a column too narrow for the card's 432, it leaves room for Download's overhang, which
+    // takes the pointer there too.
+    @Test
+    func aNarrowColumnLeavesRoomForDownload() throws {
+        list.window.setContentSize(NSSize(width: 450, height: 700))
+        list.window.layoutIfNeeded()
+        show([file(9, "notes.pdf")])
+        let view = try attachments()
+        let row = try #require(view.files.first)
+
+        #expect(row.frame.maxX + FileRowView.downloadOverhang < view.bounds.width, "\(row.frame) in \(view.bounds)")
+        let overhang = NSPoint(x: row.bounds.maxX + 6, y: -4)
+        hover(row, at: overhang)
+        #expect(row.showsDownload)
+        #expect(list.controller.cursor(at: row.convert(overhang, to: nil)) == .pointingHand)
+    }
+
+    // Each Download says which file it saves; the tooltip stays Discord's word.
+    @Test
+    func eachDownloadNamesItsFile() throws {
+        show([media(5, "clip.mp4", kind: .video), file(9, "notes.pdf")])
+        let view = try attachments()
+
+        #expect(view.files.first?.download.accessibilityLabel() == "Download notes.pdf")
+        #expect(view.tiles.first?.download.accessibilityLabel() == "Download clip.mp4")
+        #expect(view.files.first?.download.toolTip == "Download")
+    }
+
+    // Outside the list (the New Thread form's preview) nothing offers Download.
+    @Test
+    func aCellOutsideTheListOffersNoDownload() throws {
+        let cell = MessageCell()
+        cell.frame = NSRect(x: 0, y: 0, width: 700, height: 400)
+        let message = row(1, at: list.noon, content: "hi", files: [media(5, "clip.mp4", kind: .video), file(9, "notes.pdf")])
+            .shown
+        cell.configure(message, body: NSAttributedString(string: "hi"), startsGroup: true, groupTime: "", shortTime: "", fullDate: "")
+
+        let view = try #require(cell.attachments)
+        #expect(view.files.first?.download.isHidden == true)
+        #expect(view.tiles.first?.download.isHidden == true)
+    }
+
+    // A save that fails once its window has gone says nothing there.
+    @Test
+    func aFailedSaveAfterTheWindowClosedShowsNoAlert() async throws {
+        list.controller.onSaveFailure = nil
+        actions.failsSaves = true
+        show([file(9, "notes.pdf")])
+        let row = try #require(try attachments().files.first)
+        list.controller.chooseSaveURL = { [list, destination] _ in
+            list.window.orderOut(nil)
+            return destination
+        }
+
+        row.download.performClick(nil)
+        try await eventually { self.actions.saveAttempts == 1 }
+        await Task.yield()
+
+        #expect(list.window.attachedSheet == nil)
+    }
+
+    // A covered video shows no Download, as nothing of it shows.
+    @Test
+    func aCoveredVideoHasNoDownload() {
+        let tile = MediaTileView()
+        tile.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        var content = MediaTileView.Content(attachment: media(5, "clip.mp4", kind: .video), cover: .spoiler)
+        content.downloadable = true
+        tile.configure(content)
+        tile.isHovered = true
+        tile.layoutSubtreeIfNeeded()
+
+        #expect(!tile.showsDownload)
+    }
+
+    // On a short revealed sensitive video Download overlaps the eye: the one drawn on top takes
+    // the click.
+    @Test
+    func theButtonOnTopTakesTheClick() {
+        let tile = MediaTileView()
+        tile.frame = NSRect(x: 0, y: 0, width: 300, height: 60)
+        var content = MediaTileView.Content(
+            attachment: media(5, "clip.mp4", kind: .video), cover: .sensitive(shown: true))
+        content.downloadable = true
+        tile.configure(content)
+        tile.isHovered = true
+        tile.layoutSubtreeIfNeeded()
+        let both = NSPoint(x: 280, y: 30)
+        #expect(tile.download.frame.contains(both) && tile.eye.frame.contains(both))
+
+        #expect(tile.hitTest(both) === tile.download)
     }
 
     // Discord hides the group on media under 40 points.

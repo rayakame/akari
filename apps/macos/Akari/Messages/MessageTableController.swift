@@ -1094,9 +1094,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onOpenFile = { [weak self] attachment in self?.actions?.openMedia(attachment.key) }
             cell.onDownloadFile = { [weak self] attachment in self?.download(attachment) }
             // The channel's option only touches videos and audio: other rows don't ask the store.
-            cell.hidesDownloads =
+            let hidden =
                 row.shown.attachments.contains { $0.kind == .video || $0.kind == .audio }
                 && actions?.hidesDownloads(of: row) == true
+            cell.downloads = hidden ? .filesOnly : .all
             cell.onEmbed = { [weak self] embed, action in self?.embed(action, embed, of: row) }
             cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
@@ -1229,6 +1230,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private func saveFailed(in window: NSWindow) {
         if let onSaveFailure {
             onSaveFailure(ViewerActions.saveFailed)
+            return
+        }
+        guard window.isVisible else {
             return
         }
         let alert = NSAlert()
@@ -1701,15 +1705,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         box?.hovered = true
         hoveredBox = box
         let overlay = target?.view as? OverlayButton
+        let hit = hitView(at: location)
         let tile = (target?.view as? MediaTileView) ?? (overlay?.superview as? MediaTileView)
-            ?? hovered(MediaTileView.self, at: location)
+            ?? enclosing(MediaTileView.self, around: hit)
         let action = target?.view as? HoverActionButton
         if hoveredAction !== action {
             hoveredAction?.isHovered = false
         }
         action?.isHovered = true
         hoveredAction = action
-        let file = hovered(FileRowView.self, at: location)
+        let file = enclosing(FileRowView.self, around: hit)
         if hoveredFile !== file {
             hoveredFile?.isHovered = false
             file?.isHovered = true
@@ -1889,13 +1894,18 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
     }
 
-    // The tile under the pointer even where it takes no click (a covered one): hover still shows.
-    // The tile or file card under the pointer, also under one of its buttons.
-    private func hovered<View: NSView>(_ kind: View.Type, at location: NSPoint?) -> View? {
+    // What's under the pointer in the window, the list's or not.
+    private func hitView(at location: NSPoint?) -> NSView? {
         guard let location, let content = tableView.window?.contentView else {
             return nil
         }
-        var view = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
+        return content.hitTest(content.superview?.convert(location, from: nil) ?? location)
+    }
+
+    // A tile or file card around `hit`, also where it takes no click (a covered tile) or under
+    // one of its buttons: hover still shows.
+    private func enclosing<View: NSView>(_ kind: View.Type, around hit: NSView?) -> View? {
+        var view = hit
         while let current = view, current !== tableView {
             if let found = current as? View {
                 return found.isDescendant(of: tableView) ? found : nil

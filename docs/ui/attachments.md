@@ -74,8 +74,8 @@ Discord's numbers, from sizes alone, so a row is as tall before its media loads 
 
 ## File rows
 
-- 432 wide at most (narrower in a narrow column), 74 tall: 16 in, a 1 pt border, corners 8,
-  Discord's raised surface and light shadow.
+- 432 wide at most (in a narrower column 9 less than it, which keeps Download inside), 74 tall:
+  16 in, a 1 pt border, corners 8, Discord's raised surface and light shadow.
 - *Akari's symbol for the type* (a page, an archive, a sound wave, film, a photo, code, a
   table), where Discord draws its own file icons.
 - The name in the link color, cut with an ellipsis, underlined under the pointer; a click opens

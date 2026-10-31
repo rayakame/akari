@@ -6,9 +6,7 @@ import Testing
 @testable import Akari
 
 // The list page as Discord's showed in Chris's comparison (2026-10-31), measured to the ink in
-// points: cards 16 apart, the search field 16 above Sort & View, the pill 32 tall and 19 above
-// the first card; in a card, the title 18 below its top, the lines about 27 apart and the footer
-// 14 above its bottom; unread posts bright, read ones muted.
+// points; unread posts bright, read ones muted.
 @MainActor
 struct ForumLookTests {
     static let width: CGFloat = 700
@@ -159,6 +157,21 @@ struct ForumLookTests {
                 #expect(preview < 0.72, "read preview \(preview)")
             }
         }
+    }
+
+    // VoiceOver hears what the bright title shows.
+    @Test
+    func anUnreadCardSaysSo() throws {
+        let forum = try #require(session(unread: [0]).forum)
+
+        #expect(ForumListCard.label(forum.posts[0]).hasSuffix(", unread"))
+        #expect(!ForumListCard.label(forum.posts[1]).contains("unread"))
+    }
+
+    // The gallery's author keeps Discord's 14 (text-sm/semibold); only the list's message is 15.
+    @Test
+    func theGallerysAuthorStays14() {
+        #expect(TypeScale.forumGalleryAuthor == TextStyle(14, .semibold, line: 18))
     }
 
     // Discord's filled forum symbol, the same in the sidebar and the header, and a filled bubble
