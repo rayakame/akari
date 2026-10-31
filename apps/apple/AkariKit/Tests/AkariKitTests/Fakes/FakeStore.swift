@@ -39,6 +39,7 @@ final class FakeStore: Store, @unchecked Sendable {
         // Each forum's page for a view; none: nothing listed, nothing loaded.
         var forumPages: [ChannelId: @Sendable (ForumView) -> ForumPosts] = [:]
         var postPreviews: [ChannelId: PostPreview] = [:]
+        var unreadPosts: Set<ChannelId> = []
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -252,5 +253,9 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func postPreview(postId: ChannelId) -> PostPreview? {
         read(.postPreview(postId)) { $0.postPreviews[postId] }
+    }
+
+    override func unreadPosts(postIds: [ChannelId]) -> [ChannelId] {
+        read(.unreadPosts(postIds)) { state in postIds.filter(state.unreadPosts.contains) }
     }
 }

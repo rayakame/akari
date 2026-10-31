@@ -419,6 +419,35 @@ final class ForumModelTests {
         session.close()
     }
 
+    // Discord's unread look: the store says which posts have messages past the read position.
+    @Test
+    func aCardSaysWhetherItsPostIsUnread() throws {
+        store.update { $0.unreadPosts = [id(41), id(43)] }
+        list([41, 42], archived: [43])
+        let session = inForum()
+
+        let forum = try forum(session)
+        #expect(forum.posts.map(\.unread) == [true, false])
+        #expect(forum.archived.map(\.unread) == [true])
+        #expect(account.log.reads.contains(.unreadPosts([id(41), id(42)])))
+        session.close()
+    }
+
+    // An ack anywhere (here or another device) moves a post's read state: its badge event says so.
+    @Test
+    func aPostsBadgeChangeRereadsItsCard() throws {
+        store.update { $0.unreadPosts = [id(41)] }
+        list([41, 42])
+        let session = inForum()
+        let forum = try forum(session)
+
+        store.update { $0.unreadPosts = [] }
+        session.apply(EventBatch([.badgeChanged(channelId: id(41), guildId: id(1))]))
+
+        #expect(forum.posts.map(\.unread) == [false, false])
+        session.close()
+    }
+
     // MARK: The pill
 
     @Test

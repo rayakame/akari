@@ -66,6 +66,7 @@ final class CallLog: Sendable {
         case hidesMediaDownloads(ChannelId)
         case forumPosts(ChannelId, ForumView)
         case postPreview(ChannelId)
+        case unreadPosts([ChannelId])
     }
 
     private let state = Locked<(calls: [Call], offMainThread: Int)>(([], 0))

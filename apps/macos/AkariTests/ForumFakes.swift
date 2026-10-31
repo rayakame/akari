@@ -31,6 +31,10 @@ nonisolated struct ForumFakes {
     var newPosts: UInt32 = 0
     var canReadHistory = true
     var topic: String? = "Be kind. Search before you post. One idea per post."
+    /// The posts, by index, whose cards show unread.
+    var unread: Set<Int> = []
+    /// No tags and no pin: each card starts with its title.
+    var untagged = false
     private(set) var account: ForumAccount?
 
     @MainActor
@@ -104,7 +108,7 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
         for index in 0..<(fakes.posts + fakes.archived) {
             let id = ForumFakes.post(index)
             let tags: [TagId] =
-                switch index % 5 {
+                switch fakes.untagged ? -1 : index % 5 {
                 case 0: [ForumFakes.tags[3].id]
                 case 1: [ForumFakes.tags[1].id]
                 case 2: ForumFakes.tags.map(\.id)
@@ -120,7 +124,7 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
                     messageCount: UInt32(index * 7 + 2), ownerId: UserId(rawValue: 2),
                     lastMessageId: MessageId(rawValue: id.rawValue + 1), createdAt: nil,
                     memberCount: nil, memberIdsPreview: [],
-                    archivedAt: ForumFakes.now, appliedTags: tags, pinned: index == 0))
+                    archivedAt: ForumFakes.now, appliedTags: tags, pinned: index == 0 && !fakes.untagged))
         }
         channelsById = channels
         super.init(noHandle: NoHandle())
@@ -183,6 +187,10 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
         return ForumPosts(
             active: posts, archived: (fakes.posts..<(fakes.posts + fakes.archived)).map(ForumFakes.post),
             older: .all, newPosts: fakes.newPosts)
+    }
+
+    override func unreadPosts(postIds: [ChannelId]) -> [ChannelId] {
+        postIds.filter { post in fakes.unread.contains { ForumFakes.post($0) == post } }
     }
 
     override func postPreview(postId: ChannelId) -> PostPreview? {

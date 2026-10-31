@@ -53,6 +53,9 @@ public final class ForumModel {
         public let created: Date
         /// Its first message's images and videos.
         public let media: [Attachment]
+        /// Active, with messages past where the user stopped reading: the bright title and
+        /// preview.
+        public let unread: Bool
     }
 
     public enum Search: Equatable, Sendable {
@@ -399,7 +402,9 @@ public final class ForumModel {
             return true
         }
         let changed = batch.channelsChanged[guildId] ?? []
+        // A post's badge changes with its read state, which its card's look follows.
         return changed.contains(forumId) || !changed.isDisjoint(with: listedIds)
+            || !(batch.badgesChanged[guildId] ?? []).isDisjoint(with: listedIds)
     }
 
     private var view: ForumView {
@@ -434,10 +439,14 @@ public final class ForumModel {
     }
 
     private func cards(_ ids: [ChannelId]) -> [Card] {
-        store.channels(ids: ids).compactMap(card)
+        guard !ids.isEmpty else {
+            return []
+        }
+        let unread = Set(store.unreadPosts(postIds: ids))
+        return store.channels(ids: ids).compactMap { card($0, unread: unread.contains($0.id)) }
     }
 
-    private func card(_ post: Channel) -> Card? {
+    private func card(_ post: Channel, unread: Bool) -> Card? {
         guard let info = post.thread else {
             return nil
         }
@@ -457,6 +466,6 @@ public final class ForumModel {
             time: settings.sort == .creationDate
                 ? posted : ThreadBrowserModel.lastActivity(post, info),
             created: info.createdAt ?? posted,
-            media: first?.attachments.filter { $0.display == .media } ?? [])
+            media: first?.attachments.filter { $0.display == .media } ?? [], unread: unread)
     }
 }
