@@ -34,6 +34,9 @@ enum Palette {
     // Discord's shadow-border: a ring just outside a popout.
     static let shadowBorder = token(
         "shadowBorder", dark: "#ffffff", light: "#000000", alpha: (0.08, 0.08))
+    // Discord's secondary control (Sort & View): 12 % in both themes.
+    static let controlSecondary = token(
+        "controlSecondary", dark: "#97979f", light: "#97979f", alpha: (31 / 255, 31 / 255))
     static let backgroundModNormal = token(
         "backgroundModNormal", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.2))
     static let backgroundModStrong = token(

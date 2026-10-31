@@ -371,12 +371,13 @@ nonisolated private struct Spine: Shape {
 struct ChannelSymbol: View {
     let channel: Channel
     var size: CGFloat = 20
+    var color = Palette.interactiveText
 
     var body: some View {
         // 18 in the 20 box: the # is 17 tall, as Discord's.
         Image(systemName: ChannelSymbols.name(for: channel.kind))
             .font(.system(size: size * 0.9))
-            .foregroundStyle(Color(nsColor: Palette.interactiveText))
+            .foregroundStyle(Color(nsColor: color))
             .frame(width: size, height: size)
             .overlay(alignment: .bottomTrailing) {
                 if channel.nsfw {

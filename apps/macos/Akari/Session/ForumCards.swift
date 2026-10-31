@@ -2,14 +2,19 @@ import AkariKit
 import AppKit
 import SwiftUI
 
-/// The forum page's measures, from Discord's CSS (canary 653948).
+/// The forum page's measures, from Discord's CSS (canary 653948) and, for the list, as Chris's
+/// comparison measured it (2026-10-31).
 enum ForumMeasures {
     static let inset: CGFloat = 16
     static let galleryInset: CGFloat = 24
     static let top: CGFloat = 20
     static let radius: CGFloat = 12
     static let control: CGFloat = 32
-    static let cardGap: CGFloat = 8
+    static let cardGap: CGFloat = 16
+    /// From Sort & View to the first card.
+    static let barBottom: CGFloat = 19
+    /// A list card's padding above its title and below its footer, its 1 pt border included.
+    static let cardPadding: CGFloat = 13
     static let bottom: CGFloat = 24
     static let thumbnail: CGFloat = 72
     static let placeholderHeight: CGFloat = 102
@@ -72,15 +77,15 @@ struct ForumListCard: View {
                     }
                     Text(card.title)
                         .font(TypeScale.forumTitle.font)
-                        .foregroundStyle(Color(nsColor: Palette.textMuted))
+                        .foregroundStyle(Color(nsColor: card.unread ? Palette.textStrong : Palette.textMuted))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .padding(.bottom, 6)
-                    ForumCardMessage(preview: card.preview)
+                    ForumCardMessage(preview: card.preview, unread: card.unread)
                         .frame(height: TypeScale.forumMessage.line)
+                        .padding(.bottom, 8)
                     ForumCardFooter(card: card, now: now)
                 }
-                .padding(.bottom, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if let media = card.media.first {
                     ForumThumbnail(media: media, placeholders: placeholders)
@@ -88,7 +93,7 @@ struct ForumListCard: View {
                         .padding(.leading, 12)
                 }
             }
-            .padding(.vertical, 12)
+            .padding(.vertical, ForumMeasures.cardPadding)
             .padding(.horizontal, 10)
         }
         .buttonStyle(ForumCardStyle(hovered: hovered))
@@ -266,9 +271,11 @@ struct TagEmojiView: View {
     }
 }
 
-/// "Ray: hello", the first message on one line; Discord's words without one.
+/// "Ray: hello", the first message on one line; Discord's words without one. An unread post's
+/// author is strong and its message the default text, a read one's both muted.
 struct ForumCardMessage: View {
     let preview: ForumModel.Card.Preview
+    var unread = false
 
     static let deleted = "Original message was deleted"
 
@@ -278,8 +285,9 @@ struct ForumCardMessage: View {
             case .message(let message, let author):
                 Text(author + ":")
                     .font(TypeScale.forumAuthor.font)
+                    .foregroundStyle(Color(nsColor: unread ? Palette.textStrong : Palette.textMuted))
                     .fixedSize()
-                Self.content(of: message)
+                Self.content(of: message, unread: unread)
                     .font(TypeScale.forumMessage.font)
                     .padding(.leading, 4)
             case .deleted:
@@ -289,12 +297,12 @@ struct ForumCardMessage: View {
                 Color.clear
             }
         }
-        .foregroundStyle(Color(nsColor: Palette.textMuted))
+        .foregroundStyle(Color(nsColor: unread ? Palette.textDefault : Palette.textMuted))
         .lineLimit(1)
         .truncationMode(.tail)
     }
 
-    static func content(of message: Message) -> Text {
+    static func content(of message: Message, unread: Bool = false) -> Text {
         if let placeholder = ThreadBox.placeholder(for: message) {
             return Text(placeholder).italic()
         }
@@ -302,13 +310,14 @@ struct ForumCardMessage: View {
         let built = NSMutableAttributedString(
             attributedString: ThreadBoxView.content(
                 MessageText.build(message, revealed: [], now: Date(), times: times).text))
-        // A read post's message is muted, its mentions and links keep their colors.
+        // The text takes the card's color; mentions and links keep theirs.
+        let text = unread ? Palette.textDefault : Palette.textMuted
         let whole = NSRange(location: 0, length: built.length)
         built.enumerateAttribute(.foregroundColor, in: whole) { value, range, _ in
             if let color = value as? NSColor,
                 color == Palette.textDefault || color == Palette.textStrong
             {
-                built.addAttribute(.foregroundColor, value: Palette.textMuted, range: range)
+                built.addAttribute(.foregroundColor, value: text, range: range)
             }
         }
         let attributed =
@@ -337,13 +346,15 @@ struct ForumCardFooter: View {
 }
 
 struct ForumCardCount: View {
+    static let symbol = "bubble.left.fill"
+
     let count: String
     let size: CGFloat
     var muted = false
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "bubble.left")
+            Image(systemName: Self.symbol)
                 .font(.system(size: size - 2))
                 .foregroundStyle(Color(nsColor: muted ? Palette.textMuted : Palette.textDefault))
             Text(count)
@@ -474,7 +485,7 @@ struct ForumGalleryCard: View {
             }
             Text(card.title)
                 .font(TypeScale.forumGalleryTitle.font)
-                .foregroundStyle(Color(nsColor: Palette.textMuted))
+                .foregroundStyle(Color(nsColor: card.unread ? Palette.textStrong : Palette.textMuted))
                 .lineLimit(1)
         }
     }
@@ -491,9 +502,9 @@ struct ForumGalleryCard: View {
         Group {
             switch card.preview {
             case .message(let message, _):
-                ForumCardMessage.content(of: message)
+                ForumCardMessage.content(of: message, unread: card.unread)
                     .font(TypeScale.forumMessage.font)
-                    .foregroundStyle(Color(nsColor: Palette.textMuted))
+                    .foregroundStyle(Color(nsColor: card.unread ? Palette.textDefault : Palette.textMuted))
             case .deleted:
                 Text(ForumCardMessage.deleted)
                     .font(TypeScale.forumMessage.font)

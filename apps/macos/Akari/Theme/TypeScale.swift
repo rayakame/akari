@@ -137,11 +137,12 @@ nonisolated enum TypeScale {
     static let embedFieldName = TextStyle(14, .semibold, line: 18)
     static let embedFooter = TextStyle(12, .medium, line: 16)
     // The forum page (canary 653948): heading-lg/semibold field and titles, text-sm cards,
-    // text-xs status, the eyebrow, heading-md/semibold empty state, text-md/medium pill.
+    // text-xs status, the eyebrow, heading-md/semibold empty state, text-md/medium pill. A card's
+    // first message is 15, which matches the official client's ink beside SF's.
     static let forumField = TextStyle(20, .semibold, line: 24)
     static let forumTitle = TextStyle(20, .semibold, line: 24)
-    static let forumAuthor = TextStyle(14, .semibold, line: 18)
-    static let forumMessage = TextStyle(14, .medium, line: 18)
+    static let forumAuthor = TextStyle(15, .semibold, line: 18)
+    static let forumMessage = TextStyle(15, .medium, line: 18)
     static let forumFooter = TextStyle(14, .medium, line: 18)
     static let forumTime = TextStyle(14, line: 18)
     static let forumStatus = TextStyle(12, line: 16)

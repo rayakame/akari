@@ -384,7 +384,7 @@ struct ForumTagsBar: View {
             }
         }
         .padding(.top, 16)
-        .padding(.bottom, 4)
+        .padding(.bottom, ForumMeasures.barBottom)
     }
 }
 
@@ -530,8 +530,11 @@ struct ForumSortMenu: View {
             .padding(.trailing, 8)
             .frame(height: ForumMeasures.control)
             .background(
-                Color(nsColor: hovered ? Palette.backgroundModNormal : Palette.baseLowest),
+                Color(nsColor: hovered ? Palette.backgroundModNormal : Palette.controlSecondary),
                 in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(Color(nsColor: Palette.borderSubtle), lineWidth: 1)
+            }
             .contentShape(Capsule())
         }
         .menuStyle(.button)

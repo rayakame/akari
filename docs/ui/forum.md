@@ -2,15 +2,15 @@
 
 What a forum channel shows when the user opens it: its posts as cards in the message list's
 place, with search, the tag filter and Sort & View. Read from Discord's web client (canary
-653948, 2026-10-28; modules in brackets). Posts opening beside the forum, creating posts, NEW
-and the unread look on cards, and media channels come with the next forum PR; until then the
-differences are marked *Akari:*.
+653948, 2026-10-28; modules in brackets), the list's spacing as Chris measured the live client
+against Akari (2026-10-31). Posts opening beside the forum, creating posts, NEW and media
+channels come with the next forum PR; until then the differences are marked *Akari:*.
 
 ## Where it opens
 
 - A forum row in the channel list opens the page; so do a forum's mention in a message and a
-  link to it. The header shows the forum's symbol and name, without its topic: the topic is the
-  page's guidelines. Media channels don't open yet (their tooltip says so).
+  link to it. The header shows the forum's symbol (two filled bubbles, as in the channel list, in
+  the header icons' gray) and name, without its topic: the topic is the page's guidelines. Media channels don't open yet (their tooltip says so).
 - Opening the page refreshes its list and asks Discord for the first 10 posts' first messages
   (the official client does that as the row is pressed, module 473503). It subscribes the guild
   as opening any channel does, so the gateway's thread lists arrive.
@@ -67,9 +67,11 @@ differences are marked *Akari:*.
 
 ## The tags bar
 
-16 above, 4 below, 32 tall:
+16 under the search row, 19 above the first card, 32 tall:
 
-- **"Sort & View"** (`base-lowest`, a capsule, 12 and 8 inside): a menu with "Sort by" (Recently
+- **"Sort & View"** (a capsule, 12 and 8 inside, the secondary control's 12 % fill and a 1 pt
+  `border-subtle`, as the live client draws it; canary 653948's CSS has `base-lowest` without a
+  border): a menu with "Sort by" (Recently
   Active, Date Posted), "View as" (List, Gallery), "Tag Matching" (Match Some, Match All; with
   tags) and "Reset to default", which restores the forum's sort, view and matching and keeps the
   tag filter. The choices stay per forum for the session, starting from the forum's defaults.
@@ -83,15 +85,24 @@ differences are marked *Akari:*.
 Cards are buttons: the hand over all of them ([cursors.md](cursors.md)), Tab reaches them,
 VoiceOver reads "Post {title}, {count} messages".
 
-- **List** (16 from the page's sides, 8 apart): radius 12, `base-low`, `border-subtle`; hovered
-  `surface-high` with a stronger border and a shadow. 12 above and below, 10 at the sides:
+- **List** (16 from the page's sides, 16 apart): radius 12, `base-low`, `border-subtle`; hovered
+  `surface-high` with a stronger border and a shadow. 13 above and below (with the border), 10
+  at the sides; 102 tall with one line of title and no tags: the title's ink 18 below the top,
+  title, message and footer about 27 apart, the footer 14 above the bottom (the live client puts
+  the 8 above the footer, where canary 653948's CSS has it below):
   - the pinned badge (22, the brand, a white pin, "Pinned") and the first 3 tags (24 tall, 8
     inside, 12 semibold; one in the filter on `base-lowest`), then "+N" naming the rest;
-  - the title (20 semibold, 2 lines), muted until cards show unread;
-  - the first message on one line: the author (14 semibold) and its text (14 medium, the
-    message's markdown on one line), "Click to see attachment" and its kin without text,
-    "Original message was deleted" once Discord says so, nothing while it loads;
-  - the message count and the time: "12", "50+" for posts before 2022-07-01, "100k+"; "•"; the
+  - the title (20 semibold, 2 lines);
+  - the first message on one line: the author (semibold) and its text (medium, the message's
+    markdown on one line), *15 where Discord's is 14, which matches its ink beside SF*, "Click
+    to see attachment" and its kin without text, "Original message was deleted" once Discord says
+    so, nothing while it loads;
+  - an **unread** post (active, with messages past the user's read position, whatever its mute
+    or unread setting; Discord's `isForumPostUnread`) shows its title and author in
+    `text-strong` and its message in `text-default`; a read or archived one all in
+    `text-muted`;
+  - the message count (a filled bubble) and the time: "12", "50+" for posts before 2022-07-01,
+    "100k+"; "•"; the
     last activity (or the creation under Date Posted) as "5m ago", "3h ago", "2d ago",
     ">30d ago", then the date; its tooltip says when it was posted;
   - the first media at the right, 72 square, radius 8, 12 from the text; covered media (spoiler,
@@ -111,9 +122,9 @@ VoiceOver reads "Post {title}, {count} messages".
 
 ## Loading and empty
 
-- While older posts or a search load: placeholder cards (`base-low`, radius 12, 102 tall, 8
-  apart, at 33%, 100% and 66% by turns, as many as fill the window below 200 of header, 118
-  each); in the gallery, tiles for the window's rows.
+- While older posts or a search load: placeholder cards (`base-low`, radius 12, 102 tall, 16
+  apart as the cards, at 33%, 100% and 66% by turns, as many as fill the window below 200 of
+  header, 118 each); in the gallery, tiles for the window's rows.
 - With no post to show and nothing loading: "Be the first to start the conversation!" / "What
   do you want to post about in #ideas?"; with a filter "There are no posts with this tag yet!"
   (or "these tags") / "Be the first to start a conversation with this tag" (or "these tags").

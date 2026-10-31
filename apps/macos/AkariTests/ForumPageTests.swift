@@ -140,7 +140,7 @@ struct ForumPageTests {
             ),
         ] {
             let areas = handAreas(in: view, size: size)
-            // The list card is 132 tall, centered in the 160.
+            // The list card is 134 tall (its tags row too), centered in the 160.
             for point in [NSPoint(x: 4, y: 80), NSPoint(x: 596, y: 80), NSPoint(x: 300, y: 20)] {
                 #expect(areas.contains { $0.contains(point) }, "\(name) \(point): \(areas)")
             }

@@ -18,7 +18,7 @@ struct ChannelHeader: View {
         HStack(spacing: 8) {
             if let channel {
                 if let parent, channel.isThread {
-                    ChannelSymbol(channel: parent)
+                    ChannelSymbol(channel: parent, color: Palette.textMuted)
                     Button(action: openParent) {
                         Text(parent.name ?? "")
                             .font(TypeScale.channelHeader.font)
@@ -33,7 +33,7 @@ struct ChannelHeader: View {
                         .foregroundStyle(Color(nsColor: Palette.textMuted))
                         .accessibilityHidden(true)
                 }
-                ChannelSymbol(channel: channel)
+                ChannelSymbol(channel: channel, color: Palette.textMuted)
                 Text(name)
                     .font(TypeScale.channelHeader.font)
                     .foregroundStyle(Color(nsColor: Palette.textStrong))
