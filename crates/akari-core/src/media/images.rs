@@ -384,6 +384,7 @@ impl Images {
         let started = Instant::now();
         let mut url = self.signed(&planned, false).await?;
         let mut renewed_after_denial = false;
+        let mut from_original = false;
         let mut attempts = 0;
         let outcome = loop {
             attempts += 1;
@@ -395,7 +396,16 @@ impl Images {
                         && signed::expires(&url).is_none_or(|ex| ex <= self.now_seconds()) =>
                 {
                     renewed_after_denial = true;
-                    url = self.signed(&planned, true).await?;
+                    let renewed = self.signed(&planned, true).await?;
+                    url = match &planned.original {
+                        Some(original) if from_original => signed::resign(original, &renewed),
+                        _ => renewed,
+                    };
+                }
+                Fetched::TooLarge if !from_original && let Some(original) = &planned.original => {
+                    tracing::debug!(target: LOG, key = %planned.disk, "proxy copy too large, original asked");
+                    from_original = true;
+                    url = signed::resign(original, &self.signed(&planned, false).await?);
                 }
                 Fetched::Status(403 | 404 | 410) => {
                     lock(&self.missing).insert(planned.disk.clone());

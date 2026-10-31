@@ -1,6 +1,6 @@
 use reqwest::Url;
 
-use super::{AnimatedFormat, ImageError, ImageKey};
+use super::{AnimatedFormat, ImageError, ImageKey, MAX_BODY};
 use crate::model::StickerFormatType;
 use crate::state::{Attachment, AttachmentKind, EmbedMedia, ImageHash};
 
@@ -92,6 +92,9 @@ pub(crate) struct Planned {
     pub(crate) url: Url,
     /// The signed CDN link whose signature `url` carries, refreshed when it's due.
     pub(crate) signed: Option<Url>,
+    /// An attachment as uploaded, when it fits the display cap: the media proxy's copy can weigh
+    /// several times as much (an animated GIF it encodes again).
+    pub(crate) original: Option<Url>,
 }
 
 /// Discord's image hosts: the CDN and the media proxy as the endpoints name them, and the
@@ -177,6 +180,7 @@ impl Hosts {
                     source: None,
                     url,
                     signed: None,
+                    original: None,
                 })
             }
             ImageKey::Emoji {
@@ -198,6 +202,7 @@ impl Hosts {
                 source: None,
                 url: join(&self.cdn, &format!("embed/avatars/{index}.png"))?,
                 signed: None,
+                original: None,
             }),
             ImageKey::DefaultAvatar { .. } => Err(ImageError::UnknownKey),
             ImageKey::Sticker { id, format } => self.sticker(id.get(), *format, size, animated),
@@ -320,6 +325,7 @@ impl Hosts {
             source: None,
             url,
             signed: None,
+            original: None,
         }
     }
 
@@ -357,6 +363,7 @@ impl Hosts {
             source: None,
             url,
             signed: None,
+            original: None,
         })
     }
 
@@ -391,7 +398,10 @@ impl Hosts {
             (AttachmentKind::Image, Some(_)) if attachment.is_animated() => Form::WebP,
             _ => Form::Still,
         };
-        Ok(Self::proxied(
+        let original = signed
+            .clone()
+            .filter(|_| form == Form::Gif && attachment.size <= MAX_BODY as u64);
+        let mut planned = Self::proxied(
             proxy,
             format!("attachment/{}", attachment.id.get()),
             (width, height),
@@ -399,7 +409,9 @@ impl Hosts {
             form,
             &extension,
             signed,
-        ))
+        );
+        planned.original = original;
+        Ok(planned)
     }
 
     /// An embed's image or thumbnail through the proxy, keyed by its proxy path.
@@ -456,6 +468,7 @@ impl Hosts {
             source: None,
             signed: Some(url.clone()).filter(is_attachment_link),
             url,
+            original: None,
         })
     }
 
@@ -518,6 +531,7 @@ impl Hosts {
             source: Some(longest),
             url,
             signed,
+            original: None,
         }
     }
 }

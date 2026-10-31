@@ -63,6 +63,9 @@ Discord's numbers, from sizes alone, so a row is as tall before its media loads 
   and "Play GIFs when Discord is focused" (`gif_auto_play`) is on, or while the pointer is over
   it. Reduce Motion stops the setting's part; the pointer still plays it. *Akari's own "GIF"
   badge* sits top left, 6 in, while it doesn't play.
+- A playing GIF comes from the media proxy, as Discord's does. *A display file may weigh 16 MB;
+  when the proxy's copy is heavier (it encodes a GIF again, a 10 MB one came back at 33.5 MB) and
+  the upload itself fits, the GIF comes from the upload on the CDN.*
 - A video shows its poster (the proxy's still) with Discord's Play button in the middle: a black
   48 pt circle at 60 %, its symbol nudged 1 right.
 - A click on an image or a video opens the media viewer at it ([viewer.md](viewer.md)). *A
