@@ -3,8 +3,7 @@ use crate::state::{NotificationLevel, ThreadMembership};
 
 // From thread_create.json: created in GENERAL by Mira, with the user's member.
 const CREATED: u64 = 300_000_000_000_000_021;
-// The fixture's member joined G1 on 2024-01-01; these IDs are from 2023 and 2024-10.
-const BEFORE_JOIN: u64 = 1_100_000_000_000_000_000;
+// The fixture's member joined G1 on 2024-01-01; this ID is from 2024-10.
 const AFTER_JOIN: u64 = 1_300_000_000_000_000_000;
 
 fn ready_where(edit: impl FnOnce(&mut Value)) -> State {
@@ -261,8 +260,8 @@ fn membership_events_for_an_unknown_thread_are_skipped() {
 #[test]
 fn a_thread_without_a_read_state_is_unread_from_its_start() {
     let mut state = ready_state();
-    let mut thread = created();
-    thread["last_message_id"] = BEFORE_JOIN.to_string().into();
+    let mut thread = started_when_made(created());
+    thread["last_message_id"] = AFTER_JOIN.to_string().into();
 
     apply(&mut state, "THREAD_CREATE", thread);
 
@@ -270,22 +269,14 @@ fn a_thread_without_a_read_state_is_unread_from_its_start() {
     assert!(state.read_state(Snowflake::new(CREATED)).is_none());
 }
 
-// A forum post's starter message has the post's own ID.
-#[test]
-fn a_forum_post_with_only_its_starter_is_unread() {
-    let mut state = ready_state();
-    let mut post = created();
-    post["last_message_id"] = CREATED.to_string().into();
-
-    apply(&mut state, "THREAD_CREATE", post);
-
-    assert!(state.unread(Snowflake::new(CREATED)));
-}
-
 #[test]
 fn a_thread_we_are_mentioned_into_is_unread_from_its_start() {
     let mut state = ready_state();
-    apply(&mut state, "THREAD_CREATE", created_unjoined());
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        started_when_made(created_unjoined()),
+    );
     apply(&mut state, "MESSAGE_CREATE", plain(AFTER_JOIN + 1, CREATED));
 
     apply(
@@ -295,9 +286,80 @@ fn a_thread_we_are_mentioned_into_is_unread_from_its_start() {
     );
 
     let read = state.read_state(Snowflake::new(CREATED)).expect("started");
-    assert_eq!(read.acked.map(|id| id.get()), Some(CREATED - 1));
+    // Read up to the guild join (2024-01-01T12:00:00Z), which is after the thread's start.
+    assert_eq!(
+        read.acked.map(|id| id.get()),
+        Some(snowflake_at(1_704_110_400_001) - 1)
+    );
     assert_eq!(read.mentions, 1);
     assert!(state.unread(Snowflake::new(CREATED)));
+}
+
+// thread_create.json's member joined at 2026-10-08T12:00:00Z.
+const JOINED_THREAD: i64 = 1_791_460_800_000;
+
+// The thread with its newest message at `last`, last archived or unarchived at `archived`.
+fn thread_at(archived: &str, joined: bool, last: i64) -> Value {
+    let mut thread = if joined {
+        created()
+    } else {
+        created_unjoined()
+    };
+    thread["thread_metadata"]["archive_timestamp"] = archived.into();
+    thread["last_message_id"] = snowflake_at(last).to_string().into();
+    thread
+}
+
+fn unread_with(thread: Value) -> bool {
+    let mut state = ready_state();
+    apply(&mut state, "THREAD_CREATE", thread);
+    state.unread(Snowflake::new(CREATED))
+}
+
+// Discord's start without a read state (`getAckTimestamp`): 5 s before the user joined.
+#[test]
+fn a_joined_thread_is_read_up_to_five_seconds_before_the_join() {
+    let archived = "2026-10-01T00:00:00.000000+00:00";
+
+    assert!(!unread_with(thread_at(
+        archived,
+        true,
+        JOINED_THREAD - 6_000
+    )));
+    assert!(unread_with(thread_at(
+        archived,
+        true,
+        JOINED_THREAD - 4_000
+    )));
+}
+
+// What was said before its last archive change counts as read.
+#[test]
+fn an_unjoined_thread_is_read_up_to_its_last_archive_change() {
+    let archived = "2026-10-08T12:00:00.000000+00:00";
+
+    assert!(!unread_with(thread_at(
+        archived,
+        false,
+        JOINED_THREAD - 1_000
+    )));
+    assert!(unread_with(thread_at(
+        archived,
+        false,
+        JOINED_THREAD + 1_000
+    )));
+}
+
+// The fixture's member joined G1 at 2024-01-01T12:00:00Z; a forum post isn't bound by it.
+#[test]
+fn a_thread_is_read_up_to_the_guild_join() {
+    let before_join = 1_704_067_200_000;
+
+    assert!(!unread_with(thread_at(
+        "2023-06-01T00:00:00.000000+00:00",
+        false,
+        before_join
+    )));
 }
 
 const MINUTE: i64 = 60_000;

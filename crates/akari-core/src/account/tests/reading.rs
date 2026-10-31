@@ -563,6 +563,16 @@ async fn mark_read_on_a_read_channel_sends_nothing() {
     assert!(posted(&online.server).await.is_empty());
 }
 
+// thread_create.json without the user, last archived when its ID was made: without a read state
+// a thread is read up to its last archive change, and the fixture's is later than the pings.
+fn unjoined_thread() -> Value {
+    let mut thread: Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/thread_create.json")).unwrap();
+    thread.as_object_mut().unwrap().remove("member");
+    thread["thread_metadata"]["archive_timestamp"] = "2017-04-07T20:12:53.730000+00:00".into();
+    thread
+}
+
 #[tokio::test]
 async fn mark_guilds_read_sends_one_bulk_ack_of_unread_channels_and_joined_threads() {
     let mut online = acking(|ready| {
@@ -570,9 +580,7 @@ async fn mark_guilds_read_sends_one_bulk_ack_of_unread_channels_and_joined_threa
         add_channel(ready, QUIET, 0, AFTER_JOIN, AFTER_JOIN);
     })
     .await;
-    let mut unjoined: Value =
-        serde_json::from_str(include_str!("../../../tests/fixtures/thread_create.json")).unwrap();
-    unjoined.as_object_mut().unwrap().remove("member");
+    let unjoined = unjoined_thread();
     online
         .connection
         .send(dispatch(2, "THREAD_CREATE", unjoined))
@@ -1236,9 +1244,7 @@ async fn a_thread_ack_carries_flags_2() {
 #[tokio::test]
 async fn an_unjoined_thread_is_acked_without_last_viewed() {
     let mut online = acking(|_| {}).await;
-    let mut unjoined: Value =
-        serde_json::from_str(include_str!("../../../tests/fixtures/thread_create.json")).unwrap();
-    unjoined.as_object_mut().unwrap().remove("member");
+    let unjoined = unjoined_thread();
     online
         .connection
         .send(dispatch(2, "THREAD_CREATE", unjoined))

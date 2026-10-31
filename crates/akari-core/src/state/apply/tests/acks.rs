@@ -824,7 +824,7 @@ fn unjoined_thread(state: &mut State, mentioned: bool) -> u64 {
         "../../../../tests/fixtures/thread_create.json"
     ));
     created.as_object_mut().unwrap().remove("member");
-    apply(state, "THREAD_CREATE", created);
+    apply(state, "THREAD_CREATE", started_when_made(created));
     let message = if mentioned {
         message(AFTER_JOIN + 3, thread)
     } else {

@@ -16,6 +16,7 @@ use crate::state::types::{Channel, ThreadInfo};
 const MENTION_ON_ALL_MESSAGES: u64 = 1 << 5;
 // A channel and the thread beside it in the split view.
 const READING_LIMIT: usize = 2;
+const THREAD_JOIN_GRACE: i64 = 5_000;
 
 // A channel the user is reading, with the newest row its list showed after the last write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,14 +44,37 @@ impl Entities {
         }
     }
 
-    // Without a read state a thread is unread from its start, including a forum post's starter,
-    // which has the post's ID; a guild channel is read up to the join, a DM until a message.
+    // Without a read state a guild channel is read up to the join, a DM until a message, and a
+    // thread as the official client's `getAckTimestamp` has it: up to 5 s before the user joined
+    // it or its last archive change, else its start (a forum post's starter has the post's ID).
     fn start_position(&self, channel: &Channel) -> Option<u64> {
-        if channel.is_thread() {
-            return Some(channel.id.get().saturating_sub(1));
+        let guild_join = channel
+            .guild_id
+            .and_then(|guild| self.members.get(&guild)?.joined_at)
+            .map(Timestamp::unix_millis);
+        let Some(info) = channel.thread.as_deref() else {
+            let joined = guild_join?;
+            return Some(Snowflake::<GenericMarker>::from_unix_millis(joined, 0).get());
+        };
+        let joined = info
+            .member
+            .and_then(|member| member.joined_at)
+            .map_or(-THREAD_JOIN_GRACE, |at| {
+                at.unix_millis() - THREAD_JOIN_GRACE
+            });
+        let mut start = joined.max(info.archive_timestamp.unix_millis() - 1);
+        if start <= 0 {
+            start = channel.id.unix_millis() - 1;
         }
-        let joined = self.members.get(&channel.guild_id?)?.joined_at?;
-        Some(Snowflake::<GenericMarker>::from_unix_millis(joined.unix_millis(), 0).get())
+        let in_forum = channel
+            .parent_id
+            .and_then(|parent| self.channels.get(&parent))
+            .is_some_and(|parent| parent.is_forum());
+        if !in_forum && let Some(guild_join) = guild_join {
+            start = start.max(guild_join);
+        }
+        // The last ID of that millisecond: a message within it is read, as by timestamps.
+        Some(Snowflake::<GenericMarker>::from_unix_millis(start + 1, 0).get() - 1)
     }
 
     fn needs_ack(&self, channel: &Channel) -> bool {

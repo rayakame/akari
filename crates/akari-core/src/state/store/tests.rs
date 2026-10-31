@@ -2066,6 +2066,10 @@ fn an_ack_undone_while_ready_is_prepared_still_gets_its_badge_event() {
 const FETCHED: u64 = 300_000_000_000_000_040;
 
 fn fetched(archived: bool, member: bool) -> model::Channel {
+    serde_json::from_str(&fetched_value(archived, member).to_string()).unwrap()
+}
+
+fn fetched_value(archived: bool, member: bool) -> Value {
     let mut thread = json!({
         "id": FETCHED.to_string(),
         "type": 11,
@@ -2086,7 +2090,7 @@ fn fetched(archived: bool, member: bool) -> model::Channel {
             "join_timestamp": "2024-03-01T08:30:00.250000+00:00", "flags": 1, "muted": false
         });
     }
-    serde_json::from_str(&thread.to_string()).unwrap()
+    thread
 }
 
 fn fetched_id() -> ChannelId {
@@ -2162,10 +2166,12 @@ fn a_fetch_keeps_what_the_gateway_brought_meanwhile() {
 fn a_fetched_joined_thread_is_listed_at_once() {
     let store = ready_store();
 
-    assert!(matches!(
-        store.learn_thread(fetched(false, true)),
-        Learned::Kept
-    ));
+    // Its newest message came after the join, long ago: it's listed for being unread.
+    let mut thread = fetched_value(false, true);
+    thread["last_message_id"] = "1300000000000000000".into();
+    let thread = serde_json::from_str(&thread.to_string()).unwrap();
+
+    assert!(matches!(store.learn_thread(thread), Learned::Kept));
 
     assert!(
         store

@@ -221,7 +221,7 @@ fn a_ping_in_an_unjoined_thread_reaches_the_server_badge_once_it_joins_the_user(
         "../../../../tests/fixtures/thread_create.json"
     ));
     thread.as_object_mut().unwrap().remove("member");
-    apply(&mut state, "THREAD_CREATE", thread);
+    apply(&mut state, "THREAD_CREATE", started_when_made(thread));
     apply(
         &mut state,
         "MESSAGE_CREATE",
@@ -794,9 +794,9 @@ fn a_thread_created_later_follows_its_parent() {
     apply(
         &mut state,
         "THREAD_CREATE",
-        fixture(include_str!(
+        started_when_made(fixture(include_str!(
             "../../../../tests/fixtures/thread_create.json"
-        )),
+        ))),
     );
     apply(
         &mut state,

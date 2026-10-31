@@ -598,7 +598,11 @@ fn only_mentions_counts_unread_posts() {
     let mut state = state_from(&ready);
     apply(&mut state, "CHANNEL_CREATE", forum());
     apply(&mut state, "MESSAGE_ACK", read_ack(FORUM, FORUM_ACK));
-    apply(&mut state, "THREAD_CREATE", listed_post(OLD, OLD + 1, &[]));
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        started_when_made(listed_post(OLD, OLD + 1, &[])),
+    );
     apply(
         &mut state,
         "USER_GUILD_SETTINGS_UPDATE",
@@ -1042,4 +1046,33 @@ fn a_newly_pinned_post_joins_the_frozen_list() {
     apply(&mut state, "THREAD_UPDATE", pinned);
 
     assert_eq!(active(&state, &any), [LATER, MIDDLE, OLD, NEWEST]);
+}
+
+// A post's starter message has the post's own ID: alone, it makes the post unread.
+#[test]
+fn a_post_with_only_its_starter_is_unread() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let mut starter_only = started_when_made(post(&[]));
+    starter_only["last_message_id"] = POST.to_string().into();
+
+    apply(&mut state, "THREAD_CREATE", starter_only);
+
+    assert!(state.unread(Snowflake::new(POST)));
+}
+
+// Discord's start for a post without a read state isn't bound by the guild join, as other
+// threads' is (the fixture's member joined G1 at 2024-01-01T12:00:00Z).
+#[test]
+fn a_post_from_before_the_guild_join_is_unread() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let mut early = post(&[]);
+    early["thread_metadata"]["archive_timestamp"] = "2023-06-01T00:00:00.000000+00:00".into();
+    let before_join = Snowflake::<model::GenericMarker>::from_unix_millis(1_704_067_200_000, 0);
+    early["last_message_id"] = before_join.get().to_string().into();
+
+    apply(&mut state, "THREAD_CREATE", early);
+
+    assert!(state.unread(Snowflake::new(POST)));
 }
