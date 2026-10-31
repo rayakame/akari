@@ -41,6 +41,7 @@ async fn a_forum_and_its_posts_cross_as_records() {
             "parent_id": FORUM.get().to_string(), "name": "a question", "flags": 2,
             "owner_id": "100000000000000002", "applied_tags": [BUG.get().to_string()],
             "total_message_sent": 4, "message_count": 4, "member_count": 1,
+            "last_message_id": "1300000000000000000",
             "thread_metadata": {"archived": false, "auto_archive_duration": 1440,
                 "archive_timestamp": "2024-03-02T08:30:00.250000+00:00", "locked": false},
         }}),
@@ -83,6 +84,7 @@ async fn a_forum_and_its_posts_cross_as_records() {
     assert_eq!(post.applied_tags, [BUG]);
     assert_eq!(post.total_message_sent, Some(4));
     assert!(post.pinned);
+    assert_eq!(store.unread_posts(vec![POST, FORUM]), [POST]);
 
     account.open_forum(Some(FORUM));
     events_until(

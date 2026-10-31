@@ -1076,3 +1076,68 @@ fn a_post_from_before_the_guild_join_is_unread() {
 
     assert!(state.unread(Snowflake::new(POST)));
 }
+
+// A card's unread look, as Discord's `isForumPostUnread`: an active post with messages past where
+// the user stopped reading, whatever its mute or unread setting; an archived post never.
+#[test]
+fn unread_posts_are_active_ones_with_messages_past_the_read_position() {
+    let mut ready = ready_value();
+    ready["notification_settings"]["flags"] = 16.into();
+    let mut state = state_from(&ready);
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let mut archived = listed_post(NEWEST, 400_000_000_000_000_500, &[]);
+    archived["thread_metadata"]["archived"] = true.into();
+    for post in [
+        listed_post(OLD, 400_000_000_000_000_900, &[]),
+        listed_post(MIDDLE, 400_000_000_000_000_200, &[]),
+        archived,
+    ] {
+        apply(&mut state, "THREAD_CREATE", started_when_made(post));
+    }
+    apply(
+        &mut state,
+        "MESSAGE_ACK",
+        read_ack(MIDDLE, 400_000_000_000_000_200),
+    );
+    // Only mentions: the posts show no unread badge, their cards still do.
+    apply(
+        &mut state,
+        "USER_GUILD_SETTINGS_UPDATE",
+        json!({
+            "guild_id": G1.to_string(),
+            "channel_overrides": [{"channel_id": FORUM.to_string(), "muted": false, "message_notifications": 1, "flags": 512}],
+        }),
+    );
+    assert!(!state.channel_badge(Snowflake::new(OLD)).unread);
+
+    let unread = state.unread_posts(&[OLD, MIDDLE, NEWEST, LATER].map(Snowflake::new));
+
+    assert_eq!(unread, [Snowflake::new(OLD)]);
+}
+
+// Reading a post, even one the user never joined, says to read its card's look again.
+#[test]
+fn an_ack_on_a_post_says_its_badge_changed() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        started_when_made(listed_post(OLD, 400_000_000_000_000_900, &[])),
+    );
+    assert_eq!(state.unread_posts(&[Snowflake::new(OLD)]).len(), 1);
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_ACK",
+        read_ack(OLD, 400_000_000_000_000_900),
+    );
+
+    assert!(
+        events
+            .iter()
+            .any(|event| event.starts_with(&format!("BadgeChanged({OLD}"))),
+        "{events:?}"
+    );
+    assert!(state.unread_posts(&[Snowflake::new(OLD)]).is_empty());
+}

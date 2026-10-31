@@ -225,6 +225,14 @@ impl Store {
         self.core.forum_posts(forum_id, &(&view).into()).into()
     }
 
+    /// Of `post_ids`, the active posts with messages past where the user stopped reading: their
+    /// cards show bright, whatever the post's mute or unread setting; an archived post never
+    /// does. `BadgeChanged`, `ChannelUpdated` and `ThreadActivity` for a post say to read it
+    /// again.
+    pub fn unread_posts(&self, post_ids: Vec<ChannelId>) -> Vec<ChannelId> {
+        self.core.unread_posts(&post_ids)
+    }
+
     /// A forum post's first message for its card; `None` until Akari has it
     /// (`Account::request_post_previews`). `PostPreviewChanged` says to read it again.
     pub fn post_preview(&self, post_id: ChannelId) -> Option<PostPreview> {

@@ -479,6 +479,20 @@ impl State {
             .map(PostPreview::Loaded)
     }
 
+    /// Of `posts`, the active ones with messages past where the user stopped reading.
+    pub(crate) fn unread_posts(&self, posts: &[ChannelId]) -> Vec<ChannelId> {
+        posts
+            .iter()
+            .copied()
+            .filter(|post| {
+                self.entities.channels.get(post).is_some_and(|channel| {
+                    channel.thread.as_deref().is_some_and(|info| !info.archived)
+                        && self.entities.unread(channel)
+                })
+            })
+            .collect()
+    }
+
     /// Queues the posts whose cards show without a first message, unless asked already or failed
     /// within the last 30 s; `true` when one was queued.
     pub(crate) fn want_post_previews(

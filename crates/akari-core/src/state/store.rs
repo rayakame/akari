@@ -1144,6 +1144,14 @@ impl Store {
         self.read(|inner| inner.state.forum_posts(forum, view))
     }
 
+    /// Of `posts`, the active ones with messages past where the user stopped reading, which
+    /// their cards show bright as the official client's do: whatever the post's mute or unread
+    /// setting, and never for an archived post. Read again on `BadgeChanged` (its read state),
+    /// `ChannelUpdated` and `ThreadActivity` for a post.
+    pub fn unread_posts(&self, posts: &[ChannelId]) -> Vec<ChannelId> {
+        self.read(|inner| inner.state.unread_posts(posts))
+    }
+
     /// DMs and group DMs, in no particular order.
     pub fn private_channels(&self) -> Vec<Arc<Channel>> {
         self.read(|inner| inner.state.private_channels())
