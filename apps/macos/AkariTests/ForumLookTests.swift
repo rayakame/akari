@@ -70,48 +70,53 @@ struct ForumLookTests {
         return found
     }
 
-    func page(_ session: SessionModel) throws -> Rendered {
+    func page(_ session: SessionModel, scale: CGFloat = 2) throws -> Rendered {
         let forum = try #require(session.forum)
         return try Rendered(
             ForumPage(forum: forum, session: session, now: ForumFakes.now)
                 .frame(width: Self.width, height: 700),
-            size: NSSize(width: Self.width, height: 700))
+            size: NSSize(width: Self.width, height: 700), scale: scale)
     }
 
-    @Test
-    func cardsAre16ApartAndThePill19AboveThem() throws {
-        let image = try page(session())
+    // At 1× (CI's runner) edges round to whole points.
+    @Test(arguments: [1, 2] as [CGFloat])
+    func cardsAre16ApartAndThePill19AboveThem(scale: CGFloat) throws {
+        let image = try page(session(), scale: scale)
+        let near = scale == 1 ? 1 : 0.5
         let background = image.color(4, 4)
 
         // Left of Sort & View's text, right of its round end; the search field and cards cross it.
         let crossed = boxes(image, x: 50, background: background)
         try #require(crossed.count >= 5, "\(crossed)")
         let (search, pill, first, second, third) = (crossed[0], crossed[1], crossed[2], crossed[3], crossed[4])
-        #expect(abs(pill.top - search.bottom - 16) <= 0.5, "search to pill \(pill.top - search.bottom)")
-        #expect(abs(pill.bottom - pill.top - 32) <= 0.5, "pill \(pill.bottom - pill.top)")
-        #expect(abs(first.top - pill.bottom - 19) <= 0.5, "pill to card \(first.top - pill.bottom)")
-        #expect(abs(second.top - first.bottom - 16) <= 0.5, "card gap \(second.top - first.bottom)")
-        #expect(abs(third.top - second.bottom - 16) <= 0.5)
-        #expect(abs(first.bottom - first.top - 102) <= 0.5, "card \(first.bottom - first.top)")
+        let toPill = pill.top - search.bottom
+        let toCard = first.top - pill.bottom
+        let gap = second.top - first.bottom
+        #expect(abs(toPill - 16) <= near, "search to pill \(toPill)")
+        #expect(abs(pill.bottom - pill.top - 32) <= near, "pill \(pill.bottom - pill.top)")
+        #expect(abs(toCard - 19) <= near, "pill to card \(toCard)")
+        #expect(abs(gap - 16) <= near, "card gap \(gap)")
+        #expect(abs(third.top - second.bottom - 16) <= near)
+        #expect(abs(first.bottom - first.top - 102) <= near, "card \(first.bottom - first.top)")
     }
 
     // Discord's secondary control: a 12 % fill and a 1 pt border on the page.
-    @Test
-    func sortAndViewHasAFillAndABorder() throws {
-        let image = try page(session())
+    @Test(arguments: [1, 2] as [CGFloat])
+    func sortAndViewHasAFillAndABorder(scale: CGFloat) throws {
+        let image = try page(session(), scale: scale)
         let background = try #require(image.color(4, 4))
         let pill = try #require(boxes(image, x: 50, background: background).dropFirst().first)
 
         let fill = try #require(image.color(50, pill.top + 3))
-        let edge = try #require(image.color(50, pill.top + 0.25))
+        let edge = try #require(image.color(50, pill.top + 0.5 / scale))
         #expect(fill.brightnessComponent - background.brightnessComponent > 0.03, "\(fill)")
         #expect(edge.brightnessComponent > fill.brightnessComponent + 0.01, "\(edge) over \(fill)")
     }
 
     // Title, preview and footer spread over the card as Discord's, its footer 14 above its bottom.
-    @Test
-    func aCardsLinesSpreadAsDiscords() throws {
-        let image = try page(session())
+    @Test(arguments: [1, 2] as [CGFloat])
+    func aCardsLinesSpreadAsDiscords(scale: CGFloat) throws {
+        let image = try page(session(), scale: scale)
         let background = image.color(4, 4)
         let card = try #require(boxes(image, x: 50, background: background).dropFirst(2).first)
 
@@ -136,9 +141,9 @@ struct ForumLookTests {
     }
 
     // Discord's unread look: an unread post's title and preview bright, a read one's muted.
-    @Test
-    func anUnreadCardIsBrightAndAReadOneMuted() throws {
-        let image = try page(session(unread: [0]))
+    @Test(arguments: [1, 2] as [CGFloat])
+    func anUnreadCardIsBrightAndAReadOneMuted(scale: CGFloat) throws {
+        let image = try page(session(unread: [0]), scale: scale)
         let background = image.color(4, 4)
         let cards = Array(boxes(image, x: 50, background: background).dropFirst(2))
         try #require(cards.count >= 2)
@@ -198,5 +203,20 @@ struct ForumLookTests {
         let symbol = brightest(image, x0: 14, x1: 38, y0: 10, y1: 38)
         let threads = brightest(image, x0: 240, x1: 300, y0: 10, y1: 38)
         #expect(abs(symbol - threads) < 0.02, "\(symbol) vs \(threads)")
+    }
+}
+
+extension Rendered {
+    // In a plain window at `scale`: CI's runner draws at 1×, a Retina Mac at 2×.
+    init<Content: View>(_ view: Content, size: NSSize, scale: CGFloat) throws {
+        let window = ScaledWindow.make(scale: scale)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.setContentSize(size)
+        let host = NSHostingView(rootView: view)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        self.scale = CGFloat(rep.pixelsWide) / host.bounds.width
     }
 }
