@@ -311,12 +311,25 @@ fn a_thread_whose_parent_isnt_viewed_changes_without_events() {
 
 #[test]
 fn unjoined_threads_are_never_listed_or_counted() {
-    let mut state = with_a_box();
+    let mut state = viewing_general();
+    let mut started = with_thread(plain(MESSAGE, GENERAL), 3);
+    started["thread"] = started_when_made(started["thread"].take());
+    apply(&mut state, "MESSAGE_CREATE", started);
     let before = state.guild_badge(Snowflake::new(G1));
 
-    // The fixture's message mentions the user.
-    apply(&mut state, "MESSAGE_CREATE", message(MESSAGE + 1, MESSAGE));
+    // The fixture's message mentions the user, after the guild join (2024-01-01) it counts.
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        message(1_300_000_000_000_000_000, MESSAGE),
+    );
 
+    assert_eq!(
+        state
+            .read_state(Snowflake::new(MESSAGE))
+            .map(|read| read.mentions),
+        Some(1)
+    );
     assert!(!state.listed(Snowflake::new(MESSAGE)));
     assert!(
         state

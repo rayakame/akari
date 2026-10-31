@@ -1652,11 +1652,8 @@ async fn a_save_isnt_held_back_by_the_image_downloads() {
     assert!(images.await.unwrap().iter().all(Result::is_ok));
 }
 
-// An animated GIF built as the one Chris reported: full-size frames after the first draw only
-// what changed and leave the rest transparent over the frame kept underneath (disposal 1), 40 ms
-// each, looping forever; 4 × 4 pixels. `padding` adds a comment of that many bytes, which is how
-// the media proxy's copy stands in here: the same frames, more bytes (Discord's proxy gave that
-// 10 MB GIF back at 33.5 MB).
+// A 4 × 4 GIF shaped as the one Chris reported (delta frames over disposal 1, 40 ms, looping);
+// `padding` bytes of comment stand in for the proxy's heavier copy of the same frames.
 fn delta_gif(frames: usize, padding: usize) -> Vec<u8> {
     let mut bytes = b"GIF89a".to_vec();
     bytes.extend([4, 0, 4, 0, 0x81, 0, 0]);
@@ -1853,4 +1850,76 @@ async fn a_denied_original_is_renewed_as_the_original() {
         original
     );
     assert_eq!(*renewals.lock().unwrap(), 3);
+}
+
+// A denied upload says nothing about the proxy's still of it, which still loads.
+#[tokio::test]
+async fn a_denied_original_leaves_the_still_alone() {
+    let online = connected().await;
+    let (cdn, proxy) = load_gif(&online, delta_gif(3, 0).len(), now_seconds() + 86_400).await;
+    Mock::given(method("GET"))
+        .and(path(proxy.clone()))
+        .and(query_param("format", "webp"))
+        .respond_with(png(4, 4))
+        .mount(&online.server)
+        .await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+    serve(&online.server, &cdn, ResponseTemplate::new(404)).await;
+    assert_eq!(
+        online.account.image(playing(attachment_key())).await,
+        Err(ImageError::NotFound)
+    );
+
+    let still = online
+        .account
+        .image(ImageRequest {
+            key: attachment_key(),
+            width: 8,
+            height: 8,
+            animated: None,
+        })
+        .await;
+
+    assert!(still.is_ok(), "{still:?}");
+}
+
+// The upload gets its own tries, whatever the proxy's took.
+#[tokio::test]
+async fn the_original_has_its_own_tries() {
+    let online = connected().await;
+    let original = delta_gif(3, 0);
+    let (cdn, proxy) = load_gif(&online, original.len(), now_seconds() + 86_400).await;
+    Mock::given(method("GET"))
+        .and(path(proxy.clone()))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(2)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path(cdn.clone()))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    serve(&online.server, &cdn, gif_answer(original.clone())).await;
+
+    let file = online.account.image(playing(attachment_key())).await;
+
+    assert_eq!(
+        std::fs::read(file.expect("the original").path).unwrap(),
+        original
+    );
 }

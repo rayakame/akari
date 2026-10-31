@@ -1141,3 +1141,36 @@ fn an_ack_on_a_post_says_its_badge_changed() {
     );
     assert!(state.unread_posts(&[Snowflake::new(OLD)]).is_empty());
 }
+
+// A post archived before Discord's epoch starts at the epoch, never below it.
+#[test]
+fn a_post_archived_before_discords_epoch_is_unread_after_it() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let mut early = started_when_made(post(&[]));
+    early["thread_metadata"]["archive_timestamp"] = "2014-06-01T00:00:00.000000+00:00".into();
+    early["last_message_id"] = POST.to_string().into();
+
+    apply(&mut state, "THREAD_CREATE", early);
+
+    assert!(state.unread(Snowflake::new(POST)));
+}
+
+// Without its metadata a post is still a thread: unread from its start, as Discord's.
+#[test]
+fn a_post_without_its_metadata_is_unread_from_its_start() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let mut bare = post(&[]);
+    bare.as_object_mut().unwrap().remove("thread_metadata");
+    bare["last_message_id"] = POST.to_string().into();
+
+    apply(&mut state, "THREAD_CREATE", bare);
+
+    assert!(
+        state
+            .channel(Snowflake::new(POST))
+            .is_some_and(|post| post.thread.is_none())
+    );
+    assert!(state.unread(Snowflake::new(POST)));
+}

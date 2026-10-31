@@ -405,7 +405,12 @@ impl Images {
                 Fetched::TooLarge if !from_original && let Some(original) = &planned.original => {
                     tracing::debug!(target: LOG, key = %planned.disk, "proxy copy too large, original asked");
                     from_original = true;
+                    attempts = 0;
                     url = signed::resign(original, &self.signed(&planned, false).await?);
+                }
+                // The proxy still has its copy: a denied upload marks nothing missing.
+                Fetched::Status(403 | 404 | 410) if from_original => {
+                    break Err(ImageError::NotFound);
                 }
                 Fetched::Status(403 | 404 | 410) => {
                     lock(&self.missing).insert(planned.disk.clone());

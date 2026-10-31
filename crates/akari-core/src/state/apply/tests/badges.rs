@@ -202,14 +202,18 @@ fn an_unjoined_threads_messages_give_the_server_no_dot() {
         "../../../../tests/fixtures/thread_create.json"
     ));
     thread.as_object_mut().unwrap().remove("member");
-    apply(&mut state, "THREAD_CREATE", thread);
+    apply(&mut state, "THREAD_CREATE", started_when_made(thread));
 
     apply(
         &mut state,
         "MESSAGE_CREATE",
-        plain(400_000_000_000_000_008, 300_000_000_000_000_021),
+        plain(AFTER_JOIN + 8, 300_000_000_000_000_021),
     );
 
+    assert!(
+        state.unread(Snowflake::new(300_000_000_000_000_021)),
+        "its message is unread"
+    );
     assert_eq!(guild_badge(&state, G1), badge(false, 0));
 }
 

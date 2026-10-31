@@ -257,26 +257,37 @@ fn membership_events_for_an_unknown_thread_are_skipped() {
     );
 }
 
-#[test]
-fn a_thread_without_a_read_state_is_unread_from_its_start() {
-    let mut state = ready_state();
-    let mut thread = started_when_made(created());
-    thread["last_message_id"] = AFTER_JOIN.to_string().into();
+// A thread made, and joined, at 2024-06-01T00:00:00Z, after the guild join.
+const NEW_THREAD: i64 = 1_717_200_000_000;
 
-    apply(&mut state, "THREAD_CREATE", thread);
-
-    assert!(state.unread(Snowflake::new(CREATED)));
-    assert!(state.read_state(Snowflake::new(CREATED)).is_none());
+fn new_thread(joined: bool) -> Value {
+    let mut thread = if joined {
+        created()
+    } else {
+        created_unjoined()
+    };
+    thread["thread_metadata"]["archive_timestamp"] = "2024-06-01T00:00:00.000000+00:00".into();
+    if joined {
+        thread["member"]["join_timestamp"] = "2024-06-01T00:00:00.000000+00:00".into();
+    }
+    thread
 }
 
 #[test]
-fn a_thread_we_are_mentioned_into_is_unread_from_its_start() {
+fn a_new_thread_is_unread_from_its_start() {
+    let mut before = new_thread(true);
+    before["last_message_id"] = snowflake_at(NEW_THREAD - 1_000).to_string().into();
+    let mut after = new_thread(true);
+    after["last_message_id"] = snowflake_at(NEW_THREAD + 1_000).to_string().into();
+
+    assert!(!unread_with(before));
+    assert!(unread_with(after));
+}
+
+#[test]
+fn a_mention_starts_a_threads_read_state_at_its_start() {
     let mut state = ready_state();
-    apply(
-        &mut state,
-        "THREAD_CREATE",
-        started_when_made(created_unjoined()),
-    );
+    apply(&mut state, "THREAD_CREATE", new_thread(false));
     apply(&mut state, "MESSAGE_CREATE", plain(AFTER_JOIN + 1, CREATED));
 
     apply(
@@ -286,10 +297,10 @@ fn a_thread_we_are_mentioned_into_is_unread_from_its_start() {
     );
 
     let read = state.read_state(Snowflake::new(CREATED)).expect("started");
-    // Read up to the guild join (2024-01-01T12:00:00Z), which is after the thread's start.
+    // The last ID before the thread's start, as the line above its first message shows.
     assert_eq!(
         read.acked.map(|id| id.get()),
-        Some(snowflake_at(1_704_110_400_001) - 1)
+        Some(snowflake_at(NEW_THREAD) - 1)
     );
     assert_eq!(read.mentions, 1);
     assert!(state.unread(Snowflake::new(CREATED)));

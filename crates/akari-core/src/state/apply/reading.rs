@@ -45,24 +45,24 @@ impl Entities {
     }
 
     // Without a read state a guild channel is read up to the join, a DM until a message, and a
-    // thread as the official client's `getAckTimestamp` has it: up to 5 s before the user joined
-    // it or its last archive change, else its start (a forum post's starter has the post's ID).
+    // thread to the official client's start for it (`getAckTimestamp`, read-states.md).
     fn start_position(&self, channel: &Channel) -> Option<u64> {
         let guild_join = channel
             .guild_id
             .and_then(|guild| self.members.get(&guild)?.joined_at)
             .map(Timestamp::unix_millis);
-        let Some(info) = channel.thread.as_deref() else {
+        if !channel.is_thread() {
             let joined = guild_join?;
             return Some(Snowflake::<GenericMarker>::from_unix_millis(joined, 0).get());
-        };
+        }
+        let info = channel.thread.as_deref();
         let joined = info
-            .member
-            .and_then(|member| member.joined_at)
+            .and_then(|info| info.member?.joined_at)
             .map_or(-THREAD_JOIN_GRACE, |at| {
                 at.unix_millis() - THREAD_JOIN_GRACE
             });
-        let mut start = joined.max(info.archive_timestamp.unix_millis() - 1);
+        let archived = info.map_or(0, |info| info.archive_timestamp.unix_millis() - 1);
+        let mut start = joined.max(archived);
         if start <= 0 {
             start = channel.id.unix_millis() - 1;
         }
@@ -74,7 +74,11 @@ impl Entities {
             start = start.max(guild_join);
         }
         // The last ID of that millisecond: a message within it is read, as by timestamps.
-        Some(Snowflake::<GenericMarker>::from_unix_millis(start + 1, 0).get() - 1)
+        Some(
+            Snowflake::<GenericMarker>::from_unix_millis(start + 1, 0)
+                .get()
+                .saturating_sub(1),
+        )
     }
 
     fn needs_ack(&self, channel: &Channel) -> bool {

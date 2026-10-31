@@ -59,7 +59,7 @@ backing scale (2 on Retina), rounded up. The host passes those pixels (`ImageReq
 | emoji | `emojis/{id}.webp?size=N` | animated: `&animated=true`, or `.gif?size=N` |
 | default avatar | `embed/avatars/{0–5}.png` | 256 × 256 PNGs; no query (size is ignored); 6 is a 404 |
 | sticker | `media…/stickers/{id}.{ext}?size=N` | PNG → `.webp` + `quality=lossless`; APNG `.png` (still: `&passthrough=false`); GIF `.gif` (still: `.webp`); Lottie unsupported |
-| attachment | its `proxy_url` with the signature, then `format=webp`, `quality=lossless` for `.png` and `.avif`, `width`, `height` | GIF animating: no `format`; animated WebP or AVIF (`IS_ANIMATED`): `format=webp&animated=true`; a video's poster: `format=webp` |
+| attachment | its `proxy_url` with the signature, then `format=webp`, `quality=lossless` for `.png` and `.avif`, `width`, `height` | GIF animating: no `format`, and when the proxy's copy is over the cap and the upload's `size` fits, its CDN `url` (renewed) instead; animated WebP or AVIF (`IS_ANIMATED`): `format=webp&animated=true`; a video's poster: `format=webp` |
 | embed image, thumbnail | its `proxy_url`, sized as an attachment | |
 | embed author or footer icon | its `proxy_icon_url` as Discord gives it | |
 

@@ -42,9 +42,10 @@ A channel without a read state:
   canary 653948): the later of 5 s before the user joined it (its thread member's
   `join_timestamp`) and 1 ms before its last archive change (`thread_metadata.archive_timestamp`,
   its creation unless it was archived and opened again); without either, 1 ms before the thread
-  was made. A thread outside a forum or media channel is also read up to the guild join; a forum
-  post isn't. Compared by milliseconds, as the client compares timestamps. So a new thread is
-  unread from its start, a forum post's starter message (which has the post's ID) included, and
+  was made, never before Discord's epoch. A thread outside a forum or media channel (or under a
+  parent the store doesn't know) is also read up to the guild join; a forum post isn't. Compared
+  by milliseconds, as the client compares timestamps. So a new thread is unread from its start, a
+  forum post's starter message (which has the post's ID) included, and
   the new messages line sits above its first message, as the official client showed for a thread
   the user was mentioned into (observed 2026-10-17); what was said before the user joined, or
   before the thread last left the archive, is read.
@@ -406,6 +407,9 @@ modules 573163, 435470, 863005, 543465); the sequence on the wire is **unverifie
 - **Not sent:** the official client's second ack, at the forum's newest post, after the user
   opens posts ("ACK_FORUM_CHANNEL_NO_UNREAD_POSTS"), which moves the ack back from "now"; with the
   forum acked at "now" while shown it would add nothing (O4 to observe).
+- **Cards** (`Store::unread_posts`): a post shows unread when it's active and its newest message
+  is past its read position, whatever its mute or unread setting (Discord's `isForumPostUnread`);
+  an archived post never does. A post's read state change emits its `BadgeChanged`.
 - **The row** (`Badge.posts`): when its unread setting resolves to All Messages (as the dot's),
   `New(n)` counts active posts the user neither joined nor opened (no read state of their own)
   newer than the forum's ack, or than the guild join without one; else `Unread(n)` counts

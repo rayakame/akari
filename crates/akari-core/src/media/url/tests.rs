@@ -703,3 +703,34 @@ fn originals_are_png_or_gif_at_the_largest_size() {
         Some(ImageError::Unsupported)
     );
 }
+
+// Only an animated GIF attachment whose upload fits the display cap has the upload to fall back
+// on: the proxy encodes GIFs again, at times much heavier.
+#[test]
+fn only_a_gif_that_fits_keeps_its_upload() {
+    let gif = attachment("loop.gif", 540, 405);
+    let mut huge = attachment("loop.gif", 540, 405);
+    huge.size = MAX_BODY as u64 + 1;
+    let still = hosts().attachment(&gif, (540, 405), None).unwrap();
+    let playing = hosts()
+        .attachment(&gif, (540, 405), Some(AnimatedFormat::Gif))
+        .unwrap();
+    let webp = hosts()
+        .attachment(
+            &attachment("loop.webp", 540, 405),
+            (540, 405),
+            Some(AnimatedFormat::WebP),
+        )
+        .unwrap();
+    let too_large = hosts()
+        .attachment(&huge, (540, 405), Some(AnimatedFormat::Gif))
+        .unwrap();
+
+    assert_eq!(
+        playing.original.as_ref().map(Url::as_str),
+        Some(gif.url.as_ref())
+    );
+    assert_eq!(still.original, None);
+    assert_eq!(webp.original, None);
+    assert_eq!(too_large.original, None);
+}

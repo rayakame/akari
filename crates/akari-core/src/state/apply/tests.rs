@@ -30,9 +30,8 @@ fn fixture(json: &str) -> Value {
 // When the 300_000_000_000_000_0xx thread IDs were made.
 const THREADS_MADE: &str = "2017-04-07T20:12:53.730000+00:00";
 
-// A thread fixture last archived, and joined, when its ID was made: without a read state a
-// thread is read up to those, and the fixtures' 2024 and 2026 ones are later than the IDs most
-// tests send.
+// A thread fixture archived and joined when its ID was made: without a read state a thread is
+// read up to those, and the fixtures' own are later than the IDs most tests send.
 fn started_when_made(mut thread: Value) -> Value {
     thread["thread_metadata"]["archive_timestamp"] = THREADS_MADE.into();
     if let Some(member) = thread.get_mut("member").filter(|member| member.is_object()) {
