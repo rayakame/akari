@@ -574,6 +574,7 @@ struct MessageListModelTests {
         #expect(!model.hidesDownloads(of: row))
 
         store.update { $0.hidingDownloads = [here] }
+        model.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
 
         #expect(model.hidesDownloads(of: row))
     }
@@ -588,5 +589,19 @@ struct MessageListModelTests {
         #expect(written == 7)
         #expect(account.saves.current.map(\.key) == [key])
         #expect(account.saves.current.map(\.destination) == ["/somewhere/notes.pdf"])
+    }
+
+    // CodeRabbit on #61: the channel's option can change while its list is open.
+    @Test
+    func aChannelUpdateRereadsWhetherDownloadsAreHidden() async {
+        shown(window([1]))
+        let model = loaded()
+        await model.open()
+        #expect(!model.hidesMediaDownloads)
+
+        store.update { $0.hidingDownloads = [here] }
+        model.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
+
+        #expect(model.hidesMediaDownloads)
     }
 }

@@ -186,6 +186,9 @@ public final class MessageListModel {
     public private(set) var revealedMedia: Set<MediaKey> = []
     /// Sensitive media the user showed with its eye; a second click hides it again (D144).
     public private(set) var shownSensitive: Set<MediaKey> = []
+    /// The channel hides downloads of its media (Discord's channel option): its videos and
+    /// audio offer no Download.
+    public private(set) var hidesMediaDownloads = false
     /// Whether the view is scrolled to the bottom of its rows, as it reports; a list opens there.
     public private(set) var atBottom = true
     /// At the present, not stale, and scrolled to its bottom: where the user reads new messages.
@@ -265,6 +268,7 @@ public final class MessageListModel {
             channelId: channelId, account: account, store: store, drafts: drafts)
         readStoredPosition()
         readOwner()
+        hidesMediaDownloads = store.hidesMediaDownloads(channelId: channelId)
         reload(rereading: [])
         if hasMessages {
             openedFrom = .window
@@ -458,7 +462,8 @@ public final class MessageListModel {
     /// Whether the shown message's channel hides downloads of its media (Discord's channel
     /// option): videos and audio lose their Download, files keep theirs.
     public func hidesDownloads(of row: Row) -> Bool {
-        store.hidesMediaDownloads(channelId: row.shown.channelId)
+        row.shown.channelId == channelId
+            ? hidesMediaDownloads : store.hidesMediaDownloads(channelId: row.shown.channelId)
     }
 
     /// Saves the original to `destination` (an attachment's Download); cancelling the task leaves
@@ -519,6 +524,13 @@ public final class MessageListModel {
             || ownerId.map(batch.usersChanged.contains) == true
         {
             readOwner()
+        }
+        let channelChanged = guildId.flatMap { batch.channelsChanged[$0] }?.contains(channelId) == true
+        if batch.everythingChanged || channelChanged {
+            let hides = store.hidesMediaDownloads(channelId: channelId)
+            if hides != hidesMediaDownloads {
+                hidesMediaDownloads = hides
+            }
         }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages

@@ -16,6 +16,8 @@ struct MessageTableState: Equatable {
     var revealedMedia: Set<MediaKey> = []
     var shownSensitive: Set<MediaKey> = []
     var showsAltText = false
+    /// The channel's option: its videos and audio offer no Download.
+    var hidesDownloads = false
     var newMessages: MessageId?
     var unreadJumps = 0
     var messageJump: MessageListModel.MessageJump?
@@ -259,6 +261,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             .union(previous.revealedMedia.symmetricDifference(state.revealedMedia).map(\.messageId))
             .union(previous.shownSensitive.symmetricDifference(state.shownSensitive).map(\.messageId))
             .union(previous.showsAltText != state.showsAltText ? messageIds() : [])
+            .union(previous.hidesDownloads != state.hidesDownloads ? messageIds() : [])
         let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {

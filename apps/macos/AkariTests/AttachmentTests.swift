@@ -975,11 +975,12 @@ final class AttachmentDownloadTests {
         list.controller.onSaveFailure = { [unowned self] in failures.append($0) }
     }
 
-    func show(_ files: [AkariFFI.Attachment]) {
-        list.show(
-            MessageTableState(
-                rows: [row(1, at: list.noon, content: "hi", files: files)], reachedOldest: true,
-                images: ImageCacheRef(ImageCache(source: FakeImageSource.stalling()), placeholders: nil)))
+    func show(_ files: [AkariFFI.Attachment], hidesDownloads: Bool = false) {
+        var state = MessageTableState(
+            rows: [row(1, at: list.noon, content: "hi", files: files)], reachedOldest: true,
+            images: ImageCacheRef(ImageCache(source: FakeImageSource.stalling()), placeholders: nil))
+        state.hidesDownloads = hidesDownloads
+        list.show(state)
     }
 
     func attachments() throws -> AttachmentsView {
@@ -1156,6 +1157,23 @@ final class AttachmentDownloadTests {
         #expect(tile.download.frame.contains(both) && tile.eye.frame.contains(both))
 
         #expect(tile.hitTest(both) === tile.download)
+    }
+
+    // CodeRabbit on #61: when the channel starts hiding downloads, the rows showing take it.
+    @Test
+    func theChannelsOptionChangingReachesTheRowsShowing() throws {
+        let clip = [media(5, "clip.mp4", kind: .video)]
+        show(clip)
+        let video = try #require(try attachments().tiles.first)
+        hover(video, at: NSPoint(x: video.bounds.midX, y: video.bounds.midY))
+        #expect(video.showsDownload)
+
+        actions.hidesDownloads = true
+        show(clip, hidesDownloads: true)
+
+        let now = try #require(try attachments().tiles.first)
+        hover(now, at: NSPoint(x: now.bounds.midX, y: now.bounds.midY))
+        #expect(!now.showsDownload)
     }
 
     // Discord hides the group on media under 40 points.
