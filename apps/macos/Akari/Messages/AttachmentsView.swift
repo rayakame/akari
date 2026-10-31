@@ -77,6 +77,7 @@ final class AttachmentsView: NSView {
     /// A tile's click or button, with the tile.
     var onMedia: (Attachment, MediaTileView.Action, MediaTileView) -> Void = { _, _, _ in }
     var onOpenFile: (Attachment) -> Void = { _ in }
+    var onDownloadFile: (Attachment) -> Void = { _ in }
 
     init() {
         super.init(frame: .zero)
@@ -118,15 +119,19 @@ final class AttachmentsView: NSView {
                 return hit
             }
         }
-        for file in files where !file.isHidden && file.frame.contains(local) {
-            return file.hitTest(local) ?? file
+        for file in files {
+            if let hit = file.takes(local) {
+                return hit
+            }
         }
         return nil
     }
 
-    /// `covers` gives each media item's cover, the session's reveals applied.
+    /// `covers` gives each media item's cover, the session's reveals applied; `hidesDownloads`
+    /// is the channel's option, which takes Download from videos and audio, never from files.
     func configure(
-        _ attachments: [Attachment], covers: (Attachment) -> MediaTileView.Cover?, showsAltText: Bool
+        _ attachments: [Attachment], covers: (Attachment) -> MediaTileView.Cover?, showsAltText: Bool,
+        hidesDownloads: Bool = false
     ) {
         self.attachments = attachments
         layoutCache = nil
@@ -157,10 +162,11 @@ final class AttachmentsView: NSView {
             let attachment = media[index]
             tile.isHidden = false
             tile.cornerRadius = media.count == 1 ? Self.mosaicRadius : Self.cellRadius
-            tile.configure(
-                MediaTileView.Content(
-                    attachment: attachment, cover: covers(attachment), showsAltText: showsAltText,
-                    single: media.count == 1))
+            var content = MediaTileView.Content(
+                attachment: attachment, cover: covers(attachment), showsAltText: showsAltText,
+                single: media.count == 1)
+            content.downloadable = Self.downloadable(attachment, hidesDownloads: hidesDownloads)
+            tile.configure(content)
         }
         mosaic.isHidden = media.isEmpty
         while files.count < shownFiles.count {
@@ -170,15 +176,32 @@ final class AttachmentsView: NSView {
                     self.onOpenFile(attachment)
                 }
             }
+            row.onDownload = { [weak self, weak row] in
+                if let self, let attachment = row?.attachment {
+                    self.onDownloadFile(attachment)
+                }
+            }
             files.append(row)
             addSubview(row)
         }
         for (index, row) in files.enumerated() {
             row.isHidden = index >= shownFiles.count
-            row.configure(index < shownFiles.count ? shownFiles[index] : nil)
+            let file = index < shownFiles.count ? shownFiles[index] : nil
+            row.configure(
+                file, downloadable: file.map { Self.downloadable($0, hidesDownloads: hidesDownloads) } ?? false)
         }
         invalidateIntrinsicContentSize()
         needsLayout = true
+    }
+
+    /// Discord's Download (module 96782): files always, videos and audio unless the channel hides
+    /// downloads, images never.
+    static func downloadable(_ attachment: Attachment, hidesDownloads: Bool) -> Bool {
+        switch attachment.kind {
+        case .file: true
+        case .video, .audio: !hidesDownloads
+        case .image: false
+        }
     }
 
     private func layout(for width: CGFloat) -> Layout {

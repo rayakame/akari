@@ -235,6 +235,14 @@ final class MessageListBridge: MessageListActions {
         await messages.originalURL(key)
     }
 
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool {
+        messages.hidesDownloads(of: row)
+    }
+
+    func saveOriginal(_ key: ImageKey, to destination: URL) async throws {
+        _ = try await messages.saveOriginal(key, to: destination)
+    }
+
     func toggleSensitive(_ key: MediaKey) {
         messages.toggleSensitive(key)
     }

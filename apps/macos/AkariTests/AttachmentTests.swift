@@ -49,6 +49,17 @@ final class RecordingMediaActions: MessageListActions {
     }
     func revealMedia(_ key: MediaKey) { revealed.append(key) }
     func toggleSensitive(_ key: MediaKey) { toggled.append(key) }
+    /// The channel hides downloads of media.
+    var hidesDownloads = false
+    var saved: [(key: ImageKey, destination: URL)] = []
+    var failsSaves = false
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool { hidesDownloads }
+    func saveOriginal(_ key: ImageKey, to destination: URL) async throws {
+        if failsSaves {
+            throw ImageError.Unavailable
+        }
+        saved.append((key, destination))
+    }
 }
 
 // A message's attachments (D141–D144): Discord's mosaic from metadata only, the media asked at
@@ -936,6 +947,156 @@ final class AttachmentTests {
     }
 }
 
+// Discord's hover button (module 96782, CSS 830560): Download on files always, on videos and
+// audio unless the channel hides downloads, never on images; 4 inside a video's top right, 8
+// past a file card's top right corner; shown while its media or card, or itself, is under the
+// pointer. A click saves the original where the save panel says, as the viewer does.
+@MainActor @Suite(.timeLimit(.minutes(1)))
+final class AttachmentDownloadTests {
+    let list = MessageTableTests(onScreen: { _ in true })
+    let actions = RecordingMediaActions()
+    let destination = FileManager.default.temporaryDirectory.appending(path: "download-\(UUID().uuidString).pdf")
+    var asked: [String] = []
+    var failures: [String] = []
+
+    init() {
+        list.controller.actions = actions
+        list.window.setContentSize(NSSize(width: 900, height: 700))
+        list.window.layoutIfNeeded()
+        list.controller.chooseSaveURL = { [unowned self] name in
+            asked.append(name)
+            return destination
+        }
+        list.controller.onSaveFailure = { [unowned self] in failures.append($0) }
+    }
+
+    func show(_ files: [AkariFFI.Attachment]) {
+        list.show(
+            MessageTableState(
+                rows: [row(1, at: list.noon, content: "hi", files: files)], reachedOldest: true,
+                images: ImageCacheRef(ImageCache(source: FakeImageSource.stalling()), placeholders: nil)))
+    }
+
+    func attachments() throws -> AttachmentsView {
+        let cell = try #require(try list.cell(of: 1) as? MessageCell)
+        return try #require(cell.attachments)
+    }
+
+    func hover(_ view: NSView, at point: NSPoint) {
+        list.pointer.location = view.convert(point, to: nil)
+        list.controller.pointerMoved()
+    }
+
+    func leave() {
+        list.pointer.location = nil
+        list.controller.pointerMoved()
+    }
+
+    @Test
+    func aFileShowsDownloadAtItsCornerWhileHovered() throws {
+        show([file(9, "notes.pdf")])
+        let row = try #require(try attachments().files.first)
+        #expect(!row.showsDownload)
+        // The 32 box 8 past the corner, in a 1 pt ring.
+        #expect(row.download.frame == NSRect(x: row.bounds.maxX + 8 - 32 - 1, y: -8 - 1, width: 34, height: 34))
+
+        hover(row, at: NSPoint(x: 20, y: row.bounds.midY))
+        #expect(row.showsDownload)
+        let outside = NSPoint(x: row.bounds.maxX + 4, y: -4)
+        hover(row, at: outside)
+        #expect(row.showsDownload, "its part outside the card keeps it")
+        #expect(list.controller.cursor(at: row.convert(outside, to: nil)) == .pointingHand)
+
+        leave()
+        #expect(!row.showsDownload)
+    }
+
+    @Test
+    func aVideoShowsDownloadTopRightWhileHoveredAndAnImageNone() throws {
+        show([media(5, "clip.mp4", kind: .video), media(6)])
+        let tiles = try attachments().tiles.filter { !$0.isHidden }
+        try #require(tiles.count == 2)
+        let (video, image) = (tiles[0], tiles[1])
+
+        hover(video, at: NSPoint(x: video.bounds.midX, y: video.bounds.midY))
+        #expect(video.showsDownload)
+        #expect(video.download.frame == NSRect(x: video.bounds.maxX - 4 - 32, y: 4, width: 32, height: 32))
+
+        hover(image, at: NSPoint(x: image.bounds.midX, y: image.bounds.midY))
+        #expect(!image.showsDownload)
+        #expect(!video.showsDownload)
+    }
+
+    @Test
+    func aChannelThatHidesDownloadsKeepsOnlyFilesTheirs() throws {
+        actions.hidesDownloads = true
+        var audio = file(8, "voice.ogg")
+        audio.kind = .audio
+        show([media(5, "clip.mp4", kind: .video), file(9, "notes.pdf"), audio])
+        let view = try attachments()
+        let video = try #require(view.tiles.first)
+        let (notes, voice) = (view.files[0], view.files[1])
+
+        hover(video, at: NSPoint(x: video.bounds.midX, y: video.bounds.midY))
+        #expect(!video.showsDownload)
+        hover(notes, at: NSPoint(x: 20, y: notes.bounds.midY))
+        #expect(notes.showsDownload)
+        hover(voice, at: NSPoint(x: 20, y: voice.bounds.midY))
+        #expect(!voice.showsDownload)
+    }
+
+    // Discord hides the group on media under 40 points.
+    @Test
+    func aVideoUnder40PointsHasNoDownload() {
+        let tile = MediaTileView()
+        tile.frame = NSRect(x: 0, y: 0, width: 39, height: 200)
+        var content = MediaTileView.Content(attachment: media(5, "clip.mp4", kind: .video))
+        content.downloadable = true
+        tile.configure(content)
+        tile.isHovered = true
+        tile.layoutSubtreeIfNeeded()
+
+        #expect(!tile.showsDownload)
+    }
+
+    @Test
+    func aDownloadSavesTheOriginalWhereThePanelSays() async throws {
+        let notes = file(9, "notes.pdf")
+        show([notes])
+        let row = try #require(try attachments().files.first)
+        hover(row, at: NSPoint(x: 20, y: row.bounds.midY))
+
+        row.download.performClick(nil)
+
+        try await eventually { !self.actions.saved.isEmpty }
+        #expect(asked == ["notes.pdf"])
+        #expect(actions.saved.map(\.key) == [notes.key])
+        #expect(actions.saved.map(\.destination) == [destination])
+        #expect(failures.isEmpty)
+    }
+
+    @Test
+    func aCancelledPanelSavesNothingAndAFailedSaveSaysSo() async throws {
+        show([media(5, "clip.mp4", kind: .video)])
+        let video = try #require(try attachments().tiles.first)
+        hover(video, at: NSPoint(x: video.bounds.midX, y: video.bounds.midY))
+        list.controller.chooseSaveURL = { [unowned self] name in
+            asked.append(name)
+            return nil
+        }
+
+        video.download.performClick(nil)
+        try await eventually { self.asked == ["clip.mp4"] }
+        #expect(actions.saved.isEmpty)
+
+        actions.failsSaves = true
+        list.controller.chooseSaveURL = { [destination] _ in destination }
+        video.download.performClick(nil)
+        try await eventually { !self.failures.isEmpty }
+        #expect(failures == [ViewerActions.saveFailed])
+    }
+}
+
 // Discord's numbers at 2×, measured on the drawing (D130's sharpness rule for media too).
 @MainActor @Suite(.timeLimit(.minutes(1)))
 struct AttachmentDrawingTests {
@@ -949,8 +1110,10 @@ struct AttachmentDrawingTests {
         return try Self.layerImage(of: view, scale: scale)
     }
 
-    // A view's layer tree where it is, its top left first.
-    static func layerImage(of view: NSView, scale: CGFloat) throws -> NSBitmapImageRep {
+    // A view's layer tree where it is, its top left first, over `backdrop` if given.
+    static func layerImage(of view: NSView, scale: CGFloat, over backdrop: NSColor? = nil) throws
+        -> NSBitmapImageRep
+    {
         let layer = try #require(view.layer)
         let rep = try #require(
             NSBitmapImageRep(
@@ -959,6 +1122,10 @@ struct AttachmentDrawingTests {
                 hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
                 bitsPerPixel: 0))
         let context = try #require(NSGraphicsContext(bitmapImageRep: rep)).cgContext
+        if let backdrop {
+            context.setFillColor(backdrop.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: rep.pixelsWide, height: rep.pixelsHigh))
+        }
         context.scaleBy(x: scale, y: scale)
         // Core Animation draws upward; the bitmap's rows run down.
         context.translateBy(x: 0, y: view.bounds.height)
@@ -987,6 +1154,65 @@ struct AttachmentDrawingTests {
         #expect(beside.redComponent < 0.5, "the dark circle, not the symbol: \(beside)")
         let middle = try #require(rep.colorAt(x: Int(151 * scale), y: Int(100 * scale)))
         #expect(middle.redComponent > 0.8, "the symbol: \(middle)")
+    }
+
+    // Discord's play cover: the circle and its symbol at 60 % together (#9a9a9a over a black
+    // video), at 80 % while the pointer is over the video (#cccccc).
+    @Test
+    func playIsDimmedUntilTheVideoIsHovered() throws {
+        let tile = MediaTileView()
+        tile.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        let window = ScaledWindow.make(scale: 2)
+        window.setContentSize(tile.frame.size)
+        window.contentView = tile
+        tile.configure(MediaTileView.Content(attachment: media(5, "clip.mp4", kind: .video)))
+        window.displayIfNeeded()
+        func symbol() throws -> CGFloat {
+            let rep = try Self.layerImage(of: tile, scale: 2, over: .black)
+            return try #require(rep.colorAt(x: 151 * 2, y: 100 * 2)).redComponent
+        }
+
+        let idle = try symbol()
+        tile.isHovered = true
+        tile.layoutSubtreeIfNeeded()
+        let hovered = try symbol()
+
+        #expect(abs(idle - 0.6) < 0.03, "\(idle)")
+        #expect(abs(hovered - 0.8) < 0.03, "\(hovered)")
+    }
+
+    // A file's Download: the 32 box on base-low past the card's corner, ringed in the chat's color.
+    @Test
+    func aFilesDownloadIsDiscordsButton() throws {
+        let row = FileRowView()
+        row.frame = NSRect(x: 0, y: 20, width: 432, height: 74)
+        row.configure(file(9, "notes.zip"), downloadable: true)
+        row.isHovered = true
+        let container = FlippedView(frame: NSRect(x: 0, y: 0, width: 460, height: 100))
+        container.wantsLayer = true
+        container.addSubview(row)
+        let window = ScaledWindow.make(scale: 2)
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.setContentSize(container.frame.size)
+        window.contentView = container
+        container.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        let rep = try Self.layerImage(of: container, scale: 2, over: .white)
+        var panel: NSColor?
+        var chat: NSColor?
+        container.effectiveAppearance.performAsCurrentDrawingAppearance {
+            panel = Palette.panel.usingColorSpace(.deviceRGB)
+            chat = Palette.chat.usingColorSpace(.deviceRGB)
+        }
+
+        // The box's corner inside the ring, and the ring at its top, 9 above the card.
+        let fill = try #require(rep.colorAt(x: Int((432 + 8 - 32 + 3) * 2), y: Int((20 - 8 + 3) * 2)))
+        let ring = try #require(rep.colorAt(x: Int((432 + 8 - 16) * 2), y: Int((20 - 9) * 2)))
+        #expect(abs(fill.redComponent - (panel?.redComponent ?? 0)) < 0.02, "\(fill)")
+        #expect(abs(ring.redComponent - (chat?.redComponent ?? 0)) < 0.02, "\(ring)")
+        // Over the card: its border doesn't cross the button.
+        let overBorder = try #require(rep.colorAt(x: Int((432 - 12) * 2), y: Int(20 * 2)))
+        #expect(abs(overBorder.redComponent - (panel?.redComponent ?? 0)) < 0.02, "\(overBorder)")
     }
 
     // The spoiler pill: 15/600 uppercase, 12 and 8 around, radius 20, black .6.
@@ -1025,4 +1251,8 @@ struct AttachmentDrawingTests {
         let corner = try #require(rep.colorAt(x: 0, y: 0))
         #expect(corner.alphaComponent < 0.5, "rounded")
     }
+}
+
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

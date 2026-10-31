@@ -21,6 +21,7 @@ final class MediaTileView: NSButton {
         case reveal
         case toggleSensitive
         case altText
+        case download
     }
 
     /// What a tile shows: an attachment's image or video, or an embed's.
@@ -68,6 +69,8 @@ final class MediaTileView: NSButton {
         var showsAltText = false
         /// Alone in its message: a sensitive cover says why where it fits.
         var single = false
+        /// Download among its hover buttons: a video whose channel doesn't hide downloads.
+        var downloadable = false
 
         init(media: Media, cover: Cover? = nil, showsAltText: Bool = false, single: Bool = false) {
             self.media = media
@@ -87,6 +90,11 @@ final class MediaTileView: NSButton {
     static let spoilerText = "SPOILER"
     // Discord says why only where the cover is at least this large.
     static let sensitiveTextMinimum = NSSize(width: 146, height: 212)
+    // Discord's hover buttons leave media under 40 points.
+    static let hoverButtonsMinimum: CGFloat = 40
+    // The play cover's opacity, and under the pointer (`.cover.active:hover .iconWrapper`).
+    static let playOpacity: Float = 0.6
+    static let hoveredPlayOpacity: Float = 0.8
 
     let picture = ImageLayerView()
     // Above the picture: AppKit keeps a subview's layer over layers added beside it.
@@ -104,6 +112,7 @@ final class MediaTileView: NSButton {
     private let playSymbol = CALayer()
     let eye = OverlayButton()
     let alt = OverlayButton()
+    let download = HoverActionButton(symbol: "arrow.down.to.line", label: HoverActionButton.download)
     private(set) var content: Content?
     private var spinnerTask: Task<Void, Never>?
     private(set) var spinnerShown = false
@@ -166,7 +175,9 @@ final class MediaTileView: NSButton {
         addSubview(picture)
         play.backgroundColor = NSColor.black.cgColor
         play.cornerRadius = 24
-        play.opacity = 0.6
+        play.opacity = Self.playOpacity
+        // In the circle's layer: Discord dims both together.
+        play.addSublayer(playSymbol)
         playSymbol.contentsGravity = .center
         // `playImage` is drawn at 2×: its 24 pt whatever the screen.
         playSymbol.contentsScale = 2
@@ -181,7 +192,7 @@ final class MediaTileView: NSButton {
         pill.layer.cornerRadius = 20
         overlay.wantsLayer = true
         addSubview(overlay)
-        for sublayer in [coverLayer, play, playSymbol, pill.layer, badge.layer, spinner.layer] {
+        for sublayer in [coverLayer, play, pill.layer, badge.layer, spinner.layer] {
             overlay.layer?.addSublayer(sublayer)
         }
         warning.image = NSImage(
@@ -209,7 +220,9 @@ final class MediaTileView: NSButton {
         alt.text = "ALT"
         alt.cornerRadius = 4
         alt.setAccessibilityLabel("Show alt text")
-        for view in [warning, warningText, failure, failureLabel, eye, alt] as [NSView] {
+        download.target = self
+        download.action = #selector(downloadClicked)
+        for view in [warning, warningText, failure, failureLabel, eye, alt, download] as [NSView] {
             view.isHidden = true
             addSubview(view)
         }
@@ -233,7 +246,7 @@ final class MediaTileView: NSButton {
             return nil
         }
         let local = convert(point, from: superview)
-        for button in [eye, alt] where !button.isHidden && button.frame.contains(local) {
+        for button in [eye, alt, download] as [NSView] where !button.isHidden && button.frame.contains(local) {
             return button
         }
         return self
@@ -290,6 +303,7 @@ final class MediaTileView: NSButton {
     var isVideo: Bool { content?.media.video == true }
     var showsGifBadge: Bool { !badge.isHidden }
     var showsPlay: Bool { !play.isHidden }
+    var showsDownload: Bool { !download.isHidden && download.isShown }
     var coverShown: Cover? { content.flatMap { Self.hides($0.cover) ? $0.cover : nil } }
     var failureShown: Bool { !failureLabel.isHidden }
     var spoilerPillBackground: CGColor? { pill.backgroundColor }
@@ -327,6 +341,10 @@ final class MediaTileView: NSButton {
         onAction(.altText)
     }
 
+    @objc private func downloadClicked() {
+        onAction(.download)
+    }
+
     // Only once the tile has its size: a single item says why where the sentence fits.
     private func updateSensitiveText() {
         warningText.isHidden =
@@ -345,7 +363,11 @@ final class MediaTileView: NSButton {
         coverLayer.frame = bounds
         let center = NSPoint(x: bounds.midX, y: bounds.midY)
         play.frame = NSRect(x: center.x - 24, y: center.y - 24, width: 48, height: 48)
-        playSymbol.frame = play.frame.offsetBy(dx: 1, dy: 0)
+        playSymbol.frame = play.bounds.offsetBy(dx: 1, dy: 0)
+        download.frame = NSRect(
+            x: bounds.maxX - 4 - HoverActionButton.size, y: 4, width: HoverActionButton.size,
+            height: HoverActionButton.size)
+        updateDownload()
         pill.layer.position = center
         badge.layer.anchorPoint = .zero
         badge.layer.position = NSPoint(x: 6, y: 6)
@@ -431,8 +453,8 @@ final class MediaTileView: NSButton {
         failureLabel.isHidden = !failed
         let video = media?.video == true
         play.isHidden = !video || media?.ownPlay == false || cover != nil || failed
-        playSymbol.isHidden = play.isHidden
         playSymbol.contents = Self.playImage
+        updateDownload()
         let moves = media?.animated == true || media?.loops == true
         badge.isHidden = !moves || video || cover != nil || failed || animates
         alt.isHidden =
@@ -450,6 +472,22 @@ final class MediaTileView: NSButton {
     private func updateHover() {
         update()
         updateMotion()
+        // Discord's `transition: opacity .25s`.
+        let opacity = isHovered ? Self.hoveredPlayOpacity : Self.playOpacity
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = play.presentation()?.opacity ?? play.opacity
+        fade.toValue = opacity
+        fade.duration = 0.25
+        play.opacity = opacity
+        play.add(fade, forKey: "fade")
+    }
+
+    // Over uncovered media at least 40 points each way, shown while the pointer is over it.
+    private func updateDownload() {
+        download.isHidden =
+            content?.downloadable != true || Self.hides(content?.cover)
+            || bounds.width < Self.hoverButtonsMinimum || bounds.height < Self.hoverButtonsMinimum
+        download.isShown = isHovered
     }
 
     private func updateMotion() {

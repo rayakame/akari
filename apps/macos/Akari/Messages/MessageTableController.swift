@@ -136,6 +136,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private weak var hoveredTile: MediaTileView?
     private weak var hoveredOverlay: OverlayButton?
     private weak var hoveredFileName: FileNameButton?
+    private weak var hoveredFile: FileRowView?
+    private weak var hoveredAction: HoverActionButton?
+    /// The save panel's answer for a suggested name, for tests; `nil` shows the panel.
+    var chooseSaveURL: ((String) async -> URL?)?
+    /// What a failed save says, for tests; `nil` shows an alert on the window.
+    var onSaveFailure: ((String) -> Void)?
     /// An ALT button's description, open beside it.
     private(set) var altText: NSPopover?
     let viewer = MediaViewer()
@@ -1086,6 +1092,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 self?.media(action, attachment, of: row, tile: tile)
             }
             cell.onOpenFile = { [weak self] attachment in self?.actions?.openMedia(attachment.key) }
+            cell.onDownloadFile = { [weak self] attachment in self?.download(attachment) }
+            cell.hidesDownloads = actions?.hidesDownloads(of: row) ?? false
             cell.onEmbed = { [weak self] embed, action in self?.embed(action, embed, of: row) }
             cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
@@ -1181,7 +1189,49 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.toggleSensitive(key)
         case .altText:
             showAltText(attachment.description ?? "", from: tile.alt)
+        case .download:
+            download(attachment)
         }
+    }
+
+    // Discord's Download: saved where the save panel says, through the core, as the viewer saves.
+    private func download(_ attachment: Attachment) {
+        guard let window = tableView.window else {
+            return
+        }
+        Task { [weak self] in
+            guard let self, let destination = await self.saveURL(for: attachment.filename, in: window)
+            else {
+                return
+            }
+            do {
+                try await self.actions?.saveOriginal(attachment.key, to: destination)
+            } catch is CancellationError {
+            } catch {
+                self.saveFailed(in: window)
+            }
+        }
+    }
+
+    private func saveURL(for name: String, in window: NSWindow) async -> URL? {
+        if let chooseSaveURL {
+            return await chooseSaveURL(name)
+        }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = name
+        panel.canCreateDirectories = true
+        return await panel.beginSheetModal(for: window) == .OK ? panel.url : nil
+    }
+
+    private func saveFailed(in window: NSWindow) {
+        if let onSaveFailure {
+            onSaveFailure(ViewerActions.saveFailed)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = ViewerActions.saveFailed
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window)
     }
 
     // Over the list's window; false when there's no viewer to open.
@@ -1649,7 +1699,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         hoveredBox = box
         let overlay = target?.view as? OverlayButton
         let tile = (target?.view as? MediaTileView) ?? (overlay?.superview as? MediaTileView)
-            ?? hoveredMedia(at: location)
+            ?? hovered(MediaTileView.self, at: location)
+        let action = target?.view as? HoverActionButton
+        if hoveredAction !== action {
+            hoveredAction?.isHovered = false
+        }
+        action?.isHovered = true
+        hoveredAction = action
+        let file = hovered(FileRowView.self, at: location)
+        if hoveredFile !== file {
+            hoveredFile?.isHovered = false
+            file?.isHovered = true
+            hoveredFile = file
+        }
         if hoveredOverlay !== overlay {
             hoveredOverlay?.isHovered = false
         }
@@ -1825,14 +1887,15 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     // The tile under the pointer even where it takes no click (a covered one): hover still shows.
-    private func hoveredMedia(at location: NSPoint?) -> MediaTileView? {
+    // The tile or file card under the pointer, also under one of its buttons.
+    private func hovered<View: NSView>(_ kind: View.Type, at location: NSPoint?) -> View? {
         guard let location, let content = tableView.window?.contentView else {
             return nil
         }
         var view = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
         while let current = view, current !== tableView {
-            if let tile = current as? MediaTileView {
-                return tile.isDescendant(of: tableView) ? tile : nil
+            if let found = current as? View {
+                return found.isDescendant(of: tableView) ? found : nil
             }
             view = current.superview
         }
