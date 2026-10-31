@@ -107,6 +107,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
+    override func hidesMediaDownloads(channelId: ChannelId) -> Bool { false }
+
     func add(_ count: UInt64, to channel: ChannelId) {
         counts.withLock { $0[channel.rawValue, default: 40] += count }
     }

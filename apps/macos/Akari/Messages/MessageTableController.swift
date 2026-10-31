@@ -1093,7 +1093,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             cell.onOpenFile = { [weak self] attachment in self?.actions?.openMedia(attachment.key) }
             cell.onDownloadFile = { [weak self] attachment in self?.download(attachment) }
-            cell.hidesDownloads = actions?.hidesDownloads(of: row) ?? false
+            // The channel's option only touches videos and audio: other rows don't ask the store.
+            cell.hidesDownloads =
+                row.shown.attachments.contains { $0.kind == .video || $0.kind == .audio }
+                && actions?.hidesDownloads(of: row) == true
             cell.onEmbed = { [weak self] embed, action in self?.embed(action, embed, of: row) }
             cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread

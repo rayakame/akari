@@ -53,7 +53,11 @@ final class RecordingMediaActions: MessageListActions {
     var hidesDownloads = false
     var saved: [(key: ImageKey, destination: URL)] = []
     var failsSaves = false
-    func hidesDownloads(of row: MessageListModel.Row) -> Bool { hidesDownloads }
+    var hidesDownloadsAsked = 0
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool {
+        hidesDownloadsAsked += 1
+        return hidesDownloads
+    }
     func saveOriginal(_ key: ImageKey, to destination: URL) async throws {
         if failsSaves {
             throw ImageError.Unavailable
@@ -1043,6 +1047,21 @@ final class AttachmentDownloadTests {
         #expect(notes.showsDownload)
         hover(voice, at: NSPoint(x: 20, y: voice.bounds.midY))
         #expect(!voice.showsDownload)
+    }
+
+    // Only a row with a video or audio asks: the option changes nothing else, and rows are many.
+    @Test
+    func onlyAVideoOrAudioAsksWhetherDownloadsAreHidden() throws {
+        show([file(9, "notes.pdf"), media(6)])
+        list.show(
+            MessageTableState(
+                rows: [row(1, at: list.noon, content: "hi")], reachedOldest: true,
+                images: ImageCacheRef(ImageCache(source: FakeImageSource.stalling()), placeholders: nil)))
+        #expect(actions.hidesDownloadsAsked == 0)
+
+        show([media(5, "clip.mp4", kind: .video)])
+
+        #expect(actions.hidesDownloadsAsked > 0)
     }
 
     // Discord hides the group on media under 40 points.

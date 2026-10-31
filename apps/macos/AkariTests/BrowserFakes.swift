@@ -173,6 +173,8 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
+    override func hidesMediaDownloads(channelId: ChannelId) -> Bool { false }
+
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         parentId == FakeBrowserStore.parent ? creation : ThreadCreation(public: false, private: false)
     }

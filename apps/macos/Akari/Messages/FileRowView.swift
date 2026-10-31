@@ -52,8 +52,8 @@ final class FileRowView: NSView {
             addSubview(view)
         }
         updateColors()
-        // Download overhangs the corner, and the shadow lies outside too; set last, as adding the
-        // subviews turned it back on.
+        // Download overhangs the corner, and the shadow lies outside too; set last: set earlier in
+        // this setup, it didn't stick.
         clipsToBounds = false
     }
 
