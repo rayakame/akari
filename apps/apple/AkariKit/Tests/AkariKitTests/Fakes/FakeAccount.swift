@@ -105,6 +105,12 @@ final class FakeAccount: Account, @unchecked Sendable {
     }
 
     let originalLinks = Locked<[ImageKey: String]>([:])
+    let saves = Locked<[(key: ImageKey, destination: String)]>([])
+
+    override func saveOriginal(key: ImageKey, destination: String) -> PendingSave {
+        saves.withLock { $0.append((key, destination)) }
+        return FakeSave()
+    }
 
     override func originalUrl(key: ImageKey) async throws -> String {
         guard let link = originalLinks.current[key] else {
@@ -341,6 +347,46 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.setBrowsing(parentId))
     }
 
+    // What loading older posts leaves in the store, as akari-core would.
+    let afterOlderPosts = Locked<(@Sendable (ForumView) -> Void)?>(nil)
+    let olderPostsError = Locked<RequestError?>(nil)
+    // A post search's answer: Discord's IDs, `nil` while not indexed; an error fails it.
+    let postSearchReply = Locked<Result<[ChannelId]?, RequestError>>(.success([]))
+    // While set, each post search waits here before answering.
+    let holdPostSearches = Locked(false)
+    let postSearchEntries = AsyncQueue<Void>()
+
+    override func openForum(forumId: ChannelId?) {
+        log.append(.openForum(forumId))
+    }
+
+    override func refreshForum(forumId: ChannelId) {
+        log.append(.refreshForum(forumId))
+    }
+
+    override func loadOlderPosts(forumId: ChannelId, view: ForumView) async throws {
+        log.append(.loadOlderPosts(forumId, view))
+        if let error = olderPostsError.current {
+            throw error
+        }
+        afterOlderPosts.current?(view)
+    }
+
+    override func searchPosts(forumId: ChannelId, name: String, view: ForumView) async throws
+        -> [ChannelId]?
+    {
+        log.append(.searchPosts(forumId, name, view))
+        // UniFFI's calls run on whatever happens to the task that awaits them.
+        if holdPostSearches.current {
+            _ = await Task { [postSearchEntries] in await postSearchEntries.next() }.value
+        }
+        return try postSearchReply.current.get()
+    }
+
+    override func requestPostPreviews(forumId: ChannelId, postIds: [ChannelId]) {
+        log.append(.requestPostPreviews(forumId, postIds))
+    }
+
     let membershipError = Locked<RequestError?>(nil)
 
     override func joinThread(threadId: ChannelId, location: ThreadLocation) async throws {
@@ -432,4 +478,18 @@ final class FakePendingImage: PendingImage, @unchecked Sendable {
     override func cancel() {
         work.current?.cancel()
     }
+}
+
+/// A save that wrote 7 bytes.
+final class FakeSave: PendingSave, @unchecked Sendable {
+    init() {
+        super.init(noHandle: NoHandle())
+    }
+
+    required init(unsafeFromHandle handle: UInt64) {
+        fatalError("a fake has no Rust object")
+    }
+
+    override func result() async throws -> UInt64 { 7 }
+    override func cancel() {}
 }

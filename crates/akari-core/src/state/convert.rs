@@ -3,15 +3,17 @@ use std::sync::Arc;
 use super::settings::NotificationLevel;
 use super::types::{
     Attachment, Call, Channel, CurrentUser, Delivery, Discriminator, Embed, EmbedAuthor,
-    EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, Guild, ImageHash, Member, Message,
-    MessageReference, PermissionOverwrite, ReferencedMessage, Role, RoleSubscription, Sticker,
-    SystemData, ThreadInfo, ThreadMembership, User,
+    EmbedField, EmbedFooter, EmbedMedia, EmbedProvider, ForumLayout, ForumSettings, ForumSort,
+    ForumTag, Guild, ImageHash, Member, Message, MessageReference, PermissionOverwrite,
+    ReferencedMessage, Role, RoleSubscription, Sticker, SystemData, TagEmoji, TagMatching,
+    ThreadInfo, ThreadMembership, User,
 };
 use crate::gateway::{
     AvailableGuild, ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate,
 };
 use crate::model::{
-    self, ChannelId, EmojiId, GenericMarker, GuildId, MessageId, Snowflake, Timestamp, UserId,
+    self, ChannelId, ChannelType, EmojiId, GenericMarker, GuildId, MessageId, Snowflake, TagId,
+    Timestamp, UserId,
 };
 
 fn text(value: String) -> Box<str> {
@@ -214,14 +216,32 @@ impl Channel {
         };
         let member = channel.member.map(ThreadMembership::from_wire);
         let preview = channel.member_ids_preview.into_boxed_slice();
+        let tags = channel.applied_tags.into_boxed_slice();
         let thread = channel.thread_metadata.map(|metadata| {
             Box::new(thread_info(
                 metadata,
-                channel.message_count,
-                channel.member_count,
+                Counts {
+                    messages: channel.message_count,
+                    members: channel.member_count,
+                    total: channel.total_message_sent,
+                },
                 member,
                 preview,
+                tags,
             ))
+        });
+        let forum = is_forum(channel.kind).then(|| {
+            Box::new(ForumSettings {
+                tags: list(channel.available_tags, forum_tag),
+                default_reaction: channel
+                    .default_reaction_emoji
+                    .and_then(|emoji| tag_emoji(emoji.emoji_id, emoji.emoji_name)),
+                sort: forum_sort(channel.default_sort_order),
+                layout: forum_layout(channel.default_forum_layout),
+                tag_matching: tag_matching(channel.default_tag_setting.as_deref()),
+                post_slowmode: channel.default_thread_rate_limit_per_user.unwrap_or(0),
+                template: optional_text(channel.template),
+            })
         });
         Self {
             id: channel.id,
@@ -240,6 +260,7 @@ impl Channel {
             icon: image(channel.icon),
             owner_id: channel.owner_id,
             thread,
+            forum,
             flags: channel.flags,
             message_request: channel.is_message_request,
             spam: channel.is_spam,
@@ -298,16 +319,21 @@ impl Channel {
         next.flags = update.flags.unwrap_or(next.flags);
         next.message_request = update.is_message_request.unwrap_or(next.message_request);
         next.spam = update.is_spam.unwrap_or(next.spam);
-        let counts = |info: Option<&ThreadInfo>| {
-            (
-                update
-                    .message_count
-                    .or(info.and_then(|info| info.message_count)),
-                update
-                    .member_count
-                    .or(info.and_then(|info| info.member_count)),
-            )
+        let counts = |info: Option<&ThreadInfo>| Counts {
+            messages: update
+                .message_count
+                .or(info.and_then(|info| info.message_count)),
+            members: update
+                .member_count
+                .or(info.and_then(|info| info.member_count)),
+            total: update
+                .total_message_sent
+                .or(info.and_then(|info| info.total_message_sent)),
         };
+        let tags = update
+            .applied_tags
+            .map(Vec::into_boxed_slice)
+            .or_else(|| next.thread.as_deref().map(|info| info.applied_tags.clone()));
         let preview = update
             .member_ids_preview
             .map(Vec::into_boxed_slice)
@@ -317,31 +343,75 @@ impl Channel {
                     .map(|info| info.member_ids_preview.clone())
             });
         if let Some(metadata) = update.thread_metadata {
-            let (messages, members) = counts(next.thread.as_deref());
+            let counts = counts(next.thread.as_deref());
             let member = next.thread.as_deref().and_then(|info| info.member);
             next.thread = Some(Box::new(thread_info(
                 metadata,
-                messages,
-                members,
+                counts,
                 member,
                 preview.unwrap_or_default(),
+                tags.unwrap_or_default(),
             )));
         } else if let Some(info) = next.thread.as_deref_mut() {
-            (info.message_count, info.member_count) = counts(Some(info));
+            let counts = counts(Some(info));
+            (
+                info.message_count,
+                info.member_count,
+                info.total_message_sent,
+            ) = (counts.messages, counts.members, counts.total);
             if let Some(preview) = preview {
                 info.member_ids_preview = preview;
             }
+            if let Some(tags) = tags {
+                info.applied_tags = tags;
+            }
         }
+        next.forum = is_forum(next.kind).then(|| {
+            let mut settings = next
+                .forum
+                .take()
+                .map(|settings| *settings)
+                .unwrap_or_default();
+            if let Some(tags) = update.available_tags {
+                settings.tags = list(tags, forum_tag);
+            }
+            if let Some(emoji) = update.default_reaction_emoji {
+                settings.default_reaction =
+                    emoji.and_then(|emoji| tag_emoji(emoji.emoji_id, emoji.emoji_name));
+            }
+            if let Some(sort) = update.default_sort_order {
+                settings.sort = forum_sort(sort);
+            }
+            if let Some(layout) = update.default_forum_layout {
+                settings.layout = forum_layout(layout);
+            }
+            if let Some(setting) = update.default_tag_setting {
+                settings.tag_matching = tag_matching(setting.as_deref());
+            }
+            if let Some(slowmode) = update.default_thread_rate_limit_per_user {
+                settings.post_slowmode = slowmode;
+            }
+            if let Some(template) = update.template {
+                settings.template = optional_text(template);
+            }
+            Box::new(settings)
+        });
         next
     }
 }
 
+struct Counts {
+    messages: Option<u32>,
+    members: Option<u32>,
+    total: Option<u32>,
+}
+
 fn thread_info(
     metadata: model::ThreadMetadata,
-    message_count: Option<u32>,
-    member_count: Option<u32>,
+    counts: Counts,
     member: Option<ThreadMembership>,
     member_ids_preview: Box<[UserId]>,
+    applied_tags: Box<[TagId]>,
 ) -> ThreadInfo {
     ThreadInfo {
         member,
@@ -350,9 +420,51 @@ fn thread_info(
         auto_archive_duration: metadata.auto_archive_duration,
         archive_timestamp: metadata.archive_timestamp,
         create_timestamp: metadata.create_timestamp,
-        message_count,
-        member_count,
+        message_count: counts.messages,
+        member_count: counts.members,
         member_ids_preview,
+        applied_tags,
+        total_message_sent: counts.total,
+    }
+}
+
+fn is_forum(kind: ChannelType) -> bool {
+    matches!(kind, ChannelType::GuildForum | ChannelType::GuildMedia)
+}
+
+fn forum_tag(tag: model::ForumTag) -> ForumTag {
+    ForumTag {
+        id: tag.id,
+        name: text(tag.name),
+        moderated: tag.moderated,
+        emoji: tag_emoji(tag.emoji_id, tag.emoji_name),
+    }
+}
+
+fn tag_emoji(id: Option<EmojiId>, name: Option<String>) -> Option<TagEmoji> {
+    id.map(TagEmoji::Custom)
+        .or_else(|| optional_text(name).map(TagEmoji::Unicode))
+}
+
+// Discord's codes; anything else is its default.
+fn forum_sort(code: Option<u8>) -> ForumSort {
+    match code {
+        Some(1) => ForumSort::CreationDate,
+        _ => ForumSort::LatestActivity,
+    }
+}
+
+fn forum_layout(code: Option<u8>) -> ForumLayout {
+    match code {
+        Some(2) => ForumLayout::Gallery,
+        _ => ForumLayout::List,
+    }
+}
+
+fn tag_matching(setting: Option<&str>) -> TagMatching {
+    match setting {
+        Some("match_all") => TagMatching::All,
+        _ => TagMatching::Some,
     }
 }
 

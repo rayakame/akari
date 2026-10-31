@@ -13,7 +13,7 @@ tracking event comes first.
 
 | Region | Cursor | Authority |
 |---|---|---|
-| The message list (each of the channel's and the split's): rows, a message's text, links, mentions, hidden spoilers and code blocks, thread boxes, Retry and Delete, Try again; the bars over it (unread, jump, locked, status) | I-beam over text, pointing hand over what clicks (custom and Unicode emoji, stickers, images and videos and a spoiler's cover, a sensitive cover's eye, ALT buttons, a file's name, an embed's links, images, video pill and covered card, the unread bar, the jump bar's button too), arrow elsewhere (also over media waiting for a scan or under a sensitive cover) | The list's tracking area (`MessageTableController`): it hit-tests on every move, scroll, update and key change, while its window is key and on top at the pointer; over a bar it takes the bar's `CursorArea`. Text views and boxes track nothing themselves. |
+| The message list (each of the channel's and the split's): rows, a message's text, links, mentions, hidden spoilers and code blocks, thread boxes, Retry and Delete, Try again; the bars over it (unread, jump, locked, status) | I-beam over text, pointing hand over what clicks (custom and Unicode emoji, stickers, images and videos and a spoiler's cover, a sensitive cover's eye, ALT buttons, Download on files and videos, a file's name, an embed's links, images, video pill and covered card, the unread bar, the jump bar's button too), arrow elsewhere (also over media waiting for a scan or under a sensitive cover) | The list's tracking area (`MessageTableController`): it hit-tests on every move, scroll, update and key change, while its window is key and on top at the pointer; over a bar it takes the bar's `CursorArea`. Text views and boxes track nothing themselves. |
 | The composer | I-beam | AppKit (NSTextView's own) |
 | The channel header: the "# parent ›" link, the Threads button, the thread's "…" | Pointing hand | `CursorArea` |
 | The split's header: its title, "…", the X | Pointing hand | `CursorArea` |
@@ -27,6 +27,8 @@ tracking event comes first.
 | A floating split's card over the channel's list | What lies there | The list asks `CursorArea.cursor(at:in:)` for what isn't its own: an area, another authority, the I-beam over editable text, else the arrow |
 | The shield under the browser | Arrow | Its own tracking area (`ShieldWindow`) |
 | More Active Threads (never key): its rows and "See All" | Pointing hand | `CursorArea` |
+| The forum page: cards (list and gallery, edge to edge), Sort & View, tag pills, All and Select Tags' pills and Clear all, the guidelines button and its Close and View All, the status row's Clear, the New Posts pill | Pointing hand (the arrow over Clear all with no tag chosen) | `CursorArea` |
+| The forum's search field | I-beam | AppKit (the field's own) |
 | The media viewer (key): zoomable media; its buttons, arrows and strip; a video; the scrim | Zoom in or zoom out (the arrow before macOS 15); pointing hand; the player's own; arrow | The viewer's tracking area (`ViewerView`): it hit-tests on every move and zoom |
 | An emoji's or sticker's popout (key): a server row that opens, "Show More" | Pointing hand | `CursorArea` |
 | The hover card over an emoji or sticker | None of its own: it takes no mouse events | The list keeps deciding under it |

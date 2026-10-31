@@ -13,10 +13,11 @@ use crate::model::{
 use crate::state::{
     Attachment, Call, Channel, ChannelSettings, CurrentUser, Delivery, Discriminator,
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
-    ExplicitContentFilter, ExplicitContentSettings, FolderEntry, Guild, GuildSettings, ImageHash,
-    Member, Message, MessageReference, NotificationLevel, PermissionOverwrite, ReadState,
-    Redaction, ReferencedMessage, Role, RoleSubscription, SpoilerSetting, Sticker,
-    StickerAnimation, SystemData, ThreadInfo, ThreadMembership, Unreads, User,
+    ExplicitContentFilter, ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings,
+    ForumSort, ForumTag, Guild, GuildSettings, ImageHash, Member, Message, MessageReference,
+    NotificationLevel, PermissionOverwrite, ReadState, Redaction, ReferencedMessage, Role,
+    RoleSubscription, SpoilerSetting, Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching,
+    ThreadInfo, ThreadMembership, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -342,6 +343,121 @@ struct ThreadRow {
     message_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     member_count: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    applied_tags: Vec<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_message_sent: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct ForumRow {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<TagRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_reaction: Option<EmojiRow>,
+    #[serde(skip_serializing_if = "is_false")]
+    sort_by_creation: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    gallery: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    match_all: bool,
+    post_slowmode: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    template: Option<Box<str>>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct TagRow {
+    id: u64,
+    name: Box<str>,
+    #[serde(skip_serializing_if = "is_false")]
+    moderated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    emoji: Option<EmojiRow>,
+}
+
+// A custom emoji's ID or a Unicode emoji.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum EmojiRow {
+    Custom(u64),
+    Unicode(Box<str>),
+}
+
+impl EmojiRow {
+    fn from_emoji(emoji: &TagEmoji) -> Self {
+        match emoji {
+            TagEmoji::Custom(id) => Self::Custom(id.get()),
+            TagEmoji::Unicode(name) => Self::Unicode(name.clone()),
+        }
+    }
+
+    fn into_emoji(self) -> TagEmoji {
+        match self {
+            Self::Custom(id) => TagEmoji::Custom(Snowflake::new(id)),
+            Self::Unicode(name) => TagEmoji::Unicode(name),
+        }
+    }
+}
+
+impl From<&ForumSettings> for ForumRow {
+    fn from(settings: &ForumSettings) -> Self {
+        Self {
+            tags: settings
+                .tags
+                .iter()
+                .map(|tag| TagRow {
+                    id: tag.id.get(),
+                    name: tag.name.clone(),
+                    moderated: tag.moderated,
+                    emoji: tag.emoji.as_ref().map(EmojiRow::from_emoji),
+                })
+                .collect(),
+            default_reaction: settings.default_reaction.as_ref().map(EmojiRow::from_emoji),
+            sort_by_creation: settings.sort == ForumSort::CreationDate,
+            gallery: settings.layout == ForumLayout::Gallery,
+            match_all: settings.tag_matching == TagMatching::All,
+            post_slowmode: settings.post_slowmode,
+            template: settings.template.clone(),
+        }
+    }
+}
+
+impl ForumRow {
+    fn into_settings(self) -> ForumSettings {
+        ForumSettings {
+            tags: self
+                .tags
+                .into_iter()
+                .map(|tag| ForumTag {
+                    id: Snowflake::new(tag.id),
+                    name: tag.name,
+                    moderated: tag.moderated,
+                    emoji: tag.emoji.map(EmojiRow::into_emoji),
+                })
+                .collect(),
+            default_reaction: self.default_reaction.map(EmojiRow::into_emoji),
+            sort: if self.sort_by_creation {
+                ForumSort::CreationDate
+            } else {
+                ForumSort::LatestActivity
+            },
+            layout: if self.gallery {
+                ForumLayout::Gallery
+            } else {
+                ForumLayout::List
+            },
+            tag_matching: if self.match_all {
+                TagMatching::All
+            } else {
+                TagMatching::Some
+            },
+            post_slowmode: self.post_slowmode,
+            template: self.template,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -374,6 +490,8 @@ pub(super) struct ChannelRow {
     owner_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thread: Option<ThreadRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    forum: Option<ForumRow>,
     flags: u64,
     #[serde(skip_serializing_if = "is_false")]
     message_request: bool,
@@ -421,7 +539,10 @@ impl From<&Channel> for ChannelRow {
                 create_timestamp: thread.create_timestamp.map(nanos),
                 message_count: thread.message_count,
                 member_count: thread.member_count,
+                applied_tags: thread.applied_tags.iter().map(|tag| tag.get()).collect(),
+                total_message_sent: thread.total_message_sent,
             }),
+            forum: channel.forum.as_deref().map(ForumRow::from),
             flags: channel.flags,
             message_request: channel.message_request,
             spam: channel.spam,
@@ -472,8 +593,15 @@ impl ChannelRow {
                     message_count: thread.message_count,
                     member_count: thread.member_count,
                     member_ids_preview: Box::default(),
+                    applied_tags: thread
+                        .applied_tags
+                        .into_iter()
+                        .map(Snowflake::new)
+                        .collect(),
+                    total_message_sent: thread.total_message_sent,
                 })
             }),
+            forum: self.forum.map(|forum| Box::new(forum.into_settings())),
             flags: self.flags,
             message_request: self.message_request,
             spam: self.spam,

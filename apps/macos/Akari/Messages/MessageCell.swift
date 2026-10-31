@@ -76,6 +76,9 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
     /// A media tile's click or button, with the tile.
     var onMedia: (Attachment, MediaTileView.Action, MediaTileView) -> Void = { _, _, _ in }
     var onOpenFile: (Attachment) -> Void = { _ in }
+    var onDownloadFile: (Attachment) -> Void = { _ in }
+    /// What offers Download, set by the list before `configure`; nothing elsewhere.
+    var downloads = AttachmentsView.Downloads.none
     // Built for the first message with stickers; most messages have none.
     private var stickers: StickerRow?
     // Built for the first message with a thread, as the failed line is: buttons cost.
@@ -227,7 +230,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             view.isHidden = false
             view.configure(
                 message.attachments, covers: { Self.cover($0, media) },
-                showsAltText: media.showsAltText)
+                showsAltText: media.showsAltText, downloads: downloads)
         }
         if shown.isEmpty {
             embeds?.configure([])
@@ -493,6 +496,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         view.placeholders = placeholders
         view.onMedia = { [weak self] attachment, action, tile in self?.onMedia(attachment, action, tile) }
         view.onOpenFile = { [weak self] attachment in self?.onOpenFile(attachment) }
+        view.onDownloadFile = { [weak self] attachment in self?.onDownloadFile(attachment) }
         let after = stack.views(in: .top).firstIndex(of: content).map { $0 + 1 } ?? 0
         stack.insertView(view, at: after, in: .top)
         view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true

@@ -54,6 +54,9 @@ async fn a_threads_record_carries_its_state() {
             member_count: Some(3),
             member_ids_preview: Vec::new(),
             archived_at: SystemTime::UNIX_EPOCH + Duration::from_millis(1_709_281_800_250),
+            applied_tags: Vec::new(),
+            total_message_sent: None,
+            pinned: false,
         })
     );
     assert_eq!(

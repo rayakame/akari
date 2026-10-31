@@ -36,9 +36,40 @@ struct MentionBadge: View {
             case 1: "1 mention"
             default: "\(badge.mentions) mentions"
             }
-        return [muted ? "muted" : nil, badge.unread ? "unread" : nil, mentions]
+        let posts: String? =
+            switch badge.posts {
+            case .new(let count)?: count == 1 ? "1 new post" : "\(count) new posts"
+            case .unread(let count)?: count == 1 ? "1 unread post" : "\(count) unread posts"
+            case nil: nil
+            }
+        return [muted ? "muted" : nil, badge.unread ? "unread" : nil, mentions, posts]
             .compactMap { $0 }
             .joined(separator: ", ")
+    }
+}
+
+/// A forum row's count where it has no mentions: "3 New" in the brand's color for new posts,
+/// else the muted count of posts with unread activity (Discord's text-xs/semibold).
+struct PostCountText: View {
+    let count: PostCount
+
+    static func text(_ count: PostCount) -> String {
+        switch count {
+        case .new(let count): "\(MentionBadge.text(count)) New"
+        case .unread(let count): MentionBadge.text(count)
+        }
+    }
+
+    var body: some View {
+        Text(Self.text(count))
+            .font(TypeScale.forumStatusAction.font)
+            .foregroundStyle(
+                Color(nsColor: {
+                    if case .new = count { Palette.textLink } else { Palette.textMuted }
+                }())
+            )
+            .lineLimit(1)
+            .fixedSize()
     }
 }
 

@@ -1651,3 +1651,275 @@ async fn a_save_isnt_held_back_by_the_image_downloads() {
     );
     assert!(images.await.unwrap().iter().all(Result::is_ok));
 }
+
+// A 4 × 4 GIF shaped as the one Chris reported (delta frames over disposal 1, 40 ms, looping);
+// `padding` bytes of comment stand in for the proxy's heavier copy of the same frames.
+fn delta_gif(frames: usize, padding: usize) -> Vec<u8> {
+    let mut bytes = b"GIF89a".to_vec();
+    bytes.extend([4, 0, 4, 0, 0x81, 0, 0]);
+    bytes.extend([0, 0, 0, 0xff, 0xff, 0xff, 0x58, 0x65, 0xf2, 0, 0, 0]);
+    bytes.extend(b"\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00");
+    let mut left = padding;
+    if left > 0 {
+        bytes.extend([0x21, 0xfe]);
+        while left > 0 {
+            let block = left.min(255);
+            bytes.push(block as u8);
+            bytes.extend(std::iter::repeat_n(b'.', block));
+            left -= block;
+        }
+        bytes.push(0);
+    }
+    for frame in 0..frames {
+        // Disposal 1 for every frame; the deltas' index 3 is transparent.
+        let packed = if frame == 0 { 0x04 } else { 0x05 };
+        bytes.extend([0x21, 0xf9, 4, packed, 4, 0, 3, 0]);
+        bytes.extend([0x2c, 0, 0, 0, 0, 4, 0, 4, 0, 0]);
+        // LZW at 3 bits, a clear before every two of the 16 pixels so the width never grows.
+        let pixel = if frame == 0 { 0 } else { 3 };
+        let mut codes = Vec::new();
+        for pair in 0..8 {
+            codes.push(4);
+            codes.push(if frame > 0 && pair == frame % 8 {
+                1
+            } else {
+                pixel
+            });
+            codes.push(pixel);
+        }
+        codes.push(5);
+        let mut data = Vec::new();
+        let (mut buffer, mut bits) = (0u32, 0);
+        for code in codes {
+            buffer |= code << bits;
+            bits += 3;
+            while bits >= 8 {
+                data.push(buffer as u8);
+                buffer >>= 8;
+                bits -= 8;
+            }
+        }
+        if bits > 0 {
+            data.push(buffer as u8);
+        }
+        bytes.push(2);
+        bytes.push(data.len() as u8);
+        bytes.extend(data);
+        bytes.push(0);
+    }
+    bytes.push(0x3b);
+    bytes
+}
+
+// A GIF attachment whose CDN link is `/attachments/…` and whose proxy link is `/proxy/…`, so the
+// test server tells them apart.
+async fn load_gif(online: &Online, size: usize, fresh: i64) -> (String, String) {
+    let original = format!("/attachments/{GENERAL}/{ATTACHMENT}/loop.gif");
+    let proxied = format!("/proxy{original}");
+    let link = |at: &str| format!("{}{at}?{}&", online.uri(), signature(fresh));
+    let attachment = json!({
+        "id": ATTACHMENT.to_string(), "filename": "loop.gif", "size": size,
+        "url": link(&original), "proxy_url": link(&proxied),
+        "width": 4, "height": 4, "content_type": "image/gif",
+    });
+    load_message(online, |message| {
+        message["attachments"] = json!([attachment])
+    })
+    .await;
+    (original, proxied)
+}
+
+fn gif_answer(bytes: Vec<u8>) -> ResponseTemplate {
+    ResponseTemplate::new(200)
+        .insert_header("content-type", "image/gif")
+        .set_body_bytes(bytes)
+}
+
+fn playing(key: ImageKey) -> ImageRequest {
+    ImageRequest {
+        key,
+        width: 8,
+        height: 8,
+        animated: Some(AnimatedFormat::Gif),
+    }
+}
+
+#[tokio::test]
+async fn a_gif_whose_proxy_copy_is_over_the_cap_comes_from_the_original() {
+    let online = connected().await;
+    let original = delta_gif(3, 0);
+    let inflated = delta_gif(3, crate::media::MAX_BODY + 1);
+    let fresh = now_seconds() + 86_400;
+    let (cdn, proxy) = load_gif(&online, original.len(), fresh).await;
+    serve(&online.server, &proxy, gif_answer(inflated)).await;
+    serve(&online.server, &cdn, gif_answer(original.clone())).await;
+
+    let file = online
+        .account
+        .image(playing(attachment_key()))
+        .await
+        .unwrap();
+
+    assert!(file.animated);
+    assert_eq!((file.width, file.height), (4, 4));
+    assert_eq!(std::fs::read(&file.path).unwrap(), original);
+    assert_eq!(online.requests_to(&proxy).await.len(), 1, "the proxy first");
+    let fetched = online.requests_to(&cdn).await;
+    assert_eq!(fetched.len(), 1);
+    assert_eq!(
+        fetched[0].url.query(),
+        Some(signature(fresh).as_str()),
+        "as uploaded, with its signature"
+    );
+}
+
+#[tokio::test]
+async fn a_gif_too_large_both_ways_stays_too_large() {
+    let online = connected().await;
+    let (cdn, proxy) = load_gif(&online, crate::media::MAX_BODY + 1, now_seconds() + 86_400).await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+
+    let file = online.account.image(playing(attachment_key())).await;
+
+    assert_eq!(file, Err(ImageError::TooLarge));
+    assert!(
+        online.requests_to(&cdn).await.is_empty(),
+        "the original wouldn't fit either"
+    );
+}
+
+// A denied original, its link past its expiry, is renewed as the original, not as the proxy's.
+#[tokio::test]
+async fn a_denied_original_is_renewed_as_the_original() {
+    let online = connected().await;
+    let past = now_seconds() - 600;
+    let fresh = now_seconds() + 86_400;
+    let original = delta_gif(3, 0);
+    let (cdn, proxy) = load_gif(&online, original.len(), past).await;
+    let renewals = Arc::new(Mutex::new(0));
+    let counted = renewals.clone();
+    let uri = online.uri();
+    let renewed_path = cdn.clone();
+    Mock::given(method("POST"))
+        .and(path(REFRESH))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let asked = body["attachment_urls"][0].as_str().unwrap().to_owned();
+            let mut renewals = counted.lock().unwrap();
+            *renewals += 1;
+            // Two renewals past their expiry too, as with a skewed clock.
+            let ex = if *renewals < 3 {
+                past + *renewals
+            } else {
+                fresh
+            };
+            let refreshed = format!("{uri}{renewed_path}?{}&", signature(ex));
+            ResponseTemplate::new(200).set_body_json(
+                json!({"refreshed_urls": [{"original": asked, "refreshed": refreshed}]}),
+            )
+        })
+        .mount(&online.server)
+        .await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path(cdn.clone()))
+        .and(query_param("ex", format!("{fresh:x}")))
+        .respond_with(gif_answer(original.clone()))
+        .mount(&online.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(cdn))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&online.server)
+        .await;
+
+    let file = online.account.image(playing(attachment_key())).await;
+
+    assert_eq!(
+        std::fs::read(file.expect("the original").path).unwrap(),
+        original
+    );
+    assert_eq!(*renewals.lock().unwrap(), 3);
+}
+
+// A denied upload says nothing about the proxy's still of it, which still loads.
+#[tokio::test]
+async fn a_denied_original_leaves_the_still_alone() {
+    let online = connected().await;
+    let (cdn, proxy) = load_gif(&online, delta_gif(3, 0).len(), now_seconds() + 86_400).await;
+    Mock::given(method("GET"))
+        .and(path(proxy.clone()))
+        .and(query_param("format", "webp"))
+        .respond_with(png(4, 4))
+        .mount(&online.server)
+        .await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+    serve(&online.server, &cdn, ResponseTemplate::new(404)).await;
+    assert_eq!(
+        online.account.image(playing(attachment_key())).await,
+        Err(ImageError::NotFound)
+    );
+
+    let still = online
+        .account
+        .image(ImageRequest {
+            key: attachment_key(),
+            width: 8,
+            height: 8,
+            animated: None,
+        })
+        .await;
+
+    assert!(still.is_ok(), "{still:?}");
+}
+
+// The upload gets its own tries, whatever the proxy's took.
+#[tokio::test]
+async fn the_original_has_its_own_tries() {
+    let online = connected().await;
+    let original = delta_gif(3, 0);
+    let (cdn, proxy) = load_gif(&online, original.len(), now_seconds() + 86_400).await;
+    Mock::given(method("GET"))
+        .and(path(proxy.clone()))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(2)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path(cdn.clone()))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    serve(&online.server, &cdn, gif_answer(original.clone())).await;
+
+    let file = online.account.image(playing(attachment_key())).await;
+
+    assert_eq!(
+        std::fs::read(file.expect("the original").path).unwrap(),
+        original
+    );
+}

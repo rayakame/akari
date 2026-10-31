@@ -7,6 +7,7 @@ mod contents;
 mod expressions;
 mod fake;
 mod formatted;
+mod forum;
 mod images;
 mod login;
 mod messages;

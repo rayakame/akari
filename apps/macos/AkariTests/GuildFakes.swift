@@ -68,6 +68,8 @@ nonisolated final class GuildStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
+    override func hidesMediaDownloads(channelId: ChannelId) -> Bool { false }
+
     // Nothing to create here.
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         ThreadCreation(public: false, private: false)

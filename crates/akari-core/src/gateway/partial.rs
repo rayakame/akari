@@ -1,11 +1,11 @@
 use serde::de::{self, Deserialize, Deserializer};
 
-use crate::lenient::{default_on_error, skip_invalid_option};
+use crate::lenient::{default_on_error, double_option_on_error, skip_invalid_option};
 use crate::model::{
-    Attachment, Channel, ChannelId, ChannelType, Embed, GenericMarker, GuildId, MessageCall,
-    MessageId, MessageNotificationLevel, MessageType, NsfwLevel, PermissionOverwrite, PremiumType,
-    Role, RoleId, Snowflake, StickerItem, ThreadMetadata, Timestamp, User, UserId, WebhookId,
-    double_option,
+    Attachment, Channel, ChannelId, ChannelType, DefaultReaction, Embed, ForumTag, GenericMarker,
+    GuildId, MessageCall, MessageId, MessageNotificationLevel, MessageType, NsfwLevel,
+    PermissionOverwrite, PremiumType, Role, RoleId, Snowflake, StickerItem, TagId, ThreadMetadata,
+    Timestamp, User, UserId, WebhookId, double_option,
 };
 
 /// GUILD_UPDATE. A missing field is unchanged, `Some(None)` is `null`, a list replaces.
@@ -104,6 +104,24 @@ pub struct ChannelUpdate {
     pub flags: Option<u64>,
     pub is_message_request: Option<bool>,
     pub is_spam: Option<bool>,
+    #[serde(default, deserialize_with = "skip_invalid_option")]
+    pub available_tags: Option<Vec<ForumTag>>,
+    #[serde(default, deserialize_with = "double_option_on_error")]
+    pub default_reaction_emoji: Option<Option<DefaultReaction>>,
+    #[serde(default, deserialize_with = "double_option_on_error")]
+    pub default_sort_order: Option<Option<u8>>,
+    #[serde(default, deserialize_with = "double_option_on_error")]
+    pub default_forum_layout: Option<Option<u8>>,
+    #[serde(default, deserialize_with = "double_option_on_error")]
+    pub default_tag_setting: Option<Option<String>>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub default_thread_rate_limit_per_user: Option<u32>,
+    #[serde(default, deserialize_with = "double_option_on_error")]
+    pub template: Option<Option<String>>,
+    #[serde(default, deserialize_with = "skip_invalid_option")]
+    pub applied_tags: Option<Vec<TagId>>,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub total_message_sent: Option<u32>,
 }
 
 /// MESSAGE_UPDATE. A missing field is unchanged, `Some(None)` is `null`. `tts` isn't

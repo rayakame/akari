@@ -127,9 +127,12 @@ Source: [channel object](https://docs.discord.food/resources/channel#channel-str
   may point to something that no longer exists.
 - `thread_metadata.create_timestamp` is missing for threads created before 2022-01-09
   ([thread metadata](https://docs.discord.food/resources/channel#thread-metadata-structure)).
-- Not modeled: forum and media fields (`available_tags`, `applied_tags`,
-  `default_reaction_emoji`, sort order, layout), voice fields (`rtc_region`,
-  `video_quality_mode`, `status`), group DM `nicks`, `safety_warnings`, the thread `member`.
+- Forum and media fields (`available_tags`, `default_reaction_emoji`, `default_sort_order`,
+  `default_forum_layout`, `default_tag_setting`, `default_thread_rate_limit_per_user`,
+  `template`) and posts' `applied_tags` and `total_message_sent` are lenient: a malformed value
+  is left out, a malformed tag dropped ([Forums](dispatches.md#forums)).
+- Not modeled: voice fields (`rtc_region`, `video_quality_mode`, `status`), group DM `nicks`,
+  `safety_warnings`, the thread `member`.
 
 ## Guild
 

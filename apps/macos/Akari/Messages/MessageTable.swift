@@ -159,6 +159,7 @@ struct MessageArea: View {
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
             revealedSpoilers: messages.revealedSpoilers, revealedMedia: messages.revealedMedia,
             shownSensitive: messages.shownSensitive, showsAltText: showsAltText,
+            hiddenDownloads: messages.channelsHidingDownloads,
             newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
             startRoom: messages.composer.locked ? LockedBanner.room : 0,
@@ -233,6 +234,14 @@ final class MessageListBridge: MessageListActions {
 
     func mediaURL(_ key: ImageKey) async -> URL? {
         await messages.originalURL(key)
+    }
+
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool {
+        messages.hidesDownloads(of: row)
+    }
+
+    func saveOriginal(_ key: ImageKey, to destination: URL) async throws {
+        _ = try await messages.saveOriginal(key, to: destination)
     }
 
     func toggleSensitive(_ key: MediaKey) {

@@ -50,6 +50,10 @@ protocol MessageListActions: AnyObject {
     func toggleSensitive(_ key: MediaKey)
     // A GIFV's video, which plays in the list.
     func mediaURL(_ key: ImageKey) async -> URL?
+    // The shown message's channel takes Download from its videos and audio.
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool
+    // An attachment's Download, once the save panel answered.
+    func saveOriginal(_ key: ImageKey, to destination: URL) async throws
 }
 
 extension MessageListActions {
@@ -63,4 +67,6 @@ extension MessageListActions {
     func revealMedia(_ key: MediaKey) {}
     func toggleSensitive(_ key: MediaKey) {}
     func mediaURL(_ key: ImageKey) async -> URL? { nil }
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool { false }
+    func saveOriginal(_ key: ImageKey, to destination: URL) async throws {}
 }

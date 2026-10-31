@@ -13,7 +13,7 @@ struct ChannelSidebar: View {
             ListHeader(title: guildName)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    let open = session.messages?.channelId
+                    let open = session.openChannelId
                     let rows = collapsed.visible(list.shown(open: open), in: list.guildId) {
                         list.staysWhenCollapsed($0, open: open)
                     }
@@ -161,7 +161,7 @@ struct ChannelRow: View {
 
     var body: some View {
         Button {
-            if channel.opensMessageList {
+            if channel.opensPage {
                 open()
             }
         } label: {
@@ -182,6 +182,8 @@ struct ChannelRow: View {
                 Spacer(minLength: 0)
                 if badge.mentions > 0 {
                     MentionBadge(count: badge.mentions)
+                } else if let posts = badge.posts {
+                    PostCountText(count: posts)
                 }
             }
             .padding(.vertical, 4)
@@ -200,7 +202,7 @@ struct ChannelRow: View {
         }
         .anchorPreference(key: PeekRowBounds.self, value: .bounds) { peeking ? $0 : nil }
         .help(
-            channel.opensMessageList
+            channel.opensPage
                 ? channel.topic ?? "" : ChannelSymbols.unsupported(channel.kind)
         )
         .accessibilityValue(MentionBadge.accessibilityValue(badge, muted: muted))
@@ -369,12 +371,13 @@ nonisolated private struct Spine: Shape {
 struct ChannelSymbol: View {
     let channel: Channel
     var size: CGFloat = 20
+    var color = Palette.interactiveText
 
     var body: some View {
         // 18 in the 20 box: the # is 17 tall, as Discord's.
         Image(systemName: ChannelSymbols.name(for: channel.kind))
             .font(.system(size: size * 0.9))
-            .foregroundStyle(Color(nsColor: Palette.interactiveText))
+            .foregroundStyle(Color(nsColor: color))
             .frame(width: size, height: size)
             .overlay(alignment: .bottomTrailing) {
                 if channel.nsfw {

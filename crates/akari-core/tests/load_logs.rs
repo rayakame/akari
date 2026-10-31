@@ -23,7 +23,7 @@ async fn the_load_log_holds_numbers_and_the_channel_only() {
         "type": 0,
         "content": "secret-content-77",
         "channel_id": CHANNEL.to_string(),
-        "author": {"id": "4242", "username": "Mira-Name", "global_name": "Mira-Global",
+        "author": {"id": "100000000000004242", "username": "Mira-Name", "global_name": "Mira-Global",
                    "avatar": null, "discriminator": "0", "public_flags": 0},
         "attachments": [], "embeds": [], "mentions": [], "mention_roles": [],
         "pinned": false, "mention_everyone": false, "tts": false,
@@ -72,7 +72,7 @@ async fn the_load_log_holds_numbers_and_the_channel_only() {
         "secret-content-77",
         "Mira-Name",
         "Mira-Global",
-        "4242",
+        "100000000000004242",
         "load-log-test-token",
     ] {
         assert!(!text.contains(secret), "{secret} in {text}");

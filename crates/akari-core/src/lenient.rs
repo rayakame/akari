@@ -59,6 +59,30 @@ where
         .collect())
 }
 
+// For partial updates: missing is "unchanged", `null` or a value that doesn't parse is `Some(None)`.
+pub(crate) fn double_option_on_error<'de, D, T>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let Some(raw) = Option::<&'de RawValue>::deserialize(deserializer)? else {
+        return Ok(Some(None));
+    };
+    Ok(Some(serde_json::from_str(raw.get()).map_or_else(
+        |err| {
+            tracing::warn!(
+                error = %JsonError::from(&err),
+                "using nothing for a {} that failed to parse",
+                type_name::<T>()
+            );
+            None
+        },
+        Some,
+    )))
+}
+
 // A part of a payload that doesn't parse becomes its default instead of failing the payload.
 pub(crate) fn default_on_error<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where

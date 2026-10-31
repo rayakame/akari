@@ -186,6 +186,9 @@ public final class MessageListModel {
     public private(set) var revealedMedia: Set<MediaKey> = []
     /// Sensitive media the user showed with its eye; a second click hides it again (D144).
     public private(set) var shownSensitive: Set<MediaKey> = []
+    /// Of the channels its rows show messages from, those that hide downloads of their media
+    /// (Discord's channel option): videos and audio from them offer no Download.
+    public private(set) var channelsHidingDownloads: Set<ChannelId> = []
     /// Whether the view is scrolled to the bottom of its rows, as it reports; a list opens there.
     public private(set) var atBottom = true
     /// At the present, not stale, and scrolled to its bottom: where the user reads new messages.
@@ -265,6 +268,7 @@ public final class MessageListModel {
             channelId: channelId, account: account, store: store, drafts: drafts)
         readStoredPosition()
         readOwner()
+        readHiddenDownloads()
         reload(rereading: [])
         if hasMessages {
             openedFrom = .window
@@ -455,6 +459,30 @@ public final class MessageListModel {
         return URL(string: link)
     }
 
+    /// Whether the shown message's channel hides downloads of its media (Discord's channel
+    /// option): videos and audio lose their Download, files keep theirs.
+    public func hidesDownloads(of row: Row) -> Bool {
+        store.hidesMediaDownloads(channelId: row.shown.channelId)
+    }
+
+    // A thread's starter row shows its parent's message.
+    private var shownChannels: Set<ChannelId> {
+        Set(rows.map(\.shown.channelId)).union([channelId])
+    }
+
+    private func readHiddenDownloads() {
+        let hiding = shownChannels.filter { store.hidesMediaDownloads(channelId: $0) }
+        if hiding != channelsHidingDownloads {
+            channelsHidingDownloads = hiding
+        }
+    }
+
+    /// Saves the original to `destination` (an attachment's Download); cancelling the task leaves
+    /// the file as it was. Returns the bytes written.
+    public func saveOriginal(_ key: ImageKey, to destination: URL) async throws -> UInt64 {
+        try await account.saveOriginal(key, to: destination)
+    }
+
     /// The viewer on `row`'s media from `index`, by its author at its time; the shown message's
     /// channel says whether downloads are offered.
     public func viewer(_ items: [ViewerModel.Item], at index: Int, of row: Row) -> ViewerModel? {
@@ -507,6 +535,10 @@ public final class MessageListModel {
             || ownerId.map(batch.usersChanged.contains) == true
         {
             readOwner()
+        }
+        let changedChannels = guildId.flatMap { batch.channelsChanged[$0] } ?? []
+        if batch.everythingChanged || !changedChannels.isDisjoint(with: shownChannels) {
+            readHiddenDownloads()
         }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages

@@ -21,6 +21,7 @@ const ACK: &str = "channels/{}/messages/{}/ack";
 const ACK_BULK: &str = "read-states/ack-bulk";
 const THREAD_MEMBER: &str = "channels/{}/thread-members/@me";
 const THREAD_SEARCH: &str = "channels/{}/threads/search";
+const POST_DATA: &str = "channels/{}/post-data";
 const THREADS: &str = "channels/{}/threads";
 const MESSAGE_THREADS: &str = "channels/{}/messages/{}/threads";
 const REFRESH_URLS: &str = "attachments/refresh-urls";
@@ -481,6 +482,30 @@ impl AccountRest {
         let Exchange { body, .. } = self
             .send(route, Waiting::Allowed, || {
                 self.request(HttpMethod::GET, &path)
+            })
+            .await
+            .map_err(RequestError::from)?;
+        serde_json::from_slice(&body).map_err(|_| RequestError::UnexpectedResponse)
+    }
+
+    /// Forum posts' first messages and owners (at most 10 a request, as the official client).
+    pub(crate) async fn post_data(
+        &self,
+        forum: ChannelId,
+        posts: &[ChannelId],
+    ) -> Result<model::PostData, RequestError> {
+        #[derive(Serialize)]
+        struct Body {
+            thread_ids: Vec<String>,
+        }
+        let path = format!("channels/{}/post-data", forum.get());
+        let route = RouteKey::new(Method::Post, POST_DATA, forum.get());
+        let body = Body {
+            thread_ids: posts.iter().map(|post| post.get().to_string()).collect(),
+        };
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Allowed, || {
+                Ok(self.request(HttpMethod::POST, &path)?.json(&body))
             })
             .await
             .map_err(RequestError::from)?;

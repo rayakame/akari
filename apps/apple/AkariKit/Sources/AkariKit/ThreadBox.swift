@@ -73,15 +73,19 @@ public struct ThreadBox: Equatable, Sendable {
         guard let count, count > 0 else {
             return "See Thread ›"
         }
-        let number =
-            if threadId.rawValue <= cappedBefore && count >= 50 {
-                "50+"
-            } else if count >= 100_000 {
-                "100k+"
-            } else {
-                String(count)
-            }
+        let number = number(count: count, threadId: threadId)
         return number == "1" ? "1 Message ›" : "\(number) Messages ›"
+    }
+
+    /// A thread's message count as Discord writes it: "12", "50+", "100k+".
+    public static func number(count: UInt32, threadId: ChannelId) -> String {
+        if threadId.rawValue <= cappedBefore && count >= 50 {
+            "50+"
+        } else if count >= 100_000 {
+            "100k+"
+        } else {
+            String(count)
+        }
     }
 
     /// What the second line says for a newest message without content; `nil` when it has some.

@@ -154,6 +154,15 @@ pub enum StoreEvent {
     OlderThreadsChanged {
         parent_id: ChannelId,
     },
+    /// The open forum's list changed, or loading its archived posts moved on: read
+    /// `Store::forum_posts` again.
+    ForumPostsChanged {
+        forum_id: ChannelId,
+    },
+    /// A forum post's first message arrived, changed or went: read `Store::post_preview` again.
+    PostPreviewChanged {
+        post_id: ChannelId,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -268,6 +277,8 @@ impl StoreEvent {
                 thread_id,
             },
             E::OlderThreadsChanged { parent_id } => Self::OlderThreadsChanged { parent_id },
+            E::ForumPostsChanged { forum_id } => Self::ForumPostsChanged { forum_id },
+            E::PostPreviewChanged { post_id } => Self::PostPreviewChanged { post_id },
             E::ChannelAdded(channel) => Self::ChannelAdded {
                 channel_id: channel.id,
                 guild_id: channel.guild_id,

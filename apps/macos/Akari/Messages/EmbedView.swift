@@ -676,7 +676,7 @@ final class EmbedView: NSView {
             act(.reveal)
         case .toggleSensitive:
             act(.toggleSensitive)
-        case .altText:
+        case .altText, .download:
             break
         }
     }

@@ -330,6 +330,17 @@ struct SessionView<MessageArea: View>: View {
             }
             if let messages = session.messages {
                 messageArea(messages, channelName)
+            } else if let forum = session.forum {
+                let gate = session.ageGate(of: forum.forumId)
+                if gate == .open {
+                    ForumPage(forum: forum, session: session)
+                        .id(ObjectIdentifier(forum))
+                } else {
+                    AgeGateView(
+                        gate: gate,
+                        agree: { session.agreeToAgeRestricted(in: forum.forumId) },
+                        back: session.leaveAgeGate)
+                }
             } else if session.currentUser == nil {
                 EmptyState(text: nil)
             } else if session.place == .home {
@@ -364,7 +375,7 @@ struct SessionView<MessageArea: View>: View {
     }
 
     private var openChannel: Channel? {
-        guard let id = session.messages?.channelId else {
+        guard let id = session.openChannelId else {
             return nil
         }
         return session.channels?.channel(id) ?? conversation?.channel
