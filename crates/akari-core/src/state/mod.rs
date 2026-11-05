@@ -6,6 +6,7 @@ mod clock;
 mod convert;
 mod events;
 mod expressions;
+mod media;
 mod order;
 mod permissions;
 mod read_states;
@@ -22,6 +23,8 @@ pub use events::{ConnectionState, StoreEvent};
 pub use expressions::{
     EmojiSource, SourceEmoji, SourceGuild, StickerDetails, StickerOrigin, StickerPack,
 };
+pub(crate) use media::AgeAgreements;
+pub use media::{AgeGate, AttachmentDisplay, MediaCover, ShownAttachment};
 pub use order::display_order;
 pub use read_states::ReadState;
 pub(crate) use read_states::{Ack, AckBody, ReadStates};

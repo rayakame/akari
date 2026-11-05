@@ -34,6 +34,7 @@ final class FakeStore: Store, @unchecked Sendable {
         // Messages that can start a thread.
         var startable: Set<MessageId> = []
         var threadSlowmodes: [ChannelId: Slowmode] = [:]
+        var ageGates: [ChannelId: AgeGate] = [:]
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -125,6 +126,10 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func displaySettings() -> DisplaySettings {
         read(.displaySettings) { $0.displaySettings }
+    }
+
+    override func ageGate(channelId: ChannelId) -> AgeGate {
+        state.current.ageGates[channelId] ?? .open
     }
 
     override func mutedChannels(ids: [ChannelId]) -> [ChannelId] {

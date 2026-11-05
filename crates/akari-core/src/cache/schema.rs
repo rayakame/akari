@@ -3,13 +3,7 @@ use rusqlite::Connection;
 use crate::model::UserId;
 
 // A file with any other version is deleted and started over.
-pub(super) const CURRENT: i32 = 5;
-// Its rows read as they are: 5 only adds a thread member's join time, which READY fills in.
-pub(super) const UPGRADABLE: i32 = 4;
-
-pub(super) fn upgrade(conn: &Connection) -> rusqlite::Result<()> {
-    conn.pragma_update(None, "user_version", CURRENT)
-}
+pub(super) const CURRENT: i32 = 6;
 
 pub(super) fn create(conn: &Connection, user: UserId) -> rusqlite::Result<()> {
     conn.execute_batch(&format!(

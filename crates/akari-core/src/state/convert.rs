@@ -52,6 +52,7 @@ impl CurrentUser {
             premium_type: current.premium_type,
             mfa_enabled: current.mfa_enabled,
             verified: current.verified,
+            nsfw_allowed: current.nsfw_allowed,
         }
     }
 
@@ -76,6 +77,9 @@ impl CurrentUser {
         next.premium_type = update.premium_type.unwrap_or(next.premium_type);
         next.mfa_enabled = update.mfa_enabled.unwrap_or(next.mfa_enabled);
         next.verified = update.verified.unwrap_or(next.verified);
+        if let Some(allowed) = update.nsfw_allowed {
+            next.nsfw_allowed = allowed;
+        }
         next
     }
 }
@@ -95,6 +99,7 @@ impl Guild {
             default_message_notifications: default_level(properties.default_message_notifications),
             community: community(&properties.features),
             emojis: emoji_ids(&guild.emojis),
+            age_restricted: age_restricted(properties.owner_configured_content_level),
         }
     }
 
@@ -119,6 +124,9 @@ impl Guild {
         if let Some(features) = update.features {
             next.community = community(&features);
         }
+        if let Some(level) = update.owner_configured_content_level {
+            next.age_restricted = age_restricted(level);
+        }
         next
     }
 }
@@ -128,6 +136,13 @@ pub(crate) fn emoji_ids(emojis: &[model::EmojiRef]) -> Box<[EmojiId]> {
     ids.sort_unstable();
     ids.dedup();
     ids.into()
+}
+
+fn age_restricted(level: Option<model::NsfwLevel>) -> bool {
+    matches!(
+        level,
+        Some(model::NsfwLevel::Explicit | model::NsfwLevel::AgeRestricted)
+    )
 }
 
 fn community(features: &[String]) -> bool {
@@ -517,6 +532,7 @@ fn attachment(attachment: model::Attachment) -> Attachment {
     Attachment {
         id: attachment.id,
         filename: text(attachment.filename),
+        title: optional_text(attachment.title),
         description: optional_text(attachment.description),
         content_type: optional_text(attachment.content_type),
         size: attachment.size,
@@ -525,6 +541,11 @@ fn attachment(attachment: model::Attachment) -> Attachment {
         width: attachment.width,
         height: attachment.height,
         flags: attachment.flags,
+        placeholder: attachment
+            .placeholder
+            .filter(|_| attachment.placeholder_version == Some(1))
+            .map(text),
+        content_scan_version: attachment.content_scan_version,
     }
 }
 
@@ -783,6 +804,42 @@ mod tests {
         assert_eq!(message.referenced_message, ReferencedMessage::NotIncluded);
     }
 
+    // Its box needs the placeholder before the file and the scan's version for its cover.
+    #[test]
+    fn an_attachment_keeps_its_placeholder_title_and_scan() {
+        let attachment = |edit: fn(&mut Value)| {
+            let message = Message::from_wire(
+                edited(include_str!("../../tests/fixtures/message.json"), |value| {
+                    edit(&mut value["attachments"][0]);
+                }),
+                &mut new_arc,
+            );
+            message.attachments[0].clone()
+        };
+
+        let shown = attachment(|value| value["title"] = "screenshot".into());
+        assert_eq!(
+            shown.placeholder.as_deref(),
+            Some("3PcNNYSFeXh/d3eld0iHZoZgVwh2")
+        );
+        assert_eq!(shown.title.as_deref(), Some("screenshot"));
+        assert_eq!(shown.content_scan_version, Some(2));
+        // Only version 1 is a thumbhash Akari decodes.
+        let newer = attachment(|value| value["placeholder_version"] = 2.into());
+        assert_eq!(newer.placeholder, None);
+        let unversioned = attachment(|value| {
+            value.as_object_mut().unwrap().remove("placeholder_version");
+        });
+        assert_eq!(unversioned.placeholder, None);
+        let unscanned = attachment(|value| {
+            value
+                .as_object_mut()
+                .unwrap()
+                .remove("content_scan_version");
+        });
+        assert_eq!(unscanned.content_scan_version, None);
+    }
+
     #[test]
     fn authors_and_mentions_go_through_the_interner() {
         let mut seen = Vec::new();
@@ -846,6 +903,58 @@ mod tests {
         assert!(info.archived && info.locked);
         assert_eq!(info.message_count, Some(12));
         assert_eq!(counted.thread.unwrap().message_count, Some(13));
+    }
+
+    // The age gate's "not old enough" variant hangs on an explicit false only.
+    #[test]
+    fn the_current_user_keeps_whether_age_restricted_content_is_allowed() {
+        let current = |allowed: Value| {
+            let mut user = ready().user;
+            user.nsfw_allowed = serde_json::from_value(allowed).unwrap();
+            CurrentUser::from_wire(user)
+        };
+
+        assert_eq!(current(Value::Bool(true)).nsfw_allowed, Some(true));
+        assert_eq!(current(Value::Bool(false)).nsfw_allowed, Some(false));
+        assert_eq!(current(Value::Null).nsfw_allowed, None);
+        let known = current(Value::Bool(true));
+        let changed = known.patch(parse(r#"{"id": "1", "nsfw_allowed": false}"#));
+        assert_eq!(changed.nsfw_allowed, Some(false));
+        let cleared = known.patch(parse(r#"{"id": "1", "nsfw_allowed": null}"#));
+        assert_eq!(cleared.nsfw_allowed, None);
+        let kept = known.patch(parse(r#"{"id": "1", "username": "x"}"#));
+        assert_eq!(kept.nsfw_allowed, Some(true));
+    }
+
+    // The owner's content level gates every channel (module 260509): explicit (1) and
+    // age-restricted (3); `nsfw_level` only behind an experiment that's off.
+    #[test]
+    fn a_guild_is_age_restricted_by_its_owners_content_level() {
+        let guild = |level: Value| {
+            let GatewayGuild::Available(wire) = edited::<Ready>(
+                &parse::<Value>(include_str!("../../tests/fixtures/ready.json"))["d"].to_string(),
+                |value| value["guilds"][0]["properties"]["owner_configured_content_level"] = level,
+            )
+            .guilds
+            .remove(0) else {
+                panic!("expected an available guild");
+            };
+            Guild::from_wire(*wire)
+        };
+
+        assert!(guild(1.into()).age_restricted);
+        assert!(guild(3.into()).age_restricted);
+        assert!(!guild(0.into()).age_restricted);
+        assert!(!guild(2.into()).age_restricted);
+        assert!(!guild(Value::Null).age_restricted);
+        let open = guild(0.into());
+        let restricted = open.patch(parse(
+            r#"{"id": "200000000000000001", "owner_configured_content_level": 3}"#,
+        ));
+        assert!(restricted.age_restricted);
+        let renamed = restricted.patch(parse(r#"{"id": "200000000000000001", "name": "R"}"#));
+        assert!(renamed.age_restricted);
+        assert!(!restricted.shows_the_same(&open));
     }
 
     #[test]

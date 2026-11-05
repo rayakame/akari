@@ -73,11 +73,25 @@ struct MessageArea: View {
     var focusNow = false
     var onFocused: () -> Void = {}
     var images: ImageCache?
+    var placeholders: PlaceholderCache?
     var motion = MotionPolicy.default
     var focused = false
+    /// `view_image_descriptions`: media with a description shows its ALT button.
+    var showsAltText = false
+    var ageGate = AgeGate.open
+    var agreeToAgeGate: () -> Void = {}
+    var leaveAgeGate: () -> Void = {}
     @State private var link = MessageTableLink()
 
     var body: some View {
+        if ageGate != .open {
+            AgeGateView(gate: ageGate, agree: agreeToAgeGate, back: leaveAgeGate)
+        } else {
+            list
+        }
+    }
+
+    @ViewBuilder private var list: some View {
         let bridge = MessageListBridge(
             messages: messages, link: link, links: links, go: go, openThread: openThread,
             openThreads: openThreads, openGuild: openGuild, markServerRead: markServerRead,
@@ -142,10 +156,13 @@ struct MessageArea: View {
             failedLoads: messages.failedLoads, start: name.start,
             channelId: messages.channelId, lastLoad: messages.lastLoad,
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
-            revealedSpoilers: messages.revealedSpoilers, newMessages: messages.newMessagesLine,
+            revealedSpoilers: messages.revealedSpoilers, revealedMedia: messages.revealedMedia,
+            shownSensitive: messages.shownSensitive, showsAltText: showsAltText,
+            newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
             startRoom: messages.composer.locked ? LockedBanner.room : 0,
-            images: ImageCacheRef(images), motion: motion, focused: focused)
+            images: ImageCacheRef(images, placeholders: placeholders), motion: motion,
+            focused: focused)
     }
 }
 
@@ -195,6 +212,22 @@ final class MessageListBridge: MessageListActions {
 
     func retry(_ message: MessageId) {
         Task { await messages.composer.retry(message) }
+    }
+
+    func openMedia(_ key: ImageKey) {
+        Task { [messages] in
+            if let url = await messages.originalURL(key) {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
+    func revealMedia(_ key: MediaKey) {
+        messages.reveal(media: key)
+    }
+
+    func toggleSensitive(_ key: MediaKey) {
+        messages.toggleSensitive(key)
     }
 
     func delete(_ message: MessageId) {

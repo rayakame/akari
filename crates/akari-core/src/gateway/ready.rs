@@ -40,4 +40,7 @@ pub struct Ready {
     pub notification_settings: Option<NotificationSettings>,
     pub session_id: String,
     pub resume_gateway_url: String,
+    /// The newest explicit content scan; media scanned before it may need a new one.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub explicit_content_scan_version: Option<u32>,
 }

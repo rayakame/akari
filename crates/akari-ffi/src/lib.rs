@@ -41,10 +41,11 @@ pub use login::{
     QrEvent, QrLogin, ScannedUser,
 };
 pub use records::{
-    Attachment, Channel, ConnectionState, ContentStats, Delivery, DisplaySettings, EmojiSource,
-    ExplicitContentFilter, ExplicitContentSettings, Guild, Message, MessageReference,
-    MessageWindow, Nitro, Redaction, Slowmode, SourceEmoji, SourceGuild, SpoilerSetting,
-    StarterMessage, Sticker, StickerAnimation, StickerDetails, StickerOrigin, StickerPack, User,
+    AgeGate, Attachment, AttachmentDisplay, AttachmentKind, Channel, ConnectionState, ContentStats,
+    Delivery, DisplaySettings, EmojiSource, ExplicitContentFilter, ExplicitContentSettings, Guild,
+    MediaCover, Message, MessageReference, MessageWindow, Nitro, Redaction, Slowmode, SourceEmoji,
+    SourceGuild, SpoilerSetting, StarterMessage, Sticker, StickerAnimation, StickerDetails,
+    StickerOrigin, StickerPack, User,
 };
 pub use store::{Store, message_length};
 pub use subscription::{StoreEvent, StoreSubscription};

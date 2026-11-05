@@ -334,6 +334,8 @@ pub(crate) struct UserSettings {
     pub(crate) notification_flags: u64,
     // READY's proto didn't decode, so the store keeps the folders and display settings it had.
     pub(crate) unreadable: bool,
+    // Akari's own, kept across READY: guilds whose age-restricted channels the user agreed to see.
+    pub(crate) age_agreements: Arc<super::media::AgeAgreements>,
 }
 
 impl UserSettings {

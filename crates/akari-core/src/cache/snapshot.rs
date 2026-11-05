@@ -150,6 +150,10 @@ fn settings_changes(
         writer.put_display_settings(&new.display)?;
         counts.0 += 1;
     }
+    if old.age_agreements != new.age_agreements {
+        writer.put_age_agreements(&new.age_agreements)?;
+        counts.0 += 1;
+    }
     Ok(counts)
 }
 

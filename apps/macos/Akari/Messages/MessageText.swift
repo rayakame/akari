@@ -291,6 +291,11 @@ private struct Builder {
     // A list's numbers from 10 up need more than the usual 20 of marker column.
     private let columns: [CGFloat]
 
+    // The channel shows its spoilers (`render_spoilers`), or the user clicked this one.
+    private func isRevealed(_ spoiler: UInt16) -> Bool {
+        message.spoilersShown || revealed.contains(spoiler)
+    }
+
     init(_ message: Message, revealed: Set<UInt16>, now: Date, times: TimestampText) {
         self.message = message
         source = message.content as NSString
@@ -430,7 +435,7 @@ private struct Builder {
         }
         if let spoiler = block.spoiler {
             attributes[.akariSpoiler] = MessageText.Spoiler(
-                index: spoiler, hidden: !revealed.contains(spoiler))
+                index: spoiler, hidden: !isRevealed(spoiler))
         }
         return BlockStyle(
             face: face, flags: flags, attributes: attributes, marker: shown, isCode: isCode)
@@ -469,11 +474,11 @@ private struct Builder {
         }
         if let spoiler = span.spoiler {
             attributes[.akariSpoiler] = MessageText.Spoiler(
-                index: spoiler, hidden: !revealed.contains(spoiler))
+                index: spoiler, hidden: !isRevealed(spoiler))
         }
         let start = out.length
         defer {
-            if let spoiler = span.spoiler ?? block.spoiler, !revealed.contains(spoiler) {
+            if let spoiler = span.spoiler ?? block.spoiler, !isRevealed(spoiler) {
                 hide(NSRange(location: start, length: out.length - start), spoiler)
             }
         }

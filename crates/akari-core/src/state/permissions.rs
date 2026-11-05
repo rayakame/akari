@@ -146,6 +146,7 @@ mod tests {
             default_message_notifications: crate::state::NotificationLevel::AllMessages,
             community: false,
             emojis: Box::new([]),
+            age_restricted: false,
         }
     }
 

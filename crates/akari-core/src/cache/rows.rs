@@ -113,6 +113,8 @@ pub(super) struct CurrentUserRow {
     premium_type: u16,
     mfa_enabled: bool,
     verified: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    nsfw_allowed: Option<bool>,
 }
 
 impl From<&CurrentUser> for CurrentUserRow {
@@ -122,6 +124,7 @@ impl From<&CurrentUser> for CurrentUserRow {
             premium_type: current.premium_type.into(),
             mfa_enabled: current.mfa_enabled,
             verified: current.verified,
+            nsfw_allowed: current.nsfw_allowed,
         }
     }
 }
@@ -133,6 +136,7 @@ impl From<CurrentUserRow> for CurrentUser {
             premium_type: PremiumType::from(row.premium_type),
             mfa_enabled: row.mfa_enabled,
             verified: row.verified,
+            nsfw_allowed: row.nsfw_allowed,
         }
     }
 }
@@ -172,6 +176,8 @@ pub(super) struct GuildRow {
     // Its custom emoji's IDs, sorted; absent in files written before them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     emojis: Vec<u64>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    age_restricted: bool,
 }
 
 fn is_zero(value: &u8) -> bool {
@@ -218,6 +224,7 @@ impl From<&Guild> for GuildRow {
             community: guild.community,
             default_level: level_code(guild.default_message_notifications),
             emojis: guild.emojis.iter().map(|emoji| emoji.get()).collect(),
+            age_restricted: guild.age_restricted,
         }
     }
 }
@@ -247,6 +254,7 @@ impl GuildRow {
             default_message_notifications: level(self.default_level),
             community: self.community,
             emojis: self.emojis.into_iter().map(Snowflake::new).collect(),
+            age_restricted: self.age_restricted,
         }
     }
 }
@@ -479,6 +487,8 @@ struct AttachmentRow {
     id: u64,
     filename: Box<str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<Box<str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<Box<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     content_type: Option<Box<str>>,
@@ -490,6 +500,10 @@ struct AttachmentRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     height: Option<u32>,
     flags: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    placeholder: Option<Box<str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_scan_version: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -778,6 +792,7 @@ impl From<&Message> for MessageRow {
                 .map(|attachment| AttachmentRow {
                     id: attachment.id.get(),
                     filename: attachment.filename.clone(),
+                    title: attachment.title.clone(),
                     description: attachment.description.clone(),
                     content_type: attachment.content_type.clone(),
                     size: attachment.size,
@@ -786,6 +801,8 @@ impl From<&Message> for MessageRow {
                     width: attachment.width,
                     height: attachment.height,
                     flags: attachment.flags,
+                    placeholder: attachment.placeholder.clone(),
+                    content_scan_version: attachment.content_scan_version,
                 })
                 .collect(),
             embeds: message.embeds.iter().map(EmbedRow::from).collect(),
@@ -874,6 +891,9 @@ impl MessageRow {
                     width: attachment.width,
                     height: attachment.height,
                     flags: attachment.flags,
+                    title: attachment.title,
+                    placeholder: attachment.placeholder,
+                    content_scan_version: attachment.content_scan_version,
                 })
                 .collect(),
             embeds: self.embeds.into_iter().map(Embed::from).collect(),

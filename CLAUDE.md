@@ -60,13 +60,18 @@ animation, explicit content) with their event, keeps "0", "0000" and legacy disc
 apart, and gives every user an avatar key (the avatar, else Discord's default avatar by the
 client's index rule) and guilds and group DMs their icon's; it keeps which server each of the
 user's custom emoji is from and asks Discord where other emoji and stickers are from (their
-popouts);
+popouts); it says how each message's attachments show (the media mosaic or file rows, Discord's
+order) and what covers each (a spoiler by `render_spoilers`, sensitive media by the user's
+explicit and gore settings per conversation, media waiting for Discord's content scan, which the
+account asks for in viewed channels and stops waiting for after 3 s), and whether a channel waits
+behind the age gate, with the user's agreement per server in the cache;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, show where a channel's unread state and mentions come from, and get an image as the app
 would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
-emoji span's key, the display settings), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+emoji span's key, the display settings, attachments with their kind, size, placeholder, key,
+place and cover, the age gate and the agreement), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, and the composer), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
@@ -87,7 +92,11 @@ as layers from the image tier, animated avatars playing on hover while the windo
 emoji as image layers on fixed boxes in the text (jumbo at 48, `:name:` as tooltip, copy and
 fallback) and stickers in a row under the text (Lottie as a named box), both fitting inside their
 box and animated by their settings, visibility and the message's hover, with the hand, a hover card
-and a click's popout (where an emoji or sticker is from, Discord's words); a thread
+and a click's popout (where an emoji or sticker is from, Discord's words); a message's attachments
+under its text (Discord's mosaic from sizes alone with placeholders, the fade, the spinner, failure
+and retry, GIFs by the motion policy, video posters, file rows, ALT buttons, spoiler and sensitive
+covers with the eye, the media a screen away asked early; a click opens the original in the
+browser until the viewer) and the age gate in place of a gated channel's list and composer; a thread
 opens with its header ("# channel › thread"), its start and starter message, and a locked
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
 its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message
