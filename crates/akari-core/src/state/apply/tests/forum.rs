@@ -1606,60 +1606,147 @@ fn an_answer_doesnt_undo_what_the_gateway_brought_meanwhile() {
     assert!(!state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events));
 }
 
-// CodeRabbit on #61: an edit of a first message that comes before its preview does isn't lost
-// when the answer, sent before the edit, lands.
+// CodeRabbit on #61: an edit of a first message that comes while its preview is being asked for
+// says the answer may be older than it: an older answer is asked for again, a newer one stays.
+
+fn edit_at(post: u64, content: &str, time: &str) -> Value {
+    json!({"id": post.to_string(), "channel_id": post.to_string(), "content": content,
+           "edited_timestamp": time})
+}
+
+fn answered(post: u64, content: &str, edited: Option<&str>) -> crate::model::PostData {
+    let mut first = starter(post, content);
+    first["edited_timestamp"] = edited.into();
+    serde_json::from_str(
+        &json!({"threads": {post.to_string(): {"first_message": first, "owner": null}}})
+            .to_string(),
+    )
+    .unwrap()
+}
+
+fn asking(state: &mut State, post: u64) -> (ChannelId, Vec<ChannelId>) {
+    state.want_post_previews(
+        Snowflake::new(FORUM),
+        &[Snowflake::new(post)],
+        &mut Vec::new(),
+    );
+    state.next_post_batch().expect("a batch")
+}
+
+const NOON: &str = "2026-11-11T12:00:00.000000+00:00";
+const LATER_THAT_DAY: &str = "2026-11-11T13:00:00.000000+00:00";
+
 #[test]
-fn an_edit_before_the_answer_is_applied_to_it() {
+fn an_answer_from_before_an_edit_is_asked_for_again() {
     let mut state = forum_with_posts();
-    let mut events = Vec::new();
-    let asked = [Snowflake::new(OLD), Snowflake::new(NEWEST)];
-    state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events);
-    let (forum, batch) = state.next_post_batch().expect("a batch");
-    for (post, content) in [
-        (OLD, "edited"),
-        (OLD, "edited twice"),
-        (NEWEST, "gone anyway"),
-    ] {
-        apply(
-            &mut state,
-            "MESSAGE_UPDATE",
-            json!({"id": post.to_string(), "channel_id": post.to_string(), "content": content}),
-        );
-    }
+    let (forum, batch) = asking(&mut state, OLD);
+    apply(&mut state, "MESSAGE_UPDATE", edit_at(OLD, "edited", NOON));
     assert_eq!(preview(&state, OLD), None, "nothing to edit yet");
 
-    let answer: crate::model::PostData = serde_json::from_str(
-        &json!({
-            "threads": {
-                OLD.to_string(): {"first_message": starter(OLD, "before the edit"), "owner": null},
-                NEWEST.to_string(): {"first_message": null, "owner": null},
-            }
-        })
-        .to_string(),
-    )
-    .unwrap();
-    state.finish_post_batch(forum, &batch, Some(answer), &mut events);
+    let mut events = Vec::new();
+    state.finish_post_batch(
+        forum,
+        &batch,
+        Some(answered(OLD, "before the edit", None)),
+        &mut events,
+    );
 
-    assert_eq!(preview(&state, OLD).as_deref(), Some("edited twice"));
-    assert_eq!(preview(&state, NEWEST).as_deref(), Some("deleted"));
+    assert_eq!(preview(&state, OLD), None, "the stale answer isn't shown");
+    assert!(events.is_empty(), "{events:?}");
+    let (forum, batch) = state.next_post_batch().expect("asked again at once");
+    assert_eq!(batch, [Snowflake::new(OLD)]);
+    state.finish_post_batch(
+        forum,
+        &batch,
+        Some(answered(OLD, "edited", Some(NOON))),
+        &mut events,
+    );
+    assert_eq!(preview(&state, OLD).as_deref(), Some("edited"));
+    assert_eq!(state.next_post_batch(), None);
+}
 
-    // An edit of a post nobody asked about is nothing to keep.
+#[test]
+fn an_answer_newer_than_the_edit_stays() {
+    let mut state = forum_with_posts();
+    let (forum, batch) = asking(&mut state, OLD);
     apply(
         &mut state,
         "MESSAGE_UPDATE",
-        json!({"id": MIDDLE.to_string(), "channel_id": MIDDLE.to_string(), "content": "unasked"}),
+        edit_at(OLD, "the first edit", NOON),
     );
-    state.want_post_previews(
-        Snowflake::new(FORUM),
-        &[Snowflake::new(MIDDLE)],
-        &mut events,
+
+    state.finish_post_batch(
+        forum,
+        &batch,
+        Some(answered(OLD, "the second edit", Some(LATER_THAT_DAY))),
+        &mut Vec::new(),
     );
-    let (forum, batch) = state.next_post_batch().expect("a batch");
-    let answer: crate::model::PostData = serde_json::from_str(
-        &json!({"threads": {MIDDLE.to_string(): {"first_message": starter(MIDDLE, "as asked"), "owner": null}}})
+
+    assert_eq!(preview(&state, OLD).as_deref(), Some("the second edit"));
+    assert_eq!(state.next_post_batch(), None);
+}
+
+// An update that says no edit time (Discord filling in a link's embed) could be either side of
+// the answer: asked again, once.
+#[test]
+fn an_update_without_a_time_asks_once_more() {
+    let mut state = forum_with_posts();
+    let (forum, batch) = asking(&mut state, OLD);
+    apply(
+        &mut state,
+        "MESSAGE_UPDATE",
+        json!({"id": OLD.to_string(), "channel_id": OLD.to_string(), "embeds": []}),
+    );
+
+    state.finish_post_batch(
+        forum,
+        &batch,
+        Some(answered(OLD, "first", None)),
+        &mut Vec::new(),
+    );
+    let (forum, batch) = state.next_post_batch().expect("asked again");
+    state.finish_post_batch(
+        forum,
+        &batch,
+        Some(answered(OLD, "first", None)),
+        &mut Vec::new(),
+    );
+
+    assert_eq!(preview(&state, OLD).as_deref(), Some("first"));
+    assert_eq!(state.next_post_batch(), None);
+}
+
+// An answer that says the first message is gone needs no second ask; an edit of a post nobody
+// asked about is nothing to keep.
+#[test]
+fn a_deleted_answer_and_an_unasked_edit_change_nothing() {
+    let mut state = forum_with_posts();
+    let (forum, batch) = asking(&mut state, NEWEST);
+    apply(
+        &mut state,
+        "MESSAGE_UPDATE",
+        edit_at(NEWEST, "gone anyway", NOON),
+    );
+    let gone: crate::model::PostData = serde_json::from_str(
+        &json!({"threads": {NEWEST.to_string(): {"first_message": null, "owner": null}}})
             .to_string(),
     )
     .unwrap();
-    state.finish_post_batch(forum, &batch, Some(answer), &mut events);
+    state.finish_post_batch(forum, &batch, Some(gone), &mut Vec::new());
+    assert_eq!(preview(&state, NEWEST).as_deref(), Some("deleted"));
+    assert_eq!(state.next_post_batch(), None);
+
+    apply(
+        &mut state,
+        "MESSAGE_UPDATE",
+        edit_at(MIDDLE, "unasked", LATER_THAT_DAY),
+    );
+    let (forum, batch) = asking(&mut state, MIDDLE);
+    state.finish_post_batch(
+        forum,
+        &batch,
+        Some(answered(MIDDLE, "as asked", None)),
+        &mut Vec::new(),
+    );
     assert_eq!(preview(&state, MIDDLE).as_deref(), Some("as asked"));
 }

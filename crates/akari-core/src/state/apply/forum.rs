@@ -34,8 +34,9 @@ pub(super) struct Previews {
     asked: HashSet<ChannelId>,
     // When a post Discord didn't answer for may be asked again.
     retry: HashMap<ChannelId, i64>,
-    // Edits of first messages being asked for: the answer may be from before them.
-    edits: HashMap<ChannelId, Vec<MessageUpdate>>,
+    // First messages edited while being asked for, with the newest edit's time (`None`: an
+    // update that named none): an answer from before it is stale.
+    edited: HashMap<ChannelId, Option<i64>>,
 }
 
 // The official client keeps the pages of at most this many filters.
@@ -656,7 +657,7 @@ impl State {
     /// What post-data answered for `asked`, or `None` when the request failed.
     pub(crate) fn finish_post_batch(
         &mut self,
-        _forum: ChannelId,
+        forum: ChannelId,
         asked: &[ChannelId],
         answer: Option<PostData>,
         events: &mut Vec<StoreEvent>,
@@ -665,7 +666,7 @@ impl State {
         let retry = self.now_millis() + RETRY_MILLIS;
         for post in asked {
             self.previews.asked.remove(post);
-            let edits = self.previews.edits.remove(post).unwrap_or_default();
+            let edited = self.previews.edited.remove(post);
             // What the gateway brought while the request was on its way is newer.
             if self.previews.messages.contains_key(post) {
                 self.previews.retry.remove(post);
@@ -678,12 +679,19 @@ impl State {
             if let Some(user) = entry.owner.and_then(|owner| owner.user) {
                 self.put_user(user, events);
             }
+            // Edited meanwhile: only an answer that has the edit is shown, else asked again.
+            if let (Some(seen), Some(first)) = (edited, &entry.first_message) {
+                let answered = first.edited_timestamp.map(|at| at.unix_millis());
+                if seen.is_none_or(|seen| answered.is_none_or(|answered| answered < seen)) {
+                    self.previews.asked.insert(*post);
+                    self.previews.queue.push_back((forum, *post));
+                    continue;
+                }
+            }
             let users = &self.entities.users;
             let message = entry.first_message.map(|message| {
-                let first = Message::from_wire(message, &mut |user| known_user(user, users));
-                // Applied again to an answer that has them already, they change nothing.
-                Arc::new(edits.into_iter().fold(first, |first, edit| {
-                    first.patch(edit, &mut |user| known_user(user, users))
+                Arc::new(Message::from_wire(message, &mut |user| {
+                    known_user(user, users)
                 }))
             });
             self.previews.messages.insert(*post, message);
@@ -746,11 +754,12 @@ impl State {
                 && self.previews.asked.contains(&update.channel_id)
                 && !self.previews.messages.contains_key(&update.channel_id)
             {
+                let at = update.edited_timestamp.flatten().map(|at| at.unix_millis());
                 self.previews
-                    .edits
+                    .edited
                     .entry(update.channel_id)
-                    .or_default()
-                    .push(update.clone());
+                    .and_modify(|seen| *seen = seen.zip(at).map(|(seen, at)| seen.max(at)))
+                    .or_insert(at);
             }
             return;
         };
