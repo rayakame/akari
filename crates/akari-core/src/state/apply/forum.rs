@@ -123,10 +123,7 @@ impl State {
         self.previews.messages.retain(|post, _| of_forum(post));
         self.previews.retry.retain(|post, _| of_forum(post));
         self.list_forum(forum, events);
-        let read_before = self.forum_read_position(forum);
-        if let Some(list) = self.forum_list.as_mut() {
-            list.read_before = read_before;
-        }
+        self.begin_forum_visit(events);
         let view = self
             .entities
             .channels
@@ -172,6 +169,21 @@ impl State {
             read_before,
         });
         events.push(StoreEvent::ForumPostsChanged { forum_id: forum });
+    }
+
+    // Takes the open forum's read position for its NEW badges: when it opens, and with a
+    // session's first READY, whose ack a forum shown from the disk cache hadn't yet.
+    pub(super) fn begin_forum_visit(&mut self, events: &mut Vec<StoreEvent>) {
+        let Some(forum) = self.forum_list.as_ref().map(|list| list.forum) else {
+            return;
+        };
+        let read_before = self.forum_read_position(forum);
+        if let Some(list) = self.forum_list.as_mut()
+            && list.read_before != read_before
+        {
+            list.read_before = read_before;
+            events.push(StoreEvent::ForumPostsChanged { forum_id: forum });
+        }
     }
 
     // The forum's ack, else the user's join to its server as a message ID.
@@ -524,9 +536,7 @@ impl State {
             .collect()
     }
 
-    /// Of `posts`, the open forum's whose cards show NEW (module 218461 `isNewForumThread`):
-    /// active, never opened, not the user's own, made after the forum's read position as the
-    /// visit began and after the user joined the server.
+    // Module 218461 `isNewForumThread`; the user's own post counts as opened there.
     pub(crate) fn new_posts(&self, posts: &[ChannelId]) -> Vec<ChannelId> {
         let Some((list, since)) = self
             .forum_list
@@ -539,7 +549,12 @@ impl State {
         let Some(joined) = channels
             .get(&list.forum)
             .and_then(|forum| self.entities.members.get(&forum.guild_id?)?.joined_at)
-            .map(|joined| MessageId::from_unix_millis(joined.unix_millis(), 0).get())
+            // The last ID of the join's millisecond: Discord compares times.
+            .map(|joined| {
+                MessageId::from_unix_millis(joined.unix_millis() + 1, 0)
+                    .get()
+                    .saturating_sub(1)
+            })
         else {
             return Vec::new();
         };

@@ -1401,3 +1401,147 @@ fn a_sync_keeps_the_cards_new() {
 
     assert_eq!(new_cards(&state, &ALL), [20, 21]);
 }
+
+// A post made 40 minutes after the join whose only message is its starter: nothing in it is
+// unread (Discord's start for a never-opened post is its archive timestamp).
+fn read_new_post(state: &mut State) -> u64 {
+    let id = minutes_after_join(40);
+    let mut post = listed_post(id, id, &[]);
+    post["thread_metadata"]["archive_timestamp"] = "2024-01-01T12:41:00.000000+00:00".into();
+    apply(state, "THREAD_CREATE", post);
+    assert!(!state.unread(Snowflake::new(id)));
+    id
+}
+
+// Discord acks a never-opened post the moment it shows, also with nothing unread in it.
+#[test]
+fn opening_a_new_post_with_nothing_unread_ends_its_new() {
+    let mut state = forum_read_before();
+    let post = read_new_post(&mut state);
+    open(&mut state);
+    assert_eq!(new_cards(&state, &[40]), [40]);
+    load_page(&mut state, post, LoadKind::Latest, &[post], true);
+
+    let mut events = Vec::new();
+    let acks = state.set_reading(&[Snowflake::new(post)], &mut events);
+
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    assert_eq!(acks[0].cursor.map(Snowflake::get), Some(post));
+    assert_eq!(new_cards(&state, &[40]), [0i64; 0]);
+    assert!(
+        events
+            .iter()
+            .map(describe)
+            .any(|event| event == format!("BadgeChanged({post})")),
+        "{events:?}"
+    );
+    state.set_reading(&[], &mut Vec::new());
+    assert!(
+        state
+            .set_reading(&[Snowflake::new(post)], &mut Vec::new())
+            .is_empty(),
+        "once"
+    );
+}
+
+// Each time the host opens the forum is a visit of its own, as each selection is in Discord.
+#[test]
+fn opening_the_open_forum_again_begins_a_new_visit() {
+    let mut state = forum_read_before();
+    open(&mut state);
+    read_forum(&mut state);
+
+    open(&mut state);
+
+    assert_eq!(new_cards(&state, &ALL), [0i64; 0]);
+}
+
+#[test]
+fn another_forums_posts_and_ones_at_the_position_arent_new() {
+    let mut state = forum_read_before();
+    let mut other = forum();
+    other["id"] = (FORUM + 500).to_string().into();
+    apply(&mut state, "CHANNEL_CREATE", other);
+    let mut elsewhere = post_made(26);
+    elsewhere["parent_id"] = (FORUM + 500).to_string().into();
+    apply(&mut state, "THREAD_CREATE", elsewhere);
+    apply(&mut state, "THREAD_CREATE", post_made(10));
+
+    open(&mut state);
+    assert_eq!(new_cards(&state, &[10, 26]), [0i64; 0]);
+
+    state.open_forum(Some(Snowflake::new(FORUM + 500)), &mut Vec::new());
+    assert_eq!(
+        new_cards(&state, &[20, 26]),
+        [26],
+        "its own posts, from the join"
+    );
+}
+
+// Discord compares times: a post made in the millisecond of the join isn't after it.
+#[test]
+fn a_post_made_in_the_joins_millisecond_isnt_new() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let same = snowflake_at(JOINED) + 7;
+    apply(
+        &mut state,
+        "THREAD_CREATE",
+        started_when_made(listed_post(same, same, &[])),
+    );
+    apply(&mut state, "THREAD_CREATE", post_made(1));
+
+    open(&mut state);
+
+    let posts = [same, minutes_after_join(1)].map(Snowflake::new);
+    assert_eq!(state.new_posts(&posts), [posts[1]]);
+}
+
+// A mention in a post never opened leaves an estimate, not a read state: it's still new.
+#[test]
+fn a_mention_in_a_post_never_opened_keeps_it_new() {
+    let mut state = forum_read_before();
+    open(&mut state);
+    let post = minutes_after_join(20);
+    let mut message = starter(post, "look");
+    message["id"] = (post + 5).to_string().into();
+    message["mentions"] =
+        json!([{"id": ME.to_string(), "username": "me", "discriminator": "0", "avatar": null}]);
+
+    apply(&mut state, "MESSAGE_CREATE", message);
+
+    assert_eq!(new_cards(&state, &[20]), [20]);
+}
+
+// The app shows the forum from the disk cache before READY: the first READY's ack is the one
+// the visit began with (another device may have read the forum since).
+#[test]
+fn the_first_ready_after_a_restore_takes_the_position_again() {
+    let mut ready = ready_value();
+    ready["read_state"]["entries"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id": FORUM.to_string(), "last_message_id": minutes_after_join(21).to_string(), "mention_count": 0, "flags": 0}));
+    let mut state = State::new();
+    state.open_forum(Some(Snowflake::new(FORUM)), &mut Vec::new());
+    assert_eq!(new_cards(&state, &ALL), [0i64; 0], "nothing known yet");
+
+    let events = apply(&mut state, "READY", ready);
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    for minutes in [20, 30] {
+        apply(&mut state, "THREAD_CREATE", post_made(minutes));
+    }
+
+    assert!(
+        events.contains(&format!("ForumPostsChanged({FORUM})")),
+        "{events:?}"
+    );
+    assert_eq!(new_cards(&state, &[20, 30]), [30]);
+
+    // A later READY (a new session after a lost one) keeps the visit's position.
+    read_forum(&mut state);
+    apply(&mut state, "READY", ready_value());
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    apply(&mut state, "THREAD_CREATE", post_made(30));
+    assert_eq!(new_cards(&state, &[30]), [30]);
+}

@@ -1408,9 +1408,10 @@ impl Account {
         }
     }
 
-    /// The forum whose page shows, `None` once it closes. Opening one refreshes its list: while
-    /// it stays open, who's listed and in what order change only with [`refresh_forum`], a new
-    /// connection or the guild's thread sync, a deletion or a pin (G-1).
+    /// The forum whose page shows, `None` once it closes. Each call with a forum begins a visit:
+    /// the cards' NEW badges count from the forum's read position then. Opening one refreshes
+    /// its list: while it stays open, who's listed and in what order change only with
+    /// [`refresh_forum`], a new connection or the guild's thread sync, a deletion or a pin (G-1).
     ///
     /// [`refresh_forum`]: Self::refresh_forum
     pub fn open_forum(&self, forum: Option<ChannelId>) {

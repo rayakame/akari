@@ -576,6 +576,7 @@ impl State {
             // never comes as a dispatch.
             self.windows.mark_stale(events);
         }
+        let first = !self.ready;
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
@@ -590,6 +591,10 @@ impl State {
             late: Vec::new(),
         };
         let old = (std::mem::replace(&mut self.entities, next), old);
+        // Before READY's reading acks the forum at "now".
+        if first {
+            self.begin_forum_visit(events);
+        }
         // READY's cursors are fresh.
         self.stale_cursors.clear();
         self.follow_ready();

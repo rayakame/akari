@@ -441,8 +441,15 @@ impl State {
         let stored = self.entities.channels.get(&channel)?;
         let body = AckBody::of(stored);
         let before = self.entities.read_states.get(channel);
+        // Module 218461 `eM`: a forum post never opened is acked once it shows, unread or not.
+        let unopened_post = before.is_none_or(|state| state.estimated)
+            && stored
+                .parent_id
+                .and_then(|parent| self.entities.channels.get(&parent))
+                .is_some_and(|parent| parent.is_forum());
         if shown.get() <= self.entities.read_position(stored)
             && before.is_none_or(|state| state.mentions == 0)
+            && !unopened_post
         {
             return None;
         }

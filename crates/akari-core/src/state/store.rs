@@ -1150,12 +1150,8 @@ impl Store {
         self.read(|inner| inner.state.unread_posts(posts))
     }
 
-    /// Of `posts`, the open forum's whose cards show NEW, as the official client's: active posts
-    /// the user never opened and didn't make, made since the forum was read before this visit
-    /// (its ack when it was opened, the user's join to the server without one) and since that
-    /// join. Opening the forum the next time ends them. Read again with [`unread_posts`].
-    ///
-    /// [`unread_posts`]: Self::unread_posts
+    /// Of `posts`, the open forum's whose cards show NEW: never opened, not the user's own, made
+    /// since the forum was read before this visit. Read again when `unread_posts` is.
     pub fn new_posts(&self, posts: &[ChannelId]) -> Vec<ChannelId> {
         self.read(|inner| inner.state.new_posts(posts))
     }

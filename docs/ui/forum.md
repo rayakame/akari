@@ -118,7 +118,8 @@ VoiceOver reads "Post {title}, {count} messages".
   and the next 4 of the active list (unfiltered); Akari sends them 10 a request, one request at a
   time, and asks a missing one again at most every 30 s while its card shows
   ([dispatches.md](../protocol/dispatches.md#forums)).
-- The message line is one line at the text's size whatever the message holds: a message of
+- The message line is one line at the text's size (Akari's 15, as the author's) whatever the
+  message holds: a message of
   only emoji isn't jumbo there (Discord parses every one-line preview with `formatInline`, which
   turns jumbo off; its emoji are 18 high), a heading isn't large. *Akari: the gallery card's
   text is capped the same way, where Discord's, a box of several lines, can show jumbo emoji.*
@@ -131,7 +132,8 @@ Discord's `isNewForumThread` [218461, 767581; the cards' hook `X5` in 435470]. A
 when all of this holds:
 
 - the post is active (not archived);
-- the user never opened it: it has no read state of its own. Discord's `_persisted`: set by any
+- the user never opened it: it has no read state of its own (a mention in it leaves none).
+  Discord's `_persisted`: set by any
   ack of the post (opening it in a focused window acks it at once, also with nothing unread;
   reading it on another device; the user's own message in it; a mark as read that includes it),
   by READY's read states, and for the user's own new post when it's created. Joining or
@@ -147,24 +149,30 @@ without NEW (an old post never opened), and NEW posts are always among the never
 
 How it ends:
 
-- **Opening the post**, here or on another device: at once.
+- **Opening the post**, here or on another device: at once. *Akari acks a never-opened post
+  when it shows at the bottom, unread or not, as Discord does.*
 - **Opening the forum the next time.** Showing the forum acks it at "now" right after the
   position was taken, so on the next visit nothing older than this visit is new: a post is NEW
   for one visit. Opening and closing posts beside the forum is the same visit; going to another
   channel and back is the next one.
 - **A relaunch**: the position is kept in memory only, and taken again from the forum's ack,
-  which the last visit moved.
+  which the last visit moved. *Akari shows the forum from its disk cache before it's connected:
+  it takes the position again with the session's first READY, whose ack counts.*
 - Archiving the post.
 - Marking the forum as read while it shows changes nothing (the position was taken before);
-  marking the server as read acks the joined posts, which ends theirs.
+  marking the server as read acks its joined posts that are unread or mentioned, which ends
+  theirs.
 
 The badge [805251, CSS 963434, 223139]: "New" in capitals, 12 semibold, white on `#5966f2`
 (`--badge-primary-background`, the same in both themes), a round pill 16 tall with 8 inside. In
 the list it stands in the title's text, 8 after it, its text 2 above the title's baseline, and
 wraps with it; when title and badge would need a third line, the title keeps its two lines and
 the badge stands at its right, 4 from the top. In the gallery it ends the author's row, at its
-top. *Akari: the same rule in the core (`Store::new_posts`), read with the cards' unread look;
-the forum row's "N New" still follows the forum's current ack ([below](#the-forums-row)).*
+top. *Akari: the same rule in the core (`Store::new_posts`), read with the cards' unread look.
+Each time the app opens the forum's page is a visit. Until the next READY the forum's own ack
+is the Mac's "now", where Discord's is its server's: with the Mac's clock ahead, a post made
+right after a visit can miss its NEW on the next. The forum row's "N New" still follows the
+forum's current ack ([below](#the-forums-row)).*
 
 ## Loading and empty
 
