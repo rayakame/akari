@@ -75,10 +75,9 @@ struct ForumListCard: View {
                         ForumCardTags(card: card, filter: filter)
                             .padding(.bottom, 8)
                     }
-                    Text(card.title)
+                    title
                         .font(TypeScale.forumTitle.font)
                         .foregroundStyle(Color(nsColor: card.unread ? Palette.textStrong : Palette.textMuted))
-                        .lineLimit(2)
                         .multilineTextAlignment(.leading)
                         .padding(.bottom, 6)
                     ForumCardMessage(preview: card.preview, unread: card.unread)
@@ -102,10 +101,36 @@ struct ForumListCard: View {
         .accessibilityLabel(ForumListCard.label(card))
     }
 
-    /// "Post {title}, {count} message(s)", as Discord's, and whether it's unread.
+    // Discord's title: the pill in the text after it, and at its right once the two lines are
+    // full (its "taller than 60").
+    @ViewBuilder private var title: some View {
+        if card.isNew {
+            UpTo(height: 2.5 * TypeScale.forumTitle.line) {
+                ViewThatFits(in: .vertical) {
+                    Text(card.title)
+                        + Text(Image(nsImage: ForumNewBadge.inline))
+                        // In the badge's own font: under the title's, the offset would deepen the line.
+                        .font(TypeScale.forumBadge.font)
+                        .baselineOffset(ForumNewBadge.inlineOffset)
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(card.title)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ForumNewBadge()
+                            .padding(.top, 4)
+                    }
+                }
+            }
+        } else {
+            Text(card.title)
+                .lineLimit(2)
+        }
+    }
+
+    /// "Post {title}, {count} message(s)", as Discord's, and whether it's unread or new.
     static func label(_ card: ForumModel.Card) -> String {
         "Post \(card.title), \(card.count) \(card.count == "1" ? "message" : "messages")"
-            + (card.unread ? ", unread" : "")
+            + (card.unread ? ", unread" : "") + (card.isNew ? ", new" : "")
     }
 }
 
@@ -131,6 +156,70 @@ struct ForumCardStyle: ButtonStyle {
             .shadow(color: .black.opacity(hovered ? 0.16 : 0), radius: 2, y: 1)
             .contentShape(shape)
     }
+}
+
+// Offers its content at most `height` and takes the size the content then has.
+private struct UpTo: Layout {
+    let height: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews.first?.sizeThatFits(ProposedViewSize(width: proposal.width, height: height)) ?? .zero
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        subviews.first?.place(
+            at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: height))
+    }
+}
+
+/// Discord's NEW badge on a post made since the forum was last read: a round pill 16 tall with 8
+/// inside, white 12 semibold capitals on its blurple, the same in both themes.
+struct ForumNewBadge: View {
+    static let fill = NSColor(hex: "#5966f2")
+    static let text = "NEW"
+    private static let height = TypeScale.size(16)
+    private static let padding = TypeScale.size(8)
+
+    var body: some View {
+        Text(Self.text)
+            .font(TypeScale.forumBadge.font)
+            .foregroundStyle(.white)
+            .padding(.horizontal, Self.padding)
+            .frame(height: Self.height)
+            .background(Color(nsColor: Self.fill), in: Capsule())
+            .fixedSize()
+            .accessibilityHidden(true)
+    }
+
+    private static var label: NSAttributedString {
+        NSAttributedString(
+            string: text, attributes: [.font: TypeScale.forumBadge.nsFont, .foregroundColor: NSColor.white])
+    }
+
+    /// The pill for a line of text, with its 8 from the text before it.
+    static let inline: NSImage = {
+        let label = Self.label
+        let width = label.size().width.rounded(.up) + 2 * padding
+        let size = NSSize(width: padding + width, height: height)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let pill = NSRect(x: padding, y: 0, width: width, height: height)
+            fill.setFill()
+            NSBezierPath(roundedRect: pill, xRadius: height / 2, yRadius: height / 2).fill()
+            let size = label.size()
+            label.draw(at: NSPoint(x: pill.midX - size.width / 2, y: (height - size.height) / 2))
+            return true
+        }
+        return image
+    }()
+
+    /// Discord's `top: -2px`: the pill's text sits 2 above the line's baseline.
+    static let inlineOffset: CGFloat = {
+        let font = TypeScale.forumBadge.nsFont
+        let baseline = (height - (font.ascender - font.descender)) / 2 - font.descender
+        return TypeScale.size(2) - baseline
+    }()
 }
 
 /// The pinned badge, then the first three tags and "+N" for the rest (named in its tooltip).
@@ -483,6 +572,10 @@ struct ForumGalleryCard: View {
                     .font(TypeScale.forumGalleryTime.font)
                     .foregroundStyle(Color(nsColor: Palette.textDefault))
                     .lineLimit(1)
+                if card.isNew {
+                    Spacer(minLength: 8)
+                    ForumNewBadge()
+                }
             }
             Text(card.title)
                 .font(TypeScale.forumGalleryTitle.font)

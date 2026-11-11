@@ -231,6 +231,12 @@ impl Store {
         self.core.unread_posts(&post_ids)
     }
 
+    /// Of `post_ids`, the open forum's posts whose cards show NEW: never opened, not the user's
+    /// own, made since the forum was read before this visit. Read with `unread_posts`.
+    pub fn new_posts(&self, post_ids: Vec<ChannelId>) -> Vec<ChannelId> {
+        self.core.new_posts(&post_ids)
+    }
+
     /// A forum post's first message for its card; `None` until Akari has it
     /// (`Account::request_post_previews`). `PostPreviewChanged` says to read it again.
     pub fn post_preview(&self, post_id: ChannelId) -> Option<PostPreview> {

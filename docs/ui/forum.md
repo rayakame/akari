@@ -3,8 +3,9 @@
 What a forum channel shows when the user opens it: its posts as cards in the message list's
 place, with search, the tag filter and Sort & View. Read from Discord's web client (canary
 653948, 2026-10-28; modules in brackets), the list's spacing as Chris measured the live client
-against Akari (2026-10-31). Posts opening beside the forum, creating posts, NEW and media
-channels come with the next forum PR; until then the differences are marked *Akari:*.
+against Akari (2026-10-31), the NEW badge from canary 671387 (2026-11-11). Posts opening beside
+the forum, creating posts and media channels come with the next forum PR; until then the
+differences are marked *Akari:*.
 
 ## Where it opens
 
@@ -101,6 +102,7 @@ VoiceOver reads "Post {title}, {count} messages".
     or unread setting; Discord's `isForumPostUnread`) shows its title and author in
     `text-strong` and its message in `text-default`; a read or archived one all in
     `text-muted`;
+  - a **new** post has the NEW badge after its title ([below](#the-new-badge));
   - the message count (a filled bubble) and the time: "12", "50+" for posts before 2022-07-01,
     "100k+"; "•"; the
     last activity (or the creation under Date Posted) as "5m ago", "3h ago", "2d ago",
@@ -116,9 +118,53 @@ VoiceOver reads "Post {title}, {count} messages".
   and the next 4 of the active list (unfiltered); Akari sends them 10 a request, one request at a
   time, and asks a missing one again at most every 30 s while its card shows
   ([dispatches.md](../protocol/dispatches.md#forums)).
+- The message line is one line at the text's size whatever the message holds: a message of
+  only emoji isn't jumbo there (Discord parses every one-line preview with `formatInline`, which
+  turns jumbo off; its emoji are 18 high), a heading isn't large. *Akari: the gallery card's
+  text is capped the same way, where Discord's, a box of several lines, can show jumbo emoji.*
 - *Akari:* no reactions on cards yet (backlog "Reactions on forum cards"), no typing faces, no
-  NEW badge or "(N New)", and only attachments as a card's media (Discord also shows embeds'
-  images).
+  "(N New)", and only attachments as a card's media (Discord also shows embeds' images).
+
+### The NEW badge
+
+Discord's `isNewForumThread` [218461, 767581; the cards' hook `X5` in 435470]. A card shows NEW
+when all of this holds:
+
+- the post is active (not archived);
+- the user never opened it: it has no read state of its own. Discord's `_persisted`: set by any
+  ack of the post (opening it in a focused window acks it at once, also with nothing unread;
+  reading it on another device; the user's own message in it; a mark as read that includes it),
+  by READY's read states, and for the user's own new post when it's created. Joining or
+  following a post doesn't;
+- it was made after the forum's read position **as it was when the forum was opened**
+  (`ackMessageIdAtChannelSelect`: the forum's ack at the channel's selection; without an ack,
+  the user's join to the server);
+- it was made after the user joined the server.
+
+Whether the user joined the post, its pin and its owner play no part, except that the user's
+own post counts as opened. It is a different rule from the unread look: a card can be unread
+without NEW (an old post never opened), and NEW posts are always among the never opened.
+
+How it ends:
+
+- **Opening the post**, here or on another device: at once.
+- **Opening the forum the next time.** Showing the forum acks it at "now" right after the
+  position was taken, so on the next visit nothing older than this visit is new: a post is NEW
+  for one visit. Opening and closing posts beside the forum is the same visit; going to another
+  channel and back is the next one.
+- **A relaunch**: the position is kept in memory only, and taken again from the forum's ack,
+  which the last visit moved.
+- Archiving the post.
+- Marking the forum as read while it shows changes nothing (the position was taken before);
+  marking the server as read acks the joined posts, which ends theirs.
+
+The badge [805251, CSS 963434, 223139]: "New" in capitals, 12 semibold, white on `#5966f2`
+(`--badge-primary-background`, the same in both themes), a round pill 16 tall with 8 inside. In
+the list it stands in the title's text, 8 after it, its text 2 above the title's baseline, and
+wraps with it; when title and badge would need a third line, the title keeps its two lines and
+the badge stands at its right, 4 from the top. In the gallery it ends the author's row, at its
+top. *Akari: the same rule in the core (`Store::new_posts`), read with the cards' unread look;
+the forum row's "N New" still follows the forum's current ack ([below](#the-forums-row)).*
 
 ## Loading and empty
 

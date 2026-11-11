@@ -216,6 +216,23 @@ struct ThreadBoxViewTests {
         #expect(onlyEmoji.bottom == ["Mira", ":pog:", "25m ago"])
     }
 
+    // Nothing on a one-line preview is larger than its text: an emoji-only message isn't jumbo
+    // there (Discord's previews never are), a heading isn't large.
+    @Test(arguments: ["🗿", "<:pog:5>", "🗿 <:pog:5> 🗿", "# Loud", "plain **bold** `code`"])
+    func nothingOnAPreviewIsLargerThanItsText(content: String) {
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let built = MessageText.build(latest(content), revealed: [], now: now, times: times).text
+
+        let line = ThreadBoxView.content(built)
+
+        var sizes: Set<CGFloat> = []
+        line.enumerateAttribute(.font, in: NSRange(location: 0, length: line.length)) { value, _, _ in
+            sizes.insert((value as? NSFont)?.pointSize ?? 0)
+        }
+        #expect(sizes.max() == TypeScale.size(14), "\(content): \(sizes)")
+        #expect(line.size().height <= 20, "\(content): \(line.size().height)")
+    }
+
     @Test
     func theBoxShowsTheLatestMessage() throws {
         let (_, view) = try shown()

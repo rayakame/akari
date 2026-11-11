@@ -35,6 +35,12 @@ nonisolated struct ForumFakes {
     var unread: Set<Int> = []
     /// No tags and no pin: each card starts with its title.
     var untagged = false
+    /// The first post's first message, in place of its sentence.
+    var firstMessage: String?
+    /// The posts, by index, whose cards show NEW.
+    var new: Set<Int> = []
+    /// The first post's title, in place of its own.
+    var firstTitle: String?
     private(set) var account: ForumAccount?
 
     @MainActor
@@ -117,7 +123,8 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
                 }
             channels[id] = Channel(
                 id: id, kind: .publicThread, guildId: ForumFakes.guild, parentId: ForumFakes.forum,
-                name: ForumFakes.titles[index % 5], position: 0, topic: nil, nsfw: false,
+                name: index == 0 ? fakes.firstTitle ?? ForumFakes.titles[0] : ForumFakes.titles[index % 5],
+                position: 0, topic: nil, nsfw: false,
                 rateLimitPerUser: 0, recipientIds: [],
                 thread: ThreadInfo(
                     joined: false, archived: index >= fakes.posts, locked: false, private: false,
@@ -193,6 +200,10 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
         postIds.filter { post in fakes.unread.contains { ForumFakes.post($0) == post } }
     }
 
+    override func newPosts(postIds: [ChannelId]) -> [ChannelId] {
+        postIds.filter { post in fakes.new.contains { ForumFakes.post($0) == post } }
+    }
+
     override func postPreview(postId: ChannelId) -> PostPreview? {
         guard let index = (0..<(fakes.posts + fakes.archived)).first(where: { ForumFakes.post($0) == postId })
         else {
@@ -208,7 +219,7 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
                 id: MessageId(rawValue: postId.rawValue), channelId: postId, kind: .default,
                 author: forumUser(UserId(rawValue: 2), name: "Ray"), fromWebhook: false,
                 content: index == 0
-                    ? "Please search before posting, and give your post a clear title."
+                    ? fakes.firstMessage ?? "Please search before posting, and give your post a clear title."
                     : "It would be great if the settings window followed the system's appearance.",
                 timestamp: ForumFakes.now, editedTimestamp: nil, pinned: false,
                 mentionEveryone: false, attachments: [], embeds: [], stickers: [],

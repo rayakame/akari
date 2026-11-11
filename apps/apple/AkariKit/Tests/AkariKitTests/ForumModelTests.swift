@@ -434,6 +434,25 @@ final class ForumModelTests {
         session.close()
     }
 
+    // Discord's NEW badge: the store says which posts were made since the forum was last read
+    // and never opened; opening one (its badge event) ends it.
+    @Test
+    func aCardSaysWhetherItsPostIsNew() throws {
+        store.update { $0.newPosts = [id(41), id(43)] }
+        list([41, 42], archived: [43])
+        let session = inForum()
+
+        let forum = try forum(session)
+        #expect(forum.posts.map(\.isNew) == [true, false])
+        #expect(forum.archived.map(\.isNew) == [false], "an archived post is never new")
+        #expect(account.log.reads.contains(.newPosts([id(41), id(42)])))
+
+        store.update { $0.newPosts = [] }
+        session.apply(EventBatch([.badgeChanged(channelId: id(41), guildId: id(1))]))
+        #expect(forum.posts.map(\.isNew) == [false, false])
+        session.close()
+    }
+
     @Test
     func aBadgeChangeOfAPostNotListedRereadsNothing() throws {
         list([41])

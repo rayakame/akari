@@ -77,6 +77,9 @@ pub(super) struct ForumList {
     forum: ChannelId,
     posts: HashMap<ChannelId, u64>,
     new_posts: u32,
+    // The forum's read position as this visit began, before the visit moved it to "now": the
+    // official client's `ackMessageIdAtChannelSelect`. `None` without an ack or a join time.
+    read_before: Option<u64>,
 }
 
 fn archived(channel: &Channel) -> bool {
@@ -120,6 +123,10 @@ impl State {
         self.previews.messages.retain(|post, _| of_forum(post));
         self.previews.retry.retain(|post, _| of_forum(post));
         self.list_forum(forum, events);
+        let read_before = self.forum_read_position(forum);
+        if let Some(list) = self.forum_list.as_mut() {
+            list.read_before = read_before;
+        }
         let view = self
             .entities
             .channels
@@ -152,12 +159,33 @@ impl State {
             .listable_posts(forum)
             .map(|post| (post.id, newest(post)))
             .collect();
+        // A refresh keeps what the visit began with.
+        let read_before = self
+            .forum_list
+            .as_ref()
+            .filter(|list| list.forum == forum)
+            .and_then(|list| list.read_before);
         self.forum_list = Some(ForumList {
             forum,
             posts,
             new_posts: 0,
+            read_before,
         });
         events.push(StoreEvent::ForumPostsChanged { forum_id: forum });
+    }
+
+    // The forum's ack, else the user's join to its server as a message ID.
+    fn forum_read_position(&self, forum: ChannelId) -> Option<u64> {
+        self.entities
+            .read_states
+            .get(forum)
+            .and_then(|state| state.acked)
+            .map(MessageId::get)
+            .or_else(|| {
+                let guild = self.entities.channels.get(&forum)?.guild_id?;
+                let joined = self.entities.members.get(&guild)?.joined_at?;
+                Some(MessageId::from_unix_millis(joined.unix_millis(), 0).get())
+            })
     }
 
     // The forum's active posts the user may see.
@@ -492,6 +520,47 @@ impl State {
                     channel.thread.as_deref().is_some_and(|info| !info.archived)
                         && self.entities.unread(channel)
                 })
+            })
+            .collect()
+    }
+
+    /// Of `posts`, the open forum's whose cards show NEW (module 218461 `isNewForumThread`):
+    /// active, never opened, not the user's own, made after the forum's read position as the
+    /// visit began and after the user joined the server.
+    pub(crate) fn new_posts(&self, posts: &[ChannelId]) -> Vec<ChannelId> {
+        let Some((list, since)) = self
+            .forum_list
+            .as_ref()
+            .and_then(|list| Some((list, list.read_before?)))
+        else {
+            return Vec::new();
+        };
+        let channels = &self.entities.channels;
+        let Some(joined) = channels
+            .get(&list.forum)
+            .and_then(|forum| self.entities.members.get(&forum.guild_id?)?.joined_at)
+            .map(|joined| MessageId::from_unix_millis(joined.unix_millis(), 0).get())
+        else {
+            return Vec::new();
+        };
+        let me = self.me();
+        posts
+            .iter()
+            .copied()
+            .filter(|id| {
+                let Some(post) = channels.get(id) else {
+                    return false;
+                };
+                let opened = self
+                    .entities
+                    .read_states
+                    .get(post.id)
+                    .is_some_and(|state| !state.estimated);
+                post.parent_id == Some(list.forum)
+                    && !archived(post)
+                    && id.get() > since.max(joined)
+                    && !opened
+                    && post.owner_id.is_none_or(|owner| Some(owner) != me)
             })
             .collect()
     }

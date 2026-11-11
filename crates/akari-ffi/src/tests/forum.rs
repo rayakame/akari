@@ -12,6 +12,8 @@ use crate::subscription::StoreEvent;
 
 const FORUM: ChannelId = ChannelId::new(300_000_000_000_000_050);
 const POST: ChannelId = ChannelId::new(300_000_000_000_000_051);
+// Made in May 2024, after the fixture's member joined the server.
+const FRESH: ChannelId = ChannelId::new(1_246_000_000_000_000_000);
 const BUG: TagId = TagId::new(500_000_000_000_000_001);
 
 // The forum's settings, a post's tags and pin, and its page cross as records (task 171).
@@ -47,9 +49,22 @@ async fn a_forum_and_its_posts_cross_as_records() {
         }}),
     )
     .await;
+    send(
+        &mut ws,
+        json!({"op": 0, "s": 4, "t": "THREAD_CREATE", "d": {
+            "id": FRESH.get().to_string(), "type": 11, "guild_id": "200000000000000001",
+            "parent_id": FORUM.get().to_string(), "name": "another", "flags": 0,
+            "owner_id": "100000000000000002", "applied_tags": [],
+            "total_message_sent": 0, "message_count": 0, "member_count": 1,
+            "last_message_id": FRESH.get().to_string(),
+            "thread_metadata": {"archived": false, "auto_archive_duration": 1440,
+                "archive_timestamp": "2024-05-31T08:30:00.250000+00:00", "locked": false},
+        }}),
+    )
+    .await;
     events_until(
         &subscription,
-        |event| matches!(event, StoreEvent::ChannelAdded { channel_id, .. } if *channel_id == POST),
+        |event| matches!(event, StoreEvent::ChannelAdded { channel_id, .. } if *channel_id == FRESH),
     )
     .await;
     let store = account.store();
@@ -85,6 +100,7 @@ async fn a_forum_and_its_posts_cross_as_records() {
     assert_eq!(post.total_message_sent, Some(4));
     assert!(post.pinned);
     assert_eq!(store.unread_posts(vec![POST, FORUM]), [POST]);
+    assert!(store.new_posts(vec![POST, FRESH, FORUM]).is_empty());
 
     account.open_forum(Some(FORUM));
     events_until(
@@ -92,6 +108,7 @@ async fn a_forum_and_its_posts_cross_as_records() {
         |event| matches!(event, StoreEvent::ForumPostsChanged { forum_id } if *forum_id == FORUM),
     )
     .await;
+    assert_eq!(store.new_posts(vec![POST, FRESH, FORUM]), [FRESH]);
     let view = ForumView {
         tags: vec![BUG],
         ..ForumView::default()

@@ -1232,3 +1232,172 @@ fn the_frozen_list_drops_posts_the_user_can_no_longer_see() {
             .is_empty()
     );
 }
+
+// A card's NEW badge, as Discord's `isNewForumThread`: an active post the user never opened,
+// made since the forum was read before this visit and since the user joined the server.
+
+// The fixture's member joined G1 at 2024-01-01T12:00:00Z.
+const JOINED: i64 = 1_704_110_400_000;
+
+fn minutes_after_join(minutes: i64) -> u64 {
+    snowflake_at(JOINED + minutes * 60_000)
+}
+
+fn post_made(minutes: i64) -> Value {
+    let id = minutes_after_join(minutes);
+    started_when_made(listed_post(id, id, &[]))
+}
+
+fn new_cards(state: &State, minutes: &[i64]) -> Vec<i64> {
+    let posts: Vec<ChannelId> = minutes
+        .iter()
+        .map(|at| Snowflake::new(minutes_after_join(*at)))
+        .collect();
+    let new = state.new_posts(&posts);
+    minutes
+        .iter()
+        .copied()
+        .filter(|at| new.contains(&Snowflake::new(minutes_after_join(*at))))
+        .collect()
+}
+
+fn open(state: &mut State) {
+    state.open_forum(Some(Snowflake::new(FORUM)), &mut Vec::new());
+}
+
+// The forum read up to 10 minutes after the join; posts made 5, 20, 21 (joined), 22 (opened),
+// 23 (the user's own) and 24 (archived) minutes after it.
+fn forum_read_before() -> State {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    apply(
+        &mut state,
+        "MESSAGE_ACK",
+        read_ack(FORUM, minutes_after_join(10)),
+    );
+    let mut joined = post_made(21);
+    joined["member"] = json!({"id": joined["id"], "user_id": ME.to_string(), "join_timestamp": "2026-10-01T00:00:00+00:00", "flags": 1});
+    let mut mine = post_made(23);
+    mine["owner_id"] = ME.to_string().into();
+    let mut archived = post_made(24);
+    archived["thread_metadata"]["archived"] = true.into();
+    for post in [
+        post_made(5),
+        post_made(20),
+        joined,
+        post_made(22),
+        mine,
+        archived,
+    ] {
+        apply(&mut state, "THREAD_CREATE", post);
+    }
+    let opened = minutes_after_join(22);
+    apply(&mut state, "MESSAGE_ACK", read_ack(opened, opened));
+    state
+}
+
+const ALL: [i64; 6] = [5, 20, 21, 22, 23, 24];
+
+#[test]
+fn posts_made_since_the_forum_was_last_read_are_new() {
+    let mut state = forum_read_before();
+    assert_eq!(new_cards(&state, &ALL), [0i64; 0], "no forum is open");
+
+    open(&mut state);
+
+    assert_eq!(new_cards(&state, &ALL), [20, 21], "joined or not");
+}
+
+// The forum's own ack moves to "now" while its page shows; the cards stay new until the forum is
+// opened the next time.
+#[test]
+fn the_cards_stay_new_while_the_forum_stays_open() {
+    let mut state = forum_read_before();
+    open(&mut state);
+
+    read_forum(&mut state);
+    state.refresh_forum(Snowflake::new(FORUM), &mut Vec::new());
+    assert_eq!(new_cards(&state, &ALL), [20, 21]);
+
+    state.open_forum(None, &mut Vec::new());
+    assert_eq!(new_cards(&state, &ALL), [0i64; 0]);
+    open(&mut state);
+    assert_eq!(new_cards(&state, &ALL), [0i64; 0], "read on the last visit");
+}
+
+#[test]
+fn a_post_made_while_the_forum_is_open_is_new_unless_its_the_users() {
+    let mut state = forum_read_before();
+    open(&mut state);
+    read_forum(&mut state);
+
+    apply(&mut state, "THREAD_CREATE", post_made(30));
+    let mut mine = post_made(31);
+    mine["owner_id"] = ME.to_string().into();
+    apply(&mut state, "THREAD_CREATE", mine);
+
+    assert_eq!(new_cards(&state, &[30, 31]), [30]);
+}
+
+#[test]
+fn opening_a_post_or_archiving_it_ends_its_new() {
+    let mut state = forum_read_before();
+    open(&mut state);
+
+    let read = minutes_after_join(20);
+    let events = apply(&mut state, "MESSAGE_ACK", read_ack(read, read));
+    assert!(
+        events.contains(&format!("BadgeChanged({read})")),
+        "{events:?}"
+    );
+    let mut archived = post_made(21);
+    archived["thread_metadata"]["archived"] = true.into();
+    apply(&mut state, "THREAD_UPDATE", archived);
+
+    assert_eq!(new_cards(&state, &ALL), [0i64; 0]);
+}
+
+// A forum never read counts from the user's join to the server.
+#[test]
+fn without_a_forum_ack_posts_since_the_join_are_new() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    for minutes in [-5, 5] {
+        apply(&mut state, "THREAD_CREATE", post_made(minutes));
+    }
+
+    open(&mut state);
+
+    assert_eq!(new_cards(&state, &[-5, 5]), [5]);
+}
+
+// A forum read before the user's join (an ack an import left) still counts from the join.
+#[test]
+fn a_post_from_before_the_join_is_never_new() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    apply(
+        &mut state,
+        "MESSAGE_ACK",
+        read_ack(FORUM, minutes_after_join(-60)),
+    );
+    for minutes in [-5, 5] {
+        apply(&mut state, "THREAD_CREATE", post_made(minutes));
+    }
+
+    open(&mut state);
+
+    assert_eq!(new_cards(&state, &[-5, 5]), [5]);
+}
+
+// A new connection's thread sync refreshes the list and keeps what the visit began with.
+#[test]
+fn a_sync_keeps_the_cards_new() {
+    let mut state = forum_read_before();
+    open(&mut state);
+    read_forum(&mut state);
+
+    state.refresh_open_forum(Snowflake::new(G1), &mut Vec::new());
+
+    assert_eq!(new_cards(&state, &ALL), [20, 21]);
+}

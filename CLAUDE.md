@@ -53,7 +53,8 @@ searches threads by name; it creates threads, from a message or not, as the offi
 with the parent's own slowmode for new threads; it keeps forums' settings and posts' tags, the open
 forum's post list (frozen between refreshes, the new-post count, archived pages per tag filter,
 search) and posts' first messages (post-data, 10 at a time, one request at a time), counts a forum
-row's new or unread posts, and acks a forum being read at "now"; `akari_core::media` gets images: keys by Discord's
+row's new or unread posts, says which cards are unread and which are new (made since the forum was
+last read, never opened), and acks a forum being read at "now"; `akari_core::media` gets images: keys by Discord's
 IDs, the size and form each box asks for (never fewer pixels than it covers on screen), downloads
 without the token on a client of their own (eight at a time, newest first, one per image however
 many ask), signed attachment links renewed in batches, each account's images on disk with LRU
@@ -120,7 +121,7 @@ with a thread has the thread's box (count, newest message, time), which opens it
 channel list's "More Active Threads" show a channel's threads (the popout, the modal); the New
 Thread form takes the split's place (a message's menu, the browser's Create buttons, ⌘⇧⌥N) and
 creates threads; a forum's row opens its page (search, Sort & View, the tag filter, list and
-gallery cards, older posts, the "N New Posts" pill) and shows its post count; it shows
+gallery cards with the NEW badge, older posts, the "N New Posts" pill) and shows its post count; it shows
 the
 connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent

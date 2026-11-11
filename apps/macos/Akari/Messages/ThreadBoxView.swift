@@ -221,10 +221,13 @@ final class ThreadBoxView: NSButton {
         text.removeAttribute(.paragraphStyle, range: whole)
         text.removeAttribute(.baselineOffset, range: whole)
         text.removeAttribute(.attachment, range: whole)
-        let scale = TypeScale.size(14) / TypeScale.body.size
+        // One line has one size: a jumbo emoji or a heading is no larger than the text around it.
+        let size = TypeScale.size(14)
+        let scale = size / TypeScale.body.size
         text.enumerateAttribute(.font, in: whole) { value, range, _ in
             if let font = value as? NSFont,
-                let smaller = NSFont(descriptor: font.fontDescriptor, size: font.pointSize * scale)
+                let smaller = NSFont(
+                    descriptor: font.fontDescriptor, size: min(font.pointSize * scale, size))
             {
                 text.addAttribute(.font, value: smaller, range: range)
             }

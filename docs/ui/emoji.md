@@ -29,9 +29,11 @@ come from Discord's CDN at runtime like every image ([images.md](images.md),
   the message's hover for every emoji in it (Discord tracks the emoji's own hover too).*
 - **Failure**: an emoji that can't load shows `:name:` in its box, small and muted, the text
   around it unmoved. A hidden spoiler's emoji stay under the cover and aren't asked for.
-- **Elsewhere**: a thread box's second line and the Threads browser's rows read a custom emoji
-  as `:name:` (one line of small text, no image layers); the New Thread form's preview shows
-  the message as the list does, emoji and stickers included.
+- **Elsewhere**: a thread box's second line, the Threads browser's rows and a forum card's
+  message read a custom emoji as `:name:` (one line of small text, no image layers) and are
+  never jumbo: Discord parses its one-line previews with `formatInline`, which turns jumbo off,
+  so an emoji-only message shows its emoji at the line's text size. The New Thread form's
+  preview shows the message as the list does, emoji and stickers included.
 
 ## Stickers
 

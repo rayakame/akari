@@ -56,6 +56,8 @@ public final class ForumModel {
         /// Active, with messages past where the user stopped reading: the bright title and
         /// preview.
         public let unread: Bool
+        /// Made since the forum was last read and never opened: the NEW badge.
+        public let isNew: Bool
     }
 
     public enum Search: Equatable, Sendable {
@@ -438,16 +440,19 @@ public final class ForumModel {
         listedIds = Set(posts.map(\.id) + archived.map(\.id))
     }
 
-    // An archived post never shows unread: the store isn't asked.
+    // An archived post never shows unread or new: the store isn't asked.
     private func cards(_ ids: [ChannelId], archived: Bool = false) -> [Card] {
         guard !ids.isEmpty else {
             return []
         }
         let unread = archived ? [] : Set(store.unreadPosts(postIds: ids))
-        return store.channels(ids: ids).compactMap { card($0, unread: unread.contains($0.id)) }
+        let new = archived ? [] : Set(store.newPosts(postIds: ids))
+        return store.channels(ids: ids).compactMap {
+            card($0, unread: unread.contains($0.id), isNew: new.contains($0.id))
+        }
     }
 
-    private func card(_ post: Channel, unread: Bool) -> Card? {
+    private func card(_ post: Channel, unread: Bool, isNew: Bool) -> Card? {
         guard let info = post.thread else {
             return nil
         }
@@ -467,6 +472,7 @@ public final class ForumModel {
             time: settings.sort == .creationDate
                 ? posted : ThreadBrowserModel.lastActivity(post, info),
             created: info.createdAt ?? posted,
-            media: first?.attachments.filter { $0.display == .media } ?? [], unread: unread)
+            media: first?.attachments.filter { $0.display == .media } ?? [], unread: unread,
+            isNew: isNew)
     }
 }

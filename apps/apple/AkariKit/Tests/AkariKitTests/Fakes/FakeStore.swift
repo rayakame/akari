@@ -40,6 +40,7 @@ final class FakeStore: Store, @unchecked Sendable {
         var forumPages: [ChannelId: @Sendable (ForumView) -> ForumPosts] = [:]
         var postPreviews: [ChannelId: PostPreview] = [:]
         var unreadPosts: Set<ChannelId> = []
+        var newPosts: Set<ChannelId> = []
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -257,5 +258,9 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func unreadPosts(postIds: [ChannelId]) -> [ChannelId] {
         read(.unreadPosts(postIds)) { state in postIds.filter(state.unreadPosts.contains) }
+    }
+
+    override func newPosts(postIds: [ChannelId]) -> [ChannelId] {
+        read(.newPosts(postIds)) { state in postIds.filter(state.newPosts.contains) }
     }
 }
