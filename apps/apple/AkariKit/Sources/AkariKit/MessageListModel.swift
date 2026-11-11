@@ -165,7 +165,14 @@ public final class MessageListModel {
 
     public let channelId: ChannelId
     /// Oldest first, then our pending and failed messages.
-    public private(set) var rows: [Row] = []
+    public private(set) var rows: [Row] = [] {
+        didSet {
+            // A starter's row brings its parent's download option with it.
+            if shownChannels != downloadsReadFor {
+                readHiddenDownloads()
+            }
+        }
+    }
     public private(set) var reachedOldest = false
     public private(set) var atPresent = true
     public private(set) var isStale = false
@@ -247,6 +254,7 @@ public final class MessageListModel {
     // list still has to reach the present.
     @ObservationIgnored private var owedPresent: Int?
     @ObservationIgnored private var retired = false
+    @ObservationIgnored private var downloadsReadFor: Set<ChannelId> = []
     @ObservationIgnored private var landed = 0
     @ObservationIgnored private var messageJumps = 0
     // The message the last jump that loaded goes to.
@@ -471,7 +479,8 @@ public final class MessageListModel {
     }
 
     private func readHiddenDownloads() {
-        let hiding = shownChannels.filter { store.hidesMediaDownloads(channelId: $0) }
+        downloadsReadFor = shownChannels
+        let hiding = downloadsReadFor.filter { store.hidesMediaDownloads(channelId: $0) }
         if hiding != channelsHidingDownloads {
             channelsHidingDownloads = hiding
         }
