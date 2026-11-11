@@ -11,7 +11,8 @@ final class GatedFrames: FrameSource, @unchecked Sendable {
     let loopCount: Int
     /// Every index asked for, in order.
     let decoded = Locked<[Int]>([])
-    private let broken: Set<Int>
+    /// Frames that don't decode.
+    let broken: Locked<Set<Int>>
     private let image: CGImage
     private let gate = NSCondition()
     private var allowed = 0
@@ -20,7 +21,7 @@ final class GatedFrames: FrameSource, @unchecked Sendable {
         frameCount = count
         delays = Array(repeating: delay, count: count)
         self.loopCount = loopCount
-        self.broken = broken
+        self.broken = Locked(broken)
         let context = CGContext(
             data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -33,7 +34,7 @@ final class GatedFrames: FrameSource, @unchecked Sendable {
     /// Lets `count` more decodes finish.
     func allow(_ count: Int = 1) {
         gate.withLock {
-            allowed = count == .max ? .max : allowed + count
+            allowed = count == .max || allowed == .max ? .max : allowed + count
             gate.broadcast()
         }
     }
@@ -53,6 +54,6 @@ final class GatedFrames: FrameSource, @unchecked Sendable {
             return nil
         }
         decoded.withLock { $0.append(index) }
-        return broken.contains(index) ? nil : image
+        return broken.current.contains(index) ? nil : image
     }
 }

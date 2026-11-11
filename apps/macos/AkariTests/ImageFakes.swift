@@ -202,8 +202,7 @@ func frames(of picture: ImageLayerView, count: Int, sourceLocation: SourceLocati
     return seen
 }
 
-/// The images log's lines while `body` runs. The log is the app's: suites running side by side
-/// each get every line, and the log goes back to what it was when the last one is done.
+/// The images log's lines while `body` runs; suites running side by side each get every line.
 @MainActor
 func imageLog(_ body: () async throws -> Void) async rethrows -> [String] {
     let lines = OSAllocatedUnfairLock<[String]>(initialState: [])

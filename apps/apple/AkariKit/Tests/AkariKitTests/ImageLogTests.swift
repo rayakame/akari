@@ -69,6 +69,24 @@ struct ImageLogTests {
         #expect(!lines.current.contains { $0.contains("secret-name") || $0.contains(images.directory.path) })
     }
 
+    // Why a file gave no animation is only looked into for the log.
+    @Test
+    func withTheLogOffAFailedOpenIsntLookedInto() async throws {
+        let still = try images.png("still", width: 32, height: 32)
+        let cache = ImageCache(source: FakeImageSource.serving(still, width: 32, height: 32))
+        let probes = AnimationSource.failureProbes.current
+
+        await #expect(throws: ImageCacheError.undecodable) {
+            try await cache.animation(ImageSpec(key: .testAvatar(5), width: 16, height: 16, animated: .gif))
+        }
+        #expect(AnimationSource.failureProbes.current == probes)
+
+        await logging {
+            _ = try? await cache.animation(ImageSpec(key: .testAvatar(5), width: 16, height: 16, animated: .gif))
+        }
+        #expect(AnimationSource.failureProbes.current > probes)
+    }
+
     @Test
     func aFileThatsGoneIsLogged() async throws {
         let gone = images.directory.appending(path: "gone.gif")

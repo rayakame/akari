@@ -1886,6 +1886,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         for tile in tiles where !tile.isHidden {
             let moves = tile.content.map { $0.media.animated || $0.media.loops } ?? false
             guard moves, tile.window != nil else {
+                if tile.animates, let key = tile.content?.media.key {
+                    ImageLog.log("list: \(ImageLog.name(key)) rests (not in the window)")
+                }
                 tile.animates = false
                 continue
             }

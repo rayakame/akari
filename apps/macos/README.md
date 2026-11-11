@@ -243,8 +243,9 @@ only. Combine them as
 `-AkariLog images` (category `images`, also on stderr beside akari-core's lines) says why an
 image or an animation doesn't show and follows the ones that play: a failed image and an
 animation that didn't start with the reason (over the size cap, not available, the file has one
-frame, …), each GIF in the list and the viewer as the motion rule starts or rests it (window
-key, how much shows, hover, the GIF setting, Reduce Motion), an animation's start (frames,
+frame, …), each GIF as the motion rule starts or rests it (in the list with the window key, how
+much shows, hover, the GIF setting and Reduce Motion; in the viewer by its key state and the
+app's), an animation's start (frames,
 size, the box's pixels), its frame index once a second while it plays, and a frame that didn't
 decode. Keys are Discord's IDs, never links or file names. For a GIF that won't play:
 `-AkariLog akari_core=debug,images`; akari-core's `akari_core::media` lines say what was asked

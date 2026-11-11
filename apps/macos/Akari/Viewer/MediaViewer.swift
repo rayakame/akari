@@ -174,7 +174,8 @@ final class MediaViewer {
         if let view, plays != view.animates {
             let key = view.model.current.key
             ImageLog.log(
-                "viewer: \(ImageLog.name(key)) \(plays ? "plays" : "rests") (the viewer key and the app active: \(plays))")
+                "viewer: \(ImageLog.name(key)) "
+                    + (plays ? "plays (the viewer key and the app active)" : "rests (the viewer not key or the app not active)"))
         }
         view?.animates = plays
     }

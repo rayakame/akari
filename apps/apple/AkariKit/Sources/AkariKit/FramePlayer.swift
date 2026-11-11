@@ -80,13 +80,8 @@ public final class AnimationClock {
     }
 }
 
-/// Plays a `FrameSource` into a callback: each frame decoded at the box's pixels off the main
-/// actor, shown at its delay, loops honoured, the last frame kept when the loops are up.
-///
-/// Frames that fit the budget are all kept, and the clock alone says which shows: a tick never
-/// waits for a frame, one not decoded yet shows as soon as it is, if still due. Past the budget
-/// only a window of frames ahead of the picture is kept, decoded in order, and the picture never
-/// passes a frame that isn't decoded yet: a decoder slower than the delays plays slow, in order.
+/// Plays a `FrameSource` into a callback on the clock: frames decoded at the box's pixels off the
+/// main actor, all kept when they fit the budget, else a window of them ahead of the picture.
 @MainActor
 public final class FramePlayer {
     public typealias Frame = @MainActor (CGImage, Int) -> Void
@@ -115,9 +110,9 @@ public final class FramePlayer {
     private var loopsDone = 0
     private var waiting = false
     private var generation = 0
-    // What the decoder shares with the player: where the window starts, which of its frames
-    // need no decoding, its wake-up, and its own task, which goes with the player.
-    private let head = LockedBox(0)
+    // What the decoder shares with the player: the window (its first frame and how many), which
+    // of its frames need no decoding, its wake-up, and its own task, which goes with the player.
+    private let head = LockedBox((first: 0, span: 0))
     private let settled = LockedBox(Set<Int>())
     private let wake = LockedBox<AsyncStream<Void>.Continuation?>(nil)
     private let decoding = LockedBox<Task<Void, Never>?>(nil)
@@ -194,11 +189,13 @@ public final class FramePlayer {
         nextDue = time
         loopsDone = 0
         waiting = false
-        head.withLock { $0 = 0 }
+        broken = []
+        head.withLock { $0 = (0, span) }
         clock.register(self)
         if keepsAll {
             show(0)
         } else {
+            publish()
             advance(time)
         }
         startDecoding()
@@ -254,9 +251,18 @@ public final class FramePlayer {
         }
     }
 
-    // A window's tick: the picture moves to the newest decoded frame that's due, through the
-    // frames before it, and stops at the first that isn't decoded. That one shows when it
-    // lands, and the frames after it take their delays from then.
+    // The frames the window holds from `nextIndex` on: none past the last loop's last frame.
+    private var span: Int {
+        let count = animation.frameCount
+        let most = min(Self.window, count)
+        guard animation.loopCount > 0 else {
+            return most
+        }
+        let left = animation.loopCount - loopsDone
+        return left > 1 ? most : left == 1 ? min(most, count - nextIndex) : 0
+    }
+
+    // A frame that lands late shows then, and the frames after it take their delays from there.
     private func advance(_ now: Double, landed: Bool = false) {
         let count = animation.frameCount
         let first = nextIndex
@@ -296,9 +302,9 @@ public final class FramePlayer {
         guard landed || nextIndex != first else {
             return
         }
-        // The window starts at the frame the picture needs next.
-        frames = frames.filter { (($0.key - nextIndex + count) % count) < Self.window }
-        head.withLock { $0 = nextIndex }
+        let span = span
+        frames = frames.filter { (($0.key - nextIndex + count) % count) < span }
+        head.withLock { $0 = (nextIndex, span) }
         publish()
     }
 
@@ -348,10 +354,9 @@ public final class FramePlayer {
             // The window's frames in order, then asleep until the picture moves.
             var moves = moved.makeAsyncIterator()
             while !Task.isCancelled {
-                let first = head.current
+                let (first, span) = head.current
                 let have = settled.current
-                let missing = (0..<min(Self.window, count)).lazy.map { (first + $0) % count }
-                    .first { !have.contains($0) }
+                let missing = (0..<span).lazy.map { (first + $0) % count }.first { !have.contains($0) }
                 guard let index = missing else {
                     guard await moves.next() != nil else {
                         return

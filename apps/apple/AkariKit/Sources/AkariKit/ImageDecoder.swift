@@ -173,8 +173,12 @@ public final class AnimationSource: FrameSource, @unchecked Sendable {
         loopCount = Self.loopCount(in: container)
     }
 
+    // Failed opens looked into; tests read it.
+    static let failureProbes = LockedBox(0)
+
     /// Why `url` gave no animation, for the log.
     static func failure(_ url: URL) -> String {
+        failureProbes.withLock { $0 += 1 }
         do {
             let source = try ImageDecoder.open(url)
             return CGImageSourceGetCount(source) > 1 ? "the file doesn't decode" : "the file has one frame"

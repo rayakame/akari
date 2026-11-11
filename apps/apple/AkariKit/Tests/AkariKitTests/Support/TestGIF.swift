@@ -1,9 +1,7 @@
 import Foundation
 
-/// An animated GIF written for a test, to a byte count: every frame the whole canvas, kept
-/// underneath the next (disposal 1), each after the first drawing a band of noise and leaving
-/// the rest transparent, 40 ms apart (the last stays 120 ms), looping forever. The noise is sized
-/// so the file comes out just under `bytes`; a comment before the trailer makes up the rest.
+/// An animated GIF that decodes, `bytes` to the byte: full frames kept underneath the next
+/// (disposal 1), noise on transparency after the first, 40 ms apart (the last 120), looping.
 nonisolated enum TestGIF {
     struct Shape {
         var width: Int
@@ -133,6 +131,10 @@ nonisolated enum TestGIF {
                     prefix = pixel
                 }
                 emit(prefix)
+                // A decoder adds a code for the last one too, and reads END at the width that gives.
+                if next >= 1 << width, width < 12 {
+                    width += 1
+                }
                 for key in used {
                     table[key] = 0
                 }
@@ -157,8 +159,18 @@ nonisolated enum TestGIF {
 extension TestGIF {
     // Written once per run, off the main actor: the encoder takes seconds in a debug build.
     private static let heavyFile = Task.detached { () throws -> URL in
-        let url = FileManager.default.temporaryDirectory.appending(
-            path: "akari-test-heavy-\(UUID().uuidString).gif")
+        let files = FileManager.default
+        let prefix = "akari-test-heavy-"
+        // A run that crashed left its file behind.
+        for name in (try? files.contentsOfDirectory(atPath: files.temporaryDirectory.path)) ?? []
+        where name.hasPrefix(prefix) {
+            let old = files.temporaryDirectory.appending(path: name)
+            let written = (try? files.attributesOfItem(atPath: old.path))?[.modificationDate] as? Date
+            if let written, written.timeIntervalSinceNow < -3600 {
+                try? files.removeItem(at: old)
+            }
+        }
+        let url = files.temporaryDirectory.appending(path: "\(prefix)\(UUID().uuidString).gif")
         try data(heavy).write(to: url)
         atexit_b { try? FileManager.default.removeItem(at: url) }
         return url

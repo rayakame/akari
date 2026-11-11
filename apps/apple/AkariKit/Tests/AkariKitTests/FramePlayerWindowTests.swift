@@ -70,6 +70,42 @@ final class FramePlayerWindowTests {
         #expect(Array(shown.current.prefix(4)) == [0, 1, 3, 4])
     }
 
+    // A frame that failed once is tried again by the next start.
+    @Test
+    func aStartTriesBrokenFramesAgain() async throws {
+        let frames = GatedFrames(count: 327, delay: 0.04, broken: [0, 1])
+        frames.allow(.max)
+        let player = player(frames)
+        player.start(at: 0)
+        _ = try await run(step: 0.02) { shown.current.count >= 2 }
+        player.stop()
+        #expect(Array(shown.current.prefix(2)) == [2, 3])
+        frames.broken.withLock { $0 = [] }
+        shown.withLock { $0 = [] }
+
+        player.start(at: 10)
+        _ = try await run(from: 10, step: 0.02) { shown.current.count >= 2 }
+        player.stop()
+
+        #expect(Array(shown.current.prefix(2)) == [0, 1])
+    }
+
+    // The last loop decodes nothing past its last frame.
+    @Test
+    func theLastLoopDoesntDecodeIntoTheNext() async throws {
+        let frames = GatedFrames(count: 40, delay: 0.04, loopCount: 1)
+        frames.allow(.max)
+        let player = FramePlayer(animation: frames, pixels: (4000, 4000), clock: clock) {
+            [shown] _, index in shown.withLock { $0.append(index) }
+        }
+
+        player.start(at: 0)
+        _ = try await run(step: 0.02) { !player.isPlaying }
+
+        #expect(shown.current == Array(0..<40))
+        #expect(frames.decoded.current == Array(0..<40), "each frame once")
+    }
+
     // The GIF that never played, by its numbers: 327 frames of 540 × 405 in 10 159 614 bytes,
     // 286 MB decoded. It plays through its loop and into the next from four frames at a time.
     @Test
