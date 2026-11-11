@@ -90,6 +90,29 @@ final class FakeAccount: Account, @unchecked Sendable {
         log.append(.view(channelId))
     }
 
+    let agreements = Locked<[GuildId]>([])
+
+    // As the core: the server's asking gates open.
+    override func agreeToAgeRestricted(guildId: GuildId) {
+        agreements.withLock { $0.append(guildId) }
+        fakeStore.update { store in
+            for (channel, gate) in store.ageGates where store.channels[channel]?.guildId == guildId {
+                if case .ask = gate {
+                    store.ageGates[channel] = .open
+                }
+            }
+        }
+    }
+
+    let originalLinks = Locked<[ImageKey: String]>([:])
+
+    override func originalUrl(key: ImageKey) async throws -> String {
+        guard let link = originalLinks.current[key] else {
+            throw ImageError.Unavailable
+        }
+        return link
+    }
+
     override func setReading(channelIds: [ChannelId]) {
         readingCalls.withLock { $0.append(channelIds) }
         if let state = readStateAfterReading.current {

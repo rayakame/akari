@@ -298,6 +298,14 @@ plays them (`docs/ui/images.md`):
   client's rules from the store (`ExpressionStore`: the user's servers and their emoji, the Nitro
   tier) and Discord's answers (`ExpressionLookups`, 5 s for an emoji's source);
   `ExpressionTarget.card` is its hover card (`ExpressionCard`).
+- `PlaceholderCache` (`session.placeholders`): Discord's thumbhashes as small images, decoded
+  once each, the oldest going past 512.
+- `FileSize.text` words a file's size as the official client does; `FileType.symbol` picks a
+  file row's symbol by extension.
+- `MessageListModel.revealedMedia` and `shownSensitive` hold the session's spoiler reveals and
+  eye toggles (`reveal(media:)`, `toggleSensitive`); `originalURL(_:)` asks the core for a
+  fresh link. `SessionModel.ageGate(of:)`, `agreeToAgeRestricted(in:)` and `leaveAgeGate()`
+  run the age gate; a gated channel is never read.
 - `ImageKey.canAnimate`: an `a_` hash, an animated emoji, an APNG or GIF sticker.
   `sameSubject(as:)`: the same user, server, group, emoji or attachment, whatever the hash.
 

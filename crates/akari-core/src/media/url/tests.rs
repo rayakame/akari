@@ -29,6 +29,7 @@ fn attachment(filename: &str, width: u32, height: u32) -> Attachment {
     Attachment {
         id: Snowflake::new(1_300_000_000_000_000_003),
         filename: filename.into(),
+        title: None,
         description: None,
         content_type: None,
         size: 1000,
@@ -43,6 +44,8 @@ fn attachment(filename: &str, width: u32, height: u32) -> Attachment {
         width: Some(width),
         height: Some(height),
         flags: 0,
+        placeholder: None,
+        content_scan_version: None,
     }
 }
 

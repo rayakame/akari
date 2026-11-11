@@ -24,8 +24,9 @@ thread row's menu, the Threads browser (`ThreadBrowser.swift`, `ThreadBrowserCon
 the header's Threads button and its popout, the "See all threads" modal, and the channel list's
 "More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
 `ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), and the
-composer (a locked thread's banner), and avatars and icons in every place (`docs/ui/images.md`).
-Attachments, embeds, reactions, replies, voice, notifications and settings come later.
+composer (a locked thread's banner), avatars and icons in every place (`docs/ui/images.md`), and a
+message's attachments with their covers and the age gate (`docs/ui/attachments.md`).
+Embeds, reactions, replies, voice, notifications and settings come later.
 
 ## Images
 
@@ -55,6 +56,16 @@ Attachments, embeds, reactions, replies, voice, notifications and settings come 
   a sticker is a button) and `ExpressionHoverCard` its card after 300 ms, a borderless child
   window that takes no mouse events; a click (the text view's, once its tracking ends without a
   selection) opens `ExpressionPopoutPresenter`'s panel in `ChildWindows` beside the item.
+- A message's attachments are an `AttachmentsView` in the cell's stack right under the text:
+  `MediaTileView`s in a flipped mosaic laid out by `AttachmentsView.layout` (PR A's layout
+  functions, fitted to the text column; the cell's height adds the same layout's), then
+  `FileRowView`s. A tile is a button over an `ImageLayerView` (the media tier, Discord's fade),
+  the placeholder layer under it and an overlay view above it (covers, the spoiler pill, our
+  GIF badge, Play, the spinner), with the eye and ALT buttons on top; the controller decides
+  which GIF plays, the hand over what clicks, the hovered tile, the alt popover, and asks the
+  media of rows within a screen above and below (`prefetchMedia`). `MessageCell.cover` applies
+  the session's reveals to the core's cover. A gated channel's `MessageArea` shows
+  `AgeGateView` and never opens its list.
 - A loading or failed avatar shows the `avatarPlaceholder` disc; a server's icon is drawn
   alone (`ServerPicture`: the rail, the folder minis, the title bar), its initials' tile only
   without an icon or after a failure. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).

@@ -15,6 +15,7 @@ impl Permissions {
     pub const VIEW_CHANNEL: Self = Self(1 << 10);
     pub const SEND_MESSAGES: Self = Self(1 << 11);
     pub const SEND_TTS_MESSAGES: Self = Self(1 << 12);
+    pub const MANAGE_MESSAGES: Self = Self(1 << 13);
     pub const EMBED_LINKS: Self = Self(1 << 14);
     pub const ATTACH_FILES: Self = Self(1 << 15);
     pub const READ_MESSAGE_HISTORY: Self = Self(1 << 16);

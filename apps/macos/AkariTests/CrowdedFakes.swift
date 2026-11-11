@@ -38,6 +38,7 @@ nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
 
 nonisolated final class CrowdedStore: Store, @unchecked Sendable {
     override func displaySettings() -> DisplaySettings { displayDefaults() }
+    override func ageGate(channelId: ChannelId) -> AgeGate { .open }
 
     static let guildIds = (1...40).map { GuildId(rawValue: $0) }
     static let channelIds = (1001...1060).map { ChannelId(rawValue: $0) }

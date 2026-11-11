@@ -67,6 +67,7 @@ nonisolated final class FormattedAccount: Account, @unchecked Sendable {
 
 nonisolated final class FormattedStore: Store, @unchecked Sendable {
     override func displaySettings() -> DisplaySettings { displayDefaults() }
+    override func ageGate(channelId: ChannelId) -> AgeGate { .open }
 
     static let channelIds = [ChannelId(rawValue: 1001), ChannelId(rawValue: 1002)]
     static let threadId = ChannelId(rawValue: 1003)

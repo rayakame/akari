@@ -27,6 +27,10 @@ pub(crate) struct Timing {
     pub(crate) rate_window: Duration,
     /// What a popout's lookup is given, as the official client gives an emoji's source.
     pub(crate) lookup_timeout: Duration,
+    /// How long media waits for its explicit content scan (the official client's 3 s).
+    pub(crate) scan_wait: Duration,
+    /// The most a scan request waits before it goes (the client's 800 ms).
+    pub(crate) scan_jitter: Duration,
 }
 
 impl Default for Timing {
@@ -42,6 +46,8 @@ impl Default for Timing {
             healthy: Duration::from_secs(30),
             rate_window: Duration::from_secs(60),
             lookup_timeout: Duration::from_secs(5),
+            scan_wait: Duration::from_secs(3),
+            scan_jitter: Duration::from_millis(800),
         }
     }
 }

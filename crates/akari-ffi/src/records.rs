@@ -426,7 +426,11 @@ pub struct Message {
     pub edited_timestamp: Option<SystemTime>,
     pub pinned: bool,
     pub mention_everyone: bool,
+    /// In the order they show: the mosaic's images and videos, then the files.
     pub attachments: Vec<Attachment>,
+    /// The channel's spoilers show without a click (`render_spoilers`).
+    #[uniffi(default = false)]
+    pub spoilers_shown: bool,
     /// Embeds aren't rendered yet; the count is enough for a placeholder.
     pub embed_count: u32,
     pub stickers: Vec<Sticker>,
@@ -506,6 +510,8 @@ impl Message {
         message: &state::Message,
         formatted: FormattedText,
         mentions_me: bool,
+        shown: Vec<state::ShownAttachment>,
+        spoilers_shown: bool,
     ) -> Self {
         let system = message.system.as_deref();
         Self {
@@ -519,7 +525,11 @@ impl Message {
             edited_timestamp: message.edited_timestamp.map(system_time),
             pinned: message.pinned,
             mention_everyone: message.mention_everyone,
-            attachments: message.attachments.iter().map(Attachment::from).collect(),
+            attachments: shown
+                .into_iter()
+                .filter_map(|shown| Attachment::new(message, shown))
+                .collect(),
+            spoilers_shown,
             embed_count: u32::try_from(message.embeds.len()).unwrap_or(u32::MAX),
             stickers: message.stickers.iter().map(Sticker::from).collect(),
             components_v2: message.uses_components_v2(),
@@ -593,18 +603,135 @@ fn system_time(timestamp: Timestamp) -> SystemTime {
 pub struct Attachment {
     pub id: AttachmentId,
     pub filename: String,
+    /// The name without its extension, when Discord had to change the file's name.
+    pub title: Option<String>,
+    /// Alt text.
+    pub description: Option<String>,
     pub content_type: Option<String>,
     /// Bytes.
     pub size: u64,
+    pub kind: AttachmentKind,
+    /// Pixels; 0 when Discord doesn't say.
+    pub width: u32,
+    pub height: u32,
+    /// A thumbhash for `placeholder_image` while the image loads.
+    pub placeholder: Option<String>,
+    /// Marked a spoiler; `cover` says whether it is covered now.
+    pub spoiler: bool,
+    /// A GIF, or an animated WebP or AVIF: it plays by the motion policy.
+    pub animated: bool,
+    /// The image, a video's poster.
+    pub key: ImageKey,
+    pub display: AttachmentDisplay,
+    pub cover: Option<MediaCover>,
 }
 
-impl From<&state::Attachment> for Attachment {
-    fn from(attachment: &state::Attachment) -> Self {
-        Self {
+impl Attachment {
+    fn new(message: &state::Message, shown: state::ShownAttachment) -> Option<Self> {
+        let attachment = message.attachments.get(shown.index)?;
+        Some(Self {
             id: attachment.id,
             filename: attachment.filename.to_string(),
+            title: attachment.title.as_deref().map(str::to_owned),
+            description: attachment.description.as_deref().map(str::to_owned),
             content_type: attachment.content_type.as_deref().map(str::to_owned),
             size: attachment.size,
+            kind: attachment.kind().into(),
+            width: attachment.width.unwrap_or(0),
+            height: attachment.height.unwrap_or(0),
+            placeholder: attachment.placeholder.as_deref().map(str::to_owned),
+            spoiler: attachment.is_spoiler(),
+            animated: attachment.is_animated(),
+            key: ImageKey::Attachment {
+                channel_id: message.channel_id,
+                message_id: message.id,
+                attachment_id: attachment.id,
+            },
+            display: shown.display.into(),
+            cover: shown.cover.map(MediaCover::from),
+        })
+    }
+}
+
+/// What an attachment is, by its file name's extension as the official client decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum AttachmentKind {
+    Image,
+    Video,
+    Audio,
+    File,
+}
+
+impl From<state::AttachmentKind> for AttachmentKind {
+    fn from(kind: state::AttachmentKind) -> Self {
+        match kind {
+            state::AttachmentKind::Image => Self::Image,
+            state::AttachmentKind::Video => Self::Video,
+            state::AttachmentKind::Audio => Self::Audio,
+            _ => Self::File,
+        }
+    }
+}
+
+/// Where an attachment shows: in the message's mosaic, or as a file row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum AttachmentDisplay {
+    Media,
+    File,
+}
+
+impl From<state::AttachmentDisplay> for AttachmentDisplay {
+    fn from(display: state::AttachmentDisplay) -> Self {
+        match display {
+            state::AttachmentDisplay::Media => Self::Media,
+            _ => Self::File,
+        }
+    }
+}
+
+/// Why media is covered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum MediaCover {
+    /// Flagged by Discord's scan where the user's settings cover it; the user can show it and
+    /// hide it again.
+    Sensitive,
+    /// Waiting for Discord's scan, at most about 3 s: a black box.
+    Pending,
+    /// A click shows it for the session.
+    Spoiler,
+}
+
+impl From<state::MediaCover> for MediaCover {
+    fn from(cover: state::MediaCover) -> Self {
+        match cover {
+            state::MediaCover::Sensitive => Self::Sensitive,
+            state::MediaCover::Pending => Self::Pending,
+            _ => Self::Spoiler,
+        }
+    }
+}
+
+/// Whether a channel's messages wait behind the age gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum AgeGate {
+    Open,
+    /// The user can continue, which opens the server's age-restricted channels; `server`: the
+    /// whole server is age-restricted.
+    Ask {
+        server: bool,
+    },
+    /// Discord knows the user is under 18.
+    TooYoung {
+        server: bool,
+    },
+}
+
+impl From<state::AgeGate> for AgeGate {
+    fn from(gate: state::AgeGate) -> Self {
+        match gate {
+            state::AgeGate::Ask { server } => Self::Ask { server },
+            state::AgeGate::TooYoung { server } => Self::TooYoung { server },
+            _ => Self::Open,
         }
     }
 }

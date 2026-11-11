@@ -483,20 +483,23 @@ final class SessionModelTests {
         session.close()
     }
 
+    // Fetched first (AgeGateTests); found, it opens where the user is when the store has no
+    // guild for it.
     @Test
-    func goingToAChannelTheStoreDoesntHaveStaysInPlace() {
+    func goingToAChannelTheStoreDoesntHaveStaysInPlace() async throws {
         store.update { state in
             state.add(guild(1))
             state.list([channel(13)], in: 1)
         }
+        account.fetchedThreads.withLock { $0[id(99)] = channel(99) }
         let session = makeSession()
         session.start()
         session.open(.guild(id(1)))
 
         session.go(to: id(99))
 
+        try await eventually { session.messages?.channelId == id(99) }
         #expect(session.place == .guild(id(1)))
-        #expect(session.messages?.channelId == id(99))
         session.close()
     }
 

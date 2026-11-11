@@ -24,6 +24,7 @@ const THREAD_SEARCH: &str = "channels/{}/threads/search";
 const THREADS: &str = "channels/{}/threads";
 const MESSAGE_THREADS: &str = "channels/{}/messages/{}/threads";
 const REFRESH_URLS: &str = "attachments/refresh-urls";
+const EXPLICIT_MEDIA: &str = "channels/{}/explicit-media";
 const EMOJI_SOURCE: &str = "emojis/{}/source";
 const STICKER: &str = "stickers/{}";
 const STICKER_GUILD: &str = "stickers/{}/guild";
@@ -528,6 +529,28 @@ impl AccountRest {
         let route = RouteKey::new(Method::Post, ACK_BULK, 0);
         self.send(route, Waiting::Never, || {
             Ok(self.request(HttpMethod::POST, ACK_BULK)?.json(&body))
+        })
+        .await?;
+        Ok(())
+    }
+
+    // Answered with 204; the results come as MESSAGE_UPDATEs.
+    pub(crate) async fn scan_explicit_media(
+        &self,
+        channel: ChannelId,
+        messages: &[MessageId],
+    ) -> Result<(), Failure> {
+        #[derive(Serialize)]
+        struct Body {
+            message_ids: Vec<String>,
+        }
+        let body = Body {
+            message_ids: messages.iter().map(|id| id.get().to_string()).collect(),
+        };
+        let path = format!("channels/{}/explicit-media", channel.get());
+        let route = RouteKey::new(Method::Patch, EXPLICIT_MEDIA, channel.get());
+        self.send(route, Waiting::Never, || {
+            Ok(self.request(HttpMethod::PATCH, &path)?.json(&body))
         })
         .await?;
         Ok(())

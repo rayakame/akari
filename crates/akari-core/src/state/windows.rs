@@ -467,6 +467,41 @@ impl Windows {
         })
     }
 
+    // `id` of `channel` as its window or a viewed thread's starter shows it.
+    pub(crate) fn shown(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
+        self.message(channel, id).or_else(|| {
+            self.windows
+                .keys()
+                .find_map(|thread| match self.starter_message(*thread) {
+                    Some(StarterMessage::Loaded(starter))
+                        if starter.channel_id == channel && starter.id == id =>
+                    {
+                        Some(starter)
+                    }
+                    _ => None,
+                })
+        })
+    }
+
+    // The starter rows of viewed threads that show `id` of `channel`.
+    pub(crate) fn starter_rows_showing(
+        &self,
+        channel: ChannelId,
+        id: MessageId,
+    ) -> Vec<Arc<Message>> {
+        self.windows
+            .keys()
+            .filter(|thread| {
+                matches!(
+                    self.starter_message(**thread),
+                    Some(StarterMessage::Loaded(starter))
+                        if starter.channel_id == channel && starter.id == id
+                )
+            })
+            .filter_map(|thread| self.starter_row(*thread).cloned())
+            .collect()
+    }
+
     pub(crate) fn wanted_starter(&self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
         let row = self.starter_row(thread)?;
         if row.referenced_message != ReferencedMessage::NotIncluded {
@@ -609,6 +644,12 @@ impl Windows {
             .last()
             .map(|message| message.id)
             .max(window.present_through)
+    }
+
+    pub(crate) fn messages(&self, channel: ChannelId) -> &[Arc<Message>] {
+        self.windows
+            .get(&channel)
+            .map_or(&[], |window| window.messages.as_slice())
     }
 
     pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {

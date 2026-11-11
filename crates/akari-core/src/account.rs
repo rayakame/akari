@@ -1088,6 +1088,10 @@ impl Account {
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
         let images = Images::new(&client, user, store.clone(), rest.clone(), &runtime);
         let lookup_timeout = timing.lookup_timeout;
+        let scan_timing = scans::ScanTiming {
+            wait: timing.scan_wait,
+            jitter: timing.scan_jitter,
+        };
         let gateway = Gateway::start(client, token, timing)?;
         let shared = Arc::new_cyclic(|weak: &Weak<Shared>| {
             let unauthorized = {
@@ -1130,6 +1134,12 @@ impl Account {
         runtime.spawn(deadlines::run_deadlines(
             shared.store.clone(),
             shared.store.subscribe(),
+        ));
+        runtime.spawn(scans::run_scans(
+            shared.store.clone(),
+            shared.rest.clone(),
+            shared.store.subscribe(),
+            scan_timing,
         ));
         Ok(Self { shared })
     }
@@ -1187,6 +1197,12 @@ impl Account {
     /// failed messages loses its messages.
     pub fn view_channel(&self, channel: ChannelId) {
         self.shared.view(channel);
+    }
+
+    /// The user agreed to see the guild's age-restricted channels, as the official client asks
+    /// once per server. Kept with the account's cache.
+    pub fn agree_to_age_restricted(&self, guild: GuildId) {
+        self.shared.store.agree_to_age_restricted(guild);
     }
 
     /// The channels the user is reading at their newest messages, at most two (a channel and
@@ -1742,6 +1758,7 @@ fn on_event(store: &Store, event: ConnectionEvent, connecting: &dyn Fn() -> bool
 mod acks;
 mod deadlines;
 mod expressions;
+mod scans;
 
 #[cfg(test)]
 mod tests;

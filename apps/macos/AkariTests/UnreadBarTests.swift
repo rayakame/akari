@@ -355,6 +355,7 @@ struct UnreadBarScreenTests {
         let table = try await shownWithItsBar(session, in: host)
         #expect(try lineOffset(in: table) < 0, "the line is above the view")
         let click = try point(120, 4 + 16, in: table)
+        try settleEvents(in: window)
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             window.sendEvent(
                 try #require(
