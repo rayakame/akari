@@ -1605,3 +1605,61 @@ fn an_answer_doesnt_undo_what_the_gateway_brought_meanwhile() {
     assert!(events.is_empty(), "{events:?}");
     assert!(!state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events));
 }
+
+// CodeRabbit on #61: an edit of a first message that comes before its preview does isn't lost
+// when the answer, sent before the edit, lands.
+#[test]
+fn an_edit_before_the_answer_is_applied_to_it() {
+    let mut state = forum_with_posts();
+    let mut events = Vec::new();
+    let asked = [Snowflake::new(OLD), Snowflake::new(NEWEST)];
+    state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events);
+    let (forum, batch) = state.next_post_batch().expect("a batch");
+    for (post, content) in [
+        (OLD, "edited"),
+        (OLD, "edited twice"),
+        (NEWEST, "gone anyway"),
+    ] {
+        apply(
+            &mut state,
+            "MESSAGE_UPDATE",
+            json!({"id": post.to_string(), "channel_id": post.to_string(), "content": content}),
+        );
+    }
+    assert_eq!(preview(&state, OLD), None, "nothing to edit yet");
+
+    let answer: crate::model::PostData = serde_json::from_str(
+        &json!({
+            "threads": {
+                OLD.to_string(): {"first_message": starter(OLD, "before the edit"), "owner": null},
+                NEWEST.to_string(): {"first_message": null, "owner": null},
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    state.finish_post_batch(forum, &batch, Some(answer), &mut events);
+
+    assert_eq!(preview(&state, OLD).as_deref(), Some("edited twice"));
+    assert_eq!(preview(&state, NEWEST).as_deref(), Some("deleted"));
+
+    // An edit of a post nobody asked about is nothing to keep.
+    apply(
+        &mut state,
+        "MESSAGE_UPDATE",
+        json!({"id": MIDDLE.to_string(), "channel_id": MIDDLE.to_string(), "content": "unasked"}),
+    );
+    state.want_post_previews(
+        Snowflake::new(FORUM),
+        &[Snowflake::new(MIDDLE)],
+        &mut events,
+    );
+    let (forum, batch) = state.next_post_batch().expect("a batch");
+    let answer: crate::model::PostData = serde_json::from_str(
+        &json!({"threads": {MIDDLE.to_string(): {"first_message": starter(MIDDLE, "as asked"), "owner": null}}})
+            .to_string(),
+    )
+    .unwrap();
+    state.finish_post_batch(forum, &batch, Some(answer), &mut events);
+    assert_eq!(preview(&state, MIDDLE).as_deref(), Some("as asked"));
+}

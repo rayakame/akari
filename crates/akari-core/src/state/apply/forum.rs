@@ -34,6 +34,8 @@ pub(super) struct Previews {
     asked: HashSet<ChannelId>,
     // When a post Discord didn't answer for may be asked again.
     retry: HashMap<ChannelId, i64>,
+    // Edits of first messages being asked for: the answer may be from before them.
+    edits: HashMap<ChannelId, Vec<MessageUpdate>>,
 }
 
 // The official client keeps the pages of at most this many filters.
@@ -663,6 +665,7 @@ impl State {
         let retry = self.now_millis() + RETRY_MILLIS;
         for post in asked {
             self.previews.asked.remove(post);
+            let edits = self.previews.edits.remove(post).unwrap_or_default();
             // What the gateway brought while the request was on its way is newer.
             if self.previews.messages.contains_key(post) {
                 self.previews.retry.remove(post);
@@ -677,8 +680,10 @@ impl State {
             }
             let users = &self.entities.users;
             let message = entry.first_message.map(|message| {
-                Arc::new(Message::from_wire(message, &mut |user| {
-                    known_user(user, users)
+                let first = Message::from_wire(message, &mut |user| known_user(user, users));
+                // Applied again to an answer that has them already, they change nothing.
+                Arc::new(edits.into_iter().fold(first, |first, edit| {
+                    first.patch(edit, &mut |user| known_user(user, users))
                 }))
             });
             self.previews.messages.insert(*post, message);
@@ -737,6 +742,16 @@ impl State {
         events: &mut Vec<StoreEvent>,
     ) {
         let Some(Some(known)) = self.previews.messages.get(&update.channel_id) else {
+            if update.id.get() == update.channel_id.get()
+                && self.previews.asked.contains(&update.channel_id)
+                && !self.previews.messages.contains_key(&update.channel_id)
+            {
+                self.previews
+                    .edits
+                    .entry(update.channel_id)
+                    .or_default()
+                    .push(update.clone());
+            }
             return;
         };
         if known.id != update.id {
