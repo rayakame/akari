@@ -170,7 +170,13 @@ final class MediaViewer {
     // D136's rule for media under the pointer: it plays while the viewer is key and the app
     // active.
     private func updateMotion() {
-        view?.animates = panel.map(plays) ?? false
+        let plays = panel.map(plays) ?? false
+        if let view, plays != view.animates {
+            let key = view.model.current.key
+            ImageLog.log(
+                "viewer: \(ImageLog.name(key)) \(plays ? "plays" : "rests") (the viewer key and the app active: \(plays))")
+        }
+        view?.animates = plays
     }
 
     private func saveURL(for name: String) async -> URL? {

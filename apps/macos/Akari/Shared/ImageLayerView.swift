@@ -103,6 +103,7 @@ final class ImageLayerView: NSView {
     private var animationTask: Task<Void, Never>?
     private var pinned: ImageSpec?
     private var askedPixels: (Int, Int)?
+    private var frameLogged: ContinuousClock.Instant?
 
     init() {
         super.init(frame: .zero)
@@ -288,7 +289,8 @@ final class ImageLayerView: NSView {
                 break
             case .failure where self.still != nil && self.stillKey == spec.key:
                 break
-            case .failure:
+            case .failure(let error):
+                ImageLog.log("image \(ImageLog.name(spec.key)) failed: \(ImageLog.reason(error))")
                 self.failed = true
                 self.clearImage()
                 self.updatePlaceholder()
@@ -425,22 +427,51 @@ final class ImageLayerView: NSView {
         }
         let pixels = (spec.width, spec.height)
         animationTask = Task { [weak self] in
-            let animation = try? await images.animation(spec)
+            let outcome: Result<AnimationSource, Error>
+            do {
+                outcome = .success(try await images.animation(spec))
+            } catch {
+                outcome = .failure(error)
+            }
             // A cancelled ask leaves whatever replaced it alone.
             guard let self, !Task.isCancelled else {
                 return
             }
             self.animationTask = nil
-            guard let animation else {
+            let animation: AnimationSource
+            switch outcome {
+            case .success(let source):
+                animation = source
+            case .failure(let error):
+                ImageLog.log(
+                    "animation \(ImageLog.name(spec.key)) not started, the still stays: \(ImageLog.reason(error))")
                 return
             }
-            let player = FramePlayer(animation: animation, pixels: pixels, fit: self.fit) { [weak self] image, _ in
+            ImageLog.log(
+                "animation \(ImageLog.name(spec.key)) starts: \(animation.frameCount) frames of "
+                    + "\(animation.pixelSize.width)×\(animation.pixelSize.height) for \(pixels.0)×\(pixels.1) pixels")
+            let player = FramePlayer(animation: animation, pixels: pixels, fit: self.fit) { [weak self] image, index in
                 self?.imageLayer.contents = image
                 self?.imageLayer.isHidden = false
+                self?.logFrame(index, of: animation.frameCount, key: spec.key)
             }
             self.player = player
+            self.frameLogged = nil
             player.start()
         }
+    }
+
+    // One line a second while it plays: the frame index shows it advancing.
+    private func logFrame(_ index: Int, of count: Int, key: ImageKey) {
+        guard ImageLog.enabled else {
+            return
+        }
+        let now = ContinuousClock.now
+        if let frameLogged, now - frameLogged < .seconds(1) {
+            return
+        }
+        frameLogged = now
+        ImageLog.log("animation \(ImageLog.name(key)) shows frame \(index) of \(count)")
     }
 
     private func stopAnimation() {

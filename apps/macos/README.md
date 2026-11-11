@@ -240,6 +240,16 @@ reloaded above, the height delta, y before and after, and whether a live scroll 
 only. Combine them as
 `-AkariLog akari_core=info,scroll`; a second `-AkariLog` argument would replace the first.
 
+`-AkariLog images` (category `images`, also on stderr beside akari-core's lines) says why an
+image or an animation doesn't show and follows the ones that play: a failed image and an
+animation that didn't start with the reason (over the size cap, not available, the file has one
+frame, …), each GIF in the list and the viewer as the motion rule starts or rests it (window
+key, how much shows, hover, the GIF setting, Reduce Motion), an animation's start (frames,
+size, the box's pixels), its frame index once a second while it plays, and a frame that didn't
+decode. Keys are Discord's IDs, never links or file names. For a GIF that won't play:
+`-AkariLog akari_core=debug,images`; akari-core's `akari_core::media` lines say what was asked
+of the proxy and the CDN and why an ask ended without a file.
+
 `-AkariLog load` (category `load`) logs one line per history page and one per channel open,
 with channel IDs, counts and durations only:
 

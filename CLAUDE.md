@@ -86,7 +86,8 @@ forum page), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
-`AnimationClock`: Akari's own playback; `AnimatedFormatProbe`: WebP or GIF per Mac, decided at
+`AnimationClock`: Akari's own playback, a long GIF from four frames at a time; `ImageLog`: why
+an image or animation doesn't show; `AnimatedFormatProbe`: WebP or GIF per Mac, decided at
 launch from an animated WebP shipped as a resource). `apps/macos` is the first app: Akari's icon and logo, derived from `assets/` by
 `make-icons.swift` (an Icon Composer `.icon` and a vector template image), the login screen
 (the logo in the QR code's middle) and the main window with the server

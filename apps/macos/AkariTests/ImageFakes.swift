@@ -1,10 +1,13 @@
 import AkariKit
+import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
 import Testing
 import UniformTypeIdentifiers
 import os
+
+@testable import Akari
 
 /// An image source for the app's tests: a script per request, every request and every
 /// cancellation that reached it recorded.
@@ -38,6 +41,16 @@ final class FakeImageSource: ImageSource, @unchecked Sendable {
                     path: animation.path, width: 32, height: 32, animated: true, fromDisk: false)
             }
             return ImageFile(path: still.path, width: 80, height: 80, animated: false, fromDisk: false)
+        }
+    }
+
+    /// The heavy GIF (`TestGIF.heavy`) for animated asks, `still` for the others.
+    static func heavyGif(still: URL) async throws -> FakeImageSource {
+        let gif = try await TestGIF.heavyURL
+        return FakeImageSource { request in
+            let path = request.animated == nil ? still.path : gif.path
+            return ImageFile(
+                path: path, width: 540, height: 405, animated: request.animated != nil, fromDisk: false)
         }
     }
 
@@ -168,6 +181,62 @@ func eventually(
         try await Task.sleep(for: .milliseconds(10))
     }
     Issue.record("not within 5 s", sourceLocation: sourceLocation)
+}
+
+/// The frames `picture` shows over the next `count` changes of its frame, on the app's clock.
+@MainActor
+func frames(of picture: ImageLayerView, count: Int, sourceLocation: SourceLocation = #_sourceLocation)
+    async throws -> [Int]
+{
+    var seen: [Int] = []
+    let deadline = ContinuousClock.now + .seconds(20)
+    while seen.count < count, ContinuousClock.now < deadline {
+        if let frame = picture.player?.shownFrame, frame != seen.last {
+            seen.append(frame)
+        }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    if seen.count < count {
+        Issue.record("\(seen.count) frames within 20 s: \(seen)", sourceLocation: sourceLocation)
+    }
+    return seen
+}
+
+/// The images log's lines while `body` runs. The log is the app's: suites running side by side
+/// each get every line, and the log goes back to what it was when the last one is done.
+@MainActor
+func imageLog(_ body: () async throws -> Void) async rethrows -> [String] {
+    let lines = OSAllocatedUnfairLock<[String]>(initialState: [])
+    let id = ImageLogReaders.add { line in lines.withLock { $0.append(line) } }
+    defer { ImageLogReaders.remove(id) }
+    try await body()
+    return lines.withLock { $0 }
+}
+
+@MainActor
+private enum ImageLogReaders {
+    private static var readers: [UUID: (String) -> Void] = [:]
+    private static var before: (enabled: Bool, write: (String) -> Void)?
+
+    static func add(_ reader: @escaping (String) -> Void) -> UUID {
+        if readers.isEmpty {
+            before = (ImageLog.enabled, ImageLog.write)
+            ImageLog.enabled = true
+            ImageLog.write = { line in readers.values.forEach { $0(line) } }
+        }
+        let id = UUID()
+        readers[id] = reader
+        return id
+    }
+
+    static func remove(_ id: UUID) {
+        readers.removeValue(forKey: id)
+        if readers.isEmpty, let before {
+            ImageLog.enabled = before.enabled
+            ImageLog.write = before.write
+            self.before = nil
+        }
+    }
 }
 
 /// Discord's defaults, as the core gives them without the field.

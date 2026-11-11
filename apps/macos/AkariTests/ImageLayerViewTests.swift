@@ -488,6 +488,33 @@ final class ImageLayerViewTests {
         #expect(view.imageLayer.image === still)
     }
 
+    // An animation the core refuses (over its size cap): the still stays, and the log says why.
+    @Test
+    func aRefusedAnimationKeepsTheStillAndLogsWhy() async throws {
+        let still = try images.png("still", pixels: 80)
+        let source = FakeImageSource { request in
+            guard request.animated == nil else {
+                throw ImageError.TooLarge
+            }
+            return ImageFile(path: still.path, width: 80, height: 80, animated: false, fromDisk: false)
+        }
+        let view = shown(ImageCache(source: source), size: 16)
+        view.show(ImageLayerView.Content(key: .avatar(1, animated: true), canAnimate: true))
+        try await eventually { view.imageLayer.contents != nil }
+        let shown = view.imageLayer.image
+
+        let lines = try await imageLog {
+            view.animates = true
+            try await eventually { source.count == 2 }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+
+        #expect(view.player == nil)
+        #expect(view.imageLayer.image === shown)
+        // The log is the app's: other suites' lines may land in it too.
+        #expect(lines.contains("animation avatar (user 1) not started, the still stays: over the size cap"))
+    }
+
     @Test
     func aStillKeyNeverAnimates() async throws {
         let source = FakeImageSource.serving(try images.png("a", pixels: 80), pixels: 80)

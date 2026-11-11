@@ -80,7 +80,11 @@ how much of the image shows, and hover:
 
 Playback is Akari's own: one clock for every animation, each frame decoded at the box's
 pixels off the main thread and shown at its delay, loops honoured, the last frame kept when
-they're up. A paused animation shows its still, a separate file. Animations are asked as
+they're up. An animation whose frames fit 24 MB keeps them all; a larger one (a long GIF) is
+decoded from its file as it plays, four frames ahead of the picture, so a GIF of 286 MB of
+frames plays from 3.5 MB. Its picture never passes a frame that isn't decoded yet: when
+decoding is slower than the frames' delays it plays slow, in order, and never stands still.
+A paused animation shows its still, a separate file. Animations are asked as
 WebP, or as GIF on a Mac whose ImageIO composites animated WebP wrong (macOS 14): a launch
 probe decodes a small animated WebP shipped with AkariKit and checks one frame's pixels.
 

@@ -293,11 +293,18 @@ plays them (`docs/ui/images.md`):
   `setReduceMotion`): `plays(place, context)` for each place's rule (avatars on hover; emoji,
   stickers and GIFs by their settings and visibility), always false while the window isn't key
   or the app isn't active (`session.focused`).
-- `FramePlayer` plays an `AnimationSource` into a callback on one `AnimationClock` (a 60 Hz
-  timer that runs only while a player is registered): each frame decoded at the box's pixels
-  off the main actor, shown at its delay, loops honoured, the last frame kept; `prepare()`
-  decodes ahead, and a start decodes nothing it already has. Past the frame budget (24 MB) only
-  a window of four frames ahead of the play head is kept; a released player ends its decoding.
+- `FramePlayer` plays a `FrameSource` (an `AnimationSource`) into a callback on one
+  `AnimationClock` (a 60 Hz timer that runs only while a player is registered): each frame
+  decoded at the box's pixels off the main actor, shown at its delay, loops honoured, the last
+  frame kept; `prepare()` decodes ahead, and a start decodes nothing it already has. Frames
+  that fit the budget (24 MB) are all kept and the clock alone says which shows. Past it only a
+  window of four frames ahead of the picture is kept, decoded in order from the file (a 286 MB
+  GIF plays from 3.5 MB of frames), and the picture never passes a frame that isn't decoded:
+  a decoder slower than the delays plays slow and in order, it never stands still; a frame
+  that doesn't decode is passed over. The decoder sleeps while the window is full; a released
+  player ends it.
+- `ImageLog` (`-AkariLog images`): why an image or an animation doesn't show, and an
+  animation's frame index as it plays, by key (`ImageLog.name`), never by link or file.
 - `AnimatedFormatProbe.install()` runs once at launch: `current` is `.webP` where ImageIO
   composites the shipped fixture right, `.gif` where it doesn't (macOS 14) or until it ran.
 - `ExpressionPopoutModel` (`session.expressionPopout(target, in:)`): a clicked custom emoji's,

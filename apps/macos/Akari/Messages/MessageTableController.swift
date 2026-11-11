@@ -1894,11 +1894,18 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let fraction =
                 rect.height > 0 && rect.width > 0 && !shown.isNull
                 ? (shown.width * shown.height) / (rect.width * rect.height) : 0
-            tile.animates = state.motion.plays(
+            let plays = state.motion.plays(
                 .gif,
                 MotionPolicy.Context(
                     windowKey: state.focused, appActive: state.focused, hovered: tile === hoveredTile,
                     visibleFraction: fraction))
+            if plays != tile.animates, let key = tile.content?.media.key {
+                ImageLog.log(
+                    "list: \(ImageLog.name(key)) \(plays ? "plays" : "rests") (window key and app active "
+                        + "\(state.focused), \(Int(fraction * 100)) % shown, hovered \(tile === hoveredTile), "
+                        + "GIF autoplay \(state.motion.gifAutoPlay), Reduce Motion \(state.motion.reduceMotion))")
+            }
+            tile.animates = plays
         }
     }
 
