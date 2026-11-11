@@ -88,6 +88,18 @@ struct StarterMessageTests {
         #expect(late.channelsHidingDownloads == [id(10)])
     }
 
+    // CodeRabbit on #61: a post's option is its forum's, and the forum's update says so.
+    @Test
+    func aParentsUpdateRereadsThePostsOwnOption() {
+        let model = makeModel()
+        #expect(model.channelsHidingDownloads.isEmpty)
+
+        store.update { $0.hidingDownloads = [thread] }
+        model.apply(EventBatch([.channelUpdated(channelId: id(10), guildId: id(1))]))
+
+        #expect(model.channelsHidingDownloads == [thread])
+    }
+
     @Test
     func anUnavailableStarterSaysSorryWeCouldntLoadIt() {
         starts(.unavailable)

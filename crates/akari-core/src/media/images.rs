@@ -258,10 +258,6 @@ impl Images {
             form: planned.form,
             needed: planned.needed,
         };
-        if lock(&self.oversized).contains(&flight) {
-            tracing::debug!(target: LOG, key = %planned.disk, "image known to be over the cap");
-            return Err(ImageError::TooLarge);
-        }
         let Some(tier) = self.tier().await.filter(|tier| !tier.is_deleted()) else {
             tracing::debug!(target: LOG, key = %planned.disk, "no image directory");
             return Err(ImageError::Unavailable);
@@ -274,6 +270,10 @@ impl Images {
                 animated: entry.animated,
                 from_disk: true,
             });
+        }
+        if lock(&self.oversized).contains(&flight) {
+            tracing::debug!(target: LOG, key = %planned.disk, "image known to be over the cap");
+            return Err(ImageError::TooLarge);
         }
         if matches!(self.store.connection(), ConnectionState::Offline) {
             tracing::debug!(target: LOG, key = %planned.disk, "offline, image not on disk");

@@ -255,6 +255,7 @@ public final class MessageListModel {
     @ObservationIgnored private var owedPresent: Int?
     @ObservationIgnored private var retired = false
     @ObservationIgnored private var downloadsReadFor: Set<ChannelId> = []
+    @ObservationIgnored private var downloadsFollow: Set<ChannelId> = []
     @ObservationIgnored private var landed = 0
     @ObservationIgnored private var messageJumps = 0
     // The message the last jump that loaded goes to.
@@ -480,6 +481,9 @@ public final class MessageListModel {
 
     private func readHiddenDownloads() {
         downloadsReadFor = shownChannels
+        // A post's option is its forum's: the forum's update is the one that says it changed.
+        downloadsFollow = downloadsReadFor.union(
+            downloadsReadFor.compactMap { store.channel(id: $0)?.parentId })
         let hiding = downloadsReadFor.filter { store.hidesMediaDownloads(channelId: $0) }
         if hiding != channelsHidingDownloads {
             channelsHidingDownloads = hiding
@@ -546,7 +550,7 @@ public final class MessageListModel {
             readOwner()
         }
         let changedChannels = guildId.flatMap { batch.channelsChanged[$0] } ?? []
-        if batch.everythingChanged || !changedChannels.isDisjoint(with: shownChannels) {
+        if batch.everythingChanged || !changedChannels.isDisjoint(with: downloadsFollow) {
             readHiddenDownloads()
         }
         let updated = batch.updatedMessages[channelId] ?? []

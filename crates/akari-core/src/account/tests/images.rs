@@ -2111,3 +2111,46 @@ async fn a_refused_renewal_of_the_upload_marks_nothing_missing() {
     );
     assert_eq!(still, Err(ImageError::TooLarge), "asked, not known missing");
 }
+
+// CodeRabbit on #61: an ask remembered as over the cap is still answered by a file another size
+// brought since.
+#[tokio::test]
+async fn a_file_kept_since_answers_an_ask_that_was_over_the_cap() {
+    let online = connected().await;
+    let file = format!("/attachments/{GENERAL}/{ATTACHMENT}/photo.png");
+    let link = format!(
+        "{}{file}?{}&",
+        online.uri(),
+        signature(now_seconds() + 86_400)
+    );
+    load_message(&online, |message| {
+        message["attachments"] = json!([{
+            "id": ATTACHMENT.to_string(), "filename": "photo.png", "size": 4000,
+            "url": link, "proxy_url": link, "width": 2048, "height": 2048,
+        }]);
+    })
+    .await;
+    Mock::given(method("GET"))
+        .and(path(file.clone()))
+        .and(query_param("width", "128"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/png")
+                .set_body_bytes(vec![0; crate::media::MAX_BODY + 1]),
+        )
+        .mount(&online.server)
+        .await;
+    serve(&online.server, &file, png(1024, 1024)).await;
+    let small = request(attachment_key(), 128);
+
+    let first = online.account.image(small.clone()).await;
+    let larger = online.account.image(request(attachment_key(), 1024)).await;
+    let again = online.account.image(small).await;
+
+    assert_eq!(first, Err(ImageError::TooLarge));
+    assert_eq!(larger.map(|file| file.width), Ok(1024));
+    assert_eq!(
+        again.map(|file| (file.width, file.from_disk)),
+        Ok((1024, true))
+    );
+}
