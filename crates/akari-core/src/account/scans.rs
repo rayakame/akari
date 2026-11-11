@@ -11,6 +11,8 @@ use crate::state::{Store, StoreEvent, Subscription};
 // The documented limit per channel; the official client sends them all at once.
 const CHUNK: usize = 75;
 
+type Unauthorized = Arc<dyn Fn() + Send + Sync>;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ScanTiming {
     pub(crate) wait: Duration,
@@ -26,7 +28,9 @@ pub(crate) async fn run_scans(
     rest: Arc<AccountRest>,
     changes: Subscription,
     timing: ScanTiming,
+    unauthorized: impl Fn() + Send + Sync + 'static,
 ) {
+    let unauthorized: Unauthorized = Arc::new(unauthorized);
     loop {
         let Some(event) = changes.next().await else {
             return;
@@ -53,6 +57,7 @@ pub(crate) async fn run_scans(
                 channel,
                 ids,
                 timing.jitter,
+                unauthorized.clone(),
             ));
         }
     }
@@ -70,11 +75,15 @@ async fn ask(
     channel: ChannelId,
     ids: Vec<MessageId>,
     jitter: Duration,
+    unauthorized: Unauthorized,
 ) {
     tokio::time::sleep(jitter.mul_f64(random::unit())).await;
     for chunk in ids.chunks(CHUNK) {
         if let Err(failure) = rest.scan_explicit_media(channel, chunk).await {
             let error = RequestError::from(failure);
+            if matches!(error, RequestError::Unauthorized) {
+                unauthorized();
+            }
             tracing::debug!(
                 channel_id = channel.get(),
                 messages = chunk.len(),
