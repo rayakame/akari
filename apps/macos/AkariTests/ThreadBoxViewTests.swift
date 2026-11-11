@@ -263,13 +263,41 @@ struct ThreadBoxViewTests {
         #expect(view.accessibilityValue() as? String == "Mira: :pog:, 25m ago")
     }
 
-    // Without the image the line reads the emoji's name.
+    // Without a cache the box stays, empty.
     @Test
-    func theLineNamesAnEmojiWhoseImageIsntHere() throws {
-        let (_, view) = try shown(box(.latest(latest("look <:pog:5>"), authorName: "Mira")))
+    func withoutACacheTheLinesBoxStays() throws {
+        let (_, plain) = try shown(box(.latest(latest("look <:pog:5>"), authorName: "Mira")))
 
-        #expect(view.preview.shown.string == "look :pog:")
+        #expect(plain.preview.shown.string == "look \u{FFFC}")
+        #expect(plain.preview.emojiViews.count == 1)
+    }
+
+    // An image that failed gives its box up to the emoji's name, and the thread's box grows by it.
+    @Test
+    func theLineNamesAnEmojiOnlyOnceItsImageFailed() async throws {
+        list.show(
+            MessageTableState(
+                rows: [
+                    row(
+                        20, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 14, 30), content: "test",
+                        hasThread: true, threadBox: box(.latest(latest("look <:pog:5>"), authorName: "Mira")))
+                ],
+                reachedOldest: true, images: ImageCacheRef(ImageCache(source: FakeImageSource.failing()))))
+        let cell = try #require(try list.cell(of: 20) as? MessageCell)
+        let view = try #require(Self.boxView(in: cell))
+        let reserved = view.preview.frame
+        let time = try #require(view.rect(of: "25m ago"))
+
+        try await eventually {
+            view.layoutSubtreeIfNeeded()
+            return view.preview.shown.string == "look :pog:"
+        }
+
         #expect(view.preview.emojiViews.isEmpty)
+        #expect(view.preview.frame.width > reserved.width, "\(view.preview.frame) after \(reserved)")
+        #expect(view.preview.frame.width == view.preview.textWidth)
+        let moved = try #require(view.rect(of: "25m ago"))
+        #expect(moved.minX > time.minX, "the time moves over")
     }
 
     // The line's emoji play with their message's: by the setting while the window is key.
@@ -290,6 +318,41 @@ struct ThreadBoxViewTests {
         #expect(view.avatarView.content != nil)
 
         list.show([row(20, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 14, 30), content: "test")])
+        view.layoutSubtreeIfNeeded()
+
+        #expect(view.isHidden)
+        #expect(view.preview.emojiViews.isEmpty)
+        #expect(view.avatarView.content == nil)
+    }
+
+    // CodeRabbit on #61: a "started a thread" line's box follows the same rules: its emoji play
+    // with the line, and a reused line without a thread lets them go.
+    @Test
+    func aNoticesBoxPlaysAndLetsGoAsAMessages() async throws {
+        let images = TestImages()
+        let cache = ImageCache(
+            source: FakeImageSource.serving(try images.png("red", pixels: 64, color: [255, 0, 0, 255]), pixels: 64))
+        func line(_ box: ThreadBox?) -> MessageListModel.Row {
+            row(
+                22, by: author(2, "Ray"), at: newest, kind: .threadCreated, content: "t13",
+                reference: MessageReference(
+                    messageId: nil, channelId: ChannelId(rawValue: 22), guildId: GuildId(rawValue: 1)),
+                hasThread: box != nil, threadBox: box)
+        }
+        list.show(
+            MessageTableState(
+                rows: [line(box(.latest(latest("<a:pog:5>"), authorName: "Mira")))], reachedOldest: true,
+                images: ImageCacheRef(cache), focused: true))
+        let cell = try #require(try list.cell(of: 22) as? NoticeCell)
+        let view = try #require(Self.boxView(in: cell))
+        try await eventually {
+            view.layoutSubtreeIfNeeded()
+            return view.preview.emojiViews.first?.hasImage == true
+        }
+        #expect(view.preview.emojiViews.first?.animates == true)
+
+        cell.configure(
+            line(nil).message, notice: [.text("t13")], time: "", fullDate: "", threadBox: nil)
         view.layoutSubtreeIfNeeded()
 
         #expect(view.isHidden)

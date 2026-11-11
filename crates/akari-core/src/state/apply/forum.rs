@@ -186,6 +186,18 @@ impl State {
         }
     }
 
+    // The open forum has no position yet (opened before the store had it): takes it once it
+    // can, before the forum is read.
+    pub(super) fn find_forum_position(&mut self, forum: ChannelId, events: &mut Vec<StoreEvent>) {
+        if self
+            .forum_list
+            .as_ref()
+            .is_some_and(|list| list.forum == forum && list.read_before.is_none())
+        {
+            self.begin_forum_visit(events);
+        }
+    }
+
     // The forum's ack, else the user's join to its server as a message ID.
     fn forum_read_position(&self, forum: ChannelId) -> Option<u64> {
         self.entities
@@ -651,6 +663,11 @@ impl State {
         let retry = self.now_millis() + RETRY_MILLIS;
         for post in asked {
             self.previews.asked.remove(post);
+            // What the gateway brought while the request was on its way is newer.
+            if self.previews.messages.contains_key(post) {
+                self.previews.retry.remove(post);
+                continue;
+            }
             let Some(entry) = threads.remove(post) else {
                 self.previews.retry.insert(*post, retry);
                 continue;

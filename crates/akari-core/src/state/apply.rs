@@ -973,6 +973,8 @@ impl State {
             }
             None => {
                 self.entities.channels.insert(id, channel.clone());
+                // The open forum came after it was opened: its visit begins now.
+                self.find_forum_position(id, events);
                 events.push(StoreEvent::ChannelAdded(channel));
             }
         }

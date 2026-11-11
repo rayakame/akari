@@ -118,36 +118,64 @@ final class PreviewLineTests {
         #expect(!view.shown.string.contains(":pog:"))
     }
 
-    // Until the image is decoded the line reads the emoji's name, in full; so it does when the
-    // image can't be had.
+    // As in the message list: the box is there from the first layout and stays empty while its
+    // image loads, so nothing moves when the image lands.
     @Test
-    func theNameStandsInUntilTheImageIsHere() async throws {
+    func theBoxIsReservedWhileItsImageLoads() async throws {
         let gate = Gate()
         let picture = try images.png("red", pixels: 64, color: [255, 0, 0, 255])
-        let source = FakeImageSource.serving(picture, pixels: 64, gate: gate)
-        let view = shown("look <:pog:5> there", source: source)
-        #expect(view.shown.string == "look :pog: there")
-        #expect(view.emojiViews.isEmpty)
+        let view = shown("look <:pog:5> there", source: FakeImageSource.serving(picture, pixels: 64, gate: gate))
+
+        let layer = try #require(view.emojiViews.first)
+        let box = layer.frame
+        let width = view.textWidth
+        #expect(view.shown.string == "look \u{FFFC} there")
+        #expect(box.size == NSSize(width: side, height: side))
+        #expect(!layer.hasImage && !layer.failed)
+        #expect(layer.fallbackLayer.isHidden, "no name while it loads")
 
         gate.fire()
         try await eventually {
             view.layoutSubtreeIfNeeded()
-            return view.emojiViews.count == 1
+            return layer.hasImage
         }
+        #expect(view.emojiViews.first === layer)
+        #expect(layer.frame == box)
         #expect(view.shown.string == "look \u{FFFC} there")
-
-        let refused = FakeImageSource.failing()
-        let failing = shown("look <:pog:5> there", source: refused)
-        try await eventually { refused.count >= 1 }
-        try await Task.sleep(for: .milliseconds(20))
-        failing.layoutSubtreeIfNeeded()
-        #expect(failing.shown.string == "look :pog: there")
-        #expect(failing.emojiViews.isEmpty)
+        #expect(view.textWidth == width)
     }
 
-    // An image the cache already has takes its box at once: no name flashes.
+    // Only an image that failed gives its box up: the line reads the emoji's name, in full, and
+    // is as wide as that takes.
     @Test
-    func aDecodedImageTakesItsBoxAtOnce() async throws {
+    func aFailedImagesNameTakesItsBoxsPlace() async throws {
+        let view = shown("look <:pog:5> there", source: FakeImageSource.failing())
+        let width = view.textWidth
+        #expect(view.shown.string == "look \u{FFFC} there")
+
+        try await eventually {
+            view.layoutSubtreeIfNeeded()
+            return view.shown.string == "look :pog: there"
+        }
+
+        #expect(view.emojiViews.isEmpty)
+        let font = NSFont.systemFont(ofSize: TypeScale.size(14))
+        #expect(view.textWidth == ceil(self.width("look :pog: there", font)))
+        #expect(view.textWidth > width)
+    }
+
+    // Without a cache nothing loads and nothing fails: the box stays.
+    @Test
+    func withoutACacheTheBoxStays() {
+        let view = shown("look <:pog:5> there")
+
+        #expect(view.shown.string == "look \u{FFFC} there")
+        #expect(view.emojiViews.count == 1)
+    }
+
+    // An image the cache already has is on its box with the first layout.
+    @Test
+    func aDecodedImageIsThereAtOnce() async throws {
         let source = try red()
         let cache = ImageCache(source: source)
         let first = PreviewLineView()
@@ -167,12 +195,11 @@ final class PreviewLineTests {
         window.contentView?.addSubview(second)
         second.layoutSubtreeIfNeeded()
 
-        #expect(second.shown.string == "again \u{FFFC}")
-        #expect(second.emojiViews.count == 1)
+        #expect(second.emojiViews.first?.hasImage == true)
         #expect(source.count == 1, "one download for both")
     }
 
-    // The session is back online: a line whose image failed asks once more.
+    // The session is back online: the name gives the box back, and the image is asked again.
     @Test
     func aFailedImageIsAskedAgainWhenTheCacheSaysSo() async throws {
         let source = FakeImageSource.failing()
@@ -182,10 +209,13 @@ final class PreviewLineTests {
         view.text = line("<:pog:5>")
         view.frame = NSRect(x: 10, y: 10, width: 300, height: 18)
         window.contentView?.addSubview(view)
+        try await eventually {
+            view.layoutSubtreeIfNeeded()
+            return view.shown.string == ":pog:"
+        }
+        let asked = source.count
         view.layoutSubtreeIfNeeded()
-        try await eventually { source.count == 1 }
-        view.layoutSubtreeIfNeeded()
-        #expect(source.count == 1, "not asked again by a layout")
+        #expect(source.count == asked, "not asked again by a layout")
 
         let picture = try images.png("red", pixels: 64, color: [255, 0, 0, 255])
         source.replace { _ in
@@ -197,6 +227,33 @@ final class PreviewLineTests {
             view.layoutSubtreeIfNeeded()
             return view.emojiViews.first?.hasImage == true
         }
+        #expect(view.shown.string == "\u{FFFC}")
+    }
+
+    // In SwiftUI the line grows to its failed emoji's name.
+    @Test
+    func aSwiftUILineReflowsOnceForAFailedImage() async throws {
+        let text = line("look <:pog:5>")
+        let host = NSHostingView(
+            rootView: HStack(spacing: 0) {
+                PreviewLine(text: text, lineHeight: 18)
+                Spacer(minLength: 0)
+            }
+            .environment(\.imageCache, ImageCache(source: FakeImageSource.failing()))
+            .frame(width: 300, height: 18))
+        host.frame = NSRect(x: 0, y: 40, width: 300, height: 18)
+        window.contentView?.addSubview(host)
+        host.layoutSubtreeIfNeeded()
+        let view = try #require(Self.find(PreviewLineView.self, in: host))
+        #expect(abs(view.frame.width - ceil(text.size().width)) <= 1)
+
+        let font = NSFont.systemFont(ofSize: TypeScale.size(14))
+        let named = ceil(width("look :pog:", font))
+        try await eventually {
+            host.layoutSubtreeIfNeeded()
+            return abs(view.frame.width - named) <= 1
+        }
+        #expect(view.shown.string == "look :pog:")
     }
 
     // An emoji the ellipsis cut off, or under a hidden spoiler, isn't asked for.

@@ -506,6 +506,9 @@ impl State {
     }
 
     fn read_locally(&mut self, channel: ChannelId) -> Option<Ack> {
+        if self.is_forum(channel) {
+            self.find_forum_position(channel, &mut Vec::new());
+        }
         let stored = self.entities.channels.get(&channel)?;
         let mut ack = self.ack_of(stored);
         if stored.is_forum() {

@@ -64,6 +64,10 @@ final class ThreadBoxView: NSButton {
         avatarView.isHidden = true
         addSubview(avatarView)
         preview.isHidden = true
+        preview.onReflow = { [weak self] in
+            self?.needsLayout = true
+            self?.needsDisplay = true
+        }
         addSubview(preview)
     }
 
@@ -361,7 +365,7 @@ final class ThreadBoxView: NSButton {
 
     private var boxWidth: CGFloat {
         let top = firstLine.map(Self.width).reduce(0, +) + Self.nameGap
-        var bottom = secondLine.map(Self.width).reduce(0, +)
+        var bottom = secondLine.map { preview.width(of: $0) }.reduce(0, +)
         if case .latest? = box?.bottom {
             bottom += Self.avatar + Self.avatarGap + Self.authorGap
         }
@@ -460,7 +464,8 @@ final class ThreadBoxView: NSButton {
             let authorWidth = max(0, min(Self.width(second[1]), end - x))
             parts.append(Part(text: second[1], rect: line(x, secondTop, authorWidth), line: 1))
             x += authorWidth + Self.authorGap
-            let contentWidth = max(0, min(Self.width(second[2]), end - x))
+            // As wide as the line shows it: a failed emoji's name is longer than its box.
+            let contentWidth = max(0, min(preview.width(of: second[2]), end - x))
             parts.append(
                 Part(text: second[2], rect: line(x, secondTop, contentWidth), line: 1, preview: true))
             x += contentWidth

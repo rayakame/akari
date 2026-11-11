@@ -3,20 +3,15 @@ import AppKit
 import SwiftUI
 
 /// A message on one line (`ThreadBoxView.content`), cut with an ellipsis: the text drawn once,
-/// a custom emoji as the list's image layer on its box once its image is here, `:name:` until
-/// then and when it fails. Takes no clicks.
+/// a custom emoji as the list's image layer on its box, there from the first layout. Only an
+/// image that failed gives its box up to `:name:`. Takes no clicks.
 final class PreviewLineView: NSView {
-    // An emoji's name standing in for its box.
-    private static let name = NSAttributedString.Key("akariEmojiName")
-
     private let storage = NSTextStorage()
     private let layoutManager = NSLayoutManager()
     private let container = NSTextContainer(size: .zero)
     private let overlay = EmojiOverlay()
-    // The emoji whose image the cache has decoded at the box's pixels; those it couldn't get.
-    private var ready: Set<ImageKey> = []
+    // The emoji whose image failed: their names stand in the line.
     private var failed: Set<ImageKey> = []
-    private var loads: [ImageKey: Task<Void, Never>] = [:]
 
     var text = NSAttributedString() {
         didSet {
@@ -24,13 +19,10 @@ final class PreviewLineView: NSView {
             guard !Self.same(text, oldValue) else {
                 return
             }
-            textWidth = ceil(text.size().width)
-            restart()
-            invalidateIntrinsicContentSize()
+            failed = []
+            show()
         }
     }
-    /// The whole line's width, its emoji as boxes.
-    private(set) var textWidth: CGFloat = 0
     var images: ImageCache? {
         get { overlay.images }
         set {
@@ -38,7 +30,10 @@ final class PreviewLineView: NSView {
                 return
             }
             overlay.images = newValue
-            restart()
+            if !failed.isEmpty {
+                failed = []
+                show()
+            }
         }
     }
     /// The owner's say, by the list's rule for emoji.
@@ -54,9 +49,13 @@ final class PreviewLineView: NSView {
     var baseline: CGFloat? {
         didSet { needsDisplay = true }
     }
+    /// A failed image's name took its box's place, or gave it back: the line's width changed.
+    var onReflow: (() -> Void)?
     var emojiViews: [ImageLayerView] { overlay.emojiViews }
-    /// The line as it shows now: names where images aren't here.
+    /// The line as it shows now: a name where an image failed.
     var shown: NSAttributedString { NSAttributedString(attributedString: storage) }
+    /// The shown line's whole width.
+    private(set) var textWidth: CGFloat = 0
 
     init() {
         super.init(frame: .zero)
@@ -65,6 +64,7 @@ final class PreviewLineView: NSView {
         container.lineBreakMode = .byTruncatingTail
         layoutManager.addTextContainer(container)
         storage.addLayoutManager(layoutManager)
+        overlay.onFailure = { [weak self] key in self?.fail(key) }
         addSubview(overlay)
         NotificationCenter.default.addObserver(
             self, selector: #selector(retry(_:)), name: ImageCache.retryFailedNotification, object: nil)
@@ -82,6 +82,11 @@ final class PreviewLineView: NSView {
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: textWidth, height: NSView.noIntrinsicMetric)
+    }
+
+    /// `line`'s width as the view shows it, when it is the view's own; else its plain width.
+    func width(of line: NSAttributedString) -> CGFloat {
+        Self.same(line, text) ? textWidth : ceil(line.size().width)
     }
 
     private static func same(_ line: NSAttributedString, _ other: NSAttributedString) -> Bool {
@@ -112,25 +117,10 @@ final class PreviewLineView: NSView {
         }
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if window == nil {
-            stopLoads()
-        } else {
-            needsLayout = true
-        }
-    }
-
-    override func viewDidChangeBackingProperties() {
-        super.viewDidChangeBackingProperties()
-        restart()
-    }
-
     override func layout() {
         super.layout()
         overlay.frame = bounds
         container.size = NSSize(width: bounds.width, height: .greatestFiniteMagnitude)
-        load()
         overlay.show(emojiShapes(), at: .zero)
     }
 
@@ -160,92 +150,49 @@ final class PreviewLineView: NSView {
         layoutManager.drawGlyphs(forGlyphRange: glyphs, at: origin)
     }
 
-    private func restart() {
-        stopLoads()
-        ready = []
-        failed = []
+    // The layer's image failed for good: the one time the line reflows.
+    private func fail(_ key: ImageKey) {
+        guard failed.insert(key).inserted else {
+            return
+        }
         show()
     }
 
-    private func stopLoads() {
-        loads.values.forEach { $0.cancel() }
-        loads = [:]
-    }
-
+    // The session is back: the boxes return and ask again.
     @objc private func retry(_ notification: Notification) {
         guard notification.object as AnyObject === images, !failed.isEmpty else {
             return
         }
         failed = []
-        needsLayout = true
+        show()
     }
 
-    // The text with each emoji whose image isn't here as its name.
+    // The text, each emoji whose image failed as its name.
     private func show() {
         let line = NSMutableAttributedString(attributedString: text)
         var index = line.length - 1
-        while index >= 0 {
+        while index >= 0, !failed.isEmpty {
             defer { index -= 1 }
             var attributes = line.attributes(at: index, effectiveRange: nil)
-            guard let box = attributes[.akariEmoji] as? MessageText.EmojiBox, !ready.contains(box.key)
+            guard let box = attributes[.akariEmoji] as? MessageText.EmojiBox, failed.contains(box.key)
             else {
                 continue
             }
             attributes[.akariEmoji] = nil
             attributes[.attachment] = nil
-            attributes[Self.name] = box
             line.replaceCharacters(
                 in: NSRange(location: index, length: 1),
                 with: NSAttributedString(string: ":\(box.name):", attributes: attributes))
         }
         storage.setAttributedString(line)
+        let width = ceil(line.size().width)
+        let reflowed = width != textWidth
+        textWidth = width
+        invalidateIntrinsicContentSize()
         needsLayout = true
         needsDisplay = true
-    }
-
-    private func spec(_ box: MessageText.EmojiBox) -> ImageSpec {
-        let pixels = ImageLayerView.pixels(
-            NSSize(width: box.side, height: box.side), scale: window?.backingScaleFactor ?? 1)
-        return ImageSpec(key: box.key, width: pixels.0, height: pixels.1, fit: .contain)
-    }
-
-    // Asks for the images of the names the line shows: not past the ellipsis, not under a
-    // hidden spoiler. One already decoded takes its box at once.
-    private func load() {
-        guard window != nil, bounds.width > 0, let images else {
-            return
-        }
-        var landed = false
-        storage.enumerateAttribute(Self.name, in: NSRange(location: 0, length: storage.length)) {
-            value, range, _ in
-            guard let box = value as? MessageText.EmojiBox, !failed.contains(box.key),
-                loads[box.key] == nil, !ready.contains(box.key),
-                (range.location..<NSMaxRange(range)).contains(where: isShown)
-            else {
-                return
-            }
-            let spec = spec(box)
-            if images.cached(spec) != nil {
-                ready.insert(box.key)
-                landed = true
-                return
-            }
-            loads[box.key] = Task { [weak self] in
-                let image = try? await images.image(spec)
-                guard let self, !Task.isCancelled else {
-                    return
-                }
-                self.loads[box.key] = nil
-                if image != nil {
-                    self.ready.insert(box.key)
-                    self.show()
-                } else {
-                    self.failed.insert(box.key)
-                }
-            }
-        }
-        if landed {
-            show()
+        if reflowed {
+            onReflow?()
         }
     }
 
@@ -263,6 +210,7 @@ final class PreviewLineView: NSView {
         return cut.location == NSNotFound || glyph < cut.location
     }
 
+    // A box for each emoji the line shows; the others ask for nothing.
     private func emojiShapes() -> [MessageBlockShape] {
         guard bounds.width > 0, storage.length > 0 else {
             return []

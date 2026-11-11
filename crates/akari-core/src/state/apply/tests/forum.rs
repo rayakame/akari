@@ -1545,3 +1545,63 @@ fn the_first_ready_after_a_restore_takes_the_position_again() {
     apply(&mut state, "THREAD_CREATE", post_made(30));
     assert_eq!(new_cards(&state, &[30]), [30]);
 }
+
+// CodeRabbit on #61: the forum is opened before the store has it (the cache had none, READY has
+// no read state for it): its position is taken when it comes, before it's read.
+#[test]
+fn a_forum_that_comes_after_it_was_opened_takes_its_position_then() {
+    let mut state = State::new();
+    state.open_forum(Some(Snowflake::new(FORUM)), &mut Vec::new());
+    apply(&mut state, "READY", ready_value());
+    assert_eq!(new_cards(&state, &[5]), [0i64; 0]);
+
+    let events = apply(&mut state, "CHANNEL_CREATE", forum());
+    apply(&mut state, "THREAD_CREATE", post_made(5));
+
+    assert!(
+        events.contains(&format!("ForumPostsChanged({FORUM})")),
+        "{events:?}"
+    );
+    assert_eq!(new_cards(&state, &[5]), [5]);
+    read_forum(&mut state);
+    assert_eq!(
+        new_cards(&state, &[5]),
+        [5],
+        "the visit's own ack changes nothing"
+    );
+}
+
+// CodeRabbit on #61: a first message deleted or edited while post-data is on its way stays as
+// the gateway left it; the answer is older.
+#[test]
+fn an_answer_doesnt_undo_what_the_gateway_brought_meanwhile() {
+    let mut state = forum_with_posts();
+    let mut events = Vec::new();
+    let asked = [Snowflake::new(OLD), Snowflake::new(NEWEST)];
+    state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events);
+    let (forum, batch) = state.next_post_batch().expect("a batch");
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": OLD.to_string(), "channel_id": OLD.to_string()}),
+    );
+    apply(&mut state, "MESSAGE_CREATE", starter(NEWEST, "live"));
+
+    let answer: crate::model::PostData = serde_json::from_str(
+        &json!({
+            "threads": {
+                OLD.to_string(): {"first_message": starter(OLD, "stale"), "owner": null},
+                NEWEST.to_string(): {"first_message": starter(NEWEST, "stale"), "owner": null},
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    events.clear();
+    state.finish_post_batch(forum, &batch, Some(answer), &mut events);
+
+    assert_eq!(preview(&state, OLD).as_deref(), Some("deleted"));
+    assert_eq!(preview(&state, NEWEST).as_deref(), Some("live"));
+    assert!(events.is_empty(), "{events:?}");
+    assert!(!state.want_post_previews(Snowflake::new(FORUM), &asked, &mut events));
+}

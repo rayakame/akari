@@ -1076,6 +1076,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.onOpenThread = openThread
                 cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
+                cell.animatesEmoji = emojiPlays(
+                    at: index, visible: tableView.visibleRect, nearBottom: nearBottomStart())
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
                     followsLine: followsLine, fullDate: fullDate,
@@ -1868,6 +1870,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let visible = tableView.visibleRect
         let nearBottom = nearBottomStart()
         tableView.enumerateAvailableRowViews { rowView, index in
+            if let line = rowView.view(atColumn: 0) as? NoticeCell {
+                line.animatesEmoji = emojiPlays(at: index, visible: visible, nearBottom: nearBottom)
+            }
             guard let cell = rowView.view(atColumn: 0) as? MessageCell else {
                 return
             }
