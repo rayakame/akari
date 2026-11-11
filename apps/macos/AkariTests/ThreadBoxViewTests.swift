@@ -1,3 +1,4 @@
+import AkariFFI
 import AkariKit
 import AppKit
 import Testing
@@ -207,13 +208,32 @@ struct ThreadBoxViewTests {
         #expect(blank(Self.pixel(rep, 36, box.midY - 1.5)))
     }
 
-    // The line has no image layers: a custom emoji reads as its name.
+    // The newest message's custom emoji is its image in the line, played with the message's.
     @Test
-    func theLineShowsACustomEmojiAsItsName() throws {
-        let withEmoji = try shown(box(.latest(latest("look <:pog:5>"), authorName: "Mira"))).box
-        #expect(withEmoji.bottom == ["Mira", "look :pog:", "25m ago"])
-        let onlyEmoji = try shown(box(.latest(latest("<:pog:5>"), authorName: "Mira"))).box
-        #expect(onlyEmoji.bottom == ["Mira", ":pog:", "25m ago"])
+    func theLineShowsACustomEmojisImage() throws {
+        let (cell, view) = try shown(box(.latest(latest("look <a:pog:5>"), authorName: "Mira")))
+
+        let layer = try #require(view.preview.emojiViews.first)
+        #expect(layer.content?.key == .emoji(emojiId: EmojiId(rawValue: 5), animated: true))
+        #expect(layer.fallbackText == ":pog:")
+        #expect(view.bottom == ["Mira", "look \u{FFFC}", "25m ago"])
+        #expect(view.preview.frame == view.rect(of: "look \u{FFFC}"))
+        #expect(view.accessibilityValue() as? String == "Mira: look :pog:, 25m ago")
+        #expect(!view.preview.isAccessibilityElement())
+
+        cell.animatesEmoji = true
+        #expect(layer.animates)
+        cell.animatesEmoji = false
+        #expect(!layer.animates)
+    }
+
+    // A box without a newest message has no line of its own.
+    @Test
+    func aBoxWithoutAMessageHasNoPreviewLine() throws {
+        let (_, view) = try shown(box(.noRecentMessages))
+
+        #expect(view.preview.isHidden)
+        #expect(view.preview.emojiViews.isEmpty)
     }
 
     // Nothing on a one-line preview is larger than its text: an emoji-only message isn't jumbo

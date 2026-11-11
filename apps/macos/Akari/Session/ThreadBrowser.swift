@@ -420,7 +420,7 @@ struct ThreadBrowserCard: View {
                     .foregroundStyle(Color(nsColor: Palette.textDefault))
                     .lineLimit(1)
                     .frame(height: TypeScale.browserTitle.line)
-                ThreadBrowserSubtitle(subtitle: row.subtitle, now: now)
+                ThreadBrowserSubtitle(subtitle: row.subtitle, now: now, hovered: hovered)
                     .frame(height: TypeScale.browserText.line)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -456,6 +456,8 @@ struct ThreadBrowserCard: View {
 struct ThreadBrowserSubtitle: View {
     let subtitle: ThreadBrowserModel.Row.Subtitle
     var now: Date?
+    /// The pointer is over the row: its message's emoji play.
+    var hovered = false
 
     // Discord's separator in active rows, its own text.
     private static let separator = "\u{00a0} \u{2022} \u{00a0}"
@@ -518,16 +520,21 @@ struct ThreadBrowserSubtitle: View {
         .lineLimit(1)
     }
 
-    private func content(of message: Message) -> Text {
+    @ViewBuilder private func content(of message: Message) -> some View {
         if let placeholder = ThreadBox.placeholder(for: message) {
-            return Text(placeholder).italic()
+            Text(placeholder).italic()
+        } else {
+            PreviewLine(
+                text: Self.line(of: message), font: TypeScale.browserText.nsFont,
+                lineHeight: TypeScale.browserText.line, hovered: hovered)
         }
+    }
+
+    /// The newest message as the row's line shows it.
+    static func line(of message: Message) -> NSAttributedString {
         let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
-        let built = ThreadBoxView.content(
+        return ThreadBoxView.content(
             MessageText.build(message, revealed: [], now: Date(), times: times).text)
-        let attributed =
-            (try? AttributedString(built, including: \.appKit)) ?? AttributedString(built.string)
-        return Text(attributed)
     }
 
     static func time(_ date: Date, now: Date) -> String {

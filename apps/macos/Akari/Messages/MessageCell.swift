@@ -48,6 +48,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         set {
             content.animatesEmoji = newValue
             embeds?.animatesEmoji = newValue
+            threadBox?.animatesEmoji = newValue
         }
     }
     /// The list's say: this message's stickers play (`animate_stickers`, visibility, hover).
@@ -476,6 +477,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
         }
         let box = ThreadBoxView()
         box.images = images
+        box.animatesEmoji = content.animatesEmoji
         box.topInset = Self.boxGap - Self.spacing
         box.target = self
         box.action = #selector(threadBoxClicked)

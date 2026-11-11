@@ -121,8 +121,10 @@ VoiceOver reads "Post {title}, {count} messages".
 - The message line is one line at the text's size (Akari's 15, as the author's) whatever the
   message holds: a message of
   only emoji isn't jumbo there (Discord parses every one-line preview with `formatInline`, which
-  turns jumbo off; its emoji are 18 high), a heading isn't large. *Akari: the gallery card's
-  text is capped the same way, where Discord's, a box of several lines, can show jumbo emoji.*
+  turns jumbo off; its emoji are 18 high), a heading isn't large. A custom emoji is its image,
+  18 high ([emoji.md](emoji.md#custom-emoji)). *Akari: the gallery card's text is capped the
+  same way and names its custom emoji (`:name:`), where Discord's, a box of several lines, can
+  show jumbo emoji.*
 - *Akari:* no reactions on cards yet (backlog "Reactions on forum cards"), no typing faces, no
   "(N New)", and only attachments as a card's media (Discord also shows embeds' images).
 

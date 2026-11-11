@@ -24,9 +24,19 @@ final class ThreadBoxView: NSButton {
     private var content: NSAttributedString?
     private var time: String?
     let avatarView = ImageLayerView()
+    /// The newest message's line, its custom emoji as images.
+    let preview = PreviewLineView()
     var images: ImageCache? {
         get { avatarView.images }
-        set { avatarView.images = newValue }
+        set {
+            avatarView.images = newValue
+            preview.images = newValue
+        }
+    }
+    /// The list's say for the message the box is under: its line's emoji play with it.
+    var animatesEmoji: Bool {
+        get { preview.animatesEmoji }
+        set { preview.animatesEmoji = newValue }
     }
     /// Kept clear above the box: the gap to the message's text. The view's height rounds up to a
     /// whole point, as row heights do.
@@ -53,11 +63,27 @@ final class ThreadBoxView: NSButton {
         avatarView.cornerRadius = Self.avatar / 2
         avatarView.isHidden = true
         addSubview(avatarView)
+        preview.readsItself = false
+        preview.isHidden = true
+        addSubview(preview)
     }
 
     override func layout() {
         super.layout()
         placeAvatar()
+        placePreview()
+    }
+
+    // The message's line is a view of its own, for its emoji's layers.
+    private func placePreview() {
+        guard let part = parts.first(where: \.preview) else {
+            preview.isHidden = true
+            preview.text = NSAttributedString()
+            return
+        }
+        preview.isHidden = false
+        preview.frame = part.rect
+        preview.text = part.text
     }
 
     // The avatar's place follows the parts; the view sits where the drawn avatar was.
@@ -95,6 +121,7 @@ final class ThreadBoxView: NSButton {
         hovered = false
         needsDisplay = true
         placeAvatar()
+        placePreview()
     }
 
     /// The box itself, within the view.
@@ -152,7 +179,7 @@ final class ThreadBoxView: NSButton {
             roundedRect: frame.insetBy(dx: inset, dy: inset), xRadius: Self.radius - inset,
             yRadius: Self.radius - inset
         ).fill()
-        for part in parts where part.avatar == nil {
+        for part in parts where part.avatar == nil && !part.preview {
             Self.draw(part.text, in: part.rect)
         }
     }
@@ -197,32 +224,17 @@ final class ThreadBoxView: NSButton {
         NSBezierPath(roundedRect: boxFrame, xRadius: Self.radius, yRadius: Self.radius).fill()
     }
 
-    // The newest message's content on one line: formatted, small, links not clickable, hidden
-    // spoilers covered.
+    /// A message on one line, for `PreviewLineView`: formatted, at `size`, links not clickable,
+    /// hidden spoilers covered, a custom emoji a box of `emojiSide` (1.375 of the text).
     static func content(
-        _ built: NSAttributedString, size: CGFloat = TypeScale.size(14)
+        _ built: NSAttributedString, size: CGFloat = TypeScale.size(14), emojiSide: CGFloat? = nil
     ) -> NSAttributedString {
         let text = NSMutableAttributedString(attributedString: built)
-        // A custom emoji reads as its name on the line; the box has no image layers.
-        var emoji: [(NSRange, String)] = []
-        text.enumerateAttribute(.akariEmoji, in: NSRange(location: 0, length: text.length)) {
-            value, range, _ in
-            if let box = value as? MessageText.EmojiBox {
-                emoji.append((range, String(repeating: ":\(box.name):", count: range.length)))
-            }
-        }
-        for (range, name) in emoji.reversed() {
-            var attributes = text.attributes(at: range.location, effectiveRange: nil)
-            attributes[.attachment] = nil
-            attributes[.akariEmoji] = nil
-            text.replaceCharacters(in: range, with: NSAttributedString(string: name, attributes: attributes))
-        }
         let whole = NSRange(location: 0, length: text.length)
         text.removeAttribute(.link, range: whole)
         text.removeAttribute(.toolTip, range: whole)
         text.removeAttribute(.paragraphStyle, range: whole)
         text.removeAttribute(.baselineOffset, range: whole)
-        text.removeAttribute(.attachment, range: whole)
         // Nothing is larger than the line's text (a jumbo emoji, a heading); code stays at its
         // 0.875 of it.
         let scale = size / TypeScale.body.size
@@ -240,14 +252,50 @@ final class ThreadBoxView: NSButton {
                 text.addAttribute(.backgroundColor, value: Palette.spoilerHidden, range: range)
             }
         }
-        for (search, replacement) in [("\n", " "), ("\u{2028}", " "), ("\u{FFFC}", "")] {
+        // Symbols go; a custom emoji keeps its box, at the line's size.
+        let side = emojiSide ?? (size * 1.375).rounded()
+        var index = text.length - 1
+        while index >= 0 {
+            defer { index -= 1 }
+            let one = NSRange(location: index, length: 1)
+            var attributes = text.attributes(at: index, effectiveRange: nil)
+            if let box = attributes[.akariEmoji] as? MessageText.EmojiBox {
+                attributes[.akariEmoji] = MessageText.EmojiBox(
+                    key: box.key, name: box.name, animated: box.animated, side: side, centered: false)
+                attributes[.attachment] = nil
+                let font = attributes[.font] as? NSFont ?? .systemFont(ofSize: size)
+                text.replaceCharacters(in: one, with: MessageText.emojiBox(side, in: font, attributes))
+            } else if attributes[.attachment] != nil {
+                text.deleteCharacters(in: one)
+            }
+        }
+        for search in ["\n", "\u{2028}"] {
             var range = (text.string as NSString).range(of: search)
             while range.location != NSNotFound {
-                text.replaceCharacters(in: range, with: replacement)
-                let start = range.location + (replacement as NSString).length
+                text.replaceCharacters(in: range, with: " ")
                 range = (text.string as NSString).range(
-                    of: search, range: NSRange(location: start, length: text.length - start))
+                    of: search,
+                    range: NSRange(location: range.location + 1, length: text.length - range.location - 1))
             }
+        }
+        return text
+    }
+
+    /// `content` where no image layer can stand: a custom emoji as `:name:`.
+    static func named(_ content: NSAttributedString) -> NSAttributedString {
+        let text = NSMutableAttributedString(attributedString: content)
+        var index = text.length - 1
+        while index >= 0 {
+            defer { index -= 1 }
+            var attributes = text.attributes(at: index, effectiveRange: nil)
+            guard let box = attributes[.akariEmoji] as? MessageText.EmojiBox else {
+                continue
+            }
+            attributes[.akariEmoji] = nil
+            attributes[.attachment] = nil
+            text.replaceCharacters(
+                in: NSRange(location: index, length: 1),
+                with: NSAttributedString(string: ":\(box.name):", attributes: attributes))
         }
         return text
     }
@@ -289,6 +337,7 @@ final class ThreadBoxView: NSButton {
         let rect: NSRect
         let line: Int
         var avatar: ImageKey?
+        var preview = false
     }
 
     private var boxWidth: CGFloat {
@@ -393,7 +442,8 @@ final class ThreadBoxView: NSButton {
             parts.append(Part(text: second[1], rect: line(x, secondTop, authorWidth), line: 1))
             x += authorWidth + Self.authorGap
             let contentWidth = max(0, min(Self.width(second[2]), end - x))
-            parts.append(Part(text: second[2], rect: line(x, secondTop, contentWidth), line: 1))
+            parts.append(
+                Part(text: second[2], rect: line(x, secondTop, contentWidth), line: 1, preview: true))
             x += contentWidth
         } else {
             let width = max(0, min(Self.width(second[0]), end - x))

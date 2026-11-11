@@ -101,7 +101,8 @@ icons in every place (message headers, DM rows and the rail, the user panel, the
 DM's start, thread boxes, the browser's rows and facepiles, server icons over their initials)
 as layers from the image tier, animated avatars playing on hover while the window is key; custom
 emoji as image layers on fixed boxes in the text (jumbo at 48, `:name:` as tooltip, copy and
-fallback) and stickers in a row under the text (Lottie as a named box), both fitting inside their
+fallback; at the text's size in the one-line previews of thread boxes, the Threads browser and
+forum cards) and stickers in a row under the text (Lottie as a named box), both fitting inside their
 box and animated by their settings, visibility and the message's hover, with the hand, a hover card
 and a click's popout (where an emoji or sticker is from, Discord's words); a message's attachments
 under its text (Discord's mosaic from sizes alone with placeholders, the fade, the spinner, failure

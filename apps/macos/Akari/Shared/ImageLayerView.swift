@@ -73,6 +73,10 @@ final class ImageLayerView: NSView {
     var fallbackText: String? {
         didSet { updateFallback() }
     }
+    /// The fallback text shows while the image loads too.
+    var showsFallbackWhileLoading = false {
+        didSet { updateFallback() }
+    }
     /// The most pixels the box asks for, its shape kept (the viewer's zoom: never above the
     /// source or 4096 a side).
     var maxPixels: NSSize? {
@@ -396,7 +400,8 @@ final class ImageLayerView: NSView {
     }
 
     private func updateFallback() {
-        let shows = failed && fallbackText != nil
+        let waiting = showsFallbackWhileLoading && content != nil && still == nil
+        let shows = (failed || waiting) && fallbackText != nil
         fallbackLayer.isHidden = !shows
         guard shows else {
             return

@@ -80,7 +80,7 @@ struct ForumListCard: View {
                         .foregroundStyle(Color(nsColor: card.unread ? Palette.textStrong : Palette.textMuted))
                         .multilineTextAlignment(.leading)
                         .padding(.bottom, 6)
-                    ForumCardMessage(preview: card.preview, unread: card.unread)
+                    ForumCardMessage(preview: card.preview, unread: card.unread, hovered: hovered)
                         .frame(height: TypeScale.forumMessage.line)
                         .padding(.bottom, 8)
                     ForumCardFooter(card: card, now: now)
@@ -363,22 +363,35 @@ struct TagEmojiView: View {
 struct ForumCardMessage: View {
     let preview: ForumModel.Card.Preview
     var unread = false
+    /// The pointer is over the card: the message's emoji play.
+    var hovered = false
 
     static let deleted = "Original message was deleted"
     /// The message's text size, as the author's beside it.
     static let size = TypeScale.forumMessage.size
+    /// Discord's emoji in the line: 18 high.
+    static let emojiSide = TypeScale.size(18)
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
             switch preview {
             case .message(let message, let author):
                 Text(author + ":")
                     .font(TypeScale.forumAuthor.font)
                     .foregroundStyle(Color(nsColor: unread ? Palette.textStrong : Palette.textMuted))
                     .fixedSize()
-                Self.content(of: message, unread: unread)
-                    .font(TypeScale.forumMessage.font)
-                    .padding(.leading, 4)
+                Group {
+                    if let placeholder = ThreadBox.placeholder(for: message) {
+                        Text(placeholder).italic()
+                    } else {
+                        PreviewLine(
+                            text: Self.line(of: message, unread: unread),
+                            font: .systemFont(ofSize: Self.size),
+                            lineHeight: TypeScale.forumMessage.line, hovered: hovered)
+                    }
+                }
+                .font(TypeScale.forumMessage.font)
+                .padding(.leading, 4)
             case .deleted:
                 Text(Self.deleted)
                     .font(TypeScale.forumMessage.font)
@@ -391,14 +404,13 @@ struct ForumCardMessage: View {
         .truncationMode(.tail)
     }
 
-    static func content(of message: Message, unread: Bool = false) -> Text {
-        if let placeholder = ThreadBox.placeholder(for: message) {
-            return Text(placeholder).italic()
-        }
+    /// The first message as the card's line shows it, in the card's color.
+    static func line(of message: Message, unread: Bool = false) -> NSAttributedString {
         let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
         let built = NSMutableAttributedString(
             attributedString: ThreadBoxView.content(
-                MessageText.build(message, revealed: [], now: Date(), times: times).text, size: size))
+                MessageText.build(message, revealed: [], now: Date(), times: times).text, size: size,
+                emojiSide: emojiSide))
         // The text takes the card's color; mentions and links keep theirs.
         let text = unread ? Palette.textDefault : Palette.textMuted
         let whole = NSRange(location: 0, length: built.length)
@@ -409,8 +421,17 @@ struct ForumCardMessage: View {
                 built.addAttribute(.foregroundColor, value: text, range: range)
             }
         }
+        return built
+    }
+
+    /// The gallery card's fading text, of several lines: no image layers, emoji by name.
+    static func content(of message: Message, unread: Bool = false) -> Text {
+        if let placeholder = ThreadBox.placeholder(for: message) {
+            return Text(placeholder).italic()
+        }
+        let named = ThreadBoxView.named(line(of: message, unread: unread))
         let attributed =
-            (try? AttributedString(built, including: \.appKit)) ?? AttributedString(built.string)
+            (try? AttributedString(named, including: \.appKit)) ?? AttributedString(named.string)
         return Text(attributed)
     }
 }

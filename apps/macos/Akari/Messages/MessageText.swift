@@ -132,6 +132,20 @@ enum MessageText {
         return builder.build()
     }
 
+    /// The character an emoji's image layer stands on: `side` wide in a line of `font`, no
+    /// taller than the line's text.
+    static func emojiBox(
+        _ side: CGFloat, in font: NSFont, _ attributes: [NSAttributedString.Key: Any]
+    ) -> NSAttributedString {
+        let attachment = NSTextAttachment()
+        attachment.bounds = NSRect(x: 0, y: 0, width: side, height: side)
+        attachment.attachmentCell = EmojiCell(
+            size: NSSize(width: side, height: min(side, font.ascender.rounded(.down))))
+        let box = NSMutableAttributedString(attachment: attachment)
+        box.addAttributes(attributes, range: NSRange(location: 0, length: box.length))
+        return box
+    }
+
     /// A masked link in an embed's text: its own list isn't the message's.
     static func maskedLink(_ url: String) -> URL? {
         var components = URLComponents()
@@ -765,14 +779,7 @@ private struct Builder {
     private func emojiBox(_ side: CGFloat, _ face: Typeface, _ attributes: [NSAttributedString.Key: Any])
         -> NSAttributedString
     {
-        let attachment = NSTextAttachment()
-        let font = face.font(bold: false, italic: false)
-        attachment.bounds = NSRect(x: 0, y: 0, width: side, height: side)
-        attachment.attachmentCell = EmojiCell(
-            size: NSSize(width: side, height: min(side, font.ascender.rounded(.down))))
-        let box = NSMutableAttributedString(attachment: attachment)
-        box.addAttributes(attributes, range: NSRange(location: 0, length: box.length))
-        return box
+        MessageText.emojiBox(side, in: face.font(bold: false, italic: false), attributes)
     }
 
     private func symbol(

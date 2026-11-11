@@ -595,6 +595,8 @@ final class EmojiOverlay: NSView {
             }
         }
     }
+    /// A one-line preview's emoji read `:name:` while they load too.
+    var namesWhileLoading = false
 
     override var isFlipped: Bool { true }
 
@@ -632,6 +634,7 @@ final class EmojiOverlay: NSView {
             } else {
                 view = ImageLayerView()
                 view.fit = .contain
+                view.showsFallbackWhileLoading = namesWhileLoading
                 view.images = images
                 view.animates = animates
                 emojiViews.append(view)
