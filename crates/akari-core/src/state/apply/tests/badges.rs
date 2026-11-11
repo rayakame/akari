@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::Badge;
+use crate::state::{Badge, PostCount};
 
 const CATEGORY: u64 = 300_000_000_000_000_001;
 const ROLE: u64 = 500_000_000_000_000_002;
@@ -7,7 +7,11 @@ const FORUM: u64 = 300_000_000_000_000_030;
 const AFTER_JOIN: u64 = 1_300_000_000_000_000_000;
 
 fn badge(unread: bool, mentions: u32) -> Badge {
-    Badge { unread, mentions }
+    Badge {
+        unread,
+        mentions,
+        posts: PostCount::None,
+    }
 }
 
 fn channel_badge(state: &State, channel: u64) -> Badge {
@@ -198,14 +202,18 @@ fn an_unjoined_threads_messages_give_the_server_no_dot() {
         "../../../../tests/fixtures/thread_create.json"
     ));
     thread.as_object_mut().unwrap().remove("member");
-    apply(&mut state, "THREAD_CREATE", thread);
+    apply(&mut state, "THREAD_CREATE", started_when_made(thread));
 
     apply(
         &mut state,
         "MESSAGE_CREATE",
-        plain(400_000_000_000_000_008, 300_000_000_000_000_021),
+        plain(AFTER_JOIN + 8, 300_000_000_000_000_021),
     );
 
+    assert!(
+        state.unread(Snowflake::new(300_000_000_000_000_021)),
+        "its message is unread"
+    );
     assert_eq!(guild_badge(&state, G1), badge(false, 0));
 }
 
@@ -217,7 +225,7 @@ fn a_ping_in_an_unjoined_thread_reaches_the_server_badge_once_it_joins_the_user(
         "../../../../tests/fixtures/thread_create.json"
     ));
     thread.as_object_mut().unwrap().remove("member");
-    apply(&mut state, "THREAD_CREATE", thread);
+    apply(&mut state, "THREAD_CREATE", started_when_made(thread));
     apply(
         &mut state,
         "MESSAGE_CREATE",
@@ -790,9 +798,9 @@ fn a_thread_created_later_follows_its_parent() {
     apply(
         &mut state,
         "THREAD_CREATE",
-        fixture(include_str!(
+        started_when_made(fixture(include_str!(
             "../../../../tests/fixtures/thread_create.json"
-        )),
+        ))),
     );
     apply(
         &mut state,

@@ -63,15 +63,21 @@ Discord's numbers, from sizes alone, so a row is as tall before its media loads 
   and "Play GIFs when Discord is focused" (`gif_auto_play`) is on, or while the pointer is over
   it. Reduce Motion stops the setting's part; the pointer still plays it. *Akari's own "GIF"
   badge* sits top left, 6 in, while it doesn't play.
+- A playing GIF comes from the media proxy, as Discord's does. *A display file may weigh 16 MB;
+  when the proxy's copy is heavier (it encodes a GIF again, a 10 MB one came back at 33.5 MB) and
+  the upload itself fits, the GIF comes from the upload on the CDN; a GIF's CDN link posted as
+  text (an image embed) the same way. Another site's GIF has no upload on Discord's CDN: past
+  16 MB it stays a still.*
 - A video shows its poster (the proxy's still) with Discord's Play button in the middle: a black
-  48 pt circle at 60 %, its symbol nudged 1 right.
-- *Until the media viewer, a click on an image or a video opens the original in the browser
-  (a fresh signed link). Discord opens its viewer for images and plays a single video in place.*
+  48 pt circle with its symbol nudged 1 right, both at 60 % together (a gray symbol over a dark
+  video), at 80 % while the pointer is over the video, fading in 0.25 s.
+- A click on an image or a video opens the media viewer at it ([viewer.md](viewer.md)). *A
+  single video opens it too (Discord plays it in place).*
 
 ## File rows
 
-- 432 wide at most (narrower in a narrow column), 74 tall: 16 in, a 1 pt border, corners 8,
-  Discord's raised surface and light shadow.
+- 432 wide at most (in a narrower column 9 less than it, which keeps Download inside), 74 tall:
+  16 in, a 1 pt border, corners 8, Discord's raised surface and light shadow.
 - *Akari's symbol for the type* (a page, an archive, a sound wave, film, a photo, code, a
   table), where Discord draws its own file icons.
 - The name in the link color, cut with an ellipsis, underlined under the pointer; a click opens
@@ -79,9 +85,25 @@ Discord's numbers, from sizes alone, so a row is as tall before its media loads 
   file a title, the name is the title and the extension.
 - The size in Discord's words: base 1024, "512 bytes" (no singular), then two decimals
   ("1.50 MB"), a comma for thousands.
-- *No Download button on hover yet: the name's link downloads, and Save comes with the viewer.*
 - Audio files and voice messages are file rows until Akari has a player.
 - Three files, 8 apart; the first 12 under the mosaic, or 10 under the text.
+
+## Hover buttons
+
+Discord's hover buttons (module 96782, canary 653948) show while the pointer is over the media or
+the file card, or over the buttons themselves: 32 square (a 20 pt symbol, 6 around) on
+`base-low`, corners 5; under the pointer the hover fill and the brighter text. Over media they
+sit 4 in from the top right; on a file card they overhang its top right corner by 8, ringed 1 pt
+in the chat's color. They leave media under 40 pt, and only as many as fit show (the last ones).
+
+- **Download** ("Download", an arrow down to a line): on files always; on videos and audio files
+  unless the channel hides media downloads; never on images or GIFs. *Akari:* a click asks where
+  with the save panel and saves the original there, as the viewer's Save does; a failure says
+  "The file couldn't be saved." Discord's opens the link, which the browser downloads.
+- **Images and GIFs** show no Download. For the user's own messages Discord adds "Modify
+  Attachment" (a pencil) and "Remove Message Attachment" (a trash can, red under the pointer);
+  over a GIF its "GIF" badge (top left, 6 in) gives way to a star that adds it to the user's
+  favorite GIFs. *Akari edits no messages and keeps no favorite GIFs yet, so none of them show.*
 
 ## Alt text
 

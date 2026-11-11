@@ -140,6 +140,7 @@ mod tests {
             icon: None,
             owner_id: None,
             thread: None,
+            forum: None,
             flags: 0,
             last_message_id: None,
             message_request: false,

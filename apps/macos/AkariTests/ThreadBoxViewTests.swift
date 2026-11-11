@@ -1,3 +1,4 @@
+import AkariFFI
 import AkariKit
 import AppKit
 import Testing
@@ -207,13 +208,230 @@ struct ThreadBoxViewTests {
         #expect(blank(Self.pixel(rep, 36, box.midY - 1.5)))
     }
 
-    // The line has no image layers: a custom emoji reads as its name.
+    // The box under Ray's message with every image a red picture, once its line's emoji landed.
+    func shownWithImages(_ content: String, focused: Bool = true) async throws -> ThreadBoxView {
+        let images = TestImages()
+        let cache = ImageCache(
+            source: FakeImageSource.serving(try images.png("red", pixels: 64, color: [255, 0, 0, 255]), pixels: 64))
+        list.show(
+            MessageTableState(
+                rows: [
+                    row(
+                        20, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 14, 30), content: "test",
+                        hasThread: true, threadBox: box(.latest(latest(content), authorName: "Mira")))
+                ],
+                reachedOldest: true, images: ImageCacheRef(cache), focused: focused))
+        let cell = try #require(try list.cell(of: 20) as? MessageCell)
+        let view = try #require(Self.boxView(in: cell))
+        try await eventually {
+            view.layoutSubtreeIfNeeded()
+            return view.preview.emojiViews.first?.hasImage == true
+        }
+        return view
+    }
+
+    // The newest message's custom emoji is its image in the line, on the author's baseline.
     @Test
-    func theLineShowsACustomEmojiAsItsName() throws {
-        let withEmoji = try shown(box(.latest(latest("look <:pog:5>"), authorName: "Mira"))).box
-        #expect(withEmoji.bottom == ["Mira", "look :pog:", "25m ago"])
-        let onlyEmoji = try shown(box(.latest(latest("<:pog:5>"), authorName: "Mira"))).box
-        #expect(onlyEmoji.bottom == ["Mira", ":pog:", "25m ago"])
+    func theLineShowsACustomEmojisImage() async throws {
+        let view = try await shownWithImages("TTT <a:pog:5>")
+
+        let layer = try #require(view.preview.emojiViews.first)
+        #expect(layer.content?.key == .emoji(emojiId: EmojiId(rawValue: 5), animated: true))
+        #expect(layer.imageLayer.contents != nil && !layer.imageLayer.isHidden)
+        #expect(layer.frame.size == NSSize(width: 19, height: 19))
+        #expect(view.bottom == ["Mira", "TTT \u{FFFC}", "25m ago"])
+        #expect(view.preview.frame == view.rect(of: "TTT \u{FFFC}"))
+        #expect(view.accessibilityValue() as? String == "Mira: TTT :pog:, 25m ago")
+        #expect(!view.preview.isAccessibilityElement())
+        let rep = try renderedAt2x(view)
+        let name = try #require(view.rect(of: "Mira"))
+        let author = try #require(Self.baseline(of: name, in: rep))
+        var text = view.preview.frame
+        text.size.width = layer.frame.minX - 2
+        let message = try #require(Self.baseline(of: text, in: rep))
+        #expect(abs(author - message) <= 0.5, "one baseline: \(author) and \(message)")
+    }
+
+    // A message of only an emoji: the line is the emoji's box.
+    @Test
+    func aLineOfOnlyAnEmojiIsItsBox() async throws {
+        let view = try await shownWithImages("<:pog:5>")
+
+        #expect(view.bottom == ["Mira", "\u{FFFC}", "25m ago"])
+        #expect(view.preview.frame.width == 19)
+        #expect(view.preview.emojiViews.first?.frame.size == NSSize(width: 19, height: 19))
+        #expect(view.accessibilityValue() as? String == "Mira: :pog:, 25m ago")
+    }
+
+    // Without a cache the box stays, empty.
+    @Test
+    func withoutACacheTheLinesBoxStays() throws {
+        let (_, plain) = try shown(box(.latest(latest("look <:pog:5>"), authorName: "Mira")))
+
+        #expect(plain.preview.shown.string == "look \u{FFFC}")
+        #expect(plain.preview.emojiViews.count == 1)
+    }
+
+    // An image that failed gives its box up to the emoji's name, and the thread's box grows by it.
+    @Test
+    func theLineNamesAnEmojiOnlyOnceItsImageFailed() async throws {
+        list.show(
+            MessageTableState(
+                rows: [
+                    row(
+                        20, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 14, 30), content: "test",
+                        hasThread: true, threadBox: box(.latest(latest("look <:pog:5>"), authorName: "Mira")))
+                ],
+                reachedOldest: true, images: ImageCacheRef(ImageCache(source: FakeImageSource.failing()))))
+        let cell = try #require(try list.cell(of: 20) as? MessageCell)
+        let view = try #require(Self.boxView(in: cell))
+        let reserved = view.preview.frame
+        let time = try #require(view.rect(of: "25m ago"))
+
+        try await eventually {
+            view.layoutSubtreeIfNeeded()
+            return view.preview.shown.string == "look :pog:"
+        }
+
+        #expect(view.preview.emojiViews.isEmpty)
+        #expect(view.preview.frame.width > reserved.width, "\(view.preview.frame) after \(reserved)")
+        #expect(view.preview.frame.width == view.preview.textWidth)
+        let moved = try #require(view.rect(of: "25m ago"))
+        #expect(moved.minX > time.minX, "the time moves over")
+    }
+
+    // The line's emoji play with their message's: by the setting while the window is key.
+    @Test
+    func theLinesEmojiPlayWithTheMessages() async throws {
+        let playing = try await shownWithImages("<a:pog:5>")
+        #expect(playing.preview.emojiViews.first?.animates == true)
+
+        let resting = try await shownWithImages("<a:pog:5>", focused: false)
+        #expect(resting.preview.emojiViews.first?.animates == false)
+    }
+
+    // A reused cell without a thread lets its old box's pictures go: nothing plays unseen.
+    @Test
+    func aCellWithoutABoxLetsItsLinesEmojiGo() async throws {
+        let view = try await shownWithImages("<a:pog:5>")
+        #expect(view.preview.emojiViews.count == 1)
+        #expect(view.avatarView.content != nil)
+
+        list.show([row(20, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 14, 30), content: "test")])
+        view.layoutSubtreeIfNeeded()
+
+        #expect(view.isHidden)
+        #expect(view.preview.emojiViews.isEmpty)
+        #expect(view.avatarView.content == nil)
+    }
+
+    // CodeRabbit on #61: a "started a thread" line's box follows the same rules: its emoji play
+    // with the line, and a reused line without a thread lets them go.
+    @Test
+    func aNoticesBoxPlaysAndLetsGoAsAMessages() async throws {
+        let images = TestImages()
+        let cache = ImageCache(
+            source: FakeImageSource.serving(try images.png("red", pixels: 64, color: [255, 0, 0, 255]), pixels: 64))
+        func line(_ box: ThreadBox?) -> MessageListModel.Row {
+            row(
+                22, by: author(2, "Ray"), at: newest, kind: .threadCreated, content: "t13",
+                reference: MessageReference(
+                    messageId: nil, channelId: ChannelId(rawValue: 22), guildId: GuildId(rawValue: 1)),
+                hasThread: box != nil, threadBox: box)
+        }
+        list.show(
+            MessageTableState(
+                rows: [line(box(.latest(latest("<a:pog:5>"), authorName: "Mira")))], reachedOldest: true,
+                images: ImageCacheRef(cache), focused: true))
+        let cell = try #require(try list.cell(of: 22) as? NoticeCell)
+        let view = try #require(Self.boxView(in: cell))
+        try await eventually {
+            view.layoutSubtreeIfNeeded()
+            return view.preview.emojiViews.first?.hasImage == true
+        }
+        #expect(view.preview.emojiViews.first?.animates == true)
+
+        cell.configure(
+            line(nil).message, notice: [.text("t13")], time: "", fullDate: "", threadBox: nil)
+        view.layoutSubtreeIfNeeded()
+
+        #expect(view.isHidden)
+        #expect(view.preview.emojiViews.isEmpty)
+        #expect(view.avatarView.content == nil)
+    }
+
+    // The box is made after its cell was told to play: it takes the cell's word with it.
+    @Test
+    func aBoxMadeLaterTakesItsCellsWord() throws {
+        list.show([row(20, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 14, 30), content: "test")])
+        let cell = try #require(try list.cell(of: 20) as? MessageCell)
+        cell.animatesEmoji = true
+
+        let message = row(
+            20, by: author(2, "Ray"), at: berlinTime(2026, 10, 10, 14, 30), content: "test", hasThread: true
+        ).message
+        cell.configure(
+            message, body: NSAttributedString(string: "test"), startsGroup: true, groupTime: "",
+            shortTime: "", fullDate: "", threadBox: (box(), nil, nil))
+
+        let made = try #require(Self.boxView(in: cell))
+        #expect(made.animatesEmoji)
+    }
+
+    // A box without a newest message has no line of its own.
+    @Test
+    func aBoxWithoutAMessageHasNoPreviewLine() throws {
+        let (_, view) = try shown(box(.noRecentMessages))
+
+        #expect(view.preview.isHidden)
+        #expect(view.preview.emojiViews.isEmpty)
+    }
+
+    // Nothing on a one-line preview is larger than its text: an emoji-only message isn't jumbo
+    // there (Discord's previews never are), a heading isn't large.
+    @Test(arguments: ["🗿", "<:pog:5>", "🗿 <:pog:5> 🗿", "# Loud", "plain **bold** `code`"])
+    func nothingOnAPreviewIsLargerThanItsText(content: String) {
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let built = MessageText.build(latest(content), revealed: [], now: now, times: times).text
+
+        let line = ThreadBoxView.content(built)
+
+        var sizes: Set<CGFloat> = []
+        line.enumerateAttribute(.font, in: NSRange(location: 0, length: line.length)) { value, _, _ in
+            sizes.insert((value as? NSFont)?.pointSize ?? 0)
+        }
+        #expect(sizes.max() == TypeScale.size(14), "\(content): \(sizes)")
+        #expect(line.size().height <= 20, "\(content): \(line.size().height)")
+    }
+
+    // Code stays smaller than the text it stands in, in a heading too.
+    @Test(arguments: ["a `code` b", "# Title `code`"])
+    func aPreviewsCodeIsSmallerThanItsText(content: String) throws {
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let line = ThreadBoxView.content(
+            MessageText.build(latest(content), revealed: [], now: now, times: times).text)
+        let string = line.string as NSString
+
+        let code = try #require(line.attribute(.font, at: string.range(of: "code").location, effectiveRange: nil) as? NSFont)
+        let text = try #require(line.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        #expect(text.pointSize == TypeScale.size(14))
+        #expect(code.pointSize == TypeScale.size(14) * 0.875, "\(code.pointSize)")
+    }
+
+    // A caller's own size: the forum card's message is 15.
+    @Test
+    func aPreviewTakesItsCallersSize() {
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let built = MessageText.build(latest("🗿 **bold**"), revealed: [], now: now, times: times).text
+
+        let line = ThreadBoxView.content(built, size: 15)
+
+        var sizes: Set<CGFloat> = []
+        line.enumerateAttribute(.font, in: NSRange(location: 0, length: line.length)) { value, _, _ in
+            sizes.insert((value as? NSFont)?.pointSize ?? 0)
+        }
+        #expect(sizes == [15])
+        #expect(ForumCardMessage.size == TypeScale.forumMessage.size)
     }
 
     @Test

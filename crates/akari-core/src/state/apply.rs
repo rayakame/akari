@@ -313,9 +313,10 @@ pub(crate) struct Derived {
 
 impl Derived {
     pub(crate) fn build(entities: &Entities, now_millis: i64) -> Self {
+        let threads = ThreadIndex::build(entities);
         Self {
-            badges: Badges::build(entities, now_millis),
-            threads: ThreadIndex::build(entities),
+            badges: Badges::build(entities, &threads, now_millis),
+            threads,
             late: Vec::new(),
         }
     }
@@ -394,6 +395,12 @@ pub(crate) struct State {
     generation: u64,
     // The channel whose Threads browser is open.
     browsing: Option<ChannelId>,
+    // The forum whose page shows, as its list last refreshed.
+    forum_list: Option<forum::ForumList>,
+    // Each forum tag filter's pages of archived posts in this connection.
+    forum_pages: HashMap<forum::PageKey, forum::ForumPages>,
+    // Forum posts' first messages from post-data and searches (`None`: deleted), and what's asked.
+    previews: forum::Previews,
     page_tickets: u64,
     // Explicit content scans asked and given up on this session.
     scans: super::media::Scans,
@@ -432,6 +439,9 @@ impl State {
             older: HashMap::new(),
             generation: 0,
             browsing: None,
+            forum_list: None,
+            forum_pages: HashMap::new(),
+            previews: forum::Previews::default(),
             page_tickets: 0,
             scans: super::media::Scans::default(),
             clock,
@@ -566,6 +576,7 @@ impl State {
             // never comes as a dispatch.
             self.windows.mark_stale(events);
         }
+        let first = !self.ready;
         self.ready = true;
         events.push(StoreEvent::Ready);
         self.dirty = Dirty::default();
@@ -580,6 +591,10 @@ impl State {
             late: Vec::new(),
         };
         let old = (std::mem::replace(&mut self.entities, next), old);
+        // Before READY's reading acks the forum at "now".
+        if first {
+            self.begin_forum_visit(events);
+        }
         // READY's cursors are fresh.
         self.stale_cursors.clear();
         self.follow_ready();
@@ -710,7 +725,7 @@ impl State {
         }
         let dirty = std::mem::take(&mut self.dirty);
         self.badges
-            .update(&self.entities, dirty, now_millis, events);
+            .update(&self.entities, &self.threads, dirty, now_millis, events);
     }
 
     // The channel, and its threads, whose permissions follow its overwrites.
@@ -752,8 +767,10 @@ impl State {
             E::ChannelCreate(channel) => self.put_channel(*channel, events),
             E::ThreadCreate(thread) => {
                 let (id, parent) = (thread.id, thread.parent_id);
+                let (owner, newly_created) = (thread.owner_id, thread.newly_created);
                 self.put_channel(*thread, events);
                 self.note_post(parent, id);
+                self.forum_post_created(id, parent, owner, newly_created, events);
             }
             E::ChannelUpdate(update) | E::ThreadUpdate(update) => {
                 self.channel_update(*update, events);
@@ -776,6 +793,7 @@ impl State {
                 if boxed {
                     self.reread_boxes(channel, events);
                 }
+                self.note_first_message(&message, events);
                 self.read_message(&message);
                 self.dirty.channel(channel);
                 let forced = self.forced_through(&message);
@@ -798,6 +816,7 @@ impl State {
                 if self.update_latest(&update) {
                     self.reread_boxes(update.channel_id, events);
                 }
+                self.update_first_message(&update, events);
                 self.windows.update(*update, &self.entities.users, events);
             }
             E::MessageDelete(delete) => {
@@ -806,6 +825,7 @@ impl State {
                 {
                     self.reread_boxes(delete.channel_id, events);
                 }
+                self.delete_first_message(delete.channel_id, delete.id, events);
                 self.windows.delete(delete.channel_id, delete.id, events);
             }
             E::MessageDeleteBulk(delete) => {
@@ -817,6 +837,7 @@ impl State {
                     self.reread_boxes(delete.channel_id, events);
                 }
                 for id in delete.ids {
+                    self.delete_first_message(delete.channel_id, id, events);
                     self.windows.delete(delete.channel_id, id, events);
                 }
             }
@@ -952,6 +973,8 @@ impl State {
             }
             None => {
                 self.entities.channels.insert(id, channel.clone());
+                // The open forum came after it was opened: its visit begins now.
+                self.find_forum_position(id, events);
                 events.push(StoreEvent::ChannelAdded(channel));
             }
         }
@@ -1025,10 +1048,11 @@ impl State {
             self.threads.remove(&known);
             self.threads.add(&next);
             self.entities.channels.insert(id, next.clone());
-            events.push(StoreEvent::ChannelUpdated(next));
+            events.push(StoreEvent::ChannelUpdated(next.clone()));
             if self.drop_stale_latest(id, known.last_message_id) {
                 self.reread_boxes(id, events);
             }
+            self.forum_post_updated(&known, &next, events);
         }
     }
 
@@ -1069,6 +1093,7 @@ impl State {
     // As the official client reads it: it adds and updates threads, keeps the ones it doesn't
     // list, and its members are the user's own memberships.
     fn thread_list_sync(&mut self, sync: ThreadListSync, events: &mut Vec<StoreEvent>) {
+        let guild = sync.guild_id;
         for thread in sync.threads {
             self.put_thread(thread, events);
         }
@@ -1085,6 +1110,9 @@ impl State {
             if self.note_latest(message) {
                 self.reread_boxes(message.channel_id, events);
             }
+        }
+        if let Some(guild) = guild {
+            self.refresh_open_forum(guild, events);
         }
     }
 
@@ -1171,12 +1199,19 @@ impl State {
         self.latest.remove(&removed.id);
         self.unconfirmed.remove(&removed.id);
         self.older.remove(&removed.id);
+        self.forum_pages.retain(|key, _| key.forum != removed.id);
         self.entities.read_states.forget(removed.id);
         self.dirty.channel(removed.id);
+        // Gone from the store, a post no longer leads the badges to its forum.
+        if let Some(parent) = removed.parent_id {
+            self.dirty.channel(parent);
+        }
         events.push(StoreEvent::ChannelRemoved {
             channel_id: removed.id,
             guild_id: removed.guild_id,
         });
+        self.forget_first_message(removed.id);
+        self.forum_post_deleted(&removed, events);
         let threads: Vec<ChannelId> = self.threads.of(removed.id).collect();
         self.threads.remove(&removed);
         for thread in threads {
@@ -1186,6 +1221,7 @@ impl State {
             self.windows.drop_channel(thread);
             self.latest.remove(&thread);
             self.unconfirmed.remove(&thread);
+            self.forget_first_message(thread);
             self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {
@@ -1639,8 +1675,11 @@ impl State {
         self.windows.pending(channel, id)
     }
 
+    // A post's first message can be here from post-data alone: its card's media asks for it.
     pub(crate) fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
-        self.windows.message(channel, id)
+        self.windows
+            .message(channel, id)
+            .or_else(|| self.preview_message(channel, id))
     }
 
     pub(crate) fn current_user(&self) -> Option<Arc<CurrentUser>> {
@@ -2053,10 +2092,12 @@ pub(crate) fn wall_millis() -> i64 {
 mod boxes;
 mod browser;
 mod creating;
+mod forum;
 mod media;
 mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
+pub(crate) use forum::PageKey;
 
 #[cfg(test)]
 pub(crate) mod tests;

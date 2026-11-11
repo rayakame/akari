@@ -18,6 +18,7 @@ struct MessageTable: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.actions = actions
+        context.coordinator.viewer.focus = context.environment.windowFocus
         link.controller = context.coordinator
         context.coordinator.show(state)
     }
@@ -158,6 +159,7 @@ struct MessageArea: View {
             openedAt: messages.openedAt, openedFrom: messages.openedFrom,
             revealedSpoilers: messages.revealedSpoilers, revealedMedia: messages.revealedMedia,
             shownSensitive: messages.shownSensitive, showsAltText: showsAltText,
+            hiddenDownloads: messages.channelsHidingDownloads,
             newMessages: messages.newMessagesLine,
             unreadJumps: messages.unreadJumps, messageJump: messages.messageJump,
             startRoom: messages.composer.locked ? LockedBanner.room : 0,
@@ -222,8 +224,24 @@ final class MessageListBridge: MessageListActions {
         }
     }
 
+    func viewer(_ items: [ViewerModel.Item], at index: Int, of row: MessageListModel.Row) -> ViewerModel? {
+        messages.viewer(items, at: index, of: row)
+    }
+
     func revealMedia(_ key: MediaKey) {
         messages.reveal(media: key)
+    }
+
+    func mediaURL(_ key: ImageKey) async -> URL? {
+        await messages.originalURL(key)
+    }
+
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool {
+        messages.hidesDownloads(of: row)
+    }
+
+    func saveOriginal(_ key: ImageKey, to destination: URL) async throws {
+        _ = try await messages.saveOriginal(key, to: destination)
     }
 
     func toggleSensitive(_ key: MediaKey) {

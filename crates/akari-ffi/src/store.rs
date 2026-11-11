@@ -4,12 +4,14 @@ use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, Permissions, Use
 use akari_core::state;
 
 use crate::contents::{Contents, Found};
+use crate::embeds;
 use crate::formatted::FormattedText;
 use crate::names::Names;
 use crate::records::{
-    AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings, Guild,
-    GuildBadge, GuildSettings, Message, MessageWindow, Nitro, ReadState, ServerListItem, Slowmode,
-    StarterMessage, ThreadBrowser, ThreadCreation, User,
+    AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings,
+    ForumPosts, ForumView, Guild, GuildBadge, GuildSettings, Message, MessageWindow, Nitro,
+    PostPreview, ReadState, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
+    ThreadCreation, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -37,12 +39,26 @@ impl Store {
             *misses += 1;
         }
         let formatted = FormattedText::new(&document, &message.content, names, Some(message));
+        let shown = self
+            .core
+            .shown_embeds(message, document.has_spoilered_link());
+        let hides_content = self
+            .core
+            .embeds_hide_link(&shown, document.is_single_link(&message.content));
         Message::new(
             message,
             formatted,
             self.core.mentions_me(message),
             self.core.shown_attachments(message),
             self.core.spoilers_shown(message.channel_id),
+            embeds::embeds(
+                message,
+                &shown,
+                names,
+                document.spoiler_count(),
+                &self.contents,
+            ),
+            hides_content,
         )
     }
 }
@@ -95,6 +111,12 @@ impl Store {
     /// it again.
     pub fn age_gate(&self, channel_id: ChannelId) -> AgeGate {
         self.core.age_gate(channel_id).into()
+    }
+
+    /// The channel hides its media's download options: a forum or media channel's post whose
+    /// channel turned them off. The parent's `ChannelUpdated` says to read it again.
+    pub fn hides_media_downloads(&self, channel_id: ChannelId) -> bool {
+        self.core.hides_media_downloads(channel_id)
     }
 
     /// Of `ids`, the channels muted now by their own settings, in the order given; a thread by
@@ -193,6 +215,40 @@ impl Store {
     /// again.
     pub fn thread_browser(&self, parent_id: ChannelId) -> ThreadBrowser {
         self.core.thread_browser(parent_id).into()
+    }
+
+    /// A forum's page for `view`: its active posts (frozen while it's the open forum, see
+    /// `Account::open_forum`), its archived posts down to the loaded pages for the view's tags,
+    /// the count of others' new posts. `ForumPostsChanged` says to read it again, as does
+    /// `ChannelUpdated` for its posts.
+    pub fn forum_posts(&self, forum_id: ChannelId, view: ForumView) -> ForumPosts {
+        self.core.forum_posts(forum_id, &(&view).into()).into()
+    }
+
+    /// Of `post_ids`, the active posts with messages past the read position, mutes aside: their
+    /// cards show unread. A post's `BadgeChanged`, `ChannelUpdated` or `ThreadActivity` changes it.
+    pub fn unread_posts(&self, post_ids: Vec<ChannelId>) -> Vec<ChannelId> {
+        self.core.unread_posts(&post_ids)
+    }
+
+    /// Of `post_ids`, the open forum's posts whose cards show NEW: never opened, not the user's
+    /// own, made since the forum was read before this visit. Read with `unread_posts`.
+    pub fn new_posts(&self, post_ids: Vec<ChannelId>) -> Vec<ChannelId> {
+        self.core.new_posts(&post_ids)
+    }
+
+    /// A forum post's first message for its card; `None` until Akari has it
+    /// (`Account::request_post_previews`). `PostPreviewChanged` says to read it again.
+    pub fn post_preview(&self, post_id: ChannelId) -> Option<PostPreview> {
+        Some(match self.core.post_preview(post_id)? {
+            state::PostPreview::Loaded(message) => {
+                let names = Names::new(&self.core, message.channel_id);
+                PostPreview::Loaded {
+                    message: self.message(&message, &names, &mut 0),
+                }
+            }
+            _ => PostPreview::Deleted,
+        })
     }
 
     /// DMs and group DMs, the latest conversation first.

@@ -16,6 +16,8 @@ struct MessageTableState: Equatable {
     var revealedMedia: Set<MediaKey> = []
     var shownSensitive: Set<MediaKey> = []
     var showsAltText = false
+    /// The rows' channels whose videos and audio offer no Download (Discord's channel option).
+    var hiddenDownloads: Set<ChannelId> = []
     var newMessages: MessageId?
     var unreadJumps = 0
     var messageJump: MessageListModel.MessageJump?
@@ -108,6 +110,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private let onScreen: @MainActor (NSWindow) -> Bool
     private let build: Build
     // Shared by the height pass and the cell, so a row's text is built once per change (D71).
+    // A row's embeds with their texts built, for its cell and its height.
+    private var embedTexts:
+        [MessageId: (message: Message, revealed: Set<UInt16>, media: MessageCell.MediaState, shown: [EmbedView.Shown])] =
+            [:]
     private var texts: [MessageId: (message: Message, revealed: Set<UInt16>, built: MessageText.Built)] =
         [:]
     // A thread box's newest message as the box shows it, and when the box's time changes.
@@ -132,8 +138,15 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private weak var hoveredTile: MediaTileView?
     private weak var hoveredOverlay: OverlayButton?
     private weak var hoveredFileName: FileNameButton?
+    private weak var hoveredFile: FileRowView?
+    private weak var hoveredAction: HoverActionButton?
+    /// The save panel's answer for a suggested name, for tests; `nil` shows the panel.
+    var chooseSaveURL: ((String) async -> URL?)?
+    /// What a failed save says, for tests; `nil` shows an alert on the window.
+    var onSaveFailure: ((String) -> Void)?
     /// An ALT button's description, open beside it.
     private(set) var altText: NSPopover?
+    let viewer = MediaViewer()
     // The media of the rows a screen above and below what shows, asked before it scrolls in.
     private(set) var prefetching: [ImageSpec: Task<Void, Never>] = [:]
     private var prefetchFailed: Set<ImageSpec> = []
@@ -248,6 +261,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             .union(previous.revealedMedia.symmetricDifference(state.revealedMedia).map(\.messageId))
             .union(previous.shownSensitive.symmetricDifference(state.shownSensitive).map(\.messageId))
             .union(previous.showsAltText != state.showsAltText ? messageIds() : [])
+            .union(rows(from: previous.hiddenDownloads.symmetricDifference(state.hiddenDownloads)))
         let next = timeline(of: state)
         let changes = TimelineChanges(from: timeline.items, to: next.items)
         if !changes.isEmpty {
@@ -410,6 +424,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         locale = localeSource()
         times = TimestampText(locale: locale, timeZone: calendar.timeZone, calendar: calendar)
         texts.removeAll()
+        embedTexts.removeAll()
         boxContents.removeAll()
         let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
         if let place {
@@ -452,6 +467,11 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return Set(old.symmetricDifference(new).map(\.messageId))
     }
 
+    // The rows showing a message from one of `channels`.
+    private func rows(from channels: Set<ChannelId>) -> Set<MessageId> {
+        channels.isEmpty ? [] : Set(state.rows.filter { channels.contains($0.shown.channelId) }.map(\.id))
+    }
+
     private func messageIds() -> Set<MessageId> {
         Set(timeline.items.compactMap { if case .message(let row, _) = $0 { row.id } else { nil } })
     }
@@ -490,6 +510,14 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         if url.host() == "threads" {
             actions?.openThreads(of: row.message.channelId)
+            return
+        }
+        if url.host() == "masked" {
+            let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "url" }?.value
+            if let target = value.flatMap(URL.init(string:)) {
+                actions?.openLink(target, masked: true)
+            }
             return
         }
         guard let value = url.pathComponents.last.flatMap({ UInt64($0) }) else {
@@ -647,6 +675,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             if case .message(let row, _) = timeline.items[index] {
                 relativeTimes[row.id] = nil
                 texts[row.id] = nil
+                embedTexts[row.id] = nil
                 boxContents[row.id] = nil
                 boxTimes[row.id] = nil
             }
@@ -997,7 +1026,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             return MessageCell.height(
                 message, body: body(row), startsGroup: startsGroup, followsDay: followsDay,
-                followsLine: followsLine, hasBox: hasBox, width: width)
+                followsLine: followsLine, hasBox: hasBox, embeds: embeds(row), width: width)
         }
     }
 
@@ -1047,6 +1076,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.onOpenThread = openThread
                 cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
+                cell.animatesEmoji = emojiPlays(
+                    at: index, visible: tableView.visibleRect, nearBottom: nearBottomStart())
                 cell.configure(
                     message, notice: notice, time: groupTime, followsDay: followsDay,
                     followsLine: followsLine, fullDate: fullDate,
@@ -1068,9 +1099,17 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onExpression = { [weak self] target, rect in self?.openExpression(target, at: rect) }
             cell.placeholders = state.images.placeholders
             cell.onMedia = { [weak self] attachment, action, tile in
-                self?.media(action, attachment, of: row.id, tile: tile)
+                self?.media(action, attachment, of: row, tile: tile)
             }
             cell.onOpenFile = { [weak self] attachment in self?.actions?.openMedia(attachment.key) }
+            cell.onDownloadFile = { [weak self] attachment in self?.download(attachment) }
+            // The channel's option only touches videos and audio: other rows don't ask the store.
+            let hidden =
+                row.shown.attachments.contains { $0.kind == .video || $0.kind == .audio }
+                && actions?.hidesDownloads(of: row) == true
+            cell.downloads = hidden ? .filesOnly : .all
+            cell.onEmbed = { [weak self] embed, action in self?.embed(action, embed, of: row) }
+            cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
             cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
             cell.configure(
@@ -1078,28 +1117,85 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
                 shortTime: MessageFormat.shortTime(
                     message.timestamp, calendar: calendar, locale: locale),
-                fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id))
+                fullDate: fullDate, threadBox: boxParts(row), media: mediaState(of: row.id),
+                embeds: embeds(row))
             cell.flash(elapsed: flashElapsed(item.id), reducesMotion: reducesMotion())
             updateMedia(of: cell, at: index, visible: visible)
             return cell
         }
     }
 
+    private func embeds(_ row: MessageListModel.Row) -> [EmbedView.Shown] {
+        let message = row.shown
+        guard !message.embeds.isEmpty else {
+            return []
+        }
+        let revealed = revealed[row.id] ?? []
+        let media = mediaState(of: row.id)
+        if let cached = embedTexts[row.id], cached.message == message, cached.revealed == revealed,
+            cached.media == media
+        {
+            return cached.shown
+        }
+        let now = now()
+        let shown = message.embeds.map { embed in
+            EmbedView.shown(
+                embed, cover: MessageCell.cover(embed, media), spoilersShown: message.spoilersShown,
+                revealed: revealed, now: now, times: times,
+                footerTime: embed.footer?.timestamp.map {
+                    MessageFormat.footerTime($0, now: now, calendar: calendar, locale: locale)
+                })
+        }
+        embedTexts[row.id] = (message, revealed, media, shown)
+        noteRelativeTime(of: row.id)
+        return shown
+    }
+
+    // A row's next relative time change, in its text or its embeds'.
+    private func noteRelativeTime(of row: MessageId) {
+        let body = texts[row]?.built.nextChange
+        let embeds = embedTexts[row]?.shown.compactMap(\.nextChange).min()
+        relativeTimes[row] = [body, embeds].compactMap { $0 }.min()
+    }
+
+    private func embed(_ action: EmbedView.Action, _ embed: Embed, of row: MessageListModel.Row) {
+        let key = MediaKey(messageId: row.id, embed: embed.index, url: embed.url)
+        switch action {
+        case .open(let image):
+            if let opened = ViewerModel.embed(embed, from: image), view(opened, of: row) {
+                return
+            }
+            actions?.openMedia(image)
+        case .openLink(let url):
+            actions?.openLink(url, masked: false)
+        case .reveal:
+            actions?.revealMedia(key)
+        case .toggleSensitive:
+            actions?.toggleSensitive(key)
+        }
+    }
+
     private func mediaState(of message: MessageId) -> MessageCell.MediaState {
         MessageCell.MediaState(
-            revealed: Set(state.revealedMedia.filter { $0.messageId == message }.map(\.attachmentId)),
-            shownSensitive: Set(
-                state.shownSensitive.filter { $0.messageId == message }.map(\.attachmentId)),
+            revealed: Set(state.revealedMedia.filter { $0.messageId == message }.map(\.item)),
+            shownSensitive: Set(state.shownSensitive.filter { $0.messageId == message }.map(\.item)),
             showsAltText: state.showsAltText)
     }
 
     private func media(
-        _ action: MediaTileView.Action, _ attachment: Attachment, of message: MessageId,
+        _ action: MediaTileView.Action, _ attachment: Attachment, of row: MessageListModel.Row,
         tile: MediaTileView
     ) {
-        let key = MediaKey(messageId: message, attachmentId: attachment.id)
+        let key = MediaKey(messageId: row.id, attachmentId: attachment.id)
         switch action {
         case .open:
+            let media = mediaState(of: row.id)
+            let opened = ViewerModel.attachments(of: row.shown, from: attachment.id) {
+                !MediaTileView.hides(MessageCell.cover($0, media))
+            }
+            if let opened, view(opened, of: row) {
+                return
+            }
             actions?.openMedia(attachment.key)
         case .reveal:
             actions?.revealMedia(key)
@@ -1107,7 +1203,63 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             actions?.toggleSensitive(key)
         case .altText:
             showAltText(attachment.description ?? "", from: tile.alt)
+        case .download:
+            download(attachment)
         }
+    }
+
+    // Discord's Download: saved where the save panel says, through the core, as the viewer saves.
+    private func download(_ attachment: Attachment) {
+        guard let window = tableView.window else {
+            return
+        }
+        Task { [weak self] in
+            guard let self, let destination = await self.saveURL(for: attachment.filename, in: window)
+            else {
+                return
+            }
+            do {
+                try await self.actions?.saveOriginal(attachment.key, to: destination)
+            } catch is CancellationError {
+            } catch {
+                self.saveFailed(in: window)
+            }
+        }
+    }
+
+    private func saveURL(for name: String, in window: NSWindow) async -> URL? {
+        if let chooseSaveURL {
+            return await chooseSaveURL(name)
+        }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = name
+        panel.canCreateDirectories = true
+        return await panel.beginSheetModal(for: window) == .OK ? panel.url : nil
+    }
+
+    private func saveFailed(in window: NSWindow) {
+        if let onSaveFailure {
+            onSaveFailure(ViewerActions.saveFailed)
+            return
+        }
+        guard window.isVisible else {
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = ViewerActions.saveFailed
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window)
+    }
+
+    // Over the list's window; false when there's no viewer to open.
+    private func view(_ opened: (items: [ViewerModel.Item], index: Int), of row: MessageListModel.Row) -> Bool {
+        guard let window = tableView.window,
+            let model = actions?.viewer(opened.items, at: opened.index, of: row)
+        else {
+            return false
+        }
+        viewer.open(model, in: window, images: state.images.cache, placeholders: state.images.placeholders)
+        return true
     }
 
     // Discord's popout: to the right of the button, its title over the description.
@@ -1130,7 +1282,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         let built = build(row.shown, revealed, now, times)
         texts[row.id] = (row.shown, revealed, built)
-        relativeTimes[row.id] = built.nextChange
+        noteRelativeTime(of: row.id)
         return built.text
     }
 
@@ -1250,6 +1402,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 remeasured.insert(index)
                 rowHeights[item.id] = nil
                 texts[row.id] = nil
+                embedTexts[row.id] = nil
             }
             if body || box {
                 due.insert(index)
@@ -1562,8 +1715,21 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         box?.hovered = true
         hoveredBox = box
         let overlay = target?.view as? OverlayButton
+        let hit = hitView(at: location)
         let tile = (target?.view as? MediaTileView) ?? (overlay?.superview as? MediaTileView)
-            ?? hoveredMedia(at: location)
+            ?? enclosing(MediaTileView.self, around: hit)
+        let action = target?.view as? HoverActionButton
+        if hoveredAction !== action {
+            hoveredAction?.isHovered = false
+        }
+        action?.isHovered = true
+        hoveredAction = action
+        let file = enclosing(FileRowView.self, around: hit)
+        if hoveredFile !== file {
+            hoveredFile?.isHovered = false
+            file?.isHovered = true
+            hoveredFile = file
+        }
         if hoveredOverlay !== overlay {
             hoveredOverlay?.isHovered = false
         }
@@ -1627,6 +1793,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         hoverCard.hide()
         expressionPopout.close()
         altText?.close()
+        viewer.close()
         cancelPrefetches()
     }
 
@@ -1703,6 +1870,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         let visible = tableView.visibleRect
         let nearBottom = nearBottomStart()
         tableView.enumerateAvailableRowViews { rowView, index in
+            if let line = rowView.view(atColumn: 0) as? NoticeCell {
+                line.animatesEmoji = emojiPlays(at: index, visible: visible, nearBottom: nearBottom)
+            }
             guard let cell = rowView.view(atColumn: 0) as? MessageCell else {
                 return
             }
@@ -1714,11 +1884,16 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     // Each GIF by how much of it shows and whether the pointer is over it.
     private func updateMedia(of cell: MessageCell, at index: Int, visible: NSRect) {
-        guard let tiles = cell.attachments?.tiles, timeline.items.indices.contains(index) else {
+        let tiles = (cell.attachments?.tiles ?? []) + (cell.embeds?.tiles ?? [])
+        guard !tiles.isEmpty, timeline.items.indices.contains(index) else {
             return
         }
         for tile in tiles where !tile.isHidden {
-            guard tile.content?.attachment.animated == true, tile.window != nil else {
+            let moves = tile.content.map { $0.media.animated || $0.media.loops } ?? false
+            guard moves, tile.window != nil else {
+                if tile.animates, let key = tile.content?.media.key {
+                    ImageLog.log("list: \(ImageLog.name(key)) rests (not in the window)")
+                }
                 tile.animates = false
                 continue
             }
@@ -1727,23 +1902,36 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             let fraction =
                 rect.height > 0 && rect.width > 0 && !shown.isNull
                 ? (shown.width * shown.height) / (rect.width * rect.height) : 0
-            tile.animates = state.motion.plays(
+            let plays = state.motion.plays(
                 .gif,
                 MotionPolicy.Context(
                     windowKey: state.focused, appActive: state.focused, hovered: tile === hoveredTile,
                     visibleFraction: fraction))
+            if plays != tile.animates, let key = tile.content?.media.key {
+                ImageLog.log(
+                    "list: \(ImageLog.name(key)) \(plays ? "plays" : "rests") (window key and app active "
+                        + "\(state.focused), \(Int(fraction * 100)) % shown, hovered \(tile === hoveredTile), "
+                        + "GIF autoplay \(state.motion.gifAutoPlay), Reduce Motion \(state.motion.reduceMotion))")
+            }
+            tile.animates = plays
         }
     }
 
-    // The tile under the pointer even where it takes no click (a covered one): hover still shows.
-    private func hoveredMedia(at location: NSPoint?) -> MediaTileView? {
+    // What's under the pointer in the window, the list's or not.
+    private func hitView(at location: NSPoint?) -> NSView? {
         guard let location, let content = tableView.window?.contentView else {
             return nil
         }
-        var view = content.hitTest(content.superview?.convert(location, from: nil) ?? location)
+        return content.hitTest(content.superview?.convert(location, from: nil) ?? location)
+    }
+
+    // A tile or file card around `hit`, also where it takes no click (a covered tile) or under
+    // one of its buttons: hover still shows.
+    private func enclosing<View: NSView>(_ kind: View.Type, around hit: NSView?) -> View? {
+        var view = hit
         while let current = view, current !== tableView {
-            if let tile = current as? MediaTileView {
-                return tile.isDescendant(of: tableView) ? tile : nil
+            if let found = current as? View {
+                return found.isDescendant(of: tableView) ? found : nil
             }
             view = current.superview
         }

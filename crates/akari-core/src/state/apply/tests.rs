@@ -27,6 +27,19 @@ fn fixture(json: &str) -> Value {
     serde_json::from_str(json).unwrap()
 }
 
+// When the 300_000_000_000_000_0xx thread IDs were made.
+const THREADS_MADE: &str = "2017-04-07T20:12:53.730000+00:00";
+
+// A thread fixture archived and joined when its ID was made: without a read state a thread is
+// read up to those, and the fixtures' own are later than the IDs most tests send.
+fn started_when_made(mut thread: Value) -> Value {
+    thread["thread_metadata"]["archive_timestamp"] = THREADS_MADE.into();
+    if let Some(member) = thread.get_mut("member").filter(|member| member.is_object()) {
+        member["join_timestamp"] = THREADS_MADE.into();
+    }
+    thread
+}
+
 fn ready_value() -> Value {
     fixture(include_str!("../../../tests/fixtures/ready.json"))["d"].clone()
 }
@@ -89,6 +102,12 @@ fn describe(event: &StoreEvent) -> String {
             thread_id,
             ..
         } => format!("ThreadActivity({}, {})", parent_id.get(), thread_id.get()),
+        StoreEvent::ForumPostsChanged { forum_id } => {
+            format!("ForumPostsChanged({})", forum_id.get())
+        }
+        StoreEvent::PostPreviewChanged { post_id } => {
+            format!("PostPreviewChanged({})", post_id.get())
+        }
         StoreEvent::OlderThreadsChanged { parent_id } => {
             format!("OlderThreadsChanged({})", parent_id.get())
         }
@@ -1107,7 +1126,9 @@ fn a_window_opened_before_the_first_ready_survives_it() {
 
 mod acks;
 mod badges;
+mod embeds;
 mod expressions;
+mod forum;
 mod media;
 mod read_states;
 mod thread_boxes;

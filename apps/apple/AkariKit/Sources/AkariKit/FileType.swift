@@ -31,6 +31,18 @@ public enum FileSize {
 
 /// The symbol a file row shows, by the file's extension.
 public enum FileType {
+    /// The name Discord shows for a file: the title with the file's extension when it gave one.
+    public static func shownName(_ attachment: Attachment) -> String {
+        guard let title = attachment.title, !title.isEmpty else {
+            return attachment.filename
+        }
+        let parts = attachment.filename.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count > 1, let last = parts.last else {
+            return title
+        }
+        return "\(title).\(last)"
+    }
+
     public static func symbol(forFileNamed name: String) -> String {
         let parts = name.lowercased().split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count > 1, let last = parts.last else {

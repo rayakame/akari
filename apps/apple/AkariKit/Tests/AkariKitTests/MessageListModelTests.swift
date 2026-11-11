@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import AkariKit
@@ -558,5 +559,49 @@ struct MessageListModelTests {
         model.apply(EventBatch([event]))
 
         #expect(messageReads.isEmpty)
+    }
+
+    // MARK: Downloads
+
+    // A video's Download follows the shown message's channel (Discord's channel option); a file's
+    // never goes.
+    @Test
+    func downloadsFollowTheShownMessagesChannel() async throws {
+        shown(window([1]))
+        let model = loaded()
+        await model.open()
+        let row = try #require(model.rows.first)
+        #expect(!model.hidesDownloads(of: row))
+
+        store.update { $0.hidingDownloads = [here] }
+        model.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
+
+        #expect(model.hidesDownloads(of: row))
+    }
+
+    @Test
+    func aDownloadSavesTheOriginalThroughTheAccount() async throws {
+        let model = loaded()
+        let key = ImageKey.attachment(channelId: here, messageId: id(1), attachmentId: id(9))
+
+        let written = try await model.saveOriginal(key, to: URL(fileURLWithPath: "/somewhere/notes.pdf"))
+
+        #expect(written == 7)
+        #expect(account.saves.current.map(\.key) == [key])
+        #expect(account.saves.current.map(\.destination) == ["/somewhere/notes.pdf"])
+    }
+
+    // CodeRabbit on #61: the channel's option can change while its list is open.
+    @Test
+    func aChannelUpdateRereadsWhetherDownloadsAreHidden() async {
+        shown(window([1]))
+        let model = loaded()
+        await model.open()
+        #expect(model.channelsHidingDownloads.isEmpty)
+
+        store.update { $0.hidingDownloads = [here] }
+        model.apply(EventBatch([.channelUpdated(channelId: here, guildId: id(1))]))
+
+        #expect(model.channelsHidingDownloads == [here])
     }
 }

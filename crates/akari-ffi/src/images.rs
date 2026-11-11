@@ -74,6 +74,8 @@ pub enum EmbedSlot {
     Thumbnail,
     AuthorIcon,
     FooterIcon,
+    /// A video's copy that plays; as an image, its still.
+    Video,
 }
 
 /// A sticker's file format.
@@ -186,6 +188,7 @@ impl From<ImageKey> for media::ImageKey {
                     EmbedSlot::Thumbnail => media::EmbedSlot::Thumbnail,
                     EmbedSlot::AuthorIcon => media::EmbedSlot::AuthorIcon,
                     EmbedSlot::FooterIcon => media::EmbedSlot::FooterIcon,
+                    EmbedSlot::Video => media::EmbedSlot::Video,
                 },
             },
         }
@@ -247,6 +250,7 @@ impl From<media::ImageKey> for ImageKey {
                     media::EmbedSlot::Thumbnail => EmbedSlot::Thumbnail,
                     media::EmbedSlot::AuthorIcon => EmbedSlot::AuthorIcon,
                     media::EmbedSlot::FooterIcon => EmbedSlot::FooterIcon,
+                    media::EmbedSlot::Video => EmbedSlot::Video,
                     _ => EmbedSlot::Image,
                 },
             },
@@ -536,6 +540,18 @@ pub fn sticker_size() -> MediaSize {
 #[uniffi::export]
 pub fn embed_image_size(source: MediaSize) -> MediaSize {
     layout::embed_image(source.into()).into()
+}
+
+/// An embed's image, gallery or poster: contained in 400 × 300, or 400 × 450 when `tall`.
+#[uniffi::export]
+pub fn embed_media_size(source: MediaSize, tall: bool) -> MediaSize {
+    layout::embed_media(source.into(), tall).into()
+}
+
+/// An embed's video: as its media, at least 150 × 144.
+#[uniffi::export]
+pub fn embed_video_size(source: MediaSize, tall: bool) -> MediaSize {
+    layout::embed_video(source.into(), tall).into()
 }
 
 /// An embed card's thumbnail: contained in 80 × 80.

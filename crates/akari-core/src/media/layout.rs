@@ -47,6 +47,15 @@ const EMBED_IMAGE: Size = Size {
     width: 400,
     height: 300,
 };
+// TikTok's and portrait YouTube videos (module 659674 `ds`).
+const EMBED_TALL: Size = Size {
+    width: 400,
+    height: 450,
+};
+const EMBED_VIDEO_MIN: Size = Size {
+    width: 150,
+    height: 144,
+};
 const EMBED_THUMBNAIL: Size = Size {
     width: 80,
     height: 80,
@@ -227,6 +236,20 @@ pub fn fit_width(mosaic: &Mosaic, width: u32) -> Mosaic {
 /// An embed card's image: contained in 400 × 300.
 pub fn embed_image(source: Size) -> Size {
     contain(source, EMBED_IMAGE)
+}
+
+/// An embed's image, gallery or poster: contained in 400 × 300, or 400 × 450 when `tall`.
+pub fn embed_media(source: Size, tall: bool) -> Size {
+    contain(source, if tall { EMBED_TALL } else { EMBED_IMAGE })
+}
+
+/// An embed's video: as its media, at least 150 × 144.
+pub fn embed_video(source: Size, tall: bool) -> Size {
+    let fitted = embed_media(source, tall);
+    Size {
+        width: fitted.width.max(EMBED_VIDEO_MIN.width),
+        height: fitted.height.max(EMBED_VIDEO_MIN.height),
+    }
 }
 
 /// An embed card's thumbnail: contained in 80 × 80.
@@ -433,6 +456,14 @@ mod tests {
 
     #[test]
     fn embed_media_boxes() {
+        assert_eq!(embed_media(size(1080, 1920), false), size(169, 300));
+        assert_eq!(embed_media(size(1080, 1920), true), size(253, 450));
+        assert_eq!(embed_video(size(1280, 720), false), size(400, 225));
+        assert_eq!(
+            embed_video(size(100, 50), false),
+            size(150, 144),
+            "at least 150 × 144"
+        );
         assert_eq!(embed_image(size(1200, 630)), size(400, 210));
         assert_eq!(embed_image(size(300, 200)), size(300, 200));
         assert_eq!(embed_thumbnail(size(400, 400)), size(80, 80));

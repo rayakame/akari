@@ -50,6 +50,56 @@ struct StarterMessageTests {
         #expect(model.rows.last?.shown == model.rows.last?.message)
     }
 
+    // CodeRabbit on #61: the starter's row shows the parent's message, so the parent's download
+    // option is the one it follows, also when it changes.
+    @Test
+    func theParentsDownloadOptionReachesTheStartersRow() {
+        starts(.loaded(message: original))
+        let model = makeModel()
+        #expect(model.channelsHidingDownloads.isEmpty)
+
+        store.update { $0.hidingDownloads = [id(10)] }
+        model.apply(EventBatch([.channelUpdated(channelId: id(10), guildId: id(1))]))
+
+        #expect(model.channelsHidingDownloads == [id(10)])
+        #expect(model.hidesDownloads(of: model.rows[0]))
+        #expect(!model.hidesDownloads(of: model.rows[1]))
+    }
+
+    // CodeRabbit on #61: a parent that hides downloads when the thread opens, or when the starter
+    // lands later, is in the set, so permitting them again changes it.
+    @Test
+    func aParentHidingDownloadsFromTheStartIsFollowedToo() {
+        store.update { $0.hidingDownloads = [id(10)] }
+        starts(.loaded(message: original))
+        let model = makeModel()
+        #expect(model.channelsHidingDownloads == [id(10)])
+
+        store.update { $0.hidingDownloads = [] }
+        model.apply(EventBatch([.channelUpdated(channelId: id(10), guildId: id(1))]))
+        #expect(model.channelsHidingDownloads.isEmpty)
+
+        store.update { $0.hidingDownloads = [id(10)] }
+        starts(.loading)
+        let late = makeModel()
+        #expect(late.channelsHidingDownloads.isEmpty)
+        starts(.loaded(message: original))
+        late.apply(EventBatch([.messageUpdated(channelId: thread, messageId: id(31))]))
+        #expect(late.channelsHidingDownloads == [id(10)])
+    }
+
+    // CodeRabbit on #61: a post's option is its forum's, and the forum's update says so.
+    @Test
+    func aParentsUpdateRereadsThePostsOwnOption() {
+        let model = makeModel()
+        #expect(model.channelsHidingDownloads.isEmpty)
+
+        store.update { $0.hidingDownloads = [thread] }
+        model.apply(EventBatch([.channelUpdated(channelId: id(10), guildId: id(1))]))
+
+        #expect(model.channelsHidingDownloads == [thread])
+    }
+
     @Test
     func anUnavailableStarterSaysSorryWeCouldntLoadIt() {
         starts(.unavailable)

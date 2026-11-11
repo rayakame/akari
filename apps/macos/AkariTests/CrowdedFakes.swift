@@ -54,6 +54,8 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
+    override func hidesMediaDownloads(channelId: ChannelId) -> Bool { false }
+
     // Nothing to create here.
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         ThreadCreation(public: false, private: false)
@@ -161,7 +163,7 @@ nonisolated final class CrowdedStore: Store, @unchecked Sendable {
                 fromWebhook: false, content: content,
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(id.rawValue)),
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-                embedCount: 0, stickers: [], componentsV2: false, delivery: .sent,
+                embeds: [], stickers: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: false,
                 reference: nil, hasThread: false, mentions: [],
                 call: nil, roleSubscription: nil, purchasedProduct: nil, actor: nil,

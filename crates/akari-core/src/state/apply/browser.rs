@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use super::{Entities, State};
@@ -13,18 +13,18 @@ pub(crate) const OLDER_PAGE: u32 = 25;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OlderPage {
     pub(crate) offset: u32,
-    ticket: u64,
+    pub(super) ticket: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct OlderPages {
-    state: OlderThreads,
-    offset: u32,
+    pub(super) state: OlderThreads,
+    pub(super) offset: u32,
     // The oldest thread the pages brought, by `newest`.
-    oldest: Option<u64>,
+    pub(super) oldest: Option<u64>,
     // The last page asked for. READY and GUILD_CREATE start the pages over, so an answer whose
     // ticket isn't this one belongs to pages that are gone.
-    ticket: u64,
+    pub(super) ticket: u64,
 }
 
 impl Default for OlderPages {
@@ -39,13 +39,13 @@ impl Default for OlderPages {
 }
 
 // Discord orders threads by their newest message; one without counts from its own ID.
-fn newest(channel: &Channel) -> u64 {
+pub(super) fn newest(channel: &Channel) -> u64 {
     channel
         .last_message_id
         .map_or(channel.id.get(), |id| id.get())
 }
 
-fn newest_on_wire(thread: &model::Channel) -> u64 {
+pub(super) fn newest_on_wire(thread: &model::Channel) -> u64 {
     thread
         .last_message_id
         .map_or(thread.id.get(), |id| id.get())
@@ -232,7 +232,7 @@ impl State {
             .is_some_and(|pages| pages.ticket == page.ticket)
     }
 
-    fn keep_threads_found(
+    pub(super) fn keep_threads_found(
         &mut self,
         results: ThreadSearchResults,
         current: bool,
@@ -285,6 +285,9 @@ impl State {
                 self.reread_boxes(message.channel_id, events);
             }
         }
+        for message in &results.first_messages {
+            self.note_first_message(message, events);
+        }
         self.settle(self.now_millis(), events);
         Some(found)
     }
@@ -333,12 +336,29 @@ impl State {
             self.older.remove(&parent);
             events.push(StoreEvent::OlderThreadsChanged { parent_id: parent });
         }
+        let forums: BTreeSet<ChannelId> = self
+            .forum_pages
+            .keys()
+            .map(|key| key.forum)
+            .filter(|forum| {
+                next.channels.contains_key(forum)
+                    || channels
+                        .get(forum)
+                        .is_some_and(|channel| channel.guild_id == Some(guild))
+            })
+            .collect();
+        self.forum_pages
+            .retain(|key, _| !forums.contains(&key.forum));
+        for forum in forums {
+            events.push(StoreEvent::ForumPostsChanged { forum_id: forum });
+        }
     }
 
     // A READY lists the joined, active threads: the ones the store kept besides may be stale.
     pub(super) fn follow_ready_threads(&mut self) {
         self.unconfirmed = std::mem::take(&mut self.entities.kept_threads);
         self.older.clear();
+        self.forum_pages.clear();
         self.generation += 1;
     }
 }

@@ -25,8 +25,10 @@ the header's Threads button and its popout, the "See all threads" modal, and the
 "More Active Threads" in `MoreActiveThreads.swift`, each a panel attached to the window,
 `ChildWindows.swift`; `docs/ui/thread-browser.md`), the cursors (`docs/ui/cursors.md`), and the
 composer (a locked thread's banner), avatars and icons in every place (`docs/ui/images.md`), and a
-message's attachments with their covers and the age gate (`docs/ui/attachments.md`).
-Embeds, reactions, replies, voice, notifications and settings come later.
+message's attachments with their covers and the age gate (`docs/ui/attachments.md`), and its
+embeds: cards, media alone, galleries, GIFVs and the video pill, with their covers
+(`EmbedView.swift`, `docs/ui/embeds.md`), and the media viewer (`Viewer/`, `docs/ui/viewer.md`).
+Reactions, replies, voice, notifications and settings come later.
 
 ## Images
 
@@ -66,6 +68,15 @@ Embeds, reactions, replies, voice, notifications and settings come later.
   media of rows within a screen above and below (`prefetchMedia`). `MessageCell.cover` applies
   the session's reveals to the core's cover. A gated channel's `MessageArea` shows
   `AgeGateView` and never opens its list.
+- The media viewer (`MediaViewer`) is a key `ContainerPanel` attached over the whole session
+  window, following its size: `ViewerView` draws the scrim and holds `ViewerStage` (a
+  `MediaTileView` at the fitted box, zoomed by resizing it so the image asks again at more
+  pixels, capped by `ImageLayerView.maxPixels`; an `AVPlayerView` for videos; hidden
+  `ImageLayerView`s asking the neighbours), the top bar, Close, the arrows and the strip, laid
+  out by `ViewerLayout` from Discord's numbers. The panel hands the arrows and Space to the view
+  before a video's player sees them, and the view swallows the app's shortcuts but ⌘Q and ⌘H.
+  `ViewerActions` saves, copies and opens the original. The table's controller owns one viewer
+  and opens it from tiles and embeds through `MessageListActions.viewer`.
 - A loading or failed avatar shows the `avatarPlaceholder` disc; a server's icon is drawn
   alone (`ServerPicture`: the rail, the folder minis, the title bar), its initials' tile only
   without an icon or after a failure. Images live in `~/Library/Caches/<bundle>/Images` (`CacheDirectory`).
@@ -228,6 +239,17 @@ reader's place while rows change above it ("compensates": the rows removed, inse
 reloaded above, the height delta, y before and after, and whether a live scroll ran). Numbers
 only. Combine them as
 `-AkariLog akari_core=info,scroll`; a second `-AkariLog` argument would replace the first.
+
+`-AkariLog images` (category `images`, also on stderr beside akari-core's lines) says why an
+image or an animation doesn't show and follows the ones that play: a failed image and an
+animation that didn't start with the reason (over the size cap, not available, the file has one
+frame, …), each GIF as the motion rule starts or rests it (in the list with the window key, how
+much shows, hover, the GIF setting and Reduce Motion; in the viewer by its key state and the
+app's), an animation's start (frames,
+size, the box's pixels), its frame index once a second while it plays, and a frame that didn't
+decode. Keys are Discord's IDs, never links or file names. For a GIF that won't play:
+`-AkariLog akari_core=debug,images`; akari-core's `akari_core::media` lines say what was asked
+of the proxy and the CDN and why an ask ended without a file.
 
 `-AkariLog load` (category `load`) logs one line per history page and one per channel open,
 with channel IDs, counts and durations only:

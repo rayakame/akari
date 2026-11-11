@@ -86,13 +86,13 @@ nonisolated final class MessageLayoutManager: NSLayoutManager {
             guard let box = value as? MessageText.EmojiBox else {
                 return
             }
-            // A hidden spoiler's emoji stay under the cover, unasked.
-            let spoiler = storage.attribute(.akariSpoiler, at: range.location, effectiveRange: nil)
-            if let spoiler = spoiler as? MessageText.Spoiler, spoiler.hidden {
-                return
-            }
-            // Equal neighbours form one run; each character is a box of its own.
+            // Equal neighbours form one run; each character is a box of its own, and may be the
+            // one under a hidden spoiler, which stays under the cover, unasked.
             for index in range.location..<NSMaxRange(range) {
+                let spoiler = storage.attribute(.akariSpoiler, at: index, effectiveRange: nil)
+                if let spoiler = spoiler as? MessageText.Spoiler, spoiler.hidden {
+                    continue
+                }
                 if let rect = emojiRect(index, box) {
                     shapes.append(.emoji(rect, box))
                 }

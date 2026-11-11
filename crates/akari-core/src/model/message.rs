@@ -221,6 +221,8 @@ pub struct Embed {
     pub fields: Vec<EmbedField>,
     #[serde(default)]
     pub flags: u64,
+    /// Missing until Discord's explicit content scan looked at it.
+    pub content_scan_version: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -231,6 +233,8 @@ pub struct EmbedMedia {
     pub height: Option<u32>,
     pub content_type: Option<String>,
     pub placeholder: Option<String>,
+    /// 1 for a thumbhash.
+    pub placeholder_version: Option<u32>,
     /// Alt text.
     pub description: Option<String>,
     #[serde(default)]

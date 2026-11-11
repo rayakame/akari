@@ -3,6 +3,7 @@
 mod account;
 mod client;
 mod contents;
+mod embeds;
 mod errors;
 mod formatted;
 mod ids;
@@ -21,6 +22,10 @@ mod tests;
 
 pub use account::{Account, MessageLoad};
 pub use client::{DiscordClient, Endpoints, HostInfo, Token, discord_endpoints};
+pub use embeds::{
+    Embed, EmbedAuthor, EmbedFieldText, EmbedFooter, EmbedImage, EmbedKind, EmbedLink, EmbedVideo,
+    RichText,
+};
 pub use errors::{
     ClientError, GatewayError, ImageError, LoginError, LogoutError, NetworkErrorKind, RequestError,
     TokenStoreError,
@@ -31,9 +36,9 @@ pub use formatted::{
 };
 pub use images::{
     EmbedSlot, GalleryColumns, ImageFile, ImageKey, ImageRequest, MediaMosaic, MediaRect,
-    MediaSize, PendingImage, PendingSave, PlaceholderImage, embed_image_size, embed_thumbnail_size,
-    gallery_card_height, gallery_columns, media_box, media_contain, media_cover, media_fit_width,
-    media_mosaic, placeholder_image, sticker_size,
+    MediaSize, PendingImage, PendingSave, PlaceholderImage, embed_image_size, embed_media_size,
+    embed_thumbnail_size, embed_video_size, gallery_card_height, gallery_columns, media_box,
+    media_contain, media_cover, media_fit_width, media_mosaic, placeholder_image, sticker_size,
 };
 pub use logging::enable_logging;
 pub use login::{

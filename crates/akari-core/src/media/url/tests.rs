@@ -557,6 +557,8 @@ fn embed_images_size_like_attachments_and_key_by_their_path() {
         ),
         width: Some(1200),
         height: Some(630),
+        flags: 0,
+        placeholder: None,
     };
     let hosts = hosts();
 
@@ -594,6 +596,31 @@ fn embed_images_size_like_attachments_and_key_by_their_path() {
         )
         .unwrap();
     assert_ne!(planned.disk, other.disk);
+}
+
+// Review: a flagged animated WebP plays in its animated form, as an attachment's does.
+#[test]
+fn an_animated_webp_embed_is_asked_animated() {
+    let media = EmbedMedia {
+        url: "https://example.com/a.webp".into(),
+        proxy_url: Some(
+            "https://images-ext-1.discordapp.net/external/AbCdEf/https/example.com/a.webp".into(),
+        ),
+        width: Some(320),
+        height: Some(240),
+        flags: 32,
+        placeholder: None,
+    };
+
+    let planned = hosts()
+        .embed(&media, (320, 240), Some(AnimatedFormat::WebP))
+        .unwrap();
+
+    assert!(
+        planned.url.as_str().contains("animated=true"),
+        "{}",
+        planned.url
+    );
 }
 
 #[test]
@@ -675,4 +702,89 @@ fn originals_are_png_or_gif_at_the_largest_size() {
             .err(),
         Some(ImageError::Unsupported)
     );
+}
+
+// Only an animated GIF attachment whose upload fits the display cap has the upload to fall back
+// on: the proxy encodes GIFs again, at times much heavier.
+#[test]
+fn only_a_gif_that_fits_keeps_its_upload() {
+    let gif = attachment("loop.gif", 540, 405);
+    let mut huge = attachment("loop.gif", 540, 405);
+    huge.size = MAX_BODY as u64 + 1;
+    let still = hosts().attachment(&gif, (540, 405), None).unwrap();
+    let playing = hosts()
+        .attachment(&gif, (540, 405), Some(AnimatedFormat::Gif))
+        .unwrap();
+    let webp = hosts()
+        .attachment(
+            &attachment("loop.webp", 540, 405),
+            (540, 405),
+            Some(AnimatedFormat::WebP),
+        )
+        .unwrap();
+    let too_large = hosts()
+        .attachment(&huge, (540, 405), Some(AnimatedFormat::Gif))
+        .unwrap();
+
+    assert_eq!(
+        playing.original.as_ref().map(Url::as_str),
+        Some(gif.url.as_ref())
+    );
+    assert_eq!(still.original, None);
+    assert_eq!(webp.original, None);
+    assert_eq!(too_large.original, None);
+}
+
+fn embedded(url: &str, proxy: Option<&str>) -> EmbedMedia {
+    EmbedMedia {
+        url: url.into(),
+        proxy_url: proxy.map(Into::into),
+        width: Some(540),
+        height: Some(405),
+        flags: 0,
+        placeholder: None,
+    }
+}
+
+// A GIF's CDN link posted as text: only its playing form has the upload to fall back on, and
+// only an upload on the CDN is one.
+#[test]
+fn only_an_embedded_gif_on_the_cdn_keeps_its_upload() {
+    let path = "attachments/1300000000000000001/1300000000000000003/loop.gif";
+    let upload = format!("https://cdn.discordapp.com/{path}?{SIGNATURE}");
+    let proxy = format!("https://media.discordapp.net/{path}?{SIGNATURE}");
+    let original = |media: &EmbedMedia, animated| {
+        hosts()
+            .embed(media, (540, 405), animated)
+            .unwrap()
+            .original
+            .map(String::from)
+    };
+    let gif = Some(AnimatedFormat::Gif);
+    let linked = embedded(&upload, Some(&proxy));
+
+    assert_eq!(original(&linked, gif), Some(upload.clone()));
+    assert_eq!(original(&linked, None), None, "the still");
+    assert_eq!(
+        original(&embedded(&upload, None), gif),
+        None,
+        "no proxy copy"
+    );
+    assert_eq!(
+        original(&embedded(&proxy, Some(&proxy)), gif),
+        None,
+        "the proxy's link is no upload"
+    );
+    let rewrapped = "https://media.discordapp.net/external/abc/https/example.com/loop.gif";
+    assert_eq!(
+        original(&embedded(&proxy, Some(rewrapped)), gif),
+        None,
+        "nor under another proxy path"
+    );
+    let elsewhere = embedded("https://example.com/loop.gif", Some(rewrapped));
+    assert_eq!(original(&elsewhere, gif), None, "another site's");
+    let webp = upload.replace("loop.gif", "loop.webp");
+    let mut animated_webp = embedded(&webp, Some(&proxy.replace("loop.gif", "loop.webp")));
+    animated_webp.flags = 1 << 5;
+    assert_eq!(original(&animated_webp, Some(AnimatedFormat::WebP)), None);
 }

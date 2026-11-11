@@ -80,11 +80,79 @@ enum MessageText {
         return view.firstBaselineOffsetFromTop - font.capHeight / 2
     }()
 
+    /// What a text of the list shows: a message's content, or an embed's title, description or
+    /// field.
+    struct Source {
+        enum Base {
+            case body
+            case embedTitle
+            case embedText
+            case embedFieldName
+        }
+
+        let content: String
+        let formatted: FormattedText
+        var spoilersShown = false
+        var edited = false
+        var color = Palette.textDefault
+        var base = Base.body
+
+        init(_ message: Message) {
+            content = message.content
+            formatted = message.formatted
+            spoilersShown = message.spoilersShown
+            edited = message.editedTimestamp != nil
+            color =
+                switch message.delivery {
+                case .pending: Palette.textMuted
+                case .failed: Palette.danger
+                default: Palette.textDefault
+                }
+        }
+
+        init(_ text: RichText, base: Base, color: NSColor, spoilersShown: Bool) {
+            content = text.text
+            formatted = text.formatted
+            self.base = base
+            self.color = color
+            self.spoilersShown = spoilersShown
+        }
+    }
+
     static func build(
         _ message: Message, revealed: Set<UInt16>, now: Date, times: TimestampText
     ) -> Built {
-        var builder = Builder(message, revealed: revealed, now: now, times: times)
+        build(Source(message), revealed: revealed, now: now, times: times)
+    }
+
+    static func build(
+        _ source: Source, revealed: Set<UInt16>, now: Date, times: TimestampText
+    ) -> Built {
+        var builder = Builder(source, revealed: revealed, now: now, times: times)
         return builder.build()
+    }
+
+    /// The character an emoji's image layer stands on: `side` wide in a line of `font`, no
+    /// taller than the line's text.
+    static func emojiBox(
+        _ side: CGFloat, in font: NSFont, _ attributes: [NSAttributedString.Key: Any]
+    ) -> NSAttributedString {
+        let attachment = NSTextAttachment()
+        attachment.bounds = NSRect(x: 0, y: 0, width: side, height: side)
+        attachment.attachmentCell = EmojiCell(
+            size: NSSize(width: side, height: min(side, font.ascender.rounded(.down))))
+        let box = NSMutableAttributedString(attachment: attachment)
+        box.addAttributes(attributes, range: NSRange(location: 0, length: box.length))
+        return box
+    }
+
+    /// A masked link in an embed's text: its own list isn't the message's.
+    static func maskedLink(_ url: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "akari"
+        components.host = "masked"
+        components.queryItems = [URLQueryItem(name: "url", value: url)]
+        return components.url
     }
 
     /// The text a selection shows, as plain text: line breaks as newlines, a custom emoji as
@@ -168,7 +236,7 @@ private final class Typeface {
             NSFont(descriptor: font.fontDescriptor.withSymbolicTraits(traits), size: font.pointSize)
                 ?? font
         }
-        let regular = NSFont.systemFont(ofSize: size)
+        let regular = NSFont.systemFont(ofSize: size, weight: style.weight.appKit)
         let bold = NSFont.boldSystemFont(ofSize: size)
         let medium = NSFont.systemFont(ofSize: size, weight: .medium)
         fonts = [
@@ -200,6 +268,9 @@ private final class Typeface {
     static let subtext = Typeface(TypeScale.subtext, offset: 2, mono: 11)
     static let code = Typeface(TypeScale.codeBlock, offset: 1, mono: 14, monospaced: true)
     static let jumbo = Typeface(TypeScale.jumbo, offset: 0, mono: 42)
+    static let embedTitle = Typeface(TypeScale.embedTitle, offset: 3, mono: 14)
+    static let embedText = Typeface(TypeScale.embedText, offset: 2, mono: 12)
+    static let embedFieldName = Typeface(TypeScale.embedFieldName, offset: 2, mono: 12)
 }
 
 private enum Marker: Hashable {
@@ -276,13 +347,14 @@ private enum Symbols {
 }
 
 private struct Builder {
-    private let message: Message
+    private let text: MessageText.Source
     private let source: NSString
     private let revealed: Set<UInt16>
     private let now: Date
     private let times: TimestampText
     private let color: NSColor
     private let jumbo: Bool
+    private let base: Typeface
     private let out = NSMutableAttributedString()
     private var nextChange: Date?
     private var hasRelativeTime = false
@@ -293,23 +365,25 @@ private struct Builder {
 
     // The channel shows its spoilers (`render_spoilers`), or the user clicked this one.
     private func isRevealed(_ spoiler: UInt16) -> Bool {
-        message.spoilersShown || revealed.contains(spoiler)
+        text.spoilersShown || revealed.contains(spoiler)
     }
 
-    init(_ message: Message, revealed: Set<UInt16>, now: Date, times: TimestampText) {
-        self.message = message
-        source = message.content as NSString
+    init(_ text: MessageText.Source, revealed: Set<UInt16>, now: Date, times: TimestampText) {
+        self.text = text
+        source = text.content as NSString
         self.revealed = revealed
         self.now = now
         self.times = times
-        color =
-            switch message.delivery {
-            case .pending: Palette.textMuted
-            case .failed: Palette.danger
-            default: Palette.textDefault
+        color = text.color
+        columns = Self.columns(text.formatted.blocks)
+        jumbo = text.base == .body && text.formatted.jumbo
+        base =
+            switch text.base {
+            case .body: .body
+            case .embedTitle: .embedTitle
+            case .embedText: .embedText
+            case .embedFieldName: .embedFieldName
             }
-        columns = Self.columns(message.formatted.blocks)
-        jumbo = message.formatted.jumbo
     }
 
     private static func columns(_ blocks: [TextBlock]) -> [CGFloat] {
@@ -340,7 +414,7 @@ private struct Builder {
     }
 
     mutating func build() -> MessageText.Built {
-        let blocks = message.formatted.blocks
+        let blocks = text.formatted.blocks
         var previous: (block: TextBlock, style: BlockStyle)?
         for (index, block) in blocks.enumerated() {
             let style = style(block, first: index == 0)
@@ -355,7 +429,7 @@ private struct Builder {
             }
             previous = (block, style)
         }
-        if message.editedTimestamp != nil, !message.content.isEmpty {
+        if text.edited, !text.content.isEmpty {
             var mark: NSAttributedString = CellText.editedMark()
             if let previous, previous.style.isCode {
                 separate(previous.block, previous.style, nil)
@@ -396,7 +470,7 @@ private struct Builder {
         var color = color
         switch block.kind {
         case .paragraph:
-            face = jumbo ? .jumbo : .body
+            face = jumbo ? .jumbo : base
         case .heading(let level):
             face = Typeface.headings[min(max(Int(level), 1), 3) - 1]
             key.before = first ? 0 : 8
@@ -486,7 +560,7 @@ private struct Builder {
             if index == pillLink {
                 return
             }
-            let link = message.formatted.links[Int(index)]
+            let link = text.formatted.links[Int(index)]
             if !link.masked, let channel = link.channel, case .known(let name) = channel.name {
                 pillLink = index
                 channelPill(
@@ -495,7 +569,7 @@ private struct Builder {
                 return
             }
             attributes[.foregroundColor] = Palette.textLink
-            attributes[.link] = target(link, index: index)
+            attributes[.link] = text.base == .body ? target(link, index: index) : embedTarget(link)
             if link.masked {
                 attributes[.toolTip] = link.title.map { "\($0)\n(\(link.url))" } ?? link.url
             }
@@ -555,7 +629,13 @@ private struct Builder {
         case .command(let name, _):
             mention(MentionText.command(name), placeholder: false, span, style, attributes)
         case .emoji(let name, _, let animated, let key):
-            let side = jumbo ? TypeScale.size(MessageText.emojiJumbo) : (style.face.size * 1.375).rounded()
+            // In an embed, emoji outside headings are 18 (Discord's `.embed .emoji`).
+            let heading = Typeface.headings.contains { $0 === style.face }
+            let side =
+                jumbo
+                ? TypeScale.size(MessageText.emojiJumbo)
+                : text.base != .body && !heading
+                    ? TypeScale.size(18) : (style.face.size * 1.375).rounded()
             attributes[.akariEmoji] = MessageText.EmojiBox(
                 key: key, name: name, animated: animated, side: side, centered: jumbo)
             attributes[.toolTip] = ":\(name):"
@@ -591,11 +671,20 @@ private struct Builder {
 
     private func target(_ link: TextLink, index: UInt16) -> URL? {
         if let channel = link.channel, case .known = channel.name,
-            channel.kind?.opensMessageList ?? true
+            channel.kind?.opensPage ?? true
         {
             return URL(string: "akari://channel/\(channel.channelId.rawValue)")
         }
         return link.masked ? URL(string: "akari://link/\(index)") : URL(string: link.url)
+    }
+
+    private func embedTarget(_ link: TextLink) -> URL? {
+        if let channel = link.channel, case .known = channel.name,
+            channel.kind?.opensPage ?? true
+        {
+            return URL(string: "akari://channel/\(channel.channelId.rawValue)")
+        }
+        return link.masked ? MessageText.maskedLink(link.url) : URL(string: link.url)
     }
 
     private func shown(_ start: UInt32, _ end: UInt32) -> String {
@@ -641,7 +730,7 @@ private struct Builder {
         var attributes = attributes
         attributes[.font] = style.face.font(bold: span.bold, italic: span.italic, medium: true)
         attributes[.foregroundColor] = Palette.mentionText
-        if kind?.opensMessageList ?? true {
+        if kind?.opensPage ?? true {
             attributes[.link] = URL(string: "akari://channel/\(id.rawValue)")
             attributes[.toolTip] = nil
         } else {
@@ -690,14 +779,7 @@ private struct Builder {
     private func emojiBox(_ side: CGFloat, _ face: Typeface, _ attributes: [NSAttributedString.Key: Any])
         -> NSAttributedString
     {
-        let attachment = NSTextAttachment()
-        let font = face.font(bold: false, italic: false)
-        attachment.bounds = NSRect(x: 0, y: 0, width: side, height: side)
-        attachment.attachmentCell = EmojiCell(
-            size: NSSize(width: side, height: min(side, font.ascender.rounded(.down))))
-        let box = NSMutableAttributedString(attachment: attachment)
-        box.addAttributes(attributes, range: NSRange(location: 0, length: box.length))
-        return box
+        MessageText.emojiBox(side, in: face.font(bold: false, italic: false), attributes)
     }
 
     private func symbol(

@@ -12,14 +12,26 @@ public struct SpoilerKey: Hashable, Sendable {
     }
 }
 
-/// One attachment of one message.
+/// One attachment or one embed of one message: what a reveal or an eye button keys by.
 public struct MediaKey: Hashable, Sendable {
+    public enum Item: Hashable, Sendable {
+        case attachment(AttachmentId)
+        /// By its place among the message's embeds and its link, so an edit that brings another
+        /// embed to that place doesn't inherit a reveal.
+        case embed(UInt8, url: String?)
+    }
+
     public let messageId: MessageId
-    public let attachmentId: AttachmentId
+    public let item: Item
 
     public init(messageId: MessageId, attachmentId: AttachmentId) {
         self.messageId = messageId
-        self.attachmentId = attachmentId
+        item = .attachment(attachmentId)
+    }
+
+    public init(messageId: MessageId, embed: UInt8, url: String?) {
+        self.messageId = messageId
+        item = .embed(embed, url: url)
     }
 }
 
@@ -153,7 +165,14 @@ public final class MessageListModel {
 
     public let channelId: ChannelId
     /// Oldest first, then our pending and failed messages.
-    public private(set) var rows: [Row] = []
+    public private(set) var rows: [Row] = [] {
+        didSet {
+            // A starter's row brings its parent's download option with it.
+            if shownChannels != downloadsReadFor {
+                readHiddenDownloads()
+            }
+        }
+    }
     public private(set) var reachedOldest = false
     public private(set) var atPresent = true
     public private(set) var isStale = false
@@ -169,10 +188,14 @@ public final class MessageListModel {
     public private(set) var openedFrom = Origin.network
     /// Revealed for as long as the model lives: through rereads and loads, not a channel switch.
     public private(set) var revealedSpoilers: Set<SpoilerKey> = []
-    /// Spoilered media the user revealed, as long as the model lives (D143: no re-hiding).
+    /// Spoilered media and embeds the user revealed, as long as the model lives (D143: no
+    /// re-hiding).
     public private(set) var revealedMedia: Set<MediaKey> = []
     /// Sensitive media the user showed with its eye; a second click hides it again (D144).
     public private(set) var shownSensitive: Set<MediaKey> = []
+    /// Of the channels its rows show messages from, those that hide downloads of their media
+    /// (Discord's channel option): videos and audio from them offer no Download.
+    public private(set) var channelsHidingDownloads: Set<ChannelId> = []
     /// Whether the view is scrolled to the bottom of its rows, as it reports; a list opens there.
     public private(set) var atBottom = true
     /// At the present, not stale, and scrolled to its bottom: where the user reads new messages.
@@ -231,6 +254,8 @@ public final class MessageListModel {
     // list still has to reach the present.
     @ObservationIgnored private var owedPresent: Int?
     @ObservationIgnored private var retired = false
+    @ObservationIgnored private var downloadsReadFor: Set<ChannelId> = []
+    @ObservationIgnored private var downloadsFollow: Set<ChannelId> = []
     @ObservationIgnored private var landed = 0
     @ObservationIgnored private var messageJumps = 0
     // The message the last jump that loaded goes to.
@@ -252,6 +277,7 @@ public final class MessageListModel {
             channelId: channelId, account: account, store: store, drafts: drafts)
         readStoredPosition()
         readOwner()
+        readHiddenDownloads()
         reload(rereading: [])
         if hasMessages {
             openedFrom = .window
@@ -442,6 +468,44 @@ public final class MessageListModel {
         return URL(string: link)
     }
 
+    /// Whether the shown message's channel hides downloads of its media (Discord's channel
+    /// option): videos and audio lose their Download, files keep theirs.
+    public func hidesDownloads(of row: Row) -> Bool {
+        store.hidesMediaDownloads(channelId: row.shown.channelId)
+    }
+
+    // A thread's starter row shows its parent's message.
+    private var shownChannels: Set<ChannelId> {
+        Set(rows.map(\.shown.channelId)).union([channelId])
+    }
+
+    private func readHiddenDownloads() {
+        downloadsReadFor = shownChannels
+        // A post's option is its forum's: the forum's update is the one that says it changed.
+        downloadsFollow = downloadsReadFor.union(
+            downloadsReadFor.compactMap { store.channel(id: $0)?.parentId })
+        let hiding = downloadsReadFor.filter { store.hidesMediaDownloads(channelId: $0) }
+        if hiding != channelsHidingDownloads {
+            channelsHidingDownloads = hiding
+        }
+    }
+
+    /// Saves the original to `destination` (an attachment's Download); cancelling the task leaves
+    /// the file as it was. Returns the bytes written.
+    public func saveOriginal(_ key: ImageKey, to destination: URL) async throws -> UInt64 {
+        try await account.saveOriginal(key, to: destination)
+    }
+
+    /// The viewer on `row`'s media from `index`, by its author at its time; the shown message's
+    /// channel says whether downloads are offered.
+    public func viewer(_ items: [ViewerModel.Item], at index: Int, of row: Row) -> ViewerModel? {
+        let shown = row.shown
+        return ViewerModel(
+            items: items, index: index, author: shown.author, authorName: row.authorName,
+            timestamp: shown.timestamp,
+            hidesDownloads: store.hidesMediaDownloads(channelId: shown.channelId), account: account)
+    }
+
     // Marked read or a send: only a message newer than what is known now starts the next line.
     func endNewMessagesLine() {
         // A latest load would overtake a running jump too, but at the present none runs.
@@ -484,6 +548,10 @@ public final class MessageListModel {
             || ownerId.map(batch.usersChanged.contains) == true
         {
             readOwner()
+        }
+        let changedChannels = guildId.flatMap { batch.channelsChanged[$0] } ?? []
+        if batch.everythingChanged || !changedChannels.isDisjoint(with: downloadsFollow) {
+            readHiddenDownloads()
         }
         let updated = batch.updatedMessages[channelId] ?? []
         let hadRows = hasMessages

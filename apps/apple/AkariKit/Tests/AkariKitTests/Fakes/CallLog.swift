@@ -24,6 +24,11 @@ final class CallLog: Sendable {
         case searchThreads(ChannelId, String)
         case setBrowsing(ChannelId?)
         case createThread(ChannelId, MessageId?, String, isPrivate: Bool, CreateThreadLocation)
+        case openForum(ChannelId?)
+        case refreshForum(ChannelId)
+        case loadOlderPosts(ChannelId, ForumView)
+        case searchPosts(ChannelId, String, ForumView)
+        case requestPostPreviews(ChannelId, [ChannelId])
         case flushCache
     }
 
@@ -58,6 +63,11 @@ final class CallLog: Sendable {
         case guildBadges([GuildId])
         case readState(ChannelId)
         case unreadPrivateChannels
+        case hidesMediaDownloads(ChannelId)
+        case forumPosts(ChannelId, ForumView)
+        case postPreview(ChannelId)
+        case unreadPosts([ChannelId])
+        case newPosts([ChannelId])
     }
 
     private let state = Locked<(calls: [Call], offMainThread: Int)>(([], 0))

@@ -50,7 +50,11 @@ that the store doesn't have; it keeps the threads THREAD_LIST_SYNC and messages 
 thread's live message count and newest message for its box, and joins and leaves threads; for
 a channel's Threads browser it lists the active threads, loads the archived ones page by page and
 searches threads by name; it creates threads, from a message or not, as the official client does,
-with the parent's own slowmode for new threads; `akari_core::media` gets images: keys by Discord's
+with the parent's own slowmode for new threads; it keeps forums' settings and posts' tags, the open
+forum's post list (frozen between refreshes, the new-post count, archived pages per tag filter,
+search) and posts' first messages (post-data, 10 at a time, one request at a time), counts a forum
+row's new or unread posts, says which cards are unread and which are new (made since the forum was
+last read, never opened), and acks a forum being read at "now"; `akari_core::media` gets images: keys by Discord's
 IDs, the size and form each box asks for (never fewer pixels than it covers on screen), downloads
 without the token on a client of their own (eight at a time, newest first, one per image however
 many ask), signed attachment links renewed in batches, each account's images on disk with LRU
@@ -63,21 +67,28 @@ user's custom emoji is from and asks Discord where other emoji and stickers are 
 popouts); it says how each message's attachments show (the media mosaic or file rows, Discord's
 order) and what covers each (a spoiler by `render_spoilers`, sensitive media by the user's
 explicit and gore settings per conversation, media waiting for Discord's content scan, which the
-account asks for in viewed channels and stops waiting for after 3 s), and whether a channel waits
-behind the age gate, with the user's agreement per server in the cache;
+account asks for in viewed channels and stops waiting for after 3 s), how its embeds show
+(Discord's merge by link, promotion and filters, a card or the media alone, the link text hidden
+under its one image, and the same covers, a spoilered link covering them all), and whether a
+channel waits behind the age gate, with the user's agreement per server in the cache, and whether
+a media or forum post hides download options;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, show where a channel's unread state and mentions come from, and get an image as the app
 would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
 and the message APIs, including the send rules, the read calls and `end_session`, and images
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
 emoji span's key, the display settings, attachments with their kind, size, placeholder, key,
-place and cover, the age gate and the agreement), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
+agreement, the hidden download options, forums: their settings, post lists, first messages and
+the row's post count), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
-login, session, server, channel, DM and message lists, and the composer), the message
+login, session, server, channel, DM and message lists, the composer, the media viewer and the
+forum page), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
-`AnimationClock`: Akari's own playback; `AnimatedFormatProbe`: WebP or GIF per Mac, decided at
+`AnimationClock`: Akari's own playback, a long GIF from four frames at a time; `ImageLog`: why
+an image or animation doesn't show; `AnimatedFormatProbe`: WebP or GIF per Mac, decided at
 launch from an animated WebP shipped as a resource). `apps/macos` is the first app: Akari's icon and logo, derived from `assets/` by
 `make-icons.swift` (an Icon Composer `.icon` and a vector template image), the login screen
 (the logo in the QR code's middle) and the main window with the server
@@ -90,13 +101,19 @@ icons in every place (message headers, DM rows and the rail, the user panel, the
 DM's start, thread boxes, the browser's rows and facepiles, server icons over their initials)
 as layers from the image tier, animated avatars playing on hover while the window is key; custom
 emoji as image layers on fixed boxes in the text (jumbo at 48, `:name:` as tooltip, copy and
-fallback) and stickers in a row under the text (Lottie as a named box), both fitting inside their
+fallback; at the text's size in the one-line previews of thread boxes, the Threads browser and
+forum cards) and stickers in a row under the text (Lottie as a named box), both fitting inside their
 box and animated by their settings, visibility and the message's hover, with the hand, a hover card
 and a click's popout (where an emoji or sticker is from, Discord's words); a message's attachments
 under its text (Discord's mosaic from sizes alone with placeholders, the fade, the spinner, failure
 and retry, GIFs by the motion policy, video posters, file rows, ALT buttons, spoiler and sensitive
-covers with the eye, the media a screen away asked early; a click opens the original in the
-browser until the viewer) and the age gate in place of a gated channel's list and composer; a thread
+covers with the eye, the media a screen away asked early), its embeds under them (Discord's card
+with its rows, fields and thumbnail, media alone, galleries, GIFVs that loop by the motion policy, a
+video's Play/Open Link pill, the link text hidden, the covers), the media viewer that a click on
+an image, a video or a GIFV opens (a key panel over the window with Discord's scrim, fit and grid,
+zoom at the pointer, pan, the arrows, keys and strip, the author and time, videos in AVKit, Save,
+Open in Browser, Copy Image, Copy Media Link and View Details, the neighbours asked early) and the
+age gate in place of a gated channel's list and composer; a thread
 opens with its header ("# channel › thread"), its start and starter message, and a locked
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
 its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message
@@ -104,13 +121,14 @@ with a thread has the thread's box (count, newest message, time), which opens it
 "…" and row menu join and leave it; the header's Threads button, "See all threads" and the
 channel list's "More Active Threads" show a channel's threads (the popout, the modal); the New
 Thread form takes the split's place (a message's menu, the browser's Create buttons, ⌘⇧⌥N) and
-creates threads; it shows
+creates threads; a forum's row opens its page (search, Sort & View, the tag filter, list and
+gallery cards with the NEW badge, older posts, the "N New Posts" pill) and shows its post count; it shows
 the
 connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent
 messages, which the macOS app restores before the gateway connects. `akari-markdown` parses
 Discord's message markdown (the rules, a flat document with source spans, a source map, UTF-16
-offsets, jumbo for up to 30 emoji and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
+offsets, jumbo for up to 30 emoji, Discord's rule sets for embed text and a document cache); akari-ffi gives each message its parsed `formatted` text, parsed
 on Akari's runtime through akari-core's message preparer hook; the macOS app renders it (styles,
 code, quotes, lists, mentions, timestamps, spoilers and links), drawing boxes, pills and spoiler
 backgrounds as layers behind the text. The other app folders contain only a README.

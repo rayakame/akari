@@ -76,6 +76,8 @@ pub(crate) struct Images {
     flights: Mutex<Flights>,
     // Keys Discord answered "no such image" for, this session.
     missing: Mutex<HashSet<String>>,
+    // Asks that ended over the cap this session: the same ask would again.
+    oversized: Mutex<HashSet<FlightKey>>,
     // Renewed links by path, beside the store: a renewal never reloads a row.
     renewed: Mutex<HashMap<String, Url>>,
 }
@@ -129,6 +131,7 @@ impl Images {
             runtime: runtime.clone(),
             flights: Mutex::default(),
             missing: Mutex::default(),
+            oversized: Mutex::default(),
             renewed: Mutex::default(),
         })
     }
@@ -196,11 +199,11 @@ impl Images {
                     .get(usize::from(*embed))
                     .ok_or(ImageError::UnknownKey)?;
                 match slot {
-                    EmbedSlot::Image | EmbedSlot::Thumbnail => {
-                        let media = if *slot == EmbedSlot::Image {
-                            embed.image.as_ref()
-                        } else {
-                            embed.thumbnail.as_ref()
+                    EmbedSlot::Image | EmbedSlot::Thumbnail | EmbedSlot::Video => {
+                        let media = match slot {
+                            EmbedSlot::Image => embed.image.as_ref(),
+                            EmbedSlot::Thumbnail => embed.thumbnail.as_ref(),
+                            _ => embed.video.as_ref(),
                         };
                         hosts.embed(
                             media.ok_or(ImageError::UnknownKey)?,
@@ -241,16 +244,24 @@ impl Images {
             Ok(planned) => planned,
             // An attachment kept from an earlier session answers without its message.
             Err(ImageError::UnknownKey) => return self.kept_without_message(&request).await,
-            Err(err) => return Err(err),
+            Err(err) => {
+                tracing::debug!(target: LOG, kind = key_kind(&request.key), reason = error_name(err), "image not asked for");
+                return Err(err);
+            }
         };
         if lock(&self.missing).contains(&planned.disk) {
+            tracing::debug!(target: LOG, key = %planned.disk, "image known to be missing");
             return Err(ImageError::NotFound);
         }
-        let tier = self
-            .tier()
-            .await
-            .filter(|tier| !tier.is_deleted())
-            .ok_or(ImageError::Unavailable)?;
+        let flight = FlightKey {
+            disk: planned.disk.clone(),
+            form: planned.form,
+            needed: planned.needed,
+        };
+        let Some(tier) = self.tier().await.filter(|tier| !tier.is_deleted()) else {
+            tracing::debug!(target: LOG, key = %planned.disk, "no image directory");
+            return Err(ImageError::Unavailable);
+        };
         if let Some(entry) = tier.find(&planned.disk, planned.form, planned.needed).await {
             return Ok(ImageFile {
                 path: entry.path,
@@ -260,8 +271,16 @@ impl Images {
                 from_disk: true,
             });
         }
+        if lock(&self.oversized).contains(&flight) {
+            tracing::debug!(target: LOG, key = %planned.disk, "image known to be over the cap");
+            return Err(ImageError::TooLarge);
+        }
         if matches!(self.store.connection(), ConnectionState::Offline) {
+            tracing::debug!(target: LOG, key = %planned.disk, "offline, image not on disk");
             return Err(ImageError::Unavailable);
+        }
+        if request.animated.is_some() && planned.form == Form::Still {
+            tracing::debug!(target: LOG, key = %planned.disk, "no animated form, the still asked for");
         }
         self.shared(planned).await
     }
@@ -340,7 +359,7 @@ impl Images {
     }
 
     // The link to fetch: its renewed signature if it has one, renewed now when due.
-    async fn signed(&self, planned: &Planned, force: bool) -> Result<Url, ImageError> {
+    async fn signed(&self, planned: &Planned, force: bool, mark: bool) -> Result<Url, ImageError> {
         let Some(link) = &planned.signed else {
             return Ok(planned.url.clone());
         };
@@ -357,7 +376,9 @@ impl Images {
             // Not expired yet: it still works for now.
             Renewal::Refused | Renewal::Failed if usable => current,
             Renewal::Refused => {
-                lock(&self.missing).insert(planned.disk.clone());
+                if mark {
+                    lock(&self.missing).insert(planned.disk.clone());
+                }
                 return Err(ImageError::NotFound);
             }
             Renewal::Failed => return Err(ImageError::Unavailable),
@@ -382,8 +403,14 @@ impl Images {
 
     async fn download(&self, planned: Planned) -> Answer {
         let started = Instant::now();
-        let mut url = self.signed(&planned, false).await?;
+        let flight = FlightKey {
+            disk: planned.disk.clone(),
+            form: planned.form,
+            needed: planned.needed,
+        };
+        let mut url = self.signed(&planned, false, true).await?;
         let mut renewed_after_denial = false;
+        let mut from_original = false;
         let mut attempts = 0;
         let outcome = loop {
             attempts += 1;
@@ -395,14 +422,44 @@ impl Images {
                         && signed::expires(&url).is_none_or(|ex| ex <= self.now_seconds()) =>
                 {
                     renewed_after_denial = true;
-                    url = self.signed(&planned, true).await?;
+                    // The proxy still has its copy: an upload Discord won't sign marks nothing.
+                    let renewed = match self.signed(&planned, true, !from_original).await {
+                        Ok(renewed) => renewed,
+                        Err(err) => break Err(err),
+                    };
+                    url = match &planned.original {
+                        Some(original) if from_original => signed::resign(original, &renewed),
+                        _ => renewed,
+                    };
+                }
+                Fetched::TooLarge if !from_original && let Some(original) = &planned.original => {
+                    tracing::debug!(target: LOG, key = %planned.disk, "proxy copy too large, original asked");
+                    from_original = true;
+                    attempts = 0;
+                    url = match self.signed(&planned, false, false).await {
+                        Ok(renewed) => signed::resign(original, &renewed),
+                        Err(err) => break Err(err),
+                    };
+                }
+                Fetched::Status(403 | 404 | 410) if from_original => {
+                    break Err(ImageError::NotFound);
                 }
                 Fetched::Status(403 | 404 | 410) => {
                     lock(&self.missing).insert(planned.disk.clone());
                     break Err(ImageError::NotFound);
                 }
                 Fetched::Status(415) | Fetched::NotAnImage => break Err(ImageError::NotAnImage),
-                Fetched::TooLarge => break Err(ImageError::TooLarge),
+                Fetched::TooLarge => {
+                    tracing::debug!(
+                        target: LOG,
+                        key = %planned.disk,
+                        copy = if from_original { "original" } else { "proxy" },
+                        has_original = planned.original.is_some(),
+                        cap = MAX_BODY,
+                        "image over the display cap"
+                    );
+                    break Err(ImageError::TooLarge);
+                }
                 Fetched::Refused => break Err(ImageError::Unsupported),
                 Fetched::RateLimited if attempts < ATTEMPTS => {}
                 Fetched::Status(status @ 500..) if attempts < ATTEMPTS => {
@@ -427,13 +484,24 @@ impl Images {
             after_ms = crate::millis(started.elapsed()),
             "image downloaded"
         );
+        if outcome == Err(ImageError::TooLarge) {
+            let mut oversized = lock(&self.oversized);
+            if oversized.len() >= RENEWED_LIMIT {
+                oversized.clear();
+            }
+            oversized.insert(flight);
+        }
         outcome
     }
 
     async fn keep(&self, planned: &Planned, bytes: Vec<u8>) -> Answer {
         let inspected = sniff::inspect(&bytes).ok_or(ImageError::NotAnImage)?;
         if u64::from(inspected.width) * u64::from(inspected.height) > MAX_PIXELS {
+            tracing::debug!(target: LOG, key = %planned.disk, width = inspected.width, height = inspected.height, "image over the pixel cap");
             return Err(ImageError::TooLarge);
+        }
+        if planned.form != Form::Still && !inspected.animated {
+            tracing::debug!(target: LOG, key = %planned.disk, "animation asked for, the file is a still");
         }
         let tier = self
             .tier()
@@ -503,6 +571,10 @@ impl Images {
                 let link = match slot {
                     EmbedSlot::Image => embed.image.as_ref().map(|media| &*media.url),
                     EmbedSlot::Thumbnail => embed.thumbnail.as_ref().map(|media| &*media.url),
+                    EmbedSlot::Video => embed
+                        .video
+                        .as_ref()
+                        .map(|media| media.proxy_url.as_deref().unwrap_or(&media.url)),
                     EmbedSlot::AuthorIcon => embed
                         .author
                         .as_ref()
@@ -598,6 +670,7 @@ impl Images {
         let media = match slot {
             EmbedSlot::Image => embed.image.as_ref(),
             EmbedSlot::Thumbnail => embed.thumbnail.as_ref(),
+            EmbedSlot::Video => embed.video.as_ref(),
             EmbedSlot::AuthorIcon | EmbedSlot::FooterIcon => None,
         };
         media
@@ -608,6 +681,7 @@ impl Images {
 
     pub(crate) async fn clear(&self) {
         lock(&self.missing).clear();
+        lock(&self.oversized).clear();
         if let Some(tier) = self.tier().await {
             tier.clear().await;
         }
@@ -624,6 +698,21 @@ impl Drop for Images {
 
 fn retry_wait(attempts: u32) -> Duration {
     backoff::delay(attempts, RETRY_BASE, RETRY_MAX, crate::random::unit())
+}
+
+fn key_kind(key: &ImageKey) -> &'static str {
+    match key {
+        ImageKey::Avatar { .. } => "avatar",
+        ImageKey::MemberAvatar { .. } => "member_avatar",
+        ImageKey::DefaultAvatar { .. } => "default_avatar",
+        ImageKey::GuildIcon { .. } => "guild_icon",
+        ImageKey::GroupIcon { .. } => "group_icon",
+        ImageKey::RoleIcon { .. } => "role_icon",
+        ImageKey::Emoji { .. } => "emoji",
+        ImageKey::Sticker { .. } => "sticker",
+        ImageKey::Attachment { .. } => "attachment",
+        ImageKey::EmbedMedia { .. } => "embed",
+    }
 }
 
 fn error_name(err: ImageError) -> &'static str {

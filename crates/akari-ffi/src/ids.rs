@@ -1,7 +1,13 @@
 use akari_core::model::{
     AttachmentId, ChannelId, EmojiId, GuildId, MessageId, Permissions, RoleId, StickerId,
-    StickerPackId, UserId,
+    StickerPackId, TagId, UserId,
 };
+
+uniffi::custom_type!(TagId, u64, {
+    remote,
+    lower: |id| id.get(),
+    try_lift: |raw| Ok(TagId::new(raw)),
+});
 
 uniffi::custom_type!(UserId, u64, {
     remote,

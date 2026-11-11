@@ -29,9 +29,20 @@ come from Discord's CDN at runtime like every image ([images.md](images.md),
   the message's hover for every emoji in it (Discord tracks the emoji's own hover too).*
 - **Failure**: an emoji that can't load shows `:name:` in its box, small and muted, the text
   around it unmoved. A hidden spoiler's emoji stay under the cover and aren't asked for.
-- **Elsewhere**: a thread box's second line and the Threads browser's rows read a custom emoji
-  as `:name:` (one line of small text, no image layers); the New Thread form's preview shows
-  the message as the list does, emoji and stickers included.
+- **One-line previews** (a thread box's second line, the Threads browser's rows, a forum
+  card's message): the emoji's image on a box in the line, never jumbo. Discord parses these
+  with `formatInline`, which turns jumbo off, and sizes the emoji by the place: 1.375 of the 14
+  text (19.25) in the thread box and the Threads browser, 18 high on a 19.25 advance in the
+  forum card. *Akari: boxes of 19 and of 18 square, with the list's image layers on them, played
+  by the list's rule for emoji while the window is key: the setting, or the pointer over the
+  message (the thread box), the row or the card. As in the list, every emoji has its box from
+  the first layout and the box is empty while its image loads, so nothing moves when it lands.
+  Only an image that failed gives its box up: the line then reads `:name:` in its place, in
+  full, the one time it reflows; when the session is back the box returns and asks again. An
+  emoji the ellipsis cut off or under a hidden spoiler isn't asked for. The gallery card's text, several lines
+  that fade out, has no image layers: an emoji reads `:name:` there.*
+- The New Thread form's preview shows the message as the list does, emoji and stickers
+  included.
 
 ## Stickers
 

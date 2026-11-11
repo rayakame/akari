@@ -15,6 +15,29 @@ use memo::Frame;
 
 pub(crate) struct Parser {
     pub(crate) steps: u64,
+    pub(crate) rules: Rules,
+}
+
+/// Which of Discord's rules apply: all of them in a message, fewer in an embed's text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Rules {
+    /// Code blocks, quotes and subtext.
+    pub(crate) blocks: bool,
+    /// Users, roles, channels, @everyone and @here, and `<id:…>` navigation.
+    pub(crate) mentions: bool,
+    pub(crate) links: bool,
+    pub(crate) lists: bool,
+    pub(crate) headings: bool,
+}
+
+impl Rules {
+    pub(crate) const MESSAGE: Rules = Rules {
+        blocks: true,
+        mentions: true,
+        links: true,
+        lists: true,
+        headings: true,
+    };
 }
 
 // parse-discord parses some text it builds (a quote's lines without "> "), mapped back here.
@@ -310,7 +333,11 @@ pub(crate) fn char_len(text: &str, at: usize) -> usize {
 
 impl Parser {
     pub(crate) fn new() -> Self {
-        Self { steps: 0 }
+        Self::with(Rules::MESSAGE)
+    }
+
+    pub(crate) fn with(rules: Rules) -> Self {
+        Self { steps: 0, rules }
     }
 
     fn emoji(&mut self, input: &Input, at: usize, range: &Range<usize>) -> Option<Match> {
@@ -403,6 +430,7 @@ impl Parser {
             return self.rule_in_link_text(input, at, range, ctx, frame);
         }
         let nest = ctx.depth < MAX_DEPTH;
+        let rules = self.rules;
         // Fallback chains live in their own calls: a link check runs inside this frame.
         match input.text.as_bytes()[at] {
             b'`' => self.backtick(input, at, range, ctx, frame),
@@ -411,12 +439,12 @@ impl Parser {
             b'~' if nest => self.strike(input, at, range, ctx, frame),
             b'|' if nest => self.spoiler(input, at, range, ctx, frame),
             b'<' => self.angle(input, at, range, frame),
-            b'@' => self.everyone(input, at, range),
-            b'h' | b's' => self.plain_url(input, at, range, ctx),
-            b'[' if nest => self.masked_link(input, at, range, ctx, frame),
+            b'@' if rules.mentions => self.everyone(input, at, range),
+            b'h' | b's' if rules.links => self.plain_url(input, at, range, ctx),
+            b'[' if nest && rules.links => self.masked_link(input, at, range, ctx, frame),
             b'-' if nest => self.dash(input, at, range, ctx),
             b'#' => self.hash(input, at, range, ctx),
-            b'>' if nest => self.quote(input, at, range, ctx),
+            b'>' if nest && rules.blocks => self.quote(input, at, range, ctx),
             b'0'..=b'9' => self.digit(input, at, range, ctx),
             b':' => self.shortcode(input, at, range),
             0x80.. => self.emoji(input, at, range),
@@ -458,7 +486,10 @@ impl Parser {
         ctx: Ctx,
         frame: &mut Frame,
     ) -> Option<Match> {
-        self.code_block(input, at, range, frame)
+        self.rules
+            .blocks
+            .then(|| self.code_block(input, at, range, frame))
+            .flatten()
             .or_else(|| self.inline_code(input, at, range, ctx, frame))
     }
 
@@ -471,10 +502,11 @@ impl Parser {
         frame: &mut Frame,
     ) -> Option<Match> {
         let nest = ctx.depth < MAX_DEPTH;
+        let lists = nest && self.rules.lists;
         nest.then(|| self.star(input, at, range, ctx, frame))
             .flatten()
             .or_else(|| self.emoji(input, at, range))
-            .or_else(|| nest.then(|| self.list(input, at, range, ctx)).flatten())
+            .or_else(|| lists.then(|| self.list(input, at, range, ctx)).flatten())
     }
 
     fn angle(
@@ -484,27 +516,40 @@ impl Parser {
         range: &Range<usize>,
         frame: &mut Frame,
     ) -> Option<Match> {
+        let Rules {
+            mentions, links, ..
+        } = self.rules;
         self.angle_in_link(input, at, range)
-            .or_else(|| self.angle_mention(input, at, range))
-            .or_else(|| self.angle_link(input, at, range, frame))
-            .or_else(|| self.email(input, at, range, frame))
-            .or_else(|| self.phone(input, at, range))
+            .or_else(|| self.angle_mention(input, at, range, mentions))
+            .or_else(|| {
+                links
+                    .then(|| self.angle_link(input, at, range, frame))
+                    .flatten()
+            })
+            .or_else(|| links.then(|| self.email(input, at, range, frame)).flatten())
+            .or_else(|| links.then(|| self.phone(input, at, range)).flatten())
     }
 
     fn dash(&mut self, input: &Input, at: usize, range: &Range<usize>, ctx: Ctx) -> Option<Match> {
-        self.subtext(input, at, range, ctx)
-            .or_else(|| self.list(input, at, range, ctx))
+        let Rules { blocks, lists, .. } = self.rules;
+        blocks
+            .then(|| self.subtext(input, at, range, ctx))
+            .flatten()
+            .or_else(|| lists.then(|| self.list(input, at, range, ctx)).flatten())
     }
 
     fn hash(&mut self, input: &Input, at: usize, range: &Range<usize>, ctx: Ctx) -> Option<Match> {
-        let nest = ctx.depth < MAX_DEPTH;
-        self.emoji(input, at, range)
-            .or_else(|| nest.then(|| self.heading(input, at, range, ctx)).flatten())
+        let headings = ctx.depth < MAX_DEPTH && self.rules.headings;
+        self.emoji(input, at, range).or_else(|| {
+            headings
+                .then(|| self.heading(input, at, range, ctx))
+                .flatten()
+        })
     }
 
     fn digit(&mut self, input: &Input, at: usize, range: &Range<usize>, ctx: Ctx) -> Option<Match> {
-        let nest = ctx.depth < MAX_DEPTH;
+        let lists = ctx.depth < MAX_DEPTH && self.rules.lists;
         self.emoji(input, at, range)
-            .or_else(|| nest.then(|| self.list(input, at, range, ctx)).flatten())
+            .or_else(|| lists.then(|| self.list(input, at, range, ctx)).flatten())
     }
 }

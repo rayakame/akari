@@ -69,6 +69,55 @@ final class ImageLayerViewTests {
         #expect(source.count == 1)
     }
 
+    // The viewer's zoom (D146): a box larger than what it may ask for asks at most that, its
+    // shape kept.
+    @Test
+    func aCapLimitsThePixelsAskedFor() async throws {
+        let source = FakeImageSource.stalling()
+        let cache = ImageCache(source: source)
+        let view = ImageLayerView()
+        view.images = cache
+        view.maxPixels = NSSize(width: 60, height: 30)
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        view.frame = NSRect(x: 10, y: 10, width: 100, height: 40)
+        window.contentView?.addSubview(view)
+        view.layoutSubtreeIfNeeded()
+
+        try await eventually { source.count == 1 }
+        let factor = min(60 / (100 * scale), 30 / (40 * scale))
+        #expect(source.requests.withLock { $0.first?.width } == UInt32((100 * scale * factor).rounded()))
+        #expect(source.requests.withLock { $0.first?.height } == UInt32((40 * scale * factor).rounded()))
+
+        view.maxPixels = nil
+        try await eventually { source.count == 2 }
+        #expect(source.requests.withLock { $0.last?.width } == UInt32(100 * scale))
+    }
+
+    // The same image asked again at another size that fails keeps the one shown: a failure only
+    // replaces nothing.
+    @Test
+    func aFailedReAskKeepsTheShownImage() async throws {
+        let png = try images.png("a", pixels: 80)
+        let source = FakeImageSource { request in
+            guard request.width <= 80 else {
+                throw ImageError.Unavailable
+            }
+            return ImageFile(path: png.path, width: 80, height: 80, animated: false, fromDisk: false)
+        }
+        let view = shown(ImageCache(source: source), size: 80 / scale)
+        view.show(ImageLayerView.Content(key: .avatar(1)))
+        view.layoutSubtreeIfNeeded()
+        try await eventually { view.hasImage }
+
+        view.setFrameSize(NSSize(width: 200, height: 200))
+        try await eventually { source.count == 2 }
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(view.hasImage)
+        #expect(!view.failed)
+        #expect(view.imageLayer.contents != nil)
+    }
+
     // A recycled box showing another user or server clears at once: the disc, never the
     // previous subject's picture, until the new one decoded. The same subject's new hash keeps
     // the old image (D137).
@@ -437,6 +486,33 @@ final class ImageLayerViewTests {
         view.animates = false
         #expect(view.player == nil)
         #expect(view.imageLayer.image === still)
+    }
+
+    // An animation the core refuses (over its size cap): the still stays, and the log says why.
+    @Test
+    func aRefusedAnimationKeepsTheStillAndLogsWhy() async throws {
+        let still = try images.png("still", pixels: 80)
+        let source = FakeImageSource { request in
+            guard request.animated == nil else {
+                throw ImageError.TooLarge
+            }
+            return ImageFile(path: still.path, width: 80, height: 80, animated: false, fromDisk: false)
+        }
+        let view = shown(ImageCache(source: source), size: 16)
+        view.show(ImageLayerView.Content(key: .avatar(1, animated: true), canAnimate: true))
+        try await eventually { view.imageLayer.contents != nil }
+        let shown = view.imageLayer.image
+
+        let lines = try await imageLog {
+            view.animates = true
+            try await eventually { source.count == 2 }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+
+        #expect(view.player == nil)
+        #expect(view.imageLayer.image === shown)
+        // The log is the app's: other suites' lines may land in it too.
+        #expect(lines.contains("animation avatar (user 1) not started, the still stays: over the size cap"))
     }
 
     @Test

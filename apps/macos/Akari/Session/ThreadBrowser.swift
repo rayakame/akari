@@ -440,6 +440,7 @@ struct ThreadBrowserCard: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: Self.radius))
         .onHover { hovered = $0 }
+        .environment(\.rowHovered, hovered)
         .onTapGesture { open(NSEvent.modifierFlags.contains(.shift)) }
         .background(CursorArea(.pointingHand))
         .padding(.bottom, ThreadBrowserLayout.cardGap)
@@ -518,16 +519,21 @@ struct ThreadBrowserSubtitle: View {
         .lineLimit(1)
     }
 
-    private func content(of message: Message) -> Text {
+    @ViewBuilder private func content(of message: Message) -> some View {
         if let placeholder = ThreadBox.placeholder(for: message) {
-            return Text(placeholder).italic()
+            Text(placeholder).italic()
+        } else {
+            PreviewLine(
+                text: Self.line(of: message), font: TypeScale.browserText.nsFont,
+                lineHeight: TypeScale.browserText.line)
         }
+    }
+
+    /// The newest message as the row's line shows it.
+    static func line(of message: Message) -> NSAttributedString {
         let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
-        let built = ThreadBoxView.content(
+        return ThreadBoxView.content(
             MessageText.build(message, revealed: [], now: Date(), times: times).text)
-        let attributed =
-            (try? AttributedString(built, including: \.appKit)) ?? AttributedString(built.string)
-        return Text(attributed)
     }
 
     static func time(_ date: Date, now: Date) -> String {

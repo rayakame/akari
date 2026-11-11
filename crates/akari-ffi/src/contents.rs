@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use akari_core::MessagePreparer;
 use akari_core::model::{MessageId, Timestamp};
 use akari_core::state;
-use akari_markdown::{Cache, Document};
+use akari_markdown::{Cache, Document, EmbedText};
 
 use crate::records::ContentStats;
 
@@ -26,6 +26,80 @@ impl ContentKey {
             edited: message.edited_timestamp,
         }
     }
+}
+
+// One text of one embed: 0 its title, 1 its description, then each field's name and value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct EmbedKey {
+    id: MessageId,
+    embed: u8,
+    part: u16,
+}
+
+/// One text of an embed and how it parses.
+pub(crate) struct EmbedPart<'a> {
+    pub(crate) part: u16,
+    pub(crate) text: std::borrow::Cow<'a, str>,
+    /// `None`: the plain string.
+    pub(crate) rules: Option<EmbedText>,
+}
+
+/// The texts `embed` shows, by its rules: titles and field names on one line.
+pub(crate) fn embed_parts(
+    embed: &state::Embed,
+    rules: state::EmbedTextRules,
+) -> Vec<EmbedPart<'_>> {
+    let markdown = |text| rules.markdown.then_some(text);
+    let title = EmbedText::Title {
+        links: rules.title_links,
+    };
+    let mut parts = Vec::new();
+    if let Some(text) = embed.title.as_deref() {
+        parts.push(EmbedPart {
+            part: 0,
+            text: akari_markdown::one_line(text),
+            rules: markdown(title),
+        });
+    }
+    if let Some(text) = embed.description.as_deref().filter(|_| rules.description) {
+        parts.push(EmbedPart {
+            part: 1,
+            text: text.into(),
+            rules: markdown(EmbedText::Description { lists: rules.lists }),
+        });
+    }
+    if rules.fields {
+        for (index, field) in embed.fields.iter().enumerate() {
+            let Ok(index) = u16::try_from(index) else {
+                break;
+            };
+            let part = index.saturating_mul(2).saturating_add(2);
+            parts.push(EmbedPart {
+                part,
+                text: akari_markdown::one_line(&field.name),
+                rules: markdown(title),
+            });
+            parts.push(EmbedPart {
+                part: part.saturating_add(1),
+                text: (&*field.value).into(),
+                rules: markdown(EmbedText::FieldValue { lists: rules.lists }),
+            });
+        }
+    }
+    parts
+}
+
+fn parse_part(part: &EmbedPart<'_>) -> Document {
+    match part.rules {
+        Some(rules) => akari_markdown::parse_embed(&part.text, rules),
+        None => akari_markdown::plain(&part.text),
+    }
+}
+
+fn part_fingerprint(part: &EmbedPart<'_>) -> u64 {
+    static KEY: OnceLock<RandomState> = OnceLock::new();
+    KEY.get_or_init(RandomState::new)
+        .hash_one((&*part.text, part.rules))
 }
 
 // How a read found a message's document.
@@ -72,6 +146,7 @@ impl Documents {
 // runtime before they enter a window (D56); everything else when it's read.
 pub(crate) struct Contents {
     documents: Mutex<Documents>,
+    embed_documents: Mutex<Cache<EmbedKey>>,
     parsed: AtomicU64,
     misses: AtomicU64,
     event_parses: AtomicU64,
@@ -104,6 +179,7 @@ impl Contents {
                 dropped: HashSet::new(),
                 capacity,
             }),
+            embed_documents: Mutex::new(Cache::new(capacity)),
             parsed: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             event_parses: AtomicU64::new(0),
@@ -136,6 +212,66 @@ impl Contents {
         };
         counter.fetch_add(1, Ordering::Relaxed);
         (document, found)
+    }
+
+    /// An embed's text as `part` says it parses: from the cache, which the page's preparing
+    /// filled, or parsed now.
+    pub(crate) fn embed_document(
+        &self,
+        message: &state::Message,
+        embed: u8,
+        part: &EmbedPart<'_>,
+    ) -> Arc<Document> {
+        let key = EmbedKey {
+            id: message.id,
+            embed,
+            part: part.part,
+        };
+        let source = part_fingerprint(part);
+        if let Some(document) = lock(&self.embed_documents).get(&key, source) {
+            return document;
+        }
+        let document = Arc::new(parse_part(part));
+        lock(&self.embed_documents).insert(key, source, document.clone());
+        self.parsed.fetch_add(1, Ordering::Relaxed);
+        self.event_parses.fetch_add(1, Ordering::Relaxed);
+        document
+    }
+
+    // A page's embed texts, off the lock while they parse.
+    fn prepare_embeds(&self, messages: &[Arc<state::Message>]) -> u64 {
+        let mut missing = Vec::new();
+        {
+            let mut cache = lock(&self.embed_documents);
+            for message in messages {
+                for (index, embed) in message.embeds.iter().enumerate() {
+                    let Ok(embed_index) = u8::try_from(index) else {
+                        break;
+                    };
+                    let rules = state::embed_text_rules(message, embed);
+                    for part in embed_parts(embed, rules) {
+                        let key = EmbedKey {
+                            id: message.id,
+                            embed: embed_index,
+                            part: part.part,
+                        };
+                        let source = part_fingerprint(&part);
+                        if cache.get(&key, source).is_none() {
+                            missing.push((key, source, part));
+                        }
+                    }
+                }
+            }
+        }
+        let parsed: Vec<_> = missing
+            .iter()
+            .map(|(_, _, part)| Arc::new(parse_part(part)))
+            .collect();
+        let mut cache = lock(&self.embed_documents);
+        for ((key, source, _), document) in missing.iter().zip(parsed) {
+            cache.insert(*key, *source, document);
+        }
+        missing.len() as u64
     }
 
     pub(crate) fn stats(&self) -> ContentStats {
@@ -184,7 +320,8 @@ impl MessagePreparer for Contents {
                 true,
             );
         }
-        let count = missing.len() as u64;
+        drop(documents);
+        let count = missing.len() as u64 + self.prepare_embeds(messages);
         self.parsed.fetch_add(count, Ordering::Relaxed);
         u32::try_from(count).unwrap_or(u32::MAX)
     }

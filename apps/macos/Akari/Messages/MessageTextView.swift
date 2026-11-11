@@ -595,6 +595,8 @@ final class EmojiOverlay: NSView {
             }
         }
     }
+    /// Told when an emoji's image failed (a one-line preview shows its name then).
+    var onFailure: ((ImageKey) -> Void)?
 
     override var isFlipped: Bool { true }
 
@@ -632,6 +634,11 @@ final class EmojiOverlay: NSView {
             } else {
                 view = ImageLayerView()
                 view.fit = .contain
+                view.onStateChange = { [weak self] view in
+                    if view.failed, let key = view.content?.key {
+                        self?.onFailure?(key)
+                    }
+                }
                 view.images = images
                 view.animates = animates
                 emojiViews.append(view)

@@ -173,6 +173,8 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
+    override func hidesMediaDownloads(channelId: ChannelId) -> Bool { false }
+
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         parentId == FakeBrowserStore.parent ? creation : ThreadCreation(public: false, private: false)
     }
@@ -198,7 +200,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
             id: last, channelId: threadId, kind: .default, author: user(FakeBrowserStore.ray),
             fromWebhook: false, content: "test",
             timestamp: FakeBrowserStore.date(last.rawValue), editedTimestamp: nil,
-            pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
+            pinned: false, mentionEveryone: false, attachments: [], embeds: [],
             stickers: [], componentsV2: false, delivery: .sent,
             formatted: formattedText(content: "test"),
             mentionsMe: false, reference: nil, hasThread: false, mentions: [], call: nil,
@@ -261,7 +263,7 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
                 id: id, channelId: channelId, kind: kind, author: user(author),
                 fromWebhook: false, content: content,
                 timestamp: FakeBrowserStore.date(id.rawValue), editedTimestamp: nil,
-                pinned: false, mentionEveryone: false, attachments: [], embedCount: 0,
+                pinned: false, mentionEveryone: false, attachments: [], embeds: [],
                 stickers: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: false,
                 reference: kind == .threadCreated

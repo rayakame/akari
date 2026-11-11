@@ -2,6 +2,7 @@ mod bounds;
 mod cache;
 mod corpus;
 mod cost;
+mod embeds;
 mod emoji;
 mod links;
 mod outline;

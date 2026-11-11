@@ -47,6 +47,9 @@ targets:
     platform: macOS
     sources:
       - AkariTests
+      # The generated GIF AkariKit's tests play, for the list and the viewer.
+      - path: ../apple/AkariKit/Tests/AkariKitTests/Support/TestGIF.swift
+        group: AkariTests
     dependencies:
       - target: Akari
     settings:

@@ -3,7 +3,7 @@ use akari_core::state;
 use akari_markdown::utf16::Utf16Map;
 use akari_markdown::{
     BlockKind, Container, Document, HeadingLevel, InlineKind, Link, LinkKind, Navigation, Span,
-    Style,
+    SpoilerId, Style,
 };
 
 use crate::images::ImageKey;
@@ -206,6 +206,19 @@ impl FormattedText {
         names: &Names<'_>,
         message: Option<&state::Message>,
     ) -> Self {
+        Self::numbered(document, content, names, message, 0)
+    }
+
+    /// Spoilers numbered from `first`: a message's embeds continue its content's numbers, so one
+    /// reveal set covers them all.
+    pub(crate) fn numbered(
+        document: &Document,
+        content: &str,
+        names: &Names<'_>,
+        message: Option<&state::Message>,
+        first: u16,
+    ) -> Self {
+        let number = |id: SpoilerId| first.saturating_add(id.0);
         let offsets = Utf16Map::new(content);
         let at = |span: Span| (offsets.to_utf16(span.start), offsets.to_utf16(span.end));
         let text = |span: Span| content.get(span.range()).unwrap_or_default().to_owned();
@@ -245,7 +258,7 @@ impl FormattedText {
                             _ => TextContainer::Quote,
                         })
                         .collect(),
-                    spoiler: block.spoiler.map(|id| id.0),
+                    spoiler: block.spoiler.map(number),
                     spans: block
                         .inlines
                         .iter()
@@ -257,7 +270,7 @@ impl FormattedText {
                                 italic: inline.style.contains(Style::ITALIC),
                                 underline: inline.style.contains(Style::UNDERLINE),
                                 strike: inline.style.contains(Style::STRIKE),
-                                spoiler: inline.spoiler.map(|id| id.0),
+                                spoiler: inline.spoiler.map(number),
                                 link: inline.link.map(|id| id.0),
                                 start,
                                 end,

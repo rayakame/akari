@@ -122,8 +122,21 @@ public enum ImageDecoder {
     }
 }
 
+/// What a `FramePlayer` plays: frames decoded one at a time at a box's pixels, from any thread.
+public protocol FrameSource: AnyObject, Sendable {
+    var frameCount: Int { get }
+    /// Each frame's time on screen, in seconds.
+    var delays: [Double] { get }
+    /// 0 plays forever.
+    var loopCount: Int { get }
+    /// One pass through every frame.
+    var cycle: Double { get }
+    /// `nil` for a frame that can't be decoded.
+    func frame(_ index: Int, pixels: (width: Int, height: Int), fit: ImageFit) -> CGImage?
+}
+
 /// An animated file's frames, decoded one at a time at a box's pixels; `nil` for a still.
-public final class AnimationSource: @unchecked Sendable {
+public final class AnimationSource: FrameSource, @unchecked Sendable {
     public let url: URL
     public let frameCount: Int
     /// Each frame's time on screen, in seconds; delays under 10 ms read as 100 ms, as browsers
@@ -158,6 +171,24 @@ public final class AnimationSource: @unchecked Sendable {
             return delay < 0.01 ? 0.1 : delay
         }
         loopCount = Self.loopCount(in: container)
+    }
+
+    // Failed opens looked into; tests read it.
+    static let failureProbes = LockedBox(0)
+
+    /// Why `url` gave no animation, for the log.
+    static func failure(_ url: URL) -> String {
+        failureProbes.withLock { $0 += 1 }
+        do {
+            let source = try ImageDecoder.open(url)
+            return CGImageSourceGetCount(source) > 1 ? "the file doesn't decode" : "the file has one frame"
+        } catch ImageDecoder.Failure.missing {
+            return "the file is gone"
+        } catch ImageDecoder.Failure.tooLarge {
+            return "more pixels than Akari decodes"
+        } catch {
+            return "the file doesn't decode"
+        }
     }
 
     /// `index` decoded to cover `pixels`, or to fit inside them.

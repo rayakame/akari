@@ -11,8 +11,8 @@ mod timestamp;
 mod user;
 
 pub use channel::{
-    Channel, ChannelType, OverwriteType, PermissionOverwrite, ThreadMember, ThreadMetadata,
-    ThreadMuteConfig, ThreadSearchResults,
+    Channel, ChannelType, DefaultReaction, ForumTag, OverwriteType, PermissionOverwrite, PostData,
+    PostDataEntry, ThreadMember, ThreadMetadata, ThreadMuteConfig, ThreadSearchResults,
 };
 pub use expression::{
     EmojiSource, EmojiSourceApplication, EmojiSourceGuild, Sticker, StickerGuild, StickerPack,
@@ -32,7 +32,8 @@ pub use permissions::Permissions;
 pub(crate) use snowflake::DISCORD_EPOCH;
 pub use snowflake::{
     AttachmentMarker, ChannelMarker, EmojiMarker, GenericMarker, GuildMarker, MessageMarker,
-    RoleMarker, SkuMarker, Snowflake, StickerMarker, StickerPackMarker, UserMarker, WebhookMarker,
+    RoleMarker, SkuMarker, Snowflake, StickerMarker, StickerPackMarker, TagMarker, UserMarker,
+    WebhookMarker,
 };
 pub use timestamp::Timestamp;
 #[cfg(test)]
@@ -49,6 +50,7 @@ pub type MessageId = Snowflake<MessageMarker>;
 pub type RoleId = Snowflake<RoleMarker>;
 pub type StickerId = Snowflake<StickerMarker>;
 pub type StickerPackId = Snowflake<StickerPackMarker>;
+pub type TagId = Snowflake<TagMarker>;
 pub type UserId = Snowflake<UserMarker>;
 pub type WebhookId = Snowflake<WebhookMarker>;
 

@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::gateway::{GatewayEvent, decode};
 use crate::model::{self, Permissions, Snowflake};
-use crate::state::wall_millis;
+use crate::state::{PostCount, wall_millis};
 
 const G1: u64 = 200_000_000_000_000_001;
 const G3: u64 = 200_000_000_000_000_003;
@@ -1679,14 +1679,16 @@ fn badges_cross_the_store() {
         store.channel_badge(Snowflake::new(300_000_000_000_000_002)),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
     assert_eq!(
         store.guild_badge(Snowflake::new(200_000_000_000_000_001)),
         Badge {
             unread: true,
-            mentions: 2
+            mentions: 2,
+            posts: PostCount::None,
         }
     );
     assert!(store.unread_private_channels().is_empty());
@@ -1793,6 +1795,7 @@ fn badge_batches_read_in_the_order_given() {
     let unread = Badge {
         unread: true,
         mentions: 2,
+        posts: PostCount::None,
     };
 
     let channels = store.channel_badges(&[
@@ -2063,6 +2066,10 @@ fn an_ack_undone_while_ready_is_prepared_still_gets_its_badge_event() {
 const FETCHED: u64 = 300_000_000_000_000_040;
 
 fn fetched(archived: bool, member: bool) -> model::Channel {
+    serde_json::from_str(&fetched_value(archived, member).to_string()).unwrap()
+}
+
+fn fetched_value(archived: bool, member: bool) -> Value {
     let mut thread = json!({
         "id": FETCHED.to_string(),
         "type": 11,
@@ -2083,7 +2090,7 @@ fn fetched(archived: bool, member: bool) -> model::Channel {
             "join_timestamp": "2024-03-01T08:30:00.250000+00:00", "flags": 1, "muted": false
         });
     }
-    serde_json::from_str(&thread.to_string()).unwrap()
+    thread
 }
 
 fn fetched_id() -> ChannelId {
@@ -2159,10 +2166,12 @@ fn a_fetch_keeps_what_the_gateway_brought_meanwhile() {
 fn a_fetched_joined_thread_is_listed_at_once() {
     let store = ready_store();
 
-    assert!(matches!(
-        store.learn_thread(fetched(false, true)),
-        Learned::Kept
-    ));
+    // Its newest message came after the join, long ago: it's listed for being unread.
+    let mut thread = fetched_value(false, true);
+    thread["last_message_id"] = "1300000000000000000".into();
+    let thread = serde_json::from_str(&thread.to_string()).unwrap();
+
+    assert!(matches!(store.learn_thread(thread), Learned::Kept));
 
     assert!(
         store
@@ -2247,4 +2256,26 @@ fn a_ready_before_the_restore_keeps_the_cached_agreements() {
             }
         )]
     );
+}
+
+// Cards ask on every scroll: a post that's asked or waits out its retry takes no write, which
+// would make the cache flusher snapshot for nothing.
+#[test]
+fn asking_for_post_previews_again_writes_nothing() {
+    let store = Store::new(DEFAULT_LIMITS);
+    let forum = Snowflake::new(300_000_000_000_000_050);
+    let posts = [
+        Snowflake::new(300_000_000_000_000_100),
+        Snowflake::new(300_000_000_000_000_101),
+    ];
+    assert!(store.want_post_previews(forum, &posts));
+    let asked = store.changes();
+    assert!(!store.want_post_previews(forum, &posts));
+    assert_eq!(store.changes(), asked, "asked");
+
+    let (_, batch) = store.next_post_batch().unwrap();
+    store.finish_post_batch(forum, &batch, None);
+    let failed = store.changes();
+    assert!(!store.want_post_previews(forum, &posts));
+    assert_eq!(store.changes(), failed, "waiting out the retry");
 }

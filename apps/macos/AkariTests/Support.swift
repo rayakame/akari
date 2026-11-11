@@ -57,10 +57,46 @@ func media(
         display: .media, cover: cover)
 }
 
+/// An embed's text: markdown for a rich embed, as the core parses it.
+func richText(_ text: String) -> RichText {
+    RichText(text: text, formatted: formattedText(content: text))
+}
+
+/// An embed image of message `message`'s embed `embed`.
+func embedImage(
+    _ width: UInt32, _ height: UInt32, embed: UInt8 = 0, slot: EmbedSlot = .image, animated: Bool = false,
+    message: UInt64 = 1
+) -> EmbedImage {
+    EmbedImage(
+        key: .embedMedia(
+            channelId: ChannelId(rawValue: 10), messageId: MessageId(rawValue: message), embed: embed, slot: slot),
+        width: width, height: height, placeholder: nil, animated: animated)
+}
+
+/// A rich card unless told otherwise.
+func embed(
+    _ index: UInt8 = 0, kind: EmbedKind = .rich, inline: Bool = false, title: String? = "Release notes",
+    description: String? = "Version **2.0** is out.", url: String? = "https://example.com/",
+    color: UInt32? = 0x5865F2, provider: EmbedLink? = nil, author: EmbedAuthor? = nil,
+    fields: [EmbedFieldText] = [], media: [EmbedImage] = [], video: EmbedVideo? = nil,
+    thumbnail: EmbedImage? = nil, footer: EmbedFooter? = nil, tall: Bool = false,
+    cover: MediaCover? = nil
+) -> Embed {
+    Embed(
+        index: index, kind: kind, inline: inline, color: color, url: url, provider: provider,
+        author: author, title: title.map(richText), description: description.map(richText), fields: fields,
+        media: media, video: video, thumbnail: thumbnail, footer: footer, tall: tall, cover: cover)
+}
+
+func field(_ name: String, _ value: String, inline: Bool = true) -> EmbedFieldText {
+    EmbedFieldText(name: richText(name), value: richText(value), inline: inline)
+}
+
 func row(
     _ raw: UInt64, by user: User = author(1), at time: Date, kind: MessageType = .default,
     content: String? = nil, key: UInt64? = nil, componentsV2: Bool = false,
-    attachments: [String] = [], files: [AkariFFI.Attachment]? = nil, embedCount: UInt32 = 0,
+    attachments: [String] = [], files: [AkariFFI.Attachment]? = nil, embeds: [Embed] = [],
+    hidesContent: Bool = false,
     stickers: [String] = [],
     stickerFormat: StickerFormatType = .png, delivery: Delivery = .sent, edited: Date? = nil, reference: MessageReference? = nil,
     hasThread: Bool = false, fields: [EmbedField] = [],
@@ -77,7 +113,7 @@ func row(
         id: MessageId(rawValue: raw), channelId: ChannelId(rawValue: 10), kind: kind,
         author: user, fromWebhook: false, content: content, timestamp: time,
         editedTimestamp: edited, pinned: false, mentionEveryone: false, attachments: files,
-        embedCount: embedCount, stickers: stickers.enumerated().map { index, name in
+        embeds: embeds, hidesContent: hidesContent, stickers: stickers.enumerated().map { index, name in
             sticker(raw * 10 + UInt64(index), name, format: stickerFormat)
         }, componentsV2: componentsV2,
         delivery: delivery, formatted: formattedText(content: content), mentionsMe: false,

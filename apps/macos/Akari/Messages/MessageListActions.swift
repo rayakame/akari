@@ -40,12 +40,20 @@ protocol MessageListActions: AnyObject {
     func createThread(from message: MessageId)
     // A clicked emoji's or sticker's popout; nil where there's none to show.
     func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel?
-    // An image, a video's Play or a file's name: the original in the browser until the viewer.
+    // A file's name, or media the viewer can't show: the original in the browser.
     func openMedia(_ key: ImageKey)
+    // The viewer on a row's media from `index` (D146); nil leaves it to the browser.
+    func viewer(_ items: [ViewerModel.Item], at index: Int, of row: MessageListModel.Row) -> ViewerModel?
     // A spoilered attachment's click, for the session.
     func revealMedia(_ key: MediaKey)
     // A sensitive attachment's eye.
     func toggleSensitive(_ key: MediaKey)
+    // A GIFV's video, which plays in the list.
+    func mediaURL(_ key: ImageKey) async -> URL?
+    // The shown message's channel takes Download from its videos and audio.
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool
+    // An attachment's Download, once the save panel answered.
+    func saveOriginal(_ key: ImageKey, to destination: URL) async throws
 }
 
 extension MessageListActions {
@@ -53,6 +61,12 @@ extension MessageListActions {
     func createThread(from message: MessageId) {}
     func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? { nil }
     func openMedia(_ key: ImageKey) {}
+    func viewer(_ items: [ViewerModel.Item], at index: Int, of row: MessageListModel.Row) -> ViewerModel? {
+        nil
+    }
     func revealMedia(_ key: MediaKey) {}
     func toggleSensitive(_ key: MediaKey) {}
+    func mediaURL(_ key: ImageKey) async -> URL? { nil }
+    func hidesDownloads(of row: MessageListModel.Row) -> Bool { false }
+    func saveOriginal(_ key: ImageKey, to destination: URL) async throws {}
 }

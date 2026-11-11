@@ -25,7 +25,7 @@ enum MessageMenu {
         return items
     }
 
-    private static func item(_ title: String, run: @escaping () -> Void) -> NSMenuItem {
+    static func item(_ title: String, run: @escaping () -> Void) -> NSMenuItem {
         let action = MenuAction(run)
         let item = NSMenuItem(title: title, action: #selector(MenuAction.run(_:)), keyEquivalent: "")
         item.target = action
@@ -35,7 +35,7 @@ enum MessageMenu {
     }
 }
 
-private final class MenuAction: NSObject {
+final class MenuAction: NSObject {
     private let action: () -> Void
 
     init(_ run: @escaping () -> Void) {

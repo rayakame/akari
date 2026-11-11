@@ -171,6 +171,10 @@ public final class ImageCache {
             if let animation = await Task.detached(priority: .userInitiated, operation: { AnimationSource(url: url) }).value {
                 return animation
             }
+            if ImageLog.enabled {
+                let why = await Task.detached { AnimationSource.failure(url) }.value
+                ImageLog.log("animation \(ImageLog.name(spec.key)): \(why)")
+            }
             // Gone between the answer and the open (the system purged the caches): once more.
             try Task.checkCancellation()
             if attempt == 0 {

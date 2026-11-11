@@ -1082,7 +1082,7 @@ fn unjoined_thread(state: &mut State) {
         "../../../../tests/fixtures/thread_create.json"
     ));
     thread.as_object_mut().unwrap().remove("member");
-    apply(state, "THREAD_CREATE", thread);
+    apply(state, "THREAD_CREATE", started_when_made(thread));
 }
 
 #[test]

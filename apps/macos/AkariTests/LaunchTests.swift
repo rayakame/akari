@@ -1,3 +1,4 @@
+import AkariKit
 import Foundation
 import Testing
 
@@ -41,5 +42,12 @@ struct LaunchTests {
     ])
     func theScrollLogIsOnlyOnWhenItsCategoryIsAsked(filter: String, asked: Bool) {
         #expect(ScrollLog.isAsked(by: filter) == asked)
+    }
+
+    // For a GIF that rests: the core's lines and the app's in one filter.
+    @Test
+    func theImagesLogRidesWithTheCoresFilter() {
+        #expect(ImageLog.isAsked(by: "akari_core=debug,images"))
+        #expect(!ImageLog.isAsked(by: "akari_core=debug"))
     }
 }

@@ -107,6 +107,8 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
         fatalError("a fake has no Rust object")
     }
 
+    override func hidesMediaDownloads(channelId: ChannelId) -> Bool { false }
+
     func add(_ count: UInt64, to channel: ChannelId) {
         counts.withLock { $0[channel.rawValue, default: 40] += count }
     }
@@ -251,7 +253,7 @@ nonisolated final class FormattedStore: Store, @unchecked Sendable {
                 fromWebhook: false, content: content,
                 timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(number) * 600),
                 editedTimestamp: nil, pinned: false, mentionEveryone: false, attachments: [],
-                embedCount: 0, stickers: [], componentsV2: false, delivery: .sent,
+                embeds: [], stickers: [], componentsV2: false, delivery: .sent,
                 formatted: formattedText(content: content), mentionsMe: mentioned,
                 reference: pin, hasThread: false, mentions: [],
                 call: nil, roleSubscription: nil, purchasedProduct: nil, actor: nil,

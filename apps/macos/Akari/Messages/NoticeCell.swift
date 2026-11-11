@@ -11,7 +11,14 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
     private let text = MessageTextView()
     // Built for the first line with a box: buttons cost.
     private var threadBox: ThreadBoxView? {
-        didSet { threadBox?.images = images }
+        didSet {
+            threadBox?.images = images
+            threadBox?.animatesEmoji = animatesEmoji
+        }
+    }
+    /// The list's say: the box's line plays its custom emoji.
+    var animatesEmoji = false {
+        didSet { threadBox?.animatesEmoji = animatesEmoji }
     }
     /// Where the thread box's avatar comes from.
     var images: ImageCache? {
@@ -90,6 +97,8 @@ final class NoticeCell: NSTableCellView, MessageMenuRow {
     ) {
         if let threadBox {
             boxView().configure(threadBox.box, content: threadBox.content, time: threadBox.time)
+        } else {
+            self.threadBox?.clear()
         }
         self.threadBox?.isHidden = threadBox == nil
         // Off before on: both at once can't be satisfied.
