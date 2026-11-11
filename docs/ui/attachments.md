@@ -65,7 +65,9 @@ Discord's numbers, from sizes alone, so a row is as tall before its media loads 
   badge* sits top left, 6 in, while it doesn't play.
 - A playing GIF comes from the media proxy, as Discord's does. *A display file may weigh 16 MB;
   when the proxy's copy is heavier (it encodes a GIF again, a 10 MB one came back at 33.5 MB) and
-  the upload itself fits, the GIF comes from the upload on the CDN.*
+  the upload itself fits, the GIF comes from the upload on the CDN; a GIF's CDN link posted as
+  text (an image embed) the same way. Another site's GIF has no upload on Discord's CDN: past
+  16 MB it stays a still.*
 - A video shows its poster (the proxy's still) with Discord's Play button in the middle: a black
   48 pt circle with its symbol nudged 1 right, both at 60 % together (a gray symbol over a dark
   video), at 80 % while the pointer is over the video, fading in 0.25 s.

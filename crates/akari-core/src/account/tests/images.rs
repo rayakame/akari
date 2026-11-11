@@ -1923,3 +1923,129 @@ async fn the_original_has_its_own_tries() {
         original
     );
 }
+
+// A GIF attachment's link posted as text: Discord embeds it, the thumbnail's `url` the CDN link
+// and its `proxy_url` the media proxy's.
+async fn load_gif_link(online: &Online, fresh: i64) -> (String, String) {
+    let original = format!("/attachments/{GENERAL}/{ATTACHMENT}/loop.gif");
+    let proxied = format!("/proxy{original}");
+    let link = |at: &str| format!("{}{at}?{}&", online.uri(), signature(fresh));
+    load_message(online, |message| {
+        message["embeds"] = json!([{
+            "type": "image", "url": link(&original),
+            "thumbnail": {"url": link(&original), "proxy_url": link(&proxied),
+                          "width": 4, "height": 4, "content_type": "image/gif"},
+        }]);
+    })
+    .await;
+    (original, proxied)
+}
+
+fn thumbnail_key() -> ImageKey {
+    ImageKey::EmbedMedia {
+        channel: general(),
+        message: Snowflake::new(MESSAGE),
+        embed: 0,
+        slot: EmbedSlot::Thumbnail,
+    }
+}
+
+#[tokio::test]
+async fn an_embedded_gif_link_whose_proxy_copy_is_over_the_cap_comes_from_the_upload() {
+    let online = connected().await;
+    let original = delta_gif(3, 0);
+    let fresh = now_seconds() + 86_400;
+    let (cdn, proxy) = load_gif_link(&online, fresh).await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+    serve(&online.server, &cdn, gif_answer(original.clone())).await;
+
+    let file = online
+        .account
+        .image(playing(thumbnail_key()))
+        .await
+        .unwrap();
+
+    assert!(file.animated);
+    assert_eq!(std::fs::read(&file.path).unwrap(), original);
+    assert_eq!(online.requests_to(&proxy).await.len(), 1, "the proxy first");
+    let fetched = online.requests_to(&cdn).await;
+    assert_eq!(fetched.len(), 1);
+    assert_eq!(
+        fetched[0].url.query(),
+        Some(signature(fresh).as_str()),
+        "as uploaded, with its signature"
+    );
+    let again = online
+        .account
+        .image(playing(thumbnail_key()))
+        .await
+        .unwrap();
+    assert!(again.from_disk);
+}
+
+// The embed doesn't say what the upload weighs: it's asked once, and a later ask tries again.
+#[tokio::test]
+async fn an_embedded_gif_link_too_large_both_ways_stays_too_large() {
+    let online = connected().await;
+    let (cdn, proxy) = load_gif_link(&online, now_seconds() + 86_400).await;
+    let inflated = delta_gif(3, crate::media::MAX_BODY + 1);
+    serve(&online.server, &proxy, gif_answer(inflated.clone())).await;
+    serve(&online.server, &cdn, gif_answer(inflated)).await;
+
+    let file = online.account.image(playing(thumbnail_key())).await;
+
+    assert_eq!(file, Err(ImageError::TooLarge));
+    assert_eq!(online.requests_to(&proxy).await.len(), 1);
+    assert_eq!(online.requests_to(&cdn).await.len(), 1);
+    let still = online
+        .account
+        .image(ImageRequest {
+            animated: None,
+            ..playing(thumbnail_key())
+        })
+        .await;
+    assert_ne!(still, Err(ImageError::NotFound), "nothing marked missing");
+}
+
+// Akari fetches only from Discord: another site's GIF has no upload to fall back to.
+#[tokio::test]
+async fn another_sites_gif_over_the_cap_is_too_large() {
+    let online = connected().await;
+    let proxy = "/external/abc/https/example.com/loop.gif";
+    let proxied = format!("{}{proxy}", online.uri());
+    load_message(&online, |message| {
+        message["embeds"] = json!([{
+            "type": "image", "url": "https://example.com/loop.gif",
+            "thumbnail": {"url": "https://example.com/loop.gif", "proxy_url": proxied,
+                          "width": 4, "height": 4},
+        }]);
+    })
+    .await;
+    serve(
+        &online.server,
+        proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+
+    let file = online.account.image(playing(thumbnail_key())).await;
+
+    assert_eq!(file, Err(ImageError::TooLarge));
+    assert_eq!(
+        online
+            .server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|request| request.method == wiremock::http::Method::GET
+                && request.url.path().ends_with(".gif"))
+            .count(),
+        1
+    );
+}

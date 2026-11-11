@@ -92,8 +92,8 @@ pub(crate) struct Planned {
     pub(crate) url: Url,
     /// The signed CDN link whose signature `url` carries, refreshed when it's due.
     pub(crate) signed: Option<Url>,
-    /// An attachment as uploaded, when it fits the display cap: the media proxy's copy can weigh
-    /// several times as much (an animated GIF it encodes again).
+    /// A GIF as uploaded (an attachment that fits the display cap, or an embedded attachment
+    /// link): the media proxy's copy can weigh several times as much, encoded again.
     pub(crate) original: Option<Url>,
 }
 
@@ -439,11 +439,15 @@ impl Hosts {
             _ => Form::Still,
         };
         // An embedded attachment link: its CDN link is the one to refresh.
-        let signed = Url::parse(&media.url)
+        let upload = Url::parse(&media.url)
             .ok()
-            .filter(|url| self.allows(url) && is_attachment_link(url))
-            .or_else(|| Some(proxy.clone()).filter(is_attachment_link));
-        Ok(Self::proxied(
+            .filter(|url| self.allows(url) && is_attachment_link(url));
+        // The embed doesn't say what the upload weighs: the download's cap decides.
+        let original = upload.clone().filter(|upload| {
+            form == Form::Gif && (upload.origin(), upload.path()) != (proxy.origin(), proxy.path())
+        });
+        let signed = upload.or_else(|| Some(proxy.clone()).filter(is_attachment_link));
+        let mut planned = Self::proxied(
             proxy.clone(),
             embed_disk_key(&proxy),
             (width, height),
@@ -451,7 +455,9 @@ impl Hosts {
             form,
             &extension,
             signed,
-        ))
+        );
+        planned.original = original;
+        Ok(planned)
     }
 
     /// An embed's author or footer icon, as Discord gives it.

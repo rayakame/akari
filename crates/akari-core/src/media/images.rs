@@ -241,16 +241,22 @@ impl Images {
             Ok(planned) => planned,
             // An attachment kept from an earlier session answers without its message.
             Err(ImageError::UnknownKey) => return self.kept_without_message(&request).await,
-            Err(err) => return Err(err),
+            Err(err) => {
+                tracing::debug!(target: LOG, kind = key_kind(&request.key), reason = error_name(err), "image not asked for");
+                return Err(err);
+            }
         };
+        if request.animated.is_some() && planned.form == Form::Still {
+            tracing::debug!(target: LOG, key = %planned.disk, "no animated form, the still asked for");
+        }
         if lock(&self.missing).contains(&planned.disk) {
+            tracing::debug!(target: LOG, key = %planned.disk, "image known to be missing");
             return Err(ImageError::NotFound);
         }
-        let tier = self
-            .tier()
-            .await
-            .filter(|tier| !tier.is_deleted())
-            .ok_or(ImageError::Unavailable)?;
+        let Some(tier) = self.tier().await.filter(|tier| !tier.is_deleted()) else {
+            tracing::debug!(target: LOG, key = %planned.disk, "no image directory");
+            return Err(ImageError::Unavailable);
+        };
         if let Some(entry) = tier.find(&planned.disk, planned.form, planned.needed).await {
             return Ok(ImageFile {
                 path: entry.path,
@@ -261,6 +267,7 @@ impl Images {
             });
         }
         if matches!(self.store.connection(), ConnectionState::Offline) {
+            tracing::debug!(target: LOG, key = %planned.disk, "offline, image not on disk");
             return Err(ImageError::Unavailable);
         }
         self.shared(planned).await
@@ -417,7 +424,17 @@ impl Images {
                     break Err(ImageError::NotFound);
                 }
                 Fetched::Status(415) | Fetched::NotAnImage => break Err(ImageError::NotAnImage),
-                Fetched::TooLarge => break Err(ImageError::TooLarge),
+                Fetched::TooLarge => {
+                    tracing::debug!(
+                        target: LOG,
+                        key = %planned.disk,
+                        copy = if from_original { "original" } else { "proxy" },
+                        has_original = planned.original.is_some(),
+                        cap = MAX_BODY,
+                        "image over the display cap"
+                    );
+                    break Err(ImageError::TooLarge);
+                }
                 Fetched::Refused => break Err(ImageError::Unsupported),
                 Fetched::RateLimited if attempts < ATTEMPTS => {}
                 Fetched::Status(status @ 500..) if attempts < ATTEMPTS => {
@@ -448,7 +465,11 @@ impl Images {
     async fn keep(&self, planned: &Planned, bytes: Vec<u8>) -> Answer {
         let inspected = sniff::inspect(&bytes).ok_or(ImageError::NotAnImage)?;
         if u64::from(inspected.width) * u64::from(inspected.height) > MAX_PIXELS {
+            tracing::debug!(target: LOG, key = %planned.disk, width = inspected.width, height = inspected.height, "image over the pixel cap");
             return Err(ImageError::TooLarge);
+        }
+        if planned.form != Form::Still && !inspected.animated {
+            tracing::debug!(target: LOG, key = %planned.disk, "animation asked for, the file is a still");
         }
         let tier = self
             .tier()
@@ -644,6 +665,21 @@ impl Drop for Images {
 
 fn retry_wait(attempts: u32) -> Duration {
     backoff::delay(attempts, RETRY_BASE, RETRY_MAX, crate::random::unit())
+}
+
+fn key_kind(key: &ImageKey) -> &'static str {
+    match key {
+        ImageKey::Avatar { .. } => "avatar",
+        ImageKey::MemberAvatar { .. } => "member_avatar",
+        ImageKey::DefaultAvatar { .. } => "default_avatar",
+        ImageKey::GuildIcon { .. } => "guild_icon",
+        ImageKey::GroupIcon { .. } => "group_icon",
+        ImageKey::RoleIcon { .. } => "role_icon",
+        ImageKey::Emoji { .. } => "emoji",
+        ImageKey::Sticker { .. } => "sticker",
+        ImageKey::Attachment { .. } => "attachment",
+        ImageKey::EmbedMedia { .. } => "embed",
+    }
 }
 
 fn error_name(err: ImageError) -> &'static str {
