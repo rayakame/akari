@@ -76,6 +76,8 @@ pub(crate) struct Images {
     flights: Mutex<Flights>,
     // Keys Discord answered "no such image" for, this session.
     missing: Mutex<HashSet<String>>,
+    // Asks that ended over the cap this session: the same ask would again.
+    oversized: Mutex<HashSet<FlightKey>>,
     // Renewed links by path, beside the store: a renewal never reloads a row.
     renewed: Mutex<HashMap<String, Url>>,
 }
@@ -129,6 +131,7 @@ impl Images {
             runtime: runtime.clone(),
             flights: Mutex::default(),
             missing: Mutex::default(),
+            oversized: Mutex::default(),
             renewed: Mutex::default(),
         })
     }
@@ -246,12 +249,18 @@ impl Images {
                 return Err(err);
             }
         };
-        if request.animated.is_some() && planned.form == Form::Still {
-            tracing::debug!(target: LOG, key = %planned.disk, "no animated form, the still asked for");
-        }
         if lock(&self.missing).contains(&planned.disk) {
             tracing::debug!(target: LOG, key = %planned.disk, "image known to be missing");
             return Err(ImageError::NotFound);
+        }
+        let flight = FlightKey {
+            disk: planned.disk.clone(),
+            form: planned.form,
+            needed: planned.needed,
+        };
+        if lock(&self.oversized).contains(&flight) {
+            tracing::debug!(target: LOG, key = %planned.disk, "image known to be over the cap");
+            return Err(ImageError::TooLarge);
         }
         let Some(tier) = self.tier().await.filter(|tier| !tier.is_deleted()) else {
             tracing::debug!(target: LOG, key = %planned.disk, "no image directory");
@@ -269,6 +278,9 @@ impl Images {
         if matches!(self.store.connection(), ConnectionState::Offline) {
             tracing::debug!(target: LOG, key = %planned.disk, "offline, image not on disk");
             return Err(ImageError::Unavailable);
+        }
+        if request.animated.is_some() && planned.form == Form::Still {
+            tracing::debug!(target: LOG, key = %planned.disk, "no animated form, the still asked for");
         }
         self.shared(planned).await
     }
@@ -347,7 +359,7 @@ impl Images {
     }
 
     // The link to fetch: its renewed signature if it has one, renewed now when due.
-    async fn signed(&self, planned: &Planned, force: bool) -> Result<Url, ImageError> {
+    async fn signed(&self, planned: &Planned, force: bool, mark: bool) -> Result<Url, ImageError> {
         let Some(link) = &planned.signed else {
             return Ok(planned.url.clone());
         };
@@ -364,7 +376,9 @@ impl Images {
             // Not expired yet: it still works for now.
             Renewal::Refused | Renewal::Failed if usable => current,
             Renewal::Refused => {
-                lock(&self.missing).insert(planned.disk.clone());
+                if mark {
+                    lock(&self.missing).insert(planned.disk.clone());
+                }
                 return Err(ImageError::NotFound);
             }
             Renewal::Failed => return Err(ImageError::Unavailable),
@@ -389,7 +403,12 @@ impl Images {
 
     async fn download(&self, planned: Planned) -> Answer {
         let started = Instant::now();
-        let mut url = self.signed(&planned, false).await?;
+        let flight = FlightKey {
+            disk: planned.disk.clone(),
+            form: planned.form,
+            needed: planned.needed,
+        };
+        let mut url = self.signed(&planned, false, true).await?;
         let mut renewed_after_denial = false;
         let mut from_original = false;
         let mut attempts = 0;
@@ -403,7 +422,11 @@ impl Images {
                         && signed::expires(&url).is_none_or(|ex| ex <= self.now_seconds()) =>
                 {
                     renewed_after_denial = true;
-                    let renewed = self.signed(&planned, true).await?;
+                    // The proxy still has its copy: an upload Discord won't sign marks nothing.
+                    let renewed = match self.signed(&planned, true, !from_original).await {
+                        Ok(renewed) => renewed,
+                        Err(err) => break Err(err),
+                    };
                     url = match &planned.original {
                         Some(original) if from_original => signed::resign(original, &renewed),
                         _ => renewed,
@@ -413,9 +436,11 @@ impl Images {
                     tracing::debug!(target: LOG, key = %planned.disk, "proxy copy too large, original asked");
                     from_original = true;
                     attempts = 0;
-                    url = signed::resign(original, &self.signed(&planned, false).await?);
+                    url = match self.signed(&planned, false, false).await {
+                        Ok(renewed) => signed::resign(original, &renewed),
+                        Err(err) => break Err(err),
+                    };
                 }
-                // The proxy still has its copy: a denied upload marks nothing missing.
                 Fetched::Status(403 | 404 | 410) if from_original => {
                     break Err(ImageError::NotFound);
                 }
@@ -459,6 +484,13 @@ impl Images {
             after_ms = crate::millis(started.elapsed()),
             "image downloaded"
         );
+        if outcome == Err(ImageError::TooLarge) {
+            let mut oversized = lock(&self.oversized);
+            if oversized.len() >= RENEWED_LIMIT {
+                oversized.clear();
+            }
+            oversized.insert(flight);
+        }
         outcome
     }
 
@@ -649,6 +681,7 @@ impl Images {
 
     pub(crate) async fn clear(&self) {
         lock(&self.missing).clear();
+        lock(&self.oversized).clear();
         if let Some(tier) = self.tier().await {
             tier.clear().await;
         }

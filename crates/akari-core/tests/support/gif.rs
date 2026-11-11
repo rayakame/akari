@@ -9,10 +9,8 @@ pub struct Shape {
 
 const TRANSPARENT: u8 = 255;
 
-/// An animated GIF that decodes: every frame the whole canvas, kept underneath the next
-/// (disposal 1), each after the first drawing a band of noise and leaving the rest transparent,
-/// 40 ms apart (the last stays 120 ms), looping forever. The noise is sized so the file comes
-/// out just under `shape.bytes`; a comment before the trailer makes up the rest.
+/// An animated GIF that decodes, `shape.bytes` to the byte: full frames kept underneath the next
+/// (disposal 1), noise on transparency after the first, 40 ms apart (the last 120), looping.
 pub fn animated(shape: &Shape) -> Vec<u8> {
     let (width, height) = (usize::from(shape.width), usize::from(shape.height));
     let pixels = width * height;
@@ -143,6 +141,10 @@ fn lzw(pixels: &[u8], bytes: &mut Vec<u8>) {
         prefix = u32::from(pixel);
     }
     emit(prefix, width, &mut data);
+    // A decoder adds a code for the last one too, and reads END at the width that gives.
+    if next >= 1 << width && width < 12 {
+        width += 1;
+    }
     emit(END, width, &mut data);
     // Flushes what's left of the last byte.
     emit(0, 7, &mut data);

@@ -444,7 +444,9 @@ impl Hosts {
             .filter(|url| self.allows(url) && is_attachment_link(url));
         // The embed doesn't say what the upload weighs: the download's cap decides.
         let original = upload.clone().filter(|upload| {
-            form == Form::Gif && (upload.origin(), upload.path()) != (proxy.origin(), proxy.path())
+            form == Form::Gif
+                && upload.origin() == self.cdn.origin()
+                && (upload.origin(), upload.path()) != (proxy.origin(), proxy.path())
         });
         let signed = upload.or_else(|| Some(proxy.clone()).filter(is_attachment_link));
         let mut planned = Self::proxied(

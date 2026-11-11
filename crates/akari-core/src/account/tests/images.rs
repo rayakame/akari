@@ -1988,7 +1988,7 @@ async fn an_embedded_gif_link_whose_proxy_copy_is_over_the_cap_comes_from_the_up
     assert!(again.from_disk);
 }
 
-// The embed doesn't say what the upload weighs: it's asked once, and a later ask tries again.
+// The embed doesn't say what the upload weighs: it's asked once, and remembered as too heavy.
 #[tokio::test]
 async fn an_embedded_gif_link_too_large_both_ways_stays_too_large() {
     let online = connected().await;
@@ -2002,6 +2002,10 @@ async fn an_embedded_gif_link_too_large_both_ways_stays_too_large() {
     assert_eq!(file, Err(ImageError::TooLarge));
     assert_eq!(online.requests_to(&proxy).await.len(), 1);
     assert_eq!(online.requests_to(&cdn).await.len(), 1);
+    let again = online.account.image(playing(thumbnail_key())).await;
+    assert_eq!(again, Err(ImageError::TooLarge));
+    assert_eq!(online.requests_to(&proxy).await.len(), 1, "not asked again");
+    assert_eq!(online.requests_to(&cdn).await.len(), 1, "not asked again");
     let still = online
         .account
         .image(ImageRequest {
@@ -2048,4 +2052,62 @@ async fn another_sites_gif_over_the_cap_is_too_large() {
             .count(),
         1
     );
+}
+
+// Discord won't sign the upload's link again while the proxy still has its copy: the upload is
+// gone, the still isn't.
+#[tokio::test]
+async fn a_refused_renewal_of_the_upload_marks_nothing_missing() {
+    let online = connected().await;
+    let past = now_seconds() - 600;
+    let (cdn, proxy) = load_gif_link(&online, past).await;
+    let renewals = Arc::new(Mutex::new(0));
+    let counted = renewals.clone();
+    let uri = online.uri();
+    let renewed_path = cdn.clone();
+    Mock::given(method("POST"))
+        .and(path(REFRESH))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let asked = body["attachment_urls"][0].as_str().unwrap().to_owned();
+            let mut renewals = counted.lock().unwrap();
+            *renewals += 1;
+            // Past their expiry twice, as with a skewed clock; the third isn't answered.
+            let refreshed = match *renewals {
+                3 => {
+                    return ResponseTemplate::new(200).set_body_json(json!({"refreshed_urls": []}));
+                }
+                count @ 1..3 => format!("{uri}{renewed_path}?{}&", signature(past + count)),
+                _ => format!("{uri}{renewed_path}?{}&", signature(now_seconds() + 86_400)),
+            };
+            ResponseTemplate::new(200).set_body_json(
+                json!({"refreshed_urls": [{"original": asked, "refreshed": refreshed}]}),
+            )
+        })
+        .mount(&online.server)
+        .await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+    )
+    .await;
+    serve(&online.server, &cdn, ResponseTemplate::new(403)).await;
+
+    let playing_file = online.account.image(playing(thumbnail_key())).await;
+    let still = online
+        .account
+        .image(ImageRequest {
+            animated: None,
+            ..playing(thumbnail_key())
+        })
+        .await;
+
+    assert_eq!(playing_file, Err(ImageError::NotFound));
+    assert_eq!(
+        *renewals.lock().unwrap(),
+        4,
+        "the still's link is signed again"
+    );
+    assert_eq!(still, Err(ImageError::TooLarge), "asked, not known missing");
 }

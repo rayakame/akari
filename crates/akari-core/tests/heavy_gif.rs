@@ -22,8 +22,8 @@ const ATTACHMENT: u64 = 400_000_000_000_000_093;
 const ELSEWHERE: u64 = 400_000_000_000_000_094;
 const TOKEN: &str = "heavy-gif-test-token.secret";
 
-// The GIF that never played: 327 frames of 540 × 405 in 10 159 614 bytes (286 MB decoded), which
-// the media proxy gave back at 33 532 759 bytes, past the 16 MB a display file may weigh.
+// A GIF that never played: 10 159 614 bytes (286 MB decoded), which the media proxy gave back
+// at 33 532 759, past the 16 MB a display file may weigh.
 const UPLOAD: Shape = Shape {
     width: 540,
     height: 405,
@@ -56,9 +56,8 @@ fn gif_answer(bytes: Vec<u8>) -> ResponseTemplate {
         .set_body_bytes(bytes)
 }
 
-// The upload as an attachment and as a posted link (an embed), asked the way the list does (a box
-// smaller than the picture at 2×) and the way the viewer does (up to 4096 a side), at the caps
-// the app runs with; and another site's GIF, which has no upload on Discord's CDN.
+// As an attachment and as a posted link, asked as the list and the viewer do (800 and 4096
+// pixels) at the caps the app runs with; another site's GIF has no upload to fall back to.
 #[tokio::test]
 async fn a_gif_the_proxy_makes_too_heavy_plays_from_its_upload() {
     let logs = Logs::capture();
