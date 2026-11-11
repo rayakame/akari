@@ -32,12 +32,14 @@ come from Discord's CDN at runtime like every image ([images.md](images.md),
 - **One-line previews** (a thread box's second line, the Threads browser's rows, a forum
   card's message): the emoji's image on a box in the line, never jumbo. Discord parses these
   with `formatInline`, which turns jumbo off, and sizes the emoji by the place: 1.375 of the 14
-  text (19) in the thread box and the Threads browser, 18 high in the forum card. *Akari: the
-  list's image layers on the line's boxes, played by the list's rule for emoji: the setting and
-  the window's focus, or the pointer over the message (the thread box), the row or the card.
-  `:name:` shows in the box while the image loads and when it fails; an emoji the ellipsis cut
-  off or under a hidden spoiler isn't asked for. The gallery card's text, several lines that
-  fade out, has no image layers: an emoji reads `:name:` there.*
+  text (19.25) in the thread box and the Threads browser, 18 high on a 19.25 advance in the
+  forum card. *Akari: boxes of 19 and of 18 square, with the list's image layers on them, played
+  by the list's rule for emoji while the window is key: the setting, or the pointer over the
+  message (the thread box), the row or the card. Until an emoji's image is decoded, and when it
+  can't be had, the line reads `:name:` in its place, in full; the image then takes its box and
+  the text after it moves up. One the cache already holds shows at once. An emoji the ellipsis
+  cut off or under a hidden spoiler isn't asked for. The gallery card's text, several lines
+  that fade out, has no image layers: an emoji reads `:name:` there.*
 - The New Thread form's preview shows the message as the list does, emoji and stickers
   included.
 

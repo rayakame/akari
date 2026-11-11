@@ -63,7 +63,6 @@ final class ThreadBoxView: NSButton {
         avatarView.cornerRadius = Self.avatar / 2
         avatarView.isHidden = true
         addSubview(avatarView)
-        preview.readsItself = false
         preview.isHidden = true
         addSubview(preview)
     }
@@ -83,6 +82,9 @@ final class ThreadBoxView: NSButton {
         }
         preview.isHidden = false
         preview.frame = part.rect
+        // Where `draw(_:in:)` puts the baseline of the texts beside it.
+        preview.baseline =
+            (Self.line - ceil(Self.font.ascender - Self.font.descender)) / 2 + Self.font.ascender
         preview.text = part.text
     }
 
@@ -120,6 +122,18 @@ final class ThreadBoxView: NSButton {
         // A reused cell's box may be elsewhere now; the list says after its update.
         hovered = false
         needsDisplay = true
+        placeAvatar()
+        placePreview()
+    }
+
+    /// The cell shows a message without a thread: the box's pictures go, and nothing of it plays.
+    func clear() {
+        guard box != nil else {
+            return
+        }
+        box = nil
+        content = nil
+        time = nil
         placeAvatar()
         placePreview()
     }
@@ -252,7 +266,7 @@ final class ThreadBoxView: NSButton {
                 text.addAttribute(.backgroundColor, value: Palette.spoilerHidden, range: range)
             }
         }
-        // Symbols go; a custom emoji keeps its box, at the line's size.
+        // Only an emoji has a layer to stand on its box.
         let side = emojiSide ?? (size * 1.375).rounded()
         var index = text.length - 1
         while index >= 0 {
@@ -269,13 +283,18 @@ final class ThreadBoxView: NSButton {
                 text.deleteCharacters(in: one)
             }
         }
-        for search in ["\n", "\u{2028}"] {
-            var range = (text.string as NSString).range(of: search)
-            while range.location != NSNotFound {
-                text.replaceCharacters(in: range, with: " ")
-                range = (text.string as NSString).range(
-                    of: search,
-                    range: NSRange(location: range.location + 1, length: text.length - range.location - 1))
+        // One line: whatever ends a line is a space, a typed object replacement nothing.
+        index = text.length - 1
+        while index >= 0 {
+            defer { index -= 1 }
+            let one = NSRange(location: index, length: 1)
+            guard let scalar = Unicode.Scalar((text.string as NSString).character(at: index)) else {
+                continue
+            }
+            if CharacterSet.newlines.contains(scalar) {
+                text.replaceCharacters(in: one, with: " ")
+            } else if scalar == "\u{FFFC}", text.attribute(.attachment, at: index, effectiveRange: nil) == nil {
+                text.deleteCharacters(in: one)
             }
         }
         return text

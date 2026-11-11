@@ -341,6 +341,8 @@ struct ForumLookTests {
         #expect(lines[1].top >= expected[1].top - 4, "the preview's top \(lines[1]) for \(expected[1])")
         #expect(lines[1].bottom <= expected[1].bottom + 3, "the preview's bottom \(lines[1]) for \(expected[1])")
         #expect(abs(lines[2].top - expected[2].top) <= 0.5, "the footer's line \(lines[2])")
+        // A custom emoji's box, once its image is here, is the line's too.
+        #expect(ForumCardMessage.emojiSide == TypeScale.forumMessage.line)
     }
 
     func brightest(_ image: Rendered, x0: CGFloat, x1: CGFloat, y0: CGFloat, y1: CGFloat) -> CGFloat {

@@ -195,6 +195,7 @@ final class MessageCell: NSTableCellView, MessageMenuRow {
             boxView().isHidden = false
         } else {
             threadBox?.isHidden = true
+            threadBox?.clear()
         }
         needsDisplay = true
         let name = authorName ?? message.author.displayName

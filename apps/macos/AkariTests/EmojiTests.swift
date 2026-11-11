@@ -69,6 +69,18 @@ final class EmojiTests {
         #expect(emojiShapes(hidden).map(\.box.name) == ["wave"])
     }
 
+    // The same emoji beside itself, one of the two under a hidden spoiler: only that one is covered.
+    @Test(arguments: ["<:wave:5>||<:wave:5>||", "||<:wave:5>||<:wave:5>"])
+    func aCoveredEmojiBesideItsTwinStaysCoveredAlone(content: String) throws {
+        let view = shown(content)
+        let shapes = emojiShapes(view)
+
+        try #require(shapes.count == 1, "\(shapes)")
+        let first = content.hasPrefix("<")
+        let side = shapes[0].rect.width
+        #expect(first ? shapes[0].rect.minX < 1 : shapes[0].rect.minX >= side - 1, "\(shapes)")
+    }
+
     // Inline: 22 × 22 with its bottom on the line's bottom; jumbo: 48 × 48 centered on its line.
     @Test
     func theLayoutManagerGivesEachEmojiItsBox() throws {

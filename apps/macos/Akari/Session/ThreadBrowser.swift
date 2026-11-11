@@ -420,7 +420,7 @@ struct ThreadBrowserCard: View {
                     .foregroundStyle(Color(nsColor: Palette.textDefault))
                     .lineLimit(1)
                     .frame(height: TypeScale.browserTitle.line)
-                ThreadBrowserSubtitle(subtitle: row.subtitle, now: now, hovered: hovered)
+                ThreadBrowserSubtitle(subtitle: row.subtitle, now: now)
                     .frame(height: TypeScale.browserText.line)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -440,6 +440,7 @@ struct ThreadBrowserCard: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: Self.radius))
         .onHover { hovered = $0 }
+        .environment(\.rowHovered, hovered)
         .onTapGesture { open(NSEvent.modifierFlags.contains(.shift)) }
         .background(CursorArea(.pointingHand))
         .padding(.bottom, ThreadBrowserLayout.cardGap)
@@ -456,8 +457,6 @@ struct ThreadBrowserCard: View {
 struct ThreadBrowserSubtitle: View {
     let subtitle: ThreadBrowserModel.Row.Subtitle
     var now: Date?
-    /// The pointer is over the row: its message's emoji play.
-    var hovered = false
 
     // Discord's separator in active rows, its own text.
     private static let separator = "\u{00a0} \u{2022} \u{00a0}"
@@ -526,7 +525,7 @@ struct ThreadBrowserSubtitle: View {
         } else {
             PreviewLine(
                 text: Self.line(of: message), font: TypeScale.browserText.nsFont,
-                lineHeight: TypeScale.browserText.line, hovered: hovered)
+                lineHeight: TypeScale.browserText.line)
         }
     }
 

@@ -80,7 +80,7 @@ struct ForumListCard: View {
                         .foregroundStyle(Color(nsColor: card.unread ? Palette.textStrong : Palette.textMuted))
                         .multilineTextAlignment(.leading)
                         .padding(.bottom, 6)
-                    ForumCardMessage(preview: card.preview, unread: card.unread, hovered: hovered)
+                    ForumCardMessage(preview: card.preview, unread: card.unread)
                         .frame(height: TypeScale.forumMessage.line)
                         .padding(.bottom, 8)
                     ForumCardFooter(card: card, now: now)
@@ -97,6 +97,7 @@ struct ForumListCard: View {
         }
         .buttonStyle(ForumCardStyle(hovered: hovered))
         .onHover { hovered = $0 }
+        .environment(\.rowHovered, hovered)
         .background(CursorArea(.pointingHand))
         .accessibilityLabel(ForumListCard.label(card))
     }
@@ -363,8 +364,6 @@ struct TagEmojiView: View {
 struct ForumCardMessage: View {
     let preview: ForumModel.Card.Preview
     var unread = false
-    /// The pointer is over the card: the message's emoji play.
-    var hovered = false
 
     static let deleted = "Original message was deleted"
     /// The message's text size, as the author's beside it.
@@ -387,7 +386,7 @@ struct ForumCardMessage: View {
                         PreviewLine(
                             text: Self.line(of: message, unread: unread),
                             font: .systemFont(ofSize: Self.size),
-                            lineHeight: TypeScale.forumMessage.line, hovered: hovered)
+                            lineHeight: TypeScale.forumMessage.line)
                     }
                 }
                 .font(TypeScale.forumMessage.font)
@@ -429,10 +428,14 @@ struct ForumCardMessage: View {
         if let placeholder = ThreadBox.placeholder(for: message) {
             return Text(placeholder).italic()
         }
-        let named = ThreadBoxView.named(line(of: message, unread: unread))
+        let named = fading(of: message, unread: unread)
         let attributed =
             (try? AttributedString(named, including: \.appKit)) ?? AttributedString(named.string)
         return Text(attributed)
+    }
+
+    static func fading(of message: Message, unread: Bool = false) -> NSAttributedString {
+        ThreadBoxView.named(line(of: message, unread: unread))
     }
 }
 
