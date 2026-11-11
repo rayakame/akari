@@ -446,6 +446,7 @@ final class ForumModelTests {
         #expect(forum.posts.map(\.isNew) == [true, false])
         #expect(forum.archived.map(\.isNew) == [false], "an archived post is never new")
         #expect(account.log.reads.contains(.newPosts([id(41), id(42)])))
+        #expect(!account.log.reads.contains(.newPosts([id(43)])))
 
         store.update { $0.newPosts = [] }
         session.apply(EventBatch([.badgeChanged(channelId: id(41), guildId: id(1))]))

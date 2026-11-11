@@ -107,17 +107,13 @@ struct ForumListCard: View {
         if card.isNew {
             UpTo(height: 2.5 * TypeScale.forumTitle.line) {
                 ViewThatFits(in: .vertical) {
-                    Text(card.title)
-                        + Text(Image(nsImage: ForumNewBadge.inline))
-                        // In the badge's own font: under the title's, the offset would deepen the line.
-                        .font(TypeScale.forumBadge.font)
-                        .baselineOffset(ForumNewBadge.inlineOffset)
-                    HStack(alignment: .top, spacing: 8) {
+                    inlineTitle
+                    HStack(alignment: .top, spacing: ForumNewBadge.gap) {
                         Text(card.title)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         ForumNewBadge()
-                            .padding(.top, 4)
+                            .padding(.top, TypeScale.size(4))
                     }
                 }
             }
@@ -125,6 +121,16 @@ struct ForumListCard: View {
             Text(card.title)
                 .lineLimit(2)
         }
+    }
+
+    private var inlineTitle: Text {
+        let space = (" " as NSString).size(withAttributes: [.font: TypeScale.forumTitle.nsFont]).width
+        // The pill in the badge's own font: under the title's, its offset would deepen the line.
+        let pill = Text(Image(nsImage: ForumNewBadge.pill))
+            .font(TypeScale.forumBadge.font)
+            .baselineOffset(ForumNewBadge.inlineOffset)
+        // A word joiner in the title's font: a line holding only the pill is a title line.
+        return Text("\(Text(card.title))\(Text(" ").kerning(ForumNewBadge.gap - space))\(pill)\u{2060}")
     }
 
     /// "Post {title}, {count} message(s)", as Discord's, and whether it's unread or new.
@@ -179,47 +185,38 @@ private struct UpTo: Layout {
 struct ForumNewBadge: View {
     static let fill = NSColor(hex: "#5966f2")
     static let text = "NEW"
+    /// From the title to the pill.
+    static let gap = TypeScale.size(8)
     private static let height = TypeScale.size(16)
     private static let padding = TypeScale.size(8)
 
     var body: some View {
-        Text(Self.text)
-            .font(TypeScale.forumBadge.font)
-            .foregroundStyle(.white)
-            .padding(.horizontal, Self.padding)
-            .frame(height: Self.height)
-            .background(Color(nsColor: Self.fill), in: Capsule())
-            .fixedSize()
+        Image(nsImage: Self.pill)
             .accessibilityHidden(true)
     }
 
-    private static var label: NSAttributedString {
-        NSAttributedString(
-            string: text, attributes: [.font: TypeScale.forumBadge.nsFont, .foregroundColor: NSColor.white])
+    // Where the pill's text lies above its bottom: centered by the font's own line.
+    private static var baseline: CGFloat {
+        let font = TypeScale.forumBadge.nsFont
+        return (height - (font.ascender - font.descender)) / 2 - font.descender
     }
 
-    /// The pill for a line of text, with its 8 from the text before it.
-    static let inline: NSImage = {
-        let label = Self.label
-        let width = label.size().width.rounded(.up) + 2 * padding
-        let size = NSSize(width: padding + width, height: height)
-        let image = NSImage(size: size, flipped: false) { _ in
-            let pill = NSRect(x: padding, y: 0, width: width, height: height)
+    /// The pill as a picture, for a line of text and beside one.
+    static let pill: NSImage = {
+        let label = NSAttributedString(
+            string: text, attributes: [.font: TypeScale.forumBadge.nsFont, .foregroundColor: NSColor.white])
+        let width = label.size().width
+        let size = NSSize(width: width.rounded(.up) + 2 * padding, height: height)
+        return NSImage(size: size, flipped: false) { rect in
             fill.setFill()
-            NSBezierPath(roundedRect: pill, xRadius: height / 2, yRadius: height / 2).fill()
-            let size = label.size()
-            label.draw(at: NSPoint(x: pill.midX - size.width / 2, y: (height - size.height) / 2))
+            NSBezierPath(roundedRect: rect, xRadius: height / 2, yRadius: height / 2).fill()
+            label.draw(with: NSRect(x: rect.midX - width / 2, y: baseline, width: width, height: 0))
             return true
         }
-        return image
     }()
 
     /// Discord's `top: -2px`: the pill's text sits 2 above the line's baseline.
-    static let inlineOffset: CGFloat = {
-        let font = TypeScale.forumBadge.nsFont
-        let baseline = (height - (font.ascender - font.descender)) / 2 - font.descender
-        return TypeScale.size(2) - baseline
-    }()
+    static let inlineOffset = TypeScale.size(2) - baseline
 }
 
 /// The pinned badge, then the first three tags and "+N" for the rest (named in its tooltip).
@@ -368,6 +365,8 @@ struct ForumCardMessage: View {
     var unread = false
 
     static let deleted = "Original message was deleted"
+    /// The message's text size, as the author's beside it.
+    static let size = TypeScale.forumMessage.size
 
     var body: some View {
         HStack(spacing: 0) {
@@ -399,7 +398,7 @@ struct ForumCardMessage: View {
         let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
         let built = NSMutableAttributedString(
             attributedString: ThreadBoxView.content(
-                MessageText.build(message, revealed: [], now: Date(), times: times).text))
+                MessageText.build(message, revealed: [], now: Date(), times: times).text, size: size))
         // The text takes the card's color; mentions and links keep theirs.
         let text = unread ? Palette.textDefault : Palette.textMuted
         let whole = NSRange(location: 0, length: built.length)
@@ -572,8 +571,13 @@ struct ForumGalleryCard: View {
                     .font(TypeScale.forumGalleryTime.font)
                     .foregroundStyle(Color(nsColor: Palette.textDefault))
                     .lineLimit(1)
+                    .layoutPriority(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // The pill ends the row at its top and adds nothing to its height.
+            .padding(.trailing, card.isNew ? ForumNewBadge.pill.size.width + ForumNewBadge.gap : 0)
+            .overlay(alignment: .topTrailing) {
                 if card.isNew {
-                    Spacer(minLength: 8)
                     ForumNewBadge()
                 }
             }

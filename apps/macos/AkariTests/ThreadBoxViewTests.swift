@@ -233,6 +233,36 @@ struct ThreadBoxViewTests {
         #expect(line.size().height <= 20, "\(content): \(line.size().height)")
     }
 
+    // Code stays smaller than the text it stands in, in a heading too.
+    @Test(arguments: ["a `code` b", "# Title `code`"])
+    func aPreviewsCodeIsSmallerThanItsText(content: String) throws {
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let line = ThreadBoxView.content(
+            MessageText.build(latest(content), revealed: [], now: now, times: times).text)
+        let string = line.string as NSString
+
+        let code = try #require(line.attribute(.font, at: string.range(of: "code").location, effectiveRange: nil) as? NSFont)
+        let text = try #require(line.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        #expect(text.pointSize == TypeScale.size(14))
+        #expect(code.pointSize == TypeScale.size(14) * 0.875, "\(code.pointSize)")
+    }
+
+    // A caller's own size: the forum card's message is 15.
+    @Test
+    func aPreviewTakesItsCallersSize() {
+        let times = TimestampText(locale: .current, timeZone: .current, calendar: .current)
+        let built = MessageText.build(latest("🗿 **bold**"), revealed: [], now: now, times: times).text
+
+        let line = ThreadBoxView.content(built, size: 15)
+
+        var sizes: Set<CGFloat> = []
+        line.enumerateAttribute(.font, in: NSRange(location: 0, length: line.length)) { value, _, _ in
+            sizes.insert((value as? NSFont)?.pointSize ?? 0)
+        }
+        #expect(sizes == [15])
+        #expect(ForumCardMessage.size == TypeScale.forumMessage.size)
+    }
+
     @Test
     func theBoxShowsTheLatestMessage() throws {
         let (_, view) = try shown()

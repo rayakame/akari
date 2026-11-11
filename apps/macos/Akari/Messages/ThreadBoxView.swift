@@ -199,7 +199,9 @@ final class ThreadBoxView: NSButton {
 
     // The newest message's content on one line: formatted, small, links not clickable, hidden
     // spoilers covered.
-    static func content(_ built: NSAttributedString) -> NSAttributedString {
+    static func content(
+        _ built: NSAttributedString, size: CGFloat = TypeScale.size(14)
+    ) -> NSAttributedString {
         let text = NSMutableAttributedString(attributedString: built)
         // A custom emoji reads as its name on the line; the box has no image layers.
         var emoji: [(NSRange, String)] = []
@@ -221,13 +223,14 @@ final class ThreadBoxView: NSButton {
         text.removeAttribute(.paragraphStyle, range: whole)
         text.removeAttribute(.baselineOffset, range: whole)
         text.removeAttribute(.attachment, range: whole)
-        // One line has one size: a jumbo emoji or a heading is no larger than the text around it.
-        let size = TypeScale.size(14)
+        // Nothing is larger than the line's text (a jumbo emoji, a heading); code stays at its
+        // 0.875 of it.
         let scale = size / TypeScale.body.size
         text.enumerateAttribute(.font, in: whole) { value, range, _ in
             if let font = value as? NSFont,
                 let smaller = NSFont(
-                    descriptor: font.fontDescriptor, size: min(font.pointSize * scale, size))
+                    descriptor: font.fontDescriptor,
+                    size: min(font.pointSize * scale, font.isFixedPitch ? size * 0.875 : size))
             {
                 text.addAttribute(.font, value: smaller, range: range)
             }

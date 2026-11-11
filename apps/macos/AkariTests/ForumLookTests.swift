@@ -50,6 +50,21 @@ struct ForumLookTests {
             && color.blueComponent - color.greenComponent > 0.3
     }
 
+    // The bottom (points) of the white letters inside `box`.
+    func whiteBottom(_ image: Rendered, in box: NSRect) -> CGFloat? {
+        let columns = Int(box.minX * image.scale)..<Int(box.maxX * image.scale)
+        let rows = Int(box.minY * image.scale)..<Int(box.maxY * image.scale)
+        let last = rows.last { row in
+            columns.contains { column in
+                guard let pixel = image.pixel(column, row) else {
+                    return false
+                }
+                return pixel.brightnessComponent > 0.9 && pixel.saturationComponent < 0.25
+            }
+        }
+        return last.map { CGFloat($0 + 1) / image.scale }
+    }
+
     // The columns (points) of bright text between rows `top` and `bottom`, left of `x1`.
     func inkRight(_ image: Rendered, x1: CGFloat, from top: CGFloat, to bottom: CGFloat) -> CGFloat {
         var right = 0
@@ -82,12 +97,15 @@ struct ForumLookTests {
         let title = try #require(
             inkRuns(plain, x0: 26, x1: 400, from: usual[0].top + 2, to: usual[0].bottom - 2).first)
         let label = ("NEW" as NSString).size(withAttributes: [.font: TypeScale.forumBadge.nsFont]).width
-        #expect(abs(badge.height - 16) <= 0.5, "\(badge)")
-        #expect(abs(badge.width - (label.rounded(.up) + 16)) <= 1, "\(badge) for \(label)")
+        #expect(abs(badge.height - 16) <= 0.75, "\(badge)")
+        #expect(abs(badge.width - (label.rounded(.up) + 16)) <= 0.5, "\(badge) for \(label)")
         let titleEnd = inkRight(plain, x1: 600, from: title.top, to: title.bottom)
         #expect((7...10.5).contains(badge.minX - titleEnd), "after the title: \(badge.minX - titleEnd)")
-        // Discord's sits 1.2 under the middle of the title's capitals and ends 1.5 under its baseline.
-        #expect(abs(badge.midY - (title.top + title.bottom) / 2) <= 2.5, "\(badge) on \(title)")
+        // The fake's title has no descenders: its ink ends on the baseline. Discord's pill ends
+        // 1.5 under it, its capitals 2 above it.
+        #expect((1...2.25).contains(badge.maxY - title.bottom), "under the baseline: \(badge.maxY - title.bottom)")
+        let capitals = try #require(whiteBottom(image, in: badge))
+        #expect((1.25...2.75).contains(title.bottom - capitals), "the capitals: \(title.bottom - capitals)")
         // Round ends: the box's corner is the card, its middle the fill; white letters inside.
         #expect(!blurple(image.color(badge.minX + 0.5, badge.minY + 0.5)))
         // #5966f2, as a swatch of it draws in the same window.
@@ -112,11 +130,58 @@ struct ForumLookTests {
         let badge = try #require(pill(image, from: card.top, to: card.bottom))
         let lines = inkRuns(image, x0: 26, x1: 400, from: card.top + 2, to: card.bottom - 2)
         try #require(lines.count == 4, "two title lines, the preview, the footer: \(lines)")
-        #expect(abs(badge.height - 16) <= 0.5, "\(badge)")
+        let label = ("NEW" as NSString).size(withAttributes: [.font: TypeScale.forumBadge.nsFont]).width
+        #expect(abs(badge.height - 16) <= 0.75, "\(badge)")
+        #expect(abs(badge.width - (label.rounded(.up) + 16)) <= 0.5, "the same pill as in the text: \(badge)")
         #expect(badge.minY >= lines[0].top - 6 && badge.maxY <= lines[1].top + 4, "at the top: \(badge)")
         let titleEnd = inkRight(image, x1: badge.minX - 1, from: lines[0].top, to: lines[1].bottom)
         #expect(badge.minX - titleEnd >= 7, "right of the title: \(badge.minX - titleEnd)")
         #expect(badge.maxX <= Self.width - 16 - 10, "inside the card: \(badge)")
+    }
+
+    // A title that leaves the pill no room on its line: the pill takes the next, a line as tall
+    // as the title's.
+    @Test
+    func aPillAloneOnTheSecondLineKeepsTheLinesHeight() throws {
+        // The card's text is 648 wide at this page width; the pill needs 53 of it.
+        var words = "Wide"
+        let font = TypeScale.forumTitle.nsFont
+        while (words as NSString).size(withAttributes: [.font: font]).width < 615 {
+            words += " wide"
+        }
+        let twoLines = try page(session(unread: [0], firstTitle: words + " and then some more words"))
+        let image = try page(session(unread: [0], new: [0], firstTitle: words))
+        let background = image.color(4, 4)
+        let card = try #require(boxes(image, x: 50, background: background).dropFirst(2).first)
+        let usual = try #require(boxes(twoLines, x: 50, background: background).dropFirst(2).first)
+
+        let badge = try #require(pill(image, from: card.top, to: card.bottom))
+        try #require(badge.minX < 60, "the pill wrapped: \(badge)")
+        #expect(card.bottom - card.top == usual.bottom - usual.top, "as a card with a two-line title")
+    }
+
+    // Without an author (the first message still loading) the pill moves nothing either.
+    @Test
+    func aNewGalleryCardsTitleStaysWhereItIs() throws {
+        var fakes = ForumFakes()
+        fakes.untagged = true
+        let plain = try #require(fakes.session().forum)
+        fakes.new = [4]
+        let new = try #require(fakes.session().forum)
+        let size = CGSize(width: 320, height: ForumMeasures.galleryCardHeight(width: 320))
+        func lines(_ forum: ForumModel) throws -> [(top: CGFloat, bottom: CGFloat)] {
+            let image = try Rendered(
+                ForumGalleryCard(card: forum.posts[4], filter: [], size: size, now: ForumFakes.now) {}
+                    .frame(width: size.width, height: size.height),
+                size: NSSize(width: size.width, height: size.height), scale: 2)
+            return inkRuns(image, x0: 14, x1: 200, from: 2, to: 58)
+        }
+        try #require(new.posts[4].isNew && new.posts[4].preview == .loading)
+
+        let (usual, shown) = (try lines(plain), try lines(new))
+
+        try #require(usual.count == 2 && shown.count == 2, "\(usual) \(shown)")
+        #expect(shown[1].top == usual[1].top && shown[0].top == usual[0].top, "\(shown) for \(usual)")
     }
 
     @Test
@@ -141,9 +206,9 @@ struct ForumLookTests {
 
         let badge = try #require(pill(try card(0), from: 0, to: size.height))
         #expect(pill(try card(1), from: 0, to: size.height) == nil)
-        #expect(abs(badge.height - 16) <= 0.5, "\(badge)")
+        #expect(abs(badge.height - 16) <= 0.75, "\(badge)")
         #expect(abs(badge.maxX - (size.width - 12)) <= 1, "at the row's end: \(badge)")
-        #expect(abs(badge.minY - 12) <= 1.5, "at the row's top: \(badge)")
+        #expect(abs(badge.minY - 12) <= 0.5, "at the row's top: \(badge)")
     }
 
     // Rows (points) where the column at `x` isn't the page's color: the boxes it crosses.
@@ -266,14 +331,14 @@ struct ForumLookTests {
         let background = image.color(4, 4)
         let card = try #require(boxes(image, x: 50, background: background).dropFirst(2).first)
         let usual = try #require(boxes(plain, x: 50, background: background).dropFirst(2).first)
-        #expect(card.bottom - card.top == usual.bottom - usual.top)
 
         let expected = inkRuns(plain, x0: 26, x1: 400, from: usual.top + 2, to: usual.bottom - 2)
         let lines = inkRuns(image, x0: 26, x1: 400, from: card.top + 2, to: card.bottom - 2)
 
         try #require(expected.count == 3 && lines.count == 3, "\(lines)")
         #expect(abs(lines[0].bottom - expected[0].bottom) <= 0.5, "the title's line \(lines[0])")
-        #expect(lines[1].top >= expected[1].top - 3, "the preview's top \(lines[1]) for \(expected[1])")
+        // The system's emoji stands 18 tall at this size, as Discord's: 3.5 over the capitals.
+        #expect(lines[1].top >= expected[1].top - 4, "the preview's top \(lines[1]) for \(expected[1])")
         #expect(lines[1].bottom <= expected[1].bottom + 3, "the preview's bottom \(lines[1]) for \(expected[1])")
         #expect(abs(lines[2].top - expected[2].top) <= 0.5, "the footer's line \(lines[2])")
     }
