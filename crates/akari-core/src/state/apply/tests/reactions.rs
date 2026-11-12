@@ -687,6 +687,25 @@ fn a_reaction_is_replayed_only_over_the_loads_that_ran_when_it_came() {
     }
 }
 
+#[test]
+fn many_messages_reactions_are_read_at_once_and_only_those_with_some() {
+    let mut state = viewing(GENERAL);
+    for id in [10, 11, 12] {
+        apply(&mut state, "MESSAGE_CREATE", message(id, GENERAL));
+    }
+    add(&mut state, GENERAL, 12, MIRA, FIRE);
+    add(&mut state, GENERAL, 10, MIRA, UP);
+    let ids = [12, 99, 11, 10].map(Snowflake::new);
+
+    let read: Vec<(u64, Shown)> = state
+        .reactions_of(Snowflake::new(GENERAL), &ids)
+        .iter()
+        .map(|(id, reactions)| (id.get(), shown(reactions)))
+        .collect();
+
+    assert_eq!(read, [(12, one(FIRE, 1, false)), (10, one(UP, 1, false))]);
+}
+
 // Messages are held by the hundred; a reaction list costs one pointer pair on those without any.
 #[test]
 fn a_message_stays_small() {

@@ -230,8 +230,8 @@ preview), `edited`, `voice_message`, `has_attachments`, `has_embeds`, `has_stick
 `forwarded`. `ReplyTargetChanged { channel_id, target_id }` says the answer changed (the target
 was loaded, edited or deleted); the IDs are the target's, and every reply to it reads the same
 answer. `RepliedTo.mentions_author` is the preview's "@": akari-core's
-`Message::mentions_user` on the reply for the loaded target's author, so it is false while the
-target isn't loaded: read the replies' messages again with their target
+`Store::reply_mentions_author`, the reply's mentions naming the loaded target's author, so it
+is false while the target isn't loaded: read the replies' messages again with their target
 ([messages.md](../../docs/protocol/messages.md#replies)).
 
 `Store.pins_unread(channel_id)` is the dot on the header's pins button; `PinsUnreadChanged {

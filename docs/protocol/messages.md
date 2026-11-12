@@ -152,7 +152,8 @@ messages apart from the replies, as the official client's ReferencedMessageStore
   starter), so a line never falls back to "not loaded" under its reader. A channel's targets go
   with the channel, and with its window unless another window's reply names them. A new
   session keeps them (the official client drops them all); the refresh brings them again.
-- The preview's "@": `Message::mentions_user(author)` on the reply, for the target's author.
+- The preview's "@": `Store::reply_mentions_author(&reply)`, which is
+  `Message::mentions_user(author)` on the reply for the loaded target's author.
   Discord puts the author into a pinging reply's `mentions`; the official client shows the "@"
   whenever they are there, also for a mention typed into the text.
 - Other kinds with a reference (a pin's line, "started a thread", a crosspost, a forward) have

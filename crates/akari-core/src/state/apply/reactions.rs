@@ -31,6 +31,17 @@ impl State {
             .and_then(|message| message.reactions.clone())
             .unwrap_or_else(|| NONE.clone())
     }
+
+    pub(crate) fn reactions_of(
+        &self,
+        channel: ChannelId,
+        ids: &[MessageId],
+    ) -> Vec<(MessageId, Arc<[Reaction]>)> {
+        ids.iter()
+            .map(|id| (*id, self.reactions(channel, *id)))
+            .filter(|(_, reactions)| !reactions.is_empty())
+            .collect()
+    }
 }
 
 impl State {

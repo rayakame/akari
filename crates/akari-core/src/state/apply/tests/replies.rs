@@ -746,3 +746,68 @@ fn a_target_a_refresh_finds_deleted_says_so_on_its_replies() {
     assert!(events.contains(&changed(GENERAL, 11)), "{events:?}");
     assert_eq!(target(&state, GENERAL, 11), "deleted");
 }
+
+// The preview's "@": the reply's mentions name the author of the loaded target.
+#[test]
+fn a_reply_says_whether_it_pinged_its_targets_author() {
+    let mut state = viewing(GENERAL);
+    let by = |author: u64, id: u64| {
+        let mut target = message(id, GENERAL);
+        target["author"]["id"] = author.to_string().into();
+        target
+    };
+    let silent = |mut reply: Value| {
+        reply["mentions"] = json!([]);
+        reply
+    };
+    let replies = [
+        reply_to(10, GENERAL, 1, Some(by(ME, 1))),
+        silent(reply_to(11, GENERAL, 1, Some(by(ME, 1)))),
+        reply_to(12, GENERAL, 2, Some(by(MIRA, 2))),
+        reply_to(13, GENERAL, 3, None),
+        reply_to(14, GENERAL, 4, Some(Value::Null)),
+        message(15, GENERAL),
+    ];
+    for reply in replies {
+        apply(&mut state, "MESSAGE_CREATE", reply);
+    }
+    let pinged = |id: u64| {
+        let reply = state
+            .message(Snowflake::new(GENERAL), Snowflake::new(id))
+            .unwrap();
+        state.reply_mentions_author(&reply)
+    };
+
+    assert!(pinged(10));
+    assert!(!pinged(11), "no mention");
+    assert!(!pinged(12), "mentions someone else");
+    assert!(!pinged(13), "not loaded");
+    assert!(!pinged(14), "deleted");
+    assert!(!pinged(15), "no reply");
+}
+
+#[test]
+fn many_targets_are_read_at_once_in_the_order_asked() {
+    let mut state = viewing(GENERAL);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply(10, GENERAL, Some(original(GENERAL, "kept"))),
+    );
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(11, GENERAL, 6, Some(Value::Null)),
+    );
+    let ids = [6, 99, TARGET, 6].map(Snowflake::new);
+
+    let targets = state.reply_targets(Snowflake::new(GENERAL), &ids);
+
+    assert_eq!(
+        targets,
+        ids.map(|id| state.reply_target(Snowflake::new(GENERAL), id))
+    );
+    assert_eq!(targets[0], ReplyTarget::Deleted);
+    assert_eq!(targets[1], ReplyTarget::NotLoaded);
+    assert!(matches!(targets[2], ReplyTarget::Loaded(_)));
+}
