@@ -311,7 +311,8 @@ fn leaving_a_server_while_it_is_down_takes_its_channels_pin_acks_and_read_states
             .push(json!({"id": G1.to_string(), "unavailable": true}));
         apply(state, "READY", ready);
     };
-    let cases: [(&str, &dyn Fn(&mut State)); 2] = [("outage", &down), ("READY", &down_at_ready)];
+    type GoesDown<'a> = &'a dyn Fn(&mut State);
+    let cases: [(&str, GoesDown); 2] = [("outage", &down), ("READY", &down_at_ready)];
 
     for (name, goes_down) in cases {
         let mut state = state_from(&pinned_ready(PINNED.into()));
