@@ -108,6 +108,13 @@ impl Account {
         self.core.view_channel(channel_id);
     }
 
+    /// The channels whose message lists the host shows (the open channel and the thread beside
+    /// it), read or not; an empty list when none shows. A channel marked unread while it is open
+    /// stays unread until it leaves these, and one that leaves stops being read.
+    pub fn set_open_channels(&self, channel_ids: Vec<ChannelId>) {
+        self.core.set_open_channels(&channel_ids);
+    }
+
     /// The channels the user is reading at their newest messages, at most two (a channel and
     /// the thread beside it); further ones are ignored, and an empty list reads none. Each is
     /// acked up to the newest message its list shows at the present, and again as that list

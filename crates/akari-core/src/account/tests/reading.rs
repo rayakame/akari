@@ -400,6 +400,7 @@ async fn a_channel_still_read_isnt_read_again_when_the_other_changes() {
     let mut online = acking(general_read).await;
     showing(&online, &[NEWEST]).await;
     showing_thread(&online, &[THREAD_NEWEST]).await;
+    online.account.set_open_channels(&[general(), id(THREAD)]);
     online.account.set_reading(&[general(), id(THREAD)]);
     online
         .connection
@@ -422,7 +423,8 @@ async fn a_channel_still_read_isnt_read_again_when_the_other_changes() {
     sync(&mut online.connection, &online.subscription, 5).await;
     assert_eq!(handed(&online.account), []);
 
-    online.account.set_reading(&[id(THREAD)]);
+    online.account.set_open_channels(&[id(THREAD)]);
+    online.account.set_open_channels(&[general(), id(THREAD)]);
     online.account.set_reading(&[general(), id(THREAD)]);
     assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
 }

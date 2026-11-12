@@ -228,10 +228,37 @@ async fn the_echo_changes_nothing_more() {
     assert_eq!(pending(&online.account), 0);
 }
 
-#[tokio::test]
-async fn a_channel_marked_unread_while_it_is_read_stays_unread() {
-    let mut online = read_general().await;
+async fn event_with(subscription: &Subscription, name: &str) {
+    while !next(subscription).await.unwrap().contains(name) {}
+}
+
+// A new session, with GENERAL's list refreshed after its READY as the core does on its own.
+async fn refreshed_session(online: &mut Online, edit: impl FnOnce(&mut Value)) -> FakeConnection {
+    Mock::given(method("GET"))
+        .and(path(MESSAGES))
+        .respond_with(ResponseTemplate::new(200).set_body_json(page(&[FIRST, FIRST + 1, NEWEST])))
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    let fresh = new_session(online, edit).await;
+    events_until(
+        &online.subscription,
+        &format!("MessagesRefreshed({GENERAL})"),
+    )
+    .await;
+    fresh
+}
+
+// GENERAL's list shows and the user reads it.
+fn open_and_read(online: &Online) {
+    online.account.set_open_channels(&[general()]);
     online.account.set_reading(&[general()]);
+}
+
+#[tokio::test]
+async fn a_channel_marked_unread_while_it_is_open_stays_unread() {
+    let mut online = read_general().await;
+    open_and_read(&online);
     online
         .account
         .mark_unread(general(), msg(NEWEST))
@@ -250,10 +277,30 @@ async fn a_channel_marked_unread_while_it_is_read_stays_unread() {
     );
 }
 
+// Scrolled up: the mark came while the host named nothing as read.
 #[tokio::test]
-async fn leaving_and_coming_back_reads_it_again() {
+async fn a_mark_while_the_channel_isnt_read_holds_it_too() {
     let mut online = read_general().await;
+    online.account.set_open_channels(&[general()]);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+
     online.account.set_reading(&[general()]);
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+}
+
+// Scrolling away, the window losing key: the host stops naming the channel, which stays open.
+#[tokio::test]
+async fn reading_stopping_and_starting_again_leaves_it_unread() {
+    let mut online = read_general().await;
+    open_and_read(&online);
     online
         .account
         .mark_unread(general(), msg(NEWEST))
@@ -265,6 +312,30 @@ async fn leaving_and_coming_back_reads_it_again() {
     online.account.set_reading(&[]);
     online.account.set_reading(&[general()]);
 
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+}
+
+#[tokio::test]
+async fn leaving_and_coming_back_reads_it_again() {
+    let mut online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+
+    online.account.set_open_channels(&[id(THREAD)]);
+    assert!(!online.account.store().holds(general()));
+    assert!(
+        badge(&online.account, GENERAL).unread,
+        "leaving reads nothing"
+    );
+    open_and_read(&online);
+
     assert_eq!(badge(&online.account, GENERAL), Badge::default());
     assert_eq!(
         sent(&online.server, 2).await,
@@ -275,18 +346,59 @@ async fn leaving_and_coming_back_reads_it_again() {
     );
 }
 
-// A reconnect stops the reading on its own; the user didn't leave.
+// Left before the host said it stopped reading it: a message arriving in between reads nothing.
 #[tokio::test]
-async fn a_new_session_leaves_it_unread() {
+async fn a_channel_that_was_left_isnt_read_any_more() {
     let mut online = read_general().await;
-    online.account.set_reading(&[general()]);
+    open_and_read(&online);
     online
         .account
         .mark_unread(general(), msg(NEWEST))
         .await
         .unwrap();
 
-    let mut fresh = new_session(&mut online, |ready| {
+    online.account.set_open_channels(&[]);
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+}
+
+// The split closes: the channel beside it is still open.
+#[tokio::test]
+async fn the_other_pane_closing_leaves_it_unread() {
+    let mut online = read_general().await;
+    online.account.set_open_channels(&[general(), id(THREAD)]);
+    online.account.set_reading(&[general(), id(THREAD)]);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+
+    online.account.set_open_channels(&[general()]);
+    online.account.set_reading(&[general()]);
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+
+    assert_eq!(handed(&online.account), []);
+    assert!(badge(&online.account, GENERAL).unread);
+}
+
+// As the host does it: the drop ends its reading, and it names the channel again once online.
+#[tokio::test]
+async fn a_new_session_leaves_it_unread() {
+    let mut online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+
+    online.account.set_reading(&[]);
+    let mut fresh = refreshed_session(&mut online, |ready| {
         ready["read_state"]["entries"][0]["last_message_id"] = (NEWEST - 1).to_string().into();
         ready["read_state"]["entries"][0]["mention_count"] = 1.into();
     })
@@ -299,26 +411,122 @@ async fn a_new_session_leaves_it_unread() {
     assert!(badge(&online.account, GENERAL).unread);
 }
 
+// Read on another device while Akari was away: READY has it read, and it is read as it grows.
 #[tokio::test]
-async fn a_channel_marked_unread_elsewhere_while_it_is_read_stays_unread() {
+async fn a_ready_that_has_it_read_ends_it() {
     let mut online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+
+    let mut fresh = refreshed_session(&mut online, general_read).await;
     online.account.set_reading(&[general()]);
+    fresh.send(message(2, NEWEST + 1)).await;
+    sync(&mut fresh, &online.subscription, 3).await;
+
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
+}
+
+#[tokio::test]
+async fn a_channel_marked_unread_elsewhere_while_it_is_open_stays_unread() {
+    let mut online = read_general().await;
+    online.account.set_open_channels(&[general()]);
     online
         .connection
         .send(manual_ack(2, GENERAL, NEWEST - 1, 1))
         .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
 
-    online.connection.send(message(3, NEWEST + 1)).await;
-    sync(&mut online.connection, &online.subscription, 4).await;
+    online.account.set_reading(&[general()]);
+    online.connection.send(message(4, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 5).await;
 
     assert_eq!(handed(&online.account), []);
     assert!(badge(&online.account, GENERAL).unread);
 }
 
+// Nothing will say it was left, so nothing holds it: opening it reads it.
+#[tokio::test]
+async fn a_channel_marked_unread_elsewhere_while_it_isnt_open_is_read_when_opened() {
+    let mut online = read_general().await;
+    online
+        .connection
+        .send(manual_ack(2, GENERAL, NEWEST - 1, 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert!(!online.account.store().holds(general()));
+
+    open_and_read(&online);
+
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST)]);
+}
+
+#[tokio::test]
+async fn a_deleted_channel_is_held_no_longer() {
+    let mut online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+    assert!(online.account.store().holds(general()));
+
+    online
+        .connection
+        .send(dispatch(
+            2,
+            "CHANNEL_DELETE",
+            json!({"id": GENERAL.to_string(), "type": 0, "guild_id": G1.to_string()}),
+        ))
+        .await;
+    event_with(&online.subscription, "ChannelRemoved").await;
+
+    assert!(!online.account.store().holds(general()));
+}
+
+#[tokio::test]
+async fn a_server_that_was_left_holds_nothing() {
+    let mut online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+
+    online
+        .connection
+        .send(dispatch(2, "GUILD_DELETE", json!({"id": G1.to_string()})))
+        .await;
+    event_with(&online.subscription, "GuildRemoved").await;
+
+    assert!(!online.account.store().holds(general()));
+}
+
+#[tokio::test]
+async fn closing_the_account_holds_nothing() {
+    let online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+
+    online.account.close();
+    events_until(&online.subscription, "Closed").await;
+
+    assert!(!online.account.store().holds(general()));
+}
+
 #[tokio::test]
 async fn marking_read_ends_it() {
     let mut online = read_general().await;
-    online.account.set_reading(&[general()]);
+    open_and_read(&online);
     online
         .account
         .mark_unread(general(), msg(NEWEST))
@@ -341,9 +549,53 @@ async fn marking_read_ends_it() {
 }
 
 #[tokio::test]
+async fn marking_the_server_read_ends_it() {
+    let mut online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+
+    online.account.mark_guilds_read(&[g1()]);
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+
+    assert!(!online.account.store().holds(general()));
+    assert_eq!(badge(&online.account, GENERAL), Badge::default());
+}
+
+// Read on another device.
+#[tokio::test]
+async fn an_ack_from_elsewhere_ends_it() {
+    let mut online = read_general().await;
+    open_and_read(&online);
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+
+    online
+        .connection
+        .send(dispatch(
+            2,
+            "MESSAGE_ACK",
+            json!({"channel_id": GENERAL.to_string(), "message_id": NEWEST.to_string(),
+                   "mention_count": 0, "version": 7}),
+        ))
+        .await;
+    online.connection.send(message(3, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 4).await;
+
+    assert_eq!(handed(&online.account), [paced(GENERAL, NEWEST + 1)]);
+}
+
+#[tokio::test]
 async fn the_users_own_message_ends_it() {
     let mut online = read_general().await;
-    online.account.set_reading(&[general()]);
+    open_and_read(&online);
     online
         .account
         .mark_unread(general(), msg(NEWEST))
@@ -385,7 +637,7 @@ async fn a_refused_mark_goes_back_to_read() {
 #[tokio::test]
 async fn a_refused_mark_lets_reading_go_on() {
     let mut online = read_general().await;
-    online.account.set_reading(&[general()]);
+    open_and_read(&online);
     answer_acks_once(&online.server, missing_access()).await;
     online
         .account

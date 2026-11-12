@@ -226,3 +226,40 @@ async fn mark_unread_crosses() {
     assert!(matches!(unknown, Err(RequestError::InvalidRequest)));
     online.account.close();
 }
+
+#[tokio::test]
+async fn an_open_channel_marked_unread_stays_unread_until_it_is_left() {
+    let online = online_acking().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v9/channels/300000000000000002/messages"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fixture(include_str!(
+                "../../../akari-core/tests/fixtures/messages_page.json"
+            ))),
+        )
+        .mount(&online.server)
+        .await;
+    online
+        .account
+        .load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None)
+        .await
+        .unwrap();
+    online.account.set_open_channels(vec![GENERAL]);
+    online.account.set_reading(vec![GENERAL]);
+    assert!(!unread(&online.account, GENERAL));
+    online
+        .account
+        .mark_unread(GENERAL, MessageId::new(400_000_000_000_000_012))
+        .await
+        .unwrap();
+
+    online.account.set_reading(Vec::new());
+    online.account.set_reading(vec![GENERAL]);
+    assert!(unread(&online.account, GENERAL), "still open");
+
+    online.account.set_open_channels(Vec::new());
+    online.account.set_open_channels(vec![GENERAL]);
+    online.account.set_reading(vec![GENERAL]);
+    assert!(!unread(&online.account, GENERAL), "left and opened again");
+    online.account.close();
+}

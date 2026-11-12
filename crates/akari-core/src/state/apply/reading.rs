@@ -267,15 +267,9 @@ impl State {
                 self.release(ack.channel_id);
             }
         }
-        if ack.manual && self.reads(ack.channel_id) {
+        if ack.manual && self.open.contains(&ack.channel_id) {
             self.hold(ack.channel_id);
         }
-    }
-
-    fn reads(&self, channel: ChannelId) -> bool {
-        self.reading
-            .iter()
-            .any(|reading| reading.channel == channel)
     }
 
     fn hold(&mut self, channel: ChannelId) {
@@ -284,7 +278,7 @@ impl State {
         }
     }
 
-    fn release(&mut self, channel: ChannelId) {
+    pub(super) fn release(&mut self, channel: ChannelId) {
         self.held.retain(|held| *held != channel);
     }
 
@@ -375,8 +369,20 @@ impl State {
                 })
     }
 
-    // The connection dropped: nothing is read until the host says so again, and a channel the
-    // user marked unread stays held, since they didn't leave it.
+    // A channel that leaves was left by the user: its hold ends, and it is read no longer.
+    pub(crate) fn set_open(&mut self, channels: &[ChannelId]) {
+        let before = std::mem::replace(&mut self.open, channels.to_vec());
+        let left = |channel: &ChannelId| before.contains(channel) && !channels.contains(channel);
+        self.held.retain(|held| channels.contains(held));
+        self.reading.retain(|reading| !left(&reading.channel));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn holds(&self, channel: ChannelId) -> bool {
+        self.held.contains(&channel)
+    }
+
+    // The connection dropped: nothing is read until the host says so again.
     pub(crate) fn stop_reading(&mut self, events: &mut Vec<StoreEvent>) {
         self.reading.clear();
         self.refresh_badges(self.now_millis(), events);
@@ -453,7 +459,6 @@ impl State {
         events: &mut Vec<StoreEvent>,
     ) -> Vec<Ack> {
         let before = std::mem::take(&mut self.reading);
-        self.held.retain(|held| channels.contains(held));
         for &channel in channels {
             if self.reading.len() == READING_LIMIT {
                 break;
@@ -530,6 +535,14 @@ impl State {
     // A READY reads nothing itself: the lists it leaves are read once they grow, or once the
     // host sets them again.
     pub(super) fn follow_ready(&mut self) {
+        // Read elsewhere while Akari was away.
+        let entities = &self.entities;
+        self.held.retain(|held| {
+            entities
+                .channels
+                .get(held)
+                .is_some_and(|channel| entities.needs_ack(channel))
+        });
         for index in 0..self.reading.len() {
             let channel = self.reading[index].channel;
             self.reading[index] = Reading {

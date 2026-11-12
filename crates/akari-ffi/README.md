@@ -149,8 +149,11 @@ decides when the user is reading; the core never infers it
 `MessageActions.mark_unread` allows it (`InvalidRequest` otherwise, before asking). The badge
 and the read position move at once (`BadgeChanged`), and the call resolves on Discord's answer,
 which can take as long as Discord is unreachable: a host doesn't wait on it. An error means the
-read state already went back. The channel isn't read again by `set_reading` naming it until the
-host leaves it out once, marks it read, or the user writes there.
+read state already went back. `set_open_channels(channel_ids)` names the channels whose lists
+the host shows (the open channel and the thread beside it, read or not): a channel marked
+unread while it is open isn't read again, whatever `set_reading` names, until it leaves them,
+the user marks it read or writes there, or it is read on another device. Name every open list
+on each call, and none once the last one closes.
 
 ## Formatted messages
 
@@ -291,8 +294,8 @@ read.
   `StoreSubscription.next`) are polled directly.
 - Sync methods are cheap. A store read takes one read lock, and akari-core warns when a
   write holds the lock for more than 4 ms. `connect`, `disconnect`, `close` and
-  `view_channel`, `set_reading`, `set_browsing`, `mark_read` and `mark_guilds_read` only
-  signal.
+  `view_channel`, `set_open_channels`, `set_reading`, `set_browsing`, `mark_read` and
+  `mark_guilds_read` only signal.
 - The host's `TokenStore` runs on a blocking thread, never on the main thread or a runtime
   worker, so it may block or show a dialog.
 - Markdown is parsed on the runtime where it can be: each account registers its documents as
