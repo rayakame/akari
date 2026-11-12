@@ -717,3 +717,32 @@ fn an_evicted_thread_takes_its_starter_and_that_messages_target() {
     );
     assert!(state.wants_starter(thread));
 }
+
+// A refresh's page is the truth within its range: a row it lacks was deleted meanwhile.
+#[test]
+fn a_target_a_refresh_finds_deleted_says_so_on_its_replies() {
+    let mut state = viewing(GENERAL);
+    load(
+        &mut state,
+        GENERAL,
+        LoadKind::Latest,
+        &[
+            message(10, GENERAL),
+            message(11, GENERAL),
+            reply_to(12, GENERAL, 11, None),
+        ],
+    );
+    assert_ne!(target(&state, GENERAL, 11), "deleted");
+    state.windows.mark_stale(&mut Vec::new());
+
+    let events = load(
+        &mut state,
+        GENERAL,
+        LoadKind::Refresh,
+        &[message(10, GENERAL), reply_to(12, GENERAL, 11, None)],
+    );
+
+    assert!(events.contains(&"MessageDeleted(11)".to_owned()), "{events:?}");
+    assert!(events.contains(&changed(GENERAL, 11)), "{events:?}");
+    assert_eq!(target(&state, GENERAL, 11), "deleted");
+}
