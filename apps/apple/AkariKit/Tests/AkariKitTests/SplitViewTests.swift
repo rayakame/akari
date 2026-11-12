@@ -347,14 +347,12 @@ final class SplitViewTests {
         session.close()
     }
 
-    // A forum's posts have no channel list to open beside.
+    // A thread whose channel the store doesn't have has nothing to open beside.
     @Test
-    func openInSplitViewNeedsAParentWithAMessageList() {
+    func openInSplitViewNeedsTheThreadsChannel() {
         world()
         store.update { state in
-            state.list(
-                [channel(13, kind: .guildForum), thread(33, in: 13, name: "post"), channel(11)],
-                in: 1)
+            state.list([thread(33, in: 13, name: "orphan"), channel(11)], in: 1)
         }
         let session = makeSession()
         session.start()

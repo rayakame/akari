@@ -82,6 +82,7 @@ public final class SessionModel {
             }
             channels?.setOpen(openChannelId)
             tellOpenForum()
+            syncSplit()
         }
     }
     /// The channel the window shows: the message list's or the forum's.
@@ -359,7 +360,7 @@ public final class SessionModel {
     /// thread's row closes its channel's split, which the channel forgets.
     public func open(channel id: ChannelId) {
         engage()
-        if id == messages?.channelId {
+        if id == openChannelId {
             forgetSplit(of: id)
             shownForms.remove(id)
             syncForm()
@@ -411,7 +412,7 @@ public final class SessionModel {
     /// when Discord refuses it, it's gone or the fetch fails, nor once the user opened something
     /// else or clicked another thread meanwhile.
     public func openBeside(thread id: ChannelId, from parent: ChannelId) async {
-        guard messages?.channelId == parent else {
+        guard openChannelId == parent else {
             return
         }
         clickedThread = id
@@ -419,7 +420,8 @@ public final class SessionModel {
         if store.channel(id: id) == nil {
             let opened = messages
             let found = await ask(about: id, in: parent, check: false) ?? false
-            guard found, !ended, clickedThread == id, messages === opened else {
+            guard found, !ended, clickedThread == id, messages === opened, openChannelId == parent
+            else {
                 return
             }
             // The launch's request may have shown it meanwhile; the click is the user's.
@@ -441,11 +443,11 @@ public final class SessionModel {
 
     /// The split view's X: closes it, and the channel forgets it.
     public func closeSplit() {
-        guard let open = messages?.channelId, split != nil else {
+        guard let open = openChannelId, split != nil else {
             return
         }
         forgetSplit(of: open)
-        focusChannel = true
+        focusChannel = messages != nil
         updateReading()
     }
 
@@ -490,7 +492,7 @@ public final class SessionModel {
     public func openInSplitView() {
         guard let open = messages?.channelId, let thread = channels?.channel(open),
             thread.isThread, let parent = thread.parentId,
-            let found = store.channel(id: parent), found.opensMessageList,
+            let found = store.channel(id: parent), found.opensMessageList || found.opensForum,
             let guild = found.guildId
         else {
             return
@@ -1237,7 +1239,7 @@ public final class SessionModel {
     }
 
     private func syncSplit(onItsOwn: Bool = false) {
-        guard let open = messages?.channelId, let thread = splits[open]?.thread else {
+        guard let open = openChannelId, let thread = splits[open]?.thread else {
             showSplit(nil)
             return
         }
@@ -1306,7 +1308,7 @@ public final class SessionModel {
                 return
             }
             if found {
-                if messages?.channelId == parent {
+                if openChannelId == parent {
                     syncSplit(onItsOwn: true)
                     updateReading()
                 }
