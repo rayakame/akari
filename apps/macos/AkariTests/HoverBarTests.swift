@@ -881,6 +881,122 @@ struct HoverBarTests {
     }
 }
 
+// AppKit's own menus, popped onto a screen and cancelled from inside their tracking loop: its
+// tracking notifications are what lights the row and lets it go.
+@MainActor
+struct RealMenuTests {
+    let list = BarList()
+
+    init() {
+        list.actions.startsThreads = [1, 2]
+        list.show([
+            row(1, by: author(2, "Ray"), at: list.noon, content: "first"),
+            row(2, by: author(3), at: list.noon + 700, content: "second, with words to click on"),
+        ])
+        list.controller.popUp = { menu, point, view in
+            menu.popUp(positioning: nil, at: point, in: view)
+        }
+    }
+
+    func keyWindow() -> NSWindow {
+        let key = TestWindow.hide(
+            MessageTableTests.KeyWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 600, height: 400)),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false))
+        key.contentView = list.controller.scrollView
+        key.orderFront(nil)
+        key.layoutIfNeeded()
+        key.displayIfNeeded()
+        return key
+    }
+
+    // What the list shows while each menu tracks; every menu is cancelled once seen.
+    final class Seen {
+        var menus: [(titles: [String], lit: [UInt64], more: Bool)] = []
+    }
+
+    func tracking(_ open: () throws -> Void) rethrows -> [(titles: [String], lit: [UInt64], more: Bool)] {
+        let seen = Seen()
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
+        ) { [list] notification in
+            nonisolated(unsafe) let menu = notification.object as? NSMenu
+            MainActor.assumeIsolated {
+                RunLoop.main.perform(inModes: [.eventTracking, .default]) {
+                    MainActor.assumeIsolated {
+                        seen.menus.append(
+                            (
+                                menu?.items.map(\.title) ?? [], list.hovered,
+                                list.bar.button(.more)?.isSelected == true
+                            ))
+                        menu?.cancelTrackingWithoutAnimation()
+                    }
+                }
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        try open()
+        return seen.menus
+    }
+
+    func rightClick(_ point: NSPoint, in view: NSView, of window: NSWindow) throws {
+        window.sendEvent(
+            try #require(
+                NSEvent.mouseEvent(
+                    with: .rightMouseDown, location: view.convert(point, to: nil), modifierFlags: [],
+                    timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                    clickCount: 1, pressure: 1)))
+    }
+
+    @Test(.tags(.onScreen), .enabled(if: TestWindow.screenTests))
+    func aRightClicksMenuLightsItsRowUntilItCloses() throws {
+        let window = keyWindow()
+        defer { window.close() }
+        let cell = try list.cell(of: 2)
+        let text = try #require(MessageListFixture.messageText(in: cell))
+        let word = try glyphs(of: "words", in: text, within: text)
+        try settleEvents(in: window)
+        list.pointer.location = nil
+        list.controller.pointerMoved()
+        #expect(list.hovered.isEmpty)
+
+        let onRow = try tracking {
+            try rightClick(NSPoint(x: cell.box.maxX - 4, y: cell.box.midY), in: cell, of: window)
+        }
+        #expect(onRow.map(\.titles) == [["Create Thread", "", "Copy Text"]])
+        #expect(onRow.map(\.lit) == [[2]], "lit by the menu alone: the pointer is nowhere")
+        #expect(list.hovered.isEmpty, "and let go when it closed")
+
+        let inText = try tracking {
+            try rightClick(NSPoint(x: word.midX, y: word.midY), in: text, of: window)
+        }
+        #expect(inText.map(\.titles) == [["Create Thread", "", "Copy Text"]])
+        #expect(inText.map(\.lit) == [[2]], "the text view's menu carries the row's items")
+        #expect(list.hovered.isEmpty)
+    }
+
+    @Test(.tags(.onScreen), .enabled(if: TestWindow.screenTests))
+    func moresPopupLightsMoreAndItsRowUntilItCloses() throws {
+        let window = keyWindow()
+        defer { window.close() }
+        try settleEvents(in: window)
+        try list.hover(2)
+        let more = try #require(list.bar.button(.more))
+
+        let popped = try tracking {
+            // The pointer leaves while the menu is open.
+            list.pointer.location = nil
+            more.performClick(nil)
+        }
+
+        #expect(popped.map(\.titles) == [["Create Thread", "", "Copy Text"]])
+        #expect(popped.map(\.lit) == [[2]])
+        #expect(popped.map(\.more) == [true])
+        #expect(!more.isSelected)
+        #expect(list.hovered.isEmpty)
+    }
+}
+
 // Option-click on a message marks the channel unread from it, as Alt+click in the official
 // client: anywhere in the message's box but on its buttons, and nothing else happens.
 @MainActor
