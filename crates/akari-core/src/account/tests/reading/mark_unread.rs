@@ -886,7 +886,7 @@ async fn a_refused_mark_with_a_later_ack_pending_is_no_error() {
     release.send(()).unwrap();
     let outcome = marking.await;
 
-    assert!(outcome.is_ok(), "{outcome:?}");
+    assert_eq!(outcome.ok(), Some(MarkOutcome::Replaced));
     assert_eq!(
         sent(&online.server, 2).await,
         [Sent::Ack(GENERAL, NEWEST - 1), Sent::Ack(GENERAL, NEWEST)]
@@ -922,6 +922,80 @@ async fn a_mark_while_ready_is_prepared_goes_out_and_its_echo_brings_it() {
     sync(&mut fresh, &online.subscription, 3).await;
     assert_eq!(read_state(account, GENERAL), Some((NEWEST - 1, 1)));
     assert!(badge(account, GENERAL).unread);
+}
+
+#[tokio::test]
+async fn a_mark_discord_took_says_so() {
+    let online = read_general().await;
+
+    let outcome = online.account.mark_unread(general(), msg(NEWEST)).await;
+
+    assert_eq!(outcome.ok(), Some(MarkOutcome::Marked));
+}
+
+// The channel was read up to another message elsewhere while the mark waited: READY's state
+// stands, the mark is dropped, and its caller hears that instead of a success.
+#[tokio::test]
+async fn a_mark_dropped_for_readys_position_says_it_was_replaced() {
+    let Online {
+        account,
+        subscription,
+        mut connection,
+        server,
+        mut fake,
+    } = read_general().await;
+    let (on_arrival, release) = hold_next_ack(&server, 200).await;
+    let marking = account.mark_unread(general(), msg(NEWEST));
+    tokio::pin!(marking);
+    tokio::select! {
+        biased;
+        result = &mut marking => panic!("answered before the release: {result:?}"),
+        () = wait_for(on_arrival, "the mark never arrived") => {}
+    }
+
+    connection.send(json!({"op": 9, "d": false})).await;
+    let mut fresh = fake.accept().await;
+    assert_eq!(fresh.handshake(60_000).await["op"], 2);
+    fresh
+        .send(ready_payload(1, &fake, |ready| {
+            ready["read_state"]["entries"][0]["last_message_id"] = FIRST.to_string().into();
+            ready["read_state"]["entries"][0]["mention_count"] = 0.into();
+        }))
+        .await;
+    events_until(&subscription, "Online").await;
+    let outcome = marking.await;
+    release.send(()).unwrap();
+
+    assert_eq!(outcome.ok(), Some(MarkOutcome::Replaced));
+    assert_eq!(read_state(&account, GENERAL), Some((FIRST, 0)));
+}
+
+// A second mark before the first went out: the first one's caller has nothing to wait for.
+#[tokio::test]
+async fn a_second_mark_replaces_the_first() {
+    let online = acking(|ready| {
+        general_read(ready);
+        thread_unread(ready);
+    })
+    .await;
+    showing(&online, &[FIRST, FIRST + 1, NEWEST]).await;
+    let (on_arrival, release) = hold_next_ack(&online.server, 200).await;
+    online.account.mark_read(id(THREAD));
+    wait_for(on_arrival, "the ack never arrived").await;
+    let account = &online.account;
+
+    let (first, second, ()) = tokio::join!(
+        account.mark_unread(general(), msg(NEWEST)),
+        account.mark_unread(general(), msg(FIRST + 1)),
+        async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            release.send(()).unwrap();
+        }
+    );
+
+    assert_eq!(first.ok(), Some(MarkOutcome::Replaced));
+    assert_eq!(second.ok(), Some(MarkOutcome::Marked));
+    assert_eq!(read_state(account, GENERAL), Some((FIRST, 2)));
 }
 
 #[tokio::test]

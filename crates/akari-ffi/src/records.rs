@@ -1403,6 +1403,26 @@ impl From<akari_core::PageOutcome> for PageOutcome {
     }
 }
 
+/// How a Mark Unread ended when nothing failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum MarkOutcome {
+    /// Discord took it.
+    Marked,
+    /// Something later took its place: the user read or marked the channel again, it was read
+    /// or marked on another device, or a READY brought another position. The store shows what
+    /// replaced it, so the host takes back what it showed for the mark; nothing failed.
+    Replaced,
+}
+
+impl From<akari_core::MarkOutcome> for MarkOutcome {
+    fn from(outcome: akari_core::MarkOutcome) -> Self {
+        match outcome {
+            akari_core::MarkOutcome::Marked => Self::Marked,
+            _ => Self::Replaced,
+        }
+    }
+}
+
 /// Where one history load's time went, and what became of its page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct LoadReport {

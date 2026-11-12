@@ -136,8 +136,20 @@ pub(crate) enum Echo {
     Own { superseded: bool },
 }
 
-pub(crate) type Marked = oneshot::Receiver<Result<(), RequestError>>;
-type Waiter = oneshot::Sender<Result<(), RequestError>>;
+/// How a Mark Unread ended when nothing failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MarkOutcome {
+    /// Discord took it.
+    Marked,
+    /// Something later took its place before it counted: the user read or marked the channel
+    /// again, it was read or marked on another device, or a READY brought another position.
+    /// The store shows what replaced it.
+    Replaced,
+}
+
+pub(crate) type Marked = oneshot::Receiver<Result<MarkOutcome, RequestError>>;
+type Waiter = oneshot::Sender<Result<MarkOutcome, RequestError>>;
 
 #[derive(Debug, Clone, Copy)]
 struct Wanted {
@@ -388,7 +400,7 @@ impl Queue {
             },
         );
         if let Some((_, earlier)) = self.marks.insert(channel, (order, waiter)) {
-            let _ = earlier.send(Ok(()));
+            let _ = earlier.send(Ok(MarkOutcome::Replaced));
         }
         marked
     }
@@ -397,8 +409,8 @@ impl Queue {
         self.marks.contains_key(&channel)
     }
 
-    // A mark that is neither pending nor on its way any more went through, or something later
-    // took its place: either way its caller has nothing to wait for.
+    // A mark that is neither pending nor on its way any more, and wasn't confirmed: something
+    // later took its place.
     fn settle(&mut self) {
         let wanted = &self.wanted;
         let flight = &self.flight;
@@ -418,7 +430,7 @@ impl Queue {
             .collect();
         for channel in done {
             if let Some((_, waiter)) = self.marks.remove(&channel) {
-                let _ = waiter.send(Ok(()));
+                let _ = waiter.send(Ok(MarkOutcome::Replaced));
             }
         }
     }
@@ -508,6 +520,14 @@ impl Queue {
                 self.sent.remove(&channel);
                 if !manual.echoed {
                     self.marked.insert(channel, wanted.id);
+                }
+                if self
+                    .marks
+                    .get(&channel)
+                    .is_some_and(|(token, _)| *token == manual.token)
+                    && let Some((_, waiter)) = self.marks.remove(&channel)
+                {
+                    let _ = waiter.send(Ok(MarkOutcome::Marked));
                 }
             } else if !wanted.unchecked() {
                 self.sent.insert(channel, wanted.id);
