@@ -81,6 +81,8 @@ pub enum ThreadLocation {
     ToolbarOverflow,
     /// A thread row's context menu.
     ContextMenu,
+    /// The Follow button under a forum post's first message.
+    ForumToolbar,
 }
 
 impl ThreadLocation {
@@ -89,6 +91,7 @@ impl ThreadLocation {
             Self::SidebarOverflow => "Sidebar%20Overflow",
             Self::ToolbarOverflow => "Toolbar%20Overflow",
             Self::ContextMenu => "Context%20Menu",
+            Self::ForumToolbar => "Forum%20Toolbar",
         }
     }
 }

@@ -147,6 +147,7 @@ async fn each_location_has_the_official_query() {
         ThreadLocation::SidebarOverflow,
         ThreadLocation::ToolbarOverflow,
         ThreadLocation::ContextMenu,
+        ThreadLocation::ForumToolbar,
     ] {
         online.account.join_thread(thread, location).await.unwrap();
         online.account.leave_thread(thread, location).await.unwrap();
@@ -167,6 +168,8 @@ async fn each_location_has_the_official_query() {
             "DELETE location=Toolbar%20Overflow",
             "POST location=Context%20Menu",
             "DELETE location=Context%20Menu",
+            "POST location=Forum%20Toolbar",
+            "DELETE location=Forum%20Toolbar",
         ]
     );
 }

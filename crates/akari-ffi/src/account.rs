@@ -460,6 +460,8 @@ pub enum ThreadLocation {
     ToolbarOverflow,
     /// A thread row's context menu.
     ContextMenu,
+    /// The Follow button under a forum post's first message.
+    ForumToolbar,
 }
 
 impl From<ThreadLocation> for akari_core::ThreadLocation {
@@ -468,6 +470,7 @@ impl From<ThreadLocation> for akari_core::ThreadLocation {
             ThreadLocation::SidebarOverflow => Self::SidebarOverflow,
             ThreadLocation::ToolbarOverflow => Self::ToolbarOverflow,
             ThreadLocation::ContextMenu => Self::ContextMenu,
+            ThreadLocation::ForumToolbar => Self::ForumToolbar,
         }
     }
 }
