@@ -103,17 +103,20 @@ public final class MessageActionsModel {
     private let createThread: (ChannelId, MessageId) -> Void
     private let viewThread: (ChannelId, ChannelId) -> Void
     private let marking: (ChannelId, MessageId) -> ((_ taken: Bool) -> Void)?
+    private let reply: (MessageListModel.Row, Bool) -> Void
     private let failed: (Failure) -> Void
 
     /// `copy` puts text on the host's pasteboard; `createThread` takes the message's channel and
     /// the message, `viewThread` the thread and its parent; `marking` shows a mark as unread at
-    /// once and returns what takes Discord's answer: whether it took the mark.
+    /// once and returns what takes Discord's answer: whether it took the mark; `reply` starts a
+    /// reply to the row's message, with Shift as it was at the click.
     public init(
         store: Store, account: Account, copy: @escaping (String) -> Void,
         retry: @escaping (MessageId) -> Void, discard: @escaping (MessageId) -> Void,
         createThread: @escaping (ChannelId, MessageId) -> Void,
         viewThread: @escaping (ChannelId, ChannelId) -> Void,
         marking: @escaping (ChannelId, MessageId) -> ((_ taken: Bool) -> Void)? = { _, _ in nil },
+        reply: @escaping (MessageListModel.Row, Bool) -> Void = { _, _ in },
         failed: @escaping (Failure) -> Void
     ) {
         self.store = store
@@ -124,6 +127,7 @@ public final class MessageActionsModel {
         self.createThread = createThread
         self.viewThread = viewThread
         self.marking = marking
+        self.reply = reply
         self.failed = failed
     }
 
@@ -140,7 +144,7 @@ public final class MessageActionsModel {
         let slots = shift ? Self.shiftBarOrder : Self.barOrder
         let hasDelete = slots.contains { $0.action == .delete } && offer.has(.delete)
         return slots.compactMap { slot in
-            let fits = slot.when.fits(editable: offer.has(.edit), deletable: hasDelete)
+            let fits = slot.when.fits(editable: offer.actions.edit, deletable: hasDelete)
             return fits && offer.has(slot.action) ? Self.item(slot.action, in: .bar) : nil
         }
     }
@@ -176,7 +180,9 @@ public final class MessageActionsModel {
             if row.message.delivery == .failed {
                 discard(row.message.id)
             }
-        case .addReaction, .viewReactions, .reply, .edit, .pin, .unpin, .removeReactions,
+        case .reply:
+            reply(row, shift)
+        case .addReaction, .viewReactions, .edit, .pin, .unpin, .removeReactions,
             .removeAllReactions, .copyId, .more:
             break
         }
@@ -224,8 +230,9 @@ public final class MessageActionsModel {
             case .viewThread: actions.viewThread
             case .delete: failed && actions.delete
             case .more: true
+            case .reply: actions.reply
             // Their features aren't built yet.
-            case .addReaction, .viewReactions, .reply, .edit, .pin, .unpin, .removeReactions,
+            case .addReaction, .viewReactions, .edit, .pin, .unpin, .removeReactions,
                 .removeAllReactions, .copyId:
                 false
             }
