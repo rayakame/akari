@@ -707,6 +707,15 @@ impl Store {
         })
     }
 
+    pub(crate) fn set_open_channels(&self, channels: &[ChannelId]) {
+        self.write("open", |inner, _| inner.state.set_open(channels));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn holds(&self, channel: ChannelId) -> bool {
+        self.read(|inner| inner.state.holds(channel))
+    }
+
     // A connection that dropped may come back in a new session: until the host says the user
     // still reads the channels, nothing acks them.
     pub(crate) fn stop_reading(&self) {

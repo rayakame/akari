@@ -1506,6 +1506,14 @@ impl Account {
         self.shared.store.agree_to_age_restricted(guild);
     }
 
+    /// The channels whose message lists the host shows: the open channel and the thread beside
+    /// it, whether or not the user reads them right now. A channel marked unread while it is
+    /// open stays unread until it leaves these ([`Account::mark_unread`]); one that leaves also
+    /// stops being read. Name every open list on each call; an empty slice when none shows.
+    pub fn set_open_channels(&self, channels: &[ChannelId]) {
+        self.shared.store.set_open_channels(channels);
+    }
+
     /// The channels the user is reading at their newest messages, at most two (a channel and
     /// the thread beside it); further ones are ignored, and an empty slice reads none. Each is
     /// acked up to the newest message its list shows at the present, and again as that list
@@ -1528,8 +1536,8 @@ impl Account {
     }
 
     /// Marks the channel unread from `message` on, as the official client's Mark Unread; the
-    /// store has it at once. A channel being read isn't read again until the host leaves it out
-    /// of [`Account::set_reading`], the user marks it read or sends a message there. An archived
+    /// store has it at once. An open channel ([`Account::set_open_channels`]) isn't read again
+    /// until the user leaves it, marks it read or sends a message there. An archived
     /// thread is opened and an unjoined one joined first. Resolves when Discord took the mark,
     /// retried like every ack; a refusal puts the read state back and is the error.
     /// `InvalidRequest`, without a request, where
@@ -2102,6 +2110,7 @@ impl Drop for Finish {
             .store
             .set_connection(ConnectionState::Closed { error });
         self.shared.store.stop_reading();
+        self.shared.store.set_open_channels(&[]);
         // close() does nothing once the gateway has ended, so it runs on every path. After the
         // state, so it sees why the session ended.
         self.shared.close();

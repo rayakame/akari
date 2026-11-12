@@ -178,8 +178,9 @@ its own, as the official client acks both panes whichever was clicked last (obse
 2026-10-17). Never for one that merely receives messages, and never in answer to a MESSAGE_ACK
 from elsewhere. A channel the host names again while it's being read reads nothing new: only
 its list growing does, so the other pane scrolling away and back doesn't ack a channel marked
-unread meanwhile. A channel marked unread while it is being read, here or on another device, isn't
-read at all, growing or not, until it is left ([Mark Unread](#mark-unread)). Since a READY, each channel named counts as new once. The macOS app names a channel only while the session is online, the app is
+unread meanwhile. A channel marked unread while its list is open, here or on another device,
+isn't read at all, growing or not, until the user leaves it ([Mark Unread](#mark-unread)). Since
+a READY, each channel named counts as new once. The macOS app names a channel only while the session is online, the app is
 active, the window is key and visible, the channel's list is at the present's bottom with its
 refresh after READY in, and the user is engaged: opening the channel, a click or a key press in
 the window engages; the window losing key, the app going inactive, the window being minimized,
@@ -305,13 +306,18 @@ Shift-held hover bar and an Option-click ([message-actions.md](../ui/message-act
   the call returns Discord's error.
 - **A READY** before the mark went out keeps it only if Discord's position is still the one the
   channel had before the mark; the store shows READY's state until the mark's echo.
-- **Reading.** A channel marked unread while the host names it as read (here, or by a manual
-  MESSAGE_ACK from another device) is held: neither naming it again nor its list growing reads
-  it. The hold ends when the host leaves the channel out of `set_reading` (the user left it,
-  scrolled away, or the window lost key; the core's own stop at a connection drop doesn't
-  count), when the user marks it read or sends a message there, when it is read on another
-  device, or when the mark is refused. Akari's rule: what the official client does here wasn't
-  read.
+- **Reading.** The host says which channels' lists it shows (`Account::set_open_channels`: the
+  open channel and the thread beside it, whether the user reads them or not). A channel marked
+  unread while it is open (here, read or scrolled up, or by a manual MESSAGE_ACK from another
+  device) is held: neither naming it in `set_reading` nor its list growing reads it. The hold
+  ends when the channel leaves the open ones (another channel opened, the split closed, the
+  session ended), when the user marks it read (the bulk too) or sends a message there, when it
+  is read on another device (a plain MESSAGE_ACK, or a READY that has it read), when the mark is
+  refused, and when the channel or its server goes. Scrolling, the window losing key, a
+  connection drop, a new session and `set_reading` without the channel don't end it. A channel
+  that leaves the open ones also stops being read, and coming back to it reads it as any channel
+  opened. A manual MESSAGE_ACK for a channel that isn't open holds nothing. Akari's rule: what
+  the official client does here wasn't read.
 
 ### Acks from elsewhere and READY
 
