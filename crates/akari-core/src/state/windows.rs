@@ -420,8 +420,7 @@ pub(crate) struct Windows {
 // `Some(None)`: Discord sent it along as deleted.
 type Referenced = Option<Option<Box<model::Message>>>;
 
-#[derive(Debug, Clone)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
 enum Starter {
     Fetching,
     Found(Arc<Message>),
@@ -429,6 +428,9 @@ enum Starter {
     // A request that failed; the thread's next page asks again.
     Failed,
 }
+
+// The starter row's ID and what it showed.
+type ShownStarter = (Option<MessageId>, Option<Starter>);
 
 /// What fetching a thread's starter found.
 #[derive(Debug)]
@@ -567,6 +569,35 @@ impl Windows {
         }
         self.starters.insert(thread, Starter::Failed);
         if let Some(row) = self.starter_row(thread) {
+            events.push(StoreEvent::MessageUpdated(row.clone()));
+        }
+    }
+
+    fn starter_shown(&self, thread: ChannelId) -> ShownStarter {
+        (
+            self.starter_row(thread).map(|row| row.id),
+            self.starters.get(&thread).cloned(),
+        )
+    }
+
+    // A row that stays equal while its starter changes has no event of its own.
+    fn announce_starter(
+        &self,
+        thread: ChannelId,
+        before: &ShownStarter,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        let Some(row) = self.starter_row(thread) else {
+            return;
+        };
+        if before.0 != Some(row.id) || self.starters.get(&thread) == before.1.as_ref() {
+            return;
+        }
+        let announced = events.iter().any(|event| {
+            matches!(event, StoreEvent::MessageUpdated(updated)
+                if updated.id == row.id && updated.channel_id == thread)
+        });
+        if !announced {
             events.push(StoreEvent::MessageUpdated(row.clone()));
         }
     }
@@ -786,6 +817,7 @@ impl Windows {
         let message = Arc::new(Message::from_wire(message, &mut |user| {
             intern(user, users, &window.messages)
         }));
+        let starter = self.starter_shown(channel_id);
         self.keep_referenced(&message, referenced, users, events);
         self.targets.arrived(&message, events);
         let Some(window) = self.windows.get_mut(&channel_id) else {
@@ -803,6 +835,7 @@ impl Windows {
             }
             None => window.place(channel_id, message, limit, true, events),
         }
+        self.announce_starter(channel_id, &starter, events);
         self.trim_targets(channel_id);
     }
 
@@ -1084,6 +1117,7 @@ impl Windows {
                 (Arc::new(message), referenced)
             })
             .unzip();
+        let starter = self.starter_shown(channel_id);
         for (message, referenced) in page.iter().zip(referenced) {
             self.keep_referenced(message, referenced, users, events);
         }
@@ -1211,6 +1245,7 @@ impl Windows {
                     events.push(StoreEvent::MessagesStale { channel_id });
                 }
                 window.release_or_drop_held(channel_id, window_limit, events);
+                self.announce_starter(channel_id, &starter, events);
                 return PageOutcome::Overtaken;
             }
             LoadKind::Latest | LoadKind::Around(_) => {
@@ -1263,6 +1298,7 @@ impl Windows {
         if was_stale && !window.stale {
             events.push(StoreEvent::MessagesRefreshed { channel_id });
         }
+        self.announce_starter(channel_id, &starter, events);
         self.trim_targets(channel_id);
         PageOutcome::Applied
     }
