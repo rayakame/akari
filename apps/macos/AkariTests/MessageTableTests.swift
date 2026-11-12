@@ -1230,12 +1230,58 @@ struct MessageTableTests {
 
         var startsThreads: Set<UInt64> = []
 
-        func canCreateThread(from message: MessageId) -> Bool {
-            startsThreads.contains(message.rawValue)
+        /// What each message's bar shows, by Shift; without an entry the row has no bar.
+        var bars: [UInt64: (plain: [MessageAction], shift: [MessageAction])] = [:]
+        var marksUnread: Set<UInt64> = []
+
+        static func item(_ action: MessageAction, _ title: String) -> MessageActionItem {
+            MessageActionItem(
+                action: action, title: title, symbol: action == .more ? "ellipsis" : "link",
+                enabled: true, destructive: false)
         }
 
-        func createThread(from message: MessageId) {
-            calls.append("create thread from \(message.rawValue)")
+        /// Set: the bar and the menu are the real model's.
+        var model: MessageActionsModel?
+
+        func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem] {
+            calls.append("bar of \(row.id.rawValue)\(shift ? " shift" : "")")
+            if let model {
+                return model.bar(for: row, shift: shift)
+            }
+            guard let bar = bars[row.id.rawValue] else {
+                return []
+            }
+            return (shift ? bar.shift : bar.plain).map { Self.item($0, "\($0)") }
+        }
+
+        func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]] {
+            if let model {
+                return model.menu(for: row)
+            }
+            var groups: [[MessageActionItem]] = []
+            if startsThreads.contains(row.message.id.rawValue) {
+                groups.append([Self.item(.createThread, "Create Thread")])
+            }
+            var copies: [MessageActionItem] = []
+            if !row.shown.content.isEmpty {
+                copies.append(Self.item(.copyText, "Copy Text"))
+            }
+            if marksUnread.contains(row.message.id.rawValue) {
+                copies.append(Self.item(.markUnread, "Mark Unread"))
+            }
+            return groups + (copies.isEmpty ? [] : [copies])
+        }
+
+        func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {
+            if action == .createThread {
+                calls.append("create thread from \(row.message.id.rawValue)")
+            } else {
+                calls.append("\(action) \(row.message.id.rawValue)\(shift ? " shift" : "")")
+            }
+        }
+
+        func markUnread(from row: MessageListModel.Row) {
+            calls.append("mark unread \(row.message.id.rawValue)")
         }
 
         var popouts: [ExpressionTarget] = []

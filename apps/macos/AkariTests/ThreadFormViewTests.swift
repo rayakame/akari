@@ -301,37 +301,40 @@ struct ThreadFormFieldTests {
 }
 
 @MainActor
-struct MessageMenuThreadTests {
-    let message = Message(
-        id: MessageId(rawValue: 5), channelId: ChannelId(rawValue: 11), kind: .default,
-        author: User(
-            id: UserId(rawValue: 2), username: "ray", globalName: nil, displayName: "Ray",
-            bot: false, system: false, avatar: .defaultAvatar(index: 2)),
-        fromWebhook: false, content: "hello", timestamp: Date(), editedTimestamp: nil,
-        pinned: false, mentionEveryone: false, attachments: [], embeds: [], stickers: [],
-        componentsV2: false, delivery: .sent, formatted: formattedText(content: "hello"),
-        mentionsMe: false, reference: nil, hasThread: false, mentions: [], call: nil,
-        roleSubscription: nil, purchasedProduct: nil, actor: nil, applicationName: nil,
-        embedFields: [])
+struct MessageMenuItemsTests {
+    func item(_ action: MessageAction, _ title: String, destructive: Bool = false) -> MessageActionItem {
+        MessageActionItem(action: action, title: title, symbol: "link", enabled: true, destructive: destructive)
+    }
 
     // The official order: Reply, Forward, Create Thread | Copy Text, …
     @Test
-    func createThreadClosesItsGroupBeforeCopyText() {
-        var ran = false
-        let items = MessageMenu.items(for: message, createThread: { ran = true })
+    func aSeparatorStandsBetweenTwoGroups() {
+        var ran: [MessageAction] = []
+        let items = MessageMenu.items(
+            [[item(.createThread, "Create Thread")], [], [item(.copyText, "Copy Text"), item(.copyLink, "Copy Message Link")]]
+        ) { ran.append($0) }
 
-        #expect(items.map(\.title) == ["Create Thread", "", "Copy Text"])
+        #expect(items.map(\.title) == ["Create Thread", "", "Copy Text", "Copy Message Link"])
         #expect(items[1].isSeparatorItem)
         items[0].target?.perform(items[0].action, with: items[0])
-        #expect(ran)
+        items[3].target?.perform(items[3].action, with: items[3])
+        #expect(ran == [.createThread, .copyLink])
     }
 
     @Test
-    func withoutItTheMenuIsAsBefore() {
-        #expect(MessageMenu.items(for: message).map(\.title) == ["Copy Text"])
-        var empty = message
-        empty.content = ""
-        #expect(MessageMenu.items(for: empty, createThread: {}).map(\.title) == ["Create Thread"])
+    func oneGroupHasNoSeparatorAndNoGroupNoMenu() {
+        #expect(MessageMenu.items([[item(.copyText, "Copy Text")]]) { _ in }.map(\.title) == ["Copy Text"])
+        #expect(MessageMenu.menu(MessageMenu.items([]) { _ in }) == nil)
+    }
+
+    @Test
+    func aDestructiveItemIsRed() throws {
+        let items = MessageMenu.items([[item(.delete, "Delete Message", destructive: true)]]) { _ in }
+        let color = try #require(
+            items[0].attributedTitle?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)
+
+        #expect(items[0].title == "Delete Message")
+        #expect(color == Palette.textError)
     }
 }
 

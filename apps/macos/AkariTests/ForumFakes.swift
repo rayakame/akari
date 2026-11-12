@@ -163,6 +163,10 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
     override func threadCreation(parentId: ChannelId) -> ThreadCreation {
         ThreadCreation(public: false, private: false)
     }
+    override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
+    }
+
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool { false }
     override func threadSlowmode(parentId: ChannelId) -> Slowmode? { nil }
     override func guildSettings(guildId: GuildId?) -> GuildSettings {

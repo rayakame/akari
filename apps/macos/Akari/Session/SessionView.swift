@@ -69,6 +69,17 @@ struct SessionView<MessageArea: View>: View {
         } message: { error in
             Text(error.message)
         }
+        .alert(
+            session.messageActionFailure?.title ?? "",
+            isPresented: Binding(
+                get: { session.messageActionFailure != nil },
+                set: { if !$0 { session.dismissMessageActionFailure() } }),
+            presenting: session.messageActionFailure
+        ) { _ in
+            Button("OK") { session.dismissMessageActionFailure() }
+        } message: { failure in
+            Text(failure.message)
+        }
     }
 
     private var threadMenu: ThreadMenu? {

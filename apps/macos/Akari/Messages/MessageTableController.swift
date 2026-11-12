@@ -141,6 +141,24 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private weak var hoveredFileName: FileNameButton?
     private weak var hoveredFile: FileRowView?
     private weak var hoveredAction: HoverActionButton?
+    /// The hovered message's buttons: one bar for the list, over the rows.
+    let hoverBar = MessageHoverBar()
+    private weak var hoveredBarButton: HoverBarButton?
+    // The row and Shift state the bar's buttons were read for.
+    private var barShown: (row: MessageTimeline.ItemId, shift: Bool)?
+    // A row's content changed: its bar is read again.
+    private var barStale = false
+    // The row whose menu is open keeps its tint and bar, whatever the pointer does.
+    private var selected: MessageTimeline.ItemId?
+    private weak var moreMenu: NSMenu?
+    private var moreSelected = false
+    /// The modifier keys held now, and at a click.
+    var modifiers: () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
+    /// Shows the More button's menu at a point of a view; tests record it instead.
+    var popUp: (NSMenu, NSPoint, NSView) -> Void = { menu, point, view in
+        menu.popUp(positioning: nil, at: point, in: view)
+    }
+    nonisolated(unsafe) private var eventMonitor: Any?
     /// The save panel's answer for a suggested name, for tests; `nil` shows the panel.
     var chooseSaveURL: ((String) async -> URL?)?
     /// What a failed save says, for tests; `nil` shows an alert on the window.
@@ -416,6 +434,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             notifications.removeObserver(observer)
         }
         relativeTimer?.cancel()
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+        }
     }
 
     // Every height is measured again: system rows carry the time in their wrapped text.
@@ -457,6 +478,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             restoreAnchor()
         }
         updateRelativeTimer()
+        updatePointer()
     }
 
     private func revealed(_ old: Set<SpoilerKey>, _ new: Set<SpoilerKey>) -> Set<MessageId> {
@@ -495,6 +517,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         altText?.close()
         altText = nil
+        barStale = true
         keepingPlace {
             tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
             noteHeights(of: rows)
@@ -685,6 +708,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             rowHeights[next.items[index].id] = nil
         }
         timeline = next
+        barStale = true
         Signposts.interval("row heights") {
             tableView.beginUpdates()
             if !changes.removed.isEmpty {
@@ -1097,7 +1121,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 cell.images = state.images.cache
                 cell.onLink = { [weak self] url in self?.follow(url, in: row) }
                 cell.onOpenThread = openThread
-                cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
+                cell.menuItems = { [weak self] in self?.menuItems(for: row) ?? [] }
                 cell.animatesEmoji = emojiPlays(
                     at: index, visible: tableView.visibleRect, nearBottom: nearBottomStart())
                 cell.configure(
@@ -1133,7 +1157,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             cell.onEmbed = { [weak self] embed, action in self?.embed(action, embed, of: row) }
             cell.loopSource = { [weak self] key in await self?.actions?.mediaURL(key) }
             cell.onOpenThread = openThread
-            cell.threadAction = { [weak self] in self?.threadAction(for: row.message.id) }
+            cell.menuItems = { [weak self] in self?.menuItems(for: row) ?? [] }
             cell.configure(
                 message, body: body(row), authorName: row.authorName, startsGroup: startsGroup,
                 followsDay: followsDay, followsLine: followsLine, groupTime: groupTime,
@@ -1308,11 +1332,78 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         return built.text
     }
 
-    private func threadAction(for message: MessageId) -> (() -> Void)? {
-        guard let actions, actions.canCreateThread(from: message) else {
-            return nil
+    // Asked when the menu opens; a click reaches the actions and the row of that moment.
+    private func menuItems(for row: MessageListModel.Row) -> [NSMenuItem] {
+        guard let actions else {
+            return []
         }
-        return { [weak self] in self?.actions?.createThread(from: message) }
+        let id = MessageTimeline.ItemId.message(row.id)
+        let items = MessageMenu.items(actions.messageMenu(for: row)) { [weak self] action in
+            self?.perform(action, on: id, else: row)
+        }
+        for item in items {
+            (item.representedObject as? MenuAction)?.row = RowMenu(list: self, row: id)
+        }
+        return items
+    }
+
+    private func perform(
+        _ action: MessageAction, on id: MessageTimeline.ItemId, else row: MessageListModel.Row? = nil,
+        from button: HoverBarButton? = nil
+    ) {
+        guard let row = self.row(id) ?? row else {
+            return
+        }
+        if action == .more {
+            if let button {
+                openMenu(of: row, under: button)
+            }
+            return
+        }
+        actions?.perform(action, on: row, shift: modifiers().contains(.shift))
+    }
+
+    private func row(_ id: MessageTimeline.ItemId) -> MessageListModel.Row? {
+        for item in timeline.items where item.id == id {
+            if case .message(let row, _) = item {
+                return row
+            }
+        }
+        return nil
+    }
+
+    // The More button's menu is the row's own, under the button.
+    private func openMenu(of row: MessageListModel.Row, under button: HoverBarButton) {
+        guard let menu = MessageMenu.menu(menuItems(for: row)) else {
+            return
+        }
+        moreMenu = menu
+        popUp(menu, NSPoint(x: 0, y: button.bounds.maxY + 4), button)
+        moreMenu = nil
+    }
+
+    @objc private func menuOpened(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu,
+            let row = menu.items.lazy.compactMap({ ($0.representedObject as? MenuAction)?.row })
+                .first(where: { $0.list === self })
+        else {
+            return
+        }
+        hoverCard.hide()
+        selected = row.row
+        updatePointer()
+        moreSelected = menu === moreMenu
+        hoverBar.button(.more)?.isSelected = moreSelected
+    }
+
+    @objc private func menuClosed(_ notification: Notification) {
+        guard selected != nil else {
+            return
+        }
+        selected = nil
+        moreSelected = false
+        hoverBar.button(.more)?.isSelected = false
+        updatePointer()
     }
 
     // The box's newest message is built once per change, like the body; its time each time.
@@ -1446,6 +1537,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 }
                 noteHeights(of: remeasured)
             }
+            barStale = true
+            updatePointer()
         }
         updateRelativeTimer()
     }
@@ -1479,6 +1572,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         scrollView.horizontalScrollElasticity = .none
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: Self.restingInset, right: 0)
         tableView.didLayout = { [weak self] in
+            self?.placeBar()
             self?.settle()
             self?.reportLine()
             // A jump or the keyboard brings rows in without the pointer: their GIFs decide here.
@@ -1505,11 +1599,32 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             self?.updatePointer()
         }
         tableView.cursorAt = { [weak self] in self?.cursor(at: $0) }
+        tableView.overlay = hoverBar
+        tableView.addSubview(hoverBar)
+        hoverBar.onAction = { [weak self] action, button in
+            guard let self, let row = barShown?.row else {
+                return
+            }
+            perform(action, on: row, from: button)
+        }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .leftMouseDown]) {
+            [weak self] event in
+            guard let self else {
+                return event
+            }
+            return monitored(event) ? nil : event
+        }
         let center = NotificationCenter.default
         // The browser's panel takes the key and gives it back over a still pointer.
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
             center.addObserver(self, selector: #selector(keyChanged), name: name, object: nil)
         }
+        center.addObserver(
+            self, selector: #selector(menuOpened), name: NSMenu.didBeginTrackingNotification,
+            object: nil)
+        center.addObserver(
+            self, selector: #selector(menuClosed), name: NSMenu.didEndTrackingNotification,
+            object: nil)
         center.addObserver(
             self, selector: #selector(liveScrollStarted),
             name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
@@ -1736,6 +1851,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
         action?.isHovered = true
         hoveredAction = action
+        let barButton = target?.view as? HoverBarButton
+        if hoveredBarButton !== barButton {
+            hoveredBarButton?.isHovered = false
+        }
+        barButton?.isHovered = true
+        hoveredBarButton = barButton
         let file = enclosing(FileRowView.self, around: hit)
         if hoveredFile !== file {
             hoveredFile?.isHovered = false
@@ -1843,21 +1964,38 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
 
     private func updateHover(at location: NSPoint?) {
         var row = -1
-        if let location {
+        var overBar = false
+        if let selected {
+            row = timeline.items.firstIndex { $0.id == selected } ?? -1
+            if row < 0 {
+                self.selected = nil
+            }
+        }
+        if selected == nil, let location {
             let point = tableView.convert(location, from: nil)
             if tableView.visibleRect.contains(point) {
-                row = tableView.row(at: point)
+                // The bar belongs to its row, also where it lies over the row above.
+                if !hoverBar.isHidden, hoverBar.frame.contains(point), let shown = barShown?.row,
+                    let index = timeline.items.firstIndex(where: { $0.id == shown })
+                {
+                    row = index
+                    overBar = true
+                } else {
+                    row = tableView.row(at: point)
+                }
             }
             // The space before a group and the scrollbar's gutter belong to no message.
-            if row >= 0,
+            if row >= 0, !overBar,
                 let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
-                    as? MessageCell,
+                    as? MessageMenuRow,
                 !cell.box.contains(cell.convert(point, from: tableView))
             {
                 row = -1
             }
         }
         hovered = timeline.items.indices.contains(row) ? timeline.items[row].id : nil
+        hoverBar.isPointerInside = overBar
+        updateBar()
         let visible = tableView.rows(in: tableView.visibleRect)
         for index in visible.location..<(visible.location + visible.length) {
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
@@ -1872,6 +2010,101 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             updateAvatarAnimation()
         }
         updateMediaAnimation()
+    }
+
+    // The hovered row's bar, read when the row, Shift or the row's content changes: nothing
+    // announces what a message allows.
+    private func updateBar() {
+        let shift = selected == nil && modifiers().contains(.shift)
+        guard let hovered, let actions, let row = row(hovered) else {
+            hideBar()
+            return
+        }
+        if barStale || barShown?.row != hovered || barShown?.shift != shift {
+            hoverBar.show(actions.messageBar(for: row, shift: shift))
+            barShown = (hovered, shift)
+            barStale = false
+            hoveredBarButton = nil
+            hoverBar.button(.more)?.isSelected = moreSelected
+        }
+        placeBar()
+    }
+
+    private func hideBar() {
+        hoverBar.isHidden = true
+        hoverBar.isPointerInside = false
+        barShown = nil
+    }
+
+    // Over the row's box, from the row's place in the table: its right edge 14 inside the box's,
+    // its top 25 above the box's (16 over a group's first message), kept inside what shows.
+    private func placeBar() {
+        guard let shown = barShown, !hoverBar.items.isEmpty,
+            let index = timeline.items.firstIndex(where: { $0.id == shown.row }),
+            index < tableView.numberOfRows,
+            case .message(let row, let startsGroup) = timeline.items[index],
+            let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+                as? MessageMenuRow
+        else {
+            hoverBar.isHidden = true
+            return
+        }
+        let rect = tableView.rect(ofRow: index)
+        let box = cell.box
+        let top = rect.minY + cell.bounds.height - box.height
+        let header = startsGroup && !(cell is NoticeCell) && row.shown.kind != .reply
+        let overhang = header ? MessageHoverBar.headerOverhang : MessageHoverBar.overhang
+        let width = MessageHoverBar.width(buttons: hoverBar.items.count)
+        let frame = NSRect(
+            x: rect.minX + box.maxX - MessageHoverBar.trailing - width,
+            y: max(top - overhang, tableView.visibleRect.minY + 4), width: width,
+            height: MessageHoverBar.height)
+        hoverBar.frame = tableView.backingAlignedRect(frame, options: .alignAllEdgesNearest)
+        hoverBar.isHidden = false
+        if tableView.subviews.last !== hoverBar {
+            tableView.addSubview(hoverBar, positioned: .above, relativeTo: nil)
+        }
+    }
+
+    // Shift shows the longer bar at once, the pointer still; an Option-click marks unread.
+    func monitored(_ event: NSEvent) -> Bool {
+        guard let window = tableView.window, event.window === window else {
+            return false
+        }
+        if event.type == .flagsChanged {
+            updatePointer()
+            return false
+        }
+        return optionClick(event)
+    }
+
+    /// An Option-click in a message's box, outside its buttons, marks the channel unread from
+    /// that message and does nothing else; `true` when the click was taken.
+    func optionClick(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.option, .shift, .control, .command])
+        guard event.type == .leftMouseDown, flags == .option, pointer() != nil,
+            let hit = hitView(at: event.locationInWindow), hit.isDescendant(of: tableView)
+        else {
+            return false
+        }
+        var view: NSView? = hit
+        while let current = view, current !== tableView {
+            if current is NSButton || current === hoverBar {
+                return false
+            }
+            view = current.superview
+        }
+        let point = tableView.convert(event.locationInWindow, from: nil)
+        let index = tableView.row(at: point)
+        guard timeline.items.indices.contains(index), case .message(let row, _) = timeline.items[index],
+            let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+                as? MessageMenuRow,
+            cell.box.contains(cell.convert(point, from: tableView))
+        else {
+            return false
+        }
+        actions?.markUnread(from: row)
+        return true
     }
 
     // Custom emoji play by the setting while at least 70 % of their message shows and it is
@@ -2200,6 +2433,15 @@ class MessageTableView: NSTableView, CursorAuthority {
     var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
     var pointerMoved: (() -> Void)?
     var cursorAt: ((NSPoint) -> NSCursor?)?
+    /// The hover bar: over the rows, whatever order the table keeps its row views in.
+    weak var overlay: NSView?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let overlay, !overlay.isHidden, let hit = overlay.hitTest(convert(point, from: superview)) {
+            return hit
+        }
+        return super.hitTest(point)
+    }
 
     func cursor(at point: NSPoint) -> NSCursor? {
         cursorAt?(point)
