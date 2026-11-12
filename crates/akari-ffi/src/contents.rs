@@ -147,6 +147,8 @@ impl Documents {
 pub(crate) struct Contents {
     documents: Mutex<Documents>,
     embed_documents: Mutex<Cache<EmbedKey>>,
+    // Reply targets' one-line previews, by the target.
+    reply_documents: Mutex<Cache<MessageId>>,
     parsed: AtomicU64,
     misses: AtomicU64,
     event_parses: AtomicU64,
@@ -180,6 +182,7 @@ impl Contents {
                 capacity,
             }),
             embed_documents: Mutex::new(Cache::new(capacity)),
+            reply_documents: Mutex::new(Cache::new(capacity)),
             parsed: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             event_parses: AtomicU64::new(0),
@@ -233,6 +236,21 @@ impl Contents {
         }
         let document = Arc::new(parse_part(part));
         lock(&self.embed_documents).insert(key, source, document.clone());
+        self.parsed.fetch_add(1, Ordering::Relaxed);
+        self.event_parses.fetch_add(1, Ordering::Relaxed);
+        document
+    }
+
+    /// A reply target's content by the inline-reply rules: from the cache, or parsed now. An
+    /// edit changes the content, and with it the fingerprint.
+    pub(crate) fn reply_document(&self, target: MessageId, content: &str) -> Arc<Document> {
+        static KEY: OnceLock<RandomState> = OnceLock::new();
+        let source = KEY.get_or_init(RandomState::new).hash_one(content);
+        if let Some(document) = lock(&self.reply_documents).get(&target, source) {
+            return document;
+        }
+        let document = Arc::new(akari_markdown::parse_inline_reply(content));
+        lock(&self.reply_documents).insert(target, source, document.clone());
         self.parsed.fetch_add(1, Ordering::Relaxed);
         self.event_parses.fetch_add(1, Ordering::Relaxed);
         document

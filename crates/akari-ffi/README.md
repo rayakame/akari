@@ -238,9 +238,15 @@ for a page of replies, in the order given. The answer is a `ReplyTarget`: `Loade
 `Deleted` or `NotLoaded` (also for a message no loaded reply names). A `ReplyPreview` is what
 the one-line preview needs and no more: `kind`, the `author` as a `User` (the name and color a
 host shows are found as for a message's author; `from_webhook` says it isn't a real user), the
-raw `content` (no formatted text crosses yet: akari-markdown has no rule set for the one-line
-preview), `edited`, `voice_message`, `has_attachments`, `has_embeds`, `has_sticker` and
-`forwarded`. `ReplyTargetChanged { channel_id, target_id }` says the answer changed (the target
+raw `content`, `edited`, `voice_message`, `has_attachments`, `has_embeds`, `has_sticker`,
+`forwarded` and `formatted`: the content on one line by Discord's inline-reply rules
+(akari-markdown's `parse_inline_reply`), as a `RichText`, `None` without content. Its `text`
+is the content with each line break as a space, and its `formatted` offsets are into that
+text: one paragraph at most, no `Break` spans, no containers, a quote as text, a code block as
+one `Code` span, headings, subtext and list items as plain text, emoji never jumbo. A host
+shows the spans in a row and needs no rule of its own. The document is cached per target
+and parsed again when the content changes; a mentioned user's name comes from the target's
+message while the window has it, else from the store's users. `ReplyTargetChanged { channel_id, target_id }` says the answer changed (the target
 was loaded, edited or deleted); the IDs are the target's, and every reply to it reads the same
 answer. `RepliedTo.mentions_author` is the preview's "@": akari-core's
 `Store::reply_mentions_author`, the reply's mentions naming the loaded target's author, so it
@@ -270,11 +276,12 @@ for `message_actions` alike, and both answer for the message the row shows once
 permissions of the parent channel it is in, whatever the thread's archived or locked state
 (`view_thread` is false there, the row being in that thread). Until then both answer for the
 row itself. `mark_unread` alone is always the thread's: `Account.mark_unread` takes the
-thread's ID and the row's and marks the thread from its start. Requests for the shown message
-(a reaction, a reply, a pin, a delete) never take the row's IDs: they go to the `channel_id`
-and `id` of `starter_message`'s message, which a link to it names too. akari-core resolves any row
-the same way with `Store::shown_message(channel, row)`, which doesn't cross: AkariKit's rows
-hold their `starter_message`
+thread's ID and the row's and marks the thread from its start. `reply` is false on the row
+either way: a reply in the thread can't name a message of the parent channel. Requests for the
+shown message (a reaction, a pin, a delete) never take the row's IDs: they go to the
+`channel_id` and `id` of `starter_message`'s message, which a link to it names too. akari-core
+resolves any row the same way with `Store::shown_message(channel, row)`, which doesn't cross:
+AkariKit's rows hold their `starter_message`
 ([message-actions.md](../../docs/ui/message-actions.md#a-threads-starter-row)).
 
 ## Events
@@ -345,6 +352,25 @@ slowmode, whether the user is exempt and when they may send again. `send_message
 message over the limit with `RequestError::TooLong` before anything is queued, and Discord's own
 refusal for length maps to the same error. No event reports a cooldown; re-read `slowmode` on
 the open channel's window events and after a send.
+
+## Sending a reply
+
+`send_message` and `queue_message` take a last, optional `reply: ReplyTo { message_id, mention }`
+(`nil` by default in Swift, so calls without it stay as they are). The target is a message of
+the channel the reply goes to whose `message_actions` has `reply`; anything else is refused
+with `InvalidRequest` before a row exists. `mention` is the host's pending reply:
+`MessageActions.reply_pings` when the reply starts, off with Shift or the bar's toggle.
+
+The pending row is a reply at once: `kind` is `Reply`, `replied_to` names the target with
+`mentions_author` true when it pings, and `reply_target` answers `Loaded` from the window's
+message, so the row has its preview line before Discord answers. `deliver_message` and
+`retry_message` take nothing more: the core keeps the target and the ping with the row.
+`MessageReplaced` brings the confirmed reply as for any send.
+
+`RequestError.ReplyTargetDeleted` is Discord's refusal of a reply whose target is gone. The row
+stays failed with its text and its reference, and its target reads `Deleted`
+(`ReplyTargetChanged`). Whether the pending reply is cleared when its target is deleted before
+the send is the host's ([messages.md](../../docs/protocol/messages.md#sending-a-reply)).
 
 ## Jumps
 

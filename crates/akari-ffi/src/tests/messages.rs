@@ -226,7 +226,11 @@ async fn sending_shows_a_pending_message_then_replaces_it() {
 
     let sending = {
         let account = online.account.clone();
-        tokio::spawn(async move { account.send_message(GENERAL, "hello".to_owned()).await })
+        tokio::spawn(async move {
+            account
+                .send_message(GENERAL, "hello".to_owned(), None)
+                .await
+        })
     };
     let events = events_until(&online.subscription, |event| {
         matches!(event, StoreEvent::MessageInserted { .. })
@@ -271,7 +275,7 @@ async fn a_failed_send_stays_until_retried_or_discarded() {
 
     let failed = online
         .account
-        .send_message(GENERAL, "hello".to_owned())
+        .send_message(GENERAL, "hello".to_owned(), None)
         .await;
     assert_eq!(
         failed,
@@ -293,7 +297,7 @@ async fn a_failed_send_stays_until_retried_or_discarded() {
 
     online
         .account
-        .send_message(GENERAL, "again".to_owned())
+        .send_message(GENERAL, "again".to_owned(), None)
         .await
         .unwrap_err();
     let failed = store.window(GENERAL).unwrap().pending_ids;
@@ -426,7 +430,7 @@ async fn message_actions_work_without_a_tokio_context() {
         assert!(tokio::runtime::Handle::try_current().is_err());
         let loaded =
             block_on(account.load_messages(GENERAL, MessageLoad::Latest { limit: 50 }, None));
-        let sent = block_on(account.send_message(GENERAL, "hello".to_owned()));
+        let sent = block_on(account.send_message(GENERAL, "hello".to_owned(), None));
         (loaded, sent)
     })
     .join()
@@ -485,7 +489,8 @@ async fn slowmode_and_the_limit_cross_the_boundary() {
         })
     );
     let sending = account.clone();
-    let sent = tokio::spawn(async move { sending.send_message(GENERAL, "hi".to_owned()).await });
+    let sent =
+        tokio::spawn(async move { sending.send_message(GENERAL, "hi".to_owned(), None).await });
     events_until(&subscription, |event| {
         matches!(event, StoreEvent::MessageInserted { .. })
     })
@@ -502,7 +507,7 @@ async fn a_too_long_message_is_refused() {
 
     let err = online
         .account
-        .send_message(GENERAL, "a".repeat(2001))
+        .send_message(GENERAL, "a".repeat(2001), None)
         .await
         .unwrap_err();
 
@@ -523,7 +528,7 @@ async fn queueing_and_delivering_cross_the_boundary() {
 
     let pending = online
         .account
-        .queue_message(GENERAL, "hello".to_owned())
+        .queue_message(GENERAL, "hello".to_owned(), None)
         .unwrap();
     let window = online.account.store().window(GENERAL).unwrap();
     assert_eq!(window.pending_ids, [pending]);
@@ -536,7 +541,9 @@ async fn queueing_and_delivering_cross_the_boundary() {
     assert_eq!(sent, MessageId::new(400_000_000_000_000_050));
     online.account.close();
     assert_eq!(
-        online.account.queue_message(GENERAL, "again".to_owned()),
+        online
+            .account
+            .queue_message(GENERAL, "again".to_owned(), None),
         Err(RequestError::Closed)
     );
 }

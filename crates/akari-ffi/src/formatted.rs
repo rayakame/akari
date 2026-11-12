@@ -314,7 +314,10 @@ fn span_kind(
             let id = UserId::new(id);
             SpanKind::User {
                 id,
-                name: message.map_or(MentionName::NotLoaded, |message| names.user(id, message)),
+                name: match message {
+                    Some(message) => names.user(id, message),
+                    None => names.stored_user(id),
+                },
             }
         }
         InlineKind::RoleMention(id) => {
