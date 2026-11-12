@@ -104,6 +104,59 @@ struct NewMessagesLineTests {
     }
 
     @Test
+    func aRefusalAfterMarkingReadChangesNothing() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+
+        let undo = model.markUnread(from: id(1))
+        model.endNewMessagesLine()
+        undo()
+
+        #expect(model.newMessagesLine == nil)
+    }
+
+    // The first mark stood over the user's own message, where no line starts by itself.
+    @Test
+    func aRefusedSecondMarkGoesBackToTheFirstOverAnOwnMessage() {
+        store.update { [me] in $0.show(message(3, by: me)) }
+        shown([1, 2, 3, 4], readUpTo: 4)
+        let model = makeModel()
+        _ = model.markUnread(from: id(3))
+
+        let undo = model.markUnread(from: id(2))
+        undo()
+
+        #expect(model.newMessagesLine == id(3))
+    }
+
+    // Read on another device up to the marked message: the next line isn't over an own message.
+    @Test
+    func afterAMarkTheLineStillSkipsOtherOwnMessages() {
+        store.update { [me] in $0.show(message(3, by: me)) }
+        shown([1, 2, 3, 4], readUpTo: 4)
+        let model = makeModel()
+        _ = model.markUnread(from: id(2))
+
+        store.update { [here] in $0.readStates[here] = readState(2) }
+        model.newSession()
+
+        #expect(model.newMessagesLine == id(4))
+    }
+
+    // The list opened before the store had a read state; the cache brings one after the mark.
+    @Test
+    func aRestoredBatchAfterAMarkKeepsTheLine() {
+        store.update { [here] in $0.windows[here] = window([1, 2, 3, 4]) }
+        let model = makeModel()
+        _ = model.markUnread(from: id(2))
+
+        store.update { [here] in $0.readStates[here] = readState(4) }
+        model.apply(EventBatch([.restored, .messagesRefreshed(channelId: here)]))
+
+        #expect(model.newMessagesLine == id(2))
+    }
+
+    @Test
     func theLineUsesTheReadPositionFromBeforeTheAck() async {
         shown([1, 2, 3, 4], readUpTo: 2)
         let model = makeModel()

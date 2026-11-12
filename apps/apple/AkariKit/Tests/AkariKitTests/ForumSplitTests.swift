@@ -69,6 +69,23 @@ final class ForumSplitTests {
         session.close()
     }
 
+    // A forum's page is an open list too, with the post beside it.
+    @Test
+    func theOpenListsNameTheForumAndItsPost() async {
+        let session = inForum()
+        #expect(account.openCalls.current.last == [forumId])
+
+        await session.openBeside(thread: id(41), from: forumId)
+        #expect(account.openCalls.current.last == [forumId, id(41)])
+
+        session.open(channel: id(11))
+        #expect(account.openCalls.current.last == [id(11)])
+        session.close()
+        let opens = account.openCalls.current
+        #expect(opens.last == [])
+        #expect(zip(opens, opens.dropFirst()).allSatisfy { $0 != $1 }, "told once per change")
+    }
+
     @Test
     func anotherCardReplacesThePost() async {
         let session = inForum()
