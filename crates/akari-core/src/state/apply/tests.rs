@@ -119,6 +119,14 @@ fn describe(event: &StoreEvent) -> String {
             channel_id.get(),
             message_id.get()
         ),
+        StoreEvent::ReplyTargetChanged {
+            channel_id,
+            target_id,
+        } => format!(
+            "ReplyTargetChanged({}, {})",
+            channel_id.get(),
+            target_id.get()
+        ),
         StoreEvent::OlderThreadsChanged { parent_id } => {
             format!("OlderThreadsChanged({})", parent_id.get())
         }
@@ -1143,6 +1151,7 @@ mod forum;
 mod media;
 mod reactions;
 mod read_states;
+mod replies;
 mod thread_boxes;
 mod thread_browser;
 mod thread_create;

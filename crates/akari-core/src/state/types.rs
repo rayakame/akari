@@ -547,11 +547,9 @@ pub struct Message {
     pub stickers: Box<[Sticker]>,
     /// `None` for a message without reactions; read them with [`Message::reactions`].
     pub reactions: Option<Arc<[Reaction]>>,
-    /// The source of a reply, pin, crosspost, thread starter or forward.
+    /// The source of a reply, pin, crosspost, thread starter or forward. What a reply answers
+    /// is read by [`Message::replied_to`] from [`Store::reply_target`](super::Store::reply_target).
     pub reference: Option<Box<MessageReference>>,
-    /// The referenced message as Discord sent it along; if it is loaded, `Store::message`
-    /// has a fresher copy.
-    pub referenced_message: ReferencedMessage,
     /// `Pending` and `Failed` messages are ours, waiting in the window's outbox.
     pub delivery: Delivery,
     /// What a system message's line names beyond its author and content; `None` for most.
@@ -603,6 +601,8 @@ impl Message {
     pub const IS_COMPONENTS_V2: u64 = 1 << 15;
     /// Discord's `HAS_THREAD` message flag.
     pub const HAS_THREAD: u64 = 1 << 5;
+    /// Discord's `IS_VOICE_MESSAGE` message flag.
+    pub const IS_VOICE_MESSAGE: u64 = 1 << 13;
 
     /// A thread was started from this message, or it is the line about a thread started without
     /// one; either way the thread has this message's ID.
@@ -636,15 +636,6 @@ pub enum Delivery {
     Pending,
     /// Discord didn't take it; retry or discard it.
     Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ReferencedMessage {
-    /// Not a reply, or Discord didn't include it.
-    NotIncluded,
-    Deleted,
-    Message(Arc<Message>),
 }
 
 /// A thread's first message when it started from a message in its parent channel.

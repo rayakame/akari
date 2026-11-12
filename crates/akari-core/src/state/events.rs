@@ -127,6 +127,12 @@ pub enum StoreEvent {
         channel_id: ChannelId,
         message_id: MessageId,
     },
+    /// What [`Store::reply_target`](super::Store::reply_target) answers for the message
+    /// changed: it was loaded, edited or deleted. `channel_id` is the target's channel.
+    ReplyTargetChanged {
+        channel_id: ChannelId,
+        target_id: MessageId,
+    },
     /// Discord confirmed a pending message: drop `pending_id`'s row. `message` is in the
     /// window if it is at the present; otherwise it comes with a later load.
     MessageReplaced {

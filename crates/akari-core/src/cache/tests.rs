@@ -17,9 +17,9 @@ use crate::state::{
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
     ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings, ForumSort, ForumTag, Guild,
     GuildSettings, ImageHash, Member, Message, MessageReference, NotificationLevel,
-    PermissionOverwrite, Redaction, ReferencedMessage, Role, RoleSubscription, SpoilerSetting,
-    Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership,
-    Unreads, User, UserSettings,
+    PermissionOverwrite, Redaction, Role, RoleSubscription, SpoilerSetting, Sticker,
+    StickerAnimation, SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership, Unreads,
+    User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -297,14 +297,12 @@ pub(crate) fn message(channel: u64, id: u64, content: &str) -> Message {
         stickers: Box::new([]),
         reactions: None,
         reference: None,
-        referenced_message: ReferencedMessage::NotIncluded,
         delivery: Delivery::Sent,
         system: None,
     }
 }
 
 fn full_message() -> Message {
-    let replied = message(10, 499, "the original");
     Message {
         kind: MessageType::Reply,
         webhook_id: Some(Snowflake::new(55)),
@@ -390,7 +388,6 @@ fn full_message() -> Message {
             channel_id: Some(Snowflake::new(10)),
             guild_id: Some(Snowflake::new(100)),
         })),
-        referenced_message: ReferencedMessage::Message(Arc::new(replied)),
         system: Some(Box::new(SystemData {
             call: Some(Call {
                 participants: vec![Snowflake::new(20), Snowflake::new(21)].into(),
@@ -544,12 +541,8 @@ fn every_state_type_round_trips_through_its_row() {
     assert_eq!(read.skipped, 0);
     assert!(read.value == entities);
     let window = cache.read_window(Snowflake::new(10)).unwrap();
-    let expected = Message {
-        referenced_message: ReferencedMessage::NotIncluded,
-        ..sent
-    };
     assert_eq!(window.skipped, 0);
-    assert_eq!(window.value, vec![Arc::new(expected)]);
+    assert_eq!(window.value, vec![Arc::new(sent)]);
 }
 
 #[test]
