@@ -65,7 +65,9 @@ struct ForumPage: View {
             return ForumMeasures.loadDistance
         }
         let column = ForumMeasures.columns(width: width - 2 * ForumMeasures.galleryInset).width
-        return max(ForumMeasures.loadDistance, ForumMeasures.galleryCardHeight(width: column))
+        return max(
+            ForumMeasures.loadDistance,
+            ForumMeasures.galleryCardHeight(width: column, media: forum.isMedia))
     }
 
     private var header: some View {
@@ -108,7 +110,7 @@ struct ForumPage: View {
             if forum.showsPlaceholders {
                 ForumPlaceholders(
                     layout: forum.settings.layout, size: size,
-                    width: size.width - 2 * inset)
+                    width: size.width - 2 * inset, media: forum.isMedia)
             }
         }
     }
@@ -127,7 +129,8 @@ struct ForumPage: View {
         case .gallery:
             let columns = ForumMeasures.columns(width: width - 2 * ForumMeasures.galleryInset)
             let size = CGSize(
-                width: columns.width, height: ForumMeasures.galleryCardHeight(width: columns.width))
+                width: columns.width,
+                height: ForumMeasures.galleryCardHeight(width: columns.width, media: forum.isMedia))
             let rows = stride(from: 0, to: cards.count, by: columns.count).map {
                 Array(cards[$0..<min($0 + columns.count, cards.count)])
             }
@@ -136,7 +139,7 @@ struct ForumPage: View {
                     ForEach(row) { card in
                         ForumGalleryCard(
                             card: card, filter: forum.settings.tags, size: size,
-                            opened: isOpen(card), now: now
+                            opened: isOpen(card), contained: forum.isMedia, now: now
                         ) {
                             open(card)
                         }
@@ -511,6 +514,11 @@ struct ForumSortMenu: View {
 
     static let title = "Sort & View"
 
+    /// A media channel has one view: its button only sorts.
+    static func title(media: Bool) -> String {
+        media ? "Sort" : title
+    }
+
     var body: some View {
         Menu {
             Picker("Sort by", selection: binding(\.sort, forum.setSort)) {
@@ -518,11 +526,13 @@ struct ForumSortMenu: View {
                 Text("Date Posted").tag(ForumSort.creationDate)
             }
             .pickerStyle(.inline)
-            Picker("View as", selection: binding(\.layout, forum.setLayout)) {
-                Text("List").tag(ForumLayout.list)
-                Text("Gallery").tag(ForumLayout.gallery)
+            if !forum.isMedia {
+                Picker("View as", selection: binding(\.layout, forum.setLayout)) {
+                    Text("List").tag(ForumLayout.list)
+                    Text("Gallery").tag(ForumLayout.gallery)
+                }
+                .pickerStyle(.inline)
             }
-            .pickerStyle(.inline)
             if !forum.tags.isEmpty {
                 Picker("Tag Matching", selection: binding(\.matching, forum.setMatching)) {
                     Text("Match Some").tag(TagMatching.some)
@@ -536,7 +546,7 @@ struct ForumSortMenu: View {
             HStack(spacing: 0) {
                 Image(systemName: "arrow.up.arrow.down")
                     .font(.system(size: 12, weight: .semibold))
-                Text(Self.title)
+                Text(Self.title(media: forum.isMedia))
                     .font(TypeScale.forumSort.font)
                     .padding(.leading, 8)
                     .padding(.trailing, 4)
@@ -701,6 +711,7 @@ struct ForumPlaceholders: View {
     let layout: ForumLayout
     let size: CGSize
     let width: CGFloat
+    var media = false
 
     private static let opacities: [Double] = [0.33, 1, 0.66]
 
@@ -717,7 +728,7 @@ struct ForumPlaceholders: View {
             .accessibilityHidden(true)
         case .gallery:
             let columns = ForumMeasures.columns(width: width)
-            let height = ForumMeasures.galleryCardHeight(width: columns.width)
+            let height = ForumMeasures.galleryCardHeight(width: columns.width, media: media)
             let rows = max(Int((size.height / height).rounded(.up)), 1)
             ForEach(0..<rows, id: \.self) { row in
                 HStack(spacing: ForumMeasures.galleryGap) {

@@ -22,9 +22,11 @@ public final class ForumModel {
             self.matching = matching
         }
 
-        static func defaults(of forum: ForumSettings?) -> Settings {
+        // A media channel is a gallery whatever it or the user says.
+        static func defaults(of forum: ForumSettings?, media: Bool) -> Settings {
             Settings(
-                sort: forum?.sort ?? .latestActivity, layout: forum?.layout ?? .list, tags: [],
+                sort: forum?.sort ?? .latestActivity,
+                layout: media ? .gallery : forum?.layout ?? .list, tags: [],
                 matching: forum?.tagMatching ?? .some)
         }
     }
@@ -74,6 +76,8 @@ public final class ForumModel {
     static let searchDelay = Duration.milliseconds(350)
 
     public let forumId: ChannelId
+    /// A media channel's page: a gallery only, with 16:9 tiles.
+    public let isMedia: Bool
     /// The forum: its name, its guidelines (`topic`) and its tags.
     public private(set) var channel: Channel?
     public private(set) var settings: Settings
@@ -161,7 +165,12 @@ public final class ForumModel {
         let channel = store.channel(id: forumId)
         self.channel = channel
         guildId = channel?.guildId
-        self.settings = settings ?? .defaults(of: channel?.forum)
+        isMedia = channel?.kind == .guildMedia
+        var shown = settings ?? .defaults(of: channel?.forum, media: isMedia)
+        if isMedia {
+            shown.layout = .gallery
+        }
+        self.settings = shown
         reread()
     }
 
@@ -197,6 +206,9 @@ public final class ForumModel {
     }
 
     public func setLayout(_ layout: ForumLayout) {
+        guard !isMedia else {
+            return
+        }
         change { $0.layout = layout }
     }
 
@@ -219,7 +231,7 @@ public final class ForumModel {
 
     /// "Reset to default": the forum's sort, view and tag matching; the tag filter stays.
     public func resetToDefault() {
-        let defaults = Settings.defaults(of: channel?.forum)
+        let defaults = Settings.defaults(of: channel?.forum, media: isMedia)
         change { settings in
             settings.sort = defaults.sort
             settings.layout = defaults.layout

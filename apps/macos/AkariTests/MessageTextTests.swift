@@ -246,23 +246,23 @@ struct MessageTextTests {
         #expect(text.string == "\u{FFFC}No Access")
     }
 
-    // The sidebar doesn't open them either: no page yet for media channels, voice or categories.
+    // The sidebar doesn't open them either: no page yet for voice channels or categories.
     @Test
     func aChannelWithoutAPageIsntALink() throws {
         let text = built("<#5> https://discord.com/channels/1/6") { kind in
             if case .channel(let id, _, _) = kind {
-                kind = .channel(id: id, name: .known(name: "help"), kind: .guildMedia)
+                kind = .channel(id: id, name: .known(name: "help"), kind: .guildVoice)
             }
         }.text
         var message = message("https://discord.com/channels/1/6")
         message.formatted.links[0].channel?.name = .known(name: "help")
-        message.formatted.links[0].channel?.kind = .guildMedia
+        message.formatted.links[0].channel?.kind = .guildVoice
         let link = MessageText.build(message, revealed: [], now: now, times: times).text
 
         let mention = try attributes(text, of: "help")
         #expect(mention[.akariPill] as? MessageText.Pill == .mention)
         #expect(mention[.link] == nil)
-        #expect(mention[.toolTip] as? String == ChannelSymbols.unsupported(.guildMedia))
+        #expect(mention[.toolTip] as? String == ChannelSymbols.unsupported(.guildVoice))
         #expect(try attributes(link, of: "help")[.link] == nil)
     }
 

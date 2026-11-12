@@ -23,6 +23,28 @@ struct ForumMeasuresTests {
         #expect(ForumMeasures.galleryCardHeight(width: 320) == 316)
     }
 
+    // A media channel's tiles are 16:9: 60 + ceil(294 × 9 / 16) + 24 + 36.
+    @Test
+    func aMediaChannelsCardIsLower() {
+        #expect(ForumMeasures.galleryCardHeight(width: 320, media: true) == 286)
+    }
+
+    @Test
+    func aMediaChannelSortsButHasNoOtherView() {
+        #expect(ForumSortMenu.title(media: false) == "Sort & View")
+        #expect(ForumSortMenu.title(media: true) == "Sort")
+    }
+
+    @Test
+    func aMediaRowOpensItsPage() {
+        let media = Channel(
+            id: ChannelId(rawValue: 14), kind: .guildMedia, guildId: ForumFakes.guild, parentId: nil,
+            name: "clips", position: 0, topic: nil, nsfw: false, rateLimitPerUser: 0,
+            recipientIds: [], thread: nil)
+
+        #expect(media.opensPage)
+    }
+
     @Test
     func loadingCardsFillTheWindowBelowTheHeader() {
         #expect(ForumMeasures.placeholderCards(height: 900) == 6)

@@ -36,10 +36,10 @@ enum ForumMeasures {
         return (count, (width - galleryGap * CGFloat(count - 1)) / CGFloat(count))
     }
 
-    /// A gallery card: its 60 header, the media at 2:3 inside its 12 margins and border, 24, and
-    /// the 36 footer.
-    static func galleryCardHeight(width: CGFloat) -> CGFloat {
-        60 + ((width - 24 - 2) * 2 / 3).rounded(.up) + 24 + 36
+    /// A gallery card: its 60 header, the media at 2:3 (16:9 in a media channel) inside its 12
+    /// margins and border, 24, and the 36 footer.
+    static func galleryCardHeight(width: CGFloat, media: Bool = false) -> CGFloat {
+        60 + ((width - 24 - 2) * (media ? 9 / 16 : 2 / 3)).rounded(.up) + 24 + 36
     }
 
     /// As many placeholder cards as fill the window below Discord's 200 of header, 118 each.
@@ -540,6 +540,59 @@ struct ForumThumbnail: View {
     }
 }
 
+/// A media channel's tile: the image whole, with Discord's high shadow, over a veiled blurred
+/// cover of itself, for which Akari takes the image's placeholder.
+struct ForumMediaTile: View {
+    let media: Attachment
+    let placeholders: PlaceholderCache?
+
+    static let veil = Color(red: 28 / 255, green: 27 / 255, blue: 37 / 255)
+
+    var body: some View {
+        Self.veil
+            .overlay {
+                if let blurred = media.placeholder.flatMap({ placeholders?.image($0) }) {
+                    Image(decorative: blurred, scale: 1)
+                        .resizable()
+                        .scaledToFill()
+                        .scaleEffect(1.5)
+                }
+            }
+            .overlay(Self.veil.opacity(0.9))
+            .overlay {
+                if media.cover == nil {
+                    image
+                        .shadow(color: .black.opacity(0.24), radius: 12, y: 12)
+                } else {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.white)
+                        .shadow(radius: 2)
+                }
+            }
+            .overlay {
+                if media.kind == .video {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white)
+                        .padding(6)
+                        .background(.black.opacity(0.6), in: Circle())
+                }
+            }
+            .clipped()
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var image: some View {
+        if media.width > 0, media.height > 0 {
+            RemoteImage(key: media.key, place: .gif, fit: .cover)
+                .aspectRatio(CGFloat(media.width) / CGFloat(media.height), contentMode: .fit)
+        } else {
+            RemoteImage(key: media.key, place: .gif, fit: .contain)
+        }
+    }
+}
+
 /// A post's card in the gallery: author and age, the title, the media (at most 4, "+N") or the
 /// message's start, the tags over the media's bottom, and the count.
 struct ForumGalleryCard: View {
@@ -547,6 +600,8 @@ struct ForumGalleryCard: View {
     let filter: Set<TagId>
     let size: CGSize
     var opened = false
+    /// A media channel's card: each image whole over its own blurred cover.
+    var contained = false
     var now: Date?
     let open: () -> Void
     @State private var hovered = false
@@ -619,7 +674,7 @@ struct ForumGalleryCard: View {
         if card.media.isEmpty {
             preview
         } else {
-            ForumMosaic(media: card.media, placeholders: placeholders)
+            ForumMosaic(media: card.media, placeholders: placeholders, contained: contained)
         }
     }
 
@@ -658,6 +713,7 @@ struct ForumGalleryCard: View {
 struct ForumMosaic: View {
     let media: [Attachment]
     let placeholders: PlaceholderCache?
+    var contained = false
 
     private static let gap: CGFloat = 4
 
@@ -714,8 +770,12 @@ struct ForumMosaic: View {
         }
     }
 
-    private func tile(_ attachment: Attachment) -> some View {
-        ForumThumbnail(media: attachment, placeholders: placeholders, radius: 0)
+    @ViewBuilder private func tile(_ attachment: Attachment) -> some View {
+        if contained {
+            ForumMediaTile(media: attachment, placeholders: placeholders)
+        } else {
+            ForumThumbnail(media: attachment, placeholders: placeholders, radius: 0)
+        }
     }
 }
 

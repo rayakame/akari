@@ -43,7 +43,7 @@ extension ChannelType {
 
     /// As `Channel.opensForum`.
     public var opensForum: Bool {
-        self == .guildForum
+        self == .guildForum || self == .guildMedia
     }
 
     /// As `Channel.opensPage`.
