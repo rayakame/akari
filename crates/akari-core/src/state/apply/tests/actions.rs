@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::ChannelType;
 use crate::state::MessageActions;
 
 const ADD_REACTIONS: u64 = 1 << 6;
@@ -23,11 +24,69 @@ const MEDIA: u64 = 300_000_000_000_000_005;
 const MEDIA_POST: u64 = 300_000_000_000_000_021;
 const M: u64 = 400_000_000_000_000_050;
 
-const USER_MESSAGE: [u64; 9] = [0, 19, 20, 23, 26, 41, 45, 47, 68];
-const REPLYABLE: [u64; 21] = [
-    0, 7, 19, 20, 23, 24, 25, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 45, 46, 69,
+const FORUM: u64 = 300_000_000_000_000_006;
+const FORUM_POST: u64 = 300_000_000_000_000_022;
+const STAGE: u64 = 300_000_000_000_000_007;
+
+// The sets as Discord's client names them (module 448761), each type by its number and name.
+const USER_MESSAGE: [(u64, &str); 9] = [
+    (0, "DEFAULT"),
+    (19, "REPLY"),
+    (20, "CHAT_INPUT_COMMAND"),
+    (23, "CONTEXT_MENU_COMMAND"),
+    (26, "INTERACTION_PREMIUM_UPSELL"),
+    (41, "CUSTOM_GIFT"),
+    (45, "VOICE_HANGOUT_INVITE"),
+    (47, "CHANGELOG"),
+    (68, "MEDIA_MENTION_MESSAGE"),
 ];
-const UNDELETABLE: [u64; 11] = [1, 2, 3, 4, 5, 21, 35, 56, 57, 64, 68];
+const REPLYABLE: [(u64, &str); 21] = [
+    (0, "DEFAULT"),
+    (7, "USER_JOIN"),
+    (19, "REPLY"),
+    (20, "CHAT_INPUT_COMMAND"),
+    (23, "CONTEXT_MENU_COMMAND"),
+    (24, "AUTO_MODERATION_ACTION"),
+    (25, "ROLE_SUBSCRIPTION_PURCHASE"),
+    (32, "GUILD_APPLICATION_PREMIUM_SUBSCRIPTION"),
+    (33, "PRIVATE_CHANNEL_INTEGRATION_ADDED"),
+    (34, "PRIVATE_CHANNEL_INTEGRATION_REMOVED"),
+    (35, "PREMIUM_REFERRAL"),
+    (36, "GUILD_INCIDENT_ALERT_MODE_ENABLED"),
+    (37, "GUILD_INCIDENT_ALERT_MODE_DISABLED"),
+    (38, "GUILD_INCIDENT_REPORT_RAID"),
+    (39, "GUILD_INCIDENT_REPORT_FALSE_ALARM"),
+    (40, "GUILD_DEADCHAT_REVIVE_PROMPT"),
+    (41, "CUSTOM_GIFT"),
+    (42, "GUILD_GAMING_STATS_PROMPT"),
+    (45, "VOICE_HANGOUT_INVITE"),
+    (46, "POLL_RESULT"),
+    (69, "GUILD_SPACE_MESSAGE"),
+];
+// What Discord's list leaves out by name: recipient add and remove, call, name and icon change,
+// pin, the boosts, channel follow, thread created, thread starter, the stage lines, purchase.
+const NOT_REPLYABLE: [u64; 19] = [
+    1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 18, 21, 27, 28, 29, 30, 31, 44,
+];
+const UNDELETABLE: [(u64, &str); 11] = [
+    (1, "RECIPIENT_ADD"),
+    (2, "RECIPIENT_REMOVE"),
+    (3, "CALL"),
+    (4, "CHANNEL_NAME_CHANGE"),
+    (5, "CHANNEL_ICON_CHANGE"),
+    (21, "THREAD_STARTER_MESSAGE"),
+    (35, "PREMIUM_REFERRAL"),
+    (56, "CHAT_WALLPAPER_SET"),
+    (57, "CHAT_WALLPAPER_REMOVED"),
+    (64, "PREMIUM_GROUP_INVITE"),
+    (68, "MEDIA_MENTION_MESSAGE"),
+];
+// System lines a moderator deletes: join, pin, the boosts, thread created.
+const DELETABLE_LINES: [u64; 7] = [6, 7, 8, 9, 10, 11, 18];
+
+fn listed(set: &[(u64, &str)], kind: u64) -> bool {
+    set.iter().any(|(listed, _)| *listed == kind)
+}
 
 fn places(ready: &mut Value) {
     ready["users"].as_array_mut().unwrap().push(json!({
@@ -46,10 +105,20 @@ fn places(ready: &mut Value) {
         "id": MEDIA.to_string(), "type": 16, "name": "media", "position": 3,
         "permission_overwrites": []
     }));
-    let mut post = guild["threads"][0].clone();
-    post["id"] = MEDIA_POST.to_string().into();
-    post["parent_id"] = MEDIA.to_string().into();
-    guild["threads"].as_array_mut().unwrap().push(post);
+    guild["channels"].as_array_mut().unwrap().push(json!({
+        "id": FORUM.to_string(), "type": 15, "name": "forum", "position": 4,
+        "permission_overwrites": []
+    }));
+    guild["channels"].as_array_mut().unwrap().push(json!({
+        "id": STAGE.to_string(), "type": 13, "name": "stage", "position": 5,
+        "permission_overwrites": []
+    }));
+    for (id, parent) in [(MEDIA_POST, MEDIA), (FORUM_POST, FORUM)] {
+        let mut post = guild["threads"][0].clone();
+        post["id"] = id.to_string().into();
+        post["parent_id"] = parent.to_string().into();
+        guild["threads"].as_array_mut().unwrap().push(post);
+    }
 }
 
 // The fixture's user owns the guild and has every permission.
@@ -172,6 +241,18 @@ fn the_fixture_has_its_places() {
             .channel(Snowflake::new(MEDIA_POST))
             .unwrap()
             .is_thread()
+    );
+    assert_eq!(
+        state.channel(Snowflake::new(FORUM)).unwrap().kind,
+        ChannelType::GuildForum
+    );
+    assert_eq!(
+        state.channel(Snowflake::new(FORUM_POST)).unwrap().parent_id,
+        Some(Snowflake::new(FORUM))
+    );
+    assert_eq!(
+        state.channel(Snowflake::new(STAGE)).unwrap().kind,
+        ChannelType::GuildStageVoice
     );
     assert!(state.user(Snowflake::new(SYSTEM)).unwrap().system);
     assert!(state.channel(Snowflake::new(SYSTEM_DM)).is_some());
@@ -312,7 +393,13 @@ fn only_discords_replyable_types_take_a_reply() {
     for kind in 0..=70 {
         assert_eq!(
             actions(owner(plain), sent(GENERAL, MIRA, kind)).reply,
-            REPLYABLE.contains(&kind),
+            listed(&REPLYABLE, kind),
+            "type {kind}"
+        );
+    }
+    for kind in NOT_REPLYABLE {
+        assert!(
+            !actions(owner(plain), sent(GENERAL, MIRA, kind)).reply,
             "type {kind}"
         );
     }
@@ -442,7 +529,7 @@ fn only_a_user_message_is_edited_and_never_a_media_mention() {
     for kind in 0..=70 {
         assert_eq!(
             actions(owner(plain), sent(GENERAL, ME, kind)).edit,
-            USER_MESSAGE.contains(&kind) && kind != 68,
+            listed(&USER_MESSAGE, kind) && kind != 68,
             "type {kind}"
         );
     }
@@ -541,7 +628,13 @@ fn discords_undeletable_types_are_never_deleted() {
     for kind in 0..=70 {
         assert_eq!(
             actions(owner(plain), sent(GENERAL, ME, kind)).delete,
-            !UNDELETABLE.contains(&kind),
+            !listed(&UNDELETABLE, kind),
+            "type {kind}"
+        );
+    }
+    for kind in DELETABLE_LINES {
+        assert!(
+            actions(owner(plain), sent(GENERAL, MIRA, kind)).delete,
             "type {kind}"
         );
     }
@@ -578,7 +671,9 @@ fn pinning_follows_discords_rule() {
         ("group dm", member(0, plain), sent(GROUP, ME, 0), true),
         ("system dm", owner(plain), sent(SYSTEM_DM, SYSTEM, 0), false),
         ("voice chat", owner(plain), sent(VOICE, MIRA, 0), false),
+        ("stage chat", owner(plain), sent(STAGE, MIRA, 0), false),
         ("media post", owner(plain), sent(MEDIA_POST, MIRA, 0), false),
+        ("forum post", owner(plain), sent(FORUM_POST, MIRA, 0), true),
         (
             "thread",
             member(MEMBER | PIN, plain),
@@ -634,7 +729,7 @@ fn only_a_user_message_is_pinned() {
     for kind in 0..=70 {
         assert_eq!(
             actions(owner(plain), sent(GENERAL, MIRA, kind)).pin,
-            USER_MESSAGE.contains(&kind),
+            listed(&USER_MESSAGE, kind),
             "type {kind}"
         );
     }
@@ -711,6 +806,12 @@ fn reacting_follows_discords_rules() {
             owner(plain),
             sent(MEDIA_POST, MIRA, 0),
             (false, false),
+        ),
+        (
+            "forum post",
+            owner(plain),
+            sent(FORUM_POST, MIRA, 0),
+            (true, true),
         ),
         (
             "voice chat",
@@ -907,7 +1008,7 @@ fn thread_of_m(parent: u64) -> Value {
 }
 
 #[test]
-fn viewing_a_thread_needs_the_thread_and_view_channel() {
+fn viewing_a_thread_needs_the_thread() {
     let flagged = || with(sent(GENERAL, MIRA, 0), |m| m["flags"] = (1 << 5).into());
 
     let unknown = actions(owner(plain), flagged());
@@ -923,14 +1024,44 @@ fn viewing_a_thread_needs_the_thread_and_view_channel() {
     apply(&mut state, "THREAD_CREATE", thread_of_m(GENERAL));
     let unflagged = of(&state, GENERAL);
     assert!(unflagged.view_thread && !unflagged.create_thread);
+}
 
-    let hidden = member(MEMBER, |ready| {
-        ready["guilds"][0]["channels"][1]["permission_overwrites"] =
+#[test]
+fn viewing_a_thread_needs_view_channel_on_the_thread_itself() {
+    let flagged = with(sent(GENERAL, MIRA, 0), |m| m["flags"] = (1 << 5).into());
+    let hidden_voice = member(MEMBER, |ready| {
+        ready["guilds"][0]["channels"][2]["permission_overwrites"] =
             json!([{"id": ROLE.to_string(), "type": 0, "allow": "0", "deny": VIEW.to_string()}]);
     });
-    let mut state = load(hidden, GENERAL, &[flagged()]);
-    apply(&mut state, "THREAD_CREATE", thread_of_m(GENERAL));
-    assert!(!of(&state, GENERAL).view_thread);
+    let mut state = load(hidden_voice, GENERAL, &[flagged]);
+    apply(&mut state, "THREAD_CREATE", thread_of_m(VOICE));
+    assert!(state.channel(Snowflake::new(M)).is_some());
+
+    let actions = of(&state, GENERAL);
+
+    assert!(actions.reply && actions.copy_link);
+    assert!(!actions.view_thread);
+}
+
+#[test]
+fn a_forum_posts_message_is_pinned_and_reacted_to() {
+    let forum = actions(owner(plain), sent(FORUM_POST, ME, 0));
+    assert!(forum.pin && forum.react && forum.toggle_reaction);
+
+    let media = actions(owner(plain), sent(MEDIA_POST, ME, 0));
+    assert!(!media.pin && !media.react && !media.toggle_reaction);
+    assert!(media.reply && media.edit);
+}
+
+#[test]
+fn a_message_in_a_guild_without_my_member_offers_nothing() {
+    let memberless = owner(|ready| ready["merged_members"][0] = json!([]));
+    assert!(memberless.current_member(Snowflake::new(G1)).is_none());
+
+    assert_eq!(
+        actions(memberless, sent(GENERAL, ME, 0)),
+        MessageActions::default()
+    );
 }
 
 // A forum post's first message has the post's ID and sits in the post.
