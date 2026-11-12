@@ -30,6 +30,13 @@ embed's text as Discord shows it, its line breaks kept. A `Document` says whethe
 and nothing else (`is_single_link`) and whether a link sits in a spoiler (`has_spoilered_link`),
 which decide an embed's link text and cover.
 
+A reply's one-line preview of the message it answers has Discord's inline-reply rules
+(`parse_inline_reply`): the message's rules without quotes (`> a` is text), a code block as
+inline code, emoji never jumbo. Its document is one paragraph at most: a heading, a subtext
+line and a list item give their text without their marker, and a line break is a `Text` span
+over its line feed, never a `Break`. `line_text` is the content with each line break as a space
+at the same offsets, which is what those spans show.
+
 ## Which behavior counts
 
 Most of Discord's rules aren't documented. The rules follow

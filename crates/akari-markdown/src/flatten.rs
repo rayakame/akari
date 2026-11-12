@@ -4,56 +4,138 @@ use crate::document::{
 use crate::parse::{Node, Piece};
 
 pub(crate) fn flatten(nodes: &[Node], jumbo: bool) -> Document {
-    let mut flat = Flat::default();
-    let ctx = Context {
-        kind: BlockKind::Paragraph,
-        style: Style::default(),
-        spoiler: None,
-        link: None,
-    };
-    // A work list, not recursion: content nests 64 deep and hosts parse on small stacks.
-    let mut tasks = vec![Task::Nodes(nodes.iter(), ctx)];
-    while let Some(task) = tasks.pop() {
-        match task {
-            Task::Nodes(mut rest, ctx) => {
-                if let Some(node) = rest.next() {
-                    tasks.push(Task::Nodes(rest, ctx));
-                    flat.node(node, ctx, &mut tasks);
+    let flat = Flat::of(nodes);
+    Document::new(flat.blocks, flat.links, jumbo, flat.spoilers)
+}
+
+// The blocks as one paragraph: a line break, and the line feed between two blocks, is a space.
+pub(crate) fn one_line(nodes: &[Node], source: &str) -> Document {
+    let flat = Flat::of(nodes);
+    let mut inlines: Vec<Inline> = Vec::new();
+    let mut space: Option<Inline> = None;
+    let mut covered: Option<Span> = None;
+    for block in flat.blocks {
+        let Some(first) = block.inlines.first() else {
+            continue;
+        };
+        if let Some(last) = inlines.last()
+            && space.is_none()
+        {
+            space = between(source, last, first);
+        }
+        covered = Some(covered.map_or(block.source, |span| Span {
+            start: span.start.min(block.source.start),
+            end: span.end.max(block.source.end),
+        }));
+        for inline in block.inlines {
+            if inline.kind == InlineKind::Break {
+                if !inlines.is_empty() && space.is_none() {
+                    space = line_feed(&inline);
                 }
+                continue;
             }
-            Task::Open {
-                container,
-                children,
-                source,
-                ctx,
-            } => {
-                if let Some(container) = container {
-                    flat.containers.push((container, false));
+            inlines.extend(space.take());
+            inlines.push(inline);
+        }
+    }
+    let Some((first, rest)) = inlines.split_first() else {
+        return Document::new(Vec::new(), flat.links, false, flat.spoilers);
+    };
+    let spoiler = first
+        .spoiler
+        .filter(|&id| rest.iter().all(|inline| inline.spoiler == Some(id)));
+    let block = Block {
+        kind: BlockKind::Paragraph,
+        containers: Box::default(),
+        spoiler,
+        inlines: inlines.into(),
+        source: covered.unwrap_or_default(),
+    };
+    Document::new(vec![block], flat.links, false, flat.spoilers)
+}
+
+// A break covers the spaces and the carriage return before its line feed.
+fn line_feed(line_break: &Inline) -> Option<Inline> {
+    let end = line_break.source.end;
+    (end > line_break.source.start).then(|| Inline {
+        kind: InlineKind::Text(Span {
+            start: end - 1,
+            end,
+        }),
+        ..line_break.clone()
+    })
+}
+
+fn between(source: &str, last: &Inline, first: &Inline) -> Option<Inline> {
+    let gap = last.source.end as usize..first.source.start as usize;
+    let bytes = source.as_bytes().get(gap.clone())?;
+    let at = bytes
+        .iter()
+        .position(|&byte| byte == b'\n')
+        .or_else(|| bytes.iter().position(|&byte| byte == b' '))?;
+    let span = Span::new(gap.start + at..gap.start + at + 1);
+    Some(Inline {
+        kind: InlineKind::Text(span),
+        style: Style::default(),
+        spoiler: last.spoiler.filter(|_| last.spoiler == first.spoiler),
+        link: None,
+        source: span,
+    })
+}
+
+impl Flat {
+    fn of(nodes: &[Node]) -> Self {
+        let mut flat = Flat::default();
+        let ctx = Context {
+            kind: BlockKind::Paragraph,
+            style: Style::default(),
+            spoiler: None,
+            link: None,
+        };
+        // A work list, not recursion: content nests 64 deep and hosts parse on small stacks.
+        let mut tasks = vec![Task::Nodes(nodes.iter(), ctx)];
+        while let Some(task) = tasks.pop() {
+            match task {
+                Task::Nodes(mut rest, ctx) => {
+                    if let Some(node) = rest.next() {
+                        tasks.push(Task::Nodes(rest, ctx));
+                        flat.node(node, ctx, &mut tasks);
+                    }
                 }
-                flat.close();
-                tasks.push(Task::Close {
+                Task::Open {
+                    container,
+                    children,
                     source,
                     ctx,
-                    before: flat.blocks.len(),
-                    pop: container.is_some(),
-                });
-                tasks.push(Task::Nodes(children.iter(), ctx));
-            }
-            Task::Close {
-                source,
-                ctx,
-                before,
-                pop,
-            } => {
-                flat.close_container(source, ctx, before);
-                if pop {
-                    flat.containers.pop();
+                } => {
+                    if let Some(container) = container {
+                        flat.containers.push((container, false));
+                    }
+                    flat.close();
+                    tasks.push(Task::Close {
+                        source,
+                        ctx,
+                        before: flat.blocks.len(),
+                        pop: container.is_some(),
+                    });
+                    tasks.push(Task::Nodes(children.iter(), ctx));
+                }
+                Task::Close {
+                    source,
+                    ctx,
+                    before,
+                    pop,
+                } => {
+                    flat.close_container(source, ctx, before);
+                    if pop {
+                        flat.containers.pop();
+                    }
                 }
             }
         }
+        flat.close();
+        flat
     }
-    flat.close();
-    Document::new(flat.blocks, flat.links, jumbo, flat.spoilers)
 }
 
 #[derive(Default)]
