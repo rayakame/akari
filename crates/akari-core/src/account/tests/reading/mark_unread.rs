@@ -1123,9 +1123,9 @@ async fn other_requests(server: &MockServer) -> Vec<String> {
         .collect()
 }
 
-#[tokio::test]
-async fn an_unjoined_thread_is_joined_first() {
-    let mut online = acking(|_| {}).await;
+// UNJOINED's list shows two messages; acks are answered with `status`.
+async fn showing_an_unjoined_thread(status: u16) -> Online {
+    let mut online = online_answering(status, |_| {}).await;
     let mut thread: Value = serde_json::from_str(include_str!(
         "../../../../tests/fixtures/thread_create.json"
     ))
@@ -1137,14 +1137,33 @@ async fn an_unjoined_thread_is_joined_first() {
         .await;
     sync(&mut online.connection, &online.subscription, 3).await;
     showing_in(&online, UNJOINED, &[NEWEST + 5, NEWEST + 6], &[]).await;
+    online
+}
+
+async fn answer_the_join(online: &Online, answer: ResponseTemplate) {
     Mock::given(method("POST"))
         .and(path(format!(
             "/api/v9/channels/{UNJOINED}/thread-members/@me"
         )))
         .and(query_param("location", "Mark Unread"))
-        .respond_with(ResponseTemplate::new(204))
+        .respond_with(answer)
         .mount(&online.server)
         .await;
+}
+
+fn the_join() -> String {
+    format!("POST /api/v9/channels/{UNJOINED}/thread-members/@me?location=Mark%20Unread")
+}
+
+fn joined(online: &Online) -> bool {
+    let stored = online.account.store().channel(id(UNJOINED)).unwrap();
+    stored.thread.as_deref().unwrap().joined()
+}
+
+#[tokio::test]
+async fn an_unjoined_thread_is_joined_first() {
+    let online = showing_an_unjoined_thread(200).await;
+    answer_the_join(&online, ResponseTemplate::new(204)).await;
 
     online
         .account
@@ -1155,15 +1174,129 @@ async fn an_unjoined_thread_is_joined_first() {
     assert_eq!(
         other_requests(&online.server).await,
         [
-            format!("POST /api/v9/channels/{UNJOINED}/thread-members/@me?location=Mark%20Unread"),
+            the_join(),
             format!(
                 "POST /api/v9/channels/{UNJOINED}/messages/{}/ack",
                 NEWEST + 5
             ),
         ]
     );
+    assert!(joined(&online));
+}
+
+#[tokio::test]
+async fn a_thread_that_cant_be_joined_isnt_marked() {
+    let online = showing_an_unjoined_thread(200).await;
+    let before = read_state(&online.account, UNJOINED);
+    answer_the_join(&online, missing_access()).await;
+
+    let refused = online
+        .account
+        .mark_unread(id(UNJOINED), msg(NEWEST + 6))
+        .await;
+
+    assert!(
+        matches!(refused, Err(RequestError::Discord { status: 403, .. })),
+        "{refused:?}"
+    );
+    assert_eq!(other_requests(&online.server).await, [the_join()]);
+    assert_eq!(read_state(&online.account, UNJOINED), before);
+    assert!(!joined(&online));
+}
+
+// The list orders joined threads by it, and the Mac's clock may be off.
+#[tokio::test]
+async fn the_join_is_dated_by_discords_clock() {
+    const YEAR_2099: i64 = 4_070_908_800_000;
+    let online = showing_an_unjoined_thread(200).await;
+    let answer = ResponseTemplate::new(204).insert_header("date", "Thu, 01 Jan 2099 00:00:00 GMT");
+    answer_the_join(&online, answer).await;
+
+    online
+        .account
+        .mark_unread(id(UNJOINED), msg(NEWEST + 6))
+        .await
+        .unwrap();
+
     let stored = online.account.store().channel(id(UNJOINED)).unwrap();
-    assert!(stored.thread.as_deref().unwrap().joined());
+    let joined_at = stored.thread.as_deref().unwrap().member.unwrap().joined_at;
+    assert!(
+        joined_at.is_some_and(|at| at.unix_millis() >= YEAR_2099),
+        "{joined_at:?}"
+    );
+}
+
+// The token is gone: the user has to log in again, as after any other request's 401.
+async fn closed_for_its_token(online: &mut Online, refused: Result<MarkOutcome, RequestError>) {
+    assert!(
+        matches!(refused, Err(RequestError::Unauthorized)),
+        "{refused:?}"
+    );
+    assert_eq!(online.connection.client_close_code().await, Some(1000));
+    assert!(matches!(
+        online.account.store().connection(),
+        ConnectionState::Closed { error: Some(ref error) }
+            if matches!(**error, GatewayError::AuthenticationFailed)
+    ));
+}
+
+#[tokio::test]
+async fn a_401_on_the_mark_closes_the_account() {
+    let mut online = online_answering(401, general_read).await;
+    showing(&online, &[FIRST, FIRST + 1, NEWEST]).await;
+
+    let refused = online.account.mark_unread(general(), msg(NEWEST)).await;
+
+    closed_for_its_token(&mut online, refused).await;
+}
+
+#[tokio::test]
+async fn a_401_on_the_join_closes_the_account() {
+    let mut online = showing_an_unjoined_thread(200).await;
+    answer_the_join(&online, ResponseTemplate::new(401)).await;
+
+    let refused = online
+        .account
+        .mark_unread(id(UNJOINED), msg(NEWEST + 6))
+        .await;
+
+    closed_for_its_token(&mut online, refused).await;
+    assert_eq!(other_requests(&online.server).await, [the_join()]);
+}
+
+#[tokio::test]
+async fn a_401_on_opening_the_thread_closes_the_account() {
+    let mut online = acking(|ready| {
+        ready["guilds"][0]["threads"][0]["thread_metadata"]["archived"] = true.into();
+    })
+    .await;
+    showing_in(&online, THREAD, &[THREAD_NEWEST - 1, THREAD_NEWEST], &[]).await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/api/v9/channels/{THREAD}")))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&online.server)
+        .await;
+
+    let refused = online
+        .account
+        .mark_unread(id(THREAD), msg(THREAD_NEWEST))
+        .await;
+
+    closed_for_its_token(&mut online, refused).await;
+    assert!(posted(&online.server).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_closed_account_marks_nothing() {
+    let online = read_general().await;
+    online.account.close();
+    events_until(&online.subscription, "Closed").await;
+
+    let refused = online.account.mark_unread(general(), msg(NEWEST)).await;
+
+    assert!(matches!(refused, Err(RequestError::Closed)), "{refused:?}");
+    assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST, 0)));
+    assert!(posted(&online.server).await.is_empty());
 }
 
 #[tokio::test]
