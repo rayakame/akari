@@ -531,6 +531,7 @@ impl Message {
             attachments: list(message.attachments, attachment),
             embeds: list(message.embeds, embed),
             stickers: list(message.sticker_items, sticker),
+            reactions: super::reactions::reactions(message.reactions),
             reference: message.message_reference.map(|reference| {
                 Box::new(MessageReference {
                     kind: reference.kind,
@@ -586,6 +587,7 @@ impl Message {
             attachments: Box::new([]),
             embeds: Box::new([]),
             stickers: Box::new([]),
+            reactions: None,
             reference: None,
             referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Pending,

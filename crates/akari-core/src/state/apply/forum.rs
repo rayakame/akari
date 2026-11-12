@@ -12,6 +12,7 @@ use crate::gateway::{FORUM_UNREADS_LIMIT, ForumUnreads, MessageUpdate};
 use crate::model::{
     self, ChannelId, GuildId, MessageId, Permissions, PostData, TagId, ThreadSearchResults, UserId,
 };
+use crate::state::reactions::{self, ReactionChange};
 use crate::state::{
     Channel, ForumPosts, ForumSort, ForumView, Message, OlderThreads, PostNewCount, PostPreview,
     StoreEvent, TagMatching,
@@ -815,6 +816,28 @@ impl State {
             events.push(StoreEvent::PostPreviewChanged {
                 post_id: update.channel_id,
             });
+        }
+    }
+
+    // A post's card reads its window's first message when the post has no preview of its own.
+    pub(super) fn react_to_first_message(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        changes: &[ReactionChange],
+        row_changed: bool,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if id.get() != channel.get() {
+            return;
+        }
+        let changed = match self.previews.messages.get_mut(&channel) {
+            Some(Some(known)) => known.id == id && reactions::react(known, changes),
+            Some(None) => false,
+            None => row_changed && self.forum_of(channel).is_some(),
+        };
+        if changed {
+            events.push(StoreEvent::PostPreviewChanged { post_id: channel });
         }
     }
 

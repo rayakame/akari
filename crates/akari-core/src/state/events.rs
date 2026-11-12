@@ -121,6 +121,12 @@ pub enum StoreEvent {
         channel_id: ChannelId,
         message_id: MessageId,
     },
+    /// A message's reactions changed: read
+    /// [`Store::reactions`](super::Store::reactions) again. The message's other parts didn't.
+    MessageReactionsChanged {
+        channel_id: ChannelId,
+        message_id: MessageId,
+    },
     /// Discord confirmed a pending message: drop `pending_id`'s row. `message` is in the
     /// window if it is at the present; otherwise it comes with a later load.
     MessageReplaced {

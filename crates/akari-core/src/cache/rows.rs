@@ -1054,6 +1054,7 @@ impl MessageRow {
                     format: StickerFormatType::from(sticker.format),
                 })
                 .collect(),
+            reactions: None,
             reference: self.reference.map(|reference| {
                 Box::new(MessageReference {
                     kind: MessageReferenceType::from(reference.kind),

@@ -14,6 +14,7 @@ use super::embeds::ShownEmbed;
 use super::events::{ConnectionState, StoreEvent};
 use super::media::{AgeGate, ShownAttachment};
 use super::order;
+use super::reactions::Reaction;
 use super::read_states::{Ack, ReadState};
 use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
@@ -1383,6 +1384,14 @@ impl Store {
 
     pub fn message(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.read(|inner| inner.state.message(channel, id))
+    }
+
+    /// The message's reactions, in Discord's order, new emoji at the end; empty when it has
+    /// none or isn't loaded. Read again on `MessageReactionsChanged`, and with the message
+    /// itself on `MessageUpdated`. A viewed thread's starter row answers for the message it
+    /// shows, a forum post's ID in both places for its first message.
+    pub fn reactions(&self, channel: ChannelId, message: MessageId) -> Arc<[Reaction]> {
+        self.read(|inner| inner.state.reactions(channel, message))
     }
 
     /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC, live messages and

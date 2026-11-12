@@ -73,9 +73,9 @@ Two details:
 | MESSAGE_CREATE | `Message` | Counts toward the channel's read state first: a message of the current user reads the channel up to it (not a poll result), and others can raise its mention count ([read-states.md](read-states.md)). Added to the channel's window if the channel is viewed and its window reaches the newest message: `MessageInserted`. One whose nonce matches a pending message of ours replaces it: `MessageReplaced` ([messages.md](messages.md#sending)). Then it raises the channel's `last_message_id`: a DM or group DM gets `ChannelUpdated`, after the window's events; a guild channel or thread changes without an event. A message of the current user that isn't the echo of a send that started the channel's slowmode cooldown (one from another device) starts that cooldown ([messages.md](messages.md#slowmode)) |
 | MESSAGE_UPDATE | `MessageUpdate` | Patches a loaded message: `MessageUpdated` |
 | MESSAGE_DELETE, MESSAGE_DELETE_BULK | `MessageDelete`, `MessageDeleteBulk` | `MessageDeleted` for each loaded message |
-| MESSAGE_REACTION_ADD, MESSAGE_REACTION_REMOVE | `MessageReaction` | See [Reactions](#reactions) |
-| MESSAGE_REACTION_REMOVE_ALL, MESSAGE_REACTION_REMOVE_EMOJI | `MessageReactionRemoveAll`, `MessageReactionRemoveEmoji` | See [Reactions](#reactions) |
-| MESSAGE_REACTION_ADD_MANY | `MessageReactionAddMany` | See [Reactions](#reactions) |
+| MESSAGE_REACTION_ADD, MESSAGE_REACTION_REMOVE | `MessageReaction` | One user's reaction counts up or down on every copy of the message: `MessageReactionsChanged` for a loaded one ([Reactions](#reactions)) |
+| MESSAGE_REACTION_REMOVE_ALL, MESSAGE_REACTION_REMOVE_EMOJI | `MessageReactionRemoveAll`, `MessageReactionRemoveEmoji` | The message's reactions, or one emoji's, go: `MessageReactionsChanged` |
+| MESSAGE_REACTION_ADD_MANY | `MessageReactionAddMany` | Each listed user's reaction counts as an ADD; one `MessageReactionsChanged` |
 | CHANNEL_PINS_UPDATE, CHANNEL_PINS_ACK | `ChannelPinsUpdate`, `ChannelPinsAck` | See [Pins](#pins) |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
@@ -444,6 +444,42 @@ the emoji falls back to a default when it is missing or in another shape.
 An emoji is the same as another when both have the same `id`, or neither has one and the
 `name`s are the same string; the official client compares no other way (no variation selector
 or skin tone is normalized).
+
+**In the store.** A message keeps its reactions (`state::Message::reactions`) as Discord
+listed them: per emoji the normal and the burst count and whether the user is in each (`me`,
+`me_burst`), from `count_details` (without it `count` is the normal count); an entry that counts
+nothing, such as a poll's answers (`count_details.vote`), is left out. `burst_colors` aren't
+kept. The dispatches change them as the official client's message record does [383233]:
+
+- An add for an emoji the message has counts up in place; a new emoji goes to the end.
+- The user's own add changes nothing when their flag is set, their own removal nothing when
+  it is clear: the echo of a click Akari already applied counts once. Other users' events
+  never change the user's flags.
+- A removal never takes a count below zero, and *Akari:* another user's removal never takes it
+  below the user's own reaction (the official client's would, and drops the entry).
+- An emoji whose two counts are both 0 leaves the list; when it comes back it is at the end.
+- In a DM (not a group DM) the other user's add for an emoji they are already counted for
+  changes nothing: they react once.
+- MESSAGE_UPDATE never changes reactions (the official client keeps the record's on every
+  update); a message that arrives whole again (a page, a refresh) replaces them, with
+  `MessageUpdated`.
+
+They reach every copy of the message the store holds: the window's row, a live message held
+back until its window is refreshed, a thread box's newest message, a forum post's first
+message (`Store::post_preview`) and the message a viewed thread started from. Events only for
+what shows them: `MessageReactionsChanged { channel_id, message_id }` for the window's row and
+for the starter row of each viewed thread showing the message (the thread's ID and the row's),
+`PostPreviewChanged` for a post's first message; nothing for a thread box, whose preview shows
+no reactions. `Store::reactions(channel, message)` reads them alone, so a click doesn't read the
+message again; a starter row's IDs answer for the message it shows.
+
+A reaction that comes while a page of its channel loads is kept and put over the page, like
+edits and deletes. Nothing says whether Discord built the page before or after the reaction,
+and a count, unlike an edit, would be wrong applied twice: where the window already had the
+message and wasn't stale, its copy counted every reaction since and the page's copy takes that
+copy's reactions; else the reaction is applied to the page's copy, which is right when the
+page was built first. A reaction to the message a thread started from, while the thread's page
+loads, isn't replayed onto the copy that page brings.
 
 ## Pins
 

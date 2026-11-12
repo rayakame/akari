@@ -9,6 +9,7 @@ use super::clock::Clock;
 use super::events::StoreEvent;
 use super::order::{self, guild_order};
 use super::permissions::compute;
+use super::reactions::{ReactionChange, ReactionEmoji};
 use super::read_states::{Ack, ReadStates};
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
@@ -893,14 +894,26 @@ impl State {
             E::ThreadListSync(sync) => self.thread_list_sync(*sync, events),
             E::ForumUnreads(unreads) => self.forum_unreads(&unreads),
             E::Resumed => self.forget_unanswered_forum_unreads(),
-            E::MessageReactionAdd(_)
-            | E::MessageReactionRemove(_)
-            | E::MessageReactionRemoveAll(_)
-            | E::MessageReactionRemoveEmoji(_)
-            | E::MessageReactionAddMany(_)
-            | E::ChannelPinsUpdate(_)
-            | E::ChannelPinsAck(_)
-            | E::Other(_) => {}
+            E::MessageReactionAdd(reaction) => self.reaction_event(*reaction, true, events),
+            E::MessageReactionRemove(reaction) => self.reaction_event(*reaction, false, events),
+            E::MessageReactionRemoveAll(removal) => self.react(
+                removal.channel_id,
+                removal.message_id,
+                &[ReactionChange::RemoveAll],
+                events,
+            ),
+            E::MessageReactionRemoveEmoji(removal) => {
+                if let Some(emoji) = ReactionEmoji::from_wire(removal.emoji) {
+                    self.react(
+                        removal.channel_id,
+                        removal.message_id,
+                        &[ReactionChange::RemoveEmoji(emoji)],
+                        events,
+                    );
+                }
+            }
+            E::MessageReactionAddMany(many) => self.reactions_added(*many, events),
+            E::ChannelPinsUpdate(_) | E::ChannelPinsAck(_) | E::Other(_) => {}
         }
     }
 
@@ -2115,6 +2128,7 @@ mod browser;
 mod creating;
 mod forum;
 mod media;
+mod reactions;
 mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
