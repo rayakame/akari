@@ -25,7 +25,9 @@ app can mirror it and Discord users can switch with zero relearning.
 - [thread-create.md](thread-create.md): creating a thread: where it starts, the New Thread form,
   the default name, refusals and closing
 - [forum.md](forum.md): a forum's page: its frozen list and the pill, search, the tag filter,
-  Sort & View, list and gallery cards, older posts, and the row's counts
+  Sort & View, list and gallery cards with NEW and "(N New)", older posts, a post beside the
+  forum with its beginning and bar, the form for a new post, media channels, and the row's
+  counts
 - [cursors.md](cursors.md): which cursor shows where, and the one authority for each region
 - [message-list.md](message-list.md): message layout, the grouping rule, times, day dividers,
   system messages, loading history, the channel's start, jump to present, edits and deletes

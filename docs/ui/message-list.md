@@ -337,6 +337,10 @@ beginning of the Weekend plans group." **Unverified**: the DM and group sizes, s
 wording, which no screenshot showed yet; the official DM header also has buttons (add friend,
 block) that Akari leaves out.
 
+**A forum post** shows the forum's symbol, the post's name, "Original message was deleted"
+once its first message is gone, and its tags on a row 14 below; its action bar is the row
+under its first message ([forum.md](forum.md#a-post)).
+
 ## Threads
 
 A thread opens like a channel, with its own start, starter and composer. Observed in the
