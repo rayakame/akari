@@ -21,8 +21,8 @@ use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::threads::ThreadIndex;
 use super::types::{
-    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostCreation,
-    PostNewCount, PostPreview, StarterMessage, ThreadBrowser, ThreadCreation, User,
+    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, MessageActions,
+    PostCreation, PostNewCount, PostPreview, StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
@@ -1324,6 +1324,23 @@ impl Store {
     pub fn can_start_thread(&self, channel: ChannelId, message: MessageId) -> bool {
         let now = self.now_millis();
         self.read(|inner| inner.state.can_start_thread(channel, message, now))
+    }
+
+    /// What the user may do with the message, by the official client's rules: the message's
+    /// type, flags and delivery, the user's permissions in its channel (a DM or group DM asks
+    /// none, its system DM allows next to nothing), their timeout, and a thread's archived and
+    /// locked state. Nothing for a message the store doesn't have. Read again when the message,
+    /// its channel or the user's permissions change.
+    pub fn message_actions(&self, channel: ChannelId, message: MessageId) -> MessageActions {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.message_actions(channel, message, now))
+    }
+
+    /// [`Store::message_actions`] for a message the caller holds, which the store may have let
+    /// go of: a pinned message of the pins list, a reply's target, a row a jump trimmed away.
+    pub fn message_actions_of(&self, message: &Message) -> MessageActions {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.message_actions_of(message, now))
     }
 
     /// The parent's slowmode for creating threads, which Discord counts apart from sending: each

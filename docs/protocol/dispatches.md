@@ -576,7 +576,8 @@ and applies each event.
   stands for `SEND_MESSAGES_IN_THREADS`. A timeout leaves only `VIEW_CHANNEL` and
   `READ_MESSAGE_HISTORY`, AutoMod quarantine also `CHANGE_NICKNAME`. Without `VIEW_CHANNEL`
   nothing is left. READY sends channels the user can't see, and the official client hides
-  them.
+  them. DMs and group DMs have no computed permissions; what a message's actions take them to
+  grant is in [message-actions.md](../ui/message-actions.md#the-terms).
 
 ### Message windows
 

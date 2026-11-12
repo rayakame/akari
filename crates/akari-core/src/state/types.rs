@@ -385,6 +385,37 @@ pub struct ThreadCreation {
     pub private: bool,
 }
 
+/// What the user may do with a message: see
+/// [`Store::message_actions`](super::Store::message_actions). Every flag is false for a message
+/// that is still sending and for an ephemeral one; a failed send has only `delete`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct MessageActions {
+    pub reply: bool,
+    /// The reply pings the message's author unless the user turns that off: never for their own.
+    pub reply_pings: bool,
+    /// The reply bar has the switch for the ping: not in DMs, not for the user's own message.
+    pub mention_toggle: bool,
+    pub edit: bool,
+    /// Without a request for a failed send.
+    pub delete: bool,
+    /// The message isn't pinned and the user may pin it.
+    pub pin: bool,
+    /// The message is pinned and the user may unpin it.
+    pub unpin: bool,
+    /// With an emoji the message doesn't have yet.
+    pub react: bool,
+    /// Adding and removing the user's own reaction with an emoji the message already has.
+    pub toggle_reaction: bool,
+    /// Removing others' reactions: one user's, an emoji's, all of them.
+    pub remove_reactions: bool,
+    pub mark_unread: bool,
+    pub copy_link: bool,
+    pub create_thread: bool,
+    /// The thread started from the message is known and the user may view it.
+    pub view_thread: bool,
+}
+
 // A forum post pinned to the top of its forum.
 const PINNED: u64 = 1 << 1;
 const REQUIRE_TAG: u64 = 1 << 4;

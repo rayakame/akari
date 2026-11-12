@@ -2279,3 +2279,24 @@ fn asking_for_post_previews_again_writes_nothing() {
     assert!(!store.want_post_previews(forum, &posts));
     assert_eq!(store.changes(), failed, "waiting out the retry");
 }
+
+#[test]
+fn message_actions_answers_by_id_and_for_a_held_message() {
+    let store = ready_store();
+    let general = Snowflake::new(GENERAL);
+    store.view_channel(general);
+    let ticket = store.begin_load(general, LoadKind::Latest, None).unwrap();
+    let message: model::Message =
+        serde_json::from_str(include_str!("../../../tests/fixtures/message_create.json")).unwrap();
+    let id = message.id;
+    store.finish_load(ticket, vec![message], true);
+
+    let actions = store.message_actions(general, id);
+    assert!(actions.reply && actions.mention_toggle && actions.delete && !actions.edit);
+    let held = store.message(general, id).unwrap();
+    assert_eq!(store.message_actions_of(&held), actions);
+    assert_eq!(
+        store.message_actions(general, Snowflake::new(1)),
+        MessageActions::default()
+    );
+}
