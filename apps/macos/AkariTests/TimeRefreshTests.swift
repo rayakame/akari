@@ -136,16 +136,13 @@ final class TimeRefreshTests {
         #expect(timers.active.count == 1)
     }
 
-    @Test
-    func aRelativeTimeThatWrapsKeepsTheAnchor() throws {
-        // A row whose text wraps once its relative time turns from minutes to seconds.
-        let due = seconds(clock.now) + 61
-        let fire = clock.now + 2
+    // Text that wraps once its relative time turns from minutes to seconds, at `fire`.
+    func wrapping(due: Int64, at fire: Date, prefix: String = "x") throws -> String {
         let times = TimestampText(
             locale: clock.locale, timeZone: clock.calendar.timeZone, calendar: clock.calendar)
         let width = table.tableColumns[0].width - 88
-        let wrapping = try #require(
-            (1...160).lazy.map { "x" + String(repeating: "a", count: $0) + " <t:\(due):R>" }
+        return try #require(
+            (1...160).lazy.map { prefix + String(repeating: "a", count: $0) + " <t:\(due):R>" }
                 .first { content in
                     let message = row(1, at: self.clock.now, content: content).message
                     let height = { (now: Date) in
@@ -155,25 +152,74 @@ final class TimeRefreshTests {
                     }
                     return height(self.clock.now) != height(fire)
                 })
+    }
+
+    func scroll(toRowOf raw: UInt64) {
+        let clip = controller.scrollView.contentView
+        clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: index(of: raw)).minY))
+        controller.scrollView.reflectScrolledClipView(clip)
+        window.layoutIfNeeded()
+    }
+
+    @Test
+    func aRelativeTimeThatWrapsKeepsTheAnchor() throws {
+        let due = seconds(clock.now) + 61
+        let fire = clock.now + 2
         var rows = (1...60).map { raw in
             row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: clock.now + Double(raw) * 30)
         }
-        rows[19] = row(20, by: author(1), at: clock.now + 600, content: wrapping)
+        rows[19] = row(
+            20, by: author(1), at: clock.now + 600, content: try wrapping(due: due, at: fire))
         rows[24] = row(25, by: author(2), at: clock.now + 750, content: "soon <t:\(due):R>")
         show(rows)
+        scroll(toRowOf: 21)
         let clip = controller.scrollView.contentView
-        clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: index(of: 21)).minY))
-        controller.scrollView.reflectScrolledClipView(clip)
-        window.layoutIfNeeded()
         let place = table.rect(ofRow: index(of: 21)).minY - clip.bounds.minY
         let height = table.rect(ofRow: index(of: 20)).height
+        let before = MessageTableTests.visibleViews(in: controller)
+        #expect(before[25] != nil)
 
         clock.now = fire
         timers.fire()
+
+        // Before any layout: 25 has a new cell, the others keep theirs.
+        MessageTableTests.expectTheSameViewsInPlace(
+            before.filter { $0.key != 25 }, in: controller)
+        MessageTableTests.expectTheSameViewsInPlace(before, in: controller, reloaded: true)
+        MessageTableTests.expectRowViewsAtTheirRows(in: controller)
         window.layoutIfNeeded()
 
         #expect(table.rect(ofRow: index(of: 20)).height != height)
         #expect(table.rect(ofRow: index(of: 21)).minY - clip.bounds.minY == place)
+    }
+
+    // The timer is stopped while no relative time is on screen; a reveal builds the text anew.
+    @Test
+    func aRevealThatRewrapsARowAboveTheReaderMovesNoViews() throws {
+        let due = seconds(clock.now) + 61
+        let fire = clock.now + 2
+        var rows = (1...60).map { raw in
+            row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: clock.now + Double(raw) * 30)
+        }
+        rows[19] = row(
+            20, by: author(1), at: clock.now + 600,
+            content: try wrapping(due: due, at: fire, prefix: "||x|| "))
+        show(rows)
+        scroll(toRowOf: 21)
+        #expect(timers.active.isEmpty)
+        let height = table.rect(ofRow: index(of: 20)).height
+        let before = MessageTableTests.visibleViews(in: controller)
+        #expect(!before.isEmpty)
+
+        clock.now = fire
+        controller.show(
+            MessageTableState(
+                rows: rows, reachedOldest: true,
+                revealedSpoilers: [SpoilerKey(messageId: MessageId(rawValue: 20), index: 0)]))
+
+        #expect(table.rect(ofRow: index(of: 20)).height != height)
+        MessageTableTests.expectTheSameViewsInPlace(before, in: controller)
+        MessageTableTests.expectRowViewsAtTheirRows(in: controller)
     }
 
     // A row's relative text can change while it's off screen, with the timer stopped.
@@ -370,8 +416,9 @@ final class TimeRefreshTests {
         #expect(shown.contains("Yesterday at 11:58\u{202F}PM"))
     }
 
-    @Test
-    func aNoticeRowTakesItsNewHeightWhenItsTimeChanges() async throws {
+    // A notice first in a list of 60 whose text wraps once its time reads "Yesterday at …", with
+    // the reader at message 40; the notice's height then.
+    func rewrappingNotice() throws -> CGFloat {
         let start = berlinTime(2026, 10, 10, 23, 58)
         let notice = row(1, by: author(1, "Mira Kowalczyk-Lindqvist"), at: start, kind: .userJoin)
         let rows = [notice] + (2...60).map { row(UInt64($0), at: start + Double($0)) }
@@ -395,18 +442,36 @@ final class TimeRefreshTests {
         }
         try #require(width > 0)
         show(rows)
+        scroll(toRowOf: 40)
+        return height("Yesterday at 11:58\u{202F}PM", width)
+    }
+
+    @Test
+    func aNoticeRowTakesItsNewHeightWhenItsTimeChanges() async throws {
+        let height = try rewrappingNotice()
         let clip = controller.scrollView.contentView
-        clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: index(of: 40)).minY))
-        controller.scrollView.reflectScrolledClipView(clip)
-        window.layoutIfNeeded()
         let place = table.rect(ofRow: index(of: 40)).minY - clip.bounds.minY
 
         clock.now = berlinTime(2026, 10, 11, 0, 1)
         await post(.NSCalendarDayChanged)
 
-        #expect(
-            table.rect(ofRow: index(of: 1)).height == height("Yesterday at 11:58\u{202F}PM", width))
+        #expect(table.rect(ofRow: index(of: 1)).height == height)
         #expect(abs(table.rect(ofRow: index(of: 40)).minY - clip.bounds.minY - place) <= 0.5)
+    }
+
+    @Test
+    func aNoticeThatRewrapsAboveTheReaderMovesNoViews() throws {
+        let height = try rewrappingNotice()
+        let before = MessageTableTests.visibleViews(in: controller)
+        #expect(!before.isEmpty)
+        #expect(table.rect(ofRow: index(of: 1)).height != height)
+
+        clock.now = berlinTime(2026, 10, 11, 0, 1)
+        controller.refreshTimes()
+
+        #expect(table.rect(ofRow: index(of: 1)).height == height)
+        MessageTableTests.expectTheSameViewsInPlace(before, in: controller, reloaded: true)
+        MessageTableTests.expectRowViewsAtTheirRows(in: controller)
     }
 
     @Test

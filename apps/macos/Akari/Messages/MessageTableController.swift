@@ -450,8 +450,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if !held.isEmpty {
             tableView.reloadData(forRowIndexes: held, columnIndexes: [0])
         }
-        tableView.noteHeightOfRows(
-            withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows))
+        noteHeights(of: IndexSet(integersIn: 0..<tableView.numberOfRows))
         if pinsToBottom {
             scrollToBottom()
         } else {
@@ -494,12 +493,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         for index in rows {
             rowHeights[timeline.items[index].id] = nil
         }
-        ownChanges += 1
-        defer { ownChanges -= 1 }
         altText?.close()
         altText = nil
-        tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
-        tableView.noteHeightOfRows(withIndexesChanged: rows)
+        keepingPlace {
+            tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
+            noteHeights(of: rows)
+        }
         // The reloaded rows' views are new: the hover goes to them.
         updatePointer()
     }
@@ -697,14 +696,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             tableView.endUpdates()
             if !changes.reloaded.isEmpty {
                 tableView.reloadData(forRowIndexes: changes.reloaded, columnIndexes: [0])
-                // Outside an update the rows below keep their views' old places until a later
-                // layout; as in remeasureStart, inside one at zero duration they move at once.
-                NSAnimationContext.beginGrouping()
-                NSAnimationContext.current.duration = 0
-                tableView.beginUpdates()
-                tableView.noteHeightOfRows(withIndexesChanged: changes.reloaded)
-                tableView.endUpdates()
-                NSAnimationContext.endGrouping()
+                noteHeights(of: changes.reloaded)
             }
         }
         if firstFill {
@@ -729,6 +721,36 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         tableView.layoutSubtreeIfNeeded()
         logFills(fills, changes: changes)
         updatePointer()
+    }
+
+    // For height changes outside a timeline update: the reader's place stays, or the bottom.
+    private func keepingPlace(_ change: () -> Void) {
+        let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
+        if let place {
+            anchor = place
+        }
+        ownChanges += 1
+        defer { ownChanges -= 1 }
+        change()
+        measureRows()
+        if pinsToBottom {
+            scrollToBottom()
+        } else {
+            restoreAnchor()
+        }
+    }
+
+    // At its default duration AppKit leaves the row views at their old places.
+    private func noteHeights(of rows: IndexSet) {
+        guard !rows.isEmpty else {
+            return
+        }
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        tableView.beginUpdates()
+        tableView.noteHeightOfRows(withIndexesChanged: rows)
+        tableView.endUpdates()
+        NSAnimationContext.endGrouping()
     }
 
     // The table measures new rows only when asked for spans from the top and answers estimates
@@ -882,25 +904,9 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         else {
             return
         }
-        let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
-        if let place {
-            anchor = place
-        }
-        rowHeights[timeline.items[index].id] = nil
-        ownChanges += 1
-        defer { ownChanges -= 1 }
-        // Inside an update the table moves its row views, as for apply's inserts; at zero
-        // duration it does so at once.
-        NSAnimationContext.beginGrouping()
-        NSAnimationContext.current.duration = 0
-        tableView.beginUpdates()
-        tableView.noteHeightOfRows(withIndexesChanged: [index])
-        tableView.endUpdates()
-        NSAnimationContext.endGrouping()
-        if pinsToBottom {
-            scrollToBottom()
-        } else {
-            restoreAnchor()
+        keepingPlace {
+            rowHeights[timeline.items[index].id] = nil
+            noteHeights(of: [index])
         }
         // As in apply: inside a SwiftUI update the table's own layout can come a frame later.
         tableView.layoutSubtreeIfNeeded()
@@ -931,7 +937,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
         }
         if !rows.isEmpty {
-            tableView.noteHeightOfRows(withIndexesChanged: rows)
+            noteHeights(of: rows)
             configureEdges()
         }
     }
@@ -1420,28 +1426,19 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
         }
         if !due.isEmpty {
-            let place = pinsToBottom ? nil : visibleAnchor(skipping: [])
-            if let place {
-                anchor = place
-            }
-            ownChanges += 1
-            defer { ownChanges -= 1 }
-            // Not only the visible rows: AppKit prepares row views beyond them, shown as they are.
-            var held = IndexSet()
-            tableView.enumerateAvailableRowViews { _, row in
-                if due.contains(row) {
-                    held.insert(row)
+            keepingPlace {
+                // Not only the visible rows: AppKit prepares row views beyond them, shown as
+                // they are.
+                var held = IndexSet()
+                tableView.enumerateAvailableRowViews { _, row in
+                    if due.contains(row) {
+                        held.insert(row)
+                    }
                 }
-            }
-            if !held.isEmpty {
-                tableView.reloadData(forRowIndexes: held, columnIndexes: [0])
-            }
-            tableView.noteHeightOfRows(withIndexesChanged: remeasured)
-            measureRows()
-            if pinsToBottom {
-                scrollToBottom()
-            } else {
-                restoreAnchor()
+                if !held.isEmpty {
+                    tableView.reloadData(forRowIndexes: held, columnIndexes: [0])
+                }
+                noteHeights(of: remeasured)
             }
         }
         updateRelativeTimer()
@@ -1666,8 +1663,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if ownChanges == 0, !pinsToBottom, let place = visibleAnchor(skipping: []) {
             anchor = place
         }
-        tableView.noteHeightOfRows(
-            withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows))
+        noteHeights(of: IndexSet(integersIn: 0..<tableView.numberOfRows))
     }
 
     @objc private func liveScrollStarted(_ notification: Notification) {

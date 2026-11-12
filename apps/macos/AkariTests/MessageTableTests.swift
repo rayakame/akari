@@ -1377,8 +1377,17 @@ struct MessageTableTests {
 
     // What the reader sees: each visible message's row view and where it sits on screen.
     func visibleViews() -> [UInt64: (view: NSView?, y: CGFloat)] {
+        Self.visibleViews(in: controller)
+    }
+
+    static func visibleViews(in controller: MessageTableController) -> [UInt64: (
+        view: NSView?, y: CGFloat
+    )] {
+        let table = controller.tableView
+        let clip = controller.scrollView.contentView
+        let rows = table.rows(in: table.visibleRect)
         var shown: [UInt64: (view: NSView?, y: CGFloat)] = [:]
-        for row in visibleRows {
+        for row in rows.location..<NSMaxRange(rows) {
             guard case .message(let item, _) = controller.timeline.items[row] else {
                 continue
             }
@@ -1393,14 +1402,46 @@ struct MessageTableTests {
 
     // Checked right after the update, before any layout pass: the frame AppKit would draw next.
     func expectTheSameViewsInPlace(_ before: [UInt64: (view: NSView?, y: CGFloat)]) {
+        Self.expectTheSameViewsInPlace(before, in: controller)
+    }
+
+    // `reloaded`: the rows got new cells, so only their row views' places are compared.
+    static func expectTheSameViewsInPlace(
+        _ before: [UInt64: (view: NSView?, y: CGFloat)], in controller: MessageTableController,
+        reloaded: Bool = false
+    ) {
+        let table = controller.tableView
+        let clip = controller.scrollView.contentView
         for (raw, was) in before {
-            let row = index(of: raw)
+            let row =
+                controller.timeline.items.firstIndex { $0.id == .message(MessageId(rawValue: raw)) }
+                ?? -1
             let view = table.view(atColumn: 0, row: row, makeIfNecessary: false)
-            #expect(view != nil && view === was.view, "message \(raw) got another view")
+            if !reloaded {
+                #expect(view != nil && view === was.view, "message \(raw) got another view")
+            }
             // Where its row view is now, not where the table will put it at its next layout.
             let rowView = table.rowView(atRow: row, makeIfNecessary: false)
             let y = (rowView?.frame.minY ?? .nan) - clip.bounds.minY
             #expect(abs(y - was.y) <= 0.5, "message \(raw) moved from \(was.y) to \(y)")
+        }
+    }
+
+    // No row view left behind where its row was before a height changed.
+    func expectRowViewsAtTheirRows() {
+        Self.expectRowViewsAtTheirRows(in: controller)
+    }
+
+    static func expectRowViewsAtTheirRows(in controller: MessageTableController) {
+        let table = controller.tableView
+        table.enumerateAvailableRowViews { view, row in
+            guard row >= 0 else {
+                return
+            }
+            let rect = table.rect(ofRow: row)
+            #expect(
+                abs(view.frame.minY - rect.minY) <= 0.5 && abs(view.frame.height - rect.height) <= 0.5,
+                "row \(row)'s view is at \(view.frame.minY), \(view.frame.height) tall; its row at \(rect.minY), \(rect.height) tall")
         }
     }
 
@@ -1622,6 +1663,118 @@ struct MessageTableTests {
             145, by: rows[44].message.author, at: rows[44].message.timestamp, content: long)
         show(rows)
         #expect(abs(place(of: 150) - before) <= 0.5)
+    }
+
+    func edited(_ rows: inout [MessageListModel.Row], _ raw: UInt64, _ content: String) {
+        let at = rows.firstIndex { $0.id.rawValue == raw } ?? 0
+        rows[at] = row(
+            raw, by: rows[at].message.author, at: rows[at].message.timestamp, content: content)
+    }
+
+    @Test
+    func anEditAboveTheReaderThatGrowsMovesNoViews() {
+        var rows = page
+        show(rows)
+        scroll(toRowOf: 150)
+        let before = visibleViews()
+        #expect(!before.isEmpty)
+        let height = table.rect(ofRow: index(of: 140)).height
+
+        edited(&rows, 140, String(repeating: "words that wrap ", count: 30))
+        controller.show(MessageTableState(rows: rows))
+
+        #expect(table.rect(ofRow: index(of: 140)).height > height)
+        expectTheSameViewsInPlace(before)
+        expectRowViewsAtTheirRows()
+    }
+
+    @Test
+    func anEditAboveTheReaderThatShrinksMovesNoViews() {
+        var rows = page
+        edited(&rows, 140, String(repeating: "words that wrap ", count: 30))
+        show(rows)
+        scroll(toRowOf: 150)
+        let before = visibleViews()
+        #expect(!before.isEmpty)
+        let height = table.rect(ofRow: index(of: 140)).height
+
+        edited(&rows, 140, "short")
+        controller.show(MessageTableState(rows: rows))
+
+        #expect(table.rect(ofRow: index(of: 140)).height < height)
+        expectTheSameViewsInPlace(before)
+        expectRowViewsAtTheirRows()
+    }
+
+    @Test
+    func aRowGrowingBelowTheReaderMovesNoViewsAboveIt() {
+        var rows = page
+        show(rows)
+        scroll(toRowOf: 150)
+        let long = String(repeating: "words that wrap ", count: 30)
+        let before = visibleViews()
+        #expect(before[152] != nil)
+
+        edited(&rows, 190, long)
+        controller.show(MessageTableState(rows: rows))
+        expectTheSameViewsInPlace(before)
+        expectRowViewsAtTheirRows()
+
+        edited(&rows, 152, long)
+        controller.show(MessageTableState(rows: rows))
+        // 152 has a new cell, and what's below it has moved down by its growth.
+        expectTheSameViewsInPlace(before.filter { $0.key < 152 })
+        Self.expectTheSameViewsInPlace(before.filter { $0.key == 152 }, in: controller, reloaded: true)
+        expectRowViewsAtTheirRows()
+    }
+
+    @Test
+    func theLastRowGrowingWhilePinnedStaysPinned() {
+        var rows = page
+        show(rows)
+        #expect(controller.isPinnedToBottom)
+        let height = table.rect(ofRow: index(of: 200)).height
+
+        edited(&rows, 200, String(repeating: "words that wrap ", count: 30))
+        controller.show(MessageTableState(rows: rows))
+
+        let grown = table.rect(ofRow: index(of: 200))
+        #expect(grown.height > height)
+        #expect(controller.isPinnedToBottom)
+        #expect(abs(gapBelowTheRows) <= 0.5, "a gap of \(gapBelowTheRows) below the rows")
+        expectRowViewsAtTheirRows()
+        let rowView = table.rowView(atRow: index(of: 200), makeIfNecessary: false)
+        #expect(abs((rowView?.frame.maxY ?? .nan) - grown.maxY) <= 0.5)
+    }
+
+    // The composer grows or shrinks the list, and the placeholders above the reader with it.
+    @Test
+    func placeholdersResizingAboveTheReaderMoveNoViews() {
+        _ = hostInContainer()
+        show(MessageTableState(rows: page))
+        scroll(toRowOf: 130)
+        let before = visibleViews()
+        let height = table.rect(ofRow: 0).height
+        #expect(!before.isEmpty)
+
+        controller.scrollView.frame = NSRect(x: 0, y: -200, width: 600, height: 600)
+
+        #expect(table.rect(ofRow: 0).height > height)
+        expectTheSameViewsInPlace(before)
+        expectRowViewsAtTheirRows()
+    }
+
+    @Test
+    func aNarrowerListKeepsItsRowViewsAtTheirRows() {
+        show(messages(100, from: 101, longText: true))
+        scroll(toRowOf: 150)
+        let before = place(of: 150)
+
+        window.setContentSize(NSSize(width: 380, height: 400))
+        window.layoutIfNeeded()
+
+        #expect(abs(place(of: 150) - before) <= 0.5)
+        expectRowViewsAtTheirRows()
     }
 
     @Test
