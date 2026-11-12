@@ -436,15 +436,19 @@ impl Account {
     }
 
     /// Shows the message as pending at once and resolves with Discord's ID. On an error the
-    /// message stays as failed until retried or discarded.
+    /// message stays as failed until retried or discarded. With `reply` it answers that
+    /// message, as `queue_message` says.
+    #[uniffi::method(default(reply = None))]
     pub async fn send_message(
         &self,
         channel_id: ChannelId,
         content: String,
+        reply: Option<ReplyTo>,
     ) -> Result<MessageId, RequestError> {
         let core = self.core.clone();
         run(self.runtime, async move {
-            core.send_message(channel_id, content, None).await
+            core.send_message(channel_id, content, reply.map(Into::into))
+                .await
         })
         .await
         .map_err(Into::into)
@@ -452,13 +456,20 @@ impl Account {
 
     /// Shows the message as pending and returns its provisional ID, or refuses (empty or too
     /// long content, a closed account) before anything is queued; `deliver_message` sends it.
+    ///
+    /// With `reply` the message answers that message of the channel: the pending row is a
+    /// reply with its `replied_to`, its target reads as `Loaded` at once, and a retry keeps the
+    /// target and the ping. A message whose `message_actions` has no `reply`, or one of another
+    /// channel, is refused with `InvalidRequest`.
+    #[uniffi::method(default(reply = None))]
     pub fn queue_message(
         &self,
         channel_id: ChannelId,
         content: String,
+        reply: Option<ReplyTo>,
     ) -> Result<MessageId, RequestError> {
         self.core
-            .queue_message(channel_id, &content, None)
+            .queue_message(channel_id, &content, reply.map(Into::into))
             .map_err(Into::into)
     }
 
@@ -478,7 +489,8 @@ impl Account {
         .map_err(Into::into)
     }
 
-    /// Sends a failed message again with the same nonce.
+    /// Sends a failed message again with the same nonce; a reply with its target and its ping
+    /// as it was queued.
     pub async fn retry_message(
         &self,
         channel_id: ChannelId,
@@ -571,6 +583,25 @@ impl From<MessageLoad> for akari_core::MessageLoad {
                 id: message_id,
                 limit,
             },
+        }
+    }
+}
+
+/// What a message to send answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct ReplyTo {
+    /// A message of the channel the reply goes to.
+    pub message_id: MessageId,
+    /// Whether the reply pings the message's author: `MessageActions.reply_pings` unless the
+    /// user turned it off (Shift, or the reply bar's toggle).
+    pub mention: bool,
+}
+
+impl From<ReplyTo> for akari_core::ReplyTo {
+    fn from(reply: ReplyTo) -> Self {
+        Self {
+            message: reply.message_id,
+            mention: reply.mention,
         }
     }
 }

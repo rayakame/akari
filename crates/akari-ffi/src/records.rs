@@ -7,7 +7,7 @@ use akari_core::model::{
 };
 use akari_core::state;
 
-use crate::embeds::Embed;
+use crate::embeds::{Embed, RichText};
 use crate::errors::GatewayError;
 use crate::formatted::FormattedText;
 use crate::images::ImageKey;
@@ -707,7 +707,7 @@ pub struct RepliedTo {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum ReplyTarget {
     Loaded {
-        preview: ReplyPreview,
+        preview: Box<ReplyPreview>,
     },
     /// Discord says it is gone, or it was deleted since.
     Deleted,
@@ -732,13 +732,18 @@ pub struct ReplyPreview {
     pub has_sticker: bool,
     /// A forward: its content is in a snapshot Akari doesn't read.
     pub forwarded: bool,
+    /// The content on one line by Discord's rules for a reply's preview: `text` is `content`
+    /// with each line break as a space, `formatted` one paragraph at most, without `Break`s,
+    /// quotes or lists, a code block as inline code, emoji never jumbo. `None` without content.
+    #[uniffi(default = None)]
+    pub formatted: Option<RichText>,
 }
 
-impl From<&state::ReplyTarget> for ReplyTarget {
-    fn from(target: &state::ReplyTarget) -> Self {
+impl ReplyTarget {
+    pub(crate) fn new(target: &state::ReplyTarget, formatted: Option<RichText>) -> Self {
         match target {
             state::ReplyTarget::Loaded(preview) => Self::Loaded {
-                preview: ReplyPreview {
+                preview: Box::new(ReplyPreview {
                     kind: preview.kind,
                     author: User::from(&*preview.author),
                     from_webhook: preview.webhook,
@@ -749,7 +754,8 @@ impl From<&state::ReplyTarget> for ReplyTarget {
                     has_embeds: preview.has_embeds,
                     has_sticker: preview.has_sticker,
                     forwarded: preview.forwarded,
-                },
+                    formatted,
+                }),
             },
             state::ReplyTarget::Deleted => Self::Deleted,
             state::ReplyTarget::NotLoaded => Self::NotLoaded,
