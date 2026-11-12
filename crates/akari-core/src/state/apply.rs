@@ -395,6 +395,8 @@ pub(crate) struct State {
     recounts: HashMap<ChannelId, MessageId>,
     // The memberships of joined threads in guilds that are down, for their GUILD_CREATE.
     outage_members: HashMap<ChannelId, (GuildId, ThreadMembership)>,
+    // The channels of guilds that are down, whose read states go if the user leaves meanwhile.
+    outage_channels: HashMap<GuildId, Vec<ChannelId>>,
     // Joins for threads the store doesn't have yet, for the THREAD_CREATE that brings them.
     pending_joins: HashMap<ChannelId, ThreadMembership>,
     // Threads Get Channel refused or didn't find, for the session.
@@ -452,6 +454,7 @@ impl State {
             journal: None,
             recounts: HashMap::new(),
             outage_members: HashMap::new(),
+            outage_channels: HashMap::new(),
             pending_joins: HashMap::new(),
             unavailable_threads: HashSet::new(),
             fetched_threads: HashSet::new(),
@@ -1364,6 +1367,7 @@ impl State {
             return;
         };
         self.outage_members.retain(|_, (guild, _)| *guild != id);
+        self.outage_channels.remove(&id);
         for channel in next.channels.keys() {
             self.pending_joins.remove(channel);
         }
@@ -1440,12 +1444,14 @@ impl State {
         } else if self.entities.guilds.contains_key(&delete.id)
             || self.entities.unavailable.contains(&delete.id)
         {
+            let down = self.outage_channels.remove(&delete.id).unwrap_or_default();
             let channels: Vec<ChannelId> = self
                 .entities
                 .channels
                 .values()
                 .filter(|channel| channel.guild_id == Some(delete.id))
                 .map(|channel| channel.id)
+                .chain(down)
                 .collect();
             for channel in channels {
                 self.entities.read_states.forget(channel);
@@ -1474,19 +1480,25 @@ impl State {
     }
 
     fn stash_members(&mut self, guild: GuildId) {
+        let mut channels = Vec::new();
         for channel in self.entities.channels.values() {
-            if channel.guild_id == Some(guild)
-                && let Some(member) = channel.thread.as_deref().and_then(|info| info.member)
-            {
+            if channel.guild_id != Some(guild) {
+                continue;
+            }
+            channels.push(channel.id);
+            if let Some(member) = channel.thread.as_deref().and_then(|info| info.member) {
                 self.outage_members.insert(channel.id, (guild, member));
             }
         }
+        self.outage_channels.insert(guild, channels);
     }
 
     // Before the swap: a guild READY lists as down keeps its threads' memberships until it's back.
     fn keep_outage_members(&mut self, next: &Entities) {
         self.outage_members
             .retain(|_, (guild, _)| next.unavailable.contains(guild));
+        self.outage_channels
+            .retain(|guild, _| next.unavailable.contains(guild));
         let down: Vec<GuildId> = next
             .unavailable
             .iter()
