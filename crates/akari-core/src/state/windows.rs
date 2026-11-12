@@ -57,6 +57,8 @@ pub(crate) struct LoadTicket {
     holds: bool,
     // The channel's newest message when the load began.
     newest: Option<MessageId>,
+    // The window's missed changes when the load began; its page has those.
+    missed: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -119,8 +121,10 @@ struct Window {
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
     loading: u32,
-    // Edits and deletes while a load runs; its page may predate them.
-    missed: Vec<Missed>,
+    // Edits, deletes and reactions while a load runs, each with its number; a page may predate
+    // those that came after its load began.
+    missed: Vec<(u64, Missed)>,
+    misses: u64,
     viewed_at: i64,
     // A page landed; until then the window holds at most live messages and isn't cached.
     filled: bool,
@@ -142,6 +146,13 @@ impl Window {
 
     fn holds_live(&self) -> bool {
         self.holding > 0 || (self.stale && self.latest)
+    }
+
+    fn miss(&mut self, missed: Missed) {
+        if self.loading > 0 {
+            self.misses += 1;
+            self.missed.push((self.misses, missed));
+        }
     }
 
     fn forget_missed(&mut self) {
@@ -1057,6 +1068,7 @@ impl Windows {
             placing,
             holds,
             newest,
+            missed: window.misses,
         })
     }
 
@@ -1128,7 +1140,11 @@ impl Windows {
             return PageOutcome::Outdated;
         };
         page.sort_by_key(|message| message.id);
-        for missed in &window.missed {
+        let since_the_load = window
+            .missed
+            .iter()
+            .filter(|(number, _)| *number > ticket.missed);
+        for (_, missed) in since_the_load {
             match missed {
                 Missed::Deleted(id) => {
                     page.retain(|message| message.id != *id);
@@ -1386,11 +1402,7 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&update.channel_id) else {
             return;
         };
-        if window.loading > 0 {
-            window
-                .missed
-                .push(Missed::Updated(Box::new(update.clone())));
-        }
+        window.miss(Missed::Updated(Box::new(update.clone())));
         if let Ok(index) = Window::position(&window.messages, update.id) {
             let known = window.messages[index].clone();
             let next =
@@ -1415,12 +1427,8 @@ impl Windows {
     ) -> bool {
         let mut row = false;
         if let Some(window) = self.windows.get_mut(&channel_id) {
-            if window.loading > 0 {
-                window.missed.extend(
-                    changes
-                        .iter()
-                        .map(|change| Missed::Reacted(id, change.clone())),
-                );
+            for change in changes {
+                window.miss(Missed::Reacted(id, change.clone()));
             }
             if let Ok(index) = Window::position(&window.messages, id) {
                 row = react(&mut window.messages[index], changes);
@@ -1473,9 +1481,7 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&channel_id) else {
             return;
         };
-        if window.loading > 0 {
-            window.missed.push(Missed::Deleted(id));
-        }
+        window.miss(Missed::Deleted(id));
         if let Ok(index) = Window::position(&window.messages, id) {
             window.messages.remove(index);
             if index == window.messages.len() && window.latest && !window.stale {

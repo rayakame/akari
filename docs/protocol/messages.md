@@ -67,7 +67,9 @@ before compression. The 4 MiB body limit applies to the decompressed body.
   they didn't decode still count.
 - Edits and deletes that arrive while a page is loading are applied to the page when it
   lands, since it may predate them: a deleted message never comes back. An edit older than
-  the page's own version of the message is skipped.
+  the page's own version of the message is skipped. Only what arrived after a page's own load
+  began is applied to it: a load that begins later asks Discord later and has it. Reactions
+  are kept the same way ([dispatches.md](dispatches.md#reactions)).
 - On an error the window stays as it was, except a stale one (below). A load whose future
   is dropped before its page arrives, e.g. because its task was cancelled, ends the same
   way.
