@@ -2077,6 +2077,27 @@ impl State {
         self.windows.reply_target(channel, target)
     }
 
+    pub(crate) fn reply_targets(
+        &self,
+        channel: ChannelId,
+        targets: &[MessageId],
+    ) -> Vec<ReplyTarget> {
+        targets
+            .iter()
+            .map(|target| self.windows.reply_target(channel, *target))
+            .collect()
+    }
+
+    pub(crate) fn reply_mentions_author(&self, reply: &Message) -> bool {
+        let Some((channel, target)) = reply.replied_to() else {
+            return false;
+        };
+        match self.windows.reply_target(channel, target) {
+            ReplyTarget::Loaded(preview) => reply.mentions_user(preview.author.id),
+            ReplyTarget::Deleted | ReplyTarget::NotLoaded => false,
+        }
+    }
+
     pub(crate) fn starter_message(&self, thread: ChannelId) -> Option<StarterMessage> {
         self.windows.starter_message(thread)
     }

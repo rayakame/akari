@@ -1412,6 +1412,16 @@ impl Store {
         self.read(|inner| inner.state.reactions(channel, message))
     }
 
+    /// [`Store::reactions`] of the messages among `messages` that have some, in the order
+    /// given, as one read.
+    pub fn reactions_of(
+        &self,
+        channel: ChannelId,
+        messages: &[MessageId],
+    ) -> Vec<(MessageId, Arc<[Reaction]>)> {
+        self.read(|inner| inner.state.reactions_of(channel, messages))
+    }
+
     /// Whether the channel has a pin newer than the one the user last acknowledged: the dot
     /// on the header's pins button. Never for a muted channel, or a thread the user hasn't
     /// joined. `PinsUnreadChanged` says when a pin or an acknowledgement changed it; a mute
@@ -1427,6 +1437,18 @@ impl Store {
     /// `NotLoaded` also for a message no loaded reply names.
     pub fn reply_target(&self, channel: ChannelId, target: MessageId) -> ReplyTarget {
         self.read(|inner| inner.state.reply_target(channel, target))
+    }
+
+    /// [`Store::reply_target`] for each of `targets`, in the order given, as one read.
+    pub fn reply_targets(&self, channel: ChannelId, targets: &[MessageId]) -> Vec<ReplyTarget> {
+        self.read(|inner| inner.state.reply_targets(channel, targets))
+    }
+
+    /// Whether `reply` mentions the author of the message it answers (it pinged them, or names
+    /// them in its text): the "@" before the name in its preview. False while the target isn't
+    /// loaded, so read again on its `ReplyTargetChanged`.
+    pub fn reply_mentions_author(&self, reply: &Message) -> bool {
+        self.read(|inner| inner.state.reply_mentions_author(reply))
     }
 
     /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC, live messages and

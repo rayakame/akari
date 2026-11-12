@@ -58,10 +58,7 @@ impl Store {
             .map(|(channel_id, message_id)| RepliedTo {
                 channel_id,
                 message_id,
-                mentions_author: match self.core.reply_target(channel_id, message_id) {
-                    state::ReplyTarget::Loaded(target) => message.mentions_user(target.author.id),
-                    _ => false,
-                },
+                mentions_author: self.core.reply_mentions_author(message),
             });
         Message {
             replied_to,
@@ -408,14 +405,12 @@ impl Store {
         channel_id: ChannelId,
         message_ids: Vec<MessageId>,
     ) -> Vec<MessageReactions> {
-        message_ids
+        self.core
+            .reactions_of(channel_id, &message_ids)
             .into_iter()
-            .filter_map(|message_id| {
-                let reactions = self.reactions(channel_id, message_id);
-                (!reactions.is_empty()).then_some(MessageReactions {
-                    message_id,
-                    reactions,
-                })
+            .map(|(message_id, reactions)| MessageReactions {
+                message_id,
+                reactions: reactions.iter().map(Reaction::from).collect(),
             })
             .collect()
     }
@@ -433,9 +428,10 @@ impl Store {
         channel_id: ChannelId,
         target_ids: Vec<MessageId>,
     ) -> Vec<ReplyTarget> {
-        target_ids
-            .into_iter()
-            .map(|target_id| self.reply_target(channel_id, target_id))
+        self.core
+            .reply_targets(channel_id, &target_ids)
+            .iter()
+            .map(ReplyTarget::from)
             .collect()
     }
 
