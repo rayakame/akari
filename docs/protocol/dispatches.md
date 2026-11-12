@@ -66,7 +66,7 @@ Two details:
 | GUILD_ROLE_DELETE | `GuildRoleDelete` | `GuildUpdated` |
 | GUILD_MEMBER_UPDATE | `GuildMemberUpdate` | Only for the current user: `CurrentMemberUpdated`. Users also get it for friends and DM partners; those are skipped |
 | CHANNEL_CREATE, THREAD_CREATE | `Channel` | `ChannelAdded`, or `ChannelUpdated` for a known channel. A thread with the user's `member` is joined ([Threads](#threads)). DM recipients go to the user directory (`UserUpdated` if a known one changed). A channel in a guild the store doesn't know is skipped. A known channel keeps its `last_message_id` if that is newer. A thread in a forum or media channel also raises its parent's `last_message_id` to the thread's ID, without an event: a new post is the forum's newest "message" |
-| CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it |
+| CHANNEL_UPDATE, THREAD_UPDATE | `ChannelUpdate` | `ChannelUpdated` if something changed. `last_message_id` only moves forward; an older ID or `null` leaves it. `PinsUnreadChanged` if its `last_pin_timestamp` moved the pins dot |
 | CHANNEL_DELETE, THREAD_DELETE | `ChannelDelete` | `ChannelRemoved`, also for the threads of a deleted channel. CHANNEL_DELETE "will be partial" for private channels and THREAD_DELETE has only `id`, `guild_id`, `parent_id` and `type`, so only those are read |
 | THREAD_MEMBER_UPDATE | `ThreadMemberUpdate` | The user's own thread member: the thread's membership, mute and level are replaced, `ChannelUpdated` ([Threads](#threads)) |
 | THREAD_MEMBERS_UPDATE | `ThreadMembersUpdate` | The user's ID in `added_members` joins the thread, in `removed_member_ids` leaves it: `ChannelUpdated`. Other members and `member_count` are ignored |
@@ -76,7 +76,7 @@ Two details:
 | MESSAGE_REACTION_ADD, MESSAGE_REACTION_REMOVE | `MessageReaction` | One user's reaction counts up or down on every copy of the message: `MessageReactionsChanged` for a loaded one ([Reactions](#reactions)) |
 | MESSAGE_REACTION_REMOVE_ALL, MESSAGE_REACTION_REMOVE_EMOJI | `MessageReactionRemoveAll`, `MessageReactionRemoveEmoji` | The message's reactions, or one emoji's, go: `MessageReactionsChanged` |
 | MESSAGE_REACTION_ADD_MANY | `MessageReactionAddMany` | Each listed user's reaction counts as an ADD; one `MessageReactionsChanged` |
-| CHANNEL_PINS_UPDATE, CHANNEL_PINS_ACK | `ChannelPinsUpdate`, `ChannelPinsAck` | See [Pins](#pins) |
+| CHANNEL_PINS_UPDATE, CHANNEL_PINS_ACK | `ChannelPinsUpdate`, `ChannelPinsAck` | The channel's newest pin's time, and the pin time the user acknowledged: `PinsUnreadChanged` when the pins dot changed ([read-states.md](read-states.md#pins)) |
 | USER_UPDATE | `UserUpdate` | `CurrentUserUpdated` |
 | USER_GUILD_SETTINGS_UPDATE | `UserGuildSettings` | A full settings object for one guild (`guild_id: null` for DMs) replaces that entry: `GuildSettingsChanged` if a value changed. `collapsed` isn't read ([user-settings.md](user-settings.md#user-guild-settings)) |
 | USER_SETTINGS_PROTO_UPDATE | `SettingsProtoUpdate` | Type 1 only: the folders change as [user-settings.md](user-settings.md#the-settings-proto) describes, `ServerListChanged` if the server list did. A proto that doesn't decode changes nothing |
@@ -511,7 +511,7 @@ channels. It carries only what changed: `updated_channels` (each channel's `id`,
 `last_message_id` and `last_pin_timestamp`), voice states and their members. Akari decodes
 `guild_id` and each channel's `id`, `last_message_id` and `last_pin_timestamp` (a broken pin
 time is none), skipping a channel entry that doesn't parse, and the store raises those
-channels' `last_message_id`.
+channels' `last_message_id` and takes a pin time that is there ([read-states.md](read-states.md#pins)).
 
 Observed on 2026-10-15 with akari-cli on a test account:
 

@@ -255,6 +255,7 @@ impl Channel {
             rate_limit_per_user: channel.rate_limit_per_user.unwrap_or(0),
             default_auto_archive_duration: channel.default_auto_archive_duration,
             last_message_id: channel.last_message_id,
+            last_pin_timestamp: channel.last_pin_timestamp,
             permission_overwrites: list(channel.permission_overwrites, overwrite),
             recipients,
             icon: image(channel.icon),
@@ -278,6 +279,7 @@ impl Channel {
     pub(crate) fn same_apart_from_activity(&self, other: &Channel) -> bool {
         Channel {
             last_message_id: other.last_message_id,
+            last_pin_timestamp: other.last_pin_timestamp,
             ..self.clone()
         } == *other
     }
@@ -305,6 +307,9 @@ impl Channel {
             .or(next.default_auto_archive_duration);
         if let Some(Some(id)) = update.last_message_id {
             next.note_message(id);
+        }
+        if let Some(pinned) = update.last_pin_timestamp {
+            next.last_pin_timestamp = pinned;
         }
         if let Some(overwrites) = update.permission_overwrites {
             next.permission_overwrites = list(overwrites, overwrite);

@@ -61,6 +61,11 @@ pub enum StoreEvent {
     GuildBadgeChanged {
         guild_id: GuildId,
     },
+    /// Whether the channel has pins the user hasn't seen changed: read
+    /// [`Store::pins_unread`](super::Store::pins_unread) again.
+    PinsUnreadChanged {
+        channel_id: ChannelId,
+    },
     /// The thread joined or left its guild's [`channel_list`](super::Store::channel_list) while
     /// it didn't change itself: its inactivity window ended, it was read past it, or a message
     /// came after it.
