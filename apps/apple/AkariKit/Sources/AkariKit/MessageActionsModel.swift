@@ -32,7 +32,8 @@ public struct MessageActionItem: Equatable, Sendable, Identifiable {
 
 /// What a message's hover bar and menu list, in the official client's order, and what each does.
 /// Akari's core decides what is allowed (`Store.messageActions`, asked with the row's own IDs
-/// every time: nothing announces a change); an action takes the IDs of the message the row shows.
+/// every time: nothing announces a change) and builds a message's link (`Store.messageLink`); an
+/// action takes the IDs of the message the row shows.
 @MainActor
 public final class MessageActionsModel {
     /// Why an action failed, for one alert.
@@ -159,7 +160,7 @@ public final class MessageActionsModel {
         case .copyText:
             copy(message.content)
         case .copyLink:
-            copy(link(to: message))
+            copy(store.messageLink(channelId: row.message.channelId, messageId: row.message.id))
         case .markUnread:
             Task { await markUnread(from: row) }
         case .createThread:
@@ -179,7 +180,8 @@ public final class MessageActionsModel {
     }
 
     /// Marks the row's channel unread from its message on (Mark Unread, Option-click); nothing
-    /// where the core doesn't allow it.
+    /// where the core doesn't allow it. A mark the core says was replaced is taken back without
+    /// a word: nothing failed.
     public func markUnread(from row: MessageListModel.Row) async {
         let message = row.message
         guard store.messageActions(channelId: message.channelId, messageId: message.id).markUnread
@@ -188,7 +190,11 @@ public final class MessageActionsModel {
         }
         let undo = marking(message.channelId, message.id)
         do {
-            try await account.markUnread(channelId: message.channelId, messageId: message.id)
+            let outcome = try await account.markUnread(
+                channelId: message.channelId, messageId: message.id)
+            if outcome == .replaced {
+                undo?()
+            }
         } catch {
             undo?()
             failed(
@@ -231,11 +237,6 @@ public final class MessageActionsModel {
         return Offer(
             actions: store.messageActions(channelId: own.channelId, messageId: own.id),
             failed: own.delivery == .failed, hasText: !row.shown.content.isEmpty)
-    }
-
-    private func link(to message: Message) -> String {
-        let guild = store.channel(id: message.channelId)?.guildId.map { String($0.rawValue) } ?? "@me"
-        return "https://discord.com/channels/\(guild)/\(message.channelId.rawValue)/\(message.id.rawValue)"
     }
 
     static func item(_ action: MessageAction, in surface: Surface, failed: Bool = false) -> MessageActionItem {

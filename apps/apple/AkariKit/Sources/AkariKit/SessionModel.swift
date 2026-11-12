@@ -71,6 +71,7 @@ public final class SessionModel {
             syncSplit()
             syncForm()
             updateCreateHere()
+            tellOpenChannels()
         }
     }
     /// The open forum's page, in the message list's place; `nil` otherwise. Its Sort & View and
@@ -83,6 +84,7 @@ public final class SessionModel {
             channels?.setOpen(openChannelId)
             tellOpenForum()
             syncSplit()
+            tellOpenChannels()
         }
     }
     /// The channel the window shows: the message list's or the forum's.
@@ -94,7 +96,10 @@ public final class SessionModel {
     /// unless Discord says the thread is gone or the user can no longer see it. Like `messages`,
     /// a new model loads nothing until the view calls `open()`.
     public private(set) var split: MessageListModel? {
-        didSet { oldValue?.retire() }
+        didSet {
+            oldValue?.retire()
+            tellOpenChannels()
+        }
     }
     /// The split thread's channel, for its header and menu.
     public private(set) var splitChannel: Channel?
@@ -202,6 +207,7 @@ public final class SessionModel {
     // may have set it again, so the next derivation is sent whatever it is.
     @ObservationIgnored private var resendReading = false
     @ObservationIgnored private var toldReading: [ChannelId] = []
+    @ObservationIgnored private var toldOpen: [ChannelId] = []
     // On a 401 the core has stopped reading itself, and close() can come inside that batch.
     @ObservationIgnored private var accountClosed = false
     @ObservationIgnored private var reduceMotion = false
@@ -1141,6 +1147,7 @@ public final class SessionModel {
     public func close() {
         ended = true
         updateReading()
+        tellOpenChannels()
         account.close()
         accountClosed = true
         subscription?.close()
@@ -1597,6 +1604,17 @@ public final class SessionModel {
                 tellReading()
             }
         }
+    }
+
+    // The lists the window shows, read or not: a channel the user marked unread stays unread
+    // until it leaves them. From the lists' own setters, so every way a list goes tells the core.
+    private func tellOpenChannels() {
+        let open = ended ? [] : [openChannelId, split?.channelId].compactMap { $0 }
+        guard !accountClosed, open != toldOpen else {
+            return
+        }
+        toldOpen = open
+        account.setOpenChannels(channelIds: open)
     }
 
     private func tellReading() {

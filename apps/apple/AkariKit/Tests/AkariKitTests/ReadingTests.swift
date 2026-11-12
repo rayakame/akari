@@ -117,6 +117,74 @@ final class ReadingTests {
         session.close()
     }
 
+    var opens: [[ChannelId]] { account.openCalls.current }
+
+    // The core keeps a channel marked unread unread while its list is open: the list going is
+    // the one thing the session says, whatever reading does meanwhile.
+    @Test
+    func onlyAListGoingLeavesItsChannel() async throws {
+        let session = readingSession()
+        #expect(opens == [[general]])
+        let list = try #require(session.messages)
+
+        session.setWindowKey(false)
+        session.setWindowKey(true)
+        session.setAppActive(false)
+        session.setAppActive(true)
+        session.setWindowVisible(false)
+        session.setWindowVisible(true)
+        scrollUp(list)
+        await settle(session)
+        session.apply(EventBatch([.connection(state: .connecting)]))
+        session.apply(EventBatch([.connection(state: .offline)]))
+        session.apply(EventBatch([.ready, .connection(state: .online)]))
+        session.suspend()
+        session.resume()
+        session.open(channel: general)
+        #expect(opens == [[general]], "none of these leaves the channel")
+
+        session.open(channel: random)
+        #expect(opens == [[general], [random]])
+        session.open(.home)
+        #expect(opens == [[general], [random], []])
+        session.close()
+    }
+
+    @Test
+    func endingTheSessionLeavesItsChannels() {
+        let session = readingSession()
+
+        session.close()
+
+        #expect(opens == [[general], []])
+    }
+
+    // What finding the channel read again after a reconnect looked like: the hold is the core's,
+    // and the session never tells it the channel was left.
+    @Test
+    func aChannelMarkedUnreadStaysUnreadAcrossAReconnect() async throws {
+        let session = readingSession()
+        let list = try #require(session.messages)
+        store.update { $0.allow(allowed(), message: 2, in: 11) }
+        let row = MessageListModel.Row(id: id(2), message: message(2, in: 11))
+        await session.messageActions(for: list) { _ in }.markUnread(from: row)
+        #expect(account.held.current == [general])
+        let marked = ReadState(acked: id(1), mentions: 0, estimated: false)
+        store.update { $0.readStates[id(11)] = marked }
+        account.readStateAfterReading.withLock {
+            $0 = ReadState(acked: id(2), mentions: 0, estimated: false)
+        }
+
+        session.apply(EventBatch([.connection(state: .connecting)]))
+        session.apply(EventBatch([.connection(state: .online)]))
+
+        #expect(readings == [[general], [], [general]])
+        #expect(store.readState(channelId: general) == marked, "named again, and not read")
+        session.open(channel: random)
+        #expect(account.held.current.isEmpty, "left")
+        session.close()
+    }
+
     // The core forgets the channel whenever the connection drops, also before a resume.
     @Test
     func readingIsSetAgainAfterAReconnect() {
