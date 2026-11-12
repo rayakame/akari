@@ -973,7 +973,6 @@ impl State {
         }
     }
 
-    // Says so when the change moved the channel's pins dot.
     fn changing_pins(
         &mut self,
         channel: ChannelId,

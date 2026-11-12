@@ -117,7 +117,6 @@ impl State {
         }
     }
 
-    // The window's message, a post's first message, a shown thread's starter, or a failed send.
     fn acted_on(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
         self.message(channel, id)
             .or_else(|| self.windows.shown(channel, id))

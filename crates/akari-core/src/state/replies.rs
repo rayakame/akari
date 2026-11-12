@@ -167,7 +167,6 @@ impl ReplyTargets {
         self.channels.get(&channel).map_or(0, HashMap::len)
     }
 
-    // A reply names the target: it stays as it is known, or waits for a load to bring it.
     pub(crate) fn name(&mut self, channel: ChannelId, id: MessageId) {
         self.feeds += 1;
         self.channels
@@ -204,7 +203,6 @@ impl ReplyTargets {
         );
     }
 
-    // A message that arrived whole: a target some reply named is loaded now, or current again.
     pub(crate) fn arrived(&mut self, message: &Message, events: &mut Vec<StoreEvent>) {
         if self.has(message.channel_id, message.id) {
             let preview = Arc::new(ReplyPreview::of(message));
@@ -270,7 +268,7 @@ impl ReplyTargets {
             .is_some_and(|targets| targets.len() > LIMIT)
     }
 
-    // Down to the limit, the longest unfed first; a target a held reply names always stays.
+    // A target a held reply names always stays.
     pub(crate) fn trim(&mut self, channel: ChannelId, named: impl Fn(MessageId) -> bool) {
         self.keep(channel, LIMIT, named);
     }

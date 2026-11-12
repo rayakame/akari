@@ -64,14 +64,12 @@ pub(crate) struct CachedWindow {
     // Milliseconds since the Unix epoch, so it orders against earlier sessions' windows.
     pub(crate) viewed_at: i64,
     pub(crate) messages: Vec<Arc<Message>>,
-    // What the messages' replies answer, by the target's channel and ID; not loaded ones are
-    // left out.
+    // By the target's channel and ID; not loaded ones are left out.
     pub(crate) targets: CachedTargets,
 }
 
 pub(crate) type CachedTargets = HashMap<(ChannelId, MessageId), ReplyTarget>;
 
-// A window as the disk cache read it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CachedMessages {
     pub(crate) messages: Vec<Arc<Message>>,
@@ -414,13 +412,12 @@ pub(crate) struct Windows {
     order: VecDeque<ChannelId>,
     windows: HashMap<ChannelId, Window>,
     generations: u64,
-    // The message each thread started from: sent along with the thread's first message, or
-    // what the fetch found when it wasn't.
+    // Sent along with the thread's first message, or what the fetch found.
     starters: HashMap<ChannelId, Starter>,
     targets: ReplyTargets,
 }
 
-// The message a message refers to, as Discord sent it along: `Some(None)` for a deleted one.
+// `Some(None)`: Discord sent it along as deleted.
 type Referenced = Option<Option<Box<model::Message>>>;
 
 #[derive(Debug, Clone)]
@@ -809,7 +806,6 @@ impl Windows {
         self.trim_targets(channel_id);
     }
 
-    // What a message brought along: the message its thread started from, or the one it answers.
     fn keep_referenced(
         &mut self,
         message: &Message,
@@ -866,7 +862,6 @@ impl Windows {
         self.targets.len(channel)
     }
 
-    // The targets in `channel` that a reply the store holds names.
     fn named_targets(&self, channel: ChannelId) -> HashSet<MessageId> {
         let rows = self.windows.values().flat_map(|window| {
             window
@@ -1375,7 +1370,6 @@ impl Windows {
         }
     }
 
-    // Whether the window's row changed.
     pub(crate) fn react(
         &mut self,
         channel_id: ChannelId,
@@ -1415,7 +1409,6 @@ impl Windows {
         row
     }
 
-    // The copies threads keep of the message they started from.
     fn react_to_starters(
         &mut self,
         channel: ChannelId,

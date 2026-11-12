@@ -872,7 +872,7 @@ struct ReactionRow {
     me_burst: bool,
 }
 
-// The message a reply answers, when the store knew it; a target not loaded has no row.
+// A target that isn't loaded has no row.
 #[derive(Serialize, Deserialize)]
 enum TargetRow {
     Deleted,
