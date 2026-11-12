@@ -268,10 +268,15 @@ final class FakeAccount: Account, @unchecked Sendable {
     // Runs inside queueMessage, so a test can look at the caller's state at that moment.
     let onQueue = Locked<(@Sendable () -> Void)?>(nil)
 
-    override func queueMessage(channelId: ChannelId, content: String) throws -> MessageId {
+    override func queueMessage(channelId: ChannelId, content: String, reply: ReplyTo? = nil) throws
+        -> MessageId
+    {
         onQueue.current?()
         if let error = queueError.current {
             throw error
+        }
+        if let reply {
+            log.append(.reply(channelId, reply.messageId, mention: reply.mention))
         }
         log.append(.send(channelId, content))
         return id(900)
@@ -288,7 +293,12 @@ final class FakeAccount: Account, @unchecked Sendable {
         return id(901)
     }
 
-    override func sendMessage(channelId: ChannelId, content: String) async throws -> MessageId {
+    override func sendMessage(channelId: ChannelId, content: String, reply: ReplyTo? = nil) async throws
+        -> MessageId
+    {
+        if let reply {
+            log.append(.reply(channelId, reply.messageId, mention: reply.mention))
+        }
         log.append(.send(channelId, content))
         let held = holdSends.current ? await sendReplies.next() ?? nil : nil
         if let error = held ?? sendError.current {

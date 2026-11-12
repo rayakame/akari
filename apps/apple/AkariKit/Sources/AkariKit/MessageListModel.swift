@@ -86,11 +86,13 @@ public final class MessageListModel {
         public let authorName: String
         /// The box of the thread started from this message, or that this line is about.
         public let threadBox: ThreadBox?
+        /// The line over `shown` when it answers a message.
+        public let reply: ReplyLine?
 
         public init(
             id: MessageId, message: Message, starter: Starter? = nil, threadLinked: Bool = true,
             noticeContext: Message.NoticeContext = .init(), authorName: String? = nil,
-            threadBox: ThreadBox? = nil
+            threadBox: ThreadBox? = nil, reply: ReplyLine? = nil
         ) {
             self.id = id
             self.message = message
@@ -98,6 +100,7 @@ public final class MessageListModel {
             self.threadLinked = threadLinked
             self.noticeContext = noticeContext
             self.threadBox = threadBox
+            self.reply = reply
             let shown = if case .loaded(let original)? = starter { original } else { message }
             self.authorName = authorName ?? shown.author.displayName
         }
@@ -181,6 +184,8 @@ public final class MessageListModel {
     public private(set) var failedLoads: [Load: RequestError] = [:]
     /// The channel's composer; created with the model.
     public let composer: ComposerModel
+    /// The message the pending reply answers: its row is tinted meanwhile.
+    public var replyingTo: MessageId? { composer.reply?.messageId }
     /// The last finished load; changes with the rows it brought.
     public private(set) var lastLoad: LoadTrace?
     /// When the session opened the channel, and where its first rows came from.
@@ -210,6 +215,11 @@ public final class MessageListModel {
     public private(set) var unreadJumps = 0
     /// The last jump to a message that landed.
     public private(set) var messageJump: MessageJump?
+    /// The reply whose line the list jumped from, while the list isn't at the present: the bar
+    /// over its bottom offers the way back.
+    public private(set) var replyReturn: MessageId?
+    /// The last jump a view scrolled to: a view made later doesn't scroll to it again.
+    @ObservationIgnored public var shownJump = 0
     /// Who started the thread, by name, if the store or the loaded messages know them.
     public private(set) var threadOwner: String?
     /// A forum post's action bar; `nil` in any other channel.
@@ -281,6 +291,10 @@ public final class MessageListModel {
     @ObservationIgnored private var messageJumps = 0
     // The message the last jump that loaded goes to.
     @ObservationIgnored private var jumpingTo: MessageId?
+    // A reply's target in another channel: the session opens it there.
+    @ObservationIgnored var jumpElsewhere: ((ChannelId, MessageId) -> Void)?
+    // The message a channel opened for a jump goes to.
+    @ObservationIgnored var jumpOnOpen: MessageId?
 
     init(
         channelId: ChannelId, userId: UserId, account: Account, store: Store,
@@ -312,7 +326,11 @@ public final class MessageListModel {
     /// Views the channel; loads the latest page when it has no messages or is stale. A jump to
     /// unread an earlier list of the channel started doesn't land.
     public func open() async {
-        if hasMessages && !isStale {
+        if let target = jumpOnOpen {
+            jumpOnOpen = nil
+            account.viewChannel(channelId: channelId)
+            await jump(to: target)
+        } else if hasMessages && !isStale {
             account.supersedeAroundLoads(channelId: channelId)
             account.viewChannel(channelId: channelId)
         } else {
@@ -338,9 +356,14 @@ public final class MessageListModel {
         await load(.latest)
     }
 
-    /// Escape: marks the channel read, ends the new messages line, and loads the present when
-    /// the list shows older messages. Scrolling to the bottom is the view's part.
+    /// Escape: cancels a pending reply and does nothing else; without one it marks the channel
+    /// read, ends the new messages line, and loads the present when the list shows older
+    /// messages. Scrolling to the bottom is the view's part.
     public func escape() async {
+        if composer.reply != nil {
+            composer.cancelReply()
+            return
+        }
         account.markRead(channelId: channelId)
         endNewMessagesLine()
         // The core may hold a jump's page the list hasn't shown yet.
@@ -357,6 +380,7 @@ public final class MessageListModel {
         guard newMessagesLine != nil, let readUpTo else {
             return
         }
+        endReplyReturn()
         // A channel never read has no position to load around; its line is among the loaded rows.
         // A jump to a message still loading would land after the scroll.
         if readUpTo.rawValue != 0,
@@ -388,6 +412,7 @@ public final class MessageListModel {
     /// cancels the jump to unread cancels this one too, and so does either jump started after
     /// it. Scrolling is the view's part.
     public func jump(to messageId: MessageId) async {
+        endReplyReturn()
         let placing = activeLoads[lastPlacing]
         // The running load jumps once its messages are in.
         if placing == .aroundMessage, jumpingTo == messageId {
@@ -406,6 +431,40 @@ public final class MessageListModel {
         }
         messageJumps += 1
         messageJump = MessageJump(messageId: messageId, number: messageJumps)
+    }
+
+    /// A click on a reply's line: jumps to the message it answers, loading around it when it
+    /// isn't among the loaded ones; a deleted one has no jump. Away from the present afterwards,
+    /// the reply is the way back (`replyReturn`).
+    public func jumpToTarget(of row: Row) async {
+        guard let line = row.reply, line.jumps else {
+            return
+        }
+        guard line.channelId == channelId else {
+            jumpElsewhere?(line.channelId, line.messageId)
+            return
+        }
+        let jumps = messageJumps
+        await jump(to: line.messageId)
+        if messageJumps == jumps + 1, messageJump?.messageId == line.messageId, !atPresent,
+            row.message.delivery == .sent, row.message.channelId == channelId
+        {
+            replyReturn = row.message.id
+        }
+    }
+
+    /// "Jump To Original Message": back to the reply the list jumped from.
+    public func returnToReply() async {
+        guard let reply = replyReturn else {
+            return
+        }
+        await jump(to: reply)
+    }
+
+    private func endReplyReturn() {
+        if replyReturn != nil {
+            replyReturn = nil
+        }
     }
 
     // The official client's Escape closes the split when neither list has any, scrolled up or
@@ -626,7 +685,7 @@ public final class MessageListModel {
         if batch.everythingChanged || !changedChannels.isDisjoint(with: downloadsFollow) {
             readHiddenDownloads()
         }
-        let updated = batch.updatedMessages[channelId] ?? []
+        let updated = (batch.updatedMessages[channelId] ?? []).union(repliers(to: batch))
         let hadRows = hasMessages
         // How attachments show and what covers them come with the records; a new session
         // brings new settings and conversations.
@@ -649,6 +708,18 @@ public final class MessageListModel {
             placed = true
         }
         readPost()
+    }
+
+    // The rows whose reply line shows a target that changed: the "@" is on the reply itself.
+    private func repliers(to batch: EventBatch) -> Set<MessageId> {
+        guard !batch.replyTargetsChanged.isEmpty else {
+            return []
+        }
+        return Set(
+            rows.filter { row in
+                row.reply.map { batch.replyTargetsChanged[$0.channelId]?.contains($0.messageId) == true }
+                    ?? false
+            }.map(\.message.id))
     }
 
     // After the rows and the composer: the first message and who may answer come from them.
@@ -827,6 +898,10 @@ public final class MessageListModel {
         reachedOldest = window.oldest
         atPresent = window.latest
         isStale = window.stale
+        // At the present there is no way back to offer.
+        if atPresent {
+            endReplyReturn()
+        }
         placeNewMessagesLine()
         readPost()
     }
@@ -932,14 +1007,31 @@ public final class MessageListModel {
             } ?? true,
             noticeContext: noticeContext(for: shown),
             authorName: shown.fromWebhook ? shown.author.displayName : name(of: shown.author),
-            threadBox: ThreadBox.of(message, in: store, name: name(of:)))
+            threadBox: ThreadBox.of(message, in: store, name: name(of:)),
+            reply: replyLine(of: shown))
+    }
+
+    private func replyLine(of shown: Message) -> ReplyLine? {
+        guard let answered = shown.repliedTo else {
+            return nil
+        }
+        let target = store.replyTarget(
+            channelId: answered.channelId, targetId: answered.messageId)
+        var authorName: String?
+        if case .loaded(let preview) = target {
+            authorName =
+                preview.fromWebhook ? preview.author.displayName : name(of: preview.author)
+        }
+        return ReplyLine(
+            channelId: answered.channelId, messageId: answered.messageId, target: target,
+            mentionsAuthor: answered.mentionsAuthor, authorName: authorName)
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {
         Row(
             id: id, message: message, starter: held.starter, threadLinked: held.threadLinked,
             noticeContext: held.noticeContext, authorName: held.authorName,
-            threadBox: held.threadBox)
+            threadBox: held.threadBox, reply: held.reply)
     }
 
     // One rule for headers and system lines; server nicknames come with the member milestone.

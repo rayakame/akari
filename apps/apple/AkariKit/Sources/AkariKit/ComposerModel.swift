@@ -1,12 +1,32 @@
 import Foundation
 import Observation
 
+/// The message the next send answers, as the bar over the composer shows it.
+public struct PendingReply: Equatable, Sendable {
+    public let messageId: MessageId
+    /// The name the message's header shows for its author.
+    public let authorName: String
+    /// The reply pings the message's author.
+    public var mention: Bool
+    /// The bar has the switch for the ping: not in DMs, not for the user's own message.
+    public let showsToggle: Bool
+
+    public init(messageId: MessageId, authorName: String, mention: Bool, showsToggle: Bool) {
+        self.messageId = messageId
+        self.authorName = authorName
+        self.mention = mention
+        self.showsToggle = showsToggle
+    }
+}
+
 /// What the user writes in a channel and what happens when they send it.
 @MainActor @Observable
 public final class ComposerModel {
     public enum Problem: Equatable, Sendable {
         case tooLong(by: Int, limit: Int)
         case failed(RequestError)
+        /// The core no longer has the message a reply was for: nothing was sent.
+        case replyTargetGone
 
         /// Akari's wording for the line under the composer.
         public var text: String {
@@ -22,6 +42,9 @@ public final class ComposerModel {
                     + "The limit is \(number(limit))."
             case .failed(let error):
                 return Self.text(for: error, number: number)
+            case .replyTargetGone:
+                return "The message you were replying to isn't available any more. "
+                    + "Your message wasn't sent."
             }
         }
 
@@ -49,6 +72,8 @@ public final class ComposerModel {
                 return "This message is longer than \(number(Int(limit))) characters."
             case .Closed:
                 return "Akari isn't connected. Reconnect to send messages."
+            case .ReplyTargetDeleted:
+                return "The message you replied to was deleted."
             case .Unauthorized, .InvalidRequest, .UnexpectedResponse:
                 return error.localizedDescription
             }
@@ -94,6 +119,13 @@ public final class ComposerModel {
         didSet { awaitCooldownEnd() }
     }
     public private(set) var problem: Problem?
+    /// One per channel, kept while the session lasts: until its send starts, ✕, Escape, or the
+    /// message is deleted.
+    public private(set) var reply: PendingReply? {
+        didSet { drafts.replies[channelId] = reply }
+    }
+    /// Counts the times the composer should take the focus: a reply was started.
+    public private(set) var focusRequests = 0
 
     private static let counterFrom = 200
 
@@ -111,6 +143,7 @@ public final class ComposerModel {
         self.drafts = drafts
         draft = drafts[channelId]
         length = Self.length(of: drafts[channelId])
+        reply = drafts.replies[channelId]
         lengthLimit = Int(store.messageLengthLimit())
         readCanSend()
         slowmode = store.slowmode(channelId: channelId)
@@ -138,12 +171,22 @@ public final class ComposerModel {
         // leaves it exactly as typed.
         let pending: MessageId
         do {
-            pending = try account.queueMessage(channelId: channelId, content: content)
+            pending = try account.queueMessage(
+                channelId: channelId, content: content,
+                reply: reply.map { ReplyTo(messageId: $0.messageId, mention: $0.mention) })
         } catch {
-            problem = .failed(error as? RequestError ?? .UnexpectedResponse)
+            let failure = error as? RequestError ?? .UnexpectedResponse
+            // The core refuses a reply whose message it no longer holds.
+            if reply != nil, failure == .InvalidRequest {
+                reply = nil
+                problem = .replyTargetGone
+            } else {
+                problem = .failed(failure)
+            }
             return
         }
         draft = ""
+        reply = nil
         onSend?()
         willSend()
         do {
@@ -153,6 +196,37 @@ public final class ComposerModel {
             problem = .failed(error as? RequestError ?? .UnexpectedResponse)
         }
         slowmode = store.slowmode(channelId: channelId)
+    }
+
+    /// Reply in a message's bar or menu: the next send answers `row`'s message. Shift at the click
+    /// starts it without the ping. Replaces a pending reply; nothing where the core doesn't allow
+    /// the reply.
+    public func startReply(to row: MessageListModel.Row, shift: Bool) {
+        let message = row.message
+        let actions = store.messageActions(channelId: message.channelId, messageId: message.id)
+        guard message.channelId == channelId, actions.reply else {
+            return
+        }
+        reply = PendingReply(
+            messageId: message.id, authorName: row.authorName,
+            mention: actions.replyPings && !shift, showsToggle: actions.mentionToggle)
+        if problem == .replyTargetGone {
+            problem = nil
+        }
+        focusRequests += 1
+    }
+
+    /// The bar's "@" switch; nothing where the bar doesn't show it.
+    public func toggleReplyMention() {
+        guard reply?.showsToggle == true else {
+            return
+        }
+        reply?.mention.toggle()
+    }
+
+    /// The bar's ✕ and Escape.
+    public func cancelReply() {
+        reply = nil
     }
 
     /// Sends a failed message again.
@@ -172,6 +246,7 @@ public final class ComposerModel {
     }
 
     func apply(_ batch: EventBatch) {
+        endReplyToDeleted(batch)
         let guildChanged =
             guildId.map { batch.guildsChanged.contains($0) || batch.membersChanged.contains($0) }
             ?? false
@@ -187,6 +262,20 @@ public final class ComposerModel {
         }
         if batch.everythingChanged || batch.currentUserChanged {
             lengthLimit = Int(store.messageLengthLimit())
+        }
+    }
+
+    // Bulk deletes too, which the official client misses.
+    private func endReplyToDeleted(_ batch: EventBatch) {
+        guard let target = reply?.messageId else {
+            return
+        }
+        let deleted =
+            batch.deletedMessages[channelId]?.contains(target) == true
+            || batch.replyTargetsChanged[channelId]?.contains(target) == true
+                && store.replyTarget(channelId: channelId, targetId: target) == .deleted
+        if deleted {
+            reply = nil
         }
     }
 
