@@ -683,10 +683,11 @@ fn a_refresh_that_finds_the_starter_gone_says_so_for_the_row() {
 fn a_page_with_the_same_starter_says_nothing_for_the_row() {
     let mut state = viewing(THREAD);
     let row = starter_row(Some(message(19, GENERAL)));
-    load(&mut state, THREAD, LoadKind::Latest, &[row.clone()]);
+    let rows = [row];
+    load(&mut state, THREAD, LoadKind::Latest, &rows);
     state.windows.mark_stale(&mut Vec::new());
 
-    let events = load(&mut state, THREAD, LoadKind::Refresh, &[row]);
+    let events = load(&mut state, THREAD, LoadKind::Refresh, &rows);
 
     assert!(
         !events.contains(&"MessageUpdated(21)".to_owned()),
