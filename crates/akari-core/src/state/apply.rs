@@ -385,6 +385,8 @@ pub(crate) struct State {
     thread_cooldowns: Cooldowns,
     // The channels the user is reading: a channel and the thread beside it.
     reading: Vec<reading::Reading>,
+    // Marked unread while being read: not read again until the user leaves or marks them read.
+    held: Vec<ChannelId>,
     // Their local acks from the latest write, for the account to send.
     due: Vec<Ack>,
     // Channels whose cursor came from an unread update and may be behind Discord's.
@@ -449,6 +451,7 @@ impl State {
             cooldowns: Cooldowns::default(),
             thread_cooldowns: Cooldowns::default(),
             reading: Vec::new(),
+            held: Vec::new(),
             due: Vec::new(),
             stale_cursors: HashSet::new(),
             journal: None,
@@ -2258,6 +2261,7 @@ mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
 pub(crate) use forum::{ForumUnreadsAsk, PageKey};
+pub(crate) use reading::{Unread, UnreadNeeds};
 
 #[cfg(test)]
 pub(crate) mod tests;

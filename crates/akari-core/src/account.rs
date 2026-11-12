@@ -101,6 +101,9 @@ impl ThreadLocation {
     }
 }
 
+// The official client's `location` when Mark Unread joins a thread.
+const MARK_UNREAD_LOCATION: &str = "Mark%20Unread";
+
 // The official client turns a name's line breaks into spaces as it is typed.
 fn one_line(name: &str) -> String {
     name.split(['\r', '\n'])
@@ -642,13 +645,31 @@ impl Shared {
         }
     }
 
-    // Without the gate: the pump forgets and swaps itself, so its own acks can't come between.
+    // Without the gate but for a plain ack: the pump forgets and swaps itself, so its own acks
+    // can't come between.
     fn dispatched(self: &Arc<Self>, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
+        let plain_ack = matches!(
+            &event,
+            ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack))
+                if ack.ack_type == 0 && !ack.manual
+        );
+        // So a Mark Unread can't come between the check and the write.
+        let _gate = plain_ack.then(|| self.acks.gate());
         if let ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) = &event
-            && ack.manual
             && ack.ack_type == 0
         {
-            self.acks.forget(ack.channel_id);
+            if ack.manual {
+                self.acks.forget(ack.channel_id);
+            } else if self.acks.marking(ack.channel_id) {
+                // The echo of an ack sent before the mark would show the channel read until
+                // the mark's own echo.
+                tracing::debug!(
+                    target: "akari_core::acks",
+                    channel_id = ack.channel_id.get(),
+                    "ack from Discord left out: the channel is being marked unread"
+                );
+                return;
+            }
         }
         let starter = match &event {
             ConnectionEvent::Dispatch(DispatchEvent::MessageCreate(message))
@@ -934,6 +955,58 @@ impl Shared {
             .map_or_else(|| self.store.now(), Timestamp::from_unix_millis);
         self.store.set_own_membership(thread, join.then_some(now));
         Ok(())
+    }
+
+    async fn mark_unread(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), RequestError> {
+        self.rest.usable()?;
+        let needs = self
+            .store
+            .unread_needs(channel, message)
+            .ok_or(RequestError::InvalidRequest)?;
+        if needs.unarchive {
+            let opened = self.rest.unarchive_thread(channel).await;
+            if let Err(err) = &opened {
+                self.failed(err);
+            }
+            opened?;
+        }
+        if needs.join {
+            let joined = self
+                .rest
+                .thread_member(channel, true, MARK_UNREAD_LOCATION)
+                .await;
+            if let Err(err) = &joined {
+                self.failed(err);
+            }
+            joined?;
+            let now = self
+                .rest
+                .server_now_millis()
+                .map_or_else(|| self.store.now(), Timestamp::from_unix_millis);
+            self.store.set_own_membership(channel, Some(now));
+        }
+        let marked = {
+            let _gate = self.acks.gate();
+            let unread = self
+                .store
+                .mark_unread(channel, message)
+                .ok_or(RequestError::InvalidRequest)?;
+            tracing::debug!(
+                target: "akari_core::acks",
+                channel_id = channel.get(),
+                message_id = unread.position.get(),
+                mentions = unread.mentions,
+                "marked unread"
+            );
+            self.acks.want_unread(channel, unread)
+        };
+        let outcome = marked.await.unwrap_or(Err(RequestError::Closed));
+        // A 401 closes the queue, which only says it closed.
+        outcome.map_err(|err| self.rest.usable().err().unwrap_or(err))
     }
 
     fn view(self: &Arc<Self>, channel: ChannelId) {
@@ -1452,6 +1525,21 @@ impl Account {
         if let Some(ack) = self.shared.store.mark_read(channel) {
             self.shared.acks.want(ack, Pace::Explicit);
         }
+    }
+
+    /// Marks the channel unread from `message` on, as the official client's Mark Unread; the
+    /// store has it at once. A channel being read isn't read again until the host leaves it out
+    /// of [`Account::set_reading`], the user marks it read or sends a message there. An archived
+    /// thread is opened and an unjoined one joined first. Resolves when Discord took the mark,
+    /// retried like every ack; a refusal puts the read state back and is the error.
+    /// `InvalidRequest`, without a request, where
+    /// [`MessageActions::mark_unread`](crate::state::MessageActions) is false.
+    pub async fn mark_unread(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Result<(), RequestError> {
+        self.shared.mark_unread(channel, message).await
     }
 
     /// Marks these guilds read now with one bulk ack (Shift+Escape, a server's or a folder's

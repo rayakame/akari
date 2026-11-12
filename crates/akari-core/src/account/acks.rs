@@ -4,14 +4,14 @@ use std::collections::hash_map::Entry;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use tokio::sync::Notify;
+use tokio::sync::{Notify, oneshot};
 use tokio::time::Instant;
 
 use super::deadlines::until;
 use crate::model::{ChannelId, MessageId};
 use crate::ms;
 use crate::rest::{AccountRest, Failure, RequestError, last_viewed};
-use crate::state::{Ack, AckBody, ReadState, wall_millis};
+use crate::state::{Ack, AckBody, ReadState, Unread, wall_millis};
 
 const TARGET: &str = "akari_core::acks";
 // Like the official client: an ack about 2 s after the last message read.
@@ -117,6 +117,16 @@ impl Before {
     }
 }
 
+// Mark Unread: the position goes back, with this count; `token` names who waits for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Manual {
+    mentions: u32,
+    token: u64,
+}
+
+pub(crate) type Marked = oneshot::Receiver<Result<(), RequestError>>;
+type Waiter = oneshot::Sender<Result<(), RequestError>>;
+
 #[derive(Debug, Clone, Copy)]
 struct Wanted {
     id: MessageId,
@@ -126,6 +136,7 @@ struct Wanted {
     since: Instant,
     order: u64,
     retry: Option<Retry>,
+    manual: Option<Manual>,
 }
 
 impl Wanted {
@@ -167,6 +178,8 @@ struct Request {
     bulk: bool,
     // A single ack's; a bulk's entries carry none.
     body: AckBody,
+    // Mark Unread's mention count, in place of `body`.
+    manual: Option<u32>,
     pace: Pace,
     waited: Duration,
     failures: u32,
@@ -209,6 +222,8 @@ struct Queue {
     closed: bool,
     // Each channel's latest, for when it goes out as a single ack.
     bodies: HashMap<ChannelId, AckBody>,
+    // Who waits for each channel's Mark Unread, by its token.
+    marks: HashMap<ChannelId, (u64, Waiter)>,
 }
 
 impl Queue {
@@ -230,7 +245,7 @@ impl Queue {
             return;
         }
         let order = self.order();
-        let before = Before::now(before, after, self.swapping);
+        let before = self.over_unsent(channel, Before::now(before, after, self.swapping), true);
         match self.wanted.entry(channel) {
             Entry::Vacant(entry) => {
                 let kind = match pace {
@@ -244,6 +259,7 @@ impl Queue {
                     since: now,
                     order,
                     retry: None,
+                    manual: None,
                 });
             }
             Entry::Occupied(mut entry) => {
@@ -276,7 +292,7 @@ impl Queue {
         }
         for (channel, id, before, after) in entries {
             let order = self.order();
-            let before = Before::now(before, after, self.swapping);
+            let before = self.over_unsent(channel, Before::now(before, after, self.swapping), true);
             match self.wanted.entry(channel) {
                 Entry::Vacant(entry) => {
                     entry.insert(Wanted {
@@ -289,6 +305,7 @@ impl Queue {
                         since: now,
                         order,
                         retry: None,
+                        manual: None,
                     });
                 }
                 Entry::Occupied(mut entry) => {
@@ -304,6 +321,89 @@ impl Queue {
                         wanted.retry = None;
                     }
                 }
+            }
+        }
+    }
+
+    // A mark and an ack never merge: the later one takes the unsent one's place, over the state
+    // that one was taken over, which Discord still has. `marks_only`: acks merge as before.
+    fn over_unsent(&mut self, channel: ChannelId, mut before: Before, marks_only: bool) -> Before {
+        let pending = self.wanted.get(&channel);
+        if pending.is_some_and(|wanted| wanted.manual.is_some() || !marks_only)
+            && let Some(unsent) = self.wanted.remove(&channel)
+        {
+            before.state = unsent.before.state;
+            before.unchecked = unsent.before.unchecked;
+            before.replaced |= unsent.before.replaced;
+        }
+        before
+    }
+
+    // Back to `id`, which may be behind what Discord took; at once, alone, after the request on
+    // its way.
+    fn want_manual(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        mentions: u32,
+        before: Option<ReadState>,
+        after: Option<ReadState>,
+        now: Instant,
+    ) -> Marked {
+        let (waiter, marked) = oneshot::channel();
+        if self.closed {
+            let _ = waiter.send(Err(RequestError::Closed));
+            return marked;
+        }
+        let order = self.order();
+        let before = self.over_unsent(channel, Before::now(before, after, self.swapping), false);
+        self.wanted.insert(
+            channel,
+            Wanted {
+                id,
+                before,
+                kind: Kind::Explicit { at: now },
+                since: now,
+                order,
+                retry: None,
+                manual: Some(Manual {
+                    mentions,
+                    token: order,
+                }),
+            },
+        );
+        if let Some((_, earlier)) = self.marks.insert(channel, (order, waiter)) {
+            let _ = earlier.send(Ok(()));
+        }
+        marked
+    }
+
+    fn marking(&self, channel: ChannelId) -> bool {
+        self.marks.contains_key(&channel)
+    }
+
+    // A mark that is neither pending nor on its way any more went through, or something later
+    // took its place: either way its caller has nothing to wait for.
+    fn settle(&mut self) {
+        let wanted = &self.wanted;
+        let flight = &self.flight;
+        let waiting = |channel: &ChannelId, token: u64| {
+            let names = |wanted: &Wanted| wanted.manual.is_some_and(|manual| manual.token == token);
+            wanted.get(channel).is_some_and(names)
+                || flight
+                    .entries
+                    .iter()
+                    .any(|(flying, wanted)| flying == channel && names(wanted))
+        };
+        let done: Vec<ChannelId> = self
+            .marks
+            .iter()
+            .filter(|(channel, (token, _))| !waiting(channel, *token))
+            .map(|(channel, _)| *channel)
+            .collect();
+        for channel in done {
+            if let Some((_, waiter)) = self.marks.remove(&channel) {
+                let _ = waiter.send(Ok(()));
             }
         }
     }
@@ -350,6 +450,7 @@ impl Queue {
                 entries: Vec::with_capacity(channels.len()),
                 bulk: head.bulk(),
                 body: self.bodies.get(&channel).copied().unwrap_or_default(),
+                manual: head.manual.map(|manual| manual.mentions),
                 pace: head.pace(),
                 waited: Duration::ZERO,
                 failures: 0,
@@ -359,10 +460,11 @@ impl Queue {
                 let Some(wanted) = self.wanted.remove(&channel) else {
                     continue;
                 };
-                if self
-                    .sent
-                    .get(&channel)
-                    .is_some_and(|last| wanted.id <= *last)
+                if wanted.manual.is_none()
+                    && self
+                        .sent
+                        .get(&channel)
+                        .is_some_and(|last| wanted.id <= *last)
                 {
                     continue;
                 }
@@ -386,7 +488,10 @@ impl Queue {
     // What READY may already have overtaken isn't remembered as Discord's.
     fn confirmed(&mut self) {
         for (channel, wanted) in std::mem::take(&mut self.flight).entries {
-            if !wanted.unchecked() {
+            if wanted.manual.is_some() {
+                // The position went back: the next ack goes out even if it isn't newer.
+                self.sent.remove(&channel);
+            } else if !wanted.unchecked() {
                 self.sent.insert(channel, wanted.id);
             }
         }
@@ -428,13 +533,22 @@ impl Queue {
 
     // A bulk of several entries goes again entry by entry. A single one is handed back, unless
     // a newer ack for the channel is pending: that one goes out and carries the undo.
-    fn refuse(&mut self, now: Instant) -> Vec<Refusal> {
+    fn refuse(&mut self, now: Instant) -> (Vec<Refusal>, Option<Waiter>) {
         let flight = std::mem::take(&mut self.flight);
         if self.closed {
-            return Vec::new();
+            return (Vec::new(), None);
         }
         let mut refused = Vec::new();
+        let mut waiter = None;
         for (channel, mut wanted) in flight.entries {
+            if let Some(manual) = wanted.manual
+                && self
+                    .marks
+                    .get(&channel)
+                    .is_some_and(|(token, _)| *token == manual.token)
+            {
+                waiter = self.marks.remove(&channel).map(|(_, waiter)| waiter);
+            }
             if flight.several {
                 wanted.kind = Kind::Bulk {
                     at: now,
@@ -443,7 +557,11 @@ impl Queue {
                 wanted.retry = None;
                 self.requeue(channel, wanted);
             } else if let Some(newer) = self.wanted.get_mut(&channel) {
-                newer.before = wanted.before.then(newer.before);
+                if wanted.manual.is_some() || newer.manual.is_some() {
+                    newer.before.state = wanted.before.state;
+                } else {
+                    newer.before = wanted.before.then(newer.before);
+                }
             } else {
                 refused.push(Refusal {
                     channel,
@@ -453,7 +571,7 @@ impl Queue {
                 });
             }
         }
-        refused
+        (refused, waiter)
     }
 
     fn requeue(&mut self, channel: ChannelId, back: Wanted) {
@@ -464,6 +582,10 @@ impl Queue {
             }
             Entry::Occupied(mut entry) => {
                 let newer = entry.get_mut();
+                if back.manual.is_some() || newer.manual.is_some() {
+                    newer.before.state = back.before.state;
+                    return;
+                }
                 newer.id = newer.id.max(back.id);
                 newer.before = back.before.then(newer.before);
                 newer.since = newer.since.min(back.since);
@@ -510,8 +632,10 @@ impl Queue {
     fn reconcile(&mut self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
         self.swapping = false;
         let keep = |channel: &ChannelId, wanted: &mut Wanted| {
-            // At READY's own position an ack still clears its mentions.
-            if seen(ready(*channel)).is_some_and(|position| wanted.id < position) {
+            // At READY's own position an ack still clears its mentions; a mark goes back anyway.
+            if wanted.manual.is_none()
+                && seen(ready(*channel)).is_some_and(|position| wanted.id < position)
+            {
                 tracing::debug!(
                     target: TARGET,
                     channel_id = channel.get(),
@@ -547,6 +671,9 @@ impl Queue {
         self.closed = true;
         self.wanted = HashMap::new();
         self.flight = Flight::default();
+        for (_, (_, waiter)) in self.marks.drain() {
+            let _ = waiter.send(Err(RequestError::Closed));
+        }
     }
 }
 
@@ -585,14 +712,38 @@ impl Wants {
         after: Option<ReadState>,
         pace: Pace,
     ) {
-        self.lock()
-            .want(channel, id, before, after, pace, Instant::now());
+        let mut queue = self.lock();
+        queue.want(channel, id, before, after, pace, Instant::now());
+        queue.settle();
+        drop(queue);
         self.changed.notify_one();
     }
 
     fn want_bulk(&self, entries: Vec<BulkEntry>) {
-        self.lock().want_bulk(entries, Instant::now());
+        let mut queue = self.lock();
+        queue.want_bulk(entries, Instant::now());
+        queue.settle();
+        drop(queue);
         self.changed.notify_one();
+    }
+
+    fn want_manual(
+        &self,
+        channel: ChannelId,
+        id: MessageId,
+        mentions: u32,
+        before: Option<ReadState>,
+        after: Option<ReadState>,
+    ) -> Marked {
+        let marked = self
+            .lock()
+            .want_manual(channel, id, mentions, before, after, Instant::now());
+        self.changed.notify_one();
+        marked
+    }
+
+    fn marking(&self, channel: ChannelId) -> bool {
+        self.lock().marking(channel)
     }
 
     fn note_body(&self, channel: ChannelId, body: AckBody) {
@@ -600,23 +751,34 @@ impl Wants {
     }
 
     fn confirmed(&self) {
-        self.lock().confirmed();
+        let mut queue = self.lock();
+        queue.confirmed();
+        queue.settle();
     }
 
     fn retry(&self, at: Instant) {
-        self.lock().retry(at);
+        let mut queue = self.lock();
+        queue.retry(at);
+        queue.settle();
     }
 
     fn hold(&self, at: Instant) {
-        self.lock().hold(at);
+        let mut queue = self.lock();
+        queue.hold(at);
+        queue.settle();
     }
 
-    fn refuse(&self) -> Vec<Refusal> {
-        self.lock().refuse(Instant::now())
+    fn refuse(&self) -> (Vec<Refusal>, Option<Waiter>) {
+        let mut queue = self.lock();
+        let refused = queue.refuse(Instant::now());
+        queue.settle();
+        refused
     }
 
     fn forget(&self, channel: ChannelId) {
-        self.lock().forget(channel);
+        let mut queue = self.lock();
+        queue.forget(channel);
+        queue.settle();
     }
 
     fn forget_all(&self) {
@@ -624,7 +786,10 @@ impl Wants {
     }
 
     fn reconcile(&self, ready: impl Fn(ChannelId) -> Option<ReadState>) {
-        self.lock().reconcile(ready);
+        let mut queue = self.lock();
+        queue.reconcile(ready);
+        queue.settle();
+        drop(queue);
         self.changed.notify_one();
     }
 
@@ -732,6 +897,22 @@ impl AckSender {
         self.wants.want_bulk(entries);
     }
 
+    // Mark Unread: resolves once Discord took it or refused it, or something later replaced it.
+    pub(crate) fn want_unread(&self, channel: ChannelId, unread: Unread) -> Marked {
+        self.wants.want_manual(
+            channel,
+            unread.position,
+            unread.mentions,
+            unread.before,
+            unread.after,
+        )
+    }
+
+    // A Mark Unread for the channel is pending or on its way.
+    pub(crate) fn marking(&self, channel: ChannelId) -> bool {
+        self.wants.marking(channel)
+    }
+
     // "Now" is when the user acted, not when the ack goes out.
     fn resolve(&self, ack: Ack) -> Option<MessageId> {
         let id = AckTarget::from(ack).resolve(self.rest.server_now_millis());
@@ -834,9 +1015,10 @@ async fn send(
     while let Some(request) = wants.next().await {
         let last_viewed = last_viewed(rest.server_now_millis().unwrap_or_else(wall_millis));
         let result = match request.entries[..] {
-            [(channel, id)] if !request.bulk => {
-                rest.ack(channel, id, last_viewed, request.body).await
-            }
+            [(channel, id)] if !request.bulk => match request.manual {
+                Some(mentions) => rest.ack_manual(channel, id, mentions).await,
+                None => rest.ack(channel, id, last_viewed, request.body).await,
+            },
             _ => rest.ack_bulk(&request.entries).await,
         };
         let err = match result {
@@ -876,7 +1058,7 @@ async fn send(
         }
         log(&request, Outcome::Refused(&err));
         let _gate = wants.gate();
-        let refusals = wants.refuse();
+        let (refusals, waiter) = wants.refuse();
         #[cfg(test)]
         let park = wants
             .park
@@ -890,6 +1072,9 @@ async fn send(
         }
         for refusal in refusals {
             refused(refusal);
+        }
+        if let Some(waiter) = waiter {
+            let _ = waiter.send(Err(err));
         }
         #[cfg(test)]
         if let Some((.., handled)) = park {

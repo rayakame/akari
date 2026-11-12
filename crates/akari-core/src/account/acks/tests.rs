@@ -1225,11 +1225,11 @@ async fn a_refused_ack_leaves_its_undo_to_the_channels_newer_one() {
         Pace::Explicit,
     );
 
-    assert_eq!(wants.refuse(), [], "the newer ack still goes out");
+    assert_eq!(wants.refuse().0, [], "the newer ack still goes out");
     let newer = wants.next().await.unwrap();
     assert_eq!(single(&newer), (channel(1), message(6)));
     assert_eq!(
-        wants.refuse(),
+        wants.refuse().0,
         [refusal(
             channel(1),
             read_at(3, 2),
@@ -1309,7 +1309,7 @@ async fn merging_keeps_the_first_seen_and_undo() {
 
     assert_eq!(single(&request), (channel(1), message(7)));
     assert_eq!(
-        wants.refuse(),
+        wants.refuse().0,
         [refusal(
             channel(1),
             read_at(3, 2),
@@ -1458,7 +1458,7 @@ async fn a_refused_ack_from_before_ready_goes_back_to_ready_s_read_state() {
 
     let mut refused = Vec::new();
     while let Ok(Some(_)) = timeout(Duration::from_secs(60), wants.next()).await {
-        refused.extend(wants.refuse());
+        refused.extend(wants.refuse().0);
     }
     refused.sort_unstable_by_key(|refusal| refusal.channel);
     assert_eq!(
@@ -1673,7 +1673,7 @@ async fn a_refused_ack_never_goes_back_below_ready() {
 
     wants.next().await.unwrap();
     assert_eq!(
-        wants.refuse(),
+        wants.refuse().0,
         [refusal(
             channel(1),
             read_at(12, 2),
@@ -1704,7 +1704,7 @@ async fn acks_merged_out_of_store_order_can_still_be_undone() {
 
     wants.next().await.unwrap();
     assert_eq!(
-        wants.refuse(),
+        wants.refuse().0,
         [refusal(
             channel(1),
             read_at(1, 2),
@@ -1712,4 +1712,191 @@ async fn acks_merged_out_of_store_order_can_still_be_undone() {
             message(7)
         )]
     );
+}
+
+fn mark(wants: &Wants, channel: ChannelId, id: MessageId, mentions: u32) -> Marked {
+    wants.want_manual(
+        channel,
+        id,
+        mentions,
+        read_at(9, 0),
+        read_at(id.get() % 100, mentions),
+    )
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_mark_goes_out_behind_what_discord_took() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(9), None, read_at(9, 0), Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.confirmed();
+
+    let mut marked = mark(&wants, channel(1), message(4), 2);
+    let request = wants.next().await.unwrap();
+
+    assert_eq!(request.entries, [(channel(1), message(4))]);
+    assert_eq!(request.manual, Some(2));
+    assert!(!request.bulk);
+    assert!(marked.try_recv().is_err(), "still on its way");
+    wants.confirmed();
+    assert!(matches!(marked.try_recv(), Ok(Ok(()))));
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(4, 2),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+    assert_eq!(
+        drain(&wants).await,
+        [(channel(1), message(9))],
+        "the same position goes out again after a mark"
+    );
+}
+
+// The ack never went out, so a refused mark goes back to what Discord has.
+#[tokio::test(start_paused = true)]
+async fn a_mark_takes_the_place_of_an_unsent_ack() {
+    let wants = Wants::default();
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(3, 1),
+        read_at(9, 0),
+        Pace::Paced,
+    );
+
+    let mut marked = mark(&wants, channel(1), message(4), 2);
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.entries, [(channel(1), message(4))]);
+    assert_eq!(request.manual, Some(2));
+    let (refusals, waiter) = wants.refuse();
+
+    assert_eq!(
+        refusals,
+        [refusal(
+            channel(1),
+            read_at(3, 1),
+            read_at(4, 2),
+            message(4)
+        )]
+    );
+    assert!(
+        marked.try_recv().is_err(),
+        "the sender answers after the undo"
+    );
+    assert!(waiter.is_some());
+    assert!(drain(&wants).await.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ack_after_an_unsent_mark_takes_its_place() {
+    let wants = Wants::default();
+    wants.want(channel(2), message(1), None, None, Pace::Explicit);
+    wants.next().await.unwrap();
+    let mut marked = mark(&wants, channel(1), message(4), 2);
+
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(4, 2),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+
+    assert!(matches!(marked.try_recv(), Ok(Ok(()))));
+    wants.confirmed();
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.entries, [(channel(1), message(9))]);
+    assert_eq!(request.manual, None);
+}
+
+// The ack on its way fails and comes back: it is older than the mark and mustn't raise it.
+#[tokio::test(start_paused = true)]
+async fn a_retried_ack_doesnt_merge_into_a_mark() {
+    let wants = Wants::default();
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(3, 0),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+    wants.next().await.unwrap();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+
+    wants.retry(Instant::now() + Duration::from_secs(2));
+
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.entries, [(channel(1), message(4))]);
+    assert_eq!(request.manual, Some(2));
+    wants.confirmed();
+    assert!(drain(&wants).await.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_mark_elsewhere_ends_a_pending_mark() {
+    let wants = Wants::default();
+    wants.want(channel(2), message(1), None, None, Pace::Explicit);
+    wants.next().await.unwrap();
+    let mut marked = mark(&wants, channel(1), message(4), 2);
+    assert!(wants.marking(channel(1)));
+
+    wants.forget(channel(1));
+
+    assert!(matches!(marked.try_recv(), Ok(Ok(()))));
+    assert!(!wants.marking(channel(1)));
+    wants.confirmed();
+    assert!(drain(&wants).await.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_mark_answers_the_first() {
+    let wants = Wants::default();
+    let mut first = mark(&wants, channel(1), message(4), 2);
+
+    let mut second = mark(&wants, channel(1), message(6), 1);
+
+    assert!(matches!(first.try_recv(), Ok(Ok(()))));
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.entries, [(channel(1), message(6))]);
+    assert_eq!(request.manual, Some(1));
+    assert!(second.try_recv().is_err());
+    wants.confirmed();
+    assert!(matches!(second.try_recv(), Ok(Ok(()))));
+}
+
+#[tokio::test(start_paused = true)]
+async fn closing_answers_a_pending_mark() {
+    let wants = Wants::default();
+    let mut marked = mark(&wants, channel(1), message(4), 2);
+
+    wants.close();
+
+    assert!(matches!(marked.try_recv(), Ok(Err(RequestError::Closed))));
+    let mut late = mark(&wants, channel(1), message(4), 2);
+    assert!(matches!(late.try_recv(), Ok(Err(RequestError::Closed))));
+}
+
+// READY's position is past every mark: only one Discord's position moved under is dropped.
+#[tokio::test(start_paused = true)]
+async fn a_mark_from_before_ready_goes_out_where_discord_didnt_move() {
+    let wants = Wants::default();
+    let mut kept = mark(&wants, channel(1), message(4), 2);
+    let mut dropped = mark(&wants, channel(2), message(4), 2);
+    wants.forget_all();
+
+    wants.reconcile(|channel| {
+        if channel == self::channel(1) {
+            read_at(9, 0)
+        } else {
+            read_at(12, 0)
+        }
+    });
+
+    assert!(kept.try_recv().is_err());
+    assert!(matches!(dropped.try_recv(), Ok(Ok(()))));
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.entries, [(channel(1), message(4))]);
+    assert_eq!(request.manual, Some(2));
 }

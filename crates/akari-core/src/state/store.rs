@@ -6,7 +6,8 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, Notify, mpsc};
 
 use super::apply::{
-    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, PageKey, ReadyDiff, State,
+    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, PageKey, ReadyDiff, State, Unread,
+    UnreadNeeds,
 };
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
@@ -710,7 +711,7 @@ impl Store {
     // still reads the channels, nothing acks them.
     pub(crate) fn stop_reading(&self) {
         self.write("reading", |inner, events| {
-            inner.state.set_reading(&[], events);
+            inner.state.stop_reading(events);
         });
     }
 
@@ -723,6 +724,23 @@ impl Store {
         self.write("undo", |inner, events| {
             inner.state.undo_ack(channel, undo, after, events)
         })
+    }
+
+    // `None` when the message's actions don't offer it.
+    pub(crate) fn mark_unread(&self, channel: ChannelId, message: MessageId) -> Option<Unread> {
+        let now = self.now_millis();
+        self.write("mark unread", |inner, events| {
+            inner.state.mark_unread(channel, message, now, events)
+        })
+    }
+
+    pub(crate) fn unread_needs(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+    ) -> Option<UnreadNeeds> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.unread_needs(channel, message, now))
     }
 
     // `None` when the channel was read already.
@@ -1027,27 +1045,7 @@ impl Store {
     /// through one of the current member's roles. Suppress settings don't change it: the
     /// official client still highlights such a message and only leaves out its badge.
     pub fn mentions_me(&self, message: &Message) -> bool {
-        self.read(|inner| {
-            let state = &inner.state;
-            let Some(me) = state.current_user() else {
-                return false;
-            };
-            if message.mention_everyone || message.mentions.iter().any(|user| user.id == me.user.id)
-            {
-                return true;
-            }
-            !message.mention_roles.is_empty()
-                && state
-                    .channel(message.channel_id)
-                    .and_then(|channel| channel.guild_id)
-                    .and_then(|guild| state.current_member(guild))
-                    .is_some_and(|member| {
-                        member
-                            .roles
-                            .iter()
-                            .any(|role| message.mention_roles.contains(role))
-                    })
-        })
+        self.read(|inner| inner.state.mentions_me(message))
     }
 
     /// What the channel's row shows. `Badge::default()` for channels the user can't view
