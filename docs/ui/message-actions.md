@@ -109,9 +109,21 @@ thread withholds nothing from the message it started from. `view_thread` is fals
 row, since the thread it would open is the one the row is in. While the original is loading,
 gone or failed, both answer for the row itself, a type-21 system message of the thread.
 
-Requests never take the row's IDs. `Store::shown_message(channel, row)` gives the channel and
-ID of the message a row shows: the original's for such a starter row, the row's own for every
-other; a reaction, a reply, a pin or a delete from the row goes there.
+*Akari: `mark_unread` is the one answer that stays the thread's. The row is the thread's first
+item, so a mark from it marks the thread unread from its start, and the thread says whether it
+may be marked (not an archived, locked one); the original's channel isn't touched. What the
+official client marks from this row wasn't read.*
+
+Requests for the shown message never take the row's IDs. `Store::shown_message(channel, row)`
+gives the channel and ID of the message a row shows: the original's for such a starter row,
+the row's own for every other; a reaction, a reply, a pin or a delete from the row goes there,
+and Copy Message Link names them. Mark Unread alone takes the row's own:
+`Account::mark_unread(thread, row)`.
+
+So the row's bar and menu have Copy Text (the original's text), Copy Message Link (the
+original's, in the parent channel) and Mark Unread (the thread's); never Create Thread, since
+the original has its thread, nor View Thread. *Akari: the apps ask the core with the row's own
+IDs and take the shown message's from the `starter_message` they already hold for the row.*
 
 ## The hover bar
 
@@ -222,9 +234,7 @@ client's order, with what Akari has in bold:
   only.*
 - *A message that is still sending, and an ephemeral one, keep "Copy Text" alone: the official
   client's sending row has more, its ephemeral row no menu at all.*
-- *A thread's starter row shows the parent channel's message: Copy Text, Copy Message Link and
-  Create Thread are that message's, Mark Unread is the thread's own, and View Thread is left out
-  inside its own thread.*
+- *What a thread's starter row has is in [A thread's starter row](#a-threads-starter-row).*
 - *Left out: the row of quick reactions, Forward, Translate, Bookmark and reminders, Apps, Speak
   Message, polls' and interactions' items, Report Message, the items for a clicked image, link,
   emoji or sticker (the media viewer has Copy Image and Copy Media Link), and Copy and Search
@@ -247,6 +257,8 @@ keeps the channel unread while it stays open are in
 - *Akari: not on the row's buttons (media, a thread's box, Retry and Delete, the hover bar),
   which keep their click, and only with Option alone. Where the message can't be marked
   (an archived, locked thread) the click does nothing at all.*
+- On a thread's starter row the thread is marked, from its start
+  ([A thread's starter row](#a-threads-starter-row)).
 - The open list's new messages line goes over the chosen message, the user's own too, and
   the channel isn't read again while it stays open: leaving it, marking it read (Escape) or
   writing there ends that.
