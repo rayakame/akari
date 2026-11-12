@@ -119,11 +119,22 @@ final class FakeAccount: Account, @unchecked Sendable {
         return link
     }
 
+    let openCalls = Locked<[[ChannelId]]>([])
+    // Like akari-core: a channel marked unread while its list is open is held, and reading
+    // doesn't read it, until it leaves the open ones or is marked read.
+    let held = Locked<Set<ChannelId>>([])
+
+    override func setOpenChannels(channelIds: [ChannelId]) {
+        openCalls.withLock { $0.append(channelIds) }
+        held.withLock { $0.formIntersection(channelIds) }
+    }
+
     override func setReading(channelIds: [ChannelId]) {
         readingCalls.withLock { $0.append(channelIds) }
         if let state = readStateAfterReading.current {
+            let held = held.current
             fakeStore.update { store in
-                for channelId in channelIds {
+                for channelId in channelIds where !held.contains(channelId) {
                     store.readStates[channelId] = state
                 }
             }
@@ -132,18 +143,25 @@ final class FakeAccount: Account, @unchecked Sendable {
 
     override func markRead(channelId: ChannelId) {
         markedRead.withLock { $0.append(channelId) }
+        held.withLock { _ = $0.remove(channelId) }
         if let state = readStateAfterMarkRead.current {
             fakeStore.update { $0.readStates[channelId] = state }
         }
     }
 
     let markUnreadError = Locked<RequestError?>(nil)
+    let markUnreadOutcome = Locked(MarkOutcome.marked)
 
-    override func markUnread(channelId: ChannelId, messageId: MessageId) async throws {
+    override func markUnread(channelId: ChannelId, messageId: MessageId) async throws -> MarkOutcome {
         log.append(.markUnread(channelId, messageId))
         if let error = markUnreadError.current {
             throw error
         }
+        let outcome = markUnreadOutcome.current
+        if outcome == .marked, openCalls.current.last?.contains(channelId) == true {
+            held.withLock { _ = $0.insert(channelId) }
+        }
+        return outcome
     }
 
     override func markGuildsRead(guildIds: [GuildId]) {

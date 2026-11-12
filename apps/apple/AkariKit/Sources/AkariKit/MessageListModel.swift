@@ -238,6 +238,7 @@ public final class MessageListModel {
     @ObservationIgnored private var readUpToKnown = false
     // The message a Mark Unread named: the line may stand over the user's own.
     @ObservationIgnored private var markedFrom: MessageId?
+    @ObservationIgnored private var marks = 0
     // The read positions whose line the view said was out of sight, and on screen; the line of a
     // later position starts unplaced.
     @ObservationIgnored private var hiddenLineFrom: MessageId?
@@ -529,9 +530,12 @@ public final class MessageListModel {
         readUpTo = MessageId(rawValue: message.rawValue == 0 ? 0 : message.rawValue - 1)
         readUpToKnown = true
         markedFrom = message
+        marks += 1
+        let mark = marks
         placeNewMessagesLine()
         return { [weak self] in
-            guard let self, markedFrom == message else {
+            // A later mark's line, from the same message too, isn't this one's to take back.
+            guard let self, marks == mark, markedFrom == message else {
                 return
             }
             (readUpTo, readUpToKnown, markedFrom) = before

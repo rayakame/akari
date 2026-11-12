@@ -54,7 +54,7 @@ final class MessageActionsTests {
         content: String? = nil, delivery: Delivery = .sent, kind: MessageType = .default
     ) -> MessageListModel.Row {
         let message = message(raw, in: channel, content: content, delivery: delivery, kind: kind)
-        store.update { $0.messageActions[id(raw)] = actions }
+        store.update { $0.allow(actions, message: raw, in: channel) }
         return MessageListModel.Row(id: id(raw), message: message)
     }
 
@@ -181,12 +181,13 @@ final class MessageActionsTests {
         let message = row(100, allowed(createThread: true))
         #expect(bar(message) == [.createThread, .more])
 
-        store.update { $0.messageActions[id(100)] = allowed(viewThread: true) }
+        store.update { $0.allow(allowed(viewThread: true), message: 100, in: 11) }
 
         #expect(bar(message) == [.viewThread, .more])
         #expect(store.reads.filter { $0 == .messageActions(id(11), id(100)) }.count == 2)
     }
 
+    // The link is the core's, asked with the row's IDs.
     @Test
     func copyTextAndTheLinkGoToTheHost() {
         let message = row(100, content: "hello **there**")
@@ -196,11 +197,9 @@ final class MessageActionsTests {
         model.perform(.copyLink, on: message)
         model.perform(.copyLink, on: row(200, in: 20))
 
-        #expect(
-            copied == [
-                "hello **there**", "https://discord.com/channels/1/11/100",
-                "https://discord.com/channels/@me/20/200",
-            ])
+        #expect(copied == ["hello **there**", "link 11 100", "link 20 200"])
+        #expect(store.reads.contains(.messageLink(id(11), id(100))))
+        #expect(store.reads.contains(.messageLink(id(20), id(200))))
     }
 
     @Test
@@ -244,6 +243,17 @@ final class MessageActionsTests {
         #expect(failures.first?.message == "Akari couldn't reach Discord. Check your connection, then try again.")
     }
 
+    // An ack, another mark, another device or a READY took its place: nothing for the user to do.
+    @Test
+    func aReplacedMarkIsTakenBackWithoutAnAlert() async {
+        account.markUnreadOutcome.withLock { $0 = .replaced }
+
+        await model().markUnread(from: row(100))
+
+        #expect(marks == ["mark 11 100", "undo 100"])
+        #expect(failures.isEmpty)
+    }
+
     func starterRow() -> MessageListModel.Row {
         let original = message(100, in: 11, content: "the start")
         let starter = message(300, in: 100, kind: .threadStarterMessage)
@@ -253,7 +263,7 @@ final class MessageActionsTests {
     // The core answers for the row, asked with the row's own IDs; the actions take the original's.
     @Test
     func aStarterRowAsksAsItselfAndActsOnTheOriginal() async {
-        store.update { $0.messageActions[id(300)] = allowed() }
+        store.update { $0.allow(allowed(), message: 300, in: 100) }
         let row = starterRow()
         let model = model()
 
@@ -263,7 +273,7 @@ final class MessageActionsTests {
         model.perform(.copyLink, on: row)
         await model.markUnread(from: row)
 
-        #expect(copied == ["the start", "https://discord.com/channels/1/11/100"])
+        #expect(copied == ["the start", "link 100 300"], "the core resolves the row to its message")
         #expect(store.log.calls.contains(.markUnread(id(100), id(300))))
         #expect(marks == ["mark 100 300"])
         let asked = store.reads.filter { if case .messageActions = $0 { true } else { false } }
@@ -274,8 +284,8 @@ final class MessageActionsTests {
     @Test
     func aStarterRowOffersOnlyWhatTheCoreSaysForIt() async {
         store.update { state in
-            state.messageActions[id(100)] = allowed(createThread: true, viewThread: true)
-            state.messageActions[id(300)] = allowed(markUnread: false)
+            state.allow(allowed(createThread: true, viewThread: true), message: 100, in: 11)
+            state.allow(allowed(markUnread: false), message: 300, in: 100)
         }
         let row = starterRow()
         let model = model()
@@ -300,7 +310,7 @@ final class SessionMessageActionsTests {
         store.update { state in
             state.add(guild(1))
             state.list([channel(11)], in: 1)
-            state.messageActions[id(100)] = allowed()
+            state.allow(allowed(), message: 100, in: 11)
         }
         session = SessionModel(userId: id(1), account: account) { _ in }
         session.start()
@@ -332,7 +342,8 @@ final class SessionMessageActionsTests {
             }
             state.windows[id(11)] = window([100, 101, 102])
             state.readStates[id(11)] = ReadState(acked: id(102), mentions: 0, estimated: false)
-            state.messageActions[id(101)] = allowed()
+            state.allow(allowed(), message: 101, in: 11)
+            state.allow(allowed(), message: 100, in: 11)
         }
         let list = try #require(session.messages)
         list.apply(EventBatch([.messagesLoaded(channelId: id(11), first: id(100), last: id(102))]))
@@ -344,6 +355,47 @@ final class SessionMessageActionsTests {
 
         account.markUnreadError.withLock { $0 = .ServerError(status: 502) }
         await session.messageActions(for: list) { _ in }.markUnread(from: try #require(list.rows.first))
+        #expect(list.newMessagesLine == id(101))
+        session.close()
+    }
+
+    func unreadFrom101() throws -> MessageListModel {
+        store.update { state in
+            state.currentUser = user(1)
+            for raw in UInt64(100)...102 {
+                state.show(message(raw, in: 11, by: user(2)))
+            }
+            state.windows[id(11)] = window([100, 101, 102])
+            state.readStates[id(11)] = ReadState(acked: id(102), mentions: 0, estimated: false)
+            state.allow(allowed(), message: 101, in: 11)
+        }
+        let list = try #require(session.messages)
+        list.apply(EventBatch([.messagesLoaded(channelId: id(11), first: id(100), last: id(102))]))
+        return list
+    }
+
+    @Test
+    func aReplacedMarkTakesItsLineBack() async throws {
+        let list = try unreadFrom101()
+        let row = try #require(list.rows.first { $0.id == id(101) })
+        account.markUnreadOutcome.withLock { $0 = .replaced }
+
+        await session.messageActions(for: list) { _ in }.markUnread(from: row)
+
+        #expect(list.newMessagesLine == nil)
+        #expect(session.messageActionFailure == nil)
+        session.close()
+    }
+
+    // Marked twice from the same message: the first mark's answer isn't the second one's.
+    @Test
+    func anEarlierMarksAnswerLeavesALaterMarksLine() throws {
+        let list = try unreadFrom101()
+
+        let first = list.markUnread(from: id(101))
+        _ = list.markUnread(from: id(101))
+        first()
+
         #expect(list.newMessagesLine == id(101))
         session.close()
     }

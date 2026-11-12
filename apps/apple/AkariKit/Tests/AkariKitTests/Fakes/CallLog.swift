@@ -58,6 +58,7 @@ final class CallLog: Sendable {
         case replyTargets(ChannelId, [MessageId])
         case pinsUnread(ChannelId)
         case messageActions(ChannelId, MessageId)
+        case messageLink(ChannelId, MessageId)
         case starterMessage(ChannelId)
         case latestMessage(ChannelId)
         case threadBrowser(ChannelId)

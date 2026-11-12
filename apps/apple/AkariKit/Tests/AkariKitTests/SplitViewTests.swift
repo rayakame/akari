@@ -66,6 +66,29 @@ final class SplitViewTests {
         session.channels?.shown(open: session.messages?.channelId).map(\.id) ?? []
     }
 
+    var opens: [[ChannelId]] { account.openCalls.current }
+
+    // A thread's list stays open when it moves from beside its channel to full width, and the
+    // channel's when its split closes.
+    @Test
+    func theOpenListsFollowTheSplit() async {
+        let session = inChannel11()
+        #expect(opens == [[id(11)]])
+
+        await session.openBeside(thread: id(31), from: id(11))
+        #expect(opens.last == [id(11), id(31)])
+
+        session.closeSplit()
+        #expect(opens.last == [id(11)])
+
+        await session.openBeside(thread: id(31), from: id(11))
+        session.openInFullView()
+        #expect(opens.last == [id(31)])
+        #expect(!opens.contains([]), "nothing was left on the way but what closed")
+        #expect(!opens.dropFirst(3).contains { !$0.contains(id(31)) }, "the thread stayed open")
+        session.close()
+    }
+
     func settle(_ session: SessionModel) async {
         await finished(session.pendingReading)
     }
