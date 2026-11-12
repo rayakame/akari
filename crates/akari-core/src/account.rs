@@ -9,7 +9,7 @@ use crate::error::TransportErrorKind;
 use crate::gateway::session::Timing;
 use crate::gateway::{
     ConnectionEvent, DispatchEvent, Gateway, GatewayCommand, GatewayError, GuildSubscription,
-    MemberLists, PresenceStatus, SendError,
+    MemberLists, MessageAck, PresenceStatus, SendError,
 };
 use crate::media::{ImageError, ImageFile, ImageKey, ImageRequest, Images};
 use crate::model::{
@@ -24,7 +24,7 @@ use crate::state::{
     PageKey, StarterFetch, Store, WindowLimits, message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
-use acks::{AckSender, Pace, Refusal};
+use acks::{AckSender, Echo, Pace, Refusal};
 
 const REFRESH_LIMIT: u8 = 100;
 // Discord's limit for a thread's name, in code points, and the archive time its client picks
@@ -645,21 +645,38 @@ impl Shared {
         }
     }
 
-    // Without the gate but for a plain ack: the pump forgets and swaps itself, so its own acks
+    fn shows(&self, ack: &MessageAck) -> bool {
+        let stored = self.store.read_state(ack.channel_id);
+        stored.and_then(|state| state.acked) == Some(ack.message_id.cast())
+    }
+
+    // Without the gate but for an ack: the pump forgets and swaps itself, so its own acks
     // can't come between.
     fn dispatched(self: &Arc<Self>, event: ConnectionEvent, connecting: &dyn Fn() -> bool) {
-        let plain_ack = matches!(
-            &event,
-            ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack))
-                if ack.ack_type == 0 && !ack.manual
-        );
-        // So a Mark Unread can't come between the check and the write.
-        let _gate = plain_ack.then(|| self.acks.gate());
-        if let ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) = &event
-            && ack.ack_type == 0
-        {
+        let ack = match &event {
+            ConnectionEvent::Dispatch(DispatchEvent::MessageAck(ack)) if ack.ack_type == 0 => {
+                Some(ack)
+            }
+            _ => None,
+        };
+        // So a local ack or a Mark Unread can't come between the check and the write.
+        let _gate = ack.map(|_| self.acks.gate());
+        if let Some(ack) = ack {
             if ack.manual {
-                self.acks.forget(ack.channel_id);
+                let echo = self.acks.echo(ack.channel_id, ack.message_id.cast());
+                // The store took the mark when it was made: written again, the echo would undo a
+                // later local ack or a mention counted since.
+                if let Echo::Own { superseded } = echo
+                    && (superseded || self.shows(ack))
+                {
+                    tracing::debug!(
+                        target: "akari_core::acks",
+                        channel_id = ack.channel_id.get(),
+                        superseded,
+                        "the mark's own echo left out"
+                    );
+                    return;
+                }
             } else if self.acks.marking(ack.channel_id) {
                 // The echo of an ack sent before the mark would show the channel read until
                 // the mark's own echo.

@@ -293,7 +293,11 @@ Shift-held hover bar and an Option-click ([message-actions.md](../ui/message-act
   marked.
 - **The store** takes the mark at once, unlike the official client, which waits for the
   gateway: the read state goes to the request's message ID and count, with `BadgeChanged` and
-  the guild's badge. The echo, a manual MESSAGE_ACK with the same values, then changes nothing.
+  the guild's badge. The mark's echo is the manual MESSAGE_ACK at its position that comes while
+  the mark is on its way or after Discord took it, once per mark. It is left out while the
+  store still has the mark's position, so a mention counted since stays, and when a later ack
+  or mark of Akari's for the channel is pending, on its way or went out; otherwise (a READY
+  replaced the store meanwhile) it is written. It drops nothing from the queue.
 - **The request** goes through the ack queue: alone, at once, after the request on its way, so
   Discord gets an ack sent just before and the mark in that order. A pending ack for the channel
   that hasn't gone out is dropped for it, and an ack made after an unsent mark takes the mark's
@@ -303,7 +307,8 @@ Shift-held hover bar and an Option-click ([message-actions.md](../ui/message-act
   or on its way: it would show the channel read until the mark's own echo.
 - **Refused** (any other error), the read state goes back to what it was before the mark, or
   before the unsent ack the mark replaced, while the store still holds what the mark left, and
-  the call returns Discord's error.
+  the call returns Discord's error. With a later ack for the channel pending (the user marked
+  it read meanwhile) that ack goes out, carries the undo, and the call returns no error.
 - **A READY** before the mark went out keeps it only if Discord's position is still the one the
   channel had before the mark; the store shows READY's state until the mark's echo.
 - **Reading.** The host says which channels' lists it shows (`Account::set_open_channels`: the
@@ -325,8 +330,9 @@ When the user marks a channel unread on another device, or reads it there while 
 away, one of Akari's acks for the channel may still be pending (waiting for its turn or a
 retry, or on its way), and sending it afterwards would undo that:
 
-- **A manual MESSAGE_ACK** (mark as unread elsewhere, or the echo of Akari's own) drops the
-  channel's pending ack, also one on its way, whose answer then changes nothing.
+- **A manual MESSAGE_ACK** from elsewhere (mark as unread on another device; not the echo of
+  Akari's own mark, [above](#mark-unread)) drops the channel's pending ack, also one on its way,
+  whose answer then changes nothing.
 - **At a READY**, the acks pending from before it wait until READY is in. Each then goes out
   only if READY still has the position the channel had before Akari's ack; any other position
   means the channel was read or marked unread elsewhere meanwhile, and the ack is dropped. A

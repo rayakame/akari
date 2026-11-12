@@ -764,6 +764,166 @@ async fn marking_read_after_the_mark_is_sent_too() {
     assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST, 0)));
 }
 
+// Escape while the mark is on its way: the mark's echo is its confirmation, not a mark made
+// elsewhere, and the ack made after it goes out.
+#[tokio::test]
+async fn marking_read_while_the_mark_is_on_its_way_wins() {
+    let mut online = read_general().await;
+    let (on_arrival, release) = hold_next_ack(&online.server, 200).await;
+    let account = &online.account;
+    let marking = account.mark_unread(general(), msg(NEWEST));
+    tokio::pin!(marking);
+    tokio::select! {
+        biased;
+        result = &mut marking => panic!("answered before the release: {result:?}"),
+        () = wait_for(on_arrival, "the mark never arrived") => {}
+    }
+
+    account.mark_read(general());
+    online
+        .connection
+        .send(manual_ack(2, GENERAL, NEWEST - 1, 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert_eq!(read_state(account, GENERAL), Some((NEWEST, 0)));
+    release.send(()).unwrap();
+    marking.await.unwrap();
+
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [Sent::Ack(GENERAL, NEWEST - 1), Sent::Ack(GENERAL, NEWEST)]
+    );
+    assert_eq!(read_state(account, GENERAL), Some((NEWEST, 0)));
+    assert_eq!(badge(account, GENERAL), Badge::default());
+}
+
+// The echo comes after Discord's answer, and after an Escape made in between.
+#[tokio::test]
+async fn a_late_echo_of_the_mark_leaves_a_later_mark_read() {
+    let mut online = read_general().await;
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+    online.account.mark_read(general());
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [Sent::Ack(GENERAL, NEWEST - 1), Sent::Ack(GENERAL, NEWEST)]
+    );
+
+    online
+        .connection
+        .send(manual_ack(2, GENERAL, NEWEST - 1, 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+
+    assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST, 0)));
+}
+
+#[tokio::test]
+async fn the_echo_keeps_a_mention_counted_since_the_mark() {
+    let mut online = read_general().await;
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+    online.connection.send(message(2, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 3).await;
+    assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST - 1, 2)));
+
+    online
+        .connection
+        .send(manual_ack(4, GENERAL, NEWEST - 1, 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 5).await;
+
+    assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST - 1, 2)));
+}
+
+// The same position from another device, after the mark's own echo: Discord's count.
+#[tokio::test]
+async fn a_mark_elsewhere_at_the_same_position_sets_its_count() {
+    let mut online = read_general().await;
+    online
+        .account
+        .mark_unread(general(), msg(NEWEST))
+        .await
+        .unwrap();
+    online
+        .connection
+        .send(manual_ack(2, GENERAL, NEWEST - 1, 1))
+        .await;
+    online.connection.send(message(3, NEWEST + 1)).await;
+    sync(&mut online.connection, &online.subscription, 4).await;
+
+    online
+        .connection
+        .send(manual_ack(5, GENERAL, NEWEST - 1, 1))
+        .await;
+    sync(&mut online.connection, &online.subscription, 6).await;
+
+    assert_eq!(read_state(&online.account, GENERAL), Some((NEWEST - 1, 1)));
+}
+
+// Escape while the mark is on its way, and Discord refuses the mark: nothing failed that the
+// user still wants.
+#[tokio::test]
+async fn a_refused_mark_with_a_later_ack_pending_is_no_error() {
+    let online = read_general().await;
+    let (on_arrival, release) = hold_next_ack(&online.server, 403).await;
+    let account = &online.account;
+    let marking = account.mark_unread(general(), msg(NEWEST));
+    tokio::pin!(marking);
+    tokio::select! {
+        biased;
+        result = &mut marking => panic!("answered before the release: {result:?}"),
+        () = wait_for(on_arrival, "the mark never arrived") => {}
+    }
+
+    account.mark_read(general());
+    release.send(()).unwrap();
+    let outcome = marking.await;
+
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert_eq!(
+        sent(&online.server, 2).await,
+        [Sent::Ack(GENERAL, NEWEST - 1), Sent::Ack(GENERAL, NEWEST)]
+    );
+    assert_eq!(read_state(account, GENERAL), Some((NEWEST, 0)));
+}
+
+// The mark goes out after READY, whose state the store shows until the mark's echo.
+#[tokio::test]
+async fn a_mark_while_ready_is_prepared_goes_out_and_its_echo_brings_it() {
+    let mut online = read_general().await;
+    let (mut fresh, release) = parked_session(&mut online, general_read).await;
+
+    let account = &online.account;
+    let marking = account.mark_unread(general(), msg(NEWEST));
+    tokio::pin!(marking);
+    assert!(
+        timeout(Duration::from_millis(100), &mut marking)
+            .await
+            .is_err(),
+        "sent before READY is in"
+    );
+    assert!(posted(&online.server).await.is_empty());
+    release.send(()).unwrap();
+    events_until(&online.subscription, "Online").await;
+    marking.await.unwrap();
+
+    assert_eq!(
+        sent(&online.server, 1).await,
+        [Sent::Ack(GENERAL, NEWEST - 1)]
+    );
+    fresh.send(manual_ack(2, GENERAL, NEWEST - 1, 1)).await;
+    sync(&mut fresh, &online.subscription, 3).await;
+    assert_eq!(read_state(account, GENERAL), Some((NEWEST - 1, 1)));
+    assert!(badge(account, GENERAL).unread);
+}
+
 #[tokio::test]
 async fn a_message_the_store_doesnt_have_is_refused_without_a_request() {
     let online = read_general().await;

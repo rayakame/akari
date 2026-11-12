@@ -1262,7 +1262,7 @@ async fn a_manual_ack_elsewhere_drops_the_pending_ack() {
     wants.want(channel(4), message(4), None, None, Pace::Paced);
 
     for n in 1..=3 {
-        wants.forget(channel(n));
+        wants.echo(channel(n), message(99));
     }
     wants.retry(Instant::now());
 
@@ -1842,12 +1842,122 @@ async fn a_mark_elsewhere_ends_a_pending_mark() {
     let mut marked = mark(&wants, channel(1), message(4), 2);
     assert!(wants.marking(channel(1)));
 
-    wants.forget(channel(1));
+    wants.echo(channel(1), message(3));
 
     assert!(matches!(marked.try_recv(), Ok(Ok(()))));
     assert!(!wants.marking(channel(1)));
     wants.confirmed();
     assert!(drain(&wants).await.is_empty());
+}
+
+// Escape before Discord answered the mark: the mark's echo isn't a mark made elsewhere.
+#[tokio::test(start_paused = true)]
+async fn the_echo_of_the_mark_on_its_way_drops_nothing() {
+    let wants = Wants::default();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(4, 2),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+
+    assert_eq!(
+        wants.echo(channel(1), message(4)),
+        Echo::Own { superseded: true }
+    );
+    wants.confirmed();
+
+    assert_eq!(drain(&wants).await, [(channel(1), message(9))]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_echo_of_a_mark_alone_isnt_superseded() {
+    let wants = Wants::default();
+    wants.want(channel(1), message(9), None, read_at(9, 0), Pace::Explicit);
+    wants.next().await.unwrap();
+    wants.confirmed();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+
+    assert_eq!(
+        wants.echo(channel(1), message(4)),
+        Echo::Own { superseded: false },
+        "what went out before the mark isn't newer"
+    );
+    wants.confirmed();
+    assert_eq!(
+        wants.echo(channel(1), message(4)),
+        Echo::Elsewhere,
+        "one echo per mark"
+    );
+}
+
+// Discord's answer came first, then an ack went out, then the mark's echo.
+#[tokio::test(start_paused = true)]
+async fn a_late_echo_knows_an_ack_sent_since() {
+    let wants = Wants::default();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    wants.confirmed();
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(4, 2),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+    wants.next().await.unwrap();
+    wants.confirmed();
+
+    assert_eq!(
+        wants.echo(channel(1), message(4)),
+        Echo::Own { superseded: true }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn another_position_was_marked_elsewhere() {
+    let wants = Wants::default();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(4, 2),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+
+    assert_eq!(wants.echo(channel(1), message(2)), Echo::Elsewhere);
+    wants.confirmed();
+
+    assert!(drain(&wants).await.is_empty());
+}
+
+// The user marked the channel read meanwhile: the ack carries the undo, and nobody hears of
+// the mark's refusal.
+#[tokio::test(start_paused = true)]
+async fn a_refused_mark_with_a_newer_ack_pending_answers_without_an_error() {
+    let wants = Wants::default();
+    let mut marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(4, 2),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+
+    let (refusals, waiter) = wants.refuse();
+
+    assert!(refusals.is_empty());
+    assert!(waiter.is_none());
+    assert!(matches!(marked.try_recv(), Ok(Ok(()))));
+    assert_eq!(drain(&wants).await, [(channel(1), message(9))]);
 }
 
 #[tokio::test(start_paused = true)]
