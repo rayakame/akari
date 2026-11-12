@@ -51,7 +51,11 @@ public final class ThreadFormModel {
     public let parentId: ChannelId
     /// The message the thread starts from, shown above the fields, as it is now; `nil` for a
     /// thread without one, also once the message is deleted.
-    public private(set) var source: Message?
+    public private(set) var source: Message? {
+        didSet { readSourceReply() }
+    }
+    /// The line over the source message when it answers a message.
+    public private(set) var sourceReply: ReplyLine?
     public private(set) var location: CreateThreadLocation
     /// Line breaks become spaces, and it stops at 100 characters, as Discord's field does.
     public var name: String {
@@ -126,6 +130,15 @@ public final class ThreadFormModel {
         readPrivateMode()
         slowmode = store.threadSlowmode(parentId: parentId)
         awaitCooldownEnd()
+        readSourceReply()
+    }
+
+    // Also when the message the source answers was edited, deleted or loaded.
+    func readSourceReply() {
+        let line = source.flatMap { ReplyLine.of($0, in: store) }
+        if line != sourceReply {
+            sourceReply = line
+        }
     }
 
     /// "Thread Name", or "Thread Name (Optional)" from a message, which names the thread when
