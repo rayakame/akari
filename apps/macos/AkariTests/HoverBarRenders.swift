@@ -61,7 +61,7 @@ struct HoverBarRenders {
         let list = BarList(scale: 2, height: 520)
         list.window.appearance = NSAppearance(named: name)
         list.actions.model = MessageActionsModel(
-            channelId: ChannelId(rawValue: 10), store: ActionsStore(), account: GuildAccount(),
+            store: ActionsStore(), account: GuildAccount(),
             copy: { _ in }, retry: { _ in }, discard: { _ in }, createThread: { _, _ in },
             viewThread: { _, _ in }, failed: { _ in })
         let me = author(1, "Chris")

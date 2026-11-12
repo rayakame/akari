@@ -35,9 +35,9 @@ final class MessageActionsTests {
         }
     }
 
-    func model(in channel: UInt64 = 11) -> MessageActionsModel {
+    func model() -> MessageActionsModel {
         MessageActionsModel(
-            channelId: id(channel), store: store, account: account,
+            store: store, account: account,
             copy: { [unowned self] in copied.append($0) },
             retry: { _ in }, discard: { _ in },
             createThread: { [unowned self] in threadsCreated.append("\($0.rawValue) \($1.rawValue)") },
@@ -194,7 +194,7 @@ final class MessageActionsTests {
 
         model.perform(.copyText, on: message)
         model.perform(.copyLink, on: message)
-        self.model(in: 20).perform(.copyLink, on: row(200, in: 20))
+        model.perform(.copyLink, on: row(200, in: 20))
 
         #expect(
             copied == [
@@ -244,28 +244,47 @@ final class MessageActionsTests {
         #expect(failures.first?.message == "Akari couldn't reach Discord. Check your connection, then try again.")
     }
 
-    // The thread's own first message stands for the parent's original in the list.
-    @Test
-    func aStarterRowActsOnTheOriginalAndMarksTheThread() async {
+    func starterRow() -> MessageListModel.Row {
         let original = message(100, in: 11, content: "the start")
         let starter = message(300, in: 100, kind: .threadStarterMessage)
-        store.update { state in
-            state.messageActions[id(100)] = allowed(viewThread: true)
-            state.messageActions[id(300)] = allowed()
-        }
-        let row = MessageListModel.Row(id: id(300), message: starter, starter: .loaded(original))
-        let model = MessageActionsModel(
-            channelId: id(100), store: store, account: account,
-            copy: { [unowned self] in copied.append($0) }, retry: { _ in }, discard: { _ in },
-            createThread: { _, _ in }, viewThread: { _, _ in }, marking: { _, _ in nil },
-            failed: { _ in })
+        return MessageListModel.Row(id: id(300), message: starter, starter: .loaded(original))
+    }
+
+    // The core answers for the row, asked with the row's own IDs; the actions take the original's.
+    @Test
+    func aStarterRowAsksAsItselfAndActsOnTheOriginal() async {
+        store.update { $0.messageActions[id(300)] = allowed() }
+        let row = starterRow()
+        let model = model()
 
         #expect(model.bar(for: row, shift: true).map(\.action) == [.copyLink, .markUnread, .more])
+        #expect(model.menu(for: row).map { $0.map(\.action) } == [[.copyText, .markUnread, .copyLink]])
+        model.perform(.copyText, on: row)
         model.perform(.copyLink, on: row)
         await model.markUnread(from: row)
 
-        #expect(copied == ["https://discord.com/channels/1/11/100"])
+        #expect(copied == ["the start", "https://discord.com/channels/1/11/100"])
         #expect(store.log.calls.contains(.markUnread(id(100), id(300))))
+        #expect(marks == ["mark 100 300"])
+        let asked = store.reads.filter { if case .messageActions = $0 { true } else { false } }
+        #expect(!asked.isEmpty)
+        #expect(asked.allSatisfy { $0 == .messageActions(id(100), id(300)) })
+    }
+
+    @Test
+    func aStarterRowOffersOnlyWhatTheCoreSaysForIt() async {
+        store.update { state in
+            state.messageActions[id(100)] = allowed(createThread: true, viewThread: true)
+            state.messageActions[id(300)] = allowed(markUnread: false)
+        }
+        let row = starterRow()
+        let model = model()
+
+        #expect(model.bar(for: row, shift: true).map(\.action) == [.copyLink, .more])
+        await model.markUnread(from: row)
+
+        #expect(marks.isEmpty)
+        #expect(!store.log.calls.contains(.markUnread(id(100), id(300))))
     }
 }
 
