@@ -12,6 +12,7 @@ use super::fake::{FakeGateway, GENERAL, GUILD, events_until, fixture, online};
 use super::support::{USER, token};
 use crate::account::{Account, MessageLoad};
 use crate::errors::RequestError;
+use crate::records::MarkOutcome;
 
 struct Online {
     account: Arc<Account>,
@@ -199,12 +200,12 @@ async fn mark_unread_crosses() {
     online.account.mark_read(GENERAL);
     assert!(!unread(&online.account, GENERAL));
 
-    online
+    let outcome = online
         .account
         .mark_unread(GENERAL, MessageId::new(400_000_000_000_000_012))
-        .await
-        .unwrap();
+        .await;
 
+    assert_eq!(outcome.ok(), Some(MarkOutcome::Marked));
     assert!(unread(&online.account, GENERAL));
     let requests = online.server.received_requests().await.unwrap();
     let mark = requests

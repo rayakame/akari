@@ -311,6 +311,12 @@ Shift-held hover bar and an Option-click ([message-actions.md](../ui/message-act
   it read meanwhile) that ack goes out, carries the undo, and the call returns no error.
 - **A READY** before the mark went out keeps it only if Discord's position is still the one the
   channel had before the mark; the store shows READY's state until the mark's echo.
+- **The call's answer** is `Marked` once Discord took the mark, Discord's error when it was
+  refused, and `Replaced` when the mark stopped counting before that and nothing failed: an ack
+  or a second mark took its place unsent, the channel was marked on another device, a READY
+  dropped it for Discord's position, or it was refused with a later ack pending. The store
+  then shows what replaced it, and a host takes back what it showed for the mark (the macOS
+  app its new messages line) without telling the user.
 - **Reading.** The host says which channels' lists it shows (`Account::set_open_channels`: the
   open channel and the thread beside it, whether the user reads them or not). A channel marked
   unread while it is open (here, read or scrolled up, or by a manual MESSAGE_ACK from another

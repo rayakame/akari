@@ -7,7 +7,7 @@ use crate::contents::Contents;
 use crate::errors::{CreateThreadError, GatewayError, ImageError, RequestError};
 use crate::images::{ImageKey, ImageRequest, PendingImage, PendingSave};
 use crate::records::{
-    EmojiSource, ForumView, LoadReport, SourceGuild, StickerDetails, StickerPack,
+    EmojiSource, ForumView, LoadReport, MarkOutcome, SourceGuild, StickerDetails, StickerPack,
 };
 use crate::runtime::run;
 use crate::store::Store;
@@ -132,18 +132,20 @@ impl Account {
     }
 
     /// Marks the channel unread from the message on (a message's Mark Unread, Option-click): the
-    /// badge changes at once, and an error means it already went back. `InvalidRequest`, before
-    /// asking, where `MessageActions.mark_unread` is false.
+    /// badge changes at once, and an error means it already went back. `Replaced` when something
+    /// later took the mark's place before it counted: the store shows that instead, and nothing
+    /// failed. `InvalidRequest`, before asking, where `MessageActions.mark_unread` is false.
     pub async fn mark_unread(
         &self,
         channel_id: ChannelId,
         message_id: MessageId,
-    ) -> Result<(), RequestError> {
+    ) -> Result<MarkOutcome, RequestError> {
         let core = self.core.clone();
         run(self.runtime, async move {
             core.mark_unread(channel_id, message_id).await
         })
         .await
+        .map(Into::into)
         .map_err(Into::into)
     }
 

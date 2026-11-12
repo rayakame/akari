@@ -1739,7 +1739,7 @@ async fn a_mark_goes_out_behind_what_discord_took() {
     assert!(!request.bulk);
     assert!(marked.try_recv().is_err(), "still on its way");
     wants.confirmed();
-    assert!(matches!(marked.try_recv(), Ok(Ok(()))));
+    assert!(matches!(marked.try_recv(), Ok(Ok(MarkOutcome::Marked))));
     wants.want(
         channel(1),
         message(9),
@@ -1804,7 +1804,7 @@ async fn an_ack_after_an_unsent_mark_takes_its_place() {
         Pace::Explicit,
     );
 
-    assert!(matches!(marked.try_recv(), Ok(Ok(()))));
+    assert!(matches!(marked.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
     wants.confirmed();
     let request = wants.next().await.unwrap();
     assert_eq!(request.entries, [(channel(1), message(9))]);
@@ -1844,7 +1844,7 @@ async fn a_mark_elsewhere_ends_a_pending_mark() {
 
     wants.echo(channel(1), message(3));
 
-    assert!(matches!(marked.try_recv(), Ok(Ok(()))));
+    assert!(matches!(marked.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
     assert!(!wants.marking(channel(1)));
     wants.confirmed();
     assert!(drain(&wants).await.is_empty());
@@ -1956,7 +1956,7 @@ async fn a_refused_mark_with_a_newer_ack_pending_answers_without_an_error() {
 
     assert!(refusals.is_empty());
     assert!(waiter.is_none());
-    assert!(matches!(marked.try_recv(), Ok(Ok(()))));
+    assert!(matches!(marked.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
     assert_eq!(drain(&wants).await, [(channel(1), message(9))]);
 }
 
@@ -1967,13 +1967,13 @@ async fn a_second_mark_answers_the_first() {
 
     let mut second = mark(&wants, channel(1), message(6), 1);
 
-    assert!(matches!(first.try_recv(), Ok(Ok(()))));
+    assert!(matches!(first.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
     let request = wants.next().await.unwrap();
     assert_eq!(request.entries, [(channel(1), message(6))]);
     assert_eq!(request.manual, Some(1));
     assert!(second.try_recv().is_err());
     wants.confirmed();
-    assert!(matches!(second.try_recv(), Ok(Ok(()))));
+    assert!(matches!(second.try_recv(), Ok(Ok(MarkOutcome::Marked))));
 }
 
 #[tokio::test(start_paused = true)]
@@ -2005,7 +2005,7 @@ async fn a_mark_from_before_ready_goes_out_where_discord_didnt_move() {
     });
 
     assert!(kept.try_recv().is_err());
-    assert!(matches!(dropped.try_recv(), Ok(Ok(()))));
+    assert!(matches!(dropped.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
     let request = wants.next().await.unwrap();
     assert_eq!(request.entries, [(channel(1), message(4))]);
     assert_eq!(request.manual, Some(2));

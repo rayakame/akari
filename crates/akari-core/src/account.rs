@@ -24,6 +24,7 @@ use crate::state::{
     PageKey, StarterFetch, Store, WindowLimits, message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
+pub use acks::MarkOutcome;
 use acks::{AckSender, Echo, Pace, Refusal};
 
 const REFRESH_LIMIT: u8 = 100;
@@ -978,7 +979,7 @@ impl Shared {
         &self,
         channel: ChannelId,
         message: MessageId,
-    ) -> Result<(), RequestError> {
+    ) -> Result<MarkOutcome, RequestError> {
         self.rest.usable()?;
         let needs = self
             .store
@@ -1556,14 +1557,15 @@ impl Account {
     /// store has it at once. An open channel ([`Account::set_open_channels`]) isn't read again
     /// until the user leaves it, marks it read or sends a message there. An archived
     /// thread is opened and an unjoined one joined first. Resolves when Discord took the mark,
-    /// retried like every ack; a refusal puts the read state back and is the error.
-    /// `InvalidRequest`, without a request, where
-    /// [`MessageActions::mark_unread`](crate::state::MessageActions) is false.
+    /// retried like every ack, or when something later replaced it
+    /// ([`MarkOutcome::Replaced`]: the store no longer shows the mark, and nothing failed); a
+    /// refusal puts the read state back and is the error. `InvalidRequest`, without a request,
+    /// where [`MessageActions::mark_unread`](crate::state::MessageActions) is false.
     pub async fn mark_unread(
         &self,
         channel: ChannelId,
         message: MessageId,
-    ) -> Result<(), RequestError> {
+    ) -> Result<MarkOutcome, RequestError> {
         self.shared.mark_unread(channel, message).await
     }
 

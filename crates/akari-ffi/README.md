@@ -149,7 +149,9 @@ decides when the user is reading; the core never infers it
 `MessageActions.mark_unread` allows it (`InvalidRequest` otherwise, before asking). The badge
 and the read position move at once (`BadgeChanged`), and the call resolves on Discord's answer,
 which can take as long as Discord is unreachable: a host doesn't wait on it. An error means the
-read state already went back. `set_open_channels(channel_ids)` names the channels whose lists
+read state already went back. `MarkOutcome.Replaced` instead of `Marked` means something later
+took the mark's place (an ack, another mark, another device, a READY): the store shows that,
+nothing failed, and the host takes back what it showed for the mark without an alert. `set_open_channels(channel_ids)` names the channels whose lists
 the host shows (the open channel and the thread beside it, read or not): a channel marked
 unread while it is open isn't read again, whatever `set_reading` names, until it leaves them,
 the user marks it read or writes there, or it is read on another device. Name every open list
