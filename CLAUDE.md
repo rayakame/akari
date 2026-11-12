@@ -44,7 +44,9 @@ and mention counts per channel and server) and `Account`, which keeps the store
 current from the gateway, ends timed mutes, loads message history and sends messages over
 rate-limited REST, applying the message length limit and slowmode; it also acks what the user
 reads (paced per channel, one request at a time, "now" message IDs from Discord's clock, not the
-Mac's; threads with their flag) and marks channels and servers read, in bulk chunks; it fetches a
+Mac's; threads with their flag) and marks channels and servers read, in bulk chunks, and a
+channel unread from a message on (the official client's manual ack, the store changed at once and
+set back on a refusal, the channel not read again while it stays open); it fetches a
 thread's starter message when Discord leaves it out, and a thread a "started a thread" line names
 that the store doesn't have; it keeps the threads THREAD_LIST_SYNC and messages bring, each
 thread's live message count and newest message for its box, and joins and leaves threads; for
@@ -91,11 +93,13 @@ emoji span's key, the display settings, attachments with their kind, size, place
 place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
 agreement, the hidden download options, forums: their settings, post lists, first messages, the
 row's post count, the posts' new-message counts, what the user may post and creating a post, a
-message's thumbnail), a message's reactions, what a reply answers, the pins dot and what the user
-may do with a message, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+message's thumbnail), a message's reactions, what a reply answers, the pins dot, what the user
+may do with a message and marking unread from one, through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
 login, session, server, channel, DM and message lists, the composer, the media viewer, the
-forum page and its form for a new post), the message
+forum page and its form for a new post, and what a message's hover bar and menu list: the
+official client's order for the plain and the Shift-held bar and the menu's groups as values,
+later features' places included, with Mark Unread moving the new messages line), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
@@ -130,7 +134,12 @@ opens with its header ("# channel › thread"), its start and starter message, a
 thread's banner, system lines read as Discord words them, the "started a thread" line links to
 its thread, a pin's line jumps to the pinned message, and a jump flashes its message; a message
 with a thread has the thread's box (count, newest message, time), which opens it, and a thread's
-"…" and row menu join and leave it; the header's Threads button, "See all threads" and the
+"…" and row menu join and leave it; the hovered message has the official client's hover bar (one
+view of the list's controller over the rows, counted as its row where it overhangs the one above,
+SF Symbols, the longer row while Shift is held, Retry and Delete on a failed send, More opening
+the message's menu, the row lit while its menu is open), the message's menu has Create or View
+Thread, Copy Text, Mark Unread and Copy Message Link in the official order, and an Option-click
+on a message marks unread from it; the header's Threads button, "See all threads" and the
 channel list's "More Active Threads" show a channel's threads (the popout, the modal); the New
 Thread form takes the split's place (a message's menu, the browser's Create buttons, ⌘⇧⌥N) and
 creates threads; a forum's row opens its page (search, Sort & View, the tag filter, list and

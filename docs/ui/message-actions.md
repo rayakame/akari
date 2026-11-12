@@ -1,9 +1,10 @@
 # Message actions
 
-What the official client lets a user do with a message, and what Akari does. Everything here is
-from the code read of canary 671549 (2026-11-12: the hover bar's props, the message menu, the
-reply, edit, pin and reaction predicates, the permission and message-type tables); nothing was
-observed live. Akari's departures are marked *Akari:*.
+What the official client lets a user do with a message, and what Akari does: the rules, the
+hover bar, the message menu, Mark Unread. Everything here is from the code read of canary 671549
+(2026-11-12: the hover bar's props and stylesheets, the message menu, the reply, edit, pin and
+reaction predicates, the permission and message-type tables); nothing was observed live.
+Akari's departures are marked *Akari:*.
 
 ## What may be done with a message
 
@@ -111,3 +112,146 @@ gone or failed, both answer for the row itself, a type-21 system message of the 
 Requests never take the row's IDs. `Store::shown_message(channel, row)` gives the channel and
 ID of the message a row shows: the original's for such a starter row, the row's own for every
 other; a reaction, a reply, a pin or a delete from the row goes there.
+
+## The hover bar
+
+A row of small buttons over the hovered message's top right corner. From the code read of canary
+671549 (the bar's component and its stylesheets, 2026-11-12), not observed.
+
+### Where and how it shows
+
+- **Size:** 34 high: a 1 border, 2 of padding, buttons of 28 × 28 side by side with no gap, each
+  with a 20 × 20 icon in its middle. Its width is 28 per button plus 6. Corner radius 8, a
+  button's 6.
+- **Place:** its right edge 14 inside the message's box, its top 25 above the box's top, so it
+  lies over the row above (y −25 to +9). Over the first message of a group it sits lower, 16
+  above the box's top (−16 to +18), unless that message is a reply or a system line. *Akari: the
+  bar never leaves the list's visible part: a row at the list's top edge gets its bar 4 below that
+  edge, over its own text, where the official client cuts the bar off.*
+- **Look:** `surfaceHigh` with a 1 `borderMuted` border and a soft shadow (black at 14 %, 8 % in
+  the light theme, 1 down, blurred 4). With the pointer over the bar the border is `borderSubtle`
+  and the shadow larger (4 down, blurred 8, 16 % and 8 %), changing over 0.1 s.
+- **Buttons:** the icon in `interactiveText`. Under the pointer the button has `hoverBackground`
+  and the icon `interactiveTextActive`; pressed, `interactiveBackgroundActive` (16 %); "More"
+  while its menu is open, `selectedBackground`. A dangerous button (Delete) is `textError` in every
+  state; a disabled one at half opacity. The pointing hand shows over every button. *Akari: SF
+  Symbols for every icon; the official client also grows the hovered icon by a tenth, which Akari
+  leaves out.*
+- **Tooltips:** each button's tooltip is its label and nothing else; none names a key. *Akari:
+  macOS's own tooltip, after its usual delay and under the pointer, where the official client
+  shows its own at once above the button.*
+- It shows and hides at once, without a fade, with the row's hover: only in the key window,
+  and not while another window lies over the list at the pointer. The pointer over the bar,
+  the part over the row above included, keeps the bar's own row hovered. Clicks and right
+  clicks on the bar never reach the row under it.
+- A message that is still **sending** and an **ephemeral** one have no bar, and neither has a
+  row that allows nothing. A **failed** send's bar is Retry and Delete (Delete not red, no
+  question asked); the "Not sent." line under the message keeps its own Retry and Delete.
+- The row stays lit, with its bar, while a menu of it is open (a right click, the More button),
+  whatever the pointer does meanwhile; no other row hovers then. When the menu closes the list
+  goes back to where the pointer is. With a menu open Shift doesn't change the bar.
+- For VoiceOver the bar is a group named "Message Actions" and each button carries its label.
+
+*Akari: one bar for the whole list, a view of the list's controller laid over the rows; the
+controller's pointer authority lights its buttons, and the rows track nothing
+([message-list.md](message-list.md#selecting-text)). What the bar lists is read from the core when
+the hovered row or Shift changes and when the row's content changes, not on every move.*
+
+### The buttons, in order
+
+Each button shows only where `MessageActions` allows it. Without Shift:
+
+| # | Button | When | In Akari |
+|---|---|---|---|
+| 1 | up to 3 quick reactions, then a separator | `react` | with reactions |
+| 2 | Add Reaction | `react` | with reactions |
+| 3 | Reply | `reply`, and not `edit` (others' messages, and the user's own that can't be edited) | with replies |
+| 4 | Edit | `edit` | with editing |
+| 5 | Forward | | left out |
+| 6 | Create Thread | `create_thread` | yes |
+| 7 | View Thread | `view_thread` | yes |
+| 8 | Publish | | left out |
+| 9 | More | always | yes: opens the message's menu |
+
+With **Shift held**, the bar changes at once, the pointer still, and back when Shift is let go:
+
+| # | Button | When | In Akari |
+|---|---|---|---|
+| 1 | Copy Message ID | developer mode | once Akari has that setting |
+| 2 | Copy Link | `copy_link` | yes |
+| 3 | Configure (a join line, for Manage Server) | | left out |
+| 4 | Mark Unread | `mark_unread` | yes |
+| 5 | Bookmark Message | | left out |
+| 6 | Pin Message or Unpin Message | `pin`, `unpin`; no question asked | with pins |
+| 7 | Reply | `reply` and `edit`: the user's own editable message; the reply starts without the ping | with replies |
+| 8 | Add Reaction, Reply, Edit, Create Thread, View Thread | as without Shift; no quick reactions | as above |
+| 9 | Delete | `delete`; no question asked | with deleting |
+| 10 | More | only where Delete isn't | yes |
+
+The Shift key counts as it is at the click: a click on a button of the longer bar, and on a
+menu item, reads it then.
+
+*Akari:*
+
+- *Forward (and with it the rule that moves Create Thread into the Shift row for a message that
+  can be forwarded), Publish, Bookmark, Configure and the "official message" mark are left out.*
+- *The order above is one table in AkariKit (`MessageActionsModel`): a later feature turns its
+  action on there and its button and menu item appear in their places.*
+- *The official client's letter keys on a message with keyboard focus (E, R, P, Backspace, +, F,
+  T, Alt+Enter) are left out: Akari's rows take no keyboard focus yet. The bar's actions are
+  not VoiceOver custom actions of the row either; the rows have none.*
+
+## The message menu
+
+A right click or Control-click anywhere in a message's box, on a system line too, and the bar's
+More button open the same menu; More's opens under the button. Groups are divided by separators
+and an empty group leaves none. From the code read of canary 671549, not observed. The official
+client's order, with what Akari has in bold:
+
+| Group | Items |
+|---|---|
+| Reactions | Add Reaction, View Reactions |
+| Writing | Edit Message, Reply, Forward, **Create Thread**, ***View Thread*** |
+| The message | **Copy Text** (a message with text), Pin Message or Unpin Message, **Resend message** (a failed send), **Mark Unread**, **Copy Message Link** |
+| Removing | Remove Reactions, Remove All Reactions, **Delete Message** (red; today a failed send's only) |
+| Developer | Copy Message ID (developer mode) |
+
+*Akari:*
+
+- *"View Thread" is in the menu, in Create Thread's place: the official client has it in the bar
+  only.*
+- *A message that is still sending, and an ephemeral one, keep "Copy Text" alone: the official
+  client's sending row has more, its ephemeral row no menu at all.*
+- *A thread's starter row shows the parent channel's message: Copy Text, Copy Message Link and
+  Create Thread are that message's, Mark Unread is the thread's own, and View Thread is left out
+  inside its own thread.*
+- *Left out: the row of quick reactions, Forward, Translate, Bookmark and reminders, Apps, Speak
+  Message, polls' and interactions' items, Report Message, the items for a clicked image, link,
+  emoji or sticker (the media viewer has Copy Image and Copy Media Link), and Copy and Search
+  with Google for a text selection (a selection's menu ends with macOS's "Copy"). Copy Message ID
+  waits for developer mode.*
+
+**Copy Message Link** gives `https://discord.com/channels/{server}/{channel}/{message}`, with
+`@me` for the server in a DM or a group. The bar's "Copy Link" gives the same.
+
+## Mark Unread
+
+"Mark Unread" in the menu and in the Shift bar, and **Option-click** (Alt+click in the official
+client) on a message: the channel is unread from that message on. The request and the rule that
+keeps the channel unread while it stays open are in
+[read-states.md](../protocol/read-states.md#mark-unread).
+
+- An Option-click counts anywhere in the message's box: on its text, a link or an emoji too,
+  which then aren't followed or opened, and no text is selected. From the code read: the
+  official client's row handler takes every Alt+click and stops the click's default.
+- *Akari: not on the row's buttons (media, a thread's box, Retry and Delete, the hover bar),
+  which keep their click, and only with Option alone. Where the message can't be marked
+  (an archived, locked thread) the click does nothing at all.*
+- The open list's new messages line goes over the chosen message, the user's own too, and
+  the channel isn't read again while it stays open: leaving it, marking it read (Escape) or
+  writing there ends that.
+- *Akari: the badge and the new messages line change at the click; the official client waits
+  for Discord's answer. If Discord refuses, they go back and one alert says so ("Couldn't Mark as
+  Unread").*
+- *Akari: the official client's Alt+Enter on a message with keyboard focus is left out with
+  the other keys of a focused message.*
