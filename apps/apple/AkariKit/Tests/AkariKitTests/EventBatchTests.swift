@@ -115,6 +115,31 @@ struct EventBatchTests {
     }
 
     @Test
+    func reactionsReplyTargetsAndPinsAreCollectedApartFromTheirMessages() {
+        let batch = EventBatch([
+            .messageReactionsChanged(channelId: id(20), messageId: id(100)),
+            .messageReactionsChanged(channelId: id(20), messageId: id(100)),
+            .messageReactionsChanged(channelId: id(20), messageId: id(101)),
+            .messageReactionsChanged(channelId: id(21), messageId: id(102)),
+            .replyTargetChanged(channelId: id(20), targetId: id(90)),
+            .replyTargetChanged(channelId: id(22), targetId: id(91)),
+            .replyTargetChanged(channelId: id(22), targetId: id(91)),
+            .pinsUnreadChanged(channelId: id(20)),
+            .pinsUnreadChanged(channelId: id(23)),
+        ])
+
+        #expect(batch.reactionsChanged == [id(20): [id(100), id(101)], id(21): [id(102)]])
+        #expect(batch.replyTargetsChanged == [id(20): [id(90)], id(22): [id(91)]])
+        #expect(batch.pinsUnreadChanged == [id(20), id(23)])
+        #expect(batch.windowsChanged.isEmpty)
+        #expect(batch.updatedMessages.isEmpty)
+        #expect(batch.channelsChanged.isEmpty && batch.badgesChanged.isEmpty)
+        let empty = EventBatch([.messageUpdated(channelId: id(20), messageId: id(100))])
+        #expect(empty.reactionsChanged.isEmpty && empty.replyTargetsChanged.isEmpty)
+        #expect(empty.pinsUnreadChanged.isEmpty)
+    }
+
+    @Test
     func theLastConnectionStateWins() {
         let batch = EventBatch([
             .connection(state: .connecting), .ready, .connection(state: .online),
