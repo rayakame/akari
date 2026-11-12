@@ -1011,6 +1011,26 @@ pub struct Slowmode {
     pub until: Option<SystemTime>,
 }
 
+/// What the user may post in a forum or media channel.
+#[derive(Debug, Clone, PartialEq, Eq, Default, uniffi::Record)]
+pub struct PostCreation {
+    pub allowed: bool,
+    /// The forum's tags the user may apply, in its order.
+    pub tags: Vec<TagId>,
+    /// A post needs at least one tag.
+    pub requires_tag: bool,
+}
+
+impl From<state::PostCreation> for PostCreation {
+    fn from(creation: state::PostCreation) -> Self {
+        Self {
+            allowed: creation.allowed,
+            tags: creation.tags,
+            requires_tag: creation.requires_tag,
+        }
+    }
+}
+
 /// Which threads the user may create in a channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Record)]
 pub struct ThreadCreation {

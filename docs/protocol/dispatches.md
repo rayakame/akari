@@ -334,6 +334,42 @@ client asks again on the card's next render, without a pause). MESSAGE_CREATE, M
 and MESSAGE_DELETE of a post's first message (its ID is the post's) and the window's message
 with the post's ID keep it current, and MESSAGE_DELETE_BULK.
 
+**Creating a post** (from the client's code, canary 671387, modules 55294, 971389, 406704 and
+691060; not observed: neither the body nor Discord's answer to it has been seen on the wire):
+`Account::create_post(forum, name, tags, content)` sends the official client's one request,
+`POST /channels/{forum}/threads?use_nested_fields=true` with
+`{"name", "auto_archive_duration", "applied_tags": ["…"], "message": {"content"}}` in this
+order: `auto_archive_duration` is the forum's `default_auto_archive_duration`, else 4320;
+`applied_tags` holds the tag IDs in the order chosen and is always present (`[]` without tags);
+no `type`, `location` or nonce. The official client also sends `message.sticker_ids`,
+`message.attachments` and `message.flags` (4096 after a leading `@silent`), none of which Akari
+has. Akari sends the name and the message trimmed. What may be posted is
+`Store::post_creation(forum)`: `allowed` in a forum or media channel with Send Messages (a
+timeout takes it); `tags`, the forum's `available_tags` the user may apply, in its order, a
+`moderated` one only with Manage Threads; `requires_tag` for the channel flag REQUIRE_TAG
+(1 << 4). Refused before asking with `InvalidRequest`: a forum the user may not post in, a
+name empty or over 100 code points once trimmed, a message empty once trimmed or over the
+account's length limit, more than 5 tags, a tag not in `tags`; with `TagRequired`: no tag where
+one is required. Discord's own limits behind these (how it counts the name, its codes for too
+many or moderated tags) aren't known.
+
+The forum's `rate_limit_per_user` is the cooldown between the user's posts, the same
+`CreateThread` cooldown as for threads, keyed by the forum (`Store::thread_slowmode(forum)`): a
+created post starts it for the interval and 100 ms, 20016 holds it for its `retry_after`, and
+while it runs `create_post` answers `Slowmode` without asking. Refusals: 160006 is
+`TooManyThreads`, 200001 (AutoMod on the title) `NameBlocked` and 200000 (AutoMod on the
+message) `MessageBlocked`, each with Discord's message, 50035 with an error on `name`
+`NameRequired`; everything else is a `RequestError`, and an answer that was lost or doesn't read
+as the post `MaybeCreated`, as for threads. The request is logged with the forum's ID, the
+number of tags and the outcome, never the name or the message.
+
+Discord's answer is the post, with its first message as `message` (the nested fields). The store
+keeps the post as its THREAD_CREATE with `newly_created` would, whichever comes first and only
+once: joined, in the open forum's frozen list at once, opened, the forum acked up to it locally
+([read-states.md](read-states.md#forums)); the `message`, when it reads as one, is the post's
+first message (`Store::post_preview`), so its card asks no post-data. The official client waits
+for the THREAD_CREATE instead, loads 30 messages, opens the post and refreshes the list.
+
 **New-message counts** (op 28, [gateway.md](gateway.md#forum-unreads); from the client's code,
 modules 435470, 767581 and 474399; not observed): a card's "(N New)" is for an active post that
 is unread, opened (a read state of the user's own, not one Akari estimated) and acked.

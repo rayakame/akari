@@ -2165,3 +2165,201 @@ fn a_deleted_post_forgets_its_count() {
 
     assert_eq!(new_counts(&state), [(OLD, None)]);
 }
+
+// H-7: who may post in a forum, and with which tags.
+
+const VIEW: u64 = 1 << 10;
+const SEND: u64 = 1 << 11;
+const MANAGE_THREADS: u64 = 1 << 34;
+
+// The fixture's user owns the guild; here they're a plain member whose one role allows `allow`.
+fn member_with_forum(allow: u64, edit: impl FnOnce(&mut Value)) -> State {
+    let mut ready = ready_value();
+    let guild = &mut ready["guilds"][0];
+    guild["properties"]["owner_id"] = "100000000000000099".into();
+    guild["roles"][0]["permissions"] = "0".into();
+    guild["roles"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id": "600", "name": "r", "permissions": allow.to_string(), "position": 2}));
+    ready["merged_members"][0][0]["roles"] = json!(["600"]);
+    edit(&mut ready);
+    let mut state = state_from(&ready);
+    apply(&mut state, "CHANNEL_CREATE", open_forum());
+    state
+}
+
+// The fixture's channel denies @everyone sending.
+fn open_forum() -> Value {
+    let mut forum = forum();
+    forum["permission_overwrites"] = json!([]);
+    forum
+}
+
+fn creation(state: &State, channel: u64) -> (bool, Vec<u64>, bool) {
+    let creation = state.post_creation(Snowflake::new(channel), state.now_millis());
+    (
+        creation.allowed,
+        creation.tags.iter().map(|tag| tag.get()).collect(),
+        creation.requires_tag,
+    )
+}
+
+#[test]
+fn posting_needs_send_messages_in_the_forum() {
+    let member = member_with_forum(VIEW | SEND, |_| {});
+    assert_eq!(creation(&member, FORUM), (true, vec![BUG], false));
+
+    let reader = member_with_forum(VIEW, |_| {});
+    assert_eq!(creation(&reader, FORUM), (false, vec![], false));
+
+    let timed_out = member_with_forum(VIEW | SEND, |ready| {
+        ready["merged_members"][0][0]["communication_disabled_until"] =
+            "2999-01-01T00:00:00+00:00".into();
+    });
+    assert_eq!(creation(&timed_out, FORUM), (false, vec![], false));
+}
+
+#[test]
+fn moderated_tags_need_manage_threads() {
+    let moderator = member_with_forum(VIEW | SEND | MANAGE_THREADS, |_| {});
+    assert_eq!(creation(&moderator, FORUM), (true, vec![BUG, STAFF], false));
+
+    let mut owner = ready_state();
+    apply(&mut owner, "CHANNEL_CREATE", forum());
+    assert_eq!(creation(&owner, FORUM), (true, vec![BUG, STAFF], false));
+}
+
+#[test]
+fn a_forum_can_require_a_tag() {
+    let mut state = ready_state();
+    let mut forum = forum();
+    forum["flags"] = (1 << 4).into();
+    apply(&mut state, "CHANNEL_CREATE", forum);
+
+    assert_eq!(creation(&state, FORUM), (true, vec![BUG, STAFF], true));
+}
+
+#[test]
+fn only_forum_and_media_channels_take_posts() {
+    let mut state = ready_state();
+    let mut media = forum();
+    media["type"] = 16.into();
+    apply(&mut state, "CHANNEL_CREATE", media);
+
+    assert!(creation(&state, FORUM).0, "a media channel");
+    assert_eq!(creation(&state, GENERAL), (false, vec![], false));
+    assert_eq!(creation(&state, 1), (false, vec![], false), "unknown");
+}
+
+// H-9: a forum's slowmode for new posts is its `rate_limit_per_user`.
+#[test]
+fn a_forums_slowmode_is_its_cooldown_between_posts() {
+    let mut state = member_with_forum(VIEW | SEND, |_| {});
+    let mut slow = open_forum();
+    slow["rate_limit_per_user"] = 45.into();
+    apply(&mut state, "CHANNEL_UPDATE", slow);
+    let forum = Snowflake::new(FORUM);
+    let read = |state: &State| {
+        state.thread_slowmode(
+            forum,
+            state.now_millis(),
+            std::time::Instant::now(),
+            std::time::SystemTime::now(),
+        )
+    };
+
+    let idle = read(&state).expect("slowmode");
+    assert_eq!(idle.interval, std::time::Duration::from_secs(45));
+    assert!(!idle.exempt);
+    assert_eq!(idle.until, None);
+
+    state.start_thread_cooldown(forum, state.now_millis());
+    assert!(read(&state).is_some_and(|slowmode| slowmode.until.is_some()));
+}
+
+fn created_post(id: u64) -> crate::model::Channel {
+    let mut post = own_post(id);
+    post["member"] = json!({"id": id.to_string(), "user_id": ME.to_string(), "join_timestamp": "2026-10-01T00:00:00+00:00", "flags": 1});
+    post.as_object_mut().unwrap().remove("newly_created");
+    serde_json::from_str(&post.to_string()).unwrap()
+}
+
+fn first_message(post: u64) -> crate::model::Message {
+    let mut first = message(post, post);
+    first["author"]["id"] = ME.to_string().into();
+    first["content"] = "steps to reproduce".into();
+    serde_json::from_str(&first.to_string()).unwrap()
+}
+
+// H-8: the answer to a create is the post as its THREAD_CREATE would bring it, whichever comes
+// first, and its message is the post's first.
+#[test]
+fn a_created_post_is_kept_as_the_users_own_new_post() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    let mut events = Vec::new();
+
+    let (kept, acks) =
+        state.keep_created_post(created_post(LATER), Some(first_message(LATER)), &mut events);
+
+    let post = Snowflake::new(LATER);
+    assert_eq!(kept, Some(post));
+    assert!(acks.is_empty(), "no request");
+    assert!(active(&state, &ForumView::default()).contains(&LATER));
+    assert_eq!(forum_ack(&state), Some(LATER));
+    assert!(state.read_state(post).is_some_and(|read| !read.estimated));
+    assert!(state.new_posts(&[post]).is_empty());
+    assert_eq!(
+        preview(&state, LATER).as_deref(),
+        Some("steps to reproduce")
+    );
+    assert!(
+        state
+            .channel(post)
+            .is_some_and(|post| { post.thread.as_deref().is_some_and(|info| info.joined()) })
+    );
+
+    apply(&mut state, "THREAD_CREATE", own_post(LATER));
+    let posts = state.forum_posts(Snowflake::new(FORUM), &ForumView::default());
+    assert_eq!(posts.new_posts, 0);
+    assert_eq!(
+        posts
+            .active
+            .iter()
+            .filter(|post| post.id.get() == LATER)
+            .count(),
+        1
+    );
+    assert_eq!(forum_ack(&state), Some(LATER));
+}
+
+#[test]
+fn an_answer_after_the_gateways_post_changes_nothing() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    apply(&mut state, "THREAD_CREATE", own_post(LATER));
+    let before = state.forum_posts(Snowflake::new(FORUM), &ForumView::default());
+
+    let (kept, _) = state.keep_created_post(created_post(LATER), None, &mut Vec::new());
+
+    assert_eq!(kept, Some(Snowflake::new(LATER)));
+    let after = state.forum_posts(Snowflake::new(FORUM), &ForumView::default());
+    assert_eq!(after.new_posts, 0);
+    assert_eq!(after.active.len(), before.active.len());
+    assert_eq!(forum_ack(&state), Some(LATER));
+}
+
+#[test]
+fn a_created_post_in_a_forum_being_read_is_acked_at_now() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    read_forum(&mut state);
+    let later = snowflake_at(wall_millis() + 60_000);
+
+    let (_, acks) = state.keep_created_post(created_post(later), None, &mut Vec::new());
+
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    assert!(acks[0].now);
+    assert!(forum_ack(&state) >= Some(later));
+}

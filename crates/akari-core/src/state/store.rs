@@ -19,8 +19,8 @@ use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::threads::ThreadIndex;
 use super::types::{
-    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostNewCount, PostPreview,
-    StarterMessage, ThreadBrowser, ThreadCreation, User,
+    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostCreation,
+    PostNewCount, PostPreview, StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
@@ -1295,6 +1295,15 @@ impl Store {
         self.read(|inner| inner.state.thread_creation(parent, now))
     }
 
+    /// What the user may post in `forum`: `allowed` in a forum or media channel where they may
+    /// send messages (not while timed out); `tags` the forum's tags they may apply, in its
+    /// order, moderated ones only with Manage Threads; `requires_tag` when a post needs one. The
+    /// cooldown between posts is [`Store::thread_slowmode`]'s.
+    pub fn post_creation(&self, forum: ChannelId) -> PostCreation {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.post_creation(forum, now))
+    }
+
     /// Whether the user may start a thread from the message: a sent user message of the loaded
     /// window that has no thread yet, in a channel where they may create public threads.
     pub fn can_start_thread(&self, channel: ChannelId, message: MessageId) -> bool {
@@ -1335,6 +1344,16 @@ impl Store {
     pub(crate) fn keep_created_thread(&self, thread: model::Channel) -> Option<ChannelId> {
         self.write("thread", |inner, events| {
             inner.state.keep_created_thread(thread, events)
+        })
+    }
+
+    pub(crate) fn keep_created_post(
+        &self,
+        post: model::Channel,
+        first: Option<model::Message>,
+    ) -> (Option<ChannelId>, Vec<Ack>) {
+        self.write("post", |inner, events| {
+            inner.state.keep_created_post(post, first, events)
         })
     }
 

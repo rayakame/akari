@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, StickerId, StickerPackId};
+use akari_core::model::{ChannelId, EmojiId, GuildId, MessageId, StickerId, StickerPackId, TagId};
 use tokio::runtime::Runtime;
 
 use crate::contents::Contents;
@@ -371,6 +371,28 @@ impl Account {
         run(self.runtime, async move {
             core.create_thread(parent_id, message_id, &name, is_private, location.into())
                 .await
+        })
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Creates a post in the forum `forum_id` with its first message, in one request, and
+    /// returns it once the store has it as the user's own new post, with its first message; the
+    /// forum's slowmode for new posts starts. `tag_ids` go in the order given. Refused with
+    /// `InvalidRequest` before asking: a forum the user may not post in, a name empty or over 100
+    /// characters once trimmed, a message empty or over the length limit, more than 5 tags or
+    /// one the user may not apply; with `TagRequired` when the forum wants a tag; with
+    /// `Slowmode` while that slowmode runs.
+    pub async fn create_post(
+        &self,
+        forum_id: ChannelId,
+        name: String,
+        tag_ids: Vec<TagId>,
+        content: String,
+    ) -> Result<ChannelId, CreateThreadError> {
+        let core = self.core.clone();
+        run(self.runtime, async move {
+            core.create_post(forum_id, &name, &tag_ids, &content).await
         })
         .await
         .map_err(Into::into)
