@@ -135,6 +135,9 @@ public final class PostFormModel {
     }
 
     public func toggle(tag: TagId) {
+        guard !submitting else {
+            return
+        }
         if let index = tags.firstIndex(of: tag) {
             tags.remove(at: index)
         } else if tags.count < Self.tagLimit, usableTags.contains(where: { $0.id == tag }) {

@@ -243,4 +243,25 @@ final class ForumSplitTests {
         #expect(memory.splits(of: id(1)).isEmpty)
         session.close()
     }
+
+    // A card's post the store doesn't have is fetched first: the answer opens nothing once the
+    // user left the forum, also when they are back on it.
+    @Test
+    func aFetchedPostOpensNothingOnALaterVisit() async throws {
+        var archived = thread(43, in: 13, name: "old post")
+        archived.thread?.joined = false
+        account.fetchedThreads.withLock { $0[id(43)] = archived }
+        account.holdThreadFetches.withLock { $0 = true }
+        let session = inForum()
+
+        let opening = Task { await session.openBeside(thread: id(43), from: self.forumId) }
+        try await eventually { self.account.log.actions.contains(.fetchThread(self.forumId, id(43))) }
+        session.open(channel: id(11))
+        session.open(channel: forumId)
+        account.threadFetches.send(())
+        await opening.value
+
+        #expect(session.split == nil)
+        session.close()
+    }
 }

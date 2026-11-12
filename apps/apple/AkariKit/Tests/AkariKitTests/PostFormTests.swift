@@ -523,4 +523,24 @@ final class PostFormTests {
         #expect(try form(session).usableTags.map(\.name) == ["Bug"])
         session.close()
     }
+
+    // What's sent is what was typed at "Post": the tags don't change under a create.
+    @Test
+    func tagsStayAsSentWhileThePostIsMade() async throws {
+        account.createReply.withLock { $0 = .success(newPost()) }
+        account.holdCreates.withLock { $0 = true }
+        let session = inForum()
+        let form = try filled(session)
+        form.toggle(tag: bug)
+
+        let submit = Task { await session.submitPost() }
+        try await eventually { !self.creates.isEmpty }
+        form.toggle(tag: idea)
+        form.toggle(tag: bug)
+
+        #expect(form.tags == [bug])
+        account.createReplies.send(())
+        await submit.value
+        session.close()
+    }
 }

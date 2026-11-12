@@ -2509,3 +2509,22 @@ fn a_created_post_in_a_forum_being_read_is_acked_at_now() {
     assert!(acks[0].now);
     assert!(forum_ack(&state) >= Some(later));
 }
+
+// A post whose message count Discord didn't send has no cap: its count isn't hidden as "1+".
+#[test]
+fn a_post_without_a_message_count_shows_discords_count() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let mut post = started_when_made(listed_post(OLD, OLD + 5, &[]));
+    post.as_object_mut().unwrap().remove("message_count");
+    apply(&mut state, "THREAD_CREATE", post);
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 2));
+    open(&mut state);
+    asked(&mut state);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    let counts = state.post_new_counts(&[Snowflake::new(OLD)]);
+    assert_eq!(counts.len(), 1);
+    assert_eq!(counts[0].count, Some(3));
+}

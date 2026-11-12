@@ -1040,16 +1040,13 @@ impl State {
                 let post = self.entities.channels.get(id)?;
                 self.forum_of(*id)?;
                 self.counted_from(post)?;
-                let messages = post
-                    .thread
-                    .as_deref()
-                    .and_then(|info| info.message_count)
-                    .unwrap_or(0);
+                // Without a message count there is nothing to cap with.
+                let messages = post.thread.as_deref().and_then(|info| info.message_count);
                 let count = self
                     .post_counts
                     .counts
                     .get(id)
-                    .map(|count| (*count).min(messages))
+                    .map(|count| messages.map_or(*count, |messages| (*count).min(messages)))
                     .filter(|count| *count > 0);
                 Some(PostNewCount { post: *id, count })
             })

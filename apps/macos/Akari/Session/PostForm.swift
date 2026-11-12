@@ -127,6 +127,8 @@ struct ForumHeaderRow: View {
                 .font(TypeScale.forumField.font)
                 .foregroundStyle(Color(nsColor: Palette.textStrong))
                 .focused($titleFocused)
+                // What's sent is what was typed at "Post".
+                .disabled(form.submitting)
                 .frame(minHeight: ForumMeasures.control)
                 // Only Shift+Enter is taken from the field: a plain Enter may end an input
                 // method's composition, and reaches `onSubmit` after it.
@@ -378,7 +380,7 @@ struct PostFormTags: View {
                 ForEach(form.usableTags, id: \.id) { tag in
                     PostFormTag(
                         tag: tag, chosen: form.tags.contains(tag.id),
-                        enabled: form.canChoose(tag.id)
+                        enabled: form.canChoose(tag.id) && !form.submitting
                     ) {
                         form.toggle(tag: tag.id)
                     }

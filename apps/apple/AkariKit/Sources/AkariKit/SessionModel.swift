@@ -420,10 +420,9 @@ public final class SessionModel {
         clickedThread = id
         engage()
         if store.channel(id: id) == nil {
-            let opened = messages
+            let (opened, page) = (messages, forum)
             let found = await ask(about: id, in: parent, check: false) ?? false
-            guard found, !ended, clickedThread == id, messages === opened, openChannelId == parent
-            else {
+            guard found, !ended, clickedThread == id, messages === opened, forum === page else {
                 return
             }
             // The launch's request may have shown it meanwhile; the click is the user's.
