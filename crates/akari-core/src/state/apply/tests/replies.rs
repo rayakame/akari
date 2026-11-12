@@ -1,7 +1,7 @@
 use super::*;
-use crate::model::MessageType;
+use crate::model::{MessageReferenceType, MessageType};
 use crate::state::windows::StarterFetch;
-use crate::state::{ReplyTarget, StarterMessage};
+use crate::state::{MessageReference, ReplyPreview, ReplyTarget, StarterMessage};
 
 const TARGET: u64 = 400_000_000_000_000_005;
 
@@ -103,36 +103,232 @@ fn a_reply_brings_its_target_in_three_states() {
     );
 }
 
+fn loaded(state: &State, channel: u64, id: u64) -> Arc<ReplyPreview> {
+    match state.reply_target(Snowflake::new(channel), Snowflake::new(id)) {
+        ReplyTarget::Loaded(preview) => preview,
+        other => panic!("expected the target, got {other:?}"),
+    }
+}
+
+// (attachments, embeds, sticker)
+fn extras(preview: &ReplyPreview) -> (bool, bool, bool) {
+    (
+        preview.has_attachments,
+        preview.has_embeds,
+        preview.has_sticker,
+    )
+}
+
+fn rich() -> Value {
+    fixture(include_str!("../../../../tests/fixtures/message.json"))
+}
+
+// TARGET in GENERAL with only `part` of what a line names besides its text.
+fn carrying(part: &str) -> Value {
+    let mut target = message(TARGET, GENERAL);
+    target[part] = rich()[part].clone();
+    target
+}
+
+fn forward(mut message: Value) -> Value {
+    message["message_reference"] = json!({
+        "type": 1, "channel_id": VOICE.to_string(), "message_id": "400000000000000001",
+    });
+    message
+}
+
+// Every field of the preview, each from a target that would tell it from its neighbour.
+fn the_line_shows_each_part(bring: impl Fn(&mut State, Value)) {
+    let mut state = viewing(GENERAL);
+    let mut command = carrying("attachments");
+    command["type"] = 20.into();
+    command["flags"] = (1 << 13).into();
+    command["edited_timestamp"] = "2026-10-08T12:00:00+00:00".into();
+    command["webhook_id"] = "900000000000000001".into();
+    bring(&mut state, command);
+
+    let preview = loaded(&state, GENERAL, TARGET);
+    assert_eq!(preview.kind, MessageType::ChatInputCommand);
+    assert_eq!(preview.author.id.get(), MIRA);
+    assert!(preview.webhook);
+    assert_eq!(&*preview.content, "hi");
+    assert!(preview.edited);
+    assert_eq!(preview.flags, Message::IS_VOICE_MESSAGE);
+    assert_eq!(extras(&preview), (true, false, false));
+    assert!(!preview.forwarded);
+
+    for (part, expected) in [
+        ("embeds", (false, true, false)),
+        ("sticker_items", (false, false, true)),
+    ] {
+        let mut state = viewing(GENERAL);
+        bring(&mut state, carrying(part));
+
+        let preview = loaded(&state, GENERAL, TARGET);
+        assert_eq!(extras(&preview), expected, "{part}");
+        assert_eq!(preview.kind, MessageType::Default, "{part}");
+        assert!(!preview.webhook, "{part}");
+        assert!(!preview.edited, "{part}");
+        assert_eq!(preview.flags, 0, "{part}");
+        assert!(!preview.forwarded, "{part}");
+    }
+}
+
 #[test]
 fn a_preview_keeps_what_the_line_shows() {
+    the_line_shows_each_part(|state, target| {
+        apply(state, "MESSAGE_CREATE", reply(10, GENERAL, Some(target)));
+    });
+}
+
+#[test]
+fn a_target_from_the_window_keeps_what_the_line_shows() {
+    let from_the_window = |state: &mut State, target: Value| {
+        apply(state, "MESSAGE_CREATE", target);
+        apply(state, "MESSAGE_CREATE", reply(10, GENERAL, None));
+    };
+    the_line_shows_each_part(from_the_window);
+
     let mut state = viewing(GENERAL);
-    let mut voice = fixture(include_str!("../../../../tests/fixtures/message.json"));
-    voice["id"] = TARGET.to_string().into();
-    voice["channel_id"] = GENERAL.to_string().into();
-    voice["content"] = "".into();
-    voice["flags"] = (1 << 13).into();
-    voice["edited_timestamp"] = "2026-10-08T12:00:00+00:00".into();
-    voice["webhook_id"] = "900000000000000001".into();
+    from_the_window(&mut state, forward(message(TARGET, GENERAL)));
+    assert!(loaded(&state, GENERAL, TARGET).forwarded);
+}
+
+#[test]
+fn a_forwarded_target_sent_along_says_so() {
+    let mut state = viewing(GENERAL);
 
     apply(
         &mut state,
         "MESSAGE_CREATE",
-        reply(10, GENERAL, Some(voice)),
+        reply(10, GENERAL, Some(forward(message(TARGET, GENERAL)))),
     );
 
-    let ReplyTarget::Loaded(preview) =
-        state.reply_target(Snowflake::new(GENERAL), Snowflake::new(TARGET))
-    else {
-        panic!("expected the target");
-    };
-    assert_eq!(preview.kind, MessageType::Default);
-    assert_eq!(&*preview.author.username, "mira");
-    assert!(preview.webhook);
-    assert_eq!(&*preview.content, "");
-    assert!(preview.edited);
-    assert_ne!(preview.flags & Message::IS_VOICE_MESSAGE, 0);
-    assert!(preview.has_attachments && preview.has_embeds && preview.has_sticker);
-    assert!(!preview.forwarded);
+    assert!(loaded(&state, GENERAL, TARGET).forwarded);
+}
+
+#[test]
+fn an_edit_patches_each_part_of_the_preview() {
+    let mut state = viewing(GENERAL);
+    let mut before = original(GENERAL, "before");
+    before["edited_timestamp"] = "2026-10-08T12:00:00+00:00".into();
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply(10, GENERAL, Some(before)),
+    );
+    let rich = rich();
+    let mut other = rich["author"].clone();
+    other["id"] = "100000000000000003".into();
+    type Holds = fn(&ReplyPreview) -> bool;
+    let edits: Vec<(&str, Value, Holds)> = vec![
+        ("attachments", rich["attachments"].clone(), |preview| {
+            extras(preview) == (true, false, false)
+        }),
+        ("attachments", json!([]), |preview| {
+            extras(preview) == (false, false, false)
+        }),
+        ("embeds", rich["embeds"].clone(), |preview| {
+            extras(preview) == (false, true, false)
+        }),
+        ("sticker_items", rich["sticker_items"].clone(), |preview| {
+            extras(preview) == (false, true, true)
+        }),
+        ("flags", (1 << 13).into(), |preview| {
+            preview.flags == Message::IS_VOICE_MESSAGE
+        }),
+        ("author", other, |preview| {
+            preview.author.id.get() == 100_000_000_000_000_003
+        }),
+        ("type", 20.into(), |preview| {
+            preview.kind == MessageType::ChatInputCommand
+        }),
+        ("webhook_id", "900000000000000001".into(), |preview| {
+            preview.webhook
+        }),
+        ("edited_timestamp", Value::Null, |preview| !preview.edited),
+    ];
+
+    for (field, value, holds) in edits {
+        assert!(!holds(&loaded(&state, GENERAL, TARGET)), "{field}, before");
+        let mut edit = json!({"id": TARGET.to_string(), "channel_id": GENERAL.to_string()});
+        edit[field] = value;
+
+        let events = apply(&mut state, "MESSAGE_UPDATE", edit);
+
+        let told: Vec<&String> = events
+            .iter()
+            .filter(|event| event.starts_with("ReplyTargetChanged"))
+            .collect();
+        assert_eq!(told, [&changed(GENERAL, TARGET)], "{field}");
+        let after = loaded(&state, GENERAL, TARGET);
+        assert!(holds(&after), "{field}: {after:?}");
+        assert_eq!(&*after.content, "before", "{field}");
+    }
+}
+
+#[test]
+fn a_second_reply_with_the_same_target_says_nothing() {
+    let mut state = viewing(GENERAL);
+    let same = || Some(original(GENERAL, "the original"));
+    apply(&mut state, "MESSAGE_CREATE", reply(10, GENERAL, same()));
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(11, GENERAL, 6, Some(Value::Null)),
+    );
+
+    let again = apply(&mut state, "MESSAGE_CREATE", reply(12, GENERAL, same()));
+    let gone_again = apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(13, GENERAL, 6, Some(Value::Null)),
+    );
+
+    assert_eq!(again, ["MessageInserted(12)"]);
+    assert_eq!(gone_again, ["MessageInserted(13)"]);
+}
+
+// A command's result may answer a message of another channel: the target is that channel's.
+#[test]
+fn a_reply_into_another_channel_keeps_its_target_there() {
+    let mut state = viewing(GENERAL);
+    let mut command = message(10, GENERAL);
+    command["type"] = 23.into();
+    command["message_reference"] = json!({
+        "type": 0, "message_id": TARGET.to_string(), "channel_id": VOICE.to_string(),
+    });
+    command["referenced_message"] = original(VOICE, "elsewhere");
+
+    let events = load(&mut state, GENERAL, LoadKind::Latest, &[command]);
+
+    assert!(events.contains(&changed(VOICE, TARGET)), "{events:?}");
+    assert!(!events.contains(&changed(GENERAL, TARGET)), "{events:?}");
+    assert_eq!(target(&state, VOICE, TARGET), "elsewhere");
+    assert_eq!(target(&state, GENERAL, TARGET), "not loaded");
+    let row = state
+        .message(Snowflake::new(GENERAL), Snowflake::new(10))
+        .unwrap();
+    assert_eq!(
+        row.replied_to(),
+        Some((Snowflake::new(VOICE), Snowflake::new(TARGET)))
+    );
+
+    let (_, windows) = state.cache_parts(50);
+    let general = Snowflake::new(GENERAL);
+    let (_, cached) = windows.iter().find(|(id, _)| *id == general).unwrap();
+    let targets: Vec<(u64, u64, String)> = cached
+        .targets
+        .iter()
+        .map(|((channel, id), target)| {
+            let content = match target {
+                ReplyTarget::Loaded(preview) => preview.content.to_string(),
+                other => format!("{other:?}"),
+            };
+            (channel.get(), id.get(), content)
+        })
+        .collect();
+    assert_eq!(targets, [(VOICE, TARGET, "elsewhere".to_owned())]);
 }
 
 #[test]
@@ -143,6 +339,24 @@ fn a_target_the_window_has_needs_no_copy_sent_along() {
     apply(&mut state, "MESSAGE_CREATE", reply(10, GENERAL, None));
 
     assert_eq!(target(&state, GENERAL, TARGET), "loaded");
+}
+
+#[test]
+fn a_target_that_arrives_live_is_loaded() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", reply(10, GENERAL, None));
+    assert_eq!(target(&state, GENERAL, TARGET), "not loaded");
+
+    let events = apply(&mut state, "MESSAGE_CREATE", original(GENERAL, "at last"));
+
+    assert_eq!(
+        events[..2],
+        [
+            changed(GENERAL, TARGET),
+            format!("MessageInserted({TARGET})")
+        ]
+    );
+    assert_eq!(target(&state, GENERAL, TARGET), "at last");
 }
 
 #[test]
@@ -373,15 +587,283 @@ fn targets_are_bounded_but_never_dropped_under_a_loaded_reply() {
     assert_eq!(state.windows.targets_len(general), 100);
     assert_eq!(target(&state, GENERAL, 4000), "far away");
     assert_eq!(
-        target(&state, GENERAL, 1149),
-        "original 1149",
-        "named again, kept"
-    );
-    assert_eq!(
         target(&state, GENERAL, 1000),
         "not loaded",
         "the longest unnamed went"
     );
+    assert_eq!(
+        target(&state, GENERAL, 1050),
+        "not loaded",
+        "and the next, down to the bound"
+    );
+    assert_eq!(target(&state, GENERAL, 1051), "original 1051");
+    assert_eq!(
+        target(&state, GENERAL, 1149),
+        "original 1149",
+        "named by a loaded reply"
+    );
+}
+
+// What stays is what was named last, not what came first.
+#[test]
+fn a_target_named_again_outlives_older_ones() {
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    let replies: Vec<Value> = (0..150_u64)
+        .map(|index| {
+            let target = 1000 + index;
+            let mut original = message(target, GENERAL);
+            original["content"] = format!("original {target}").into();
+            reply_to(2000 + index, GENERAL, target, Some(original))
+        })
+        .collect();
+    load(&mut state, GENERAL, LoadKind::Latest, &replies);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(3000, GENERAL, 1000, None),
+    );
+    assert_eq!(target(&state, GENERAL, 1000), "original 1000");
+
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(
+            general,
+            LoadKind::Around(Snowflake::new(5000)),
+            2,
+            &mut events,
+        )
+        .unwrap();
+    let around = [reply_to(
+        5000,
+        GENERAL,
+        4000,
+        Some(original(GENERAL, "far away")),
+    )];
+    state.finish_load(ticket, page(&around), false, &mut events);
+
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(
+        target(&state, GENERAL, 1000),
+        "original 1000",
+        "no row names it any more; it was named after the others"
+    );
+    assert_eq!(target(&state, GENERAL, 1001), "not loaded");
+    assert_eq!(target(&state, GENERAL, 1051), "not loaded");
+    assert_eq!(target(&state, GENERAL, 1052), "original 1052");
+}
+
+const KEPT: u64 = 500;
+
+fn with_own_target(id: u64) -> Value {
+    reply_to(
+        id,
+        GENERAL,
+        id + 10_000,
+        Some(message(id + 10_000, GENERAL)),
+    )
+}
+
+// 150 replies come and go in GENERAL, each with its target, then one more comes: more targets
+// than the bound, all newer than what the tests below named first.
+fn churn(state: &mut State) {
+    let ids: Vec<u64> = (3001..=3150).collect();
+    for id in &ids {
+        apply(state, "MESSAGE_CREATE", with_own_target(*id));
+    }
+    let gone: Vec<String> = ids.iter().map(u64::to_string).collect();
+    apply(
+        state,
+        "MESSAGE_DELETE_BULK",
+        json!({"ids": gone, "channel_id": GENERAL.to_string()}),
+    );
+    apply(state, "MESSAGE_CREATE", with_own_target(9000));
+}
+
+#[test]
+fn live_replies_keep_the_bound() {
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+
+    for id in 1001..=1350_u64 {
+        apply(&mut state, "MESSAGE_CREATE", with_own_target(id));
+    }
+
+    let rows = message_ids(&state, GENERAL).unwrap();
+    assert_eq!(rows.len(), 200, "the window's own bound");
+    assert_eq!(
+        state.windows.targets_len(general),
+        200,
+        "every row's target and no other"
+    );
+    assert_eq!(target(&state, GENERAL, 11_001), "not loaded");
+    assert_ne!(target(&state, GENERAL, 11_350), "not loaded");
+}
+
+#[test]
+fn a_cache_fill_keeps_the_bound() {
+    use crate::state::CachedMessages;
+
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    let ids: Vec<u64> = (3001..=3150).collect();
+    let replies: Vec<Value> = ids.iter().map(|id| with_own_target(*id)).collect();
+    load(&mut state, GENERAL, LoadKind::Latest, &replies);
+    let gone: Vec<String> = ids.iter().map(u64::to_string).collect();
+    apply(
+        &mut state,
+        "MESSAGE_DELETE_BULK",
+        json!({"ids": gone, "channel_id": GENERAL.to_string()}),
+    );
+    assert_eq!(state.windows.targets_len(general), 150);
+
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(general, LoadKind::Latest, 2, &mut events)
+        .unwrap();
+    let cached = CachedMessages {
+        messages: vec![stored(reply(10, GENERAL, None))],
+        targets: [(
+            (general, Snowflake::new(TARGET)),
+            ReplyTarget::Loaded(Arc::new(ReplyPreview::of(&stored(original(
+                GENERAL,
+                "from the file",
+            ))))),
+        )]
+        .into(),
+    };
+    state.fill_from_cache(ticket, cached, &mut events);
+
+    assert_eq!(message_ids(&state, GENERAL).unwrap(), [10]);
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(target(&state, GENERAL, TARGET), "from the file");
+}
+
+// Live messages wait behind a stale window; they are rows as soon as its page lands.
+#[test]
+fn a_held_replys_target_is_never_trimmed() {
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    state.windows.mark_stale(&mut Vec::new());
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(10, GENERAL, KEPT, Some(original(GENERAL, "kept"))),
+    );
+    assert_eq!(state.windows.held(general).len(), 1);
+    assert!(message_ids(&state, GENERAL).unwrap().is_empty());
+
+    churn(&mut state);
+
+    assert_eq!(state.windows.held(general).len(), 2);
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(target(&state, GENERAL, KEPT), "kept");
+    assert_eq!(target(&state, GENERAL, 13_001), "not loaded");
+}
+
+#[test]
+fn an_unsent_replys_target_is_never_trimmed() {
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(10, GENERAL, KEPT, Some(original(GENERAL, "kept"))),
+    );
+    let me = state.current_user().unwrap();
+    let unsent = Message {
+        kind: MessageType::Reply,
+        reference: Some(Box::new(MessageReference {
+            kind: MessageReferenceType::Default,
+            message_id: Some(Snowflake::new(KEPT)),
+            channel_id: Some(general),
+            guild_id: None,
+        })),
+        ..Message::pending(
+            Snowflake::new(20),
+            general,
+            Arc::new(me.user.clone()),
+            "hi".to_owned(),
+            0,
+        )
+    };
+    let now = state.now_millis();
+    state.queue(general, Arc::new(unsent), now, &mut Vec::new());
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": "10", "channel_id": GENERAL.to_string()}),
+    );
+
+    churn(&mut state);
+
+    assert_eq!(message_ids(&state, GENERAL).unwrap(), [9000]);
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(target(&state, GENERAL, KEPT), "kept");
+    assert_eq!(target(&state, GENERAL, 13_001), "not loaded");
+}
+
+#[test]
+fn a_shown_starters_target_is_never_trimmed() {
+    let answering = || reply_to(19, GENERAL, KEPT, Some(original(GENERAL, "kept")));
+    let sent_along = |state: &mut State| {
+        apply(state, "MESSAGE_CREATE", starter_row(Some(answering())));
+    };
+    let fetched = |state: &mut State| {
+        apply(state, "MESSAGE_CREATE", starter_row(None));
+        let thread = Snowflake::new(THREAD);
+        assert!(state.starter_to_fetch(thread).is_some());
+        let found = page(&[answering()]).remove(0);
+        state.settle_starter(
+            thread,
+            StarterFetch::Found(Box::new(found)),
+            &mut Vec::new(),
+        );
+    };
+    let cases: [(&str, &dyn Fn(&mut State)); 2] =
+        [("sent along", &sent_along), ("fetched", &fetched)];
+
+    for (name, bring) in cases {
+        let mut state = viewing(THREAD);
+        let general = Snowflake::new(GENERAL);
+        state.view_channel(general, &mut Vec::new());
+        bring(&mut state);
+        assert_eq!(target(&state, GENERAL, KEPT), "kept", "{name}");
+
+        churn(&mut state);
+
+        assert_eq!(state.windows.targets_len(general), 100, "{name}");
+        assert_eq!(target(&state, GENERAL, KEPT), "kept", "{name}");
+        assert_eq!(target(&state, GENERAL, 13_001), "not loaded", "{name}");
+    }
+}
+
+#[test]
+fn replies_naming_another_channel_dont_protect_this_ones_targets() {
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    state.view_channel(Snowflake::new(VOICE), &mut Vec::new());
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(10, GENERAL, KEPT, Some(original(GENERAL, "here"))),
+    );
+    apply(
+        &mut state,
+        "MESSAGE_DELETE",
+        json!({"id": "10", "channel_id": GENERAL.to_string()}),
+    );
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(20, VOICE, KEPT, Some(original(VOICE, "there"))),
+    );
+
+    churn(&mut state);
+
+    assert_eq!(state.windows.targets_len(general), 100);
+    assert_eq!(target(&state, GENERAL, KEPT), "not loaded");
+    assert_eq!(target(&state, VOICE, KEPT), "there");
 }
 
 #[test]
