@@ -31,8 +31,8 @@ public struct MessageActionItem: Equatable, Sendable, Identifiable {
 }
 
 /// What a message's hover bar and menu list, in the official client's order, and what each does.
-/// Akari's core decides what is allowed (`Store.messageActions`), asked every time: nothing
-/// announces a change.
+/// Akari's core decides what is allowed (`Store.messageActions`, asked with the row's own IDs
+/// every time: nothing announces a change); an action takes the IDs of the message the row shows.
 @MainActor
 public final class MessageActionsModel {
     /// Why an action failed, for one alert.
@@ -85,7 +85,6 @@ public final class MessageActionsModel {
         case bar, menu
     }
 
-    private let channelId: ChannelId
     private let store: Store
     private let account: Account
     private let copy: (String) -> Void
@@ -96,18 +95,17 @@ public final class MessageActionsModel {
     private let marking: (ChannelId, MessageId) -> (() -> Void)?
     private let failed: (Failure) -> Void
 
-    /// `channelId` is the list's; `copy` puts text on the host's pasteboard; `createThread` takes
-    /// the message's channel and the message, `viewThread` the thread and its parent; `marking`
-    /// shows a mark as unread at once and returns what takes it back.
+    /// `copy` puts text on the host's pasteboard; `createThread` takes the message's channel and
+    /// the message, `viewThread` the thread and its parent; `marking` shows a mark as unread at
+    /// once and returns what takes it back.
     public init(
-        channelId: ChannelId, store: Store, account: Account, copy: @escaping (String) -> Void,
+        store: Store, account: Account, copy: @escaping (String) -> Void,
         retry: @escaping (MessageId) -> Void, discard: @escaping (MessageId) -> Void,
         createThread: @escaping (ChannelId, MessageId) -> Void,
         viewThread: @escaping (ChannelId, ChannelId) -> Void,
         marking: @escaping (ChannelId, MessageId) -> (() -> Void)? = { _, _ in nil },
         failed: @escaping (Failure) -> Void
     ) {
-        self.channelId = channelId
         self.store = store
         self.account = account
         self.copy = copy
@@ -202,10 +200,8 @@ public final class MessageActionsModel {
 
     private struct Offer {
         var actions: MessageActions
-        var markUnread: Bool
         var failed: Bool
         var hasText: Bool
-        var viewsOwnThread: Bool
 
         var allowsAnything: Bool {
             MessageAction.allCases.contains { $0 != .more && $0 != .copyText && has($0) }
@@ -215,10 +211,10 @@ public final class MessageActionsModel {
             switch action {
             case .copyText: hasText
             case .retry: failed
-            case .markUnread: markUnread
+            case .markUnread: actions.markUnread
             case .copyLink: actions.copyLink
             case .createThread: actions.createThread
-            case .viewThread: actions.viewThread && !viewsOwnThread
+            case .viewThread: actions.viewThread
             case .delete: failed && actions.delete
             case .more: true
             // Their features aren't built yet.
@@ -229,19 +225,12 @@ public final class MessageActionsModel {
         }
     }
 
-    // A thread's starter row shows the parent's message: its text, link and thread are that
-    // one's, but Mark Unread is the thread's own.
+    // The core answers for a thread's starter row asked with the row's own IDs.
     private func offer(for row: MessageListModel.Row) -> Offer {
-        let shown = row.shown
-        let actions = store.messageActions(channelId: shown.channelId, messageId: shown.id)
         let own = row.message
-        let markUnread =
-            own.id == shown.id && own.channelId == shown.channelId
-            ? actions.markUnread
-            : store.messageActions(channelId: own.channelId, messageId: own.id).markUnread
         return Offer(
-            actions: actions, markUnread: markUnread, failed: own.delivery == .failed,
-            hasText: !shown.content.isEmpty, viewsOwnThread: shown.id.rawValue == channelId.rawValue)
+            actions: store.messageActions(channelId: own.channelId, messageId: own.id),
+            failed: own.delivery == .failed, hasText: !row.shown.content.isEmpty)
     }
 
     private func link(to message: Message) -> String {

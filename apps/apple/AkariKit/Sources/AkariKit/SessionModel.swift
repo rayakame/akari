@@ -914,7 +914,7 @@ public final class SessionModel {
         for list: MessageListModel, copy: @escaping (String) -> Void
     ) -> MessageActionsModel {
         MessageActionsModel(
-            channelId: list.channelId, store: store, account: account, copy: copy,
+            store: store, account: account, copy: copy,
             retry: { [composer = list.composer] id in Task { await composer.retry(id) } },
             discard: { [composer = list.composer] in composer.discard($0) },
             createThread: { [weak self] channel, message in
