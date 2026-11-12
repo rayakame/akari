@@ -1395,6 +1395,15 @@ impl Store {
         self.read(|inner| inner.state.reactions(channel, message))
     }
 
+    /// Whether the channel has a pin newer than the one the user last acknowledged: the dot
+    /// on the header's pins button. Never for a muted channel, or a thread the user hasn't
+    /// joined. `PinsUnreadChanged` says when a pin or an acknowledgement changed it; a mute
+    /// or a join comes with `GuildSettingsChanged` or `ChannelUpdated`.
+    pub fn pins_unread(&self, channel: ChannelId) -> bool {
+        let now = Timestamp::from_unix_millis(self.now_millis());
+        self.read(|inner| inner.state.pins_unread(channel, now))
+    }
+
     /// The message a reply answers, by the IDs [`Message::replied_to`] gives (the target's
     /// channel and its ID): as Discord sent it along with a reply, or as a load brought it,
     /// kept current by its edits and its deletion. `ReplyTargetChanged` says to read it again.

@@ -190,6 +190,7 @@ mod tests {
             rate_limit_per_user: 0,
             default_auto_archive_duration: None,
             last_message_id: None,
+            last_pin_timestamp: None,
             permission_overwrites: overwrites.into_boxed_slice(),
             recipients: Box::new([]),
             icon: None,

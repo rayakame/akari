@@ -169,6 +169,23 @@ impl Entities {
         self.guilds.insert(id, Arc::new(guild));
     }
 
+    // The official client's rule: the newest pin is past the one acknowledged, in a channel that
+    // can be unread (not muted, not a thread the user hasn't joined).
+    pub(crate) fn pins_unread(&self, channel: ChannelId, now: Timestamp) -> bool {
+        let Some(stored) = self.channels.get(&channel) else {
+            return false;
+        };
+        let Some(pinned) = stored.last_pin_timestamp else {
+            return false;
+        };
+        let unjoined = stored.thread.as_deref().is_some_and(|info| !info.joined());
+        if unjoined || self.channel_muted_at(channel, now) {
+            return false;
+        }
+        let acked = self.read_states.pins_acked(channel);
+        pinned.unix_millis() > acked.map_or(0, Timestamp::unix_millis)
+    }
+
     // A thread's own mute is on its member; neither a muted channel nor a muted category mutes it.
     pub(crate) fn channel_muted_at(&self, channel: ChannelId, now: Timestamp) -> bool {
         let Some(stored) = self.channels.get(&channel) else {
@@ -696,6 +713,20 @@ impl State {
         let implied = |channel: &Channel| channel.guild_id.is_some_and(|id| !kept.contains(&id));
         push_channel_changes(&old.channels, &next.channels, implied, events);
 
+        let now = Timestamp::from_unix_millis(self.now_millis());
+        let mut dots: Vec<ChannelId> = next
+            .channels
+            .keys()
+            .filter(|id| old.channels.contains_key(id))
+            .filter(|id| old.pins_unread(**id, now) != next.pins_unread(**id, now))
+            .copied()
+            .collect();
+        dots.sort_unstable();
+        events.extend(
+            dots.into_iter()
+                .map(|channel_id| StoreEvent::PinsUnreadChanged { channel_id }),
+        );
+
         if old.server_list() != next.server_list() {
             events.push(StoreEvent::ServerListChanged);
         }
@@ -871,10 +902,10 @@ impl State {
             }
             E::MessageAck(ack) => self.apply_ack(&ack),
             E::ChannelUnreadUpdate(update) => {
-                self.note_unreads(update.guild_id, &update.channel_unread_updates);
+                self.note_unreads(update.guild_id, &update.channel_unread_updates, events);
             }
             E::PassiveUpdateV2(update) => {
-                self.note_unreads(update.guild_id, &update.updated_channels);
+                self.note_unreads(update.guild_id, &update.updated_channels, events);
             }
             E::RelationshipAdd(relationship) => {
                 let user = relationship.id;
@@ -914,7 +945,47 @@ impl State {
                 }
             }
             E::MessageReactionAddMany(many) => self.reactions_added(*many, events),
-            E::ChannelPinsUpdate(_) | E::ChannelPinsAck(_) | E::Other(_) => {}
+            E::ChannelPinsUpdate(update) => {
+                self.changing_pins(update.channel_id, events, |state| {
+                    if let Some(stored) = state.entities.channels.get_mut(&update.channel_id)
+                        && stored.last_pin_timestamp != update.last_pin_timestamp
+                    {
+                        Arc::make_mut(stored).last_pin_timestamp = update.last_pin_timestamp;
+                    }
+                });
+            }
+            E::ChannelPinsAck(ack) => {
+                self.changing_pins(ack.channel_id, events, |state| {
+                    let newest = state
+                        .entities
+                        .channels
+                        .get(&ack.channel_id)
+                        .and_then(|stored| stored.last_pin_timestamp);
+                    // Without a time the official client takes it to be for the newest pin.
+                    let acked = ack.timestamp.filter(|time| time.unix_millis() > 0);
+                    if let Some(acked) = acked.or(newest) {
+                        state.entities.read_states.ack_pins(ack.channel_id, acked);
+                    }
+                });
+            }
+            E::Other(_) => {}
+        }
+    }
+
+    // Says so when the change moved the channel's pins dot.
+    fn changing_pins(
+        &mut self,
+        channel: ChannelId,
+        events: &mut Vec<StoreEvent>,
+        change: impl FnOnce(&mut Self),
+    ) {
+        let now = Timestamp::from_unix_millis(self.now_millis());
+        let before = self.entities.pins_unread(channel, now);
+        change(self);
+        if self.entities.pins_unread(channel, now) != before {
+            events.push(StoreEvent::PinsUnreadChanged {
+                channel_id: channel,
+            });
         }
     }
 
@@ -1079,7 +1150,10 @@ impl State {
             self.mark_channel(&next);
             self.threads.remove(&known);
             self.threads.add(&next);
-            self.entities.channels.insert(id, next.clone());
+            let stored = next.clone();
+            self.changing_pins(id, events, |state| {
+                state.entities.channels.insert(id, stored);
+            });
             events.push(StoreEvent::ChannelUpdated(next.clone()));
             if self.drop_stale_latest(id, known.last_message_id) {
                 self.reread_boxes(id, events);
@@ -1985,6 +2059,10 @@ impl State {
 
     pub(crate) fn permissions(&self, channel: ChannelId, now_millis: i64) -> Option<Permissions> {
         self.entities.permissions(channel, now_millis)
+    }
+
+    pub(crate) fn pins_unread(&self, channel: ChannelId, now: Timestamp) -> bool {
+        self.entities.pins_unread(channel, now)
     }
 
     pub(crate) fn reply_target(&self, channel: ChannelId, target: MessageId) -> ReplyTarget {

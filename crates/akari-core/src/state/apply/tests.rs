@@ -127,6 +127,9 @@ fn describe(event: &StoreEvent) -> String {
             channel_id.get(),
             target_id.get()
         ),
+        StoreEvent::PinsUnreadChanged { channel_id } => {
+            format!("PinsUnreadChanged({})", channel_id.get())
+        }
         StoreEvent::OlderThreadsChanged { parent_id } => {
             format!("OlderThreadsChanged({})", parent_id.get())
         }
@@ -1149,6 +1152,7 @@ mod embeds;
 mod expressions;
 mod forum;
 mod media;
+mod pins;
 mod reactions;
 mod read_states;
 mod replies;

@@ -143,6 +143,7 @@ mod tests {
             forum: None,
             flags: 0,
             last_message_id: None,
+            last_pin_timestamp: None,
             message_request: false,
             spam: false,
         })

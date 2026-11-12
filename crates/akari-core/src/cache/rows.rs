@@ -564,6 +564,7 @@ impl ChannelRow {
             rate_limit_per_user: self.rate_limit_per_user,
             default_auto_archive_duration: self.default_auto_archive_duration,
             last_message_id: snowflake(self.last_message_id),
+            last_pin_timestamp: None,
             permission_overwrites: self
                 .permission_overwrites
                 .into_iter()

@@ -212,6 +212,8 @@ pub struct Channel {
     /// The newest message. Forum and media channels keep their newest post's thread ID here,
     /// so it isn't a `MessageId`. It may be deleted already, and it never moves back.
     pub last_message_id: Option<Snowflake<GenericMarker>>,
+    /// When a message was last pinned here; see [`Store::pins_unread`](super::Store::pins_unread).
+    pub last_pin_timestamp: Option<Timestamp>,
     pub permission_overwrites: Box<[PermissionOverwrite]>,
     /// DM and group DM recipients without the current user; see `Store::user`.
     pub recipients: Box<[UserId]>,
@@ -1181,6 +1183,7 @@ mod tests {
             rate_limit_per_user: 0,
             default_auto_archive_duration: None,
             last_message_id: None,
+            last_pin_timestamp: None,
             permission_overwrites: Box::new([]),
             recipients: Box::new([]),
             icon: Some(hash.clone()),

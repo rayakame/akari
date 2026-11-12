@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::types::Channel;
 use crate::gateway::{MessageAck, ReadStateEntry, Relationship, RelationshipUpdate, Versioned};
-use crate::model::{ChannelId, MessageId, RelationshipType, Snowflake, UserId};
+use crate::model::{ChannelId, MessageId, RelationshipType, Snowflake, Timestamp, UserId};
 
 const CHANNEL: u8 = 0;
 
@@ -60,6 +60,8 @@ impl AckBody {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ReadStates {
     channels: HashMap<ChannelId, ReadState>,
+    // The pin time the user acknowledged per channel; none for a channel never acknowledged.
+    pin_acks: HashMap<ChannelId, Timestamp>,
     // The newest message counted per channel, so a repeated MESSAGE_CREATE adds nothing.
     counted: HashMap<ChannelId, MessageId>,
     blocked: HashSet<UserId>,
@@ -72,7 +74,15 @@ impl ReadStates {
         read_states: Versioned<ReadStateEntry>,
         relationships: Vec<Relationship>,
     ) -> Self {
+        let pin_acks = read_states
+            .entries
+            .iter()
+            .filter(|entry| entry.read_state_type == CHANNEL)
+            .filter_map(|entry| Some((entry.id.cast(), entry.last_pin_timestamp?)))
+            .filter(|(_, acked)| acked.unix_millis() > 0)
+            .collect();
         let mut next = Self {
+            pin_acks,
             channels: read_states
                 .entries
                 .into_iter()
@@ -114,7 +124,16 @@ impl ReadStates {
         true
     }
 
+    pub(crate) fn pins_acked(&self, channel: ChannelId) -> Option<Timestamp> {
+        self.pin_acks.get(&channel).copied()
+    }
+
+    pub(crate) fn ack_pins(&mut self, channel: ChannelId, pinned: Timestamp) {
+        self.pin_acks.insert(channel, pinned);
+    }
+
     pub(crate) fn forget(&mut self, channel: ChannelId) {
+        self.pin_acks.remove(&channel);
         self.channels.remove(&channel);
         self.counted.remove(&channel);
     }
