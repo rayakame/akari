@@ -149,6 +149,22 @@ Folder As Read" send `POST /read-states/ack-bulk`, answered 204:
   documents no limit. One mark-as-read gave 254 MESSAGE_ACK events in another session, which
   points to chunks.
 
+**Mark Unread** (a message's menu and hover bar, Alt+click). From the code read of canary
+671549 (module 439147), not observed:
+
+- `POST /channels/{channel_id}/messages/{message_id}/ack` with the body
+  `{"manual":true,"mention_count":N}` and nothing else: no `token`, no `last_viewed`, no
+  `flags`, also in a thread.
+- `message_id` is the newest *loaded* message older than the chosen one. With none loaded it is
+  the chosen ID's timestamp minus one millisecond, as a snowflake with only a timestamp.
+- `N` is the number of loaded messages past that ID that mention the user (directly, through
+  @everyone or @here, or through a role; suppress settings don't count), also in a DM, where
+  Discord itself counts every message.
+- In a thread it first opens an archived one and joins one the user hasn't joined
+  (`location=Mark%20Unread`).
+- Nothing is dispatched locally; the read state follows the gateway's manual MESSAGE_ACK. What
+  keeps the open channel from being acked again afterwards wasn't read.
+
 ## How Akari acks
 
 Akari acks what the user reads and marks channels and servers read, with the routes, body and
@@ -162,7 +178,8 @@ its own, as the official client acks both panes whichever was clicked last (obse
 2026-10-17). Never for one that merely receives messages, and never in answer to a MESSAGE_ACK
 from elsewhere. A channel the host names again while it's being read reads nothing new: only
 its list growing does, so the other pane scrolling away and back doesn't ack a channel marked
-unread on another device meanwhile. Since a READY, each channel named counts as new once. The macOS app names a channel only while the session is online, the app is
+unread meanwhile. A channel marked unread while it is being read, here or on another device, isn't
+read at all, growing or not, until it is left ([Mark Unread](#mark-unread)). Since a READY, each channel named counts as new once. The macOS app names a channel only while the session is online, the app is
 active, the window is key and visible, the channel's list is at the present's bottom with its
 refresh after READY in, and the user is engaged: opening the channel, a click or a key press in
 the window engages; the window losing key, the app going inactive, the window being minimized,
@@ -258,14 +275,47 @@ same position ([MESSAGE_ACK](#message_ack)). The echo of an ack that a READY's s
 with READY's mention count ([below](#acks-from-elsewhere-and-ready)) sets the count at its
 position too.
 
+### Mark Unread
+
+`Account::mark_unread(channel, message)` sends the official client's request (above): the same
+message ID, count and body. It is refused without a request where the message's actions don't
+offer it (`MessageActions::mark_unread`).
+
+- **Threads.** An archived thread is opened first with `PATCH /channels/{id}` and
+  `{"archived":false}` (the documented Modify Channel; the client's own body wasn't read, not
+  observed), an unjoined one joined with `location=Mark%20Unread`. If either fails, nothing is
+  marked.
+- **The store** takes the mark at once, unlike the official client, which waits for the
+  gateway: the read state goes to the request's message ID and count, with `BadgeChanged` and
+  the guild's badge. The echo, a manual MESSAGE_ACK with the same values, then changes nothing.
+- **The request** goes through the ack queue: alone, at once, after the request on its way, so
+  Discord gets an ack sent just before and the mark in that order. A pending ack for the channel
+  that hasn't gone out is dropped for it, and an ack made after an unsent mark takes the mark's
+  place: the later one wins. A 429 or a transient error retries it like any ack; the call
+  resolves when Discord took it.
+- **An ack's echo** (a plain MESSAGE_ACK) for the channel is left out while its mark is pending
+  or on its way: it would show the channel read until the mark's own echo.
+- **Refused** (any other error), the read state goes back to what it was before the mark, or
+  before the unsent ack the mark replaced, while the store still holds what the mark left, and
+  the call returns Discord's error.
+- **A READY** before the mark went out keeps it only if Discord's position is still the one the
+  channel had before the mark; the store shows READY's state until the mark's echo.
+- **Reading.** A channel marked unread while the host names it as read (here, or by a manual
+  MESSAGE_ACK from another device) is held: neither naming it again nor its list growing reads
+  it. The hold ends when the host leaves the channel out of `set_reading` (the user left it,
+  scrolled away, or the window lost key; the core's own stop at a connection drop doesn't
+  count), when the user marks it read or sends a message there, when it is read on another
+  device, or when the mark is refused. Akari's rule: what the official client does here wasn't
+  read.
+
 ### Acks from elsewhere and READY
 
 When the user marks a channel unread on another device, or reads it there while Akari is
 away, one of Akari's acks for the channel may still be pending (waiting for its turn or a
 retry, or on its way), and sending it afterwards would undo that:
 
-- **A manual MESSAGE_ACK** (mark as unread elsewhere) drops the channel's pending ack, also one
-  on its way, whose answer then changes nothing.
+- **A manual MESSAGE_ACK** (mark as unread elsewhere, or the echo of Akari's own) drops the
+  channel's pending ack, also one on its way, whose answer then changes nothing.
 - **At a READY**, the acks pending from before it wait until READY is in. Each then goes out
   only if READY still has the position the channel had before Akari's ack; any other position
   means the channel was read or marked unread elsewhere meanwhile, and the ack is dropped. A

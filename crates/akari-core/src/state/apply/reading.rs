@@ -11,7 +11,7 @@ use crate::state::badges::Dirty;
 use crate::state::events::StoreEvent;
 use crate::state::read_states::{Ack, AckBody, ReadState};
 use crate::state::settings::NotificationLevel;
-use crate::state::types::{Channel, ThreadInfo};
+use crate::state::types::{Channel, Message, ThreadInfo};
 
 const MENTION_ON_ALL_MESSAGES: u64 = 1 << 5;
 // A channel and the thread beside it in the split view.
@@ -25,6 +25,21 @@ pub(super) struct Reading {
     seen: Option<MessageId>,
     // Read since the last READY: setting it again reads nothing.
     read: bool,
+}
+
+// A channel marked unread locally: where its position went, and the count sent with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Unread {
+    pub(crate) position: MessageId,
+    pub(crate) mentions: u32,
+    pub(crate) before: Option<ReadState>,
+    pub(crate) after: Option<ReadState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct UnreadNeeds {
+    pub(crate) unarchive: bool,
+    pub(crate) join: bool,
 }
 
 impl Entities {
@@ -129,6 +144,7 @@ impl State {
                 && self.entities.read_states.read_up_to(channel.id, message.id)
             {
                 self.post_ack_moved(channel.id);
+                self.release(channel.id);
             }
             return;
         }
@@ -247,7 +263,123 @@ impl State {
         if self.entities.read_states.ack(ack, newest, recount) {
             self.dirty.channel(ack.channel_id);
             self.post_ack_moved(ack.channel_id);
+            if !ack.manual {
+                self.release(ack.channel_id);
+            }
         }
+        if ack.manual && self.reads(ack.channel_id) {
+            self.hold(ack.channel_id);
+        }
+    }
+
+    fn reads(&self, channel: ChannelId) -> bool {
+        self.reading
+            .iter()
+            .any(|reading| reading.channel == channel)
+    }
+
+    fn hold(&mut self, channel: ChannelId) {
+        if !self.held.contains(&channel) {
+            self.held.push(channel);
+        }
+    }
+
+    fn release(&mut self, channel: ChannelId) {
+        self.held.retain(|held| *held != channel);
+    }
+
+    // Module 439147: the position goes to the newest loaded message before `message`, else a
+    // millisecond before it, with the loaded messages past it that mention the user.
+    pub(crate) fn mark_unread(
+        &mut self,
+        channel: ChannelId,
+        message: MessageId,
+        now_millis: i64,
+        events: &mut Vec<StoreEvent>,
+    ) -> Option<Unread> {
+        if !self
+            .message_actions(channel, message, now_millis)
+            .mark_unread
+        {
+            return None;
+        }
+        let loaded = self.windows.messages(channel);
+        let position = loaded
+            .iter()
+            .map(|loaded| loaded.id)
+            .filter(|id| *id < message)
+            .max()
+            .unwrap_or_else(|| MessageId::from_unix_millis(message.unix_millis() - 1, 0));
+        let mentions = loaded
+            .iter()
+            .filter(|loaded| loaded.id > position && self.mentions_me(loaded))
+            .count();
+        let mentions = u32::try_from(mentions).unwrap_or(u32::MAX);
+        let before = self.entities.read_states.get(channel);
+        self.apply_ack(&MessageAck {
+            ack_type: 0,
+            channel_id: channel,
+            message_id: position.cast(),
+            manual: true,
+            mention_count: Some(mentions),
+            version: 0,
+        });
+        self.refresh_badges(now_millis, events);
+        Some(Unread {
+            position,
+            mentions,
+            before,
+            after: self.entities.read_states.get(channel),
+        })
+    }
+
+    // Mark Unread opens an archived thread and joins an unjoined one first.
+    pub(crate) fn unread_needs(
+        &self,
+        channel: ChannelId,
+        message: MessageId,
+        now_millis: i64,
+    ) -> Option<UnreadNeeds> {
+        if !self
+            .message_actions(channel, message, now_millis)
+            .mark_unread
+        {
+            return None;
+        }
+        let thread = self.entities.channels.get(&channel)?.thread.as_deref();
+        Some(UnreadNeeds {
+            unarchive: thread.is_some_and(|info| info.archived),
+            join: thread.is_some_and(|info| !info.joined()),
+        })
+    }
+
+    pub(crate) fn mentions_me(&self, message: &Message) -> bool {
+        let Some(me) = self.entities.me() else {
+            return false;
+        };
+        if message.mention_everyone || message.mentions.iter().any(|user| user.id == me) {
+            return true;
+        }
+        !message.mention_roles.is_empty()
+            && self
+                .entities
+                .channels
+                .get(&message.channel_id)
+                .and_then(|channel| channel.guild_id)
+                .and_then(|guild| self.current_member(guild))
+                .is_some_and(|member| {
+                    member
+                        .roles
+                        .iter()
+                        .any(|role| message.mention_roles.contains(role))
+                })
+    }
+
+    // The connection dropped: nothing is read until the host says so again, and a channel the
+    // user marked unread stays held, since they didn't leave it.
+    pub(crate) fn stop_reading(&mut self, events: &mut Vec<StoreEvent>) {
+        self.reading.clear();
+        self.refresh_badges(self.now_millis(), events);
     }
 
     // CHANNEL_UNREAD_UPDATE and PASSIVE_UPDATE_V2 come once, when a channel turns unread, so
@@ -321,6 +453,7 @@ impl State {
         events: &mut Vec<StoreEvent>,
     ) -> Vec<Ack> {
         let before = std::mem::take(&mut self.reading);
+        self.held.retain(|held| channels.contains(held));
         for &channel in channels {
             if self.reading.len() == READING_LIMIT {
                 break;
@@ -351,6 +484,9 @@ impl State {
                     continue;
                 }
                 self.reading[index].read = true;
+                if self.held.contains(&channel) {
+                    continue;
+                }
                 if self.is_forum(channel) {
                     acks.extend(self.read_forum(channel));
                 } else {
@@ -367,6 +503,9 @@ impl State {
     pub(super) fn follow_reading(&mut self) {
         for index in 0..self.reading.len() {
             let Reading { channel, seen, .. } = self.reading[index];
+            if self.held.contains(&channel) {
+                continue;
+            }
             if self.is_forum(channel) {
                 if let Some(ack) = self.read_forum(channel) {
                     self.due.retain(|due| due.channel != channel);
@@ -497,6 +636,7 @@ impl State {
             return false;
         }
         self.entities.read_states.restore(channel, undo);
+        self.release(channel);
         self.post_ack_moved(channel);
         if let Some(journal) = &mut self.journal {
             journal.acks.retain(|(journaled, _)| *journaled != channel);
@@ -546,6 +686,7 @@ impl State {
 
     // Every local ack: a READY being prepared gets it too.
     fn read_up_to(&mut self, channel: ChannelId, cursor: Option<MessageId>) {
+        self.release(channel);
         if self.entities.read_states.read(channel, cursor) {
             self.dirty.channel(channel);
             self.post_ack_moved(channel);
