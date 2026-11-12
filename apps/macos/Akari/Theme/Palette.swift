@@ -67,6 +67,8 @@ enum Palette {
         "interactiveTextActive", dark: "#fbfbfb", light: "#28282d")
     static let hoverBackground = token(
         "hoverBackground", dark: "#97979f", light: "#97979f", alpha: (0.12, 0.12))
+    static let interactiveBackgroundActive = token(
+        "interactiveBackgroundActive", dark: "#97979f", light: "#97979f", alpha: (0.16, 0.16))
     static let selectedBackground = token(
         "selectedBackground", dark: "#97979f", light: "#97979f", alpha: (0.20, 0.24))
     // Discord's icon-only buttons (a modal's X): hovered and pressed fills, and the border both

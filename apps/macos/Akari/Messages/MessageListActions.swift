@@ -35,9 +35,13 @@ protocol MessageListActions: AnyObject {
     func openGuild(_ id: GuildId)
     // A masked link may ask first (D65).
     func openLink(_ url: URL, masked: Bool)
-    // A message's "Create Thread": whether it shows, and the form it opens.
-    func canCreateThread(from message: MessageId) -> Bool
-    func createThread(from message: MessageId)
+    // A message's hover bar and menu, asked when they show: the model's words and order.
+    func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem]
+    func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]]
+    // A button's or an item's click, with Shift as it was then.
+    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool)
+    // An Option-click on a message.
+    func markUnread(from row: MessageListModel.Row)
     // A clicked emoji's or sticker's popout; nil where there's none to show.
     func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel?
     // A file's name, or media the viewer can't show: the original in the browser.
@@ -60,8 +64,10 @@ protocol MessageListActions: AnyObject {
 }
 
 extension MessageListActions {
-    func canCreateThread(from message: MessageId) -> Bool { false }
-    func createThread(from message: MessageId) {}
+    func messageBar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem] { [] }
+    func messageMenu(for row: MessageListModel.Row) -> [[MessageActionItem]] { [] }
+    func perform(_ action: MessageAction, on row: MessageListModel.Row, shift: Bool) {}
+    func markUnread(from row: MessageListModel.Row) {}
     func expressionPopout(_ target: ExpressionTarget) -> ExpressionPopoutModel? { nil }
     func openMedia(_ key: ImageKey) {}
     func viewer(_ items: [ViewerModel.Item], at index: Int, of row: MessageListModel.Row) -> ViewerModel? {

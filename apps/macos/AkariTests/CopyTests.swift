@@ -97,7 +97,7 @@ struct CopyTests {
     @Test
     func copyTextInTheMenuCopiesTheContent() throws {
         let message = named(row(1, at: now, content: "**bold** and <@1>")).message
-        let items = MessageMenu.items(for: message, pasteboard: pasteboard)
+        let items = MessageMenu.copyText(message, pasteboard: pasteboard)
         let copy = try #require(items.first { $0.title == "Copy Text" })
 
         let menu = NSMenu()
@@ -111,13 +111,13 @@ struct CopyTests {
     func copyTextIsntOfferedWithoutText() {
         let message = row(1, at: now, content: "", attachments: ["a.png"]).message
 
-        #expect(MessageMenu.items(for: message, pasteboard: pasteboard).isEmpty)
+        #expect(MessageMenu.copyText(message, pasteboard: pasteboard).isEmpty)
     }
 
     @Test
     func theTextsMenuOffersCopyText() throws {
         let view = shown("hello")
-        view.messageMenu = { MessageMenu.items(for: row(1, at: self.now).message) }
+        view.messageMenu = { MessageMenu.copyText(row(1, at: self.now).message) }
         let event = try #require(
             NSEvent.mouseEvent(
                 with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,

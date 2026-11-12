@@ -179,6 +179,10 @@ nonisolated final class BrowserStore: Store, @unchecked Sendable {
         parentId == FakeBrowserStore.parent ? creation : ThreadCreation(public: false, private: false)
     }
 
+    override func messageActions(channelId: ChannelId, messageId: MessageId) -> MessageActions {
+        testMessageActions(createThread: canStartThread(channelId: channelId, messageId: messageId))
+    }
+
     override func canStartThread(channelId: ChannelId, messageId: MessageId) -> Bool {
         creation.public && messageId == Self.lineIds[0]
     }
