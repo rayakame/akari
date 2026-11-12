@@ -60,7 +60,6 @@ impl AckBody {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ReadStates {
     channels: HashMap<ChannelId, ReadState>,
-    // The pin time the user acknowledged per channel; none for a channel never acknowledged.
     pin_acks: HashMap<ChannelId, Timestamp>,
     // The newest message counted per channel, so a repeated MESSAGE_CREATE adds nothing.
     counted: HashMap<ChannelId, MessageId>,

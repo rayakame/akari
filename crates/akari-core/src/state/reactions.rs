@@ -206,7 +206,6 @@ impl Message {
     }
 }
 
-// Patches the copy in place, when the changes change it.
 pub(crate) fn react(copy: &mut Arc<Message>, changes: &[ReactionChange]) -> bool {
     let Some(next) = copy.reacted(changes) else {
         return false;
