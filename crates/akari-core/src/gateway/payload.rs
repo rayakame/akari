@@ -4,13 +4,16 @@ use serde_json::value::RawValue;
 
 use super::dispatch::{
     ChannelDelete, ForumUnreads, GuildDelete, GuildEmojisUpdate, GuildRoleDelete, GuildRoleEvent,
-    MessageDelete, MessageDeleteBulk, ReadySupplemental, ThreadListSync, ThreadMemberUpdate,
-    ThreadMembersUpdate,
+    MessageDelete, MessageDeleteBulk, MessageReaction, MessageReactionAddMany,
+    MessageReactionRemoveAll, MessageReactionRemoveEmoji, ReadySupplemental, ThreadListSync,
+    ThreadMemberUpdate, ThreadMembersUpdate,
 };
 use super::guild::GatewayGuild;
 use super::hello::Hello;
 use super::partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
-use super::read_state::{ChannelUnreadUpdate, MessageAck, PassiveUpdateV2};
+use super::read_state::{
+    ChannelPinsAck, ChannelPinsUpdate, ChannelUnreadUpdate, MessageAck, PassiveUpdateV2,
+};
 use super::ready::Ready;
 use super::relationship::{Relationship, RelationshipRemove, RelationshipUpdate};
 use super::settings::{NotificationSettings, SettingsProtoUpdate, UserGuildSettings};
@@ -66,6 +69,15 @@ pub enum DispatchEvent {
     MessageUpdate(Box<MessageUpdate>),
     MessageDelete(MessageDelete),
     MessageDeleteBulk(MessageDeleteBulk),
+    MessageReactionAdd(Box<MessageReaction>),
+    MessageReactionRemove(Box<MessageReaction>),
+    MessageReactionRemoveAll(MessageReactionRemoveAll),
+    MessageReactionRemoveEmoji(Box<MessageReactionRemoveEmoji>),
+    /// Reactions added to a busy message, sent only with a capability Akari doesn't name.
+    MessageReactionAddMany(Box<MessageReactionAddMany>),
+    ChannelPinsUpdate(ChannelPinsUpdate),
+    /// The user saw a channel's pins, here or elsewhere.
+    ChannelPinsAck(ChannelPinsAck),
     /// The answer to op 28.
     ForumUnreads(ForumUnreads),
     UserUpdate(Box<UserUpdate>),
@@ -111,6 +123,13 @@ impl DispatchEvent {
             Self::MessageUpdate(_) => "MESSAGE_UPDATE",
             Self::MessageDelete(_) => "MESSAGE_DELETE",
             Self::MessageDeleteBulk(_) => "MESSAGE_DELETE_BULK",
+            Self::MessageReactionAdd(_) => "MESSAGE_REACTION_ADD",
+            Self::MessageReactionRemove(_) => "MESSAGE_REACTION_REMOVE",
+            Self::MessageReactionRemoveAll(_) => "MESSAGE_REACTION_REMOVE_ALL",
+            Self::MessageReactionRemoveEmoji(_) => "MESSAGE_REACTION_REMOVE_EMOJI",
+            Self::MessageReactionAddMany(_) => "MESSAGE_REACTION_ADD_MANY",
+            Self::ChannelPinsUpdate(_) => "CHANNEL_PINS_UPDATE",
+            Self::ChannelPinsAck(_) => "CHANNEL_PINS_ACK",
             Self::ForumUnreads(_) => "FORUM_UNREADS",
             Self::UserUpdate(_) => "USER_UPDATE",
             Self::UserGuildSettingsUpdate(_) => "USER_GUILD_SETTINGS_UPDATE",
@@ -250,6 +269,21 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
         "MESSAGE_UPDATE" => parse(json).map(|update| E::MessageUpdate(Box::new(update))),
         "MESSAGE_DELETE" => parse(json).map(E::MessageDelete),
         "MESSAGE_DELETE_BULK" => parse(json).map(E::MessageDeleteBulk),
+        "MESSAGE_REACTION_ADD" => {
+            parse(json).map(|reaction| E::MessageReactionAdd(Box::new(reaction)))
+        }
+        "MESSAGE_REACTION_REMOVE" => {
+            parse(json).map(|reaction| E::MessageReactionRemove(Box::new(reaction)))
+        }
+        "MESSAGE_REACTION_REMOVE_ALL" => parse(json).map(E::MessageReactionRemoveAll),
+        "MESSAGE_REACTION_REMOVE_EMOJI" => {
+            parse(json).map(|removal| E::MessageReactionRemoveEmoji(Box::new(removal)))
+        }
+        "MESSAGE_REACTION_ADD_MANY" => {
+            parse(json).map(|many| E::MessageReactionAddMany(Box::new(many)))
+        }
+        "CHANNEL_PINS_UPDATE" => parse(json).map(E::ChannelPinsUpdate),
+        "CHANNEL_PINS_ACK" => parse(json).map(E::ChannelPinsAck),
         "FORUM_UNREADS" => parse(json).map(E::ForumUnreads),
         "USER_UPDATE" => parse(json).map(|update| E::UserUpdate(Box::new(update))),
         "USER_GUILD_SETTINGS_UPDATE" => {

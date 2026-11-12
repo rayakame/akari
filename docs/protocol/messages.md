@@ -295,7 +295,8 @@ What a custom emoji's or a sticker's popout shows comes partly from the store, p
 Discord (canary 649848's calls):
 
 - The user's servers carry their custom emoji in READY and GUILD_CREATE (`emojis`) and
-  GUILD_EMOJIS_UPDATE (the whole list); akari-core keeps each server's emoji IDs, sorted
+  GUILD_EMOJIS_UPDATE (the whole list); akari-core decodes them with their names and
+  availability ([models.md](models.md)) and keeps each server's emoji IDs, sorted
   (`Store::emoji_guild`), in memory and in the disk cache's guild row.
 - `GET /emojis/{emoji.id}/source` (`Account::emoji_source`): `{type: "GUILD" | "APPLICATION",
   guild, application}`. A guild is answered only while it's discoverable; its object has `id`,

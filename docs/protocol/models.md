@@ -166,7 +166,13 @@ Sources: [guild object](https://docs.discord.food/resources/guild#guild-structur
 - Members: `user` is missing on the member inside MESSAGE_CREATE, and deduplicated READY
   payloads replace it with `user_id`. `GuildMember` carries both as `Option`. `joined_at`
   is an `Option` too, as a precaution, although the reference marks it required.
-- Not modeled: emojis, stickers, soundboard sounds, verification and MFA levels, the
+- `GuildEmoji` is a gateway guild's and GUILD_EMOJIS_UPDATE's
+  [emoji](https://docs.discord.food/resources/emoji#emoji-object): `id`, `name` (`null` for a
+  deleted one), `animated`, `available` (`false` when the guild lost the boosts the emoji
+  needs; missing counts as `true`), `managed` and `roles` (the roles that may use it; empty
+  for everyone). Only `id` is required; a field in another shape is its default, an entry
+  without an ID is skipped. `require_colons` and `user` aren't read.
+- Not modeled: stickers, soundboard sounds, verification and MFA levels, the
   explicit content filter, system channel flags, member `avatar_decoration_data`,
   `collectibles`, `display_name_styles`, `bio`, `unusual_dm_activity_until`, `permissions`.
 
@@ -206,15 +212,19 @@ Sources: [message object](https://docs.discord.food/resources/message#message-st
 - Embed `type` stays a string: 15 kinds are documented, and some are system-only
   ([embed type](https://docs.discord.food/resources/message#embed-type)). `image`,
   `thumbnail` and `video` share one media structure.
-- Reactions: `count` is normal and burst reactions together, and `burst_colors` are hex
-  strings like `"#f0ca59"`
+- Reactions: `count` is normal and burst reactions together, `count_details` has them apart
+  (`normal`, `burst`), `me` and `me_burst` say which of the two the user added, and
+  `burst_colors` are hex strings like `"#f0ca59"`
   ([reaction](https://docs.discord.food/resources/message#reaction-structure)). A deleted
-  custom emoji has `name: null`.
-- `nonce` (an integer or a string) isn't modeled; matching our sends to their echoes comes
-  with the REST client.
-- Not modeled: `message_snapshots`, `thread`, `components`, `poll`, `call`, `activity`,
-  `application`, `interaction_metadata`, `resolved`, `role_subscription_data`, `stickers`,
-  `mention_channels`, `potions`, `shared_client_theme`.
+  custom emoji has `name: null`. Only `emoji` is required: whether every source of messages
+  sends the details and the flags isn't known, so a missing or broken one is its default
+  (`count_details: None`, which leaves `count` as the normal count). The official client
+  reads the array the same way and keeps the server's order.
+- `nonce` is an integer or a string; Discord echoes it to the sender's sessions
+  ([messages.md](messages.md#sending)).
+- `thread` is the thread started from the message, with the user's thread member when joined.
+- Not modeled: `message_snapshots`, `components`, `poll`, `activity`, `interaction_metadata`,
+  `resolved`, `stickers`, `mention_channels`, `potions`, `shared_client_theme`.
 
 ## Open points
 

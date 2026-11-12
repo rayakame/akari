@@ -133,7 +133,7 @@ impl Guild {
     }
 }
 
-pub(crate) fn emoji_ids(emojis: &[model::EmojiRef]) -> Box<[EmojiId]> {
+pub(crate) fn emoji_ids(emojis: &[model::GuildEmoji]) -> Box<[EmojiId]> {
     let mut ids: Vec<EmojiId> = emojis.iter().map(|emoji| emoji.id).collect();
     ids.sort_unstable();
     ids.dedup();

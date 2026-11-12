@@ -15,6 +15,9 @@ const GLOBAL_WINDOW: Duration = Duration::from_secs(1);
 pub(crate) enum Method {
     Get,
     Post,
+    // No route sends one yet.
+    #[cfg_attr(not(test), expect(dead_code))]
+    Put,
     Patch,
     Delete,
 }
