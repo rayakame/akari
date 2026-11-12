@@ -171,7 +171,8 @@ Sources: [guild object](https://docs.discord.food/resources/guild#guild-structur
   deleted one), `animated`, `available` (`false` when the guild lost the boosts the emoji
   needs; missing counts as `true`), `managed` and `roles` (the roles that may use it; empty
   for everyone). Only `id` is required; a field in another shape is its default, an entry
-  without an ID is skipped. `require_colons` and `user` aren't read.
+  without an ID is skipped. `require_colons` and `user` aren't read. From the reference and
+  the code read of canary 671549, not observed.
 - Not modeled: stickers, soundboard sounds, verification and MFA levels, the
   explicit content filter, system channel flags, member `avatar_decoration_data`,
   `collectibles`, `display_name_styles`, `bio`, `unusual_dm_activity_until`, `permissions`.
@@ -222,7 +223,8 @@ Sources: [message object](https://docs.discord.food/resources/message#message-st
   custom emoji has `name: null`. Only `emoji` is required: whether every source of messages
   sends the details and the flags isn't known, so a missing or broken one is its default
   (`count_details: None`, which leaves `count` as the normal count). The official client
-  reads the array the same way and keeps the server's order.
+  reads the array the same way and keeps the server's order (from the code read of canary
+  671549, not observed).
 - `nonce` is an integer or a string; Discord echoes it to the sender's sessions
   ([messages.md](messages.md#sending)).
 - `thread` is the thread started from the message, with the user's thread member when joined.

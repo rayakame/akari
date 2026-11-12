@@ -123,7 +123,7 @@ A reply (type 19) and a context-menu command's result (23) name the message they
 `message_reference` and may carry it as `referenced_message`: the message, `null` for a deleted
 one, or no key when Discord didn't fetch it ([models.md](models.md)). The store keeps those
 messages apart from the replies, as the official client's ReferencedMessageStore does (module
-9842, canary 671549): a reply's record has only its reference (`Message::replied_to`), and
+9842; from the code read of canary 671549, not observed): a reply's record has only its reference (`Message::replied_to`), and
 `Store::reply_target(channel, target)` answers `Loaded(ReplyPreview)`, `Deleted` or `NotLoaded`.
 
 - A reply that arrives, live or on a page, sets its target: `Loaded` from the message sent
