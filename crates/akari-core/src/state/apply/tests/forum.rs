@@ -1880,14 +1880,16 @@ fn forum_with_an_opened_unread_post() -> State {
 }
 
 fn asked(state: &mut State) -> Vec<(u64, u64)> {
-    let mut asked = state.next_forum_unreads().map_or_else(Vec::new, |ask| {
-        assert_eq!(ask.guild.get(), G1);
-        assert_eq!(ask.forum.get(), FORUM);
-        ask.threads
-            .iter()
-            .map(|(post, ack)| (post.get(), ack.get()))
-            .collect()
-    });
+    let mut asked = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .map_or_else(Vec::new, |ask| {
+            assert_eq!(ask.guild.get(), G1);
+            assert_eq!(ask.forum.get(), FORUM);
+            ask.threads
+                .iter()
+                .map(|(post, ack)| (post.get(), ack.get()))
+                .collect()
+        });
     asked.sort_unstable();
     asked
 }
@@ -1913,10 +1915,16 @@ fn new_counts(state: &State) -> Vec<(u64, Option<u32>)> {
 fn unread_opened_posts_are_asked_once_a_connection() {
     let mut state = forum_with_an_opened_unread_post();
 
-    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    let ask = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .expect("an ask");
+    assert_eq!(
+        ask.threads,
+        [(Snowflake::new(OLD), Snowflake::new(OLD + 2))]
+    );
     assert_eq!(asked(&mut state), [], "asked already");
 
-    state.forget_forum_unreads(&[(Snowflake::new(OLD), Snowflake::new(OLD + 2))]);
+    state.forget_forum_unreads(ask.id);
     assert_eq!(asked(&mut state), [(OLD, OLD + 2)], "the frame never left");
 
     apply(&mut state, "READY", ready_value());
@@ -2283,8 +2291,10 @@ fn a_late_answer_for_an_older_ask_is_dropped() {
 #[test]
 fn a_frame_that_never_left_leaves_no_answer_to_wait_for() {
     let mut state = forum_with_an_opened_unread_post();
-    asked(&mut state);
-    state.forget_forum_unreads(&[(Snowflake::new(OLD), Snowflake::new(OLD + 2))]);
+    let ask = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .expect("an ask");
+    state.forget_forum_unreads(ask.id);
     assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
 
     apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
@@ -2471,6 +2481,75 @@ fn an_answer_takes_no_frame_that_does_not_name_its_posts() {
     apply(&mut state, "FORUM_UNREADS", unreads(&[(MIDDLE, Some(1))]));
 
     assert_eq!(new_counts(&state), [(OLD, Some(3)), (MIDDLE, Some(1))]);
+}
+
+// The frame an answer passes over was never answered: its posts go out with the next ask.
+#[test]
+fn a_frame_an_answer_passes_over_is_asked_again() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "MESSAGE_CREATE", message(MIDDLE + 100, MIDDLE));
+    assert_eq!(asked(&mut state), [(MIDDLE, MIDDLE + 5)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(MIDDLE, Some(1))]));
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(3)), (MIDDLE, Some(1))]);
+}
+
+// A gateway that never answers isn't asked forever: a post given up once is asked once more.
+#[tokio::test(start_paused = true)]
+async fn a_post_given_up_twice_is_left_for_the_connection() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+
+    assert_eq!(asked(&mut state), []);
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(
+        asked(&mut state),
+        [(OLD, OLD + 3)],
+        "a new ack is a new question"
+    );
+}
+
+// A send that failed late forgets its own frame, not a newer one with the same posts.
+#[test]
+fn a_frame_is_forgotten_by_what_it_is_not_by_its_posts() {
+    let mut state = forum_with_an_opened_unread_post();
+    let first = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .expect("an ask");
+    apply(&mut state, "RESUMED", json!({}));
+    let second = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .expect("asked again");
+    assert_eq!(first.threads, second.threads);
+
+    state.forget_forum_unreads(first.id);
+
+    assert_eq!(asked(&mut state), []);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+// Another forum's answer, even one that names no post, is not this forum's frame's.
+#[test]
+fn another_forums_refusal_takes_no_frame() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    let mut refused = unreads(&[]);
+    refused["channel_id"] = (FORUM + 500).to_string().into();
+    refused["permission_denied"] = true.into();
+
+    apply(&mut state, "FORUM_UNREADS", refused);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
 }
 
 // Only a count that changed, or a post that may now show one, is worth a read.

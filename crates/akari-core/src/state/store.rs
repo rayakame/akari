@@ -608,13 +608,15 @@ impl Store {
         });
     }
 
-    pub(crate) fn next_forum_unreads(&self) -> Option<ForumUnreadsAsk> {
-        self.write("forum unreads", |inner, _| inner.state.next_forum_unreads())
+    pub(crate) fn next_forum_unreads(&self, wait: Duration) -> Option<ForumUnreadsAsk> {
+        self.write("forum unreads", |inner, _| {
+            inner.state.next_forum_unreads(wait)
+        })
     }
 
-    pub(crate) fn forget_forum_unreads(&self, threads: &[(ChannelId, MessageId)]) {
+    pub(crate) fn forget_forum_unreads(&self, id: u64) {
         self.write("forum unreads", |inner, _| {
-            inner.state.forget_forum_unreads(threads);
+            inner.state.forget_forum_unreads(id);
         });
     }
 

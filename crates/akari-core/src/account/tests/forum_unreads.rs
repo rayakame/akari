@@ -53,9 +53,22 @@ struct Online {
 }
 
 async fn online_with(posts: &[u64], acked: &[u64]) -> Online {
+    online_waiting(posts, acked, Timing::default().forum_unreads_wait).await
+}
+
+async fn online_waiting(posts: &[u64], acked: &[u64], forum_unreads_wait: Duration) -> Online {
     let mut fake = FakeGateway::start().await;
     let server = MockServer::start().await;
-    let account = start_with(&fake, &server);
+    let account = Account::start(
+        crate::gateway::fake::client_with(fake.url(), format!("{}/api/v9/", server.uri())),
+        Token::new(TOKEN.to_owned()),
+        Timing {
+            forum_unreads_wait,
+            ..timing()
+        },
+        DEFAULT_LIMITS,
+    )
+    .unwrap();
     let subscription = account.store().subscribe();
     account.connect().unwrap();
     let mut connection = fake.accept().await;
@@ -222,6 +235,16 @@ async fn an_answer_replayed_by_a_resume_takes_no_frame_in_flight() {
     assert_eq!(counts[0].count, Some(2));
 }
 
+// Nobody has to open or refresh anything for it: the frame's wait over, the ask goes out again.
+#[tokio::test]
+async fn a_frame_without_an_answer_is_asked_again_by_itself() {
+    let mut online = online_waiting(&[FIRST], &[FIRST], Duration::from_millis(100)).await;
+    online.account.open_forum(Some(forum()));
+    assert_eq!(online.asked().await, [(FIRST, FIRST + 2)]);
+
+    assert_eq!(online.asked().await, [(FIRST, FIRST + 2)]);
+}
+
 // Not online, nothing is marked as asked, whatever a send would answer: the posts are still
 // to ask the moment the forum was opened.
 #[tokio::test]
@@ -233,9 +256,11 @@ async fn a_forum_opened_while_not_online_marks_nothing_asked() {
 
     online.account.open_forum(Some(forum()));
     let store = online.account.store();
-    let waiting = store.next_forum_unreads().map(|ask| ask.threads);
-    assert_eq!(waiting, Some(vec![post]), "still to ask");
-    store.forget_forum_unreads(&[post]);
+    let waiting = store
+        .next_forum_unreads(Duration::from_secs(30))
+        .expect("still to ask");
+    assert_eq!(waiting.threads, [post]);
+    store.forget_forum_unreads(waiting.id);
 
     online.connection = online.fake.accept().await;
     assert_eq!(online.connection.handshake(60_000).await["op"], 6);

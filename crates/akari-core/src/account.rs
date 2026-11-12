@@ -287,6 +287,7 @@ pub(crate) struct Shared {
     preparer: RwLock<Option<Arc<dyn MessagePreparer>>>,
     images: Arc<Images>,
     lookup_timeout: Duration,
+    forum_unreads_wait: Duration,
     // Wakes the post-data task when cards want their posts' first messages.
     previews: Arc<previews::Wake>,
 }
@@ -1039,7 +1040,8 @@ impl Shared {
         if !matches!(self.store.connection(), ConnectionState::Online) {
             return;
         }
-        let Some(ask) = self.store.next_forum_unreads() else {
+        let wait = self.forum_unreads_wait;
+        let Some(ask) = self.store.next_forum_unreads(wait) else {
             return;
         };
         let shared = self.clone();
@@ -1050,7 +1052,14 @@ impl Shared {
                 threads: ask.threads.clone(),
             };
             if shared.send(command).await.is_err() {
-                shared.store.forget_forum_unreads(&ask.threads);
+                shared.store.forget_forum_unreads(ask.id);
+                return;
+            }
+            // Nothing else asks again when the answer never comes.
+            let shared = Arc::downgrade(&shared);
+            tokio::time::sleep(wait + Duration::from_millis(50)).await;
+            if let Some(shared) = shared.upgrade() {
+                shared.ask_forum_unreads();
             }
         });
     }
@@ -1289,6 +1298,7 @@ impl Account {
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
         let images = Images::new(&client, user, store.clone(), rest.clone(), &runtime);
         let lookup_timeout = timing.lookup_timeout;
+        let forum_unreads_wait = timing.forum_unreads_wait;
         let scan_timing = scans::ScanTiming {
             wait: timing.scan_wait,
             jitter: timing.scan_jitter,
@@ -1327,6 +1337,7 @@ impl Account {
                 preparer: RwLock::new(None),
                 images,
                 lookup_timeout,
+                forum_unreads_wait,
                 previews: Arc::default(),
             }
         });

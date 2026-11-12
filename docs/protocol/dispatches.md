@@ -397,8 +397,13 @@ and a post's count is taken only if that frame is the post's newest ask and name
 post still has. So a post asked again with a newer ack takes only the answer to its newest ask,
 an answer that refuses or leaves a post out holds up no later one, and an answer no waiting
 frame names the posts of is dropped: one that comes twice never resets a count that messages
-raised since. A frame unanswered after 30 s is given up (a debug line) and its posts are asked
-again with the next ask; its answer, should it come, is dropped like any without a frame.
+raised since. A frame unanswered after 30 s is given up (a debug line), as is one an answer
+passes over, and its posts are asked again, by the account itself once the 30 s are over; a
+post given up twice is left for the connection, or until its ack moves. An answer that comes
+after its frame was given up is dropped while no other frame names its posts. *Not closed:* if
+the post's ack moved and its new ask is waiting by then, the late answer takes that frame and
+its count (for the older ack, so too high) stays until the ack moves again. Akari also takes an
+answer to come whole, never in parts: a second part would be nobody's.
 Nothing in the answer says which frame it is for (no ack, no nonce), only the order does, and
 a resume's replay breaks the order: from the connection's loss to RESUMED no answer is taken,
 and the frames unanswered at RESUMED are asked again. Afterwards a

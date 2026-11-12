@@ -97,6 +97,9 @@ pub(super) struct PostCounts {
     asked: HashMap<ChannelId, MessageId>,
     // The frames Discord hasn't answered, oldest first: it answers each once, in the order asked.
     unanswered: VecDeque<Frame>,
+    frames: u64,
+    // Posts of a frame given up: asked once more, not for ever.
+    given_up: HashSet<ChannelId>,
     // Between the connection's loss and RESUMED, when a resume replays dispatches.
     resuming: bool,
     // Forums whose posts' counts the current write changed.
@@ -106,15 +109,14 @@ pub(super) struct PostCounts {
 #[derive(Debug, PartialEq)]
 struct Frame {
     ask: ForumUnreadsAsk,
-    sent: Instant,
+    // When its answer is no longer waited for.
+    until: Instant,
 }
-
-// How long a frame's answer is waited for.
-const FORUM_UNREADS_WAIT: Duration = Duration::from_secs(30);
 
 /// An op 28 to send: posts of the open forum with the acks to count from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ForumUnreadsAsk {
+    pub(crate) id: u64,
     pub(crate) guild: GuildId,
     pub(crate) forum: ChannelId,
     pub(crate) threads: Vec<(ChannelId, MessageId)>,
@@ -858,8 +860,8 @@ impl State {
     }
 
     /// The open forum's posts to ask Discord's counts for, each once a connection, marked as
-    /// asked; `None` when there are none.
-    pub(crate) fn next_forum_unreads(&mut self) -> Option<ForumUnreadsAsk> {
+    /// asked; `None` when there are none. The answer is waited for for `wait`.
+    pub(crate) fn next_forum_unreads(&mut self, wait: Duration) -> Option<ForumUnreadsAsk> {
         self.give_up_forum_unreads();
         let forum = self.forum_list.as_ref()?.forum;
         let guild = self.entities.channels.get(&forum)?.guild_id?;
@@ -881,28 +883,29 @@ impl State {
             .map(|(_, post, ack)| (post, ack))
             .collect();
         self.post_counts.asked.extend(threads.iter().copied());
+        self.post_counts.frames += 1;
         let ask = ForumUnreadsAsk {
+            id: self.post_counts.frames,
             guild,
             forum,
             threads,
         };
         self.post_counts.unanswered.push_back(Frame {
             ask: ask.clone(),
-            sent: Instant::now(),
+            until: Instant::now() + wait,
         });
         Some(ask)
     }
 
     /// The frame never left: its posts may be asked again.
-    pub(crate) fn forget_forum_unreads(&mut self, threads: &[(ChannelId, MessageId)]) {
+    pub(crate) fn forget_forum_unreads(&mut self, id: u64) {
         let frames = &mut self.post_counts.unanswered;
-        if let Some(at) = frames
-            .iter()
-            .rposition(|frame| frame.ask.threads == threads)
-        {
-            frames.remove(at);
+        let Some(at) = frames.iter().rposition(|frame| frame.ask.id == id) else {
+            return;
+        };
+        if let Some(frame) = frames.remove(at) {
+            self.forget_asked(&frame.ask.threads);
         }
-        self.forget_asked(threads);
     }
 
     // A resume replays the answers missed before RESUMED: the frames still unanswered went into
@@ -918,22 +921,30 @@ impl State {
         self.post_counts.resuming = true;
     }
 
-    // Discord may never answer a frame: its posts are then asked again with the next ask.
     fn give_up_forum_unreads(&mut self) {
         let now = Instant::now();
         while let Some(frame) = self.post_counts.unanswered.front() {
-            if now.duration_since(frame.sent) < FORUM_UNREADS_WAIT {
+            if now < frame.until {
                 break;
             }
-            let Some(frame) = self.post_counts.unanswered.pop_front() else {
-                break;
-            };
-            tracing::debug!(
-                forum = frame.ask.forum.get(),
-                posts = frame.ask.threads.len(),
-                "op 28 unanswered after 30 s, given up"
-            );
-            self.forget_asked(&frame.ask.threads);
+            if let Some(frame) = self.post_counts.unanswered.pop_front() {
+                self.give_up(&frame.ask);
+            }
+        }
+    }
+
+    // Discord may never answer a frame: its posts go out again with the next ask, once.
+    fn give_up(&mut self, ask: &ForumUnreadsAsk) {
+        tracing::debug!(
+            forum = ask.forum.get(),
+            posts = ask.threads.len(),
+            "op 28 unanswered, given up"
+        );
+        for (post, ack) in &ask.threads {
+            let counts = &mut self.post_counts;
+            if counts.asked.get(post) == Some(ack) && counts.given_up.insert(*post) {
+                counts.asked.remove(post);
+            }
         }
     }
 
@@ -964,11 +975,14 @@ impl State {
             .iter()
             .position(|frame| of_forum(frame) && names(frame))?;
         let frame = frames.remove(at)?;
-        let mut before = 0;
-        frames.retain(|frame| {
-            before += 1;
-            before > at || !of_forum(frame)
-        });
+        let (passed, kept): (Vec<_>, Vec<_>) = frames
+            .drain(..)
+            .enumerate()
+            .partition(|(index, frame)| *index < at && of_forum(frame));
+        frames.extend(kept.into_iter().map(|(_, frame)| frame));
+        for (_, passed) in passed {
+            self.give_up(&passed.ask);
+        }
         Some(frame.ask)
     }
 
@@ -1074,6 +1088,7 @@ impl State {
     pub(super) fn forget_post_count(&mut self, post: ChannelId) {
         self.post_counts.counts.remove(&post);
         self.post_counts.asked.remove(&post);
+        self.post_counts.given_up.remove(&post);
     }
 
     // After channels left the store other than one by one.
@@ -1085,6 +1100,9 @@ impl State {
         self.post_counts
             .asked
             .retain(|post, _| channels.contains_key(post));
+        self.post_counts
+            .given_up
+            .retain(|post| channels.contains_key(post));
     }
 
     pub(super) fn forget_post_counts(&mut self) {
