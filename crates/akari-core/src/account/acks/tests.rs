@@ -2010,3 +2010,287 @@ async fn a_mark_from_before_ready_goes_out_where_discord_didnt_move() {
     assert_eq!(request.entries, [(channel(1), message(4))]);
     assert_eq!(request.manual, Some(2));
 }
+
+// Shift+Escape before the mark went out: the server is read, and the mark's caller hears it.
+#[tokio::test(start_paused = true)]
+async fn a_bulk_ack_after_an_unsent_mark_takes_its_place() {
+    let wants = Wants::default();
+    wants.want(channel(2), message(1), None, None, Pace::Explicit);
+    wants.next().await.unwrap();
+    let mut marked = mark(&wants, channel(1), message(4), 2);
+
+    wants.want_bulk(vec![(channel(1), message(9), read_at(4, 2), read_at(9, 0))]);
+
+    assert!(matches!(marked.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
+    assert!(!wants.marking(channel(1)));
+    wants.confirmed();
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.entries, [(channel(1), message(9))]);
+    assert_eq!(request.manual, None);
+    assert!(request.bulk);
+    assert_eq!(
+        wants.refuse().0,
+        [refusal(
+            channel(1),
+            read_at(9, 0),
+            read_at(9, 0),
+            message(9)
+        )],
+        "over what Discord had before the mark"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_mark_goes_out_at_once() {
+    let wants = Wants::default();
+    let start = Instant::now();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+
+    wants.next().await.unwrap();
+
+    assert_eq!(Instant::now(), start);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_mark_on_its_way_isnt_answered_by_another_channels_ack() {
+    let wants = Wants::default();
+    let mut marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+
+    wants.want(channel(2), message(1), None, None, Pace::Explicit);
+
+    assert!(marked.try_recv().is_err());
+    let (_, waiter) = wants.refuse();
+    assert!(waiter.is_some());
+}
+
+// The ack went out, the mark is behind it: refused, the mark goes back to before that ack.
+#[tokio::test(start_paused = true)]
+async fn a_refused_ack_leaves_its_undo_to_the_mark_behind_it() {
+    let wants = Wants::default();
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(3, 1),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+    wants.next().await.unwrap();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+
+    assert_eq!(wants.refuse().0, []);
+
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.manual, Some(2));
+    assert_eq!(
+        wants.refuse().0,
+        [refusal(
+            channel(1),
+            read_at(3, 1),
+            read_at(4, 2),
+            message(4)
+        )]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_retried_ack_leaves_its_undo_to_the_mark_behind_it() {
+    let wants = Wants::default();
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(3, 1),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+    wants.next().await.unwrap();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+
+    wants.retry(Instant::now() + Duration::from_secs(2));
+
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.manual, Some(2));
+    assert_eq!(
+        wants.refuse().0,
+        [refusal(
+            channel(1),
+            read_at(3, 1),
+            read_at(4, 2),
+            message(4)
+        )]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_mark_doesnt_answer_the_mark_after_it() {
+    let wants = Wants::default();
+    let mut first = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    let mut second = mark(&wants, channel(1), message(6), 1);
+    assert!(matches!(first.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
+
+    let (refusals, waiter) = wants.refuse();
+
+    assert_eq!(refusals, []);
+    assert!(waiter.is_none());
+    assert!(second.try_recv().is_err());
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.entries, [(channel(1), message(6))]);
+    assert_eq!(request.manual, Some(1));
+}
+
+#[tokio::test(start_paused = true)]
+async fn discords_answer_to_the_first_mark_isnt_the_second_ones() {
+    let wants = Wants::default();
+    let _first = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    let mut second = mark(&wants, channel(1), message(6), 1);
+
+    wants.confirmed();
+
+    assert!(second.try_recv().is_err());
+    wants.next().await.unwrap();
+    wants.confirmed();
+    assert!(matches!(second.try_recv(), Ok(Ok(MarkOutcome::Marked))));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ack_over_the_second_mark_answers_it_while_the_first_is_on_its_way() {
+    let wants = Wants::default();
+    let _first = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    let mut second = mark(&wants, channel(1), message(6), 1);
+
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(6, 1),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+
+    assert!(matches!(second.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
+}
+
+// The ack waited for READY's check; the mark made over it waits for the same one.
+#[tokio::test(start_paused = true)]
+async fn a_mark_over_an_ack_from_before_ready_is_checked_as_that_ack() {
+    let wants = Wants::default();
+    for channel in [channel(1), channel(2)] {
+        wants.want(
+            channel,
+            message(9),
+            read_at(3, 0),
+            read_at(9, 0),
+            Pace::Paced,
+        );
+    }
+    wants.forget_all();
+    let mut moved = mark(&wants, channel(1), message(4), 2);
+    let mut kept = mark(&wants, channel(2), message(4), 2);
+
+    wants.reconcile(|channel| {
+        if channel == self::channel(1) {
+            read_at(7, 0)
+        } else {
+            read_at(3, 5)
+        }
+    });
+
+    assert!(matches!(moved.try_recv(), Ok(Ok(MarkOutcome::Replaced))));
+    assert!(kept.try_recv().is_err());
+    let request = wants.next().await.unwrap();
+    assert_eq!(request.entries, [(channel(2), message(4))]);
+    assert_eq!(
+        wants.refuse().0,
+        [refusal(
+            channel(2),
+            read_at(3, 5),
+            read_at(4, 2),
+            message(4)
+        )],
+        "back to READY's state"
+    );
+}
+
+// The mark's position, with its mentions read: Discord has to hear of it.
+#[tokio::test(start_paused = true)]
+async fn an_ack_at_the_position_of_a_mark_discord_took_goes_out() {
+    let wants = Wants::default();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    wants.confirmed();
+
+    wants.want(
+        channel(1),
+        message(4),
+        read_at(4, 2),
+        read_at(4, 0),
+        Pace::Explicit,
+    );
+
+    assert_eq!(drain(&wants).await, [(channel(1), message(4))]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_mark_elsewhere_ends_the_wait_for_an_echo() {
+    let wants = Wants::default();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    wants.confirmed();
+
+    assert_eq!(wants.echo(channel(1), message(2)), Echo::Elsewhere);
+
+    assert_eq!(wants.echo(channel(1), message(4)), Echo::Elsewhere);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_late_echo_comes_once() {
+    let wants = Wants::default();
+    let _marked = mark(&wants, channel(1), message(4), 2);
+    wants.next().await.unwrap();
+    wants.confirmed();
+
+    assert_eq!(
+        wants.echo(channel(1), message(4)),
+        Echo::Own { superseded: false }
+    );
+
+    assert_eq!(wants.echo(channel(1), message(4)), Echo::Elsewhere);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_late_echo_knows_an_ack_that_waits_or_is_on_its_way() {
+    let wants = Wants::default();
+    for channel in [channel(1), channel(2)] {
+        let _marked = mark(&wants, channel, message(4), 2);
+        wants.next().await.unwrap();
+        wants.confirmed();
+    }
+    wants.want(
+        channel(1),
+        message(9),
+        read_at(4, 2),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+    wants.next().await.unwrap();
+    wants.want(
+        channel(2),
+        message(9),
+        read_at(4, 2),
+        read_at(9, 0),
+        Pace::Explicit,
+    );
+
+    assert_eq!(
+        wants.echo(channel(1), message(4)),
+        Echo::Own { superseded: true },
+        "on its way"
+    );
+    assert_eq!(
+        wants.echo(channel(2), message(4)),
+        Echo::Own { superseded: true },
+        "waiting"
+    );
+}
