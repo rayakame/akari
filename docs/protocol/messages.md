@@ -134,7 +134,8 @@ messages apart from the replies, as the official client's ReferencedMessageStore
 - Any message that arrives whole (a page, MESSAGE_CREATE) and is a target some reply named
   becomes `Loaded` with its current content, so "not loaded" ends as soon as a load brings it.
 - MESSAGE_UPDATE patches a `Loaded` target, in the window or not; MESSAGE_DELETE and
-  MESSAGE_DELETE_BULK make a known target `Deleted`. What happens to a target while a page
+  MESSAGE_DELETE_BULK make a known target `Deleted`, as does a refresh whose page lacks a row
+  within its range. What happens to a target while a page
   loads is put over what the page brings, as for the page's messages.
 - `ReplyTargetChanged { channel_id, target_id }` says the answer changed; the IDs are the
   target's. Every reply to it reads the same answer.

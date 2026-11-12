@@ -231,7 +231,8 @@ impl Window {
         self.present_through = self.present_through.max(self.held_deleted.take());
     }
 
-    // The page is the channel's newest; within its range it is the truth.
+    // The page is the channel's newest; within its range it is the truth. Returns the rows it
+    // lacks, which were deleted.
     fn reconcile(
         &mut self,
         channel_id: ChannelId,
@@ -239,13 +240,15 @@ impl Window {
         reached_end: bool,
         limit: usize,
         events: &mut Vec<StoreEvent>,
-    ) {
+    ) -> Vec<MessageId> {
+        let mut deleted = Vec::new();
         if let (Some(first), Some(last)) = (page.first(), page.last()) {
             let (first, last) = (first.id, last.id);
             let ids: HashSet<MessageId> = page.iter().map(|message| message.id).collect();
             self.messages.retain(|message| {
                 let gone = (first..=last).contains(&message.id) && !ids.contains(&message.id);
                 if gone {
+                    deleted.push(message.id);
                     events.push(StoreEvent::MessageDeleted {
                         channel_id,
                         message_id: message.id,
@@ -268,6 +271,7 @@ impl Window {
         self.stale = false;
         self.latest = true;
         self.trim(channel_id, limit, End::Older, events);
+        deleted
     }
 
     fn place(
@@ -1251,7 +1255,11 @@ impl Windows {
             LoadKind::Refresh if !window.stale => {}
             LoadKind::Latest | LoadKind::Refresh if window.stale && window.reaches(&page) => {
                 let first = page.first().map(|message| message.id);
-                window.reconcile(channel_id, page, reached_end, window_limit, events);
+                let deleted =
+                    window.reconcile(channel_id, page, reached_end, window_limit, events);
+                for id in deleted {
+                    self.targets.delete(channel_id, id, events);
+                }
                 window.present_through = window.present_through.max(through);
                 if window.from_disk {
                     window.drop_before(first, channel_id, events);
