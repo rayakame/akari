@@ -10,7 +10,7 @@ use crate::names::Names;
 use crate::records::{
     AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings,
     ForumPosts, ForumView, Guild, GuildBadge, GuildSettings, Message, MessageWindow, Nitro,
-    PostPreview, ReadState, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
+    PostNewCount, PostPreview, ReadState, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
     ThreadCreation, User,
 };
 use crate::subscription::StoreSubscription;
@@ -235,6 +235,18 @@ impl Store {
     /// own, made since the forum was read before this visit. Read with `unread_posts`.
     pub fn new_posts(&self, post_ids: Vec<ChannelId>) -> Vec<ChannelId> {
         self.core.new_posts(&post_ids)
+    }
+
+    /// Of `post_ids`, the active posts with new messages that the user opened before (unread,
+    /// with a read state of their own): each with how many came since, never more than the post
+    /// has, or no count until Discord says or with nothing to count ("1+"). `PostCountsChanged`
+    /// says to read it again.
+    pub fn post_new_counts(&self, post_ids: Vec<ChannelId>) -> Vec<PostNewCount> {
+        self.core
+            .post_new_counts(&post_ids)
+            .into_iter()
+            .map(PostNewCount::from)
+            .collect()
     }
 
     /// A forum post's first message for its card; `None` until Akari has it

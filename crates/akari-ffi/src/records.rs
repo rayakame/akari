@@ -696,6 +696,23 @@ pub enum PostPreview {
     Deleted,
 }
 
+/// A forum post's new messages, for its card's "(N New)": see `Store::post_new_counts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct PostNewCount {
+    pub post_id: ChannelId,
+    /// `None`: not known, or none to count; the card says "1+".
+    pub count: Option<u32>,
+}
+
+impl From<state::PostNewCount> for PostNewCount {
+    fn from(count: state::PostNewCount) -> Self {
+        Self {
+            post_id: count.post,
+            count: count.count,
+        }
+    }
+}
+
 /// A thread's first message when it started from a message in its parent channel.
 // Copied across once per read; UniFFI can't lower a boxed record.
 #[allow(clippy::large_enum_variant)]

@@ -272,6 +272,17 @@ pub enum PostPreview {
     Deleted,
 }
 
+/// How many new messages a forum post's card says it has: see
+/// [`Store::post_new_counts`](super::Store::post_new_counts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PostNewCount {
+    pub post: ChannelId,
+    /// The messages past the user's ack, never more than the post has; `None` when Discord
+    /// hasn't said or there are none to count: the card says "1+".
+    pub count: Option<u32>,
+}
+
 /// What a forum or media channel sets for its posts.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]

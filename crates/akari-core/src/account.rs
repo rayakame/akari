@@ -636,8 +636,15 @@ impl Shared {
             }
             _ => None,
         };
+        let synced = matches!(
+            event,
+            ConnectionEvent::Dispatch(DispatchEvent::ThreadListSync(_))
+        );
         let acks = on_event(&self.store, event, connecting);
         self.ack_reading(acks);
+        if synced {
+            self.ask_forum_unreads();
+        }
         if let Some(thread) = starter {
             self.fetch_starter(thread);
         }
@@ -888,6 +895,28 @@ impl Shared {
             lists.threads.dedup();
         }
         wanted
+    }
+
+    // Op 28 for the open forum's posts not asked in this connection, as the official client
+    // asks when the forum's page shows and its guild's threads loaded.
+    fn ask_forum_unreads(self: &Arc<Self>) {
+        if !matches!(self.store.connection(), ConnectionState::Online) {
+            return;
+        }
+        let Some(ask) = self.store.next_forum_unreads() else {
+            return;
+        };
+        let shared = self.clone();
+        self.runtime.spawn(async move {
+            let command = GatewayCommand::RequestForumUnreads {
+                guild_id: ask.guild,
+                forum_id: ask.forum,
+                threads: ask.threads.clone(),
+            };
+            if shared.send(command).await.is_err() {
+                shared.store.forget_forum_unreads(&ask.threads);
+            }
+        });
     }
 
     // The official client sends its subscriptions again after READY and after RESUMED.
@@ -1419,10 +1448,13 @@ impl Account {
     /// the cards' NEW badges count from the forum's read position then. Opening one refreshes
     /// its list: while it stays open, who's listed and in what order change only with
     /// [`refresh_forum`], a new connection or the guild's thread sync, a deletion or a pin (G-1).
+    /// Each of these also asks Discord how many new messages its opened, unread posts have
+    /// ([`Store::post_new_counts`]), each post once a connection.
     ///
     /// [`refresh_forum`]: Self::refresh_forum
     pub fn open_forum(&self, forum: Option<ChannelId>) {
         let first = self.shared.store.open_forum(forum);
+        self.shared.ask_forum_unreads();
         // So the first cards show with their message.
         if let Some(forum) = forum {
             self.request_post_previews(forum, &first);
@@ -1443,6 +1475,7 @@ impl Account {
     /// over (the official client's "N New Posts" pill).
     pub fn refresh_forum(&self, forum: ChannelId) {
         self.shared.store.refresh_forum(forum);
+        self.shared.ask_forum_unreads();
     }
 
     /// Loads the next page of the forum's archived posts for `view`'s tags, as the official
@@ -1878,6 +1911,7 @@ async fn pump(mut finish: Finish) {
                         tokio::spawn(async move { status.send_status(true).await });
                         let subscriptions = shared.clone();
                         tokio::spawn(async move { subscriptions.resubscribe().await });
+                        shared.ask_forum_unreads();
                     }
                     Err(_) => break Some(Arc::new(GatewayError::Stopped)),
                 }
@@ -1892,6 +1926,7 @@ async fn pump(mut finish: Finish) {
                 tokio::spawn(async move { status.send_status(false).await });
                 let subscriptions = shared.clone();
                 tokio::spawn(async move { subscriptions.resubscribe().await });
+                shared.ask_forum_unreads();
             }
             Ok(event) => shared.dispatched(event, &connecting),
             Err(GatewayError::Closed) => break None,

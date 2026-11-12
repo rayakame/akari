@@ -20,13 +20,15 @@ pub(crate) mod settings_proto;
 pub(crate) use connection::fake;
 pub use connection::{ConnectionEvent, DisconnectReason, Gateway, GatewayError, SendError};
 pub use dispatch::{
-    ChannelDelete, GuildDelete, GuildEmojisUpdate, GuildRoleDelete, GuildRoleEvent, MessageDelete,
-    MessageDeleteBulk, ReadySupplemental, SupplementalGuild, ThreadListSync, ThreadMemberUpdate,
-    ThreadMembersUpdate,
+    ChannelDelete, ForumUnread, ForumUnreads, GuildDelete, GuildEmojisUpdate, GuildRoleDelete,
+    GuildRoleEvent, MessageDelete, MessageDeleteBulk, ReadySupplemental, SupplementalGuild,
+    ThreadListSync, ThreadMemberUpdate, ThreadMembersUpdate,
 };
 pub use guild::{AvailableGuild, GatewayGuild, UnavailableGuild};
 pub use hello::Hello;
-pub use outgoing::{GatewayCommand, GuildSubscription, MemberLists, PresenceStatus};
+pub use outgoing::{
+    FORUM_UNREADS_LIMIT, GatewayCommand, GuildSubscription, MemberLists, PresenceStatus,
+};
 pub use partial::{ChannelUpdate, GuildMemberUpdate, GuildUpdate, MessageUpdate, UserUpdate};
 pub use payload::{DecodeError, DispatchEvent, GatewayEvent, decode};
 pub use read_state::{

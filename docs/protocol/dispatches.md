@@ -79,6 +79,7 @@ Two details:
 | NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; only the badges that change send events |
 | MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([read-states.md](read-states.md)): `BadgeChanged`, and `GuildBadgeChanged` if the guild's badge changed. Acks of other read state types are ignored |
 | CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without a channel event; a channel that turns unread sends `BadgeChanged` ([read-states.md](read-states.md#badges)). A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
+| FORUM_UNREADS | `ForumUnreads` | The answer to op 28: each listed post's count of new messages, `PostCountsChanged` for the forum ([Forums](#forums)) |
 | RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Keep the blocked and ignored users, whose messages never count as mentions. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
@@ -332,6 +333,26 @@ already isn't asked again, and one Discord didn't answer for (or a failed reques
 client asks again on the card's next render, without a pause). MESSAGE_CREATE, MESSAGE_UPDATE
 and MESSAGE_DELETE of a post's first message (its ID is the post's) and the window's message
 with the post's ID keep it current, and MESSAGE_DELETE_BULK.
+
+**New-message counts** (op 28, [gateway.md](gateway.md#forum-unreads); from the client's code,
+modules 435470, 767581 and 474399; not observed): a card's "(N New)" is for an active post that
+is unread, opened (a read state of the user's own, not one Akari estimated) and acked.
+`Store::post_new_counts(posts)` lists those of `posts` with `count`: the messages past the ack,
+never more than the post's `message_count`, or `None` when no count above 0 is known (the card
+then says "1+"). The account asks for the open forum's qualifying posts, each once a connection,
+when the forum opens, when its list refreshes (`Account::refresh_forum`, a THREAD_LIST_SYNC of
+its guild) and after READY and RESUMED while it is open; a frame that never left is asked again.
+The official client asks the list as the tag filter leaves it and again on every filter change;
+Akari asks the whole active list. FORUM_UNREADS
+`{channel_id, threads: [{thread_id, missing?, count?}], permission_denied?}` answers: an answer
+with `permission_denied` is dropped, a thread without a `count` stays asked and uncounted,
+`missing` is read by nothing. Afterwards a MESSAGE_CREATE in a post with a count adds 1, and a
+post created while its forum is open (THREAD_CREATE with `newly_created`) starts at 0. Where the
+official client's count only follows another session's MESSAGE_ACK (so it drifts upward after
+the post was read here), Akari's follows every change of the post's ack: with nothing unread
+left the count is 0 and counts up from there, else it is forgotten and the post is asked again
+with its new ack; an answer for an ack the post has moved on from is dropped. The counts go
+with each READY. `PostCountsChanged { forum_id }` says to read them again.
 
 ## Large guilds
 

@@ -4198,6 +4198,7 @@ mod preparer {
 
 mod expressions;
 mod forum_posts;
+mod forum_unreads;
 mod images;
 mod reading;
 mod scans;

@@ -5,7 +5,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tokio::sync::{Mutex, Notify, mpsc};
 
-use super::apply::{Derived, Entities, Learned, OlderPage, PageKey, ReadyDiff, State};
+use super::apply::{
+    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, PageKey, ReadyDiff, State,
+};
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
 use super::embeds::ShownEmbed;
@@ -17,7 +19,7 @@ use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::threads::ThreadIndex;
 use super::types::{
-    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostPreview,
+    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostNewCount, PostPreview,
     StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
 #[cfg(test)]
@@ -603,6 +605,16 @@ impl Store {
         });
     }
 
+    pub(crate) fn next_forum_unreads(&self) -> Option<ForumUnreadsAsk> {
+        self.write("forum unreads", |inner, _| inner.state.next_forum_unreads())
+    }
+
+    pub(crate) fn forget_forum_unreads(&self, threads: &[(ChannelId, MessageId)]) {
+        self.write("forum unreads", |inner, _| {
+            inner.state.forget_forum_unreads(threads);
+        });
+    }
+
     // Read first, as `begin_older_threads`.
     pub(crate) fn begin_older_posts(&self, key: &PageKey) -> Option<OlderPage> {
         if !self.read(|inner| inner.state.can_load_older_posts(key)) {
@@ -1154,6 +1166,17 @@ impl Store {
     /// since the forum was read before this visit. Read again when `unread_posts` is.
     pub fn new_posts(&self, posts: &[ChannelId]) -> Vec<ChannelId> {
         self.read(|inner| inner.state.new_posts(posts))
+    }
+
+    /// Of `posts`, the active ones with new messages in a post the user opened before: unread,
+    /// with a read state of the user's own and an ack. `count` is how many messages came since,
+    /// never more than the post has; `None` until Discord says ([`Account::open_forum`] asks) or
+    /// with nothing to count, where the official client says "1+". Read again on
+    /// `PostCountsChanged`.
+    ///
+    /// [`Account::open_forum`]: crate::Account::open_forum
+    pub fn post_new_counts(&self, posts: &[ChannelId]) -> Vec<PostNewCount> {
+        self.read(|inner| inner.state.post_new_counts(posts))
     }
 
     /// DMs and group DMs, in no particular order.

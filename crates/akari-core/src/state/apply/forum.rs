@@ -1,17 +1,17 @@
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::State;
 use super::boxes::known_user;
 use super::browser::{OLDER_PAGE, OlderPage, OlderPages, newest, newest_on_wire};
-use crate::gateway::MessageUpdate;
+use crate::gateway::{FORUM_UNREADS_LIMIT, ForumUnreads, MessageUpdate};
 use crate::model::{
     self, ChannelId, GuildId, MessageId, Permissions, PostData, TagId, ThreadSearchResults, UserId,
 };
 use crate::state::{
-    Channel, ForumPosts, ForumSort, ForumView, Message, OlderThreads, PostPreview, StoreEvent,
-    TagMatching,
+    Channel, ForumPosts, ForumSort, ForumView, Message, OlderThreads, PostNewCount, PostPreview,
+    StoreEvent, TagMatching,
 };
 
 // Module 473503 asks at most this many posts a request.
@@ -83,6 +83,25 @@ pub(super) struct ForumList {
     // The forum's read position as this visit began, before the visit moved it to "now": the
     // official client's `ackMessageIdAtChannelSelect`. `None` without an ack or a join time.
     read_before: Option<u64>,
+}
+
+/// Forum posts' counts of messages past the user's ack, from op 28 and what came since.
+#[derive(Debug, Default)]
+#[cfg_attr(test, derive(PartialEq))]
+pub(super) struct PostCounts {
+    counts: HashMap<ChannelId, u32>,
+    // Asked in this connection, with the ack the answer counts from.
+    asked: HashMap<ChannelId, MessageId>,
+    // Forums whose posts' counts the current write changed.
+    changed: BTreeSet<ChannelId>,
+}
+
+/// An op 28 to send: posts of the open forum with the acks to count from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ForumUnreadsAsk {
+    pub(crate) guild: GuildId,
+    pub(crate) forum: ChannelId,
+    pub(crate) threads: Vec<(ChannelId, MessageId)>,
 }
 
 fn archived(channel: &Channel) -> bool {
@@ -454,12 +473,16 @@ impl State {
         } else {
             list.new_posts += 1;
         }
+        // Module 474399: a post made while its forum shows is counted from the start.
+        self.post_counts.counts.entry(post).or_insert(0);
         events.push(StoreEvent::ForumPostsChanged {
             forum_id: list.forum,
         });
     }
 
     pub(super) fn forum_post_deleted(&mut self, post: &Channel, events: &mut Vec<StoreEvent>) {
+        self.post_counts.counts.remove(&post.id);
+        self.post_counts.asked.remove(&post.id);
         if let Some(list) = self.forum_list.as_mut()
             && (list.posts.remove(&post.id).is_some() || post.parent_id == Some(list.forum))
         {
@@ -789,5 +812,178 @@ impl State {
         }
         self.previews.messages.insert(channel, None);
         events.push(StoreEvent::PostPreviewChanged { post_id: channel });
+    }
+
+    // Module 767581: an active post that is unread, opened (a read state of the user's own) and
+    // acked; the ack is what its count starts after.
+    fn counted_from(&self, post: &Channel) -> Option<MessageId> {
+        if archived(post) || !self.entities.unread(post) {
+            return None;
+        }
+        self.entities
+            .read_states
+            .get(post.id)
+            .filter(|state| !state.estimated)?
+            .acked
+    }
+
+    fn forum_of(&self, post: ChannelId) -> Option<ChannelId> {
+        let parent = self.entities.channels.get(&post)?.parent_id?;
+        self.entities
+            .channels
+            .get(&parent)
+            .is_some_and(|parent| parent.is_forum())
+            .then_some(parent)
+    }
+
+    fn is_open_forum(&self, forum: ChannelId) -> bool {
+        self.forum_list
+            .as_ref()
+            .is_some_and(|list| list.forum == forum)
+    }
+
+    /// The open forum's posts to ask Discord's counts for, each once a connection, marked as
+    /// asked; `None` when there are none.
+    pub(crate) fn next_forum_unreads(&mut self) -> Option<ForumUnreadsAsk> {
+        let forum = self.forum_list.as_ref()?.forum;
+        let guild = self.entities.channels.get(&forum)?.guild_id?;
+        let counts = &self.post_counts;
+        let mut posts: Vec<(u64, ChannelId, MessageId)> = self
+            .listable_posts(forum)
+            .filter(|post| {
+                !counts.counts.contains_key(&post.id) && !counts.asked.contains_key(&post.id)
+            })
+            .filter_map(|post| Some((newest(post), post.id, self.counted_from(post)?)))
+            .collect();
+        if posts.is_empty() {
+            return None;
+        }
+        posts.sort_unstable_by_key(|(newest, post, _)| (Reverse(*newest), Reverse(*post)));
+        posts.truncate(FORUM_UNREADS_LIMIT);
+        let threads: Vec<(ChannelId, MessageId)> = posts
+            .into_iter()
+            .map(|(_, post, ack)| (post, ack))
+            .collect();
+        self.post_counts.asked.extend(threads.iter().copied());
+        Some(ForumUnreadsAsk {
+            guild,
+            forum,
+            threads,
+        })
+    }
+
+    /// The frame never left: its posts may be asked again.
+    pub(crate) fn forget_forum_unreads(&mut self, threads: &[(ChannelId, MessageId)]) {
+        for (post, ack) in threads {
+            if self.post_counts.asked.get(post) == Some(ack) {
+                self.post_counts.asked.remove(post);
+            }
+        }
+    }
+
+    // Module 474399 keeps every count; here only one for the ack the post still has.
+    pub(super) fn forum_unreads(&mut self, unreads: &ForumUnreads) {
+        if unreads.permission_denied {
+            return;
+        }
+        for thread in &unreads.threads {
+            let Some(count) = thread.count else {
+                continue;
+            };
+            let post = thread.thread_id;
+            let current = self
+                .entities
+                .read_states
+                .get(post)
+                .and_then(|state| state.acked);
+            if current.is_none() || self.post_counts.asked.get(&post).copied() != current {
+                continue;
+            }
+            self.post_counts.counts.insert(post, count);
+            self.post_counts.changed.insert(unreads.channel_id);
+        }
+    }
+
+    // Runs before the message raises the post's newest message, so a replayed one adds nothing.
+    pub(super) fn count_post_message(&mut self, message: &model::Message) {
+        let post = message.channel_id;
+        let Some(forum) = self.forum_of(post) else {
+            return;
+        };
+        let replayed = self
+            .entities
+            .channels
+            .get(&post)
+            .and_then(|post| post.last_message_id)
+            .is_some_and(|last| last.get() >= message.id.get());
+        if replayed {
+            return;
+        }
+        if let Some(count) = self.post_counts.counts.get_mut(&post) {
+            *count = count.saturating_add(1);
+            self.post_counts.changed.insert(forum);
+        } else if self.is_open_forum(forum) {
+            self.post_counts.changed.insert(forum);
+        }
+    }
+
+    // Every change of a channel's ack ends here. Discord's count only follows another session's
+    // ack; Akari's starts over with any: at 0 once nothing is unread, else unknown until asked.
+    pub(super) fn post_ack_moved(&mut self, post: ChannelId) {
+        let Some(forum) = self.forum_of(post) else {
+            return;
+        };
+        let counts = &self.post_counts;
+        let tracked = counts.counts.contains_key(&post) || counts.asked.contains_key(&post);
+        if !tracked && !self.is_open_forum(forum) {
+            return;
+        }
+        let unread = self
+            .entities
+            .channels
+            .get(&post)
+            .is_some_and(|post| self.entities.unread(post));
+        self.post_counts.asked.remove(&post);
+        if unread {
+            self.post_counts.counts.remove(&post);
+        } else {
+            self.post_counts.counts.insert(post, 0);
+        }
+        self.post_counts.changed.insert(forum);
+    }
+
+    pub(super) fn forget_post_counts(&mut self) {
+        self.post_counts = PostCounts::default();
+    }
+
+    pub(super) fn flush_post_counts(&mut self, events: &mut Vec<StoreEvent>) {
+        for forum_id in std::mem::take(&mut self.post_counts.changed) {
+            events.push(StoreEvent::PostCountsChanged { forum_id });
+        }
+    }
+
+    /// Of `posts`, the active ones that are unread, opened and acked, each with its count of
+    /// new messages when one above 0 is known.
+    pub(crate) fn post_new_counts(&self, posts: &[ChannelId]) -> Vec<PostNewCount> {
+        posts
+            .iter()
+            .filter_map(|id| {
+                let post = self.entities.channels.get(id)?;
+                self.forum_of(*id)?;
+                self.counted_from(post)?;
+                let messages = post
+                    .thread
+                    .as_deref()
+                    .and_then(|info| info.message_count)
+                    .unwrap_or(0);
+                let count = self
+                    .post_counts
+                    .counts
+                    .get(id)
+                    .map(|count| (*count).min(messages))
+                    .filter(|count| *count > 0);
+                Some(PostNewCount { post: *id, count })
+            })
+            .collect()
     }
 }

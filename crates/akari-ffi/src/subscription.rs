@@ -163,6 +163,11 @@ pub enum StoreEvent {
     PostPreviewChanged {
         post_id: ChannelId,
     },
+    /// The new-message counts of the forum's posts may have changed: read
+    /// `Store::post_new_counts` again.
+    PostCountsChanged {
+        forum_id: ChannelId,
+    },
     ChannelAdded {
         channel_id: ChannelId,
         guild_id: Option<GuildId>,
@@ -279,6 +284,7 @@ impl StoreEvent {
             E::OlderThreadsChanged { parent_id } => Self::OlderThreadsChanged { parent_id },
             E::ForumPostsChanged { forum_id } => Self::ForumPostsChanged { forum_id },
             E::PostPreviewChanged { post_id } => Self::PostPreviewChanged { post_id },
+            E::PostCountsChanged { forum_id } => Self::PostCountsChanged { forum_id },
             E::ChannelAdded(channel) => Self::ChannelAdded {
                 channel_id: channel.id,
                 guild_id: channel.guild_id,

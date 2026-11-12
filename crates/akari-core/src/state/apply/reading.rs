@@ -125,8 +125,10 @@ impl State {
             return;
         }
         if Some(message.author.id) == self.entities.me() {
-            if message.kind != MessageType::PollResult {
-                self.entities.read_states.read_up_to(channel.id, message.id);
+            if message.kind != MessageType::PollResult
+                && self.entities.read_states.read_up_to(channel.id, message.id)
+            {
+                self.post_ack_moved(channel.id);
             }
             return;
         }
@@ -244,6 +246,7 @@ impl State {
             .is_some_and(|at| at.get() == ack.message_id.get());
         if self.entities.read_states.ack(ack, newest, recount) {
             self.dirty.channel(ack.channel_id);
+            self.post_ack_moved(ack.channel_id);
         }
     }
 
@@ -478,6 +481,7 @@ impl State {
             return false;
         }
         self.entities.read_states.restore(channel, undo);
+        self.post_ack_moved(channel);
         if let Some(journal) = &mut self.journal {
             journal.acks.retain(|(journaled, _)| *journaled != channel);
             journal.undone.insert(channel);
@@ -528,6 +532,7 @@ impl State {
     fn read_up_to(&mut self, channel: ChannelId, cursor: Option<MessageId>) {
         if self.entities.read_states.read(channel, cursor) {
             self.dirty.channel(channel);
+            self.post_ack_moved(channel);
         }
         let acked = self
             .entities

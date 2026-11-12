@@ -417,6 +417,11 @@ modules 573163, 435470, 863005, 543465); the sequence on the wire is **unverifie
 - **Cards** (`Store::unread_posts`): a post shows unread when it's active and its newest message
   is past its read position, whatever its mute or unread setting (Discord's `isForumPostUnread`);
   an archived post never does. A post's read state change emits its `BadgeChanged`.
+- **"(N New)"** (`Store::post_new_counts`): only for a post that is active, unread, opened and
+  acked; the count comes from op 28 and what happened since
+  ([dispatches.md](dispatches.md#forums)). Akari restarts a post's count with every change of
+  its ack, this session's or another's, where the official client's only follows the gateway's
+  MESSAGE_ACK.
 - **The row** (`Badge.posts`): when its unread setting resolves to All Messages (as the dot's),
   `New(n)` counts active posts the user neither joined nor opened (no read state of their own)
   newer than the forum's ack, or than the guild join without one; else `Unread(n)` counts

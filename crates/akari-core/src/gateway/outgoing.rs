@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::Token;
-use crate::model::{ChannelId, GuildId};
+use crate::model::{ChannelId, GuildId, MessageId};
 use crate::properties::ClientProperties;
 
 /// A command for [`Gateway::send`](super::Gateway::send).
@@ -16,7 +16,18 @@ pub enum GatewayCommand {
     /// and threads, and optionally member lists. Without it, large guilds send no live
     /// messages.
     SubscribeGuilds { guilds: Vec<GuildSubscription> },
+    /// Op 28: asks how many messages each forum post has past the user's ack of it, at most
+    /// 180 posts a command. FORUM_UNREADS answers.
+    RequestForumUnreads {
+        guild_id: GuildId,
+        forum_id: ChannelId,
+        /// Each post with the message the user read it up to.
+        threads: Vec<(ChannelId, MessageId)>,
+    },
 }
+
+/// The most posts the official client asks about in one op 28.
+pub const FORUM_UNREADS_LIMIT: usize = 180;
 
 /// One guild's entry in [`GatewayCommand::SubscribeGuilds`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +92,25 @@ impl GatewayCommand {
                 tracing::debug!(target: "akari_core::subscriptions", %payload, "sending op 37");
                 payload
             }
+            Self::RequestForumUnreads {
+                guild_id,
+                forum_id,
+                threads,
+            } => json(
+                28,
+                ForumUnreadsRequest {
+                    guild_id: guild_id.get().to_string(),
+                    channel_id: forum_id.get().to_string(),
+                    threads: threads
+                        .iter()
+                        .take(FORUM_UNREADS_LIMIT)
+                        .map(|(thread, ack)| AckedThread {
+                            thread_id: thread.get().to_string(),
+                            ack_message_id: ack.get().to_string(),
+                        })
+                        .collect(),
+                },
+            ),
         }
     }
 
@@ -113,6 +143,19 @@ const EMPTY_SUBSCRIPTIONS: usize = 34;
 fn entry_size(guild: &GuildSubscription) -> usize {
     let entry = serde_json::to_string(&Entry::new(guild)).map_or(0, |entry| entry.len());
     guild.guild_id.get().to_string().len() + entry + 4
+}
+
+#[derive(Serialize)]
+struct ForumUnreadsRequest {
+    guild_id: String,
+    channel_id: String,
+    threads: Vec<AckedThread>,
+}
+
+#[derive(Serialize)]
+struct AckedThread {
+    thread_id: String,
+    ack_message_id: String,
 }
 
 #[derive(Serialize)]
@@ -454,5 +497,43 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert!(GatewayCommand::subscribe_guilds(&[]).is_empty());
+    }
+
+    #[test]
+    fn forum_unreads_are_asked_as_the_official_client_asks() {
+        let command = GatewayCommand::RequestForumUnreads {
+            guild_id: Snowflake::new(200_000_000_000_000_001),
+            forum_id: Snowflake::new(300_000_000_000_000_050),
+            threads: vec![
+                (Snowflake::new(300_000_000_000_000_060), Snowflake::new(61)),
+                (Snowflake::new(300_000_000_000_000_062), Snowflake::new(63)),
+            ],
+        };
+
+        assert_eq!(
+            parse(&command.to_payload()),
+            json!({"op": 28, "d": {
+                "guild_id": "200000000000000001",
+                "channel_id": "300000000000000050",
+                "threads": [
+                    {"thread_id": "300000000000000060", "ack_message_id": "61"},
+                    {"thread_id": "300000000000000062", "ack_message_id": "63"},
+                ],
+            }})
+        );
+    }
+
+    #[test]
+    fn a_forum_unreads_frame_never_names_more_than_180_posts() {
+        let command = GatewayCommand::RequestForumUnreads {
+            guild_id: Snowflake::new(1),
+            forum_id: Snowflake::new(2),
+            threads: (0..200)
+                .map(|post| (Snowflake::new(10 + post), Snowflake::new(5)))
+                .collect(),
+        };
+
+        let payload = parse(&command.to_payload());
+        assert_eq!(payload["d"]["threads"].as_array().map(Vec::len), Some(180));
     }
 }
