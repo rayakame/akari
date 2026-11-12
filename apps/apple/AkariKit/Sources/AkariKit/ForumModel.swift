@@ -174,6 +174,10 @@ public final class ForumModel {
         self.form =
             form
             ?? PostFormModel(forumId: forumId, account: account, store: store, drafts: Drafts())
+        // What an earlier page's search left in the field; a draft's title stays.
+        if !self.form.isOpen, !self.form.hasDraft, !self.form.title.isEmpty {
+            self.form.title = ""
+        }
         self.forumId = forumId
         self.store = store
         self.account = account

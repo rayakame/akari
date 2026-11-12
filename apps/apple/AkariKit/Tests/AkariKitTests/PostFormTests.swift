@@ -267,6 +267,50 @@ final class PostFormTests {
         second.close()
     }
 
+    // A search's text is the page's, not the session's: it's gone when the forum is left.
+    @Test
+    func aSearchLeftBehindIsNoTitleLater() throws {
+        let session = inForum()
+        session.forum?.type("dark mode")
+
+        session.open(channel: id(11))
+        session.open(channel: forumId)
+
+        #expect(try form(session).title.isEmpty)
+        #expect(session.forum?.query.isEmpty == true)
+        session.close()
+    }
+
+    // Akari counts chosen tags as a draft: they keep it one when the title is emptied.
+    @Test
+    func chosenTagsKeepTheDraftWhenTheTitleIsEmptied() throws {
+        let session = inForum()
+        let page = try #require(session.forum)
+        page.openForm()
+        page.form.toggle(tag: bug)
+        page.type("A title")
+
+        page.type("")
+        page.form.close()
+
+        #expect(page.form.hasDraft)
+        session.close()
+    }
+
+    // The forum's new template takes the old one's place without becoming something typed.
+    @Test
+    func aChangedTemplateIsNotKeptAsTyped() throws {
+        world(template: "Steps:")
+        let session = inForum()
+
+        world(template: "New steps:")
+        try form(session).apply(EventBatch([.channelUpdated(channelId: id(13), guildId: id(1))]))
+
+        #expect(try form(session).message == "New steps:")
+        #expect(session.drafts.posts[forumId]?.message == nil)
+        session.close()
+    }
+
     @Test
     func theXDropsEverything() throws {
         world(template: "Steps:")

@@ -292,7 +292,8 @@ Read from the client's code *(code read; the request wasn't observed)*.
   features); drafts don't outlive the session (Discord's do); the guidelines don't open by
   themselves with the form. An unconfirmed create says "Post may exist" (Akari's words).
   Escape in the closed row empties a search's field (Discord keeps the text and only ends the
-  search); a draft's title stays, as there. Chosen tags alone count as a draft too.*
+  search); a draft's title stays, as there. Chosen tags alone count as a draft too. A search's
+  text doesn't come back with the forum's page (Discord keeps it as the draft's name).*
 
 ## Media channels
 

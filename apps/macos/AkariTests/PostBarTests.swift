@@ -82,12 +82,13 @@ struct PostBarTests {
         #expect(!same(inBox, outside))
 
         #expect(same(color(middle, box.maxY + 0.5), inBox), "no seam and no second coat")
-        #expect(same(color(middle, box.maxY + 8), inBox))
-        #expect(same(color(middle - 8, box.maxY + 1), inBox))
-        #expect(same(color(middle + 8, box.maxY + 1), inBox))
-        #expect(same(color(middle, box.maxY + 11), outside), "10 high")
-        #expect(same(color(middle - 11, box.maxY + 1), outside), "20 wide")
-        #expect(same(color(middle + 11, box.maxY + 1), outside))
+        // Probes keep two points from the edges: at 1x an edge pixel is half covered.
+        #expect(same(color(middle, box.maxY + 6), inBox))
+        #expect(same(color(middle - 6, box.maxY + 1), inBox))
+        #expect(same(color(middle + 6, box.maxY + 1), inBox))
+        #expect(same(color(middle, box.maxY + 12), outside), "10 high")
+        #expect(same(color(middle - 12, box.maxY + 1), outside), "20 wide")
+        #expect(same(color(middle + 12, box.maxY + 1), outside))
         #expect(same(color(middle - 6, box.maxY + 8), outside), "a triangle")
         #expect(same(color(middle + 6, box.maxY + 8), outside))
     }

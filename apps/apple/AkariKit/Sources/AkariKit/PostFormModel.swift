@@ -37,7 +37,7 @@ public final class PostFormModel {
             }
             drafts.posts[forumId, default: .init()].title = title
             // As the official client: emptied with no message begun, it's a search's field again.
-            if typedTitle.isEmpty, !hasMessage || typedMessage == template {
+            if typedTitle.isEmpty, tags.isEmpty, !hasMessage || typedMessage == template {
                 begun = false
             }
             // AutoMod's stays until the next try, as in the official client.
@@ -302,10 +302,11 @@ public final class PostFormModel {
         // A new template replaces the old one only where the user typed nothing over it.
         let next = Self.template(of: channel)
         if next != template {
-            if typedMessage == template {
+            let untouched = typedMessage == template
+            template = next
+            if untouched {
                 message = next
             }
-            template = next
         }
     }
 
