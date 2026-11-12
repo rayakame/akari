@@ -32,6 +32,8 @@ nonisolated final class CrowdedAccount: Account, @unchecked Sendable {
     override func viewChannel(channelId: ChannelId) {}
     override func supersedeAroundLoads(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
+
+    override func setOpenChannels(channelIds: [ChannelId]) {}
     override func markRead(channelId: ChannelId) {}
     override func markGuildsRead(guildIds: [GuildId]) {}
 }
