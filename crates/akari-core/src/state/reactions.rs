@@ -469,6 +469,35 @@ mod tests {
     }
 
     #[test]
+    fn a_batch_that_nets_to_nothing_changes_nothing() {
+        let author: model::User = serde_json::from_value(serde_json::json!({
+            "id": "1", "username": "mira", "discriminator": "0", "avatar": null
+        }))
+        .unwrap();
+        let message = Message {
+            reactions: shared(vec![reaction("👍", 1, 0, false, false)]),
+            ..Message::pending(
+                Snowflake::new(1),
+                Snowflake::new(2),
+                Arc::new(crate::state::User::from_wire(author)),
+                String::new(),
+                0,
+            )
+        };
+
+        assert!(
+            message
+                .reacted(&[add("👍", false), remove("👍", false)])
+                .is_none()
+        );
+        assert!(
+            message
+                .reacted(&[add("🔥", true), remove("🔥", true)])
+                .is_none()
+        );
+    }
+
+    #[test]
     fn wire_reactions_keep_both_counts_and_drop_what_counts_nothing() {
         let wire = |json: serde_json::Value| -> model::Reaction {
             serde_json::from_str(&json.to_string()).unwrap()
@@ -483,8 +512,9 @@ mod tests {
             "count_details": {"normal": 0, "burst": 0, "vote": 2}, "me_vote": true
         }));
         let nameless = wire(serde_json::json!({"emoji": {"id": null, "name": null}, "count": 1}));
+        let empty = wire(serde_json::json!({"emoji": {"id": null, "name": ""}, "count": 1}));
 
-        let kept = reactions(vec![detailed, plain, vote, nameless]).unwrap();
+        let kept = reactions(vec![detailed, plain, vote, nameless, empty]).unwrap();
 
         assert_eq!(
             *kept,

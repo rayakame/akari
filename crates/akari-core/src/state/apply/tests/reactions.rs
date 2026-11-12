@@ -516,6 +516,26 @@ fn every_copy_of_a_message_takes_every_reaction_dispatch() {
     }
 }
 
+// The read by IDs finds every copy that something shows; a held message isn't shown yet.
+#[test]
+fn reactions_reads_every_copy() {
+    for mut copy in copies() {
+        let Copy {
+            name, channel, id, ..
+        } = copy;
+
+        add(&mut copy.state, channel, id, MIRA, UP);
+
+        let expected = if name == "held" {
+            vec![]
+        } else {
+            one(UP, 1, false)
+        };
+        assert_eq!(reactions(&copy.state, channel, id), expected, "{name}");
+        assert_eq!((copy.read)(&copy.state), one(UP, 1, false), "{name}");
+    }
+}
+
 #[test]
 fn every_copy_keeps_its_reactions_over_an_edit() {
     for mut copy in copies() {
@@ -578,6 +598,25 @@ fn a_starter_row_reads_the_reactions_of_its_message() {
     assert_eq!(reactions(&state, GENERAL, ORIGIN), one(UP, 1, false));
 }
 
+// The row reads the parent's window, so it is told of a change there that its own copy of the
+// message doesn't take: here my reaction, which the copy sent along already had.
+#[test]
+fn a_starter_row_is_told_when_only_the_parents_row_changes() {
+    let mut state = viewing(THREAD);
+    let mut row = starter_row(true);
+    row["referenced_message"]["reactions"] = json!([wire_reaction(UP, 1, true)]);
+    apply(&mut state, "MESSAGE_CREATE", row);
+    state.view_channel(Snowflake::new(GENERAL), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(ORIGIN, GENERAL));
+    let row = 400_000_000_000_000_021_u64;
+    assert_eq!(reactions(&state, THREAD, row), []);
+
+    let events = add(&mut state, GENERAL, ORIGIN, ME, UP);
+
+    assert_eq!(events, [changed(GENERAL, ORIGIN), changed(THREAD, row)]);
+    assert_eq!(reactions(&state, THREAD, row), one(UP, 1, true));
+}
+
 // A post's card reads its window's first message when post-data brought none.
 #[test]
 fn a_card_reading_the_posts_window_is_told() {
@@ -594,6 +633,122 @@ fn a_card_reading_the_posts_window_is_told() {
         events,
         [changed(POST, POST), format!("PostPreviewChanged({POST})")]
     );
+}
+
+#[test]
+fn a_repeated_add_or_another_messages_reaction_tells_no_card() {
+    let mut state = forum_post();
+    state.open_forum(None, &mut Vec::new());
+    state.view_channel(Snowflake::new(POST), &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", message(POST, POST));
+    apply(&mut state, "MESSAGE_CREATE", message(POST + 1, POST));
+    state.open_forum(Some(Snowflake::new(FORUM)), &mut Vec::new());
+    let card = format!("PostPreviewChanged({POST})");
+    assert!(add(&mut state, POST, POST, ME, UP).contains(&card));
+
+    let repeated = add(&mut state, POST, POST, ME, UP);
+    let another = add(&mut state, POST, POST + 1, MIRA, UP);
+
+    assert_eq!(repeated, [] as [&str; 0]);
+    assert_eq!(another, [changed(POST, POST + 1)]);
+}
+
+// The debounced batch is counted like single adds: Discord may repeat the other user's.
+#[test]
+fn a_dm_batch_counts_the_other_user_once() {
+    let mut state = viewing(DM);
+    apply(&mut state, "MESSAGE_CREATE", dm_message(10, DM));
+    add(&mut state, DM, 10, MIRA, UP);
+
+    let events = apply(
+        &mut state,
+        "MESSAGE_REACTION_ADD_MANY",
+        json!({
+            "channel_id": DM.to_string(), "message_id": "10",
+            "reactions": [
+                {"users": [MIRA.to_string()], "emoji": {"id": null, "name": UP}},
+            ],
+        }),
+    );
+    assert_eq!(events, [] as [&str; 0]);
+    assert_eq!(reactions(&state, DM, 10), one(UP, 1, false));
+
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_ADD_MANY",
+        json!({
+            "channel_id": DM.to_string(), "message_id": "10",
+            "reactions": [
+                {"users": [ME.to_string(), MIRA.to_string()], "emoji": {"id": null, "name": UP}},
+                {"users": [MIRA.to_string(), ME.to_string()], "emoji": {"id": null, "name": FIRE}},
+            ],
+        }),
+    );
+    assert_eq!(
+        reactions(&state, DM, 10),
+        [one(UP, 2, true), one(FIRE, 2, true)].concat()
+    );
+}
+
+const PARTY: u64 = 800_000_000_000_000_001;
+
+fn custom(channel: u64, id: u64, user: u64, emoji: u64, name: Value) -> Value {
+    json!({
+        "channel_id": channel.to_string(), "message_id": id.to_string(),
+        "user_id": user.to_string(), "emoji": {"id": emoji.to_string(), "name": name}, "type": 0,
+    })
+}
+
+// A custom emoji is its ID: a rename or a missing name is the same reaction, another emoji of
+// the same name is not.
+#[test]
+fn custom_emoji_are_counted_by_their_id() {
+    let mut state = viewing(GENERAL);
+    apply(&mut state, "MESSAGE_CREATE", message(10, GENERAL));
+    let read = |state: &State| -> Vec<(Option<u64>, String, u32)> {
+        state
+            .reactions(Snowflake::new(GENERAL), Snowflake::new(10))
+            .iter()
+            .map(|reaction| {
+                (
+                    reaction.emoji.id.map(|id| id.get()),
+                    reaction.emoji.name.as_deref().unwrap_or("").to_owned(),
+                    reaction.normal,
+                )
+            })
+            .collect()
+    };
+
+    for (user, emoji, name) in [
+        (MIRA, PARTY, json!("party")),
+        (ME, PARTY, json!("renamed")),
+        (100_000_000_000_000_003, PARTY, Value::Null),
+        (MIRA, PARTY + 1, json!("party")),
+    ] {
+        let add = custom(GENERAL, 10, user, emoji, name);
+        apply(&mut state, "MESSAGE_REACTION_ADD", add);
+    }
+    assert_eq!(
+        read(&state),
+        [
+            (Some(PARTY), "party".to_owned(), 3),
+            (Some(PARTY + 1), "party".to_owned(), 1)
+        ]
+    );
+
+    let renamed = custom(GENERAL, 10, MIRA, PARTY, json!("renamed"));
+    apply(&mut state, "MESSAGE_REACTION_REMOVE", renamed);
+    assert_eq!(read(&state)[0], (Some(PARTY), "party".to_owned(), 2));
+
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_REMOVE_EMOJI",
+        json!({
+            "channel_id": GENERAL.to_string(), "message_id": "10",
+            "emoji": {"id": PARTY.to_string(), "name": null},
+        }),
+    );
+    assert_eq!(read(&state), [(Some(PARTY + 1), "party".to_owned(), 1)]);
 }
 
 // A page asked before a reaction came may lack it; the reaction is put over the page.
@@ -619,6 +774,104 @@ fn a_reaction_during_a_load_is_replayed_over_the_page() {
         [one(UP, 1, false), one(FIRE, 1, true)].concat()
     );
     assert_eq!(reactions(&state, GENERAL, 11), one(UP, 1, false));
+}
+
+#[test]
+fn removals_of_an_emoji_and_of_all_during_a_load_are_put_over_the_page() {
+    let mut state = viewing(GENERAL);
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(GENERAL), LoadKind::Latest, 1, &mut events)
+        .unwrap();
+
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_REMOVE_EMOJI",
+        json!({
+            "channel_id": GENERAL.to_string(), "message_id": "10",
+            "emoji": {"id": null, "name": FIRE},
+        }),
+    );
+    apply(
+        &mut state,
+        "MESSAGE_REACTION_REMOVE_ALL",
+        json!({"channel_id": GENERAL.to_string(), "message_id": "11"}),
+    );
+    let stale = [
+        with_reactions(
+            message(10, GENERAL),
+            json!([wire_reaction(FIRE, 2, true), wire_reaction(UP, 1, false)]),
+        ),
+        with_reactions(message(11, GENERAL), json!([wire_reaction(UP, 2, false)])),
+        with_reactions(message(12, GENERAL), json!([wire_reaction(FIRE, 1, false)])),
+    ];
+    state.finish_load(ticket, page(&stale), true, &mut events);
+
+    assert_eq!(reactions(&state, GENERAL, 10), one(UP, 1, false));
+    assert_eq!(reactions(&state, GENERAL, 11), []);
+    assert_eq!(reactions(&state, GENERAL, 12), one(FIRE, 1, false));
+}
+
+// A stale window's copy missed what came while the session was away, so it can't stand in
+// for the page: the reaction goes over what the page brought.
+#[test]
+fn a_reaction_during_a_stale_reload_is_put_over_the_page() {
+    let mut state = viewing(GENERAL);
+    load_page(&mut state, GENERAL, LoadKind::Latest, &[10], true);
+    state.windows.mark_stale(&mut Vec::new());
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(Snowflake::new(GENERAL), LoadKind::Refresh, 2, &mut events)
+        .unwrap();
+
+    add(&mut state, GENERAL, 10, MIRA, UP);
+    let fresh = with_reactions(message(10, GENERAL), json!([wire_reaction(FIRE, 4, true)]));
+    state.finish_load(ticket, page(&[fresh]), true, &mut events);
+
+    assert_eq!(
+        reactions(&state, GENERAL, 10),
+        [one(FIRE, 4, true), one(UP, 1, false)].concat()
+    );
+}
+
+// A message that came while a load ran waits beside the window and counts its reactions there.
+#[test]
+fn a_reaction_on_a_held_message_survives_the_page() {
+    for page_has_it in [false, true] {
+        let mut state = viewing(GENERAL);
+        let general = Snowflake::new(GENERAL);
+        let mut events = Vec::new();
+        let around = state
+            .begin_load(
+                general,
+                LoadKind::Around(Snowflake::new(20)),
+                1,
+                &mut events,
+            )
+            .unwrap();
+        let middle = page(&[message(10, GENERAL), message(20, GENERAL)]);
+        state.finish_load(around, middle, false, &mut events);
+        let latest = state
+            .begin_load(general, LoadKind::Latest, 2, &mut events)
+            .unwrap();
+        apply(&mut state, "MESSAGE_CREATE", message(30, GENERAL));
+        assert_eq!(state.windows.held(general).len(), 1);
+
+        add(&mut state, GENERAL, 30, MIRA, UP);
+        let fresh = if page_has_it {
+            with_reactions(message(30, GENERAL), json!([wire_reaction(UP, 1, false)]))
+        } else {
+            message(30, GENERAL)
+        };
+        state.finish_load(latest, page(&[fresh]), true, &mut events);
+
+        assert_eq!(message_ids(&state, GENERAL), Some(vec![30]));
+        assert_eq!(
+            reactions(&state, GENERAL, 30),
+            one(UP, 1, false),
+            "page has it: {page_has_it}"
+        );
+    }
 }
 
 // The window's own copy counted every reaction since it was current: where the page brings a
