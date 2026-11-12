@@ -130,6 +130,8 @@ public final class SessionModel {
     @ObservationIgnored private var peeked: ChannelId?
     /// The last join or leave that failed, until `dismissMembershipError()`.
     public private(set) var membershipError: MembershipError?
+    /// The last message action that failed (Mark Unread), until `dismissMessageActionFailure()`.
+    public private(set) var messageActionFailure: MessageActionsModel.Failure?
     /// The channels the user is reading: the open channel and the split thread, each while its
     /// list is fresh at the present's bottom, and unless the user scrolled clearly away from it
     /// or the session showed it on its own since the last click or key press; both only while
@@ -904,6 +906,28 @@ public final class SessionModel {
 
     public func dismissMembershipError() {
         membershipError = nil
+    }
+
+    /// What the messages of `list` offer in their hover bars and menus; `copy` is the host's
+    /// pasteboard.
+    public func messageActions(
+        for list: MessageListModel, copy: @escaping (String) -> Void
+    ) -> MessageActionsModel {
+        MessageActionsModel(
+            channelId: list.channelId, store: store, account: account, copy: copy,
+            retry: { [composer = list.composer] id in Task { await composer.retry(id) } },
+            discard: { [composer = list.composer] in composer.discard($0) },
+            createThread: { [weak self] channel, message in
+                self?.openThreadForm(in: channel, from: message, location: .message)
+            },
+            viewThread: { [weak self] thread, parent in
+                Task { await self?.openBeside(thread: thread, from: parent) }
+            },
+            failed: { [weak self] in self?.messageActionFailure = $0 })
+    }
+
+    public func dismissMessageActionFailure() {
+        messageActionFailure = nil
     }
 
     private func changeMembership(

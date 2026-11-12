@@ -20,6 +20,7 @@ final class CallLog: Sendable {
         case checkThread(ChannelId, ChannelId)
         case joinThread(ChannelId, ThreadLocation)
         case leaveThread(ChannelId, ThreadLocation)
+        case markUnread(ChannelId, MessageId)
         case loadOlderThreads(ChannelId)
         case searchThreads(ChannelId, String)
         case setBrowsing(ChannelId?)
