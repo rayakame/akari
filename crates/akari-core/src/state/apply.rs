@@ -1037,6 +1037,8 @@ impl State {
             if let Some(last) = known.last_message_id {
                 channel.note_message(last);
             }
+            // Absent in most thread objects; only CHANNEL_PINS_UPDATE takes the last pin away.
+            channel.last_pin_timestamp = channel.last_pin_timestamp.or(known.last_pin_timestamp);
             if let (Some(info), Some(before)) = (channel.thread.as_deref_mut(), &known.thread) {
                 // An absent member isn't a leave: only a members update or READY says so.
                 if info.member.is_none() {
@@ -1071,11 +1073,17 @@ impl State {
         match self.entities.channels.get(&id) {
             Some(known) if *known == channel => {}
             Some(_) => {
-                self.entities.channels.insert(id, channel.clone());
+                let stored = channel.clone();
+                self.changing_pins(id, events, |state| {
+                    state.entities.channels.insert(id, stored);
+                });
                 events.push(StoreEvent::ChannelUpdated(channel));
             }
             None => {
-                self.entities.channels.insert(id, channel.clone());
+                let stored = channel.clone();
+                self.changing_pins(id, events, |state| {
+                    state.entities.channels.insert(id, stored);
+                });
                 // The open forum came after it was opened: its visit begins now.
                 self.find_forum_position(id, events);
                 events.push(StoreEvent::ChannelAdded(channel));

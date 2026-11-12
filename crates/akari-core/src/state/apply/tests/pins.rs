@@ -239,3 +239,47 @@ fn a_pin_time_alone_is_no_channel_update_at_ready() {
         "{events:?}"
     );
 }
+
+#[test]
+fn a_thread_object_brings_its_pin_time_and_says_so() {
+    let mut state = ready_state();
+    let mut thread = fixture(include_str!(
+        "../../../../tests/fixtures/thread_create.json"
+    ));
+    thread["id"] = "300000000000000031".into();
+    thread["member"] = json!({"flags": 0, "join_timestamp": PINNED});
+    apply(&mut state, "THREAD_CREATE", thread.clone());
+    assert!(!unread(&state, 300_000_000_000_000_031));
+
+    thread["last_pin_timestamp"] = PINNED.into();
+    let events = apply(&mut state, "THREAD_CREATE", thread.clone());
+
+    assert!(
+        events.contains(&changed(300_000_000_000_000_031)),
+        "{events:?}"
+    );
+    assert!(unread(&state, 300_000_000_000_000_031));
+}
+
+// THREAD_LIST_SYNC and a message's `thread` leave the pin time out.
+#[test]
+fn a_thread_object_without_a_pin_time_keeps_the_known_one() {
+    let mut state = ready_state();
+    let mut thread = fixture(include_str!(
+        "../../../../tests/fixtures/thread_create.json"
+    ));
+    thread["id"] = "300000000000000031".into();
+    thread["member"] = json!({"flags": 0, "join_timestamp": PINNED});
+    thread["last_pin_timestamp"] = PINNED.into();
+    apply(&mut state, "THREAD_CREATE", thread.clone());
+    assert!(unread(&state, 300_000_000_000_000_031));
+
+    thread.as_object_mut().unwrap().remove("last_pin_timestamp");
+    let events = apply(&mut state, "THREAD_CREATE", thread);
+
+    assert!(
+        !events.contains(&changed(300_000_000_000_000_031)),
+        "{events:?}"
+    );
+    assert!(unread(&state, 300_000_000_000_000_031));
+}

@@ -32,9 +32,10 @@ rule (`hasUnreadPins`, canary 671549; not observed): the channel's newest pin is
 pin time the user acknowledged, compared by milliseconds.
 
 - The newest pin's time is the channel's `last_pin_timestamp` (`state::Channel`): from every
-  channel object (READY, GUILD_CREATE, CHANNEL_CREATE, THREAD_CREATE, CHANNEL_UPDATE, where a
-  missing key keeps the known time and `null` clears it), from CHANNEL_PINS_UPDATE (as sent,
-  `null` clears) and from PASSIVE_UPDATE_V2's channels (only a time that is there).
+  channel object (READY and GUILD_CREATE as sent; CHANNEL_CREATE, THREAD_CREATE and every other
+  channel or thread object for a known channel, where a missing or `null` time keeps the known
+  one, as most thread objects leave it out; CHANNEL_UPDATE, where a missing key keeps the known
+  time and `null` clears it), from CHANNEL_PINS_UPDATE (as sent, `null` clears) and from PASSIVE_UPDATE_V2's channels (only a time that is there).
 - The acknowledged time is the read state entry's `last_pin_timestamp` (Discord's epoch for
   never, which Akari keeps as none) and CHANNEL_PINS_ACK's `timestamp`; an ack without a time is
   taken to be for the channel's newest pin, as the official client takes its own.
