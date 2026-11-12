@@ -120,6 +120,8 @@ struct Window {
     held_dropped: Option<MessageId>,
     // Pending and failed messages; never trimmed.
     outbox: Vec<Arc<Message>>,
+    // The outbox's replies that don't ping their target's author.
+    quiet: Vec<MessageId>,
     loading: u32,
     // Edits, deletes and reactions while a load runs, each with its number; a page may predate
     // those that came after its load began.
@@ -139,7 +141,21 @@ enum Missed {
     Reacted(MessageId, ReactionChange),
 }
 
+// A queued message as its request needs it.
+pub(crate) struct Outgoing {
+    pub(crate) message: Arc<Message>,
+    // A reply pings its target's author.
+    pub(crate) mention: bool,
+}
+
 impl Window {
+    fn outgoing(&self, message: &Arc<Message>) -> Outgoing {
+        Outgoing {
+            message: message.clone(),
+            mention: !self.quiet.contains(&message.id),
+        }
+    }
+
     fn appends_live(&self) -> bool {
         self.latest && !self.stale && self.holding == 0
     }
@@ -740,13 +756,13 @@ impl Windows {
         messages.get(index).cloned()
     }
 
-    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Arc<Message>> {
-        self.windows
-            .get(&channel)?
+    pub(crate) fn pending(&self, channel: ChannelId, id: MessageId) -> Option<Outgoing> {
+        let window = self.windows.get(&channel)?;
+        window
             .outbox
             .iter()
             .find(|message| message.id == id && message.delivery == Delivery::Pending)
-            .cloned()
+            .map(|message| window.outgoing(message))
     }
 
     // The newest loaded message; pending and failed ones aren't in `messages`.
@@ -854,6 +870,7 @@ impl Windows {
         match pending {
             Some((pending_id, index)) => {
                 window.outbox.remove(index);
+                window.quiet.retain(|quiet| *quiet != pending_id);
                 window.place(channel_id, message.clone(), limit, false, events);
                 events.push(StoreEvent::MessageReplaced {
                     channel_id,
@@ -914,6 +931,16 @@ impl Windows {
         self.targets.set(channel, id, target, events);
     }
 
+    // Discord refused a reply because its target is gone.
+    pub(crate) fn target_gone(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        self.targets.delete(channel, id, events);
+    }
+
     pub(crate) fn reply_target(&self, channel: ChannelId, id: MessageId) -> ReplyTarget {
         self.targets.get(channel, id)
     }
@@ -964,15 +991,35 @@ impl Windows {
         self.targets.prune(channel, |id| named.contains(&id));
     }
 
+    // `answers`: the message a reply answers and whether it pings, which a retry keeps.
     pub(crate) fn queue(
         &mut self,
         channel: ChannelId,
         message: Arc<Message>,
+        answers: Option<(&Message, bool)>,
         events: &mut Vec<StoreEvent>,
     ) {
+        if !self.windows.contains_key(&channel) {
+            return;
+        }
+        if let Some((target, _)) = answers {
+            let preview = Arc::new(ReplyPreview::of(target));
+            self.targets.set(
+                target.channel_id,
+                target.id,
+                ReplyTarget::Loaded(preview),
+                events,
+            );
+        }
         if let Some(window) = self.windows.get_mut(&channel) {
+            if matches!(answers, Some((_, false))) {
+                window.quiet.push(message.id);
+            }
             window.outbox.push(message.clone());
             events.push(StoreEvent::MessageInserted(message));
+        }
+        if let Some((target, _)) = answers {
+            self.trim_targets(target.channel_id);
         }
     }
 
@@ -983,7 +1030,7 @@ impl Windows {
         from: Delivery,
         to: Delivery,
         events: &mut Vec<StoreEvent>,
-    ) -> Option<Arc<Message>> {
+    ) -> Option<Outgoing> {
         let window = self.windows.get_mut(&channel)?;
         let queued = window
             .outbox
@@ -993,7 +1040,8 @@ impl Windows {
         next.delivery = to;
         *queued = Arc::new(next);
         events.push(StoreEvent::MessageUpdated(queued.clone()));
-        Some(queued.clone())
+        let queued = queued.clone();
+        Some(window.outgoing(&queued))
     }
 
     pub(crate) fn fail(&mut self, channel: ChannelId, id: MessageId, events: &mut Vec<StoreEvent>) {
@@ -1005,7 +1053,7 @@ impl Windows {
         channel: ChannelId,
         id: MessageId,
         events: &mut Vec<StoreEvent>,
-    ) -> Option<Arc<Message>> {
+    ) -> Option<Outgoing> {
         self.set_delivery(channel, id, Delivery::Failed, Delivery::Pending, events)
     }
 
@@ -1026,6 +1074,7 @@ impl Windows {
             return false;
         };
         window.outbox.remove(index);
+        window.quiet.retain(|quiet| *quiet != id);
         events.push(StoreEvent::MessageDeleted {
             channel_id: channel,
             message_id: id,
@@ -1308,9 +1357,11 @@ impl Windows {
                     page.clear();
                 }
                 let outbox = std::mem::take(&mut window.outbox);
+                let quiet = std::mem::take(&mut window.quiet);
                 *window = Window {
                     generation,
                     outbox,
+                    quiet,
                     placing: window.placing,
                     around_placing: window.around_placing,
                     ..Window::default()
@@ -1537,9 +1588,11 @@ impl Windows {
         // Our unsent messages stay readable and retryable, so a UI can offer their text again.
         if !window.outbox.is_empty() {
             let outbox = std::mem::take(&mut window.outbox);
+            let quiet = std::mem::take(&mut window.quiet);
             *window = Window {
                 generation,
                 outbox,
+                quiet,
                 ..Window::default()
             };
             return;

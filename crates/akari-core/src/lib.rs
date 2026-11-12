@@ -42,5 +42,5 @@ pub use load_report::{LoadReport, PageOutcome};
 pub use prepare::MessagePreparer;
 pub use rest::RequestError;
 pub use secret::{Secret, Token};
-pub use state::message_length;
+pub use state::{ReplyTo, message_length};
 pub use token_store::{TokenStore, TokenStoreError};

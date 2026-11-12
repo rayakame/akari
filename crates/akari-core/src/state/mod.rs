@@ -36,7 +36,7 @@ pub(crate) use reactions::shared as shared_reactions;
 pub use reactions::{Reaction, ReactionEmoji};
 pub use read_states::ReadState;
 pub(crate) use read_states::{Ack, AckBody, ReadStates};
-pub use replies::{ReplyPreview, ReplyTarget};
+pub use replies::{ReplyPreview, ReplyTarget, ReplyTo};
 pub(crate) use send::limit_in;
 pub use send::{Slowmode, message_length};
 pub use settings::{
@@ -52,5 +52,5 @@ pub use types::*;
 pub use windows::MessageWindow;
 pub(crate) use windows::{
     CachedMessages, CachedTargets, CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket,
-    StarterFetch, WindowLimits,
+    Outgoing, StarterFetch, WindowLimits,
 };

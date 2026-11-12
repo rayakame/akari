@@ -592,6 +592,27 @@ impl Message {
         }
     }
 
+    // The official client's optimistic reply: type 19, its reference, and the target's author
+    // among the mentions when the reply pings.
+    pub(crate) fn answering(
+        mut self,
+        target: &Message,
+        guild: Option<model::GuildId>,
+        mention: bool,
+    ) -> Self {
+        self.kind = model::MessageType::Reply;
+        self.reference = Some(Box::new(MessageReference {
+            kind: model::MessageReferenceType::Default,
+            message_id: Some(target.id),
+            channel_id: Some(target.channel_id),
+            guild_id: guild,
+        }));
+        if mention {
+            self.mentions = Box::new([target.author.clone()]);
+        }
+        self
+    }
+
     pub(crate) fn patch(&self, update: MessageUpdate, intern: Intern<'_>) -> Self {
         let mut next = self.clone();
         next.kind = update.kind.unwrap_or(next.kind);

@@ -20,8 +20,9 @@ use crate::rest::{
     RequestError, uri_component,
 };
 use crate::state::{
-    Ack, ConnectionState, Cursor, ForumView, Learned, LoadKind, LoadTicket, Message, OLDER_PAGE,
-    PageKey, StarterFetch, Store, WindowLimits, message_length,
+    Ack, ConnectionState, Cursor, ForumView, Learned, LoadKind, LoadTicket, Message,
+    MessageReference, OLDER_PAGE, Outgoing, PageKey, ReplyTo, StarterFetch, Store, WindowLimits,
+    message_length,
 };
 use crate::{DiscordClient, LoadReport, MessagePreparer, Token, ms};
 pub use acks::MarkOutcome;
@@ -367,6 +368,32 @@ impl Drop for Delivering<'_> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&self.pending);
+    }
+}
+
+// Discord's answer where a reply's target is gone may also be this; neither is observed.
+const UNKNOWN_MESSAGE: u32 = 10008;
+
+fn create_body(outgoing: &Outgoing) -> CreateMessage {
+    let message = &outgoing.message;
+    let body = CreateMessage::new(message.content.to_string(), message.id.get().to_string());
+    let reference = message
+        .reference
+        .as_deref()
+        .filter(|_| message.kind == MessageType::Reply);
+    match reference {
+        Some(MessageReference {
+            message_id: Some(target),
+            channel_id,
+            guild_id,
+            ..
+        }) => body.answering(
+            *guild_id,
+            channel_id.unwrap_or(message.channel_id),
+            *target,
+            outgoing.mention,
+        ),
+        _ => body,
     }
 }
 
@@ -1163,7 +1190,12 @@ impl Shared {
         }
     }
 
-    fn queue(self: &Arc<Self>, channel: ChannelId, content: &str) -> Result<Queued, RequestError> {
+    fn queue(
+        self: &Arc<Self>,
+        channel: ChannelId,
+        content: &str,
+        reply: Option<ReplyTo>,
+    ) -> Result<Queued, RequestError> {
         self.rest.usable()?;
         let author = self
             .store
@@ -1178,6 +1210,8 @@ impl Shared {
         }
         let detached = match self.store.messages(channel) {
             Some(window) => !window.latest,
+            // A channel that was never viewed has no message to answer.
+            None if reply.is_some() => return Err(RequestError::InvalidRequest),
             None => {
                 self.view(channel);
                 false
@@ -1192,7 +1226,9 @@ impl Shared {
             content.to_owned(),
             now,
         );
-        self.store.queue_message(channel, Arc::new(message));
+        if !self.store.queue_message(channel, message, reply) {
+            return Err(RequestError::InvalidRequest);
+        }
         Ok(Queued { pending, detached })
     }
 
@@ -1201,35 +1237,35 @@ impl Shared {
     async fn deliver_queued(
         self: &Arc<Self>,
         channel: ChannelId,
-        pending: MessageId,
-        content: String,
+        outgoing: Outgoing,
         detached: bool,
     ) -> Result<MessageId, RequestError> {
         if detached {
             let (jumped, delivered) = tokio::join!(
                 self.load(channel, LoadKind::Latest, JUMP_LIMIT, None),
-                self.deliver(channel, pending, content),
+                self.deliver(channel, outgoing),
             );
             if let Err(err) = jumped {
                 tracing::debug!(error = %err, "couldn't jump to the present before sending");
             }
             return delivered;
         }
-        self.deliver(channel, pending, content).await
+        self.deliver(channel, outgoing).await
     }
 
     async fn deliver(
         &self,
         channel: ChannelId,
-        pending: MessageId,
-        content: String,
+        outgoing: Outgoing,
     ) -> Result<MessageId, RequestError> {
+        let pending = outgoing.message.id;
         let mut unanswered = Unanswered {
             store: &self.store,
             channel,
             pending: Some(pending),
         };
-        let body = CreateMessage::new(content, pending.get().to_string());
+        let answered = outgoing.message.replied_to();
+        let body = create_body(&outgoing);
         let delivered = match self.rest.create_message(channel, &body).await {
             Ok(message) => {
                 let id = message.id;
@@ -1242,9 +1278,18 @@ impl Shared {
                     RequestError::TooLong { limit: 0 } => RequestError::TooLong {
                         limit: self.store.message_length_limit(),
                     },
+                    RequestError::Discord {
+                        code: UNKNOWN_MESSAGE,
+                        ..
+                    } if answered.is_some() => RequestError::ReplyTargetDeleted,
                     err => err,
                 };
                 self.store.fail_message(channel, pending);
+                if let (RequestError::ReplyTargetDeleted, Some((channel, target))) =
+                    (&err, answered)
+                {
+                    self.store.reply_target_gone(channel, target);
+                }
                 match &err {
                     RequestError::RateLimited {
                         retry_after: Some(wait),
@@ -1959,27 +2004,40 @@ impl Account {
 
     /// Shows the message as pending at once and sends it. Resolves with Discord's ID; on an
     /// error the pending message is marked failed and stays until retried or discarded.
+    ///
+    /// With `reply` it answers that message of the channel, shown as a reply with its preview
+    /// at once. A message [`Store::message_actions`] allows no reply to, or one of another
+    /// channel, is refused with [`RequestError::InvalidRequest`]; a target Discord says is
+    /// gone fails the reply with [`RequestError::ReplyTargetDeleted`].
     pub async fn send_message(
         &self,
         channel: ChannelId,
         content: String,
+        reply: Option<ReplyTo>,
     ) -> Result<MessageId, RequestError> {
-        let Queued { pending, detached } = self.shared.queue(channel, &content)?;
+        let Queued { pending, detached } = self.shared.queue(channel, &content, reply)?;
         let _delivering = self.shared.claim(pending)?;
+        let outgoing = self
+            .shared
+            .store
+            .pending_message(channel, pending)
+            .ok_or(RequestError::InvalidRequest)?;
         self.shared
-            .deliver_queued(channel, pending, content, detached)
+            .deliver_queued(channel, outgoing, detached)
             .await
     }
 
     /// The first half of [`Account::send_message`]: shows the message as pending and returns
-    /// its provisional ID, or refuses (empty or too long content, a closed account) before
-    /// anything is queued. [`Account::deliver_message`] sends it.
+    /// its provisional ID, or refuses (empty or too long content, a reply to a message that
+    /// may not be answered, a closed account) before anything is queued.
+    /// [`Account::deliver_message`] sends it.
     pub fn queue_message(
         &self,
         channel: ChannelId,
         content: &str,
+        reply: Option<ReplyTo>,
     ) -> Result<MessageId, RequestError> {
-        Ok(self.shared.queue(channel, content)?.pending)
+        Ok(self.shared.queue(channel, content, reply)?.pending)
     }
 
     /// Sends a message [`Account::queue_message`] queued, like [`Account::send_message`].
@@ -1992,7 +2050,7 @@ impl Account {
     ) -> Result<MessageId, RequestError> {
         let shared = &self.shared;
         let _delivering = shared.claim(pending)?;
-        let message = shared
+        let outgoing = shared
             .store
             .pending_message(channel, pending)
             .ok_or(RequestError::InvalidRequest)?;
@@ -2000,9 +2058,7 @@ impl Account {
             .store
             .messages(channel)
             .is_some_and(|window| !window.latest);
-        shared
-            .deliver_queued(channel, pending, message.content.to_string(), detached)
-            .await
+        shared.deliver_queued(channel, outgoing, detached).await
     }
 
     /// Dev only: sends like [`Account::send_message`], then posts the same body with the same
@@ -2015,9 +2071,13 @@ impl Account {
         content: String,
     ) -> Result<(MessageId, Result<MessageId, RequestError>), RequestError> {
         let shared = &self.shared;
-        let Queued { pending, .. } = shared.queue(channel, &content)?;
+        let Queued { pending, .. } = shared.queue(channel, &content, None)?;
         let _delivering = shared.claim(pending)?;
-        let first = shared.deliver(channel, pending, content.clone()).await?;
+        let outgoing = shared
+            .store
+            .pending_message(channel, pending)
+            .ok_or(RequestError::InvalidRequest)?;
+        let first = shared.deliver(channel, outgoing).await?;
         let body = CreateMessage::new(content, pending.get().to_string());
         let repeat = shared
             .rest
@@ -2034,21 +2094,20 @@ impl Account {
         self.shared.member_lists.store(false, Ordering::Relaxed);
     }
 
-    /// Sends a failed message again with the same nonce.
+    /// Sends a failed message again with the same nonce; a reply with its target and its ping
+    /// as it was queued.
     pub async fn retry_message(
         &self,
         channel: ChannelId,
         pending: MessageId,
     ) -> Result<MessageId, RequestError> {
         let _delivering = self.shared.claim(pending)?;
-        let message = self
+        let outgoing = self
             .shared
             .store
             .retry_message(channel, pending)
             .ok_or(RequestError::InvalidRequest)?;
-        self.shared
-            .deliver(channel, pending, message.content.to_string())
-            .await
+        self.shared.deliver(channel, outgoing).await
     }
 
     /// Drops a failed message.

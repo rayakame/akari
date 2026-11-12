@@ -217,13 +217,14 @@ fn queued(state: &mut State, channel: u64) {
     let now = state.now_millis();
     state.queue(
         Snowflake::new(channel),
-        Arc::new(Message::pending(
+        Message::pending(
             Snowflake::new(M),
             Snowflake::new(channel),
             Arc::new(me.user.clone()),
             "hi".to_owned(),
             0,
-        )),
+        ),
+        None,
         now,
         &mut Vec::new(),
     );
@@ -1165,9 +1166,32 @@ fn a_starter_row_answers_for_the_message_it_shows() {
         MessageActions {
             view_thread: false,
             mark_unread: false,
+            reply: false,
+            reply_pings: false,
+            mention_toggle: false,
             ..in_parent
         },
-        "the thread it would view and the thread a mark would mark are the one the row is in"
+        "the thread it would view and the thread a mark would mark are the one the row is in, and a\
+         reply there can't name it"
+    );
+    assert!(
+        state
+            .answerable(
+                Snowflake::new(THREAD),
+                Snowflake::new(ROW),
+                state.now_millis()
+            )
+            .is_none()
+    );
+    assert!(
+        state
+            .answerable(
+                Snowflake::new(GENERAL),
+                Snowflake::new(THREAD),
+                state.now_millis()
+            )
+            .is_none(),
+        "the parent's window isn't loaded"
     );
     assert_eq!(
         state.shown_message(Snowflake::new(THREAD), Snowflake::new(ROW)),
