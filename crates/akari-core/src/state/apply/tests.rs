@@ -111,6 +111,14 @@ fn describe(event: &StoreEvent) -> String {
         StoreEvent::PostCountsChanged { forum_id } => {
             format!("PostCountsChanged({})", forum_id.get())
         }
+        StoreEvent::MessageReactionsChanged {
+            channel_id,
+            message_id,
+        } => format!(
+            "MessageReactionsChanged({}, {})",
+            channel_id.get(),
+            message_id.get()
+        ),
         StoreEvent::OlderThreadsChanged { parent_id } => {
             format!("OlderThreadsChanged({})", parent_id.get())
         }
@@ -1133,6 +1141,7 @@ mod embeds;
 mod expressions;
 mod forum;
 mod media;
+mod reactions;
 mod read_states;
 mod thread_boxes;
 mod thread_browser;

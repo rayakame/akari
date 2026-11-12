@@ -1,6 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use super::reactions::Reaction;
 use super::settings::NotificationLevel;
 use crate::media::ImageKey;
 use crate::model::{
@@ -544,6 +545,8 @@ pub struct Message {
     pub attachments: Box<[Attachment]>,
     pub embeds: Box<[Embed]>,
     pub stickers: Box<[Sticker]>,
+    /// `None` for a message without reactions; read them with [`Message::reactions`].
+    pub reactions: Option<Arc<[Reaction]>>,
     /// The source of a reply, pin, crosspost, thread starter or forward.
     pub reference: Option<Box<MessageReference>>,
     /// The referenced message as Discord sent it along; if it is loaded, `Store::message`

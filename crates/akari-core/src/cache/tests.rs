@@ -295,6 +295,7 @@ pub(crate) fn message(channel: u64, id: u64, content: &str) -> Message {
         attachments: Box::new([]),
         embeds: Box::new([]),
         stickers: Box::new([]),
+        reactions: None,
         reference: None,
         referenced_message: ReferencedMessage::NotIncluded,
         delivery: Delivery::Sent,

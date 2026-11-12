@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::apply::wall_millis;
 use super::events::StoreEvent;
+use super::reactions::{ReactionChange, react};
 use super::types::{Delivery, Message, ReferencedMessage, StarterMessage, User};
 use crate::gateway::MessageUpdate;
 use crate::load_report::PageOutcome;
@@ -120,6 +121,7 @@ struct Window {
 enum Missed {
     Updated(Box<MessageUpdate>),
     Deleted(MessageId),
+    Reacted(MessageId, ReactionChange),
 }
 
 impl Window {
@@ -973,6 +975,32 @@ impl Windows {
         for missed in &window.missed {
             match missed {
                 Missed::Deleted(id) => page.retain(|message| message.id != *id),
+                Missed::Reacted(id, change) => {
+                    let Ok(index) = Window::position(&page, *id) else {
+                        continue;
+                    };
+                    // A copy that was current counted every reaction since; the page may or may
+                    // not have this one.
+                    let live = [&window.messages, &window.held]
+                        .into_iter()
+                        .find_map(|copies| {
+                            let index = Window::position(copies, *id).ok()?;
+                            copies.get(index)
+                        })
+                        .filter(|_| !was_stale);
+                    match live {
+                        Some(live) if live.reactions != page[index].reactions => {
+                            page[index] = Arc::new(Message {
+                                reactions: live.reactions.clone(),
+                                ..(*page[index]).clone()
+                            });
+                        }
+                        Some(_) => {}
+                        None => {
+                            react(&mut page[index], std::slice::from_ref(change));
+                        }
+                    }
+                }
                 Missed::Updated(update) => {
                     let Ok(index) = Window::position(&page, update.id) else {
                         continue;
@@ -1195,6 +1223,85 @@ impl Windows {
                 window.held[index].patch(update, &mut |user| Arc::new(User::from_wire(user)));
             window.held[index] = Arc::new(next);
         }
+    }
+
+    // Whether the window's row changed.
+    pub(crate) fn react(
+        &mut self,
+        channel_id: ChannelId,
+        id: MessageId,
+        changes: &[ReactionChange],
+        events: &mut Vec<StoreEvent>,
+    ) -> bool {
+        let mut row = false;
+        if let Some(window) = self.windows.get_mut(&channel_id) {
+            if window.loading > 0 {
+                window.missed.extend(
+                    changes
+                        .iter()
+                        .map(|change| Missed::Reacted(id, change.clone())),
+                );
+            }
+            if let Ok(index) = Window::position(&window.messages, id) {
+                row = react(&mut window.messages[index], changes);
+            } else if let Ok(index) = Window::position(&window.held, id) {
+                react(&mut window.held[index], changes);
+            }
+        }
+        if row {
+            events.push(StoreEvent::MessageReactionsChanged {
+                channel_id,
+                message_id: id,
+            });
+        }
+        if self.react_to_starters(channel_id, id, changes) | row {
+            events.extend(self.starter_rows_showing(channel_id, id).iter().map(|row| {
+                StoreEvent::MessageReactionsChanged {
+                    channel_id: row.channel_id,
+                    message_id: row.id,
+                }
+            }));
+        }
+        row
+    }
+
+    // The copies viewed threads keep of the message they started from.
+    fn react_to_starters(
+        &mut self,
+        channel: ChannelId,
+        id: MessageId,
+        changes: &[ReactionChange],
+    ) -> bool {
+        let mut changed = false;
+        for starter in self.starters.values_mut() {
+            if let Starter::Found(message) = starter
+                && message.channel_id == channel
+                && message.id == id
+            {
+                changed |= react(message, changes);
+            }
+        }
+        let rows = self
+            .windows
+            .values_mut()
+            .flat_map(|window| window.messages.iter_mut())
+            .filter(|row| row.kind == MessageType::ThreadStarterMessage);
+        for row in rows {
+            let ReferencedMessage::Message(message) = &row.referenced_message else {
+                continue;
+            };
+            if message.channel_id != channel || message.id != id {
+                continue;
+            }
+            if let Some(next) = message.reacted(changes) {
+                *row = Arc::new(Message {
+                    referenced_message: ReferencedMessage::Message(Arc::new(next)),
+                    ..(**row).clone()
+                });
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub(crate) fn delete(
