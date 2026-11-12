@@ -361,6 +361,8 @@ struct PostFormMessage: View {
             }
         }
         .padding(.top, 4)
+        // Its text under the title's.
+        .padding(.leading, ForumMeasures.control - ComposerTextView.insets.width)
     }
 }
 

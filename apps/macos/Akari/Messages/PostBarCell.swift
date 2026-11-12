@@ -181,9 +181,10 @@ final class PostBarCell: NSTableCellView {
 final class PostBarButton: NSButton {
     static let height: CGFloat = 32
     private static let padding: CGFloat = 12
-    private static let spacing: CGFloat = 6
 
     private(set) var symbol = ""
+    /// The title as worded; the drawn one starts with the gap after the symbol.
+    private(set) var label = ""
 
     init() {
         super.init(frame: .zero)
@@ -193,6 +194,7 @@ final class PostBarButton: NSButton {
         layer?.cornerRadius = 8
         imagePosition = .imageLeading
         imageScaling = .scaleNone
+        imageHugsTitle = true
     }
 
     required init?(coder: NSCoder) {
@@ -205,15 +207,19 @@ final class PostBarButton: NSButton {
 
     func show(symbol: String, title: String?) {
         self.symbol = symbol
+        label = title ?? ""
         image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
         contentTintColor = Palette.textDefault
         imagePosition = title == nil ? .imageOnly : .imageLeading
         attributedTitle = NSAttributedString(
-            string: title ?? "",
+            string: title.map { " " + $0 } ?? "",
             attributes: [
                 .font: TypeScale.postBarButton.nsFont, .foregroundColor: Palette.textDefault,
             ])
+        if let title {
+            setAccessibilityLabel(title)
+        }
     }
 
     var fittingWidth: CGFloat {
@@ -221,7 +227,7 @@ final class PostBarButton: NSButton {
             return Self.height
         }
         let text = attributedTitle.size().width.rounded(.up)
-        return 2 * Self.padding + (image?.size.width ?? 0).rounded(.up) + Self.spacing + text
+        return 2 * Self.padding + (image?.size.width ?? 0).rounded(.up) + text
     }
 
     override func updateLayer() {

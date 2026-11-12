@@ -65,7 +65,7 @@ struct PostBarTests {
         list.controller.actions = actions
         list.show(state(2, bar: bar()))
         var cell = try barCell()
-        #expect(cell.follow.title == "Follow")
+        #expect(cell.follow.label == "Follow")
         #expect(cell.follow.symbol == "bell.fill")
         #expect(cell.follow.toolTip == "Add this post to your channel list and receive notifications about it.")
 
@@ -74,7 +74,7 @@ struct PostBarTests {
 
         list.show(state(2, bar: bar(following: true)))
         cell = try barCell()
-        #expect(cell.follow.title == "Following")
+        #expect(cell.follow.label == "Following")
         #expect(cell.follow.symbol == "checkmark")
         cell.follow.performClick(nil)
         #expect(actions.calls.last == "follow false")
@@ -99,19 +99,19 @@ struct PostBarTests {
             waited.append(duration)
             for await _ in gate.stream { break }
         }
-        #expect(cell.copy.title.isEmpty)
+        #expect(cell.copy.label.isEmpty)
         #expect(cell.copy.toolTip == "Copy Link")
 
         cell.copy.performClick(nil)
 
         #expect(actions.calls.last == "copy link")
-        #expect(cell.copy.title == "Copied")
+        #expect(cell.copy.label == "Copied")
         #expect(cell.copy.symbol == "checkmark")
         gate.continuation.yield()
-        for _ in 0..<100 where cell.copy.title == "Copied" {
+        for _ in 0..<100 where cell.copy.label == "Copied" {
             await Task.yield()
         }
-        #expect(cell.copy.title.isEmpty)
+        #expect(cell.copy.label.isEmpty)
         #expect(cell.copy.symbol == "link")
         #expect(waited == [.seconds(2)])
     }
