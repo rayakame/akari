@@ -99,6 +99,8 @@ nonisolated final class ForumAccount: Account, @unchecked Sendable {
     }
     override func viewChannel(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
+
+    override func setOpenChannels(channelIds: [ChannelId]) {}
 }
 
 nonisolated final class ForumStore: Store, @unchecked Sendable {

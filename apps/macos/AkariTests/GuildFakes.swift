@@ -41,6 +41,8 @@ nonisolated final class GuildAccount: Account, @unchecked Sendable {
     override func supersedeAroundLoads(channelId: ChannelId) {}
     override func setReading(channelIds: [ChannelId]) {}
 
+    override func setOpenChannels(channelIds: [ChannelId]) {}
+
     override func markRead(channelId: ChannelId) {
         markedRead.withLock { $0.append(channelId) }
     }
