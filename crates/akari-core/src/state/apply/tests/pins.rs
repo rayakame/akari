@@ -8,6 +8,13 @@ fn unread(state: &State, channel: u64) -> bool {
     state.pins_unread(Snowflake::new(channel), now)
 }
 
+fn acked(state: &State, channel: u64) -> Option<Timestamp> {
+    state
+        .entities
+        .read_states
+        .pins_acked(Snowflake::new(channel))
+}
+
 fn changed(channel: u64) -> String {
     format!("PinsUnreadChanged({channel})")
 }
@@ -44,6 +51,26 @@ fn ready_says_which_channels_have_pins_the_user_hasnt_seen() {
     assert!(unread(&no_entry, GENERAL), "never acknowledged");
     assert!(!unread(&never, VOICE), "no pin");
     assert!(!unread(&never, 999), "no channel");
+    assert_eq!(acked(&never, GENERAL), None, "Discord's epoch is never");
+    assert!(acked(&seen, GENERAL).is_some());
+}
+
+// A server's oldest channel has the server's ID, which its other read states are filed under.
+#[test]
+fn only_channel_read_states_acknowledge_pins() {
+    let mut ready = pinned_ready(Value::Null);
+    ready["read_state"]["entries"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": GENERAL.to_string(), "read_state_type": 1, "last_acked_id": "0",
+            "badge_count": 0, "last_pin_timestamp": LATER,
+        }));
+
+    let state = state_from(&ready);
+
+    assert_eq!(acked(&state, GENERAL), None);
+    assert!(unread(&state, GENERAL));
 }
 
 #[test]
@@ -95,6 +122,28 @@ fn an_ack_without_a_time_is_for_the_newest_pin() {
 
     assert_eq!(events, [changed(GENERAL)]);
     assert!(!unread(&state, GENERAL));
+}
+
+// Discord's epoch stands for no time, in an ack as in READY.
+#[test]
+fn an_ack_at_time_zero_is_for_the_newest_pin() {
+    let mut state = state_from(&pinned_ready(Value::Null));
+
+    let events = apply(
+        &mut state,
+        "CHANNEL_PINS_ACK",
+        pins_ack(GENERAL, "1970-01-01T00:00:00+00:00".into()),
+    );
+
+    assert_eq!(events, [changed(GENERAL)]);
+    assert!(!unread(&state, GENERAL));
+    assert_eq!(
+        acked(&state, GENERAL),
+        state
+            .channel(Snowflake::new(GENERAL))
+            .unwrap()
+            .last_pin_timestamp
+    );
 }
 
 #[test]
@@ -184,6 +233,63 @@ fn a_passive_update_brings_pin_times() {
     assert!(unread(&state, GENERAL));
 }
 
+#[test]
+fn a_passive_update_for_another_guilds_channel_changes_nothing() {
+    let mut state = state_from(&pinned_ready(PINNED.into()));
+    let before = state.channel(Snowflake::new(GENERAL)).unwrap();
+
+    let events = apply(
+        &mut state,
+        "PASSIVE_UPDATE_V2",
+        json!({
+            "guild_id": G3.to_string(),
+            "updated_channels": [
+                {"id": GENERAL.to_string(), "last_message_id": null, "last_pin_timestamp": LATER},
+            ],
+        }),
+    );
+
+    assert_eq!(events, [] as [&str; 0]);
+    assert!(!unread(&state, GENERAL));
+    assert_eq!(state.channel(Snowflake::new(GENERAL)).unwrap(), before);
+}
+
+#[test]
+fn a_deleted_channel_takes_its_pin_ack() {
+    let mut state = state_from(&pinned_ready(PINNED.into()));
+    apply(
+        &mut state,
+        "CHANNEL_PINS_ACK",
+        pins_ack(THREAD, LATER.into()),
+    );
+    assert!(acked(&state, GENERAL).is_some());
+    assert!(acked(&state, THREAD).is_some());
+
+    apply(
+        &mut state,
+        "CHANNEL_DELETE",
+        json!({"id": GENERAL.to_string(), "guild_id": G1.to_string()}),
+    );
+
+    assert_eq!(acked(&state, GENERAL), None);
+    assert_eq!(acked(&state, THREAD), None, "its thread goes with it");
+    let (entities, _) = state.cache_parts(50);
+    assert!(
+        entities.read_states.pin_acks().is_empty(),
+        "nothing for the cache to keep"
+    );
+}
+
+#[test]
+fn leaving_a_server_takes_its_channels_pin_acks() {
+    let mut state = state_from(&pinned_ready(PINNED.into()));
+    assert!(acked(&state, GENERAL).is_some());
+
+    apply(&mut state, "GUILD_DELETE", json!({"id": G1.to_string()}));
+
+    assert_eq!(acked(&state, GENERAL), None);
+}
+
 // The official client's canBeUnread: a muted channel and a thread the user hasn't joined
 // show no dot.
 #[test]
@@ -224,6 +330,30 @@ fn a_later_ready_says_which_dots_changed() {
     let again = apply(&mut state, "READY", pinned_ready(LATER.into()));
     assert!(again.contains(&changed(GENERAL)), "{again:?}");
     assert!(!unread(&state, GENERAL));
+}
+
+// A channel that comes with a later READY is announced as added; its dot is read then.
+#[test]
+fn a_later_ready_with_a_new_pinned_channel_says_nothing_of_its_dot() {
+    const NEW: u64 = 300_000_000_000_000_004;
+    let mut state = state_from(&pinned_ready(PINNED.into()));
+    let mut later = pinned_ready(PINNED.into());
+    later["guilds"][0]["channels"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id": NEW.to_string(), "type": 0, "name": "new", "position": 3,
+            "permission_overwrites": [], "last_pin_timestamp": PINNED,
+        }));
+
+    let events = apply(&mut state, "READY", later);
+
+    assert!(
+        events.contains(&format!("ChannelAdded({NEW})")),
+        "{events:?}"
+    );
+    assert!(!events.contains(&changed(NEW)), "{events:?}");
+    assert!(unread(&state, NEW));
 }
 
 #[test]
