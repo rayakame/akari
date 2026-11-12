@@ -161,6 +161,22 @@ fn an_older_ack_leaves_the_dot() {
 }
 
 #[test]
+fn an_older_ack_after_the_newest_changes_nothing() {
+    let mut state = state_from(&pinned_ready(PINNED.into()));
+    let before = acked(&state, GENERAL);
+
+    let events = apply(
+        &mut state,
+        "CHANNEL_PINS_ACK",
+        pins_ack(GENERAL, "2026-09-30T08:00:00+00:00".into()),
+    );
+
+    assert_eq!(events, [] as [&str; 0]);
+    assert!(!unread(&state, GENERAL));
+    assert_eq!(acked(&state, GENERAL), before);
+}
+
+#[test]
 fn a_pins_update_without_a_time_takes_the_dot() {
     let mut state = state_from(&pinned_ready(Value::Null));
 

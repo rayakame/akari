@@ -132,7 +132,8 @@ impl ReadStates {
     }
 
     pub(crate) fn ack_pins(&mut self, channel: ChannelId, pinned: Timestamp) {
-        self.pin_acks.insert(channel, pinned);
+        let acked = self.pin_acks.entry(channel).or_insert(pinned);
+        *acked = (*acked).max(pinned);
     }
 
     pub(crate) fn forget(&mut self, channel: ChannelId) {
