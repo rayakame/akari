@@ -313,7 +313,7 @@ int_enum! {
 pub struct PartialEmoji {
     pub id: Option<Snowflake<EmojiMarker>>,
     pub name: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "default_on_error")]
     pub animated: bool,
 }
 
