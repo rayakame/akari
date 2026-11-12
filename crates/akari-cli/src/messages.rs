@@ -178,7 +178,7 @@ async fn read(session: &Session, channel: ChannelId, limit: u8) -> ExitCode {
 
 async fn send(session: &Session, channel: ChannelId, text: String) -> ExitCode {
     println!("Sending…");
-    match session.account.send_message(channel, text).await {
+    match session.account.send_message(channel, text, None).await {
         Ok(id) => {
             println!("Sent: {}", id.get());
             ExitCode::SUCCESS

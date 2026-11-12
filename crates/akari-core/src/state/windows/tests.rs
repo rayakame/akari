@@ -948,7 +948,7 @@ fn echo(id: u64, nonce: u64) -> model::Message {
 impl Harness {
     fn queue(&mut self, message: Arc<Message>) -> Vec<String> {
         let mut events = Vec::new();
-        self.windows.queue(channel(CH), message, &mut events);
+        self.windows.queue(channel(CH), message, None, &mut events);
         describe(&events)
     }
 
@@ -1042,7 +1042,7 @@ fn a_failed_message_can_be_retried_or_discarded() {
         ]
     );
     assert_eq!(
-        retried.map(|message| message.delivery),
+        retried.map(|outgoing| outgoing.message.delivery),
         Some(Delivery::Pending)
     );
     assert!(discarded);
@@ -1645,4 +1645,34 @@ fn held_messages_dropped_within_the_page_keep_the_rows() {
 
     assert_eq!(harness.ids(), [22, 23, 24, 26, 27]);
     assert!(harness.window().latest);
+}
+
+#[test]
+fn a_reply_without_the_ping_stays_one_when_its_channel_goes() {
+    let mut harness = Harness::viewing(LOADS);
+    let target = stored(1);
+    let mut events = Vec::new();
+    harness.windows.queue(
+        channel(CH),
+        pending(500, "quiet"),
+        Some((&target, false)),
+        &mut events,
+    );
+    harness.windows.queue(
+        channel(CH),
+        pending(501, "loud"),
+        Some((&target, true)),
+        &mut events,
+    );
+
+    harness.windows.drop_channel(channel(CH));
+
+    let mention = |id| {
+        harness
+            .windows
+            .pending(channel(CH), Snowflake::new(id))
+            .map(|outgoing| outgoing.mention)
+    };
+    assert_eq!(mention(500), Some(false));
+    assert_eq!(mention(501), Some(true));
 }

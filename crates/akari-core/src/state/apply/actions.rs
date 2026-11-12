@@ -31,6 +31,10 @@ impl State {
                 // A mark from the row marks the thread, not the original's channel.
                 mark_unread: row
                     .is_some_and(|row| self.message_actions_of(&row, now_millis).mark_unread),
+                // A reply in the thread would name a message of the parent channel.
+                reply: false,
+                reply_pings: false,
+                mention_toggle: false,
                 ..actions
             };
         }
@@ -38,6 +42,18 @@ impl State {
             .map_or_else(MessageActions::default, |found| {
                 self.message_actions_of(&found, now_millis)
             })
+    }
+
+    // The message of `channel` a reply sent there may answer: a thread's starter row is its
+    // own type there, not the parent's message it shows.
+    pub(crate) fn answerable(
+        &self,
+        channel: ChannelId,
+        target: MessageId,
+        now_millis: i64,
+    ) -> Option<Arc<Message>> {
+        self.message(channel, target)
+            .filter(|message| self.message_actions_of(message, now_millis).reply)
     }
 
     pub(crate) fn shown_message(

@@ -444,7 +444,7 @@ impl Account {
     ) -> Result<MessageId, RequestError> {
         let core = self.core.clone();
         run(self.runtime, async move {
-            core.send_message(channel_id, content).await
+            core.send_message(channel_id, content, None).await
         })
         .await
         .map_err(Into::into)
@@ -458,7 +458,7 @@ impl Account {
         content: String,
     ) -> Result<MessageId, RequestError> {
         self.core
-            .queue_message(channel_id, &content)
+            .queue_message(channel_id, &content, None)
             .map_err(Into::into)
     }
 
