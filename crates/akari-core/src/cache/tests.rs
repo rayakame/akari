@@ -303,16 +303,17 @@ pub(crate) fn message(channel: u64, id: u64, content: &str) -> Message {
     }
 }
 
+// No two neighbouring fields alike, so a row that swaps or drops one reads back differently.
 fn preview() -> Arc<ReplyPreview> {
     Arc::new(ReplyPreview {
-        kind: MessageType::Default,
+        kind: MessageType::ChatInputCommand,
         author: Arc::new(user(21, "Noa")),
         webhook: true,
         content: "the original".into(),
         edited: true,
         flags: Message::IS_VOICE_MESSAGE,
         has_attachments: true,
-        has_embeds: true,
+        has_embeds: false,
         has_sticker: true,
         forwarded: true,
     })
