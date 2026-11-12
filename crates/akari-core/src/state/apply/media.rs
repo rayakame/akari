@@ -25,6 +25,19 @@ impl State {
         })
     }
 
+    pub(crate) fn shown_thumbnail(
+        &self,
+        message: &Message,
+        now_millis: i64,
+    ) -> Option<ShownAttachment> {
+        let covered = self.covered(message);
+        let scan = self.scan(message.id);
+        let spoilers = self.spoilers_shown(message.channel_id, now_millis);
+        media::thumbnail(message, |attachment| {
+            media::media_cover(attachment, covered, scan, spoilers)
+        })
+    }
+
     /// `spoilered_link`: the content has a link inside a spoiler, which covers every embed.
     pub(crate) fn shown_embeds(
         &self,

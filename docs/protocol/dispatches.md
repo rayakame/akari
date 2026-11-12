@@ -79,6 +79,7 @@ Two details:
 | NOTIFICATION_SETTINGS_UPDATE | `NotificationSettings` | Replaces the account's notification flags; only the badges that change send events |
 | MESSAGE_ACK | `MessageAck` | Moves the channel's read state ([read-states.md](read-states.md)): `BadgeChanged`, and `GuildBadgeChanged` if the guild's badge changed. Acks of other read state types are ignored |
 | CHANNEL_UNREAD_UPDATE, PASSIVE_UPDATE_V2 | `ChannelUnreadUpdate`, `PassiveUpdateV2` | Raise each listed channel's `last_message_id`, forward only, without a channel event; a channel that turns unread sends `BadgeChanged` ([read-states.md](read-states.md#badges)). A channel the store doesn't know, or one of another guild, is skipped ([Large guilds](#large-guilds)) |
+| FORUM_UNREADS | `ForumUnreads` | The answer to op 28: each listed post's count of new messages, `PostCountsChanged` for the forum ([Forums](#forums)) |
 | RELATIONSHIP_ADD, RELATIONSHIP_UPDATE, RELATIONSHIP_REMOVE | `Relationship`, `RelationshipUpdate`, `RelationshipRemove` | Keep the blocked and ignored users, whose messages never count as mentions. ADD also announces a changed type, such as a friend becoming blocked; UPDATE never does |
 
 An update or deletion for something the store doesn't know changes nothing and is logged at
@@ -234,7 +235,7 @@ THREAD_CREATE instead, then loads 30 messages, opens the thread and sends the fi
 ordinary message. The parent's slowmode also limits creating threads, apart from sending messages
 (`Store::thread_slowmode(parent)`, the official client's `CreateThread` cooldown): a created thread
 starts it for the interval and 100 ms, unless Bypass Slowmode exempts the user; Discord's slowmode
-answer (code 20016) holds it for its `retry_after` and isn't retried (other rate limits are waited
+answer (code 20016) holds it for its `retry_after` and 100 ms and isn't retried (other rate limits are waited
 out as usual), and while it runs Akari asks nothing (the official client posts and gets 20016).
 Refusals: 160006 (the server's active threads) and 160007 (its announcement threads) are
 `TooManyThreads`, 200001 (AutoMod on the name) and 200000 (AutoMod; the official client shows
@@ -332,6 +333,89 @@ already isn't asked again, and one Discord didn't answer for (or a failed reques
 client asks again on the card's next render, without a pause). MESSAGE_CREATE, MESSAGE_UPDATE
 and MESSAGE_DELETE of a post's first message (its ID is the post's) and the window's message
 with the post's ID keep it current, and MESSAGE_DELETE_BULK.
+
+**Creating a post** (from the client's code, canary 671387, modules 55294, 971389, 406704 and
+691060; not observed: neither the body nor Discord's answer to it has been seen on the wire):
+`Account::create_post(forum, name, tags, content)` sends the official client's one request,
+`POST /channels/{forum}/threads?use_nested_fields=true` with
+`{"name", "auto_archive_duration", "applied_tags": ["…"], "message": {"content"}}` in this
+order: `auto_archive_duration` is the forum's `default_auto_archive_duration`, else 4320;
+`applied_tags` holds the tag IDs in the order chosen and is always present (`[]` without tags);
+the official client's value is a set, so Akari sends a tag given twice once, at its first
+place, and counts the five after that; no `type`, `location` or nonce. The official client also sends `message.sticker_ids`,
+`message.attachments` and `message.flags` (4096 after a leading `@silent`), none of which Akari
+has. Akari sends the name and the message trimmed, and the name's line breaks as spaces
+(each run of CR and LF one space, as the official client's title field makes them while typing;
+`create_thread` does the same). What may be posted is
+`Store::post_creation(forum)`: `allowed` in a forum or media channel with Send Messages (a
+timeout takes it); `tags`, the forum's `available_tags` the user may apply, in its order, a
+`moderated` one only with Manage Threads; `requires_tag` for the channel flag REQUIRE_TAG
+(1 << 4). Refused before asking with `InvalidRequest`: a forum the user may not post in, a
+name empty or over 100 code points once trimmed, a message empty once trimmed or over the
+account's length limit, more than 5 different tags, a tag not in `tags`; with `TagRequired`: no tag where
+one is required. Discord's own limits behind these (how it counts the name, its codes for too
+many or moderated tags) aren't known.
+
+The forum's `rate_limit_per_user` is the cooldown between the user's posts, the same
+`CreateThread` cooldown as for threads, keyed by the forum (`Store::thread_slowmode(forum)`): a
+created post starts it for the interval and 100 ms, 20016 holds it for its `retry_after` and
+100 ms (threads too, as the official client's), and
+while it runs `create_post` answers `Slowmode` without asking. Refusals: 160006 is
+`TooManyThreads`, 200001 (AutoMod on the title) `NameBlocked` and 200000 (AutoMod on the
+message) `MessageBlocked`, each with Discord's message, 50035 with an error on `name`
+`NameRequired`; everything else is a `RequestError`, and an answer that was lost or doesn't read
+as the post `MaybeCreated`, as for threads. The request is logged with the forum's ID, the
+number of tags and the outcome, never the name or the message.
+
+Discord's answer is taken to be the post, with its first message as `message` (the nested
+fields). Since the answer isn't observed, it is read leniently: the post is the body itself or
+its `thread` or `channel` (the first that reads as a thread), the first message is `message`
+beside the post or inside it, and a post without one is still the post; only a body no thread
+can be read from is `MaybeCreated`. The store
+keeps the post as its THREAD_CREATE with `newly_created` would, whichever comes first and only
+once: joined, in the open forum's frozen list at once, opened, the forum acked up to it locally
+([read-states.md](read-states.md#forums)); the `message`, when it reads as one, is the post's
+first message (`Store::post_preview`), so its card asks no post-data. The official client waits
+for the THREAD_CREATE instead, loads 30 messages, opens the post and refreshes the list.
+
+**New-message counts** (op 28, [gateway.md](gateway.md#forum-unreads); from the client's code,
+modules 435470, 767581 and 474399; not observed): a card's "(N New)" is for an active post that
+is unread, opened (a read state of the user's own, not one Akari estimated) and acked.
+`Store::post_new_counts(posts)` lists those of `posts` with `count`: the messages past the ack,
+never more than the post's `message_count`, or `None` when no count above 0 is known (the card
+then says "1+"). The account asks for the open forum's qualifying posts, each once a connection,
+when the forum opens, when its list refreshes (`Account::refresh_forum`, a THREAD_LIST_SYNC of
+its guild) and after READY and RESUMED while it is open; a frame that never left is asked again.
+The official client asks the list as the tag filter leaves it and again on every filter change;
+Akari asks the whole active list. FORUM_UNREADS
+`{channel_id, threads: [{thread_id, missing?, count?}], permission_denied?}` answers: an answer
+with `permission_denied` is dropped, a thread without a `count` stays asked and uncounted,
+`missing` is read by nothing. Akari takes the gateway to answer each frame once, a refusal
+included, in the order asked, and keeps the unanswered frames: an answer is for the forum's
+oldest frame that names its posts (the forum's frames before that one count as never answered),
+and a post's count is taken only if that frame is the post's newest ask and names the ack the
+post still has. So a post asked again with a newer ack takes only the answer to its newest ask,
+an answer that refuses or leaves a post out holds up no later one, and an answer no waiting
+frame names the posts of is dropped: one that comes twice never resets a count that messages
+raised since. A frame unanswered after 30 s is given up (a debug line), as is one an answer
+passes over, and its posts are asked again, by the account itself once the 30 s are over; a
+post given up twice is left for the connection, or until its ack moves. An answer that comes
+after its frame was given up is dropped while no other frame names its posts. *Not closed:* if
+the post's ack moved and its new ask is waiting by then, the late answer takes that frame and
+its count (for the older ack, so too high) stays until the ack moves again. Akari also takes an
+answer to come whole, never in parts: a second part would be nobody's.
+Nothing in the answer says which frame it is for (no ack, no nonce), only the order does, and
+a resume's replay breaks the order: from the connection's loss to RESUMED no answer is taken,
+and the frames unanswered at RESUMED are asked again. Afterwards a
+MESSAGE_CREATE in a post with a count adds 1 (one replayed by a resume adds nothing), and a
+post created while its forum is open (THREAD_CREATE with `newly_created`) starts at 0. Where the
+official client's count only follows another session's MESSAGE_ACK (so it drifts upward after
+the post was read here), Akari's follows every change of the post's ack: with nothing unread
+left the count is 0 and counts up from there, else it is forgotten and the post is asked again
+with its new ack; an answer for an ack the post has moved on from is dropped. The counts go
+with each READY, and a post's with the post, however it leaves the store. `PostCountsChanged
+{ forum_id }` says to read them again: when a count changed, or a read post the user opened
+before got a message and now shows "1+".
 
 ## Large guilds
 

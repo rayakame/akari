@@ -2,7 +2,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use reqwest::Method as HttpMethod;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 
 use super::clock::ServerClock;
 use super::error::{ApiError, RestError};
@@ -11,7 +12,7 @@ use super::{RawResponse, RequestExtras};
 use crate::auth::CaptchaChallenge;
 use crate::error::TransportError;
 use crate::lenient::parse_list;
-use crate::model::{self, ChannelId, DISCORD_EPOCH, MessageId};
+use crate::model::{self, ChannelId, ChannelType, DISCORD_EPOCH, MessageId};
 use crate::state::{AckBody, limit_in};
 use crate::{DiscordClient, LoadReport, Token};
 
@@ -206,6 +207,58 @@ pub(crate) struct CreateThread {
     pub(crate) kind: u16,
     pub(crate) auto_archive_duration: u32,
     pub(crate) location: &'static str,
+}
+
+// The official client's body for a forum post, in its order: no type, location or nonce.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct CreatePost {
+    pub(crate) name: String,
+    pub(crate) auto_archive_duration: u32,
+    pub(crate) applied_tags: Vec<String>,
+    pub(crate) message: PostMessage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct PostMessage {
+    pub(crate) content: String,
+}
+
+// The answer to a created post isn't observed: the post itself, or wrapped as `thread` or
+// `channel`, with its first message as `message` beside or inside it.
+#[derive(Deserialize)]
+struct Wrapped<'a> {
+    #[serde(borrow, default)]
+    thread: Option<&'a RawValue>,
+    #[serde(borrow, default)]
+    channel: Option<&'a RawValue>,
+    #[serde(borrow, default)]
+    message: Option<&'a RawValue>,
+}
+
+fn created_post(body: &[u8]) -> Option<(model::Channel, Option<model::Message>)> {
+    let body = std::str::from_utf8(body).ok()?;
+    let outer: Wrapped<'_> = serde_json::from_str(body).ok()?;
+    let inner = [outer.thread, outer.channel]
+        .into_iter()
+        .flatten()
+        .map(RawValue::get);
+    let (post, source) = std::iter::once(body)
+        .chain(inner)
+        .filter_map(|json| Some((serde_json::from_str::<model::Channel>(json).ok()?, json)))
+        .find(|(channel, _)| {
+            matches!(
+                channel.kind,
+                ChannelType::NewsThread | ChannelType::PublicThread | ChannelType::PrivateThread
+            )
+        })?;
+    let nested = serde_json::from_str::<Wrapped<'_>>(source)
+        .ok()
+        .and_then(|post| post.message);
+    let first = outer
+        .message
+        .or(nested)
+        .and_then(|message| serde_json::from_str(message.get()).ok());
+    Some((post, first))
 }
 
 #[derive(Serialize)]
@@ -420,6 +473,22 @@ impl AccountRest {
             .await?;
         // `None`: Discord said yes in a body that doesn't read as a channel.
         Ok(serde_json::from_slice(&body).ok())
+    }
+
+    pub(crate) async fn create_post(
+        &self,
+        forum: ChannelId,
+        body: &CreatePost,
+    ) -> Result<Option<(model::Channel, Option<model::Message>)>, Failure> {
+        let path = format!("channels/{}/threads?use_nested_fields=true", forum.get());
+        let route = RouteKey::new(Method::Post, THREADS, forum.get());
+        let Exchange { body, .. } = self
+            .send(route, Waiting::Create, || {
+                Ok(self.request(HttpMethod::POST, &path)?.json(body))
+            })
+            .await?;
+        // `None`: Discord said yes in a body no post can be read from.
+        Ok(created_post(&body))
     }
 
     // A GET whose answer decodes as `T`, on a route with no major parameter.

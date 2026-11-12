@@ -269,6 +269,71 @@ fn media_comes_first_and_files_follow() {
     );
 }
 
+// H-11 (module 256265): a media post's tile is its IS_THUMBNAIL attachment, the first that
+// shows as media, with its cover; the message's own list never has it.
+#[test]
+fn the_thumbnail_is_the_first_flagged_attachment_that_is_media() {
+    let mut sizeless = file("tile.png", 1 << 1, Some(4));
+    sizeless.width = None;
+    let post = message(vec![
+        file("a.png", 0, Some(4)),
+        sizeless,
+        file("cover.png", (1 << 1) | (1 << 3), Some(4)),
+        file("b.png", 0, Some(4)),
+        file("other.png", 1 << 1, Some(4)),
+    ]);
+
+    let tile = thumbnail(&post, |attachment| {
+        attachment.is_spoiler().then_some(MediaCover::Spoiler)
+    });
+
+    assert_eq!(
+        tile,
+        Some(ShownAttachment {
+            index: 2,
+            display: AttachmentDisplay::Media,
+            cover: Some(MediaCover::Spoiler),
+        })
+    );
+    let rows = shown_attachments(&post, &display(), |_| None);
+    assert_eq!(
+        placed(&rows),
+        [(0, AttachmentDisplay::Media), (3, AttachmentDisplay::Media)]
+    );
+}
+
+#[test]
+fn a_message_without_a_thumbnail_has_none() {
+    let plain = message(vec![
+        file("a.png", 0, Some(4)),
+        file("notes.zip", 1 << 1, Some(4)),
+    ]);
+
+    assert_eq!(thumbnail(&plain, |_| None), None);
+}
+
+#[test]
+fn an_explicit_thumbnail_is_covered_as_other_media() {
+    let post = message(vec![file(
+        "tile.png",
+        (1 << 1) | CONTAINS_EXPLICIT,
+        Some(4),
+    )]);
+    let settled = Scan {
+        settled: true,
+        newest: Some(4),
+    };
+
+    let tile = thumbnail(&post, |attachment| {
+        media_cover(attachment, EXPLICIT, settled, false)
+    });
+
+    assert_eq!(
+        tile.and_then(|tile| tile.cover),
+        Some(MediaCover::Sensitive)
+    );
+}
+
 #[test]
 fn without_inline_media_every_attachment_is_a_file_row_without_a_cover() {
     let mut display = display();

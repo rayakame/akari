@@ -3,15 +3,17 @@
 What a forum channel shows when the user opens it: its posts as cards in the message list's
 place, with search, the tag filter and Sort & View. Read from Discord's web client (canary
 653948, 2026-10-28; modules in brackets), the list's spacing as Chris measured the live client
-against Akari (2026-10-31), the NEW badge from canary 671387 (2026-11-11). Posts opening beside
-the forum, creating posts and media channels come with the next forum PR; until then the
-differences are marked *Akari:*.
+against Akari (2026-10-31), the NEW badge, posts beside the forum, "(N New)", the form for a new
+post and media channels from canary 671387 (2026-11-11 and 12). What rests on the client's code
+alone, with no look at the live client's requests, says *(code read)*. Differences are marked
+*Akari:*.
 
 ## Where it opens
 
 - A forum row in the channel list opens the page; so do a forum's mention in a message and a
   link to it. The header shows the forum's symbol (two filled bubbles, as in the channel list, in
-  the header icons' gray) and name, without its topic: the topic is the page's guidelines. Media channels don't open yet (their tooltip says so).
+  the header icons' gray) and name, without its topic: the topic is the page's guidelines. A
+  media channel's row opens the same page as a gallery ([below](#media-channels)).
 - Opening the page refreshes its list and asks Discord for the first 10 posts' first messages
   (the official client does that as the row is pressed, module 473503). It subscribes the guild
   as opening any channel does, so the gateway's thread lists arrive.
@@ -19,8 +21,14 @@ differences are marked *Akari:*.
   the forum is acked at "now" whenever a post is newer than its ack or a post has unread
   activity past it ([read-states.md](../protocol/read-states.md#forums)). An age-restricted
   forum shows the age gate first, as a channel does, and isn't read behind it.
-- *Akari:* a card's click opens its post in full, as Shift+click does in Discord, until posts
-  open beside the forum.
+- A card's click opens its post beside the page, in the split view
+  ([layout.md](layout.md#split-view)); Shift+click opens it alone, full width. The forum keeps
+  its post: coming back to the forum shows it again, also after a relaunch. The split's X,
+  Escape with nothing left to mark, and a click on the forum's own row while it's open close it
+  and the forum forgets it. The open post's card has the selected fill (`surface-higher`).
+  *Akari: "Open in Full View" and the split's title open the post alone and the forum keeps it,
+  as a channel keeps its thread; Discord forgets it there. Akari has no "Open threads in split
+  view" setting: a click always opens beside.*
 
 ## The list [207777]
 
@@ -51,9 +59,12 @@ differences are marked *Akari:*.
 
 - The search row: a card (radius 12, `base-low` under the input background, `border-subtle`,
   the brand's border while focused), 8 inside: a 32 box with the magnifying glass (a spinner
-  while searching), the field (20 semibold, "Search", 100 characters at most, typed line breaks
-  become spaces) and, with a topic, the guidelines button ("Post Guidelines"). *Akari: "Search"
-  until posts can be created, where Discord says "Search or create a post...".*
+  while searching, a pencil while a closed form holds a draft), the field (20 semibold,
+  "Search or create a post...", 100 characters at most, typed line breaks become spaces), with
+  a topic the guidelines button ("Post Guidelines"), and "New Post" (the brand's small button
+  with a bubble). Without the permission to post the field says "Search", "New Post" is off and
+  the status row says "You do not have permission to post in this channel." while the field
+  has the focus. The row turns into the form for a new post ([below](#creating-a-post)).
 - **Search** runs 350 ms after the query or the tag filter last changed, not again for the same
   query and tags, and not while one runs (the newer one runs after it). Enter searches no sooner.
   The results replace both sections, in Discord's order. Under the field, while a search runs or
@@ -125,8 +136,16 @@ VoiceOver reads "Post {title}, {count} messages".
   18 high ([emoji.md](emoji.md#custom-emoji)). *Akari: the gallery card's text is capped the
   same way and names its custom emoji (`:name:`), where Discord's, a box of several lines, can
   show jumbo emoji.*
-- *Akari:* no reactions on cards yet (backlog "Reactions on forum cards"), no typing faces, no
-  "(N New)", and only attachments as a card's media (Discord also shows embeds' images).
+- **"(N New)"** after the count, in the brand's text color (14 semibold): how many messages
+  came since the user last read a post they had opened: "(3 New)", "(25+ New)" from 25, and
+  "(1+ New)" while Discord hasn't said how many. Only for an active post that is unread, was
+  opened before (it has a read state of its own) and has a read position; never on a NEW post.
+  The number is the smaller of Discord's count and the post's message count
+  ([read-states.md](../protocol/read-states.md#forums)). *Akari: reading the post anywhere
+  sets its count to 0, so the next message says "(1 New)"; Discord's own count can keep its old
+  number and drift up. With a message count of 0 Akari says "1+", Discord "0".*
+- *Akari:* no reactions on cards yet (backlog "Reactions on forum cards"), no typing faces, and
+  only attachments as a card's media (Discord also shows embeds' images).
 
 ### The NEW badge
 
@@ -184,7 +203,116 @@ forum's current ack ([below](#the-forums-row)).*
 - With no post to show and nothing loading: "Be the first to start the conversation!" / "What
   do you want to post about in #ideas?"; with a filter "There are no posts with this tag yet!"
   (or "these tags") / "Be the first to start a conversation with this tag" (or "these tags").
-  *Akari: a symbol where Discord shows its illustration, and no "Create a post" yet.*
+  Where the user may post, "Create a post" (a small secondary button) under the first of them
+  opens the form. *Akari: a symbol where Discord shows its illustration.*
+
+## A post
+
+A post opens as a thread does, beside the forum or alone ([message-list.md](message-list.md#threads)),
+with its own beginning and a bar under its first message *(code read)*:
+
+- **The beginning**: the forum's symbol (a media channel's in its posts) on a round disc, the
+  post's name as the title, "Original message was deleted" under it once the start is loaded
+  without the first message, and the post's tags as small pills on one row, 14 below. *Akari
+  draws it with the thread start's measures ([message-list.md](message-list.md#channel-start):
+  a 68 disc, the title 30 heavy, the line 15.5), where Discord's CSS has a 64 disc with a 40
+  symbol, the title at 32 and the line at 16; its title's weight (500 or 700) isn't settled
+  from the code.* The tags are those the user may
+  apply: a moderated tag shows there only with Manage Threads on the forum, while cards show
+  every tag to everyone.
+- **The first message** is the post's first row; its ID is the post's.
+- **The bar** under it (8 above a 1 pt `border-subtle` line, 6 above and below 32-high small
+  secondary buttons at the right, 4 apart): "Follow" with a bell, or "Following" with a
+  checkmark, which joins or leaves the post (`location` "Forum Toolbar"; tooltip "Add this post
+  to your channel list and receive notifications about it."; off for an archived post; a full
+  post says "Cannot join post" / "This post has reached the maximum possible number of
+  members."), and "Copy Link" (a link symbol), which copies
+  `https://discord.com/channels/{server}/{post}` and says "Copied" with a checkmark for 2 s.
+  Once the start is loaded and the first message is gone, the bar leads the list.
+- **Under the bar**: with replies, an 8-high `border-subtle` divider and 16 before the first
+  reply, which starts a group. Without replies, for everyone who may send in the post, unless
+  it's locked for them or they started it: a box (`background-mod-normal`, radius 12, 16 around,
+  at most 448 wide, 12 inside) with "Start the conversation!" (16 semibold) and "Be the first
+  to share what you think!" (14). The box is a speech bubble: under its bottom edge a tail
+  points down, 20 wide and 10 high, starting 100 from the box's left, in the box's color.
+- *Akari: the bar scrolls with the list; Discord's sticks to the list's top and then shows
+  "Jump to Top" (backlog). No reactions in the bar yet ("React to Post", the default reaction).
+  A symbol stands where Discord's box has its animation.*
+- Reading: the post beside the forum is read as a split thread is, the forum at "now" as before.
+  *Akari never moves the forum's ack back to its newest post after a post was read, which
+  Discord's code does about 3 s later (not observed on the wire).*
+
+## Creating a post
+
+Read from the client's code *(code read; the request wasn't observed)*.
+
+- **Who**: Send Messages on the forum (Create Public Threads plays no part), and no timeout.
+- **Opening the form**: "New Post"; Shift+Enter in the field; the empty state's "Create a
+  post"; a click on the row while a closed form holds a draft. The search ends.
+- **One field**: the header's field is the title's, with the form open or closed
+  (`value: name`; every change is saved as the draft's name). While the form is closed, what's
+  typed is searched for as well. So "New Post" opens the form with what the field holds, and a
+  closed draft's title stands in the row: text typed there changes that title, it neither
+  starts a second draft nor gives way to an older one. A title alone counts as a draft (the
+  pencil, the click that reopens) only once the form was opened, until the title is emptied
+  with no message begun (`hasClickedForm`); before that it's a search's text. The status row's
+  "Clear" ends the search and empties the field.
+- **The form**, in the header row's card:
+  - a × ("Clear") in the magnifying glass's place: drops the title, tags and message and closes;
+  - the title ("Title"; 100 characters, line breaks become spaces); Enter in a title goes on to
+    the message;
+  - the message ("Enter a message...", the channel composer's field, at least 80 high and at
+    most half the page; it starts as the forum's template, which may be posted as it is);
+  - the tags the user may apply as small pills that toggle (a tag symbol before them, 16 above,
+    12 below, then a hairline), at most 5: with five chosen the others are off; a moderated tag
+    only with Manage Threads; no row when there is none to apply;
+  - the controls (40 high, 12 above), at the right: the forum's slowmode for new posts (a timer
+    and "Slowmode is enabled.", or the countdown while it runs; tooltip "Slowmode is enabled.
+    Members can create one post every 30 seconds."), the guidelines button, and "Post" (a
+    spinner while the post is made). "Post" is on with a title and a message, outside a
+    cooldown, and with a tag where the forum requires one; else "A tag is required to create a
+    post in this channel" stands under the controls.
+- **Escape** in the title or the message closes the form and keeps what was typed: the row
+  shows the title and a pencil, and a click on it opens the form again. The form stays the forum's for the
+  session, open or closed as it was left, with everything typed; a post being made stays "Post"
+  with its spinner when the user leaves the forum and comes back, and opens beside the forum
+  if the forum is open when Discord answers.
+- **Errors**: "A title is required" and "A message is required" under their fields (typing
+  ends them), AutoMod's sentence under the title or the message it blocked, "Cannot create
+  post" / "This server has reached the maximum number of active posts. Free up space by
+  archiving a post.", "Cannot create post" / "You are being rate limited.", else "Error" / "An
+  error occurred, please try again."; a slowmode refusal starts the countdown. The form stays
+  open with everything typed.
+- **After**: the forum's list refreshes with the new post, the post opens beside the forum if
+  the forum is still open, and the form closes empty (the message back to the template). The
+  user's own post is never NEW and counts as read for the forum.
+- The request and its answers: [messages.md](../protocol/messages.md).
+- *Akari: the tags wrap onto more rows where Discord has "See more tags" and its tag search; no
+  Preview mode, no emoji and sticker buttons and no "Add Media" (uploads come with message
+  features); drafts don't outlive the session (Discord's do); the guidelines don't open by
+  themselves with the form. An unconfirmed create says "Post may exist" (Akari's words).
+  Escape in the closed row empties a search's field (Discord keeps the text and only ends the
+  search); a draft's title stays, as there. Chosen tags alone count as a draft too. A search's
+  text doesn't come back with the forum's page (Discord keeps it as the draft's name).*
+
+## Media channels
+
+A media channel (type 16) is a forum whose page is a gallery *(code read)*:
+
+- Its row opens the page; the gallery is the only view, whatever the channel's default: the
+  button reads "Sort" and its menu has no "View as".
+- Tiles are 16:9 (a card is `60 + ⌈(column − 26) × 9/16⌉ + 24 + 36` tall). Each image shows
+  whole, with Discord's high shadow and square corners, over a cover of itself under
+  `rgba(28, 27, 37, 0.9)`. *Akari: the cover is the image's blurred placeholder, where Discord
+  blurs a 1.5× copy of the image by 4.*
+- An attachment flagged as the post's thumbnail (flag 2) is the tile alone, and isn't among
+  the first message's attachments in the post. Without one, up to four media form the mosaic;
+  a post without media shows its text as a forum's gallery card.
+- Posts open, are followed and read as a forum's. A channel that hides download options hides
+  them in its posts ([viewer.md](viewer.md), [attachments.md](attachments.md)).
+- *Akari: "New Post" is off there, with the tooltip "Creating media posts needs uploads, which
+  Akari doesn't have yet." Discord's form has a thumbnail picker and "Upload your media"; its
+  client has no rule or sentence for a media post without media.*
 
 ## The forum's row
 

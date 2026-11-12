@@ -22,9 +22,11 @@ public final class ForumModel {
             self.matching = matching
         }
 
-        static func defaults(of forum: ForumSettings?) -> Settings {
+        // A media channel is a gallery whatever it or the user says.
+        static func defaults(of forum: ForumSettings?, media: Bool) -> Settings {
             Settings(
-                sort: forum?.sort ?? .latestActivity, layout: forum?.layout ?? .list, tags: [],
+                sort: forum?.sort ?? .latestActivity,
+                layout: media ? .gallery : forum?.layout ?? .list, tags: [],
                 matching: forum?.tagMatching ?? .some)
         }
     }
@@ -58,6 +60,17 @@ public final class ForumModel {
         public let unread: Bool
         /// Made since the forum was last read and never opened: the NEW badge.
         public let isNew: Bool
+        /// "3", "25+", or "1+" while Discord hasn't said how many: the messages since the user
+        /// last read an opened post, for "(3 New)" after the count; `nil` for any other post.
+        public let newCount: String?
+
+        /// Discord's wording of a post's new messages: "1+" without a number, "25+" from 25.
+        public static func newCount(_ count: UInt32?) -> String {
+            guard let count, count > 0 else {
+                return "1+"
+            }
+            return count >= 25 ? "25+" : "\(count)"
+        }
     }
 
     public enum Search: Equatable, Sendable {
@@ -74,6 +87,10 @@ public final class ForumModel {
     static let searchDelay = Duration.milliseconds(350)
 
     public let forumId: ChannelId
+    /// A media channel's page: a gallery only, with 16:9 tiles.
+    public let isMedia: Bool
+    /// The header row's form for a new post.
+    public let form: PostFormModel
     /// The forum: its name, its guidelines (`topic`) and its tags.
     public private(set) var channel: Channel?
     public private(set) var settings: Settings
@@ -152,8 +169,15 @@ public final class ForumModel {
 
     init(
         forumId: ChannelId, settings: Settings?, store: Store, account: Account,
-        remember: @escaping (Settings) -> Void
+        form: PostFormModel? = nil, remember: @escaping (Settings) -> Void
     ) {
+        self.form =
+            form
+            ?? PostFormModel(forumId: forumId, account: account, store: store, drafts: Drafts())
+        // What an earlier page's search left in the field; a draft's title stays.
+        if !self.form.isOpen, !self.form.hasDraft, !self.form.title.isEmpty {
+            self.form.title = ""
+        }
         self.forumId = forumId
         self.store = store
         self.account = account
@@ -161,7 +185,12 @@ public final class ForumModel {
         let channel = store.channel(id: forumId)
         self.channel = channel
         guildId = channel?.guildId
-        self.settings = settings ?? .defaults(of: channel?.forum)
+        isMedia = channel?.kind == .guildMedia
+        var shown = settings ?? .defaults(of: channel?.forum, media: isMedia)
+        if isMedia {
+            shown.layout = .gallery
+        }
+        self.settings = shown
         reread()
     }
 
@@ -197,6 +226,9 @@ public final class ForumModel {
     }
 
     public func setLayout(_ layout: ForumLayout) {
+        guard !isMedia else {
+            return
+        }
         change { $0.layout = layout }
     }
 
@@ -219,7 +251,7 @@ public final class ForumModel {
 
     /// "Reset to default": the forum's sort, view and tag matching; the tag filter stays.
     public func resetToDefault() {
-        let defaults = Settings.defaults(of: channel?.forum)
+        let defaults = Settings.defaults(of: channel?.forum, media: isMedia)
         change { settings in
             settings.sort = defaults.sort
             settings.layout = defaults.layout
@@ -257,6 +289,38 @@ public final class ForumModel {
             clearSearch()
         } else {
             scheduleSearch()
+        }
+    }
+
+    /// What's typed into the header's field, which shows `form.title`: the new post's title, open
+    /// or closed as in the official client, and the search too while the form is closed.
+    public func type(_ text: String) {
+        form.title = text
+        if !form.isOpen {
+            setQuery(form.title)
+        }
+    }
+
+    /// The status row's "Clear": the search ends and the field is empty.
+    public func clearField() {
+        form.title = ""
+        setQuery("")
+    }
+
+    /// Escape in the closed row: the search ends, and its text goes unless it's a draft's title.
+    public func leaveSearch() {
+        if !form.hasDraft {
+            form.title = ""
+        }
+        setQuery("")
+    }
+
+    /// "New Post", Shift+Enter in the field and "Create a post": the row becomes the form, with
+    /// what the field holds as its title, and the search ends.
+    public func openForm() {
+        form.open()
+        if form.isOpen {
+            clearSearch()
         }
     }
 
@@ -369,6 +433,7 @@ public final class ForumModel {
     // MARK: Changes
 
     func apply(_ batch: EventBatch) {
+        form.apply(batch)
         // Covers follow the display settings.
         if batch.everythingChanged || batch.displaySettingsChanged {
             previews = [:]
@@ -379,6 +444,7 @@ public final class ForumModel {
         }
         if batch.everythingChanged || batch.displaySettingsChanged
             || batch.forumsChanged.contains(forumId)
+            || batch.postCountsChanged.contains(forumId)
             || batch.threadBrowsersChanged.contains(forumId)
             || !batch.previewsChanged.isDisjoint(with: listedIds) || touches(batch)
         {
@@ -447,12 +513,24 @@ public final class ForumModel {
         }
         let unread = archived ? [] : Set(store.unreadPosts(postIds: ids))
         let new = archived ? [] : Set(store.newPosts(postIds: ids))
+        let counts = archived ? [] : store.postNewCounts(postIds: ids)
+        let counted = Dictionary(counts.map { ($0.postId, Card.newCount($0.count)) }) { first, _ in first }
         return store.channels(ids: ids).compactMap {
-            card($0, unread: unread.contains($0.id), isNew: new.contains($0.id))
+            card(
+                $0, unread: unread.contains($0.id), isNew: new.contains($0.id),
+                newCount: counted[$0.id])
         }
     }
 
-    private func card(_ post: Channel, unread: Bool, isNew: Bool) -> Card? {
+    // A media channel's tile is the post's thumbnail alone, when it has one.
+    private func media(of first: Message?) -> [Attachment] {
+        if isMedia, let thumbnail = first?.thumbnail {
+            return [thumbnail]
+        }
+        return first?.attachments.filter { $0.display == .media } ?? []
+    }
+
+    private func card(_ post: Channel, unread: Bool, isNew: Bool, newCount: String?) -> Card? {
         guard let info = post.thread else {
             return nil
         }
@@ -472,7 +550,7 @@ public final class ForumModel {
             time: settings.sort == .creationDate
                 ? posted : ThreadBrowserModel.lastActivity(post, info),
             created: info.createdAt ?? posted,
-            media: first?.attachments.filter { $0.display == .media } ?? [], unread: unread,
-            isNew: isNew)
+            media: media(of: first), unread: unread,
+            isNew: isNew, newCount: newCount)
     }
 }

@@ -120,8 +120,9 @@ row's was not observed. *Akari: disables both when nothing is unread.*
   NSFW channels get a small warning badge on their symbol. The private
   variant needs the channel's permission overwrites, which the app doesn't receive yet; rules
   channels need the server's rules channel ID, which it doesn't receive either.
-- A forum opens its page ([forum.md](forum.md)). Voice, stage, media and directory channels
-  are listed but don't open anything; their tooltip says the kind isn't supported yet.
+- A forum opens its page, a media channel the same page as a gallery
+  ([forum.md](forum.md)). Voice, stage and directory channels are listed but don't open
+  anything; their tooltip says the kind isn't supported yet.
 - Muted rows and categories are drawn at half opacity, except a row's mention count, which
   stays full red. A muted channel that is selected keeps full opacity. VoiceOver reads a row's
   mute, unread state and count after its name ("muted, unread, 2 mentions"), and a thread row as

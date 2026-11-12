@@ -5,6 +5,8 @@ struct ChannelName: Equatable {
     enum Kind: Equatable {
         case guildChannel(ChannelType)
         case thread(owner: String?)
+        /// A forum or media channel's post.
+        case post(PostStart?)
         // The recipient, if the store knows them.
         case direct(User?)
         case group
@@ -19,7 +21,7 @@ struct ChannelName: Equatable {
         }
         return switch kind {
         case .guildChannel: "Message #\(name)"
-        case .thread: "Message \"\(name)\""
+        case .thread, .post: "Message \"\(name)\""
         case .direct: "Message @\(name)"
         case .group: "Message \(name)"
         }
@@ -38,6 +40,13 @@ struct ChannelName: Equatable {
             ChannelStart(
                 icon: .symbol(ChannelSymbols.name(for: .publicThread)), title: name,
                 subtitle: owner.map { _ in "Started by " }, subtitleName: owner)
+        case .post(let post):
+            ChannelStart(
+                icon: .symbol(
+                    ChannelSymbols.name(for: post?.isMedia == true ? .guildMedia : .guildForum)),
+                title: name,
+                subtitle: post?.firstMessageDeleted == true ? PostStart.deleted : nil,
+                tags: post?.tags ?? [])
         case .direct(let user):
             ChannelStart(
                 icon: .avatar(user?.avatar), title: name,
@@ -63,4 +72,6 @@ struct ChannelStart: Equatable {
     var username: String?
     let subtitle: String?
     var subtitleName: String?
+    /// A forum post's tags, on a row under the rest.
+    var tags: [ForumTag] = []
 }

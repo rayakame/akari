@@ -82,6 +82,7 @@ public final class SessionModel {
             }
             channels?.setOpen(openChannelId)
             tellOpenForum()
+            syncSplit()
         }
     }
     /// The channel the window shows: the message list's or the forum's.
@@ -164,6 +165,8 @@ public final class SessionModel {
     // Only channels opened here can hold this session's unsent messages.
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var forumSettings: [ChannelId: ForumModel.Settings] = [:]
+    // Each forum's post form for the session, so a create in flight stays its form's.
+    @ObservationIgnored private var postForms: [ChannelId: PostFormModel] = [:]
     // The forum the core was told shows: none while the age gate stands before it.
     @ObservationIgnored private var toldForum: ChannelId?
     @ObservationIgnored private var clickedThread: ChannelId?
@@ -359,7 +362,7 @@ public final class SessionModel {
     /// thread's row closes its channel's split, which the channel forgets.
     public func open(channel id: ChannelId) {
         engage()
-        if id == messages?.channelId {
+        if id == openChannelId {
             forgetSplit(of: id)
             shownForms.remove(id)
             syncForm()
@@ -411,19 +414,23 @@ public final class SessionModel {
     /// when Discord refuses it, it's gone or the fetch fails, nor once the user opened something
     /// else or clicked another thread meanwhile.
     public func openBeside(thread id: ChannelId, from parent: ChannelId) async {
-        guard messages?.channelId == parent else {
+        guard openChannelId == parent else {
             return
         }
         clickedThread = id
         engage()
         if store.channel(id: id) == nil {
-            let opened = messages
+            let (opened, page) = (messages, forum)
             let found = await ask(about: id, in: parent, check: false) ?? false
-            guard found, !ended, clickedThread == id, messages === opened else {
+            guard found, !ended, clickedThread == id, messages === opened, forum === page else {
                 return
             }
             // The launch's request may have shown it meanwhile; the click is the user's.
             waitingLists.remove(id)
+        }
+        // A thread of another channel has no place beside this one.
+        guard store.channel(id: id)?.parentId == parent else {
+            return
         }
         if sawReady {
             checkedSplits.insert(id)
@@ -439,13 +446,27 @@ public final class SessionModel {
         updateReading()
     }
 
+    /// The post form's "Post": the new post joins the forum's list and opens beside it, unless
+    /// the user went elsewhere meanwhile.
+    public func submitPost() async {
+        guard let page = forum, let post = await page.form.create() else {
+            return
+        }
+        // The forum's page may be another model by now: left and come back to.
+        guard let open = forum, open.forumId == page.forumId else {
+            return
+        }
+        open.refresh()
+        await openBeside(thread: post, from: open.forumId)
+    }
+
     /// The split view's X: closes it, and the channel forgets it.
     public func closeSplit() {
-        guard let open = messages?.channelId, split != nil else {
+        guard let open = openChannelId, split != nil else {
             return
         }
         forgetSplit(of: open)
-        focusChannel = true
+        focusChannel = messages != nil
         updateReading()
     }
 
@@ -490,7 +511,7 @@ public final class SessionModel {
     public func openInSplitView() {
         guard let open = messages?.channelId, let thread = channels?.channel(open),
             thread.isThread, let parent = thread.parentId,
-            let found = store.channel(id: parent), found.opensMessageList,
+            let found = store.channel(id: parent), found.opensMessageList || found.opensForum,
             let guild = found.guildId
         else {
             return
@@ -876,6 +897,11 @@ public final class SessionModel {
         await changeMembership(of: thread, joins: false, from: location)
     }
 
+    /// "Follow" and "Following" under a forum post's first message.
+    public func setFollowing(_ follows: Bool, post: ChannelId) async {
+        await changeMembership(of: post, joins: follows, from: Self.postBarLocation)
+    }
+
     public func dismissMembershipError() {
         membershipError = nil
     }
@@ -893,18 +919,23 @@ public final class SessionModel {
                 try await account.leaveThread(threadId: thread, location: location)
             }
         } catch {
-            membershipError = Self.membershipError(error as? RequestError)
+            let parent = store.channel(id: thread)?.parentId.flatMap { store.channel(id: $0) }
+            membershipError = Self.membershipError(
+                error as? RequestError, post: parent?.opensForum == true)
         }
     }
+
+    static let postBarLocation = ThreadLocation.forumToolbar
 
     // TOO_MANY_THREAD_MEMBERS.
     private static let threadFull: UInt32 = 30033
 
-    private static func membershipError(_ error: RequestError?) -> MembershipError {
+    private static func membershipError(_ error: RequestError?, post: Bool) -> MembershipError {
         if case .Discord(_, threadFull, _)? = error {
+            let kind = post ? "post" : "thread"
             return MembershipError(
-                title: "Cannot join thread",
-                message: "This thread has reached the maximum possible number of members.")
+                title: "Cannot join \(kind)",
+                message: "This \(kind) has reached the maximum possible number of members.")
         }
         return MembershipError(title: "Error", message: "An error occurred, please try again.")
     }
@@ -1237,7 +1268,7 @@ public final class SessionModel {
     }
 
     private func syncSplit(onItsOwn: Bool = false) {
-        guard let open = messages?.channelId, let thread = splits[open]?.thread else {
+        guard let open = openChannelId, let thread = splits[open]?.thread else {
             showSplit(nil)
             return
         }
@@ -1306,7 +1337,7 @@ public final class SessionModel {
                 return
             }
             if found {
-                if messages?.channelId == parent {
+                if openChannelId == parent {
                     syncSplit(onItsOwn: true)
                     updateReading()
                 }
@@ -1454,7 +1485,14 @@ public final class SessionModel {
     }
 
     private func forumPage(of id: ChannelId) -> ForumModel {
-        ForumModel(forumId: id, settings: forumSettings[id], store: store, account: account) {
+        let form =
+            postForms[id]
+            ?? PostFormModel(forumId: id, account: account, store: store, drafts: drafts)
+        postForms[id] = form
+        form.reread()
+        return ForumModel(
+            forumId: id, settings: forumSettings[id], store: store, account: account, form: form
+        ) {
             [weak self] settings in
             self?.forumSettings[id] = settings
         }

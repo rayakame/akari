@@ -12,9 +12,12 @@ use crate::gateway::{
     MemberLists, PresenceStatus, SendError,
 };
 use crate::media::{ImageError, ImageFile, ImageKey, ImageRequest, Images};
-use crate::model::{ChannelId, ChannelType, GuildId, MessageId, MessageType, Timestamp, UserId};
+use crate::model::{
+    ChannelId, ChannelType, GuildId, MessageId, MessageType, TagId, Timestamp, UserId,
+};
 use crate::rest::{
-    AccountRest, CreateMessage, CreateThread, Failure, Page, Query, RequestError, uri_component,
+    AccountRest, CreateMessage, CreatePost, CreateThread, Failure, Page, PostMessage, Query,
+    RequestError, uri_component,
 };
 use crate::state::{
     Ack, ConnectionState, Cursor, ForumView, Learned, LoadKind, LoadTicket, Message, OLDER_PAGE,
@@ -28,6 +31,8 @@ const REFRESH_LIMIT: u8 = 100;
 // when the parent names none.
 const THREAD_NAME_LIMIT: usize = 100;
 const DEFAULT_ARCHIVE_MINUTES: u32 = 4320;
+// The official client lets a post have this many tags.
+const POST_TAG_LIMIT: usize = 5;
 const MAX_ACTIVE_THREADS: u32 = 160_006;
 const MAX_ANNOUNCEMENT_THREADS: u32 = 160_007;
 const AUTOMOD_BLOCKED: u32 = 200_000;
@@ -81,6 +86,8 @@ pub enum ThreadLocation {
     ToolbarOverflow,
     /// A thread row's context menu.
     ContextMenu,
+    /// The Follow button under a forum post's first message.
+    ForumToolbar,
 }
 
 impl ThreadLocation {
@@ -89,8 +96,19 @@ impl ThreadLocation {
             Self::SidebarOverflow => "Sidebar%20Overflow",
             Self::ToolbarOverflow => "Toolbar%20Overflow",
             Self::ContextMenu => "Context%20Menu",
+            Self::ForumToolbar => "Forum%20Toolbar",
         }
     }
+}
+
+// The official client turns a name's line breaks into spaces as it is typed.
+fn one_line(name: &str) -> String {
+    name.split(['\r', '\n'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_owned()
 }
 
 // A failure after the request left: Discord may have created the thread behind it.
@@ -130,7 +148,7 @@ impl CreateThreadLocation {
     }
 }
 
-/// Why [`Account::create_thread`] created nothing.
+/// Why [`Account::create_thread`] or [`Account::create_post`] created nothing.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CreateThreadError {
@@ -146,6 +164,12 @@ pub enum CreateThreadError {
     /// Discord wants a name.
     #[error("Discord wants a name")]
     NameRequired,
+    /// AutoMod refused a post's message (200000); `reason` is Discord's message.
+    #[error("AutoMod refused the message")]
+    MessageBlocked { reason: String },
+    /// The forum wants a tag on every post.
+    #[error("the forum requires a tag")]
+    TagRequired,
     /// The request went out but its answer was lost or didn't read as the thread: it may exist
     /// already. The parent's slowmode for new threads starts as if it did.
     #[error("the thread may have been created")]
@@ -263,6 +287,7 @@ pub(crate) struct Shared {
     preparer: RwLock<Option<Arc<dyn MessagePreparer>>>,
     images: Arc<Images>,
     lookup_timeout: Duration,
+    forum_unreads_wait: Duration,
     // Wakes the post-data task when cards want their posts' first messages.
     previews: Arc<previews::Wake>,
 }
@@ -633,8 +658,15 @@ impl Shared {
             }
             _ => None,
         };
+        let synced = matches!(
+            event,
+            ConnectionEvent::Dispatch(DispatchEvent::ThreadListSync(_))
+        );
         let acks = on_event(&self.store, event, connecting);
         self.ack_reading(acks);
+        if synced {
+            self.ask_forum_unreads();
+        }
         if let Some(thread) = starter {
             self.fetch_starter(thread);
         }
@@ -649,8 +681,8 @@ impl Shared {
         location: CreateThreadLocation,
     ) -> Result<ChannelId, CreateThreadError> {
         self.rest.usable()?;
-        let name = name.trim();
-        let length = message_length(name);
+        let name = one_line(name);
+        let length = message_length(&name);
         let channel = self
             .store
             .channel(parent)
@@ -678,7 +710,7 @@ impl Shared {
             return Err(CreateThreadError::Slowmode);
         }
         let body = CreateThread {
-            name: name.to_owned(),
+            name,
             kind: kind.into(),
             auto_archive_duration: channel
                 .default_auto_archive_duration
@@ -733,10 +765,125 @@ impl Shared {
                 Err(CreateThreadError::TooManyThreads { .. }) => "too_many_threads",
                 Err(CreateThreadError::NameBlocked { .. }) => "name_blocked",
                 Err(CreateThreadError::NameRequired) => "name_required",
+                Err(CreateThreadError::MessageBlocked { .. }) => "message_blocked",
+                Err(CreateThreadError::TagRequired) => "tag_required",
                 Err(CreateThreadError::MaybeCreated) => "maybe_created",
                 Err(CreateThreadError::Request(err)) => err.kind(),
             },
             "thread creation"
+        );
+        created
+    }
+
+    async fn create_post(
+        &self,
+        forum: ChannelId,
+        name: &str,
+        tags: &[TagId],
+        content: &str,
+    ) -> Result<ChannelId, CreateThreadError> {
+        self.rest.usable()?;
+        let name = one_line(name);
+        let content = content.trim();
+        // The official client's tags are a set, sent in the order first chosen.
+        let mut chosen: Vec<TagId> = Vec::with_capacity(tags.len());
+        for tag in tags {
+            if !chosen.contains(tag) {
+                chosen.push(*tag);
+            }
+        }
+        let tags = &chosen[..];
+        let channel = self
+            .store
+            .channel(forum)
+            .ok_or(RequestError::InvalidRequest)?;
+        let allowed = self.store.post_creation(forum);
+        let name_length = message_length(&name);
+        let content_length = message_length(content);
+        if !allowed.allowed
+            || name_length == 0
+            || name_length > THREAD_NAME_LIMIT
+            || content_length == 0
+            || content_length > self.store.message_length_limit()
+            || tags.len() > POST_TAG_LIMIT
+            || tags.iter().any(|tag| !allowed.tags.contains(tag))
+        {
+            return Err(RequestError::InvalidRequest.into());
+        }
+        if allowed.requires_tag && tags.is_empty() {
+            return Err(CreateThreadError::TagRequired);
+        }
+        if self
+            .store
+            .thread_slowmode(forum)
+            .is_some_and(|slowmode| slowmode.until.is_some())
+        {
+            return Err(CreateThreadError::Slowmode);
+        }
+        let body = CreatePost {
+            name,
+            auto_archive_duration: channel
+                .default_auto_archive_duration
+                .unwrap_or(DEFAULT_ARCHIVE_MINUTES),
+            applied_tags: tags.iter().map(|tag| tag.get().to_string()).collect(),
+            message: PostMessage {
+                content: content.to_owned(),
+            },
+        };
+        let answer = self.rest.create_post(forum, &body).await;
+        let created = match answer {
+            Ok(post) => {
+                self.store.start_thread_cooldown(forum);
+                post.and_then(|(post, first)| {
+                    let (kept, acks) = self.store.keep_created_post(post, first);
+                    self.ack_reading(acks);
+                    kept
+                })
+                .ok_or(CreateThreadError::MaybeCreated)
+            }
+            Err(Failure::Slowmode(wait)) => Err(self.slowed(forum, wait)),
+            Err(Failure::Api(api)) => Err(match api.code {
+                SLOWMODE => self.slowed(forum, None),
+                MAX_ACTIVE_THREADS => CreateThreadError::TooManyThreads {
+                    announcement: false,
+                },
+                AUTOMOD_BLOCKED_NAME => CreateThreadError::NameBlocked {
+                    reason: api.message,
+                },
+                AUTOMOD_BLOCKED => CreateThreadError::MessageBlocked {
+                    reason: api.message,
+                },
+                INVALID_FORM_BODY if api.field_errors.iter().any(|error| error.path == "name") => {
+                    CreateThreadError::NameRequired
+                }
+                _ => RequestError::from(Failure::Api(api)).into(),
+            }),
+            Err(other) => {
+                let err = RequestError::from(other);
+                self.failed(&err);
+                if maybe_created(&err) {
+                    self.store.start_thread_cooldown(forum);
+                    Err(CreateThreadError::MaybeCreated)
+                } else {
+                    Err(err.into())
+                }
+            }
+        };
+        tracing::debug!(
+            channel_id = forum.get(),
+            tags = tags.len(),
+            outcome = match &created {
+                Ok(_) => "created",
+                Err(CreateThreadError::Slowmode) => "slowmode",
+                Err(CreateThreadError::TooManyThreads { .. }) => "too_many_threads",
+                Err(CreateThreadError::NameBlocked { .. }) => "name_blocked",
+                Err(CreateThreadError::NameRequired) => "name_required",
+                Err(CreateThreadError::MessageBlocked { .. }) => "message_blocked",
+                Err(CreateThreadError::TagRequired) => "tag_required",
+                Err(CreateThreadError::MaybeCreated) => "maybe_created",
+                Err(CreateThreadError::Request(err)) => err.kind(),
+            },
+            "post creation"
         );
         created
     }
@@ -885,6 +1032,36 @@ impl Shared {
             lists.threads.dedup();
         }
         wanted
+    }
+
+    // Op 28 for the open forum's posts not asked in this connection, as the official client
+    // asks when the forum's page shows and its guild's threads loaded.
+    fn ask_forum_unreads(self: &Arc<Self>) {
+        if !matches!(self.store.connection(), ConnectionState::Online) {
+            return;
+        }
+        let wait = self.forum_unreads_wait;
+        let Some(ask) = self.store.next_forum_unreads(wait) else {
+            return;
+        };
+        let shared = self.clone();
+        self.runtime.spawn(async move {
+            let command = GatewayCommand::RequestForumUnreads {
+                guild_id: ask.guild,
+                forum_id: ask.forum,
+                threads: ask.threads.clone(),
+            };
+            if shared.send(command).await.is_err() {
+                shared.store.forget_forum_unreads(ask.id);
+                return;
+            }
+            // Nothing else asks again when the answer never comes.
+            let shared = Arc::downgrade(&shared);
+            tokio::time::sleep(wait + Duration::from_millis(50)).await;
+            if let Some(shared) = shared.upgrade() {
+                shared.ask_forum_unreads();
+            }
+        });
     }
 
     // The official client sends its subscriptions again after READY and after RESUMED.
@@ -1121,6 +1298,7 @@ impl Account {
         let flusher = cache.map(|cache| Flusher::start(&runtime, store.clone(), cache));
         let images = Images::new(&client, user, store.clone(), rest.clone(), &runtime);
         let lookup_timeout = timing.lookup_timeout;
+        let forum_unreads_wait = timing.forum_unreads_wait;
         let scan_timing = scans::ScanTiming {
             wait: timing.scan_wait,
             jitter: timing.scan_jitter,
@@ -1159,6 +1337,7 @@ impl Account {
                 preparer: RwLock::new(None),
                 images,
                 lookup_timeout,
+                forum_unreads_wait,
                 previews: Arc::default(),
             }
         });
@@ -1169,22 +1348,26 @@ impl Account {
             shared.store.clone(),
             shared.store.subscribe(),
         ));
+        let unauthorized = {
+            let weak = Arc::downgrade(&shared);
+            move || {
+                if let Some(shared) = weak.upgrade() {
+                    shared.failed(&RequestError::Unauthorized);
+                }
+            }
+        };
         runtime.spawn(scans::run_scans(
             shared.store.clone(),
             shared.rest.clone(),
             shared.store.subscribe(),
             scan_timing,
+            unauthorized.clone(),
         ));
-        let weak = Arc::downgrade(&shared);
         runtime.spawn(previews::run_post_data(
             shared.store.clone(),
             shared.rest.clone(),
             shared.previews.clone(),
-            move || {
-                if let Some(shared) = weak.upgrade() {
-                    shared.failed(&RequestError::Unauthorized);
-                }
-            },
+            unauthorized,
         ));
         Ok(Self { shared })
     }
@@ -1412,10 +1595,13 @@ impl Account {
     /// the cards' NEW badges count from the forum's read position then. Opening one refreshes
     /// its list: while it stays open, who's listed and in what order change only with
     /// [`refresh_forum`], a new connection or the guild's thread sync, a deletion or a pin (G-1).
+    /// Each of these also asks Discord how many new messages its opened, unread posts have
+    /// ([`Store::post_new_counts`]), each post once a connection.
     ///
     /// [`refresh_forum`]: Self::refresh_forum
     pub fn open_forum(&self, forum: Option<ChannelId>) {
         let first = self.shared.store.open_forum(forum);
+        self.shared.ask_forum_unreads();
         // So the first cards show with their message.
         if let Some(forum) = forum {
             self.request_post_previews(forum, &first);
@@ -1436,6 +1622,7 @@ impl Account {
     /// over (the official client's "N New Posts" pill).
     pub fn refresh_forum(&self, forum: ChannelId) {
         self.shared.store.refresh_forum(forum);
+        self.shared.ask_forum_unreads();
     }
 
     /// Loads the next page of the forum's archived posts for `view`'s tags, as the official
@@ -1583,8 +1770,8 @@ impl Account {
     /// parent's slowmode for new threads starts. Refused with `InvalidRequest` before asking: a
     /// name that is empty or longer than 100 code points once trimmed, a loaded message that
     /// can't start a thread ([`Store::can_start_thread`]), a kind the user may not create
-    /// ([`Store::thread_creation`]); with `Slowmode` while that slowmode runs. The first message
-    /// is an ordinary send in the thread afterwards.
+    /// ([`Store::thread_creation`]); with `Slowmode` while that slowmode runs. The name's line
+    /// breaks go as spaces. The first message is an ordinary send in the thread afterwards.
     pub async fn create_thread(
         &self,
         parent: ChannelId,
@@ -1596,6 +1783,26 @@ impl Account {
         self.shared
             .create_thread(parent, message, name, private, location)
             .await
+    }
+
+    /// Creates a post in the forum or media channel `forum` with its first message, as the
+    /// official client does in one request, and returns it: Discord's answer puts it in the
+    /// store as the user's own new post (listed at once, opened, the forum acked up to it) with
+    /// its first message, and the forum's slowmode for new posts starts
+    /// ([`Store::thread_slowmode`]). The name's line breaks go as spaces, and `tags` in the
+    /// order given, each once. Refused with `InvalidRequest` before asking: a forum the user may
+    /// not post in ([`Store::post_creation`]), a name empty or longer than 100 code points once
+    /// trimmed, a message empty once trimmed or over the account's length limit, more than 5
+    /// different tags or one the user may not apply; with `TagRequired` when the forum wants a
+    /// tag and none is given; with `Slowmode` while that slowmode runs.
+    pub async fn create_post(
+        &self,
+        forum: ChannelId,
+        name: &str,
+        tags: &[TagId],
+        content: &str,
+    ) -> Result<ChannelId, CreateThreadError> {
+        self.shared.create_post(forum, name, tags, content).await
     }
 
     /// The next place among loads and supersedes, for [`Account::load_messages_placed`]. A host
@@ -1871,6 +2078,7 @@ async fn pump(mut finish: Finish) {
                         tokio::spawn(async move { status.send_status(true).await });
                         let subscriptions = shared.clone();
                         tokio::spawn(async move { subscriptions.resubscribe().await });
+                        shared.ask_forum_unreads();
                     }
                     Err(_) => break Some(Arc::new(GatewayError::Stopped)),
                 }
@@ -1885,6 +2093,7 @@ async fn pump(mut finish: Finish) {
                 tokio::spawn(async move { status.send_status(false).await });
                 let subscriptions = shared.clone();
                 tokio::spawn(async move { subscriptions.resubscribe().await });
+                shared.ask_forum_unreads();
             }
             Ok(event) => shared.dispatched(event, &connecting),
             Err(GatewayError::Closed) => break None,

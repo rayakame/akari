@@ -103,7 +103,8 @@ The rail and the channel list together form the sidebar.
 
 A thread opened from its channel's messages (the box under a message, the thread's name in a
 "started a thread" line, or "Open in Split View" in the thread's "…") opens on the right of its
-channel, which stays open and selected in the sidebar. Read from Discord's web client (its thread
+channel, which stays open and selected in the sidebar. A forum's or media channel's post opens
+the same way beside the forum's page, from its card ([forum.md](forum.md#where-it-opens)). Read from Discord's web client (its thread
 sidebar, canary 645444, 2026-10-21) and observed 2026-10-17:
 
 ```

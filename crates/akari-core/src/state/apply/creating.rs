@@ -3,14 +3,16 @@ use std::time::{Duration, Instant, SystemTime};
 use super::State;
 use crate::model::{self, ChannelId, ChannelType, MessageId, Permissions};
 use crate::state::events::StoreEvent;
+use crate::state::read_states::Ack;
 use crate::state::send::Slowmode;
-use crate::state::types::{Delivery, ThreadCreation, ThreadMembership};
+use crate::state::types::{Delivery, PostCreation, ThreadCreation, ThreadMembership};
 
 // The kinds Discord's client lets a thread start from: a user's message, reply or command and a
 // few more that render as one (module 406704).
 const STARTS_THREADS: [u16; 9] = [0, 19, 20, 23, 26, 41, 45, 47, 68];
 const EPHEMERAL: u64 = 1 << 6;
-// Discord's client waits the interval and 100 ms more before it lets the user create again.
+// Discord's client waits the interval, or the wait a 20016 names, and 100 ms more before it
+// lets the user create again.
 const COOLDOWN_MARGIN: Duration = Duration::from_millis(100);
 
 impl State {
@@ -33,6 +35,39 @@ impl State {
             public: permissions
                 .contains(Permissions::CREATE_PUBLIC_THREADS | Permissions::READ_MESSAGE_HISTORY),
             private: text && permissions.contains(Permissions::CREATE_PRIVATE_THREADS),
+        }
+    }
+
+    // Module 406704: SEND_MESSAGES on the forum, which a timeout takes away; module 691060: a
+    // moderated tag only with MANAGE_THREADS.
+    pub(crate) fn post_creation(&self, forum: ChannelId, now_millis: i64) -> PostCreation {
+        let Some(channel) = self
+            .entities
+            .channels
+            .get(&forum)
+            .filter(|channel| channel.is_forum())
+        else {
+            return PostCreation::default();
+        };
+        let Some(permissions) = self
+            .permissions(forum, now_millis)
+            .filter(|permissions| permissions.contains(Permissions::SEND_MESSAGES))
+        else {
+            return PostCreation::default();
+        };
+        let moderator = permissions.contains(Permissions::MANAGE_THREADS);
+        let tags = channel.forum.as_deref().map_or_else(Vec::new, |settings| {
+            settings
+                .tags
+                .iter()
+                .filter(|tag| moderator || !tag.moderated)
+                .map(|tag| tag.id)
+                .collect()
+        });
+        PostCreation {
+            allowed: true,
+            tags,
+            requires_tag: channel.requires_tag(),
         }
     }
 
@@ -101,7 +136,8 @@ impl State {
         now_millis: i64,
     ) {
         if let Some((_, false)) = self.slowmode_parts(parent, now_millis) {
-            self.thread_cooldowns.hold(parent, Instant::now(), wait);
+            self.thread_cooldowns
+                .hold(parent, Instant::now(), wait + COOLDOWN_MARGIN);
         }
     }
 
@@ -140,5 +176,30 @@ impl State {
             self.settle(self.now_millis(), events);
         }
         kept
+    }
+
+    // A created post's answer: the user's own new post, as its THREAD_CREATE with
+    // `newly_created` would bring it, and its first message when Discord sent it along.
+    pub(crate) fn keep_created_post(
+        &mut self,
+        post: model::Channel,
+        first: Option<model::Message>,
+        events: &mut Vec<StoreEvent>,
+    ) -> (Option<ChannelId>, Vec<Ack>) {
+        let (parent, owner) = (post.parent_id, post.owner_id);
+        let known = self.entities.channels.contains_key(&post.id);
+        let Some(id) = self.keep_created_thread(post, events) else {
+            return (None, Vec::new());
+        };
+        if !known {
+            self.note_post(parent, id);
+            self.read_own_post(parent, id, owner);
+            self.forum_post_created(id, parent, owner, true, events);
+        }
+        if let Some(first) = first.filter(|first| first.channel_id == id) {
+            self.note_first_message(&first, events);
+        }
+        self.settle(self.now_millis(), events);
+        (Some(id), self.take_reading_acks())
     }
 }

@@ -1750,3 +1750,1055 @@ fn a_deleted_answer_and_an_unasked_edit_change_nothing() {
     );
     assert_eq!(preview(&state, MIDDLE).as_deref(), Some("as asked"));
 }
+
+// H-4: a post read beside its forum never moves the forum's ack back to its newest post; every
+// ack of the forum is at "now".
+#[test]
+fn a_post_read_beside_its_forum_leaves_the_forums_ack_at_now() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    load_page(&mut state, OLD, LoadKind::Latest, &[OLD + 1], true);
+    let before = snowflake_at(wall_millis());
+    let both = [Snowflake::new(FORUM), Snowflake::new(OLD)];
+
+    let acks = state.set_reading(&both, &mut Vec::new());
+
+    let forum: Vec<_> = acks.iter().filter(|ack| ack.channel == both[0]).collect();
+    assert_eq!(forum.len(), 1, "{acks:?}");
+    assert!(forum[0].now);
+    assert!(acks.iter().any(|ack| ack.channel == both[1]), "{acks:?}");
+    assert!(!state.unread(both[1]));
+    let read = forum_ack(&state);
+    assert!(read >= Some(before), "{read:?}");
+
+    let later = snowflake_at(wall_millis() + 60_000);
+    apply(&mut state, "MESSAGE_CREATE", message(later, OLD));
+
+    let acks = state.take_reading_acks();
+    assert!(
+        acks.iter().all(|ack| ack.channel != both[0] || ack.now),
+        "{acks:?}"
+    );
+    assert!(forum_ack(&state) >= read, "never back");
+    state.set_reading(&[], &mut Vec::new());
+    assert!(
+        state.set_reading(&both, &mut Vec::new()).is_empty(),
+        "both are read"
+    );
+}
+
+fn own_post(id: u64) -> Value {
+    let mut post = listed_post(id, id, &[]);
+    post["owner_id"] = ME.to_string().into();
+    post["newly_created"] = true.into();
+    post
+}
+
+// H-4: the user's own post acks its forum up to it without a request (module 218461), counts as
+// opened and is never new.
+#[test]
+fn the_users_own_post_acks_its_forum_locally() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    assert_eq!(posts_count(&state), PostCount::New(1));
+
+    let events = apply(&mut state, "THREAD_CREATE", own_post(LATER));
+
+    assert_eq!(forum_ack(&state), Some(LATER));
+    assert!(state.take_reading_acks().is_empty(), "no request");
+    assert_eq!(posts_count(&state), PostCount::None);
+    assert!(
+        events.contains(&format!("BadgeChanged({FORUM})")),
+        "{events:?}"
+    );
+    let post = Snowflake::new(LATER);
+    assert!(state.new_posts(&[post]).is_empty());
+    assert!(
+        state.read_state(post).is_some_and(|read| !read.estimated),
+        "opened"
+    );
+    assert!(!state.unread(post));
+    assert!(active(&state, &ForumView::default()).contains(&LATER));
+}
+
+#[test]
+fn an_own_post_never_moves_the_forums_ack_back() {
+    let mut state = forum_with_new_posts();
+    apply(&mut state, "MESSAGE_ACK", read_ack(FORUM, LATER + 5));
+
+    apply(&mut state, "THREAD_CREATE", own_post(LATER));
+
+    assert_eq!(forum_ack(&state), Some(LATER + 5));
+}
+
+// A post of the user's that only comes into view (no `newly_created`) says nothing was read.
+#[test]
+fn an_own_post_that_isnt_new_leaves_the_forums_ack() {
+    let mut state = forum_with_new_posts();
+    let mut post = own_post(LATER);
+    post["newly_created"] = false.into();
+
+    apply(&mut state, "THREAD_CREATE", post);
+
+    assert_eq!(forum_ack(&state), Some(FORUM_ACK));
+}
+
+// While the forum's page is read its ack goes to Discord as every other, at "now".
+#[test]
+fn an_own_post_in_a_forum_being_read_is_acked_at_now() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    read_forum(&mut state);
+    let later = snowflake_at(wall_millis() + 60_000);
+
+    apply(&mut state, "THREAD_CREATE", own_post(later));
+
+    let acks = state.take_reading_acks();
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    assert!(acks[0].now);
+    assert!(forum_ack(&state) >= Some(later));
+    assert!(state.new_posts(&[Snowflake::new(later)]).is_empty());
+}
+
+// H-5: how many messages a post has past the user's ack of it. Asked with op 28 for the open
+// forum's active posts that are unread, opened and acked, each once a connection; kept current
+// by messages and acks afterwards.
+
+// OLD is unread past a real ack; MIDDLE is read; NEWEST was never opened.
+fn forum_with_an_opened_unread_post() -> State {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    for (id, messages) in [(OLD, 9), (MIDDLE, 4), (NEWEST, 2)] {
+        let mut post = started_when_made(listed_post(id, id + 5, &[]));
+        post["message_count"] = messages.into();
+        apply(&mut state, "THREAD_CREATE", post);
+    }
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 2));
+    apply(&mut state, "MESSAGE_ACK", read_ack(MIDDLE, MIDDLE + 5));
+    open(&mut state);
+    state
+}
+
+fn asked(state: &mut State) -> Vec<(u64, u64)> {
+    let mut asked = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .map_or_else(Vec::new, |ask| {
+            assert_eq!(ask.guild.get(), G1);
+            assert_eq!(ask.forum.get(), FORUM);
+            ask.threads
+                .iter()
+                .map(|(post, ack)| (post.get(), ack.get()))
+                .collect()
+        });
+    asked.sort_unstable();
+    asked
+}
+
+fn unreads(counts: &[(u64, Option<u32>)]) -> Value {
+    let threads: Vec<Value> = counts
+        .iter()
+        .map(|(post, count)| json!({"thread_id": post.to_string(), "count": count}))
+        .collect();
+    json!({"channel_id": FORUM.to_string(), "threads": threads})
+}
+
+fn new_counts(state: &State) -> Vec<(u64, Option<u32>)> {
+    let posts = [OLD, MIDDLE, NEWEST].map(Snowflake::new);
+    state
+        .post_new_counts(&posts)
+        .iter()
+        .map(|count| (count.post.get(), count.count))
+        .collect()
+}
+
+#[test]
+fn unread_opened_posts_are_asked_once_a_connection() {
+    let mut state = forum_with_an_opened_unread_post();
+
+    let ask = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .expect("an ask");
+    assert_eq!(
+        ask.threads,
+        [(Snowflake::new(OLD), Snowflake::new(OLD + 2))]
+    );
+    assert_eq!(asked(&mut state), [], "asked already");
+
+    state.forget_forum_unreads(ask.id);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)], "the frame never left");
+
+    apply(&mut state, "READY", ready_value());
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let mut post = started_when_made(listed_post(OLD, OLD + 5, &[]));
+    post["message_count"] = 9.into();
+    apply(&mut state, "THREAD_CREATE", post);
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 2));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)], "a new connection");
+}
+
+#[test]
+fn no_forum_open_or_an_archived_post_asks_nothing() {
+    let mut state = forum_with_an_opened_unread_post();
+    let mut archived = started_when_made(listed_post(OLD, OLD + 5, &[]));
+    archived["thread_metadata"]["archived"] = true.into();
+    apply(&mut state, "THREAD_UPDATE", archived);
+    assert_eq!(asked(&mut state), []);
+    assert_eq!(new_counts(&state), []);
+
+    let mut state = forum_with_an_opened_unread_post();
+    state.open_forum(None, &mut Vec::new());
+    assert_eq!(asked(&mut state), []);
+}
+
+#[test]
+fn at_most_180_posts_are_asked_at_once() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    for index in 0..200 {
+        let id = 300_000_000_000_001_000 + index * 10;
+        apply(
+            &mut state,
+            "THREAD_CREATE",
+            started_when_made(listed_post(id, id + 5, &[])),
+        );
+        apply(&mut state, "MESSAGE_ACK", read_ack(id, id + 2));
+    }
+    open(&mut state);
+
+    let first = asked(&mut state);
+    let rest = asked(&mut state);
+
+    assert_eq!(first.len(), 180);
+    assert_eq!(rest.len(), 20);
+    assert!(rest.iter().all(|post| !first.contains(post)));
+}
+
+#[test]
+fn an_answer_shows_as_the_posts_new_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(new_counts(&state), [(OLD, None)], "unread, opened, acked");
+    asked(&mut state);
+
+    let events = apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    assert_eq!(events, [format!("PostCountsChanged({FORUM})")]);
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+#[test]
+fn an_answer_is_read_leniently() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+
+    apply(
+        &mut state,
+        "FORUM_UNREADS",
+        json!({"channel_id": FORUM.to_string(), "threads": [
+            {"thread_id": OLD.to_string(), "missing": true, "count": null},
+            {"thread_id": "no id"},
+        ]}),
+    );
+    assert_eq!(new_counts(&state), [(OLD, None)], "no count");
+    assert_eq!(asked(&mut state), [], "still asked");
+
+    let mut denied = unreads(&[(OLD, Some(3))]);
+    denied["permission_denied"] = true.into();
+    assert!(apply(&mut state, "FORUM_UNREADS", denied).is_empty());
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+
+    apply(
+        &mut state,
+        "FORUM_UNREADS",
+        json!({"channel_id": FORUM.to_string()}),
+    );
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+}
+
+#[test]
+fn a_count_is_never_above_the_posts_messages() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(40))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(9))]);
+
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(0))]));
+    assert_eq!(new_counts(&state), [(OLD, None)], "1+");
+}
+
+// Every answer has its frame: one that was never asked for says nothing.
+#[test]
+fn an_answer_nobody_asked_for_is_dropped() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(7))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+#[test]
+fn a_message_adds_one_to_a_known_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    let events = apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+
+    assert!(
+        events.contains(&format!("PostCountsChanged({FORUM})")),
+        "{events:?}"
+    );
+    assert_eq!(new_counts(&state), [(OLD, Some(4))]);
+}
+
+#[test]
+fn a_message_in_a_read_post_without_a_count_says_one_or_more() {
+    let mut state = forum_with_an_opened_unread_post();
+
+    let events = apply(&mut state, "MESSAGE_CREATE", message(MIDDLE + 100, MIDDLE));
+
+    assert!(
+        events.contains(&format!("PostCountsChanged({FORUM})")),
+        "{events:?}"
+    );
+    assert_eq!(new_counts(&state), [(OLD, None), (MIDDLE, None)]);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2), (MIDDLE, MIDDLE + 5)]);
+}
+
+// Akari's departure: any ack of the post restarts its count, where Discord's only follows
+// another session's.
+#[test]
+fn reading_a_post_starts_its_count_at_zero() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    let events = apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 5));
+    assert!(
+        events.contains(&format!("PostCountsChanged({FORUM})")),
+        "{events:?}"
+    );
+    assert_eq!(new_counts(&state), []);
+
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    assert_eq!(new_counts(&state), [(OLD, Some(2))]);
+    assert_eq!(asked(&mut state), [], "counted here");
+}
+
+#[test]
+fn a_local_ack_starts_the_count_at_zero_too() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    let mut events = Vec::new();
+    state.mark_read(Snowflake::new(OLD), &mut events);
+
+    assert!(
+        events
+            .iter()
+            .map(describe)
+            .any(|event| event == format!("PostCountsChanged({FORUM})")),
+        "{events:?}"
+    );
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    assert_eq!(new_counts(&state), [(OLD, Some(1))]);
+}
+
+#[test]
+fn an_ack_that_leaves_messages_unread_forgets_the_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)], "asked again");
+}
+
+// An answer for an ack the post has moved on from says nothing about it now.
+#[test]
+fn an_answer_for_an_older_ack_is_dropped() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 5));
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(1))]);
+}
+
+#[test]
+fn the_users_own_message_reads_the_post_and_counts_nothing() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    let mut own = message(OLD + 100, OLD);
+    own["author"]["id"] = ME.to_string().into();
+
+    apply(&mut state, "MESSAGE_CREATE", own);
+    assert_eq!(new_counts(&state), []);
+
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    assert_eq!(new_counts(&state), [(OLD, Some(1))]);
+}
+
+// The post's read state is there before the post, so no ack of the post sets the 0.
+#[test]
+fn a_new_post_of_the_open_forum_starts_at_zero() {
+    let mut state = forum_with_an_opened_unread_post();
+    apply(&mut state, "MESSAGE_ACK", read_ack(LATER, LATER));
+    let mut post = started_when_made(listed_post(LATER, LATER, &[]));
+    post["newly_created"] = true.into();
+    apply(&mut state, "THREAD_CREATE", post);
+
+    apply(&mut state, "MESSAGE_CREATE", message(LATER + 1, LATER));
+
+    let count = state.post_new_counts(&[Snowflake::new(LATER)]);
+    assert_eq!(count.len(), 1);
+    assert_eq!(count[0].count, Some(1));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)], "never the new post");
+}
+
+// A resume replays what the connection missed, and sometimes what it didn't.
+#[test]
+fn a_replayed_message_counts_once() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "RESUMED", json!({}));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(4))]);
+}
+
+// The read state of the post made again is there before it, so no ack touches its count.
+fn make_old_again(state: &mut State) {
+    apply(state, "MESSAGE_ACK", read_ack(OLD, OLD + 2));
+    let mut post = started_when_made(listed_post(OLD, OLD + 5, &[]));
+    post["message_count"] = 9.into();
+    apply(state, "THREAD_CREATE", post);
+    state.refresh_forum(Snowflake::new(FORUM), &mut Vec::new());
+}
+
+#[test]
+fn a_deleted_post_forgets_its_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    apply(
+        &mut state,
+        "THREAD_DELETE",
+        json!({"id": OLD.to_string(), "guild_id": G1.to_string(), "parent_id": FORUM.to_string(), "type": 11}),
+    );
+    make_old_again(&mut state);
+
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)], "asked again");
+}
+
+#[test]
+fn a_deleted_post_that_was_only_asked_can_be_asked_again() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+
+    apply(
+        &mut state,
+        "THREAD_DELETE",
+        json!({"id": OLD.to_string(), "guild_id": G1.to_string(), "parent_id": FORUM.to_string(), "type": 11}),
+    );
+    make_old_again(&mut state);
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+}
+
+// The forum's deletion takes its posts along without a THREAD_DELETE of their own.
+#[test]
+fn a_deleted_forums_posts_forget_their_counts() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    apply(
+        &mut state,
+        "CHANNEL_DELETE",
+        json!({"id": FORUM.to_string(), "guild_id": G1.to_string(), "type": 15}),
+    );
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    open(&mut state);
+    make_old_again(&mut state);
+
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)], "asked again");
+}
+
+// A refused ack is undone: the post is unread again and its count unknown, not a stale 0.
+#[test]
+fn an_undone_ack_forgets_the_count_it_started() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    let ack = state
+        .mark_read(Snowflake::new(OLD), &mut Vec::new())
+        .expect("an ack");
+
+    let mut events = Vec::new();
+    assert!(state.undo_ack(ack.channel, ack.before, ack.after, &mut events));
+
+    assert!(
+        events
+            .iter()
+            .map(describe)
+            .any(|event| event == format!("PostCountsChanged({FORUM})")),
+        "{events:?}"
+    );
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)], "asked again");
+}
+
+// Asked with ack A, read partway to B, asked again with B: the late answer for A says nothing
+// about B, and B's own answer is the count.
+#[test]
+fn a_late_answer_for_an_older_ask_is_dropped() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(
+        new_counts(&state),
+        [(OLD, None)],
+        "the answer for the older ack"
+    );
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(2))]);
+}
+
+// A frame that never left has no answer on its way.
+#[test]
+fn a_frame_that_never_left_leaves_no_answer_to_wait_for() {
+    let mut state = forum_with_an_opened_unread_post();
+    let ask = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .expect("an ask");
+    state.forget_forum_unreads(ask.id);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+// Discord answers each frame once, also when it refuses: nothing is left to wait for, and the
+// post's next ask is answered as any.
+#[test]
+fn a_refused_answer_blocks_no_later_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    let mut refused = unreads(&[]);
+    refused["permission_denied"] = true.into();
+    apply(&mut state, "FORUM_UNREADS", refused);
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+    assert_eq!(asked(&mut state), [], "once a connection");
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(2))]);
+}
+
+#[test]
+fn an_answer_that_leaves_a_post_out_blocks_no_later_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[]));
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(2))]);
+}
+
+// A resume replays what was missed before RESUMED: a frame without its answer by then went
+// into the dead connection.
+#[test]
+fn a_frame_unanswered_at_a_resume_is_asked_again() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+
+    apply(&mut state, "RESUMED", json!({}));
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+#[test]
+fn an_answered_post_is_not_asked_again_after_a_resume() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, None)]));
+
+    apply(&mut state, "RESUMED", json!({}));
+
+    assert_eq!(asked(&mut state), []);
+}
+
+// An answer belongs to the oldest frame that names its posts: a frame before it that doesn't
+// was never answered and takes no later answer for its own.
+#[test]
+fn an_answer_skips_a_frame_that_names_none_of_its_posts() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "MESSAGE_CREATE", message(MIDDLE + 100, MIDDLE));
+    assert_eq!(asked(&mut state), [(MIDDLE, MIDDLE + 5)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(MIDDLE, Some(1))]));
+    assert_eq!(new_counts(&state), [(OLD, None), (MIDDLE, Some(1))]);
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(2)), (MIDDLE, Some(1))]);
+}
+
+// A frame Discord never answers is given up after 30 s: its posts are asked again with the
+// next ask.
+#[tokio::test(start_paused = true)]
+async fn a_frame_without_an_answer_is_given_up_after_30_s() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+
+    tokio::time::advance(std::time::Duration::from_secs(29)).await;
+    assert_eq!(asked(&mut state), [], "still waited for");
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+// Without the timeout the post's later answer would go to the frame that never got one.
+#[tokio::test(start_paused = true)]
+async fn a_frame_given_up_takes_no_later_answer() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(2))]);
+}
+
+// An answer later than that is nobody's: nothing says it isn't an older frame's. The post is
+// asked again.
+#[tokio::test(start_paused = true)]
+async fn an_answer_after_its_frame_was_given_up_is_dropped() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+}
+
+// An answer says 3, two messages make it 5, a resume replays the answer and both messages.
+#[test]
+fn a_replayed_answer_never_resets_a_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    let answer = unreads(&[(OLD, Some(3))]);
+    apply(&mut state, "FORUM_UNREADS", answer.clone());
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    assert_eq!(new_counts(&state), [(OLD, Some(5))]);
+
+    apply(&mut state, "FORUM_UNREADS", answer);
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    apply(&mut state, "RESUMED", json!({}));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(5))]);
+    assert_eq!(asked(&mut state), []);
+}
+
+// The same with a newer ask of the post in flight when the connection drops: nothing in the
+// answer says which frame it is for, so what a resume replays is never taken, and the frame is
+// asked again at RESUMED.
+#[test]
+fn a_replayed_answer_never_takes_a_newer_frame() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    let answer = unreads(&[(OLD, Some(3))]);
+    apply(&mut state, "FORUM_UNREADS", answer.clone());
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 100));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 100)], "in flight");
+
+    state.connection_lost();
+    apply(&mut state, "FORUM_UNREADS", answer);
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    apply(&mut state, "MESSAGE_CREATE", message(OLD + 101, OLD));
+    assert_eq!(new_counts(&state), [(OLD, None)], "not the old answer's 3");
+    apply(&mut state, "RESUMED", json!({}));
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 100)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(1))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(1))]);
+}
+
+// An answer that names a post no waiting frame asked about is nobody's: the frame of another
+// post still gets its own.
+#[test]
+fn an_answer_takes_no_frame_that_does_not_name_its_posts() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    apply(&mut state, "MESSAGE_CREATE", message(MIDDLE + 100, MIDDLE));
+    assert_eq!(asked(&mut state), [(MIDDLE, MIDDLE + 5)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(7))]));
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(MIDDLE, Some(1))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(3)), (MIDDLE, Some(1))]);
+}
+
+// The frame an answer passes over was never answered: its posts go out with the next ask.
+#[test]
+fn a_frame_an_answer_passes_over_is_asked_again() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "MESSAGE_CREATE", message(MIDDLE + 100, MIDDLE));
+    assert_eq!(asked(&mut state), [(MIDDLE, MIDDLE + 5)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(MIDDLE, Some(1))]));
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(3)), (MIDDLE, Some(1))]);
+}
+
+// A gateway that never answers isn't asked forever: a post given up once is asked once more.
+#[tokio::test(start_paused = true)]
+async fn a_post_given_up_twice_is_left_for_the_connection() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+
+    assert_eq!(asked(&mut state), []);
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(
+        asked(&mut state),
+        [(OLD, OLD + 3)],
+        "a new ack is a new question"
+    );
+}
+
+// A send that failed late forgets its own frame, not a newer one with the same posts.
+#[test]
+fn a_frame_is_forgotten_by_what_it_is_not_by_its_posts() {
+    let mut state = forum_with_an_opened_unread_post();
+    let first = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .expect("an ask");
+    apply(&mut state, "RESUMED", json!({}));
+    let second = state
+        .next_forum_unreads(std::time::Duration::from_secs(30))
+        .expect("asked again");
+    assert_eq!(first.threads, second.threads);
+
+    state.forget_forum_unreads(first.id);
+
+    assert_eq!(asked(&mut state), []);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+// Another forum's answer, even one that names no post, is not this forum's frame's.
+#[test]
+fn another_forums_refusal_takes_no_frame() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    let mut refused = unreads(&[]);
+    refused["channel_id"] = (FORUM + 500).to_string().into();
+    refused["permission_denied"] = true.into();
+
+    apply(&mut state, "FORUM_UNREADS", refused);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+// Only a count that changed, or a post that may now show one, is worth a read.
+#[test]
+fn a_message_in_a_post_that_shows_no_count_says_nothing() {
+    let mut state = forum_with_an_opened_unread_post();
+    let changed = format!("PostCountsChanged({FORUM})");
+
+    let never_opened = apply(&mut state, "MESSAGE_CREATE", message(NEWEST + 100, NEWEST));
+    assert!(!never_opened.contains(&changed), "{never_opened:?}");
+
+    let already_unread = apply(&mut state, "MESSAGE_CREATE", message(OLD + 100, OLD));
+    assert!(!already_unread.contains(&changed), "{already_unread:?}");
+}
+
+// H-7: who may post in a forum, and with which tags.
+
+const VIEW: u64 = 1 << 10;
+const SEND: u64 = 1 << 11;
+const MANAGE_THREADS: u64 = 1 << 34;
+
+// The fixture's user owns the guild; here they're a plain member whose one role allows `allow`.
+fn member_with_forum(allow: u64, edit: impl FnOnce(&mut Value)) -> State {
+    let mut ready = ready_value();
+    let guild = &mut ready["guilds"][0];
+    guild["properties"]["owner_id"] = "100000000000000099".into();
+    guild["roles"][0]["permissions"] = "0".into();
+    guild["roles"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id": "600", "name": "r", "permissions": allow.to_string(), "position": 2}));
+    ready["merged_members"][0][0]["roles"] = json!(["600"]);
+    edit(&mut ready);
+    let mut state = state_from(&ready);
+    apply(&mut state, "CHANNEL_CREATE", open_forum());
+    state
+}
+
+// The fixture's channel denies @everyone sending.
+fn open_forum() -> Value {
+    let mut forum = forum();
+    forum["permission_overwrites"] = json!([]);
+    forum
+}
+
+fn creation(state: &State, channel: u64) -> (bool, Vec<u64>, bool) {
+    let creation = state.post_creation(Snowflake::new(channel), state.now_millis());
+    (
+        creation.allowed,
+        creation.tags.iter().map(|tag| tag.get()).collect(),
+        creation.requires_tag,
+    )
+}
+
+#[test]
+fn posting_needs_send_messages_in_the_forum() {
+    let member = member_with_forum(VIEW | SEND, |_| {});
+    assert_eq!(creation(&member, FORUM), (true, vec![BUG], false));
+
+    let reader = member_with_forum(VIEW, |_| {});
+    assert_eq!(creation(&reader, FORUM), (false, vec![], false));
+
+    let timed_out = member_with_forum(VIEW | SEND, |ready| {
+        ready["merged_members"][0][0]["communication_disabled_until"] =
+            "2999-01-01T00:00:00+00:00".into();
+    });
+    assert_eq!(creation(&timed_out, FORUM), (false, vec![], false));
+}
+
+#[test]
+fn moderated_tags_need_manage_threads() {
+    let moderator = member_with_forum(VIEW | SEND | MANAGE_THREADS, |_| {});
+    assert_eq!(creation(&moderator, FORUM), (true, vec![BUG, STAFF], false));
+
+    let mut owner = ready_state();
+    apply(&mut owner, "CHANNEL_CREATE", forum());
+    assert_eq!(creation(&owner, FORUM), (true, vec![BUG, STAFF], false));
+}
+
+#[test]
+fn a_forum_can_require_a_tag() {
+    let mut state = ready_state();
+    let mut forum = forum();
+    forum["flags"] = (1 << 4).into();
+    apply(&mut state, "CHANNEL_CREATE", forum);
+
+    assert_eq!(creation(&state, FORUM), (true, vec![BUG, STAFF], true));
+}
+
+#[test]
+fn only_forum_and_media_channels_take_posts() {
+    let mut state = ready_state();
+    let mut media = forum();
+    media["type"] = 16.into();
+    apply(&mut state, "CHANNEL_CREATE", media);
+
+    assert!(creation(&state, FORUM).0, "a media channel");
+    assert_eq!(creation(&state, GENERAL), (false, vec![], false));
+    assert_eq!(creation(&state, 1), (false, vec![], false), "unknown");
+}
+
+// H-9: a forum's slowmode for new posts is its `rate_limit_per_user`.
+#[test]
+fn a_forums_slowmode_is_its_cooldown_between_posts() {
+    let mut state = member_with_forum(VIEW | SEND, |_| {});
+    let mut slow = open_forum();
+    slow["rate_limit_per_user"] = 45.into();
+    apply(&mut state, "CHANNEL_UPDATE", slow);
+    let forum = Snowflake::new(FORUM);
+    let read = |state: &State| {
+        state.thread_slowmode(
+            forum,
+            state.now_millis(),
+            std::time::Instant::now(),
+            std::time::SystemTime::now(),
+        )
+    };
+
+    let idle = read(&state).expect("slowmode");
+    assert_eq!(idle.interval, std::time::Duration::from_secs(45));
+    assert!(!idle.exempt);
+    assert_eq!(idle.until, None);
+
+    state.start_thread_cooldown(forum, state.now_millis());
+    assert!(read(&state).is_some_and(|slowmode| slowmode.until.is_some()));
+}
+
+// Discord's client waits 100 ms past the `retry_after` of a 20016 too.
+#[test]
+fn discords_wait_is_held_with_the_clients_margin() {
+    use std::time::{Duration, Instant, SystemTime};
+    let mut state = member_with_forum(VIEW | SEND, |_| {});
+    let mut slow = open_forum();
+    slow["rate_limit_per_user"] = 45.into();
+    apply(&mut state, "CHANNEL_UPDATE", slow);
+    let forum = Snowflake::new(FORUM);
+    let (now, wall) = (Instant::now(), SystemTime::now());
+
+    state.hold_thread_cooldown(forum, Duration::from_secs(5), state.now_millis());
+
+    let until = state
+        .thread_slowmode(forum, state.now_millis(), now, wall)
+        .and_then(|slowmode| slowmode.until)
+        .expect("held");
+    assert!(until >= wall + Duration::from_millis(5100), "{until:?}");
+    assert!(until < wall + Duration::from_secs(6), "{until:?}");
+}
+
+fn created_post(id: u64) -> crate::model::Channel {
+    let mut post = own_post(id);
+    post["member"] = json!({"id": id.to_string(), "user_id": ME.to_string(), "join_timestamp": "2026-10-01T00:00:00+00:00", "flags": 1});
+    post.as_object_mut().unwrap().remove("newly_created");
+    serde_json::from_str(&post.to_string()).unwrap()
+}
+
+fn first_message(post: u64) -> crate::model::Message {
+    let mut first = message(post, post);
+    first["author"]["id"] = ME.to_string().into();
+    first["content"] = "steps to reproduce".into();
+    serde_json::from_str(&first.to_string()).unwrap()
+}
+
+// H-8: the answer to a create is the post as its THREAD_CREATE would bring it, whichever comes
+// first, and its message is the post's first.
+#[test]
+fn a_created_post_is_kept_as_the_users_own_new_post() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    let mut events = Vec::new();
+
+    let (kept, acks) =
+        state.keep_created_post(created_post(LATER), Some(first_message(LATER)), &mut events);
+
+    let post = Snowflake::new(LATER);
+    assert_eq!(kept, Some(post));
+    assert!(acks.is_empty(), "no request");
+    assert!(active(&state, &ForumView::default()).contains(&LATER));
+    assert_eq!(forum_ack(&state), Some(LATER));
+    assert!(state.read_state(post).is_some_and(|read| !read.estimated));
+    assert!(state.new_posts(&[post]).is_empty());
+    assert_eq!(
+        preview(&state, LATER).as_deref(),
+        Some("steps to reproduce")
+    );
+    assert!(
+        state
+            .channel(post)
+            .is_some_and(|post| { post.thread.as_deref().is_some_and(|info| info.joined()) })
+    );
+
+    apply(&mut state, "THREAD_CREATE", own_post(LATER));
+    let posts = state.forum_posts(Snowflake::new(FORUM), &ForumView::default());
+    assert_eq!(posts.new_posts, 0);
+    assert_eq!(
+        posts
+            .active
+            .iter()
+            .filter(|post| post.id.get() == LATER)
+            .count(),
+        1
+    );
+    assert_eq!(forum_ack(&state), Some(LATER));
+}
+
+#[test]
+fn an_answer_after_the_gateways_post_changes_nothing() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    apply(&mut state, "THREAD_CREATE", own_post(LATER));
+    let before = state.forum_posts(Snowflake::new(FORUM), &ForumView::default());
+
+    let (kept, _) = state.keep_created_post(created_post(LATER), None, &mut Vec::new());
+
+    assert_eq!(kept, Some(Snowflake::new(LATER)));
+    let after = state.forum_posts(Snowflake::new(FORUM), &ForumView::default());
+    assert_eq!(after.new_posts, 0);
+    assert_eq!(after.active.len(), before.active.len());
+    assert_eq!(forum_ack(&state), Some(LATER));
+}
+
+#[test]
+fn a_created_post_in_a_forum_being_read_is_acked_at_now() {
+    let mut state = forum_with_new_posts();
+    open(&mut state);
+    read_forum(&mut state);
+    let later = snowflake_at(wall_millis() + 60_000);
+
+    let (_, acks) = state.keep_created_post(created_post(later), None, &mut Vec::new());
+
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    assert!(acks[0].now);
+    assert!(forum_ack(&state) >= Some(later));
+}
+
+// A post whose message count Discord didn't send has no cap: its count isn't hidden as "1+".
+#[test]
+fn a_post_without_a_message_count_shows_discords_count() {
+    let mut state = ready_state();
+    apply(&mut state, "CHANNEL_CREATE", forum());
+    let mut post = started_when_made(listed_post(OLD, OLD + 5, &[]));
+    post.as_object_mut().unwrap().remove("message_count");
+    apply(&mut state, "THREAD_CREATE", post);
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 2));
+    open(&mut state);
+    asked(&mut state);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    let counts = state.post_new_counts(&[Snowflake::new(OLD)]);
+    assert_eq!(counts.len(), 1);
+    assert_eq!(counts[0].count, Some(3));
+}

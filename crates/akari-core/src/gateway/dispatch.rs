@@ -102,6 +102,28 @@ pub struct ThreadListSync {
     pub most_recent_messages: Vec<Message>,
 }
 
+/// FORUM_UNREADS: the answer to op 28.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ForumUnreads {
+    /// The forum.
+    pub channel_id: ChannelId,
+    #[serde(default, deserialize_with = "skip_invalid")]
+    pub threads: Vec<ForumUnread>,
+    /// Discord answered nothing: the user may not read the forum.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub permission_denied: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct ForumUnread {
+    pub thread_id: ChannelId,
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub missing: bool,
+    /// The messages past the ack the request named; `None` when Discord gave no count.
+    #[serde(default, deserialize_with = "default_on_error")]
+    pub count: Option<u32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct MessageDelete {
     pub id: MessageId,

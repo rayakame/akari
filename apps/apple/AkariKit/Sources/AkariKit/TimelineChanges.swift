@@ -33,7 +33,7 @@ public struct TimelineChanges: Equatable, Sendable {
             switch items[index - 1] {
             case .day: return .day
             case .newMessages: return .newMessages
-            case .edge, .message: return .other
+            case .edge, .message, .postBar: return .other
             }
         }
         var reloaded = IndexSet()

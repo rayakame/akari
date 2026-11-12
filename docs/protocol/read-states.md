@@ -406,10 +406,22 @@ modules 573163, 435470, 863005, 543465); the sequence on the wire is **unverifie
   next READY brings Discord's ack.
 - **Not sent:** the official client's second ack, at the forum's newest post, after the user
   opens posts ("ACK_FORUM_CHANNEL_NO_UNREAD_POSTS"), which moves the ack back from "now"; with the
-  forum acked at "now" while shown it would add nothing (O4 to observe).
+  forum acked at "now" while shown it would add nothing (O4 to observe). A post read beside its
+  forum's page is read as a thread beside its channel, and the forum's ack stays where it is.
+- **The user's own post** (from the client's code, module 218461; not observed): its
+  THREAD_CREATE acks the forum up to the post's ID locally, without a request, and the post
+  counts as opened. Akari does it for a THREAD_CREATE with `newly_created` (and for the answer
+  to its own create, whichever comes first): the post gets a read state at its own ID and is
+  never new. A forum whose page is being read is acked at "now" by its reading instead, as for
+  any new post, so Discord hears of it.
 - **Cards** (`Store::unread_posts`): a post shows unread when it's active and its newest message
   is past its read position, whatever its mute or unread setting (Discord's `isForumPostUnread`);
   an archived post never does. A post's read state change emits its `BadgeChanged`.
+- **"(N New)"** (`Store::post_new_counts`): only for a post that is active, unread, opened and
+  acked; the count comes from op 28 and what happened since
+  ([dispatches.md](dispatches.md#forums)). Akari restarts a post's count with every change of
+  its ack, this session's or another's, where the official client's only follows the gateway's
+  MESSAGE_ACK.
 - **The row** (`Badge.posts`): when its unread setting resolves to All Messages (as the dot's),
   `New(n)` counts active posts the user neither joined nor opened (no read state of their own)
   newer than the forum's ack, or than the guild join without one; else `Unread(n)` counts

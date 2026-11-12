@@ -5,7 +5,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tokio::sync::{Mutex, Notify, mpsc};
 
-use super::apply::{Derived, Entities, Learned, OlderPage, PageKey, ReadyDiff, State};
+use super::apply::{
+    Derived, Entities, ForumUnreadsAsk, Learned, OlderPage, PageKey, ReadyDiff, State,
+};
 use super::badges::{Badge, Badges};
 use super::clock::Clock;
 use super::embeds::ShownEmbed;
@@ -17,8 +19,8 @@ use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::threads::ThreadIndex;
 use super::types::{
-    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostPreview,
-    StarterMessage, ThreadBrowser, ThreadCreation, User,
+    Channel, CurrentUser, ForumPosts, ForumView, Guild, Member, Message, PostCreation,
+    PostNewCount, PostPreview, StarterMessage, ThreadBrowser, ThreadCreation, User,
 };
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
@@ -442,6 +444,9 @@ impl Store {
         self.write("connection", |inner, events| {
             let closed = matches!(inner.connection, ConnectionState::Closed { .. });
             if !closed && !same(&inner.connection, &connection) && allowed() {
+                if matches!(inner.connection, ConnectionState::Online) {
+                    inner.state.connection_lost();
+                }
                 inner.connection = connection.clone();
                 events.push(StoreEvent::Connection(connection));
             }
@@ -600,6 +605,18 @@ impl Store {
     pub(crate) fn refresh_forum(&self, forum: ChannelId) {
         self.write("forum", |inner, events| {
             inner.state.refresh_forum(forum, events)
+        });
+    }
+
+    pub(crate) fn next_forum_unreads(&self, wait: Duration) -> Option<ForumUnreadsAsk> {
+        self.write("forum unreads", |inner, _| {
+            inner.state.next_forum_unreads(wait)
+        })
+    }
+
+    pub(crate) fn forget_forum_unreads(&self, id: u64) {
+        self.write("forum unreads", |inner, _| {
+            inner.state.forget_forum_unreads(id);
         });
     }
 
@@ -1156,6 +1173,17 @@ impl Store {
         self.read(|inner| inner.state.new_posts(posts))
     }
 
+    /// Of `posts`, the active ones with new messages in a post the user opened before: unread,
+    /// with a read state of the user's own and an ack. `count` is how many messages came since,
+    /// never more than the post has; `None` until Discord says ([`Account::open_forum`] asks) or
+    /// with nothing to count, where the official client says "1+". Read again on
+    /// `PostCountsChanged`.
+    ///
+    /// [`Account::open_forum`]: crate::Account::open_forum
+    pub fn post_new_counts(&self, posts: &[ChannelId]) -> Vec<PostNewCount> {
+        self.read(|inner| inner.state.post_new_counts(posts))
+    }
+
     /// DMs and group DMs, in no particular order.
     pub fn private_channels(&self) -> Vec<Arc<Channel>> {
         self.read(|inner| inner.state.private_channels())
@@ -1186,6 +1214,14 @@ impl Store {
     pub fn shown_attachments(&self, message: &Message) -> Vec<ShownAttachment> {
         let now = self.now_millis();
         self.read(|inner| inner.state.shown_attachments(message, now))
+    }
+
+    /// A media post's tile: the first message's attachment Discord marks as the thumbnail, when
+    /// it is an image or video with a size, covered as other media is. It is never among
+    /// [`Store::shown_attachments`]. Read again when those are.
+    pub fn shown_thumbnail(&self, message: &Message) -> Option<ShownAttachment> {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.shown_thumbnail(message, now))
     }
 
     /// How a message's embeds show, after Discord's merge, promotion and filters, each with its
@@ -1272,6 +1308,15 @@ impl Store {
         self.read(|inner| inner.state.thread_creation(parent, now))
     }
 
+    /// What the user may post in `forum`: `allowed` in a forum or media channel where they may
+    /// send messages (not while timed out); `tags` the forum's tags they may apply, in its
+    /// order, moderated ones only with Manage Threads; `requires_tag` when a post needs one. The
+    /// cooldown between posts is [`Store::thread_slowmode`]'s.
+    pub fn post_creation(&self, forum: ChannelId) -> PostCreation {
+        let now = self.now_millis();
+        self.read(|inner| inner.state.post_creation(forum, now))
+    }
+
     /// Whether the user may start a thread from the message: a sent user message of the loaded
     /// window that has no thread yet, in a channel where they may create public threads.
     pub fn can_start_thread(&self, channel: ChannelId, message: MessageId) -> bool {
@@ -1312,6 +1357,16 @@ impl Store {
     pub(crate) fn keep_created_thread(&self, thread: model::Channel) -> Option<ChannelId> {
         self.write("thread", |inner, events| {
             inner.state.keep_created_thread(thread, events)
+        })
+    }
+
+    pub(crate) fn keep_created_post(
+        &self,
+        post: model::Channel,
+        first: Option<model::Message>,
+    ) -> (Option<ChannelId>, Vec<Ack>) {
+        self.write("post", |inner, events| {
+            inner.state.keep_created_post(post, first, events)
         })
     }
 

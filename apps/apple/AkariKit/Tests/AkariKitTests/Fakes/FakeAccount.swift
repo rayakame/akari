@@ -431,6 +431,24 @@ final class FakeAccount: Account, @unchecked Sendable {
         }
     }
 
+    override func createPost(forumId: ChannelId, name: String, tagIds: [TagId], content: String)
+        async throws -> ChannelId
+    {
+        log.append(.createPost(forumId, name, tagIds, content))
+        if holdCreates.current {
+            _ = await createReplies.next()
+        }
+        switch createReply.current {
+        case .success(let post):
+            fakeStore.update { $0.channels[post.id] = post }
+            return post.id
+        case .failure(let error):
+            throw error
+        case nil:
+            throw CreateThreadError.Request(error: .InvalidRequest)
+        }
+    }
+
     // While set, each cache flush waits for one value here.
     let holdFlushes = Locked(false)
     let flushes = AsyncQueue<Void>()

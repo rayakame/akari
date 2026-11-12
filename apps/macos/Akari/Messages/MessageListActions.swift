@@ -54,6 +54,9 @@ protocol MessageListActions: AnyObject {
     func hidesDownloads(of row: MessageListModel.Row) -> Bool
     // An attachment's Download, once the save panel answered.
     func saveOriginal(_ key: ImageKey, to destination: URL) async throws
+    // The post's bar: Follow or Following.
+    func followPost(_ follows: Bool)
+    func copyPostLink()
 }
 
 extension MessageListActions {
@@ -69,4 +72,6 @@ extension MessageListActions {
     func mediaURL(_ key: ImageKey) async -> URL? { nil }
     func hidesDownloads(of row: MessageListModel.Row) -> Bool { false }
     func saveOriginal(_ key: ImageKey, to destination: URL) async throws {}
+    func followPost(_ follows: Bool) {}
+    func copyPostLink() {}
 }

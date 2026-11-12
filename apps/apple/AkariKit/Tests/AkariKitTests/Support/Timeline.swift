@@ -42,6 +42,7 @@ extension MessageTimeline {
             case .edge(.newer): "newer"
             case .edge(.beginning): "beginning"
             case .newMessages: "new"
+            case .postBar(_, let hasReplies): hasReplies ? "bar+" : "bar"
             case .message(let row, let startsGroup):
                 startsGroup ? "+\(row.id.rawValue)" : "\(row.id.rawValue)"
             }

@@ -11,7 +11,8 @@ use serde::de::DeserializeOwned;
 
 pub use account::RequestError;
 pub(crate) use account::{
-    AccountRest, CreateMessage, CreateThread, Failure, Page, Query, last_viewed, uri_component,
+    AccountRest, CreateMessage, CreatePost, CreateThread, Failure, Page, PostMessage, Query,
+    last_viewed, uri_component,
 };
 #[cfg(test)]
 pub(crate) use error::FieldError;

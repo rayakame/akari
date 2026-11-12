@@ -288,7 +288,9 @@ struct SessionView<MessageArea: View>: View {
                     }, openFullView: session.openInFullView, close: session.closeSplit)
                 messageArea(
                     split,
-                    ChannelName(kind: .thread(owner: split.threadOwner), name: thread.name ?? ""))
+                    ChannelName(
+                        kind: split.postStart.map { .post($0) } ?? .thread(owner: split.threadOwner),
+                        name: thread.name ?? ""))
             }
         }
     }
@@ -398,7 +400,8 @@ struct SessionView<MessageArea: View>: View {
             case .dm: .direct(conversation?.recipients.first)
             case .groupDm: .group
             case .publicThread?, .privateThread?, .newsThread?:
-                .thread(owner: session.messages?.threadOwner)
+                session.messages?.postStart.map { .post($0) }
+                    ?? .thread(owner: session.messages?.threadOwner)
             case let kind?: .guildChannel(kind)
             case nil: .guildChannel(.guildText)
             }

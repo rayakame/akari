@@ -10,8 +10,8 @@ use crate::names::Names;
 use crate::records::{
     AgeGate, Badge, Channel, ChannelBadge, ConnectionState, ContentStats, DisplaySettings,
     ForumPosts, ForumView, Guild, GuildBadge, GuildSettings, Message, MessageWindow, Nitro,
-    PostPreview, ReadState, ServerListItem, Slowmode, StarterMessage, ThreadBrowser,
-    ThreadCreation, User,
+    PostCreation, PostNewCount, PostPreview, ReadState, ServerListItem, Slowmode, StarterMessage,
+    ThreadBrowser, ThreadCreation, User,
 };
 use crate::subscription::StoreSubscription;
 
@@ -45,11 +45,18 @@ impl Store {
         let hides_content = self
             .core
             .embeds_hide_link(&shown, document.is_single_link(&message.content));
+        // Only a media post's first message has one: the rest take no lock for it.
+        let thumbnail = message
+            .attachments
+            .iter()
+            .any(state::Attachment::is_thumbnail)
+            .then(|| self.core.shown_thumbnail(message))
+            .flatten();
         Message::new(
             message,
             formatted,
             self.core.mentions_me(message),
-            self.core.shown_attachments(message),
+            (self.core.shown_attachments(message), thumbnail),
             self.core.spoilers_shown(message.channel_id),
             embeds::embeds(
                 message,
@@ -237,6 +244,18 @@ impl Store {
         self.core.new_posts(&post_ids)
     }
 
+    /// Of `post_ids`, the active posts with new messages that the user opened before (unread,
+    /// with a read state of their own): each with how many came since, never more than the post
+    /// has, or no count until Discord says or with nothing to count ("1+"). `PostCountsChanged`
+    /// says to read it again.
+    pub fn post_new_counts(&self, post_ids: Vec<ChannelId>) -> Vec<PostNewCount> {
+        self.core
+            .post_new_counts(&post_ids)
+            .into_iter()
+            .map(PostNewCount::from)
+            .collect()
+    }
+
     /// A forum post's first message for its card; `None` until Akari has it
     /// (`Account::request_post_previews`). `PostPreviewChanged` says to read it again.
     pub fn post_preview(&self, post_id: ChannelId) -> Option<PostPreview> {
@@ -292,6 +311,13 @@ impl Store {
     /// channels, private ones only in text channels, none while timed out.
     pub fn thread_creation(&self, parent_id: ChannelId) -> ThreadCreation {
         self.core.thread_creation(parent_id).into()
+    }
+
+    /// What the user may post in `forum_id`: allowed where they may send messages in a forum or
+    /// media channel, with the tags they may apply (moderated ones only with Manage Threads) and
+    /// whether a post needs one. The cooldown between posts is `thread_slowmode`'s.
+    pub fn post_creation(&self, forum_id: ChannelId) -> PostCreation {
+        self.core.post_creation(forum_id).into()
     }
 
     /// Whether the user may start a thread from the message: a sent user message of the loaded

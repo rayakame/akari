@@ -18,7 +18,7 @@ struct ForumPage: View {
             ScrollViewReader { scroller in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        header
+                        header(height: proxy.size.height)
                             .id(Self.top)
                             .padding(.horizontal, ForumMeasures.inset)
                         sections(size: ForumMeasures.content(proxy.size))
@@ -65,17 +65,26 @@ struct ForumPage: View {
             return ForumMeasures.loadDistance
         }
         let column = ForumMeasures.columns(width: width - 2 * ForumMeasures.galleryInset).width
-        return max(ForumMeasures.loadDistance, ForumMeasures.galleryCardHeight(width: column))
+        return max(
+            ForumMeasures.loadDistance,
+            ForumMeasures.galleryCardHeight(width: column, media: forum.isMedia))
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForumSearchRow(
+    private func header(height: CGFloat) -> some View {
+        let submit: () -> Void = { [session] in
+            Task { await session.submitPost() }
+        }
+        let create: (() -> Void)? =
+            forum.form.canCreate && !forum.form.isOpen ? { [forum] in forum.openForm() } : nil
+        return VStack(alignment: .leading, spacing: 0) {
+            ForumHeaderRow(
                 forum: forum,
                 guidelines: forum.channel?.topic?.isEmpty == false
                     ? { withAnimation(.easeInOut(duration: 0.3)) { guidelinesOpen.toggle() } }
                     : nil,
-                shiftEscape: session.markServerRead)
+                submit: submit,
+                shiftEscape: session.markServerRead,
+                messageMaxHeight: max(PostFormLayout.messageMin, height / 2))
             if guidelinesOpen, let topic = forum.channel?.topic, !topic.isEmpty {
                 ForumGuidelines(topic: topic) {
                     withAnimation(.easeInOut(duration: 0.3)) { guidelinesOpen = false }
@@ -85,7 +94,7 @@ struct ForumPage: View {
             }
             ForumTagsBar(forum: forum)
             if forum.isEmpty {
-                ForumEmptyState(channel: name, tags: forum.settings.tags.count)
+                ForumEmptyState(channel: name, tags: forum.settings.tags.count, create: create)
             }
         }
     }
@@ -108,7 +117,7 @@ struct ForumPage: View {
             if forum.showsPlaceholders {
                 ForumPlaceholders(
                     layout: forum.settings.layout, size: size,
-                    width: size.width - 2 * inset)
+                    width: size.width - 2 * inset, media: forum.isMedia)
             }
         }
     }
@@ -117,7 +126,9 @@ struct ForumPage: View {
         switch forum.settings.layout {
         case .list:
             ForEach(cards) { card in
-                ForumListCard(card: card, filter: forum.settings.tags, now: now) { open(card) }
+                ForumListCard(
+                    card: card, filter: forum.settings.tags, opened: isOpen(card), now: now
+                ) { open(card) }
                     .onAppear { forum.cardShown(card.id) }
                     .onDisappear { forum.cardHidden(card.id) }
                     .padding(.bottom, ForumMeasures.cardGap)
@@ -125,14 +136,18 @@ struct ForumPage: View {
         case .gallery:
             let columns = ForumMeasures.columns(width: width - 2 * ForumMeasures.galleryInset)
             let size = CGSize(
-                width: columns.width, height: ForumMeasures.galleryCardHeight(width: columns.width))
+                width: columns.width,
+                height: ForumMeasures.galleryCardHeight(width: columns.width, media: forum.isMedia))
             let rows = stride(from: 0, to: cards.count, by: columns.count).map {
                 Array(cards[$0..<min($0 + columns.count, cards.count)])
             }
             ForEach(rows, id: \.first?.id) { row in
                 HStack(alignment: .top, spacing: ForumMeasures.galleryGap) {
                     ForEach(row) { card in
-                        ForumGalleryCard(card: card, filter: forum.settings.tags, size: size, now: now) {
+                        ForumGalleryCard(
+                            card: card, filter: forum.settings.tags, size: size,
+                            opened: isOpen(card), contained: forum.isMedia, now: now
+                        ) {
                             open(card)
                         }
                         .onAppear { forum.cardShown(card.id) }
@@ -144,109 +159,24 @@ struct ForumPage: View {
         }
     }
 
-    // Until posts open beside the forum, a card opens its post in full, as Shift+click does in
-    // Discord.
-    private func open(_ card: ForumModel.Card) {
-        session.go(to: card.id)
+    private func isOpen(_ card: ForumModel.Card) -> Bool {
+        session.split?.channelId == card.id
     }
-}
 
-/// The header row as search: the magnifying glass (a spinner while searching), the field, the
-/// guidelines button; the status row under it while a search runs or answered.
-struct ForumSearchRow: View {
-    let forum: ForumModel
-    let guidelines: (() -> Void)?
-    var shiftEscape: () -> Void = {}
-    @State private var query = ""
-    @FocusState private var focused: Bool
+    private func open(_ card: ForumModel.Card) {
+        Self.open(card.id, in: forum.forumId, full: NSEvent.modifierFlags.contains(.shift), session)
+    }
 
-    static let placeholder = "Search"
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Group {
-                    if forum.search == .searching {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color(nsColor: Palette.interactiveText))
-                    }
-                }
-                .frame(width: ForumMeasures.control, height: ForumMeasures.control)
-                .padding(.trailing, 8)
-                .accessibilityHidden(true)
-                TextField(
-                    "", text: $query,
-                    prompt: Text(Self.placeholder)
-                        .foregroundStyle(Color(nsColor: Palette.textMuted))
-                )
-                .textFieldStyle(.plain)
-                .font(TypeScale.forumField.font)
-                .foregroundStyle(Color(nsColor: Palette.textStrong))
-                .focused($focused)
-                .onExitCommand {
-                    if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
-                        shiftEscape()
-                    } else {
-                        query = ""
-                    }
-                }
-                .accessibilityLabel(Self.placeholder)
-                .padding(.trailing, 12)
-                if let guidelines {
-                    GuidelinesButton(action: guidelines)
-                }
-            }
-            .padding(8)
-            .background(Color(nsColor: Palette.inputBackground))
-            if let status = forum.status {
-                Rectangle()
-                    .fill(Color(nsColor: Palette.borderSubtle))
-                    .frame(height: 1)
-                HStack(spacing: 8) {
-                    Text(status)
-                        .font(TypeScale.forumStatus.font)
-                        .foregroundStyle(Color(nsColor: Palette.textDefault))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if forum.search == .found {
-                        Button("Clear") {
-                            query = ""
-                            forum.clearSearch()
-                        }
-                        .buttonStyle(.plain)
-                        .font(TypeScale.forumStatusAction.font)
-                        .foregroundStyle(Color(nsColor: Palette.textLink))
-                        .background(CursorArea(.pointingHand))
-                    }
-                }
-                .padding(.horizontal, 12)
-                .frame(height: ForumMeasures.control)
-                .background(Color(nsColor: Palette.inputBackground))
-            }
+    /// A card's click: its post beside the forum, or alone with Shift.
+    @discardableResult
+    static func open(
+        _ post: ChannelId, in forum: ChannelId, full: Bool, _ session: SessionModel
+    ) -> Task<Void, Never>? {
+        guard !full else {
+            session.go(to: post)
+            return nil
         }
-        .background(Color(nsColor: Palette.panel))
-        .clipShape(RoundedRectangle(cornerRadius: ForumMeasures.radius))
-        .overlay {
-            RoundedRectangle(cornerRadius: ForumMeasures.radius)
-                .strokeBorder(
-                    Color(nsColor: focused ? Palette.brand : Palette.borderSubtle), lineWidth: 1)
-        }
-        .onChange(of: query) { _, text in
-            forum.setQuery(text)
-            // Past 100 characters the model's query stays: the field follows it.
-            if forum.query != text {
-                query = forum.query
-            }
-        }
-        .onChange(of: forum.query) { _, text in
-            if text != query {
-                query = text
-            }
-        }
-        .onAppear { query = forum.query }
+        return Task { await session.openBeside(thread: post, from: forum) }
     }
 }
 
@@ -492,6 +422,11 @@ struct ForumSortMenu: View {
 
     static let title = "Sort & View"
 
+    /// A media channel has one view: its button only sorts.
+    static func title(media: Bool) -> String {
+        media ? "Sort" : title
+    }
+
     var body: some View {
         Menu {
             Picker("Sort by", selection: binding(\.sort, forum.setSort)) {
@@ -499,11 +434,13 @@ struct ForumSortMenu: View {
                 Text("Date Posted").tag(ForumSort.creationDate)
             }
             .pickerStyle(.inline)
-            Picker("View as", selection: binding(\.layout, forum.setLayout)) {
-                Text("List").tag(ForumLayout.list)
-                Text("Gallery").tag(ForumLayout.gallery)
+            if !forum.isMedia {
+                Picker("View as", selection: binding(\.layout, forum.setLayout)) {
+                    Text("List").tag(ForumLayout.list)
+                    Text("Gallery").tag(ForumLayout.gallery)
+                }
+                .pickerStyle(.inline)
             }
-            .pickerStyle(.inline)
             if !forum.tags.isEmpty {
                 Picker("Tag Matching", selection: binding(\.matching, forum.setMatching)) {
                     Text("Match Some").tag(TagMatching.some)
@@ -517,7 +454,7 @@ struct ForumSortMenu: View {
             HStack(spacing: 0) {
                 Image(systemName: "arrow.up.arrow.down")
                     .font(.system(size: 12, weight: .semibold))
-                Text(Self.title)
+                Text(Self.title(media: forum.isMedia))
                     .font(TypeScale.forumSort.font)
                     .padding(.leading, 8)
                     .padding(.trailing, 4)
@@ -643,6 +580,10 @@ struct ForumEmptyState: View {
     let channel: String
     /// The tag filter's size.
     let tags: Int
+    /// "Create a post", where the user may.
+    var create: (() -> Void)?
+
+    static let createTitle = "Create a post"
 
     static func words(channel: String, tags: Int) -> (title: String, text: String) {
         switch tags {
@@ -669,6 +610,10 @@ struct ForumEmptyState: View {
             Text(words.text)
                 .font(TypeScale.forumEmptyText.font)
                 .foregroundStyle(Color(nsColor: Palette.textDefault))
+            if let create {
+                BrandButton(title: Self.createTitle, size: .small, secondary: true, action: create)
+                    .padding(.top, 8)
+            }
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
@@ -682,6 +627,7 @@ struct ForumPlaceholders: View {
     let layout: ForumLayout
     let size: CGSize
     let width: CGFloat
+    var media = false
 
     private static let opacities: [Double] = [0.33, 1, 0.66]
 
@@ -698,7 +644,7 @@ struct ForumPlaceholders: View {
             .accessibilityHidden(true)
         case .gallery:
             let columns = ForumMeasures.columns(width: width)
-            let height = ForumMeasures.galleryCardHeight(width: columns.width)
+            let height = ForumMeasures.galleryCardHeight(width: columns.width, media: media)
             let rows = max(Int((size.height / height).rounded(.up)), 1)
             ForEach(0..<rows, id: \.self) { row in
                 HStack(spacing: ForumMeasures.galleryGap) {

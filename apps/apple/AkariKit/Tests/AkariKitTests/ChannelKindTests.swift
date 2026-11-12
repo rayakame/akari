@@ -21,4 +21,13 @@ struct ChannelKindTests {
     func announcementPublicAndPrivateThreadsAreThreads(kind: ChannelType, isThread: Bool) {
         #expect(channel(1, kind: kind).isThread == isThread)
     }
+
+    @Test(arguments: [
+        (ChannelType.guildForum, true), (.guildMedia, true), (.guildText, false),
+        (.publicThread, false), (.guildVoice, false),
+    ])
+    func forumAndMediaChannelsOpenAPostPage(kind: ChannelType, opens: Bool) {
+        #expect(channel(1, kind: kind).opensForum == opens)
+        #expect(channel(1, kind: kind).opensPage == (opens || kind == .guildText || kind == .publicThread))
+    }
 }

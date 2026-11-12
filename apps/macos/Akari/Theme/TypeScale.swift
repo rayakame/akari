@@ -83,6 +83,9 @@ nonisolated enum TypeScale {
     static let dayDivider = TextStyle(11, .semibold, line: 15)
     static let startTitle = TextStyle(30, .heavy)
     static let startSubtitle = TextStyle(15.5)
+    static let postBarButton = TextStyle(14, .medium)
+    static let postInviteTitle = TextStyle(16, .semibold)
+    static let postInviteText = TextStyle(14)
     static let startOwner = TextStyle(15.5, .semibold)
     static let titleBar = TextStyle(12.5, .medium)
 
@@ -144,6 +147,7 @@ nonisolated enum TypeScale {
     static let forumAuthor = TextStyle(15, .semibold, line: 18)
     static let forumMessage = TextStyle(15, .medium, line: 18)
     static let forumFooter = TextStyle(14, .medium, line: 18)
+    static let forumNewCount = TextStyle(14, .semibold, line: 18)
     static let forumTime = TextStyle(14, line: 18)
     static let forumStatus = TextStyle(12, line: 16)
     static let forumStatusAction = TextStyle(12, .semibold, line: 16)

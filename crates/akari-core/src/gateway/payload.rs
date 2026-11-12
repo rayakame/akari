@@ -3,8 +3,9 @@ use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 
 use super::dispatch::{
-    ChannelDelete, GuildDelete, GuildEmojisUpdate, GuildRoleDelete, GuildRoleEvent, MessageDelete,
-    MessageDeleteBulk, ReadySupplemental, ThreadListSync, ThreadMemberUpdate, ThreadMembersUpdate,
+    ChannelDelete, ForumUnreads, GuildDelete, GuildEmojisUpdate, GuildRoleDelete, GuildRoleEvent,
+    MessageDelete, MessageDeleteBulk, ReadySupplemental, ThreadListSync, ThreadMemberUpdate,
+    ThreadMembersUpdate,
 };
 use super::guild::GatewayGuild;
 use super::hello::Hello;
@@ -65,6 +66,8 @@ pub enum DispatchEvent {
     MessageUpdate(Box<MessageUpdate>),
     MessageDelete(MessageDelete),
     MessageDeleteBulk(MessageDeleteBulk),
+    /// The answer to op 28.
+    ForumUnreads(ForumUnreads),
     UserUpdate(Box<UserUpdate>),
     UserGuildSettingsUpdate(Box<UserGuildSettings>),
     UserSettingsProtoUpdate(Box<SettingsProtoUpdate>),
@@ -108,6 +111,7 @@ impl DispatchEvent {
             Self::MessageUpdate(_) => "MESSAGE_UPDATE",
             Self::MessageDelete(_) => "MESSAGE_DELETE",
             Self::MessageDeleteBulk(_) => "MESSAGE_DELETE_BULK",
+            Self::ForumUnreads(_) => "FORUM_UNREADS",
             Self::UserUpdate(_) => "USER_UPDATE",
             Self::UserGuildSettingsUpdate(_) => "USER_GUILD_SETTINGS_UPDATE",
             Self::UserSettingsProtoUpdate(_) => "USER_SETTINGS_PROTO_UPDATE",
@@ -246,6 +250,7 @@ fn decode_dispatch(seq: u64, name: String, data: &RawValue) -> Result<DispatchEv
         "MESSAGE_UPDATE" => parse(json).map(|update| E::MessageUpdate(Box::new(update))),
         "MESSAGE_DELETE" => parse(json).map(E::MessageDelete),
         "MESSAGE_DELETE_BULK" => parse(json).map(E::MessageDeleteBulk),
+        "FORUM_UNREADS" => parse(json).map(E::ForumUnreads),
         "USER_UPDATE" => parse(json).map(|update| E::UserUpdate(Box::new(update))),
         "USER_GUILD_SETTINGS_UPDATE" => {
             parse(json).map(|settings| E::UserGuildSettingsUpdate(Box::new(settings)))

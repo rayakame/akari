@@ -92,6 +92,11 @@ pub enum StoreEvent {
     PostPreviewChanged {
         post_id: ChannelId,
     },
+    /// The new-message counts of the forum's posts may have changed: read
+    /// [`Store::post_new_counts`](super::Store::post_new_counts) again for its cards.
+    PostCountsChanged {
+        forum_id: ChannelId,
+    },
     /// Discord refused the thread a line in the guild names, or it is gone: see
     /// [`Store::thread_unavailable`](super::Store::thread_unavailable).
     ThreadUnavailable {

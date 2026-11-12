@@ -23,6 +23,28 @@ struct ForumMeasuresTests {
         #expect(ForumMeasures.galleryCardHeight(width: 320) == 316)
     }
 
+    // A media channel's tiles are 16:9: 60 + ceil(294 × 9 / 16) + 24 + 36.
+    @Test
+    func aMediaChannelsCardIsLower() {
+        #expect(ForumMeasures.galleryCardHeight(width: 320, media: true) == 286)
+    }
+
+    @Test
+    func aMediaChannelSortsButHasNoOtherView() {
+        #expect(ForumSortMenu.title(media: false) == "Sort & View")
+        #expect(ForumSortMenu.title(media: true) == "Sort")
+    }
+
+    @Test
+    func aMediaRowOpensItsPage() {
+        let media = Channel(
+            id: ChannelId(rawValue: 14), kind: .guildMedia, guildId: ForumFakes.guild, parentId: nil,
+            name: "clips", position: 0, topic: nil, nsfw: false, rateLimitPerUser: 0,
+            recipientIds: [], thread: nil)
+
+        #expect(media.opensPage)
+    }
+
     @Test
     func loadingCardsFillTheWindowBelowTheHeader() {
         #expect(ForumMeasures.placeholderCards(height: 900) == 6)
@@ -180,17 +202,61 @@ struct ForumPageTests {
         #expect(areas.count == 4, "Sort & View, two tags and All: \(areas)")
     }
 
-    // A card's click opens its post in full until posts open beside the forum (G-10).
     @Test
-    func aCardOpensItsPost() throws {
+    func aCardOpensItsPostBesideTheForum() async throws {
         var fakes = ForumFakes()
         let session = fakes.session()
         let forum = try #require(session.forum)
         let post = forum.posts[1].id
 
-        session.go(to: post)
+        await ForumPage.open(post, in: forum.forumId, full: false, session)?.value
+
+        #expect(session.forum === forum)
+        #expect(session.split?.channelId == post)
+    }
+
+    @Test
+    func aShiftClickOpensThePostAlone() throws {
+        var fakes = ForumFakes()
+        let session = fakes.session()
+        let forum = try #require(session.forum)
+        let post = forum.posts[1].id
+
+        #expect(ForumPage.open(post, in: forum.forumId, full: true, session) == nil)
 
         #expect(session.forum == nil)
         #expect(session.messages?.channelId == post)
+        #expect(session.split == nil)
+    }
+
+    // Discord's card of the post open in the split: surface-higher, hovered or not.
+    @Test
+    func theOpenPostsCardHasTheSelectedFill() throws {
+        var fakes = ForumFakes()
+        fakes.untagged = true
+        let session = fakes.session()
+        let card = try #require(session.forum?.posts[1])
+        let size = NSSize(width: 600, height: 110)
+        func fill(opened: Bool) throws -> NSColor? {
+            let view = ForumListCard(card: card, filter: [], opened: opened, now: ForumFakes.now) {}
+                .frame(width: size.width, height: size.height, alignment: .top)
+            return try Rendered(view, size: size, scale: 2).color(300, 9)
+        }
+        func drawn(_ color: NSColor) throws -> NSColor? {
+            try Rendered(Color(nsColor: color), size: size, scale: 2).color(300, 9)
+        }
+        func near(_ color: NSColor?, _ other: NSColor?) -> Bool {
+            guard let color, let other else {
+                return false
+            }
+            return abs(color.redComponent - other.redComponent) < 0.02
+                && abs(color.blueComponent - other.blueComponent) < 0.02
+        }
+
+        let opened = try fill(opened: true)
+        let closed = try fill(opened: false)
+        #expect(near(opened, try drawn(Palette.surfaceHigher)), "\(String(describing: opened))")
+        #expect(near(closed, try drawn(Palette.panel)), "\(String(describing: closed))")
+        #expect(!near(opened, closed))
     }
 }

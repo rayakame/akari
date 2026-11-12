@@ -5,7 +5,7 @@ use super::{Derived, Entities, Journal, ReadyDiff, State};
 use crate::gateway::{ChannelUnread, MessageAck};
 use crate::model::{
     self, ChannelId, ChannelType, GenericMarker, GuildId, MessageId, MessageType, Permissions,
-    Snowflake, Timestamp,
+    Snowflake, Timestamp, UserId,
 };
 use crate::state::badges::Dirty;
 use crate::state::events::StoreEvent;
@@ -125,8 +125,10 @@ impl State {
             return;
         }
         if Some(message.author.id) == self.entities.me() {
-            if message.kind != MessageType::PollResult {
-                self.entities.read_states.read_up_to(channel.id, message.id);
+            if message.kind != MessageType::PollResult
+                && self.entities.read_states.read_up_to(channel.id, message.id)
+            {
+                self.post_ack_moved(channel.id);
             }
             return;
         }
@@ -244,6 +246,7 @@ impl State {
             .is_some_and(|at| at.get() == ack.message_id.get());
         if self.entities.read_states.ack(ack, newest, recount) {
             self.dirty.channel(ack.channel_id);
+            self.post_ack_moved(ack.channel_id);
         }
     }
 
@@ -478,6 +481,7 @@ impl State {
             return false;
         }
         self.entities.read_states.restore(channel, undo);
+        self.post_ack_moved(channel);
         if let Some(journal) = &mut self.journal {
             journal.acks.retain(|(journaled, _)| *journaled != channel);
             journal.undone.insert(channel);
@@ -528,6 +532,7 @@ impl State {
     fn read_up_to(&mut self, channel: ChannelId, cursor: Option<MessageId>) {
         if self.entities.read_states.read(channel, cursor) {
             self.dirty.channel(channel);
+            self.post_ack_moved(channel);
         }
         let acked = self
             .entities
@@ -693,6 +698,35 @@ impl State {
         };
         if stored.is_forum() && Arc::make_mut(stored).note_message(thread.cast()) {
             self.dirty.channel(stored.id);
+        }
+    }
+
+    // Module 218461: the user's own post is opened and acks its forum up to it, without a
+    // request. A forum being read is acked at "now" by its reading instead.
+    pub(super) fn read_own_post(
+        &mut self,
+        parent: Option<ChannelId>,
+        post: ChannelId,
+        owner: Option<UserId>,
+    ) {
+        let Some(forum) = parent.filter(|parent| self.is_forum(*parent)) else {
+            return;
+        };
+        if owner.is_none() || owner != self.entities.me() {
+            return;
+        }
+        if self.entities.read_states.get(post).is_none() {
+            self.read_up_to(post, Some(post.cast()));
+        }
+        let read = self.ready && self.reading.iter().any(|reading| reading.channel == forum);
+        let behind = self
+            .entities
+            .read_states
+            .get(forum)
+            .and_then(|state| state.acked)
+            .is_none_or(|acked| acked.get() < post.get());
+        if !read && behind {
+            self.read_up_to(forum, Some(post.cast()));
         }
     }
 }

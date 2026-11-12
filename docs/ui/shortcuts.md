@@ -19,6 +19,8 @@ shortcuts (https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-cre
 | Jump to the oldest unread message | Shift+Page Up (Shift+Fn+Up on a Mac laptop) (**unverified**) | Done: jumps like a click on the unread bar (below) |
 | Focus the composer | Tab (**unverified**) | Later |
 | Create a thread | Cmd+Shift+Option+N | Done: File > Create Thread, the open channel's New Thread form or the open thread's parent's, disabled where there's none ([thread-create.md](thread-create.md)) |
+| Start a new post | Shift+Enter in a forum's search field | Done: opens the form, with what the field held as its title; Enter in the title goes on to the message, Escape closes the form and keeps what was typed ([forum.md](forum.md#creating-a-post)) |
+| Open a post alone | Shift+click on its card | Done: full width; a plain click opens it beside the forum |
 | Enter or exit full screen | Ctrl+Cmd+F, Fn+F, the green button | Done: View > Enter Full Screen (SwiftUI's View menu had none); with the Threads browser open it goes full screen and closes the browser |
 | The media viewer's next or previous item | Right, Down or Space / Left or Up | Done; both wrap ([viewer.md](viewer.md)) |
 | Close the media viewer | Escape | Done; Cmd+W too. The app's other shortcuts are off while it shows, but Cmd+Q and Cmd+H |

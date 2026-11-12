@@ -335,6 +335,25 @@ Observed on 2026-10-09 with `akari-cli tail` on a test account:
 - A guild the user only previews (lurks) isn't in READY, so Akari can't view it yet; see
   [Not implemented yet](#not-implemented-yet).
 
+## Forum unreads
+
+Op 28 (Request Forum Unreads) asks how many messages forum posts have past the user's ack of
+each. From the official client's code (canary 671387, its gateway socket's
+`requestForumUnreads`); not observed on the wire:
+
+```json
+{"op": 28, "d": {"guild_id": "200000000000000001", "channel_id": "300000000000000050",
+  "threads": [{"thread_id": "300000000000000060", "ack_message_id": "400000000000000030"}]}}
+```
+
+- `GatewayCommand::RequestForumUnreads { guild_id, forum_id, threads }`, each thread with the
+  message the user read it up to; at most 180 threads a frame (`FORUM_UNREADS_LIMIT`), as the
+  official client slices its list.
+- The gateway answers with the FORUM_UNREADS dispatch. Which posts `Account` asks about and
+  when, and what the store does with the answer, is in
+  [dispatches.md](dispatches.md#forums).
+- Unknown: what the gateway answers for posts beyond 180 and when it says `permission_denied`.
+
 ### Debugging subscriptions
 
 `RUST_LOG=akari_core::subscriptions=debug,akari_core::dispatches=debug` makes akari-cli

@@ -617,6 +617,10 @@ pub struct Message {
     pub mention_everyone: bool,
     /// In the order they show: the mosaic's images and videos, then the files.
     pub attachments: Vec<Attachment>,
+    /// A media post's tile, on its first message: the attachment Discord marks as the
+    /// thumbnail, never among `attachments`.
+    #[uniffi(default = None)]
+    pub thumbnail: Option<Attachment>,
     /// The channel's spoilers show without a click (`render_spoilers`).
     #[uniffi(default = false)]
     pub spoilers_shown: bool,
@@ -696,6 +700,23 @@ pub enum PostPreview {
     Deleted,
 }
 
+/// A forum post's new messages, for its card's "(N New)": see `Store::post_new_counts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct PostNewCount {
+    pub post_id: ChannelId,
+    /// `None`: not known, or none to count; the card says "1+".
+    pub count: Option<u32>,
+}
+
+impl From<state::PostNewCount> for PostNewCount {
+    fn from(count: state::PostNewCount) -> Self {
+        Self {
+            post_id: count.post,
+            count: count.count,
+        }
+    }
+}
+
 /// A thread's first message when it started from a message in its parent channel.
 // Copied across once per read; UniFFI can't lower a boxed record.
 #[allow(clippy::large_enum_variant)]
@@ -715,7 +736,7 @@ impl Message {
         message: &state::Message,
         formatted: FormattedText,
         mentions_me: bool,
-        shown: Vec<state::ShownAttachment>,
+        (shown, thumbnail): (Vec<state::ShownAttachment>, Option<state::ShownAttachment>),
         spoilers_shown: bool,
         embeds: Vec<Embed>,
         hides_content: bool,
@@ -736,6 +757,7 @@ impl Message {
                 .into_iter()
                 .filter_map(|shown| Attachment::new(message, shown))
                 .collect(),
+            thumbnail: thumbnail.and_then(|shown| Attachment::new(message, shown)),
             spoilers_shown,
             embeds,
             hides_content,
@@ -992,6 +1014,26 @@ pub struct Slowmode {
     pub exempt: bool,
     /// When the user may send again; `None` when they may now.
     pub until: Option<SystemTime>,
+}
+
+/// What the user may post in a forum or media channel.
+#[derive(Debug, Clone, PartialEq, Eq, Default, uniffi::Record)]
+pub struct PostCreation {
+    pub allowed: bool,
+    /// The forum's tags the user may apply, in its order.
+    pub tags: Vec<TagId>,
+    /// A post needs at least one tag.
+    pub requires_tag: bool,
+}
+
+impl From<state::PostCreation> for PostCreation {
+    fn from(creation: state::PostCreation) -> Self {
+        Self {
+            allowed: creation.allowed,
+            tags: creation.tags,
+            requires_tag: creation.requires_tag,
+        }
+    }
 }
 
 /// Which threads the user may create in a channel.

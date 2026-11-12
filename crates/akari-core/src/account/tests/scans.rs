@@ -209,3 +209,25 @@ async fn a_failed_ask_is_asked_again_with_the_next_ready() {
     }
     assert_eq!(asked_ids(scans(&server).await), [["10"], ["11"], ["10"]]);
 }
+
+// A 401 on a scan means the token is gone, as on every other request.
+#[tokio::test]
+async fn a_401_on_a_scan_closes_the_account() {
+    let mut fake = FakeGateway::start().await;
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path(SCAN))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let account = start_with(&fake, &server);
+    let subscription = account.store().subscribe();
+    let mut connection = online(&mut fake, &account).await;
+    events_until(&subscription, "Online").await;
+    account.view_channel(Snowflake::new(DM));
+
+    connection.send(dm_message(2, 10, false)).await;
+
+    assert_eq!(connection.client_close_code().await, Some(1000));
+    events_until(&subscription, "Closed(AuthenticationFailed)").await;
+}

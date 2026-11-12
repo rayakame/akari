@@ -276,7 +276,7 @@ impl From<akari_core::gateway::GatewayError> for GatewayError {
     }
 }
 
-/// Why `Account::create_thread` created nothing.
+/// Why `Account::create_thread` or `Account::create_post` created nothing.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, uniffi::Error)]
 #[uniffi::export(Display)]
 pub enum CreateThreadError {
@@ -291,6 +291,12 @@ pub enum CreateThreadError {
     NameBlocked { reason: String },
     #[error("Discord wants a name")]
     NameRequired,
+    /// AutoMod refused a post's message; `reason` is Discord's message.
+    #[error("AutoMod refused the message")]
+    MessageBlocked { reason: String },
+    /// The forum wants a tag on every post.
+    #[error("the forum requires a tag")]
+    TagRequired,
     /// The request went out but its answer was lost or didn't read as the thread: it may exist
     /// already. The parent's slowmode for new threads starts as if it did.
     #[error("the thread may have been created")]
@@ -309,6 +315,8 @@ impl From<akari_core::CreateThreadError> for CreateThreadError {
             E::TooManyThreads { announcement } => Self::TooManyThreads { announcement },
             E::NameBlocked { reason } => Self::NameBlocked { reason },
             E::NameRequired => Self::NameRequired,
+            E::MessageBlocked { reason } => Self::MessageBlocked { reason },
+            E::TagRequired => Self::TagRequired,
             E::MaybeCreated => Self::MaybeCreated,
             E::Request(error) => Self::Request {
                 error: error.into(),

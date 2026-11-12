@@ -401,6 +401,8 @@ pub(crate) struct State {
     forum_pages: HashMap<forum::PageKey, forum::ForumPages>,
     // Forum posts' first messages from post-data and searches (`None`: deleted), and what's asked.
     previews: forum::Previews,
+    // Forum posts' new-message counts in this connection.
+    post_counts: forum::PostCounts,
     page_tickets: u64,
     // Explicit content scans asked and given up on this session.
     scans: super::media::Scans,
@@ -442,6 +444,7 @@ impl State {
             forum_list: None,
             forum_pages: HashMap::new(),
             previews: forum::Previews::default(),
+            post_counts: forum::PostCounts::default(),
             page_tickets: 0,
             scans: super::media::Scans::default(),
             clock,
@@ -597,6 +600,7 @@ impl State {
         }
         // READY's cursors are fresh.
         self.stale_cursors.clear();
+        self.forget_post_counts();
         self.follow_ready();
         self.follow_ready_threads();
         self.place_waiting_threads(events);
@@ -720,6 +724,7 @@ impl State {
     }
 
     fn refresh_badges(&mut self, now_millis: i64, events: &mut Vec<StoreEvent>) {
+        self.flush_post_counts(events);
         if self.dirty.is_empty() {
             return;
         }
@@ -770,6 +775,9 @@ impl State {
                 let (owner, newly_created) = (thread.owner_id, thread.newly_created);
                 self.put_channel(*thread, events);
                 self.note_post(parent, id);
+                if newly_created {
+                    self.read_own_post(parent, id, owner);
+                }
                 self.forum_post_created(id, parent, owner, newly_created, events);
             }
             E::ChannelUpdate(update) | E::ThreadUpdate(update) => {
@@ -794,6 +802,7 @@ impl State {
                     self.reread_boxes(channel, events);
                 }
                 self.note_first_message(&message, events);
+                self.count_post_message(&message);
                 self.read_message(&message);
                 self.dirty.channel(channel);
                 let forced = self.forced_through(&message);
@@ -882,7 +891,9 @@ impl State {
             E::ThreadMemberUpdate(update) => self.thread_member_update(*update, events),
             E::ThreadMembersUpdate(update) => self.thread_members_update(*update, events),
             E::ThreadListSync(sync) => self.thread_list_sync(*sync, events),
-            E::Resumed | E::Other(_) => {}
+            E::ForumUnreads(unreads) => self.forum_unreads(&unreads),
+            E::Resumed => self.forget_unanswered_forum_unreads(),
+            E::Other(_) => {}
         }
     }
 
@@ -1222,6 +1233,7 @@ impl State {
             self.latest.remove(&thread);
             self.unconfirmed.remove(&thread);
             self.forget_first_message(thread);
+            self.forget_post_count(thread);
             self.entities.read_states.forget(thread);
             self.dirty.channel(thread);
             events.push(StoreEvent::ChannelRemoved {
@@ -1284,6 +1296,7 @@ impl State {
                     self.windows.drop_channel(*id);
                     self.latest.remove(id);
                     self.unconfirmed.remove(id);
+                    self.forget_post_count(*id);
                 }
             }
             None => events.push(StoreEvent::GuildAdded(after)),
@@ -1402,6 +1415,7 @@ impl State {
             }
             keep
         });
+        self.prune_post_counts();
     }
 
     fn put_role(&mut self, event: GuildRoleEvent, events: &mut Vec<StoreEvent>) {
@@ -2097,7 +2111,7 @@ mod media;
 mod reading;
 
 pub(crate) use browser::{OLDER_PAGE, OlderPage};
-pub(crate) use forum::PageKey;
+pub(crate) use forum::{ForumUnreadsAsk, PageKey};
 
 #[cfg(test)]
 pub(crate) mod tests;

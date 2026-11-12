@@ -54,7 +54,11 @@ with the parent's own slowmode for new threads; it keeps forums' settings and po
 forum's post list (frozen between refreshes, the new-post count, archived pages per tag filter,
 search) and posts' first messages (post-data, 10 at a time, one request at a time), counts a forum
 row's new or unread posts, says which cards are unread and which are new (made since the forum was
-last read, never opened), and acks a forum being read at "now"; `akari_core::media` gets images: keys by Discord's
+last read, never opened), and acks a forum being read at "now"; it asks Discord how many messages
+are new in the open forum's opened posts (op 28, each post once per connection) and keeps the
+counts with messages and acks, says what the user may post in a forum (the tags they may apply, a
+required tag) and creates posts with the forum's slowmode, the user's own post read for its forum;
+`akari_core::media` gets images: keys by Discord's
 IDs, the size and form each box asks for (never fewer pixels than it covers on screen), downloads
 without the token on a client of their own (eight at a time, newest first, one per image however
 many ask), signed attachment links renewed in batches, each account's images on disk with LRU
@@ -71,7 +75,7 @@ account asks for in viewed channels and stops waiting for after 3 s), how its em
 (Discord's merge by link, promotion and filters, a card or the media alone, the link text hidden
 under its one image, and the same covers, a spoilered link covering them all), and whether a
 channel waits behind the age gate, with the user's agreement per server in the cache, and whether
-a media or forum post hides download options;
+a media or forum post hides download options, and gives a media post's thumbnail attachment;
 `akari-cli` can log in, log out, connect, list guilds and channels, read, send and tail
 messages, show where a channel's unread state and mentions come from, and get an image as the app
 would for a box of a given size. `akari-ffi` exposes the client, both logins, `Account`, store reads, change events
@@ -79,11 +83,12 @@ and the message APIs, including the send rules, the read calls and `end_session`
 (`PendingImage`, placeholders, layout, the records' image keys, a message's stickers and each custom
 emoji span's key, the display settings, attachments with their kind, size, placeholder, key,
 place and cover, embeds with their text formatted by Discord's embed rules, the age gate and the
-agreement, the hidden download options, forums: their settings, post lists, first messages and
-the row's post count), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
+agreement, the hidden download options, forums: their settings, post lists, first messages, the
+row's post count, the posts' new-message counts, what the user may post and creating a post, a
+message's thumbnail), through UniFFI, and `apps/apple/AkariKit` is a Swift package around its
 XCFramework and generated bindings, with a Keychain token store, the view models (app,
-login, session, server, channel, DM and message lists, the composer, the media viewer and the
-forum page), the message
+login, session, server, channel, DM and message lists, the composer, the media viewer, the
+forum page and its form for a new post), the message
 timeline, the reading signal (what tells the core which channel the user reads), and the
 image tier (`ImageCache`: the core's files decoded at the box's pixels off the main actor in
 two byte-bounded LRUs; `MotionPolicy`: whether an animation plays; `FramePlayer` and
@@ -122,7 +127,11 @@ with a thread has the thread's box (count, newest message, time), which opens it
 channel list's "More Active Threads" show a channel's threads (the popout, the modal); the New
 Thread form takes the split's place (a message's menu, the browser's Create buttons, ⌘⇧⌥N) and
 creates threads; a forum's row opens its page (search, Sort & View, the tag filter, list and
-gallery cards with the NEW badge, older posts, the "N New Posts" pill) and shows its post count; it shows
+gallery cards with the NEW badge and "(N New)", older posts, the "N New Posts" pill) and shows its
+post count; a card opens its post beside the page (Shift+click alone), with the post's beginning
+(its name and tags) and the bar under its first message (Follow, Copy Link, "Start the
+conversation!"); the page's header row turns into the form for a new post (title, message, tags,
+slowmode, Post); a media channel opens the same page as a gallery of 16:9 tiles; it shows
 the
 connection state and reconnects. akari-core also has the SQLite disk
 cache (`akari_core::cache`): one file per account with the last session's state and recent

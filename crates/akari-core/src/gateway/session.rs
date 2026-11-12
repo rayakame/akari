@@ -31,6 +31,8 @@ pub(crate) struct Timing {
     pub(crate) scan_wait: Duration,
     /// The most a scan request waits before it goes (the client's 800 ms).
     pub(crate) scan_jitter: Duration,
+    /// How long an op 28's answer is waited for before its posts are asked again.
+    pub(crate) forum_unreads_wait: Duration,
 }
 
 impl Default for Timing {
@@ -48,6 +50,7 @@ impl Default for Timing {
             lookup_timeout: Duration::from_secs(5),
             scan_wait: Duration::from_secs(3),
             scan_jitter: Duration::from_millis(800),
+            forum_unreads_wait: Duration::from_secs(30),
         }
     }
 }

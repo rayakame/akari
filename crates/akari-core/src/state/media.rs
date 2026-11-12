@@ -191,6 +191,24 @@ pub(crate) fn shown_attachments(
     media
 }
 
+/// A media post's tile: the message's first thumbnail attachment that shows as media, which
+/// [`shown_attachments`] leaves out.
+pub(crate) fn thumbnail(
+    message: &Message,
+    cover: impl Fn(&Attachment) -> Option<MediaCover>,
+) -> Option<ShownAttachment> {
+    let (index, attachment) = message
+        .attachments
+        .iter()
+        .enumerate()
+        .find(|(_, attachment)| attachment.is_thumbnail() && attachment.is_visual())?;
+    Some(ShownAttachment {
+        index,
+        display: AttachmentDisplay::Media,
+        cover: cover(attachment),
+    })
+}
+
 /// Whether spoilers show without a click: the setting, or a moderator's with Manage Messages.
 pub(crate) fn spoilers_shown(
     display: &DisplaySettings,

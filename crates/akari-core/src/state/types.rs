@@ -272,6 +272,17 @@ pub enum PostPreview {
     Deleted,
 }
 
+/// How many new messages a forum post's card says it has: see
+/// [`Store::post_new_counts`](super::Store::post_new_counts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PostNewCount {
+    pub post: ChannelId,
+    /// The messages past the user's ack, never more than the post has; `None` when Discord
+    /// hasn't said or there are none to count: the card says "1+".
+    pub count: Option<u32>,
+}
+
 /// What a forum or media channel sets for its posts.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -350,6 +361,18 @@ pub enum TagMatching {
     All,
 }
 
+/// What the user may post in a forum or media channel: see
+/// [`Store::post_creation`](super::Store::post_creation).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct PostCreation {
+    pub allowed: bool,
+    /// The forum's tags the user may apply, in its order.
+    pub tags: Vec<TagId>,
+    /// A post needs at least one tag.
+    pub requires_tag: bool,
+}
+
 /// Which threads the user may create in a channel, see `Store::thread_creation`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -361,6 +384,7 @@ pub struct ThreadCreation {
 
 // A forum post pinned to the top of its forum.
 const PINNED: u64 = 1 << 1;
+const REQUIRE_TAG: u64 = 1 << 4;
 
 impl Channel {
     /// A group DM's icon; `None` without one.
@@ -399,6 +423,11 @@ impl Channel {
     /// A forum post pinned to the top of its forum.
     pub fn is_pinned(&self) -> bool {
         self.flags & PINNED != 0
+    }
+
+    /// A forum whose posts need at least one tag.
+    pub fn requires_tag(&self) -> bool {
+        self.flags & REQUIRE_TAG != 0
     }
 
     /// Forum and media channels, whose page lists their posts.
