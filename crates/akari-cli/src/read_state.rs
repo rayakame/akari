@@ -262,6 +262,10 @@ fn akari_lines(store: &Store, channel: ChannelId, wire: Option<&WireFacts>) -> V
         "  channel badge: unread {}, mentions {}",
         badge.unread, badge.mentions
     ));
+    lines.push(pins_line(
+        known.last_pin_timestamp.map(|time| time.unix_millis()),
+        store.pins_unread(channel),
+    ));
     let permissions = store.permissions(channel);
     let allowed =
         |permission| permissions.map_or("unknown", |p: Permissions| yes(p.contains(permission)));
@@ -304,6 +308,14 @@ fn akari_lines(store: &Store, channel: ChannelId, wire: Option<&WireFacts>) -> V
         store.notification_level(channel)
     ));
     lines
+}
+
+fn pins_line(last_pin: Option<i64>, unread: bool) -> String {
+    let last = last_pin.map_or_else(
+        || "none".to_owned(),
+        |millis| format!("{} UTC", utc_minute(millis)),
+    );
+    format!("  pins: last pin {last}, unread {unread}")
 }
 
 fn state_source(wire: &WireFacts, acked: Option<u64>, mentions: u32, estimated: bool) -> String {
@@ -433,6 +445,18 @@ async fn watch_channel(session: &Session, channel: ChannelId, interrupts: &mut S
                     id_and_time(state.and_then(|state| state.acked).map(Snowflake::get)),
                     state.map_or(0, |state| state.mentions),
                     state.is_some_and(|state| state.estimated)
+                );
+            }
+            StoreEvent::PinsUnreadChanged { channel_id } if channel_id == channel => {
+                let last = store
+                    .channel(channel)
+                    .and_then(|channel| channel.last_pin_timestamp);
+                println!(
+                    "{}",
+                    pins_line(
+                        last.map(|time| time.unix_millis()),
+                        store.pins_unread(channel)
+                    )
                 );
             }
             StoreEvent::Connection(ConnectionState::Connecting) => println!("(reconnecting)"),
@@ -1042,6 +1066,18 @@ mod tests {
                 "none": null,
                 "nested": [{"topic": "<text>"}]
             })
+        );
+    }
+
+    #[test]
+    fn the_pins_line_says_when_the_last_pin_was_and_whether_it_is_unread() {
+        assert_eq!(
+            pins_line(Some(1_700_000_000_000), true),
+            "  pins: last pin 2023-11-14 22:13 UTC, unread true"
+        );
+        assert_eq!(
+            pins_line(None, false),
+            "  pins: last pin none, unread false"
         );
     }
 
