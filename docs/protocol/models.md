@@ -195,7 +195,10 @@ Sources: [message object](https://docs.discord.food/resources/message#message-st
   `"0000"`.
 - `referenced_message` has three states (footnote 5 of the message table): a missing key
   means Discord didn't try to fetch it, `null` means the message was deleted, and an
-  object is the referenced message. The model uses `Option<Option<Box<Message>>>`.
+  object is the referenced message. The model uses `Option<Option<Box<Message>>>`. The store
+  keeps it apart from the message that carried it: a reply's target
+  ([messages.md](messages.md#replies)), a thread starter's message
+  ([messages.md](messages.md#a-threads-starter-message)).
 - For system lines: `call` (`participants`, `ended_timestamp`, `null` while the call runs; a
   MESSAGE_UPDATE brings its end), `role_subscription_data`, `purchase_notification` (only its
   `guild_product_purchase.product_name` is kept), `application` (its `name`) and `actor`, the

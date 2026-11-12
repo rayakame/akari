@@ -11,6 +11,7 @@ use super::order::{self, guild_order};
 use super::permissions::compute;
 use super::reactions::{ReactionChange, ReactionEmoji};
 use super::read_states::{Ack, ReadStates};
+use super::replies::ReplyTarget;
 use super::send::{Cooldowns, DEFAULT_LENGTH_LIMIT, Slowmode, length_limit};
 use super::settings::{
     DisplaySettings, GuildSettings, NotificationLevel, ServerListItem, UserSettings, server_list,
@@ -1984,6 +1985,10 @@ impl State {
 
     pub(crate) fn permissions(&self, channel: ChannelId, now_millis: i64) -> Option<Permissions> {
         self.entities.permissions(channel, now_millis)
+    }
+
+    pub(crate) fn reply_target(&self, channel: ChannelId, target: MessageId) -> ReplyTarget {
+        self.windows.reply_target(channel, target)
     }
 
     pub(crate) fn starter_message(&self, thread: ChannelId) -> Option<StarterMessage> {

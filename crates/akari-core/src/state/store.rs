@@ -16,6 +16,7 @@ use super::media::{AgeGate, ShownAttachment};
 use super::order;
 use super::reactions::Reaction;
 use super::read_states::{Ack, ReadState};
+use super::replies::ReplyTarget;
 use super::send::Slowmode;
 use super::settings::{DisplaySettings, GuildSettings, NotificationLevel, ServerListItem};
 use super::threads::ThreadIndex;
@@ -1392,6 +1393,14 @@ impl Store {
     /// shows, a forum post's ID in both places for its first message.
     pub fn reactions(&self, channel: ChannelId, message: MessageId) -> Arc<[Reaction]> {
         self.read(|inner| inner.state.reactions(channel, message))
+    }
+
+    /// The message a reply answers, by the IDs [`Message::replied_to`] gives (the target's
+    /// channel and its ID): as Discord sent it along with a reply, or as a load brought it,
+    /// kept current by its edits and its deletion. `ReplyTargetChanged` says to read it again.
+    /// `NotLoaded` also for a message no loaded reply names.
+    pub fn reply_target(&self, channel: ChannelId, target: MessageId) -> ReplyTarget {
+        self.read(|inner| inner.state.reply_target(channel, target))
     }
 
     /// A thread's newest message, which its box shows: from THREAD_LIST_SYNC, live messages and

@@ -12,6 +12,7 @@ mod order;
 mod permissions;
 mod reactions;
 mod read_states;
+mod replies;
 mod send;
 mod settings;
 mod store;
@@ -34,6 +35,7 @@ pub use order::display_order;
 pub use reactions::{Reaction, ReactionEmoji};
 pub use read_states::ReadState;
 pub(crate) use read_states::{Ack, AckBody, ReadStates};
+pub use replies::{ReplyPreview, ReplyTarget};
 pub(crate) use send::limit_in;
 pub use send::{Slowmode, message_length};
 pub use settings::{

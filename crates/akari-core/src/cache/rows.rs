@@ -15,9 +15,9 @@ use crate::state::{
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
     ExplicitContentFilter, ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings,
     ForumSort, ForumTag, Guild, GuildSettings, ImageHash, Member, Message, MessageReference,
-    NotificationLevel, PermissionOverwrite, ReadState, Redaction, ReferencedMessage, Role,
-    RoleSubscription, SpoilerSetting, Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching,
-    ThreadInfo, ThreadMembership, Unreads, User,
+    NotificationLevel, PermissionOverwrite, ReadState, Redaction, Role, RoleSubscription,
+    SpoilerSetting, Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching, ThreadInfo,
+    ThreadMembership, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -1063,7 +1063,6 @@ impl MessageRow {
                     guild_id: snowflake(reference.guild_id),
                 })
             }),
-            referenced_message: ReferencedMessage::NotIncluded,
             delivery: Delivery::Sent,
             system: SystemData {
                 call: self.call.map(|call| Call {

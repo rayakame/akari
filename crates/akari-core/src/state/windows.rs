@@ -4,7 +4,8 @@ use std::sync::Arc;
 use super::apply::wall_millis;
 use super::events::StoreEvent;
 use super::reactions::{ReactionChange, react};
-use super::types::{Delivery, Message, ReferencedMessage, StarterMessage, User};
+use super::replies::{ReplyPreview, ReplyTarget, ReplyTargets};
+use super::types::{Delivery, Message, StarterMessage, User};
 use crate::gateway::MessageUpdate;
 use crate::load_report::PageOutcome;
 use crate::model::{self, ChannelId, MessageId, MessageType, UserId};
@@ -401,9 +402,14 @@ pub(crate) struct Windows {
     order: VecDeque<ChannelId>,
     windows: HashMap<ChannelId, Window>,
     generations: u64,
-    // Threads whose first message came without the one it started from: what the fetch found.
+    // The message each thread started from: sent along with the thread's first message, or
+    // what the fetch found when it wasn't.
     starters: HashMap<ChannelId, Starter>,
+    targets: ReplyTargets,
 }
+
+// The message a message refers to, as Discord sent it along: `Some(None)` for a deleted one.
+type Referenced = Option<Option<Box<model::Message>>>;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -431,6 +437,7 @@ impl Windows {
             windows: HashMap::new(),
             generations: 0,
             starters: HashMap::new(),
+            targets: ReplyTargets::default(),
         }
     }
 
@@ -457,15 +464,11 @@ impl Windows {
                 .and_then(|(channel, id)| self.message(channel, id))
                 .unwrap_or_else(|| message.clone())
         };
-        Some(match &row.referenced_message {
-            ReferencedMessage::Message(message) => StarterMessage::Loaded(fresh(message)),
-            ReferencedMessage::Deleted => StarterMessage::Unavailable,
-            ReferencedMessage::NotIncluded if origin.is_none() => StarterMessage::Unavailable,
-            ReferencedMessage::NotIncluded => match self.starters.get(&thread) {
-                Some(Starter::Found(message)) => StarterMessage::Loaded(fresh(message)),
-                Some(Starter::Gone | Starter::Failed) => StarterMessage::Unavailable,
-                Some(Starter::Fetching) | None => StarterMessage::Loading,
-            },
+        Some(match self.starters.get(&thread) {
+            Some(Starter::Found(message)) => StarterMessage::Loaded(fresh(message)),
+            Some(Starter::Gone | Starter::Failed) => StarterMessage::Unavailable,
+            Some(Starter::Fetching) | None if origin.is_none() => StarterMessage::Unavailable,
+            Some(Starter::Fetching) | None => StarterMessage::Loading,
         })
     }
 
@@ -506,9 +509,6 @@ impl Windows {
 
     pub(crate) fn wanted_starter(&self, thread: ChannelId) -> Option<(ChannelId, MessageId)> {
         let row = self.starter_row(thread)?;
-        if row.referenced_message != ReferencedMessage::NotIncluded {
-            return None;
-        }
         match self.starters.get(&thread) {
             None | Some(Starter::Failed) => Self::origin(row),
             Some(Starter::Fetching | Starter::Found(_) | Starter::Gone) => None,
@@ -534,10 +534,13 @@ impl Windows {
             return;
         }
         let settled = match fetch {
-            StarterFetch::Found(message) => {
-                Starter::Found(Arc::new(Message::from_wire(*message, &mut |user| {
+            StarterFetch::Found(mut message) => {
+                let referenced = message.referenced_message.take();
+                let found = Arc::new(Message::from_wire(*message, &mut |user| {
                     intern(user, users, &[])
-                })))
+                }));
+                self.keep_referenced(&found, referenced, users, events);
+                Starter::Found(found)
             }
             StarterFetch::Gone => Starter::Gone,
             StarterFetch::Failed => Starter::Failed,
@@ -595,6 +598,7 @@ impl Windows {
             };
             if let Some(evicted) = self.order.remove(index) {
                 self.windows.remove(&evicted);
+                self.prune_targets(evicted);
                 events.push(StoreEvent::MessagesCleared {
                     channel_id: evicted,
                 });
@@ -739,7 +743,7 @@ impl Windows {
 
     fn receive(
         &mut self,
-        message: model::Message,
+        mut message: model::Message,
         pending_id: Option<MessageId>,
         users: &HashMap<UserId, Arc<User>>,
         events: &mut Vec<StoreEvent>,
@@ -761,9 +765,12 @@ impl Windows {
         if pending.is_none() && !visible && !window.appends_live() && !window.holds_live() {
             return;
         }
+        let referenced = message.referenced_message.take();
         let message = Arc::new(Message::from_wire(message, &mut |user| {
             intern(user, users, &window.messages)
         }));
+        self.keep_referenced(&message, referenced, users, events);
+        self.targets.arrived(&message, events);
         let Some(window) = self.windows.get_mut(&channel_id) else {
             return;
         };
@@ -779,6 +786,96 @@ impl Windows {
             }
             None => window.place(channel_id, message, limit, true, events),
         }
+        self.trim_targets(channel_id);
+    }
+
+    // What a message brought along: the message its thread started from, or the one it answers.
+    fn keep_referenced(
+        &mut self,
+        message: &Message,
+        referenced: Referenced,
+        users: &HashMap<UserId, Arc<User>>,
+        events: &mut Vec<StoreEvent>,
+    ) {
+        if message.kind == MessageType::ThreadStarterMessage {
+            match referenced {
+                Some(Some(mut original)) => {
+                    let answered = original.referenced_message.take();
+                    let original = Arc::new(Message::from_wire(*original, &mut |user| {
+                        intern(user, users, &[])
+                    }));
+                    self.keep_referenced(&original, answered, users, events);
+                    self.starters
+                        .insert(message.channel_id, Starter::Found(original));
+                }
+                Some(None) => {
+                    self.starters.insert(message.channel_id, Starter::Gone);
+                }
+                None => {}
+            }
+            return;
+        }
+        let Some((channel, id)) = message.replied_to() else {
+            return;
+        };
+        let target = match referenced {
+            Some(Some(original)) => {
+                let preview = ReplyPreview::from_wire(*original, &mut |user| {
+                    intern(user, users, self.messages(channel))
+                });
+                ReplyTarget::Loaded(Arc::new(preview))
+            }
+            Some(None) => ReplyTarget::Deleted,
+            None => match self.message(channel, id) {
+                Some(loaded) => ReplyTarget::Loaded(Arc::new(ReplyPreview::of(&loaded))),
+                None => {
+                    self.targets.name(channel, id);
+                    return;
+                }
+            },
+        };
+        self.targets.set(channel, id, target, events);
+    }
+
+    pub(crate) fn reply_target(&self, channel: ChannelId, id: MessageId) -> ReplyTarget {
+        self.targets.get(channel, id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn targets_len(&self, channel: ChannelId) -> usize {
+        self.targets.len(channel)
+    }
+
+    // The targets in `channel` that a reply the store holds names.
+    fn named_targets(&self, channel: ChannelId) -> HashSet<MessageId> {
+        let rows = self.windows.values().flat_map(|window| {
+            window
+                .messages
+                .iter()
+                .chain(&window.held)
+                .chain(&window.outbox)
+        });
+        let starters = self.starters.values().filter_map(|starter| match starter {
+            Starter::Found(message) => Some(message),
+            _ => None,
+        });
+        rows.chain(starters)
+            .filter_map(|message| message.replied_to())
+            .filter(|(named, _)| *named == channel)
+            .map(|(_, id)| id)
+            .collect()
+    }
+
+    fn trim_targets(&mut self, channel: ChannelId) {
+        if self.targets.over_limit(channel) {
+            let named = self.named_targets(channel);
+            self.targets.trim(channel, |id| named.contains(&id));
+        }
+    }
+
+    fn prune_targets(&mut self, channel: ChannelId) {
+        let named = self.named_targets(channel);
+        self.targets.prune(channel, |id| named.contains(&id));
     }
 
     pub(crate) fn queue(
@@ -963,18 +1060,31 @@ impl Windows {
                 PageOutcome::Overtaken
             };
         }
-        let mut page: Vec<Arc<Message>> = page
+        let (mut page, referenced): (Vec<Arc<Message>>, Vec<Referenced>) = page
             .into_iter()
-            .map(|message| {
-                Arc::new(Message::from_wire(message, &mut |user| {
-                    intern(user, users, &window.messages)
-                }))
+            .map(|mut message| {
+                let referenced = message.referenced_message.take();
+                let message =
+                    Message::from_wire(message, &mut |user| intern(user, users, &window.messages));
+                (Arc::new(message), referenced)
             })
-            .collect();
+            .unzip();
+        for (message, referenced) in page.iter().zip(referenced) {
+            self.keep_referenced(message, referenced, users, events);
+        }
+        for message in &page {
+            self.targets.arrived(message, events);
+        }
+        let Some(window) = self.windows.get_mut(&channel_id) else {
+            return PageOutcome::Outdated;
+        };
         page.sort_by_key(|message| message.id);
         for missed in &window.missed {
             match missed {
-                Missed::Deleted(id) => page.retain(|message| message.id != *id),
+                Missed::Deleted(id) => {
+                    page.retain(|message| message.id != *id);
+                    self.targets.delete(channel_id, *id, events);
+                }
                 Missed::Reacted(id, change) => {
                     let Ok(index) = Window::position(&page, *id) else {
                         continue;
@@ -1002,6 +1112,11 @@ impl Windows {
                     }
                 }
                 Missed::Updated(update) => {
+                    self.targets.update(
+                        update,
+                        &mut |user| intern(user, users, &window.messages),
+                        events,
+                    );
                     let Ok(index) = Window::position(&page, update.id) else {
                         continue;
                     };
@@ -1133,6 +1248,7 @@ impl Windows {
         if was_stale && !window.stale {
             events.push(StoreEvent::MessagesRefreshed { channel_id });
         }
+        self.trim_targets(channel_id);
         PageOutcome::Applied
     }
 
@@ -1202,6 +1318,12 @@ impl Windows {
         users: &HashMap<UserId, Arc<User>>,
         events: &mut Vec<StoreEvent>,
     ) {
+        let recent = self
+            .windows
+            .get(&update.channel_id)
+            .map_or(&[][..], |window| window.messages.as_slice());
+        self.targets
+            .update(&update, &mut |user| intern(user, users, recent), events);
         let Some(window) = self.windows.get_mut(&update.channel_id) else {
             return;
         };
@@ -1265,7 +1387,7 @@ impl Windows {
         row
     }
 
-    // The copies viewed threads keep of the message they started from.
+    // The copies threads keep of the message they started from.
     fn react_to_starters(
         &mut self,
         channel: ChannelId,
@@ -1281,26 +1403,6 @@ impl Windows {
                 changed |= react(message, changes);
             }
         }
-        let rows = self
-            .windows
-            .values_mut()
-            .flat_map(|window| window.messages.iter_mut())
-            .filter(|row| row.kind == MessageType::ThreadStarterMessage);
-        for row in rows {
-            let ReferencedMessage::Message(message) = &row.referenced_message else {
-                continue;
-            };
-            if message.channel_id != channel || message.id != id {
-                continue;
-            }
-            if let Some(next) = message.reacted(changes) {
-                *row = Arc::new(Message {
-                    referenced_message: ReferencedMessage::Message(Arc::new(next)),
-                    ..(**row).clone()
-                });
-                changed = true;
-            }
-        }
         changed
     }
 
@@ -1310,6 +1412,7 @@ impl Windows {
         id: MessageId,
         events: &mut Vec<StoreEvent>,
     ) {
+        self.targets.delete(channel_id, id, events);
         let Some(window) = self.windows.get_mut(&channel_id) else {
             return;
         };
@@ -1333,6 +1436,7 @@ impl Windows {
 
     pub(crate) fn drop_channel(&mut self, channel: ChannelId) {
         self.starters.remove(&channel);
+        self.targets.drop_channel(channel);
         let generation = self.next_generation();
         let Some(window) = self.windows.get_mut(&channel) else {
             return;

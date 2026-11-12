@@ -652,7 +652,7 @@ fn a_reaction_during_a_reload_is_never_counted_twice() {
 // Messages are held by the hundred; a reaction list costs one pointer pair on those without any.
 #[test]
 fn a_message_stays_small() {
-    assert!(size_of::<Message>() <= 232, "{}", size_of::<Message>());
+    assert!(size_of::<Message>() <= 216, "{}", size_of::<Message>());
     assert!(size_of::<crate::state::Reaction>() <= 56);
     assert_eq!(
         size_of::<Option<Arc<[crate::state::Reaction]>>>(),
