@@ -85,7 +85,10 @@ impl State {
             && writable
             && !voice
             && !media_post;
-        let reactions = !system_dm && writable && !media_post;
+        let reactions = !system_dm
+            && writable
+            && !media_post
+            && can(Permissions::READ_MESSAGE_HISTORY);
 
         MessageActions {
             reply,
