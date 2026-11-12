@@ -279,11 +279,7 @@ async fn tail(
                 channel_id,
                 target_id,
             } if channel_id == channel => {
-                let target = store.reply_target(channel, target_id);
-                println!(
-                    "{}",
-                    target_changed_line(target_id.get(), &shown_target(&target, None))
-                );
+                println!("{}", target_change(store, channel, target_id));
             }
             StoreEvent::MessageDeleted {
                 channel_id,
@@ -551,6 +547,11 @@ fn target_line(target: &Target<'_>) -> String {
     }
 }
 
+fn target_change(store: &Store, channel: ChannelId, target: MessageId) -> String {
+    let now = store.reply_target(channel, target);
+    target_changed_line(target.get(), &shown_target(&now, None))
+}
+
 fn target_changed_line(id: u64, target: &Target<'_>) -> String {
     let now = match target {
         Target::Loaded { .. } => target_text(target),
@@ -663,7 +664,230 @@ pub(crate) fn utc_minute(unix_millis: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use akari_core::model::UserId;
+    use akari_core::properties::{Arch, ClientBuild, ClientProperties, DesktopOs, HostInfo};
+    use akari_core::{Account, Endpoints, Token, TokenStore, TokenStoreError};
+    use serde_json::{Value, json};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
     use super::*;
+
+    const GENERAL: u64 = 300_000_000_000_000_002;
+    // message_reply.json: the user's reply and the message of Mira's it answers.
+    const REPLY: u64 = 400_000_000_000_000_002;
+    const TARGET: u64 = 400_000_000_000_000_001;
+
+    struct NoTokens;
+
+    impl TokenStore for NoTokens {
+        fn load(&self, _: UserId) -> Result<Option<Token>, TokenStoreError> {
+            Ok(None)
+        }
+
+        fn save(&self, _: UserId, _: &Token) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+
+        fn delete(&self, _: UserId) -> Result<(), TokenStoreError> {
+            Ok(())
+        }
+    }
+
+    fn reply() -> Value {
+        serde_json::from_str(include_str!(
+            "../../akari-core/tests/fixtures/message_reply.json"
+        ))
+        .unwrap()
+    }
+
+    // A reply like the fixture's, to another message.
+    fn reply_to(id: u64, target: u64, sent_along: Option<Value>) -> Value {
+        let mut message = reply();
+        message["id"] = id.to_string().into();
+        message["message_reference"]["message_id"] = target.to_string().into();
+        match sent_along {
+            Some(target) => message["referenced_message"] = target,
+            None => {
+                message
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("referenced_message");
+            }
+        }
+        message
+    }
+
+    // An account that never connects, with `page` loaded into #general from a local server, as
+    // `read` loads it.
+    async fn loaded(page: Vec<Value>) -> (MockServer, Account) {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v9/channels/{GENERAL}/messages")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Value::Array(page)))
+            .mount(&server)
+            .await;
+        let host = HostInfo {
+            os: DesktopOs::MacOs,
+            os_version: "25.0.0".to_owned(),
+            arch: Arch::Arm64,
+            system_locale: "en-US".to_owned(),
+        };
+        let properties = ClientProperties::desktop(&host, &ClientBuild::current(DesktopOs::MacOs));
+        let endpoints = Endpoints {
+            api: format!("{}/api/v9/", server.uri()),
+            allow_plaintext: true,
+            ..Endpoints::default()
+        };
+        let client =
+            DiscordClient::with_endpoints(properties, Arc::new(NoTokens), endpoints).unwrap();
+        let account = client
+            .account(Token::new("t".to_owned()), UserId::new(1))
+            .unwrap();
+        account
+            .load_messages(Snowflake::new(GENERAL), MessageLoad::Latest { limit: 50 })
+            .await
+            .unwrap();
+        (server, account)
+    }
+
+    fn row(account: &Account, id: u64) -> Arc<Message> {
+        let window = account.store().messages(Snowflake::new(GENERAL)).unwrap();
+        window
+            .messages
+            .iter()
+            .find(|message| message.id.get() == id)
+            .cloned()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn marks_add_bursts_and_mark_a_super_reaction_as_mine() {
+        let mut message = reply();
+        message["reactions"] = json!([
+            {"emoji": {"id": null, "name": "👍"}, "count": 3,
+             "count_details": {"normal": 2, "burst": 1}, "me": false, "me_burst": true},
+            {"emoji": {"id": "800000000000000001", "name": "party"}, "count": 1,
+             "count_details": {"normal": 1, "burst": 0}, "me": false, "me_burst": false},
+            {"emoji": {"id": null, "name": "🔥"}, "count": 2,
+             "count_details": {"normal": 2, "burst": 0}, "me": true, "me_burst": false},
+        ]);
+        let (_server, account) = loaded(vec![message]).await;
+
+        let marks = marks(row(&account, REPLY).reactions());
+
+        assert_eq!(reactions_text(&marks), "👍 3* (1 super)  :party: 1  🔥 2*");
+        account.close();
+    }
+
+    #[tokio::test]
+    async fn shown_target_maps_each_state_and_the_ping() {
+        let mut sticker = reply()["referenced_message"].clone();
+        sticker["id"] = "400000000000000011".into();
+        sticker["content"] = "".into();
+        sticker["sticker_items"] =
+            json!([{"id": "700000000000000001", "name": "wave", "format_type": 1}]);
+        let mut file = sticker.clone();
+        file["id"] = "400000000000000012".into();
+        file["sticker_items"] = json!([]);
+        file["attachments"] = json!([
+            {"id": "600000000000000001", "filename": "notes.txt", "size": 12,
+             "url": "https://cdn.discordapp.com/attachments/1/2/notes.txt",
+             "proxy_url": "https://media.discordapp.net/attachments/1/2/notes.txt"},
+        ]);
+        let mut silent = reply_to(400_000_000_000_000_025, TARGET, None);
+        silent["mentions"] = json!([]);
+        let (_server, account) = loaded(vec![
+            silent,
+            reply_to(400_000_000_000_000_024, 400_000_000_000_000_012, Some(file)),
+            reply_to(
+                400_000_000_000_000_023,
+                400_000_000_000_000_011,
+                Some(sticker),
+            ),
+            reply_to(400_000_000_000_000_022, 400_000_000_000_000_009, None),
+            reply_to(
+                400_000_000_000_000_021,
+                400_000_000_000_000_008,
+                Some(Value::Null),
+            ),
+            reply(),
+        ])
+        .await;
+        let store = account.store();
+        let shown = |id: u64| {
+            let reply = row(&account, id);
+            let (channel, target) = reply.replied_to().unwrap();
+            target_line(&shown_target(
+                &store.reply_target(channel, target),
+                Some(&reply),
+            ))
+        };
+
+        assert_eq!(
+            shown(REPLY),
+            "    ↳ replying to @Mira: Release notes are up"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_025),
+            "    ↳ replying to Mira: Release notes are up",
+            "the reply didn't ping"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_021),
+            "    ↳ replying to a deleted message"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_022),
+            "    ↳ replying to a message that is not loaded"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_023),
+            "    ↳ replying to @Mira: [sticker]"
+        );
+        assert_eq!(
+            shown(400_000_000_000_000_024),
+            "    ↳ replying to @Mira: [attachment]"
+        );
+        account.close();
+    }
+
+    #[tokio::test]
+    async fn a_reply_with_reactions_prints_all_three_lines() {
+        let mut message = reply();
+        message["reactions"] = json!([
+            {"emoji": {"id": null, "name": "👍"}, "count": 1,
+             "count_details": {"normal": 1, "burst": 0}, "me": false, "me_burst": false},
+        ]);
+        let (_server, account) = loaded(vec![message]).await;
+
+        let printed = line(account.store(), &row(&account, REPLY));
+
+        assert_eq!(
+            printed,
+            "2024-03-01 08:31  Akari Tester: Looks good! (edited)\n    \
+             ↳ replying to @Mira: Release notes are up\n    \
+             reactions: 👍 1"
+        );
+        account.close();
+    }
+
+    #[tokio::test]
+    async fn tail_names_a_changed_target_by_its_own_id() {
+        let (_server, account) = loaded(vec![reply()]).await;
+
+        let printed = target_change(
+            account.store(),
+            Snowflake::new(GENERAL),
+            Snowflake::new(TARGET),
+        );
+
+        assert_eq!(
+            printed,
+            format!("* {TARGET} answered by a reply here: Mira: Release notes are up")
+        );
+        account.close();
+    }
 
     #[test]
     fn times_are_shown_in_utc_to_the_minute() {
