@@ -227,4 +227,20 @@ final class ForumSplitTests {
         #expect(account.log.actions.last == .leaveThread(id(41), .forumToolbar))
         session.close()
     }
+
+    // Review: nothing is remembered for a post that can't open here.
+    @Test
+    func aPostOfAnotherForumIsNotRemembered() async {
+        store.update { state in
+            var other = thread(51, in: 14, name: "elsewhere")
+            other.thread?.joined = false
+            state.channels[id(51)] = other
+        }
+        let session = inForum()
+
+        await session.openBeside(thread: id(51), from: forumId)
+
+        #expect(memory.splits(of: id(1)).isEmpty)
+        session.close()
+    }
 }

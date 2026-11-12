@@ -446,4 +446,81 @@ final class PostFormTests {
         #expect(form.title == "  A title ", "kept, should the permission come back")
         session.close()
     }
+
+    // Review: the form is the forum's for the session, so a create in flight is still the
+    // form's when the user comes back.
+    @Test
+    func leavingAndReturningDuringACreateCannotPostTwice() async throws {
+        account.createReply.withLock { $0 = .success(newPost()) }
+        account.holdCreates.withLock { $0 = true }
+        let session = inForum()
+        let form = try filled(session)
+
+        let submit = Task { await session.submitPost() }
+        try await eventually { !self.creates.isEmpty }
+        session.open(channel: id(11))
+        session.open(channel: forumId)
+
+        let shown = try self.form(session)
+        #expect(shown === form)
+        #expect(shown.submitting)
+        #expect(!shown.canPost)
+        await session.submitPost()
+        #expect(creates.count == 1)
+
+        account.createReplies.send(())
+        await submit.value
+        #expect(!shown.isOpen)
+        #expect(shown.title.isEmpty)
+        #expect(session.split?.channelId == id(71), "the forum is open again: its post opens")
+        session.close()
+    }
+
+    @Test
+    func aPostCreatedAfterTheUserLeftRefreshesNothing() async throws {
+        account.createReply.withLock { $0 = .success(newPost()) }
+        account.holdCreates.withLock { $0 = true }
+        let session = inForum()
+        _ = try filled(session)
+
+        let submit = Task { await session.submitPost() }
+        try await eventually { !self.creates.isEmpty }
+        session.open(channel: id(11))
+        account.createReplies.send(())
+        await submit.value
+
+        #expect(!account.log.actions.contains(.refreshForum(forumId)))
+        session.close()
+    }
+
+    // Review: the template itself is no draft, also after typing and deleting back to it.
+    @Test
+    func typingBackToTheTemplateLeavesNoDraft() throws {
+        world(template: "Steps:")
+        let session = inForum()
+        try form(session).message = "Steps: 1"
+        try form(session).message = "Steps:"
+        #expect(try !form(session).hasDraft)
+
+        world(template: "New steps:")
+        try form(session).apply(EventBatch([.channelUpdated(channelId: id(13), guildId: id(1))]))
+
+        #expect(try form(session).message == "New steps:")
+        #expect(try !form(session).hasDraft)
+        session.close()
+    }
+
+    // The session's forms follow their forum while its page is closed.
+    @Test
+    func aFormReadsItsRulesAgainWhenItsPageComesBack() throws {
+        let session = inForum()
+        #expect(try form(session).usableTags.count == 2)
+        session.open(channel: id(11))
+        store.update { $0.postCreations[id(13)]?.tags = [self.bug] }
+
+        session.open(channel: forumId)
+
+        #expect(try form(session).usableTags.map(\.name) == ["Bug"])
+        session.close()
+    }
 }

@@ -244,7 +244,9 @@ public final class MessageListModel {
     @ObservationIgnored var readHere = false
     // Mentions in this channel are named from its guild.
     @ObservationIgnored private let guildId: GuildId?
-    @ObservationIgnored private let place: Message.NoticeContext.Place
+    // Read again while the store doesn't know the channel: a launch opens it before the cache.
+    @ObservationIgnored private var place: Message.NoticeContext.Place
+    @ObservationIgnored private var placed: Bool
     @ObservationIgnored private let ownerId: UserId?
     @ObservationIgnored private var storedOwner: String?
     @ObservationIgnored private var hasMessages = false
@@ -283,6 +285,7 @@ public final class MessageListModel {
         let channel = store.channel(id: channelId)
         guildId = channel?.guildId
         place = Self.place(of: channel, in: store)
+        placed = channel != nil
         ownerId = channel?.thread?.ownerId
         composer = ComposerModel(
             channelId: channelId, account: account, store: store, drafts: drafts)
@@ -290,7 +293,6 @@ public final class MessageListModel {
         readOwner()
         readHiddenDownloads()
         reload(rereading: [])
-        readPost()
         if hasMessages {
             openedFrom = .window
         }
@@ -583,9 +585,11 @@ public final class MessageListModel {
             fromDisk = Set(rows.map(\.message.id))
         }
         composer.apply(batch)
-        if place == .forumPost {
-            readPost()
+        if !placed, let channel = store.channel(id: channelId) {
+            place = Self.place(of: channel, in: store)
+            placed = true
         }
+        readPost()
     }
 
     // After the rows and the composer: the first message and who may answer come from them.
@@ -609,9 +613,11 @@ public final class MessageListModel {
         let tags = info.appliedTags.compactMap { applied in
             available.first { $0.id == applied && (moderates || !$0.moderated) }
         }
+        // The rows the timeline shows, as its bar's place.
+        let hasFirst = rows.contains { $0.id == bar.post && $0.starter != .loading && !$0.isHidden }
         let start = PostStart(
-            tags: tags,
-            firstMessageDeleted: reachedOldest && !rows.contains { $0.id == bar.post })
+            tags: tags, firstMessageDeleted: reachedOldest && !hasFirst,
+            isMedia: forum?.kind == .guildMedia)
         if start != postStart {
             postStart = start
         }
@@ -741,6 +747,7 @@ public final class MessageListModel {
             atPresent = true
             isStale = false
             placeNewMessagesLine()
+            readPost()
             return
         }
         let ids = window.messageIds + window.pendingIds
@@ -762,6 +769,7 @@ public final class MessageListModel {
         atPresent = window.latest
         isStale = window.stale
         placeNewMessagesLine()
+        readPost()
     }
 
     // Without a read state the channel counts as read; `acked` is nil while nothing is.

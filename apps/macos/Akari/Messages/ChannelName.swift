@@ -42,7 +42,9 @@ struct ChannelName: Equatable {
                 subtitle: owner.map { _ in "Started by " }, subtitleName: owner)
         case .post(let post):
             ChannelStart(
-                icon: .symbol(ChannelSymbols.name(for: .guildForum)), title: name,
+                icon: .symbol(
+                    ChannelSymbols.name(for: post?.isMedia == true ? .guildMedia : .guildForum)),
+                title: name,
                 subtitle: post?.firstMessageDeleted == true ? PostStart.deleted : nil,
                 tags: post?.tags ?? [])
         case .direct(let user):

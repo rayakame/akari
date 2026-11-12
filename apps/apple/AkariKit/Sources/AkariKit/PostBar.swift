@@ -40,11 +40,14 @@ public struct PostStart: Equatable, Sendable {
     public let tags: [ForumTag]
     /// The start is loaded and the first message isn't there.
     public let firstMessageDeleted: Bool
+    /// A media channel's post: its channel's symbol stands over it.
+    public let isMedia: Bool
 
     public static let deleted = "Original message was deleted"
 
-    public init(tags: [ForumTag], firstMessageDeleted: Bool) {
+    public init(tags: [ForumTag], firstMessageDeleted: Bool, isMedia: Bool = false) {
         self.tags = tags
         self.firstMessageDeleted = firstMessageDeleted
+        self.isMedia = isMedia
     }
 }

@@ -169,9 +169,11 @@ public final class ForumModel {
 
     init(
         forumId: ChannelId, settings: Settings?, store: Store, account: Account,
-        drafts: Drafts = Drafts(), remember: @escaping (Settings) -> Void
+        form: PostFormModel? = nil, remember: @escaping (Settings) -> Void
     ) {
-        form = PostFormModel(forumId: forumId, account: account, store: store, drafts: drafts)
+        self.form =
+            form
+            ?? PostFormModel(forumId: forumId, account: account, store: store, drafts: Drafts())
         self.forumId = forumId
         self.store = store
         self.account = account

@@ -173,4 +173,31 @@ struct PostBarTests {
         list.show(state)
         #expect(abs(list.fittingHeight(ofRow: 0) - ChannelStartCell.height(tagged, width: list.table.tableColumns[0].width)) <= 1)
     }
+
+    @Test
+    func aMediaChannelsPostHasItsChannelsSymbol() throws {
+        let post = PostStart(tags: [], firstMessageDeleted: false, isMedia: true)
+
+        let start = try #require(ChannelName(kind: .post(post), name: "A clip").start)
+
+        #expect(start.icon == .symbol(ChannelSymbols.name(for: .guildMedia)))
+    }
+
+    // Review: a reload of the bar's row (a reply arrives, Follow flips) keeps "Copied" its 2 s.
+    @Test
+    func copiedOutlastsAReloadOfItsRow() throws {
+        list.show(state(2, bar: bar()))
+        let cell = try barCell()
+        cell.wait = { _ in try await Task.sleep(for: .seconds(60)) }
+        cell.copy.performClick(nil)
+
+        cell.prepareForReuse()
+        cell.show(bar(following: true), hasReplies: true)
+        #expect(cell.copy.label == "Copied")
+
+        cell.show(
+            PostBar(post: MessageId(rawValue: 2), following: false, canFollow: true, invites: true),
+            hasReplies: true)
+        #expect(cell.copy.label.isEmpty, "another post's bar starts over")
+    }
 }

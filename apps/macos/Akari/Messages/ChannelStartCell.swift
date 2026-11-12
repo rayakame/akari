@@ -159,7 +159,9 @@ final class ChannelStartCell: NSTableCellView {
             constraint?.isActive = false
         }
         tags.isHidden = !hasTags
-        tags.rootView = StartTags(tags: start.tags)
+        if tags.rootView.tags != start.tags {
+            tags.rootView = StartTags(tags: start.tags)
+        }
         if hasTags {
             tagsTop?.isActive = true
             bottomAfterTags?.isActive = true

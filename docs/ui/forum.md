@@ -211,9 +211,13 @@ forum's current ack ([below](#the-forums-row)).*
 A post opens as a thread does, beside the forum or alone ([message-list.md](message-list.md#threads)),
 with its own beginning and a bar under its first message *(code read)*:
 
-- **The beginning**: the forum's symbol on a round `base-lower` disc, the post's name as the
-  title, "Original message was deleted" under it once the start is loaded without the first
-  message, and the post's tags as small pills on one row. The tags are those the user may
+- **The beginning**: the forum's symbol (a media channel's in its posts) on a round disc, the
+  post's name as the title, "Original message was deleted" under it once the start is loaded
+  without the first message, and the post's tags as small pills on one row, 14 below. *Akari
+  draws it with the thread start's measures ([message-list.md](message-list.md#channel-start):
+  a 68 disc, the title 30 heavy, the line 15.5), where Discord's CSS has a 64 disc with a 40
+  symbol, the title at 32 and the line at 16; its title's weight (500 or 700) isn't settled
+  from the code.* The tags are those the user may
   apply: a moderated tag shows there only with Manage Threads on the forum, while cards show
   every tag to everyone.
 - **The first message** is the post's first row; its ID is the post's.
@@ -261,8 +265,10 @@ Read from the client's code *(code read; the request wasn't observed)*.
     cooldown, and with a tag where the forum requires one; else "A tag is required to create a
     post in this channel" stands under the controls.
 - **Escape** in the title or the message closes the form and keeps what was typed: the row
-  shows a pencil, and a click on it opens the form again. A draft with a message opens the form
-  with the page. Drafts stay per forum for the session.
+  shows a pencil, and a click on it opens the form again. The form stays the forum's for the
+  session, open or closed as it was left, with everything typed; a post being made stays "Post"
+  with its spinner when the user leaves the forum and comes back, and opens beside the forum
+  if the forum is open when Discord answers.
 - **Errors**: "A title is required" and "A message is required" under their fields (typing
   ends them), AutoMod's sentence under the title or the message it blocked, "Cannot create
   post" / "This server has reached the maximum number of active posts. Free up space by

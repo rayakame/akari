@@ -45,7 +45,8 @@ public final class PostFormModel {
     /// The post's first message; it starts as the forum's template.
     public var message: String {
         didSet {
-            drafts.posts[forumId, default: .init()].message = message
+            // The template alone is no draft.
+            drafts.posts[forumId, default: .init()].message = typedMessage == template ? nil : message
             length = Self.length(of: message)
             messageError = nil
         }
@@ -210,6 +211,16 @@ public final class PostFormModel {
             refused(error as? CreateThreadError)
             return nil
         }
+    }
+
+    /// The forum's page shows again: what changed while it was closed.
+    func reread() {
+        readRules()
+        let read = store.threadSlowmode(parentId: forumId)
+        if read != slowmode {
+            slowmode = read
+        }
+        lengthLimit = Int(store.messageLengthLimit())
     }
 
     func apply(_ batch: EventBatch) {

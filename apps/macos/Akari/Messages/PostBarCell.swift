@@ -97,12 +97,6 @@ final class PostBarCell: NSTableCellView {
         needsDisplay = true
     }
 
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        copied?.cancel()
-        showCopy(copied: false)
-    }
-
     private func showCopy(copied: Bool) {
         copy.show(symbol: copied ? "checkmark" : "link", title: copied ? PostBar.copied : nil)
         copy.toolTip = copied ? nil : PostBar.copyLink

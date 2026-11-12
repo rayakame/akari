@@ -165,6 +165,8 @@ public final class SessionModel {
     // Only channels opened here can hold this session's unsent messages.
     @ObservationIgnored private var openedChannels: Set<ChannelId> = []
     @ObservationIgnored private var forumSettings: [ChannelId: ForumModel.Settings] = [:]
+    // Each forum's post form for the session, so a create in flight stays its form's.
+    @ObservationIgnored private var postForms: [ChannelId: PostFormModel] = [:]
     // The forum the core was told shows: none while the age gate stands before it.
     @ObservationIgnored private var toldForum: ChannelId?
     @ObservationIgnored private var clickedThread: ChannelId?
@@ -427,6 +429,10 @@ public final class SessionModel {
             // The launch's request may have shown it meanwhile; the click is the user's.
             waitingLists.remove(id)
         }
+        // A thread of another channel has no place beside this one.
+        guard store.channel(id: id)?.parentId == parent else {
+            return
+        }
         if sawReady {
             checkedSplits.insert(id)
         }
@@ -447,10 +453,12 @@ public final class SessionModel {
         guard let page = forum, let post = await page.form.create() else {
             return
         }
-        page.refresh()
-        if forum === page {
-            await openBeside(thread: post, from: page.forumId)
+        // The forum's page may be another model by now: left and come back to.
+        guard let open = forum, open.forumId == page.forumId else {
+            return
         }
+        open.refresh()
+        await openBeside(thread: post, from: open.forumId)
     }
 
     /// The split view's X: closes it, and the channel forgets it.
@@ -1478,8 +1486,13 @@ public final class SessionModel {
     }
 
     private func forumPage(of id: ChannelId) -> ForumModel {
-        ForumModel(
-            forumId: id, settings: forumSettings[id], store: store, account: account, drafts: drafts
+        let form =
+            postForms[id]
+            ?? PostFormModel(forumId: id, account: account, store: store, drafts: drafts)
+        postForms[id] = form
+        form.reread()
+        return ForumModel(
+            forumId: id, settings: forumSettings[id], store: store, account: account, form: form
         ) {
             [weak self] settings in
             self?.forumSettings[id] = settings

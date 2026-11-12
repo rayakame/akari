@@ -205,4 +205,26 @@ final class PostBarTests {
         world(oldest: false, messages: [5])
         #expect(list().postStart?.firstMessageDeleted == false, "not known before the start loads")
     }
+
+    // Review: a post opened before the store knew it (a launch on it) gets its bar once it does.
+    @Test
+    func aPostTheStoreLearnsOfLaterGetsItsBarAndStart() {
+        let early = list()
+        #expect(early.postBar == nil)
+
+        world()
+        early.apply(EventBatch([.ready]))
+
+        #expect(early.postBar?.post == id(41))
+        #expect(early.postStart?.tags.map(\.name) == ["Bug"])
+    }
+
+    @Test
+    func aMediaChannelsPostSaysSo() {
+        world()
+        #expect(list().postStart?.isMedia == false)
+
+        store.update { $0.channels[id(13)]?.kind = .guildMedia }
+        #expect(list().postStart?.isMedia == true)
+    }
 }

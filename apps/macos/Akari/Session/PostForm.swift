@@ -14,11 +14,9 @@ struct ForumHeaderRow: View {
     var messageMaxHeight: CGFloat = 300
     @State private var query = ""
     @State private var messageHeight: CGFloat = PostFormLayout.messageMin
-    @FocusState private var focus: Field?
-
-    enum Field {
-        case title, message
-    }
+    // The message is an AppKit field: it's asked to take the focus, and says when it has.
+    @State private var focusMessage = false
+    @FocusState private var titleFocused: Bool
 
     private var form: PostFormModel { forum.form }
 
@@ -53,7 +51,8 @@ struct ForumHeaderRow: View {
         .overlay {
             RoundedRectangle(cornerRadius: ForumMeasures.radius)
                 .strokeBorder(
-                    Color(nsColor: focus != nil ? Palette.brand : Palette.borderSubtle), lineWidth: 1)
+                    Color(nsColor: titleFocused || form.isOpen ? Palette.brand : Palette.borderSubtle),
+                    lineWidth: 1)
         }
         .onChange(of: query) { _, text in
             typed(text)
@@ -63,7 +62,17 @@ struct ForumHeaderRow: View {
         .onChange(of: form.isOpen) { _, open in
             follow()
             if open {
-                focus = form.title.isEmpty ? .title : .message
+                if form.title.isEmpty {
+                    titleFocused = true
+                } else {
+                    focusMessage = true
+                }
+            }
+        }
+        // As the official client: the row with a draft reopens the form when it's clicked.
+        .onChange(of: titleFocused) { _, focused in
+            if focused, !form.isOpen, form.hasDraft {
+                forum.openForm()
             }
         }
         .onAppear { follow() }
@@ -100,7 +109,7 @@ struct ForumHeaderRow: View {
         if let status = forum.status {
             return status
         }
-        return !form.allowed && focus == .title ? PostFormModel.noPermission : nil
+        return !form.allowed && titleFocused ? PostFormModel.noPermission : nil
     }
 
     private var titleRow: some View {
@@ -117,10 +126,21 @@ struct ForumHeaderRow: View {
                 .textFieldStyle(.plain)
                 .font(TypeScale.forumField.font)
                 .foregroundStyle(Color(nsColor: Palette.textStrong))
-                .focused($focus, equals: .title)
+                .focused($titleFocused)
                 .frame(minHeight: ForumMeasures.control)
+                // Only Shift+Enter is taken from the field: a plain Enter may end an input
+                // method's composition, and reaches `onSubmit` after it.
                 .onKeyPress(.return, phases: .down) { press in
-                    returnPressed(shift: press.modifiers.contains(.shift))
+                    guard press.modifiers.contains(.shift), !form.isOpen, form.canCreate else {
+                        return .ignored
+                    }
+                    forum.openForm()
+                    return .handled
+                }
+                .onSubmit {
+                    if form.isOpen, !form.title.trimmingCharacters(in: .whitespaces).isEmpty {
+                        focusMessage = true
+                    }
                 }
                 .onExitCommand(perform: escape)
                 .accessibilityLabel(Self.placeholder(form))
@@ -141,14 +161,7 @@ struct ForumHeaderRow: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            // As the official client: a click on the row with a draft reopens the form.
-            if !form.isOpen, form.hasDraft {
-                forum.openForm()
-            } else {
-                focus = .title
-            }
-        }
+        .onTapGesture { titleFocused = true }
     }
 
     @ViewBuilder private var prefix: some View {
@@ -179,7 +192,8 @@ struct ForumHeaderRow: View {
         VStack(alignment: .leading, spacing: 0) {
             PostFormMessage(
                 form: form, maxHeight: messageMaxHeight, height: $messageHeight,
-                focused: $focus, submit: submit, escape: escape, shiftEscape: shiftEscape)
+                focusNow: focusMessage, onFocused: { focusMessage = false }, submit: submit,
+                escape: escape, shiftEscape: shiftEscape)
             if let error = form.messageError {
                 PostFormError(text: error)
             }
@@ -238,22 +252,6 @@ struct ForumHeaderRow: View {
         .padding(.horizontal, 12)
         .frame(height: ForumMeasures.control)
         .background(Color(nsColor: Palette.inputBackground))
-    }
-
-    // Shift+Enter opens the form; in the open form Enter goes on to the message. A search runs
-    // no sooner for Enter.
-    private func returnPressed(shift: Bool) -> KeyPress.Result {
-        if form.isOpen {
-            if !form.title.trimmingCharacters(in: .whitespaces).isEmpty {
-                focus = .message
-            }
-            return .handled
-        }
-        guard shift, form.canCreate else {
-            return .ignored
-        }
-        forum.openForm()
-        return .handled
     }
 
     private func escape() {
@@ -318,20 +316,18 @@ struct PostFormMessage: View {
     let form: PostFormModel
     let maxHeight: CGFloat
     @Binding var height: CGFloat
-    var focused: FocusState<ForumHeaderRow.Field?>.Binding
+    let focusNow: Bool
+    let onFocused: () -> Void
     let submit: () -> Void
     let escape: () -> Void
     let shiftEscape: () -> Void
-    @State private var textView: ComposerTextView?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             ComposerField(
                 text: Bindable(form).message, enabled: !form.submitting, maxHeight: maxHeight,
                 height: $height, onSubmit: submit, onEscape: escape, onShiftEscape: shiftEscape,
-                onAttach: { textView = $0 }, autoFocus: false,
-                focusNow: focused.wrappedValue == .message,
-                onFocused: {})
+                autoFocus: false, focusNow: focusNow, onFocused: onFocused)
                 .padding(.trailing, form.remaining == nil ? 0 : 48)
             if form.message.isEmpty {
                 Text(PostFormModel.messagePlaceholder)

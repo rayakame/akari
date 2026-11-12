@@ -139,6 +139,7 @@ struct ForumListCard: View {
     static func label(_ card: ForumModel.Card) -> String {
         "Post \(card.title), \(card.count) \(card.count == "1" ? "message" : "messages")"
             + (card.unread ? ", unread" : "") + (card.isNew ? ", new" : "")
+            + (card.newCount.map { ", \($0) new messages" } ?? "")
     }
 }
 

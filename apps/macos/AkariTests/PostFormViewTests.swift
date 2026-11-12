@@ -161,4 +161,13 @@ struct PostFormViewTests {
         #expect(without.isEmpty)
         #expect(ForumEmptyState.createTitle == "Create a post")
     }
+
+    // Review: VoiceOver hears the new messages too.
+    @Test
+    func aCardsLabelNamesItsNewMessages() throws {
+        let counted = try #require(session { $0.newCounts = [1: 3] }.forum)
+
+        #expect(ForumListCard.label(counted.posts[1]).hasSuffix(", 3 new messages"))
+        #expect(!ForumListCard.label(counted.posts[0]).contains("new messages"))
+    }
 }
