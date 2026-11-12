@@ -62,6 +62,7 @@ enum ForumMeasures {
 struct ForumListCard: View {
     let card: ForumModel.Card
     let filter: Set<TagId>
+    var opened = false
     var now: Date?
     let open: () -> Void
     @State private var hovered = false
@@ -95,7 +96,7 @@ struct ForumListCard: View {
             .padding(.vertical, ForumMeasures.cardPadding)
             .padding(.horizontal, 10)
         }
-        .buttonStyle(ForumCardStyle(hovered: hovered))
+        .buttonStyle(ForumCardStyle(hovered: hovered, opened: opened))
         .onHover { hovered = $0 }
         .environment(\.rowHovered, hovered)
         .background(CursorArea(.pointingHand))
@@ -145,13 +146,14 @@ struct ForumListCard: View {
 /// shadow while hovered, darker while pressed.
 struct ForumCardStyle: ButtonStyle {
     let hovered: Bool
+    var opened = false
     var radius = ForumMeasures.radius
     var border = Palette.borderSubtle
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius)
         let fill =
-            configuration.isPressed
+            configuration.isPressed || opened
             ? Palette.surfaceHigher : hovered ? Palette.surfaceHigh : Palette.panel
         return configuration.label
             .background(Color(nsColor: fill), in: shape)
@@ -544,6 +546,7 @@ struct ForumGalleryCard: View {
     let card: ForumModel.Card
     let filter: Set<TagId>
     let size: CGSize
+    var opened = false
     var now: Date?
     let open: () -> Void
     @State private var hovered = false
@@ -576,7 +579,7 @@ struct ForumGalleryCard: View {
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
         }
-        .buttonStyle(ForumCardStyle(hovered: hovered, border: Palette.borderMuted))
+        .buttonStyle(ForumCardStyle(hovered: hovered, opened: opened, border: Palette.borderMuted))
         .onHover { hovered = $0 }
         .background(CursorArea(.pointingHand))
         .accessibilityLabel(ForumListCard.label(card))

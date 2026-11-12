@@ -117,7 +117,9 @@ struct ForumPage: View {
         switch forum.settings.layout {
         case .list:
             ForEach(cards) { card in
-                ForumListCard(card: card, filter: forum.settings.tags, now: now) { open(card) }
+                ForumListCard(
+                    card: card, filter: forum.settings.tags, opened: isOpen(card), now: now
+                ) { open(card) }
                     .onAppear { forum.cardShown(card.id) }
                     .onDisappear { forum.cardHidden(card.id) }
                     .padding(.bottom, ForumMeasures.cardGap)
@@ -132,7 +134,10 @@ struct ForumPage: View {
             ForEach(rows, id: \.first?.id) { row in
                 HStack(alignment: .top, spacing: ForumMeasures.galleryGap) {
                     ForEach(row) { card in
-                        ForumGalleryCard(card: card, filter: forum.settings.tags, size: size, now: now) {
+                        ForumGalleryCard(
+                            card: card, filter: forum.settings.tags, size: size,
+                            opened: isOpen(card), now: now
+                        ) {
                             open(card)
                         }
                         .onAppear { forum.cardShown(card.id) }
@@ -144,10 +149,24 @@ struct ForumPage: View {
         }
     }
 
-    // Until posts open beside the forum, a card opens its post in full, as Shift+click does in
-    // Discord.
+    private func isOpen(_ card: ForumModel.Card) -> Bool {
+        session.split?.channelId == card.id
+    }
+
     private func open(_ card: ForumModel.Card) {
-        session.go(to: card.id)
+        Self.open(card.id, in: forum.forumId, full: NSEvent.modifierFlags.contains(.shift), session)
+    }
+
+    /// A card's click: its post beside the forum, or alone with Shift.
+    @discardableResult
+    static func open(
+        _ post: ChannelId, in forum: ChannelId, full: Bool, _ session: SessionModel
+    ) -> Task<Void, Never>? {
+        guard !full else {
+            session.go(to: post)
+            return nil
+        }
+        return Task { await session.openBeside(thread: post, from: forum) }
     }
 }
 
