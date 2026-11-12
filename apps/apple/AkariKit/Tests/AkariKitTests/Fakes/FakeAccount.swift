@@ -137,6 +137,15 @@ final class FakeAccount: Account, @unchecked Sendable {
         }
     }
 
+    let markUnreadError = Locked<RequestError?>(nil)
+
+    override func markUnread(channelId: ChannelId, messageId: MessageId) async throws {
+        log.append(.markUnread(channelId, messageId))
+        if let error = markUnreadError.current {
+            throw error
+        }
+    }
+
     override func markGuildsRead(guildIds: [GuildId]) {
         markedGuildsRead.withLock { $0.append(guildIds) }
     }
