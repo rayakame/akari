@@ -1,5 +1,6 @@
 import AkariKit
 import AppKit
+import SwiftUI
 
 // Above a channel's first message, as the official client welcomes it; its edit button waits for
 // channel settings.
@@ -15,12 +16,18 @@ final class ChannelStartCell: NSTableCellView {
     private static let usernameBaseline: CGFloat = 28
     private static let subtitleBaseline: CGFloat = 33.5
     private static let bottom: CGFloat = 6
+    private static let tagsGap: CGFloat = 14
+    private static let tagsHeight: CGFloat = 24
     private static let sizing = ChannelStartCell()
 
     let icon = StartIcon()
     private let title = MessageTextView()
     private let username = MessageTextView()
     private let subtitle = MessageTextView()
+    private let tags = NSHostingView(rootView: StartTags(tags: []))
+    private var tagsAfterTitle: NSLayoutConstraint?
+    private var tagsAfterSubtitle: NSLayoutConstraint?
+    private var bottomAfterTags: NSLayoutConstraint?
     private let iconWidth: NSLayoutConstraint
     private let iconHeight: NSLayoutConstraint
     private let subtitleAfterTitle: NSLayoutConstraint
@@ -39,9 +46,18 @@ final class ChannelStartCell: NSTableCellView {
         super.init(frame: .zero)
         identifier = Self.identifier
         icon.translatesAutoresizingMaskIntoConstraints = false
-        for view in [icon, title, username, subtitle] as [NSView] {
+        tags.translatesAutoresizingMaskIntoConstraints = false
+        tags.sizingOptions = []
+        for view in [icon, title, username, subtitle, tags] as [NSView] {
             addSubview(view)
         }
+        tagsAfterTitle = tags.topAnchor.constraint(
+            equalTo: title.lastBaselineAnchor, constant: Self.tagsGap)
+        tagsAfterSubtitle = tags.topAnchor.constraint(
+            equalTo: subtitle.lastBaselineAnchor, constant: Self.tagsGap)
+        let bottomAfterTags = bottomAnchor.constraint(equalTo: tags.bottomAnchor, constant: Self.bottom)
+        bottomAfterTags.priority = .init(999)
+        self.bottomAfterTags = bottomAfterTags
         // The table sizes the row; a required bottom would conflict while it moves row views.
         let bottomAfterSubtitle = bottomAnchor.constraint(
             equalTo: subtitle.lastBaselineAnchor, constant: Self.bottom)
@@ -68,6 +84,9 @@ final class ChannelStartCell: NSTableCellView {
             subtitle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
             subtitle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.side),
             subtitleAfterTitle, bottomAfterSubtitle,
+            tags.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.side),
+            tags.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.side),
+            tags.heightAnchor.constraint(equalToConstant: Self.tagsHeight),
         ])
     }
 
@@ -95,6 +114,9 @@ final class ChannelStartCell: NSTableCellView {
         }
         if start.subtitle != nil {
             height += subtitleBaseline + lines(sizing.subtitle)
+        }
+        if !start.tags.isEmpty {
+            height += tagsGap + tagsHeight
         }
         // Auto Layout gives the cell whole points.
         return (height + bottom).rounded(.up)
@@ -130,11 +152,20 @@ final class ChannelStartCell: NSTableCellView {
         off.isActive = false
         on.isActive = true
         subtitle.isHidden = start.subtitle == nil
-        let (unused, bottom) =
-            start.subtitle == nil
-            ? (bottomAfterSubtitle, bottomAfterTitle) : (bottomAfterTitle, bottomAfterSubtitle)
-        unused?.isActive = false
-        bottom?.isActive = true
+        let last = start.subtitle == nil ? bottomAfterTitle : bottomAfterSubtitle
+        let tagsTop = start.subtitle == nil ? tagsAfterTitle : tagsAfterSubtitle
+        let hasTags = !start.tags.isEmpty
+        for constraint in [bottomAfterTitle, bottomAfterSubtitle, bottomAfterTags, tagsAfterTitle, tagsAfterSubtitle] {
+            constraint?.isActive = false
+        }
+        tags.isHidden = !hasTags
+        tags.rootView = StartTags(tags: start.tags)
+        if hasTags {
+            tagsTop?.isActive = true
+            bottomAfterTags?.isActive = true
+        } else {
+            last?.isActive = true
+        }
         let line = NSMutableAttributedString(
             attributedString: CellText.plain(
                 start.subtitle ?? "", style: TypeScale.startSubtitle, color: Palette.textDefault))
@@ -212,5 +243,20 @@ final class StartIcon: NSView {
                     x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
                     width: size.width, height: size.height))
         }
+    }
+}
+
+// A forum post's tags under its title: small pills on one row, cut at the cell's edge.
+struct StartTags: View {
+    let tags: [ForumTag]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(tags, id: \.id) { tag in
+                ForumTagPill(tag: tag, size: .small, look: .onCard)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
     }
 }

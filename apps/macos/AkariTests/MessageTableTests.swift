@@ -1168,6 +1168,14 @@ struct MessageTableTests {
             calls.append("latest")
         }
 
+        func followPost(_ follows: Bool) {
+            calls.append("follow \(follows)")
+        }
+
+        func copyPostLink() {
+            calls.append("copy link")
+        }
+
         func escape() {
             calls.append("escape")
         }

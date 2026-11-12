@@ -17,6 +17,7 @@ public struct MessageTimeline: Equatable, Sendable {
         /// Keyed by the row it stands before.
         case newMessages(MessageId)
         case message(MessageId)
+        case postBar
     }
 
     public enum Item: Identifiable, Equatable, Sendable {
@@ -30,6 +31,9 @@ public struct MessageTimeline: Equatable, Sendable {
         case newMessages(MessageId)
         /// `startsGroup` shows the avatar, the name and the time.
         case message(MessageListModel.Row, startsGroup: Bool)
+        /// A forum post's action bar, right under its first message, or first once the start is
+        /// loaded without it. What follows starts a group.
+        case postBar(PostBar, hasReplies: Bool)
 
         public var id: ItemId {
             switch self {
@@ -37,6 +41,7 @@ public struct MessageTimeline: Equatable, Sendable {
             case .day(let start): .day(start)
             case .newMessages(let id): .newMessages(id)
             case .message(let row, _): .message(row.id)
+            case .postBar: .postBar
             }
         }
     }
@@ -48,19 +53,32 @@ public struct MessageTimeline: Equatable, Sendable {
 
     /// `edges` wrap the rows: `.beginning` or `.older` first, `.newer` last. Without rows only
     /// `.older` stays, for messages that aren't loaded yet. The new messages line goes before the
-    /// row whose ID is `newMessages`, or the next shown one; last if none is.
+    /// row whose ID is `newMessages`, or the next shown one; last if none is. `postBar` goes
+    /// under its post's first message.
     public init(
         rows: [MessageListModel.Row], calendar: Calendar = .current, edges: Set<Edge> = [],
-        newMessages: MessageId? = nil
+        newMessages: MessageId? = nil, postBar: PostBar? = nil
     ) {
         var items: [Item] = []
+        let shown = rows.filter { $0.starter != .loading && !$0.isHidden }
+        // Without the first message the bar leads, once the start is loaded.
+        let leads = postBar.flatMap { bar in
+            edges.contains(.beginning) && !shown.contains { $0.id == bar.post } ? bar : nil
+        }
         if rows.isEmpty {
-            self.items =
-                edges.contains(.older) && !edges.contains(.beginning) ? [.edge(.older)] : []
+            if let leads {
+                self.items = [.edge(.beginning), .postBar(leads, hasReplies: false)]
+            } else {
+                self.items =
+                    edges.contains(.older) && !edges.contains(.beginning) ? [.edge(.older)] : []
+            }
             return
         }
         if let top = [Edge.beginning, .older].first(where: edges.contains) {
             items.append(.edge(top))
+        }
+        if let leads {
+            items.append(.postBar(leads, hasReplies: !shown.isEmpty))
         }
         var previous: MessageListModel.Row?
         var day: Date?
@@ -89,6 +107,10 @@ public struct MessageTimeline: Equatable, Sendable {
             let startsGroup = newDay || Self.startsGroup(row, after: previous)
             items.append(.message(row, startsGroup: startsGroup))
             previous = row
+            if let postBar, row.id == postBar.post {
+                items.append(.postBar(postBar, hasReplies: row.id != shown.last?.id))
+                previous = nil
+            }
         }
         // The unread bar counts a starter still being fetched.
         if let placed = line {

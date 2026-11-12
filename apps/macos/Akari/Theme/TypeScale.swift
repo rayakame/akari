@@ -83,6 +83,9 @@ nonisolated enum TypeScale {
     static let dayDivider = TextStyle(11, .semibold, line: 15)
     static let startTitle = TextStyle(30, .heavy)
     static let startSubtitle = TextStyle(15.5)
+    static let postBarButton = TextStyle(14, .medium)
+    static let postInviteTitle = TextStyle(16, .semibold)
+    static let postInviteText = TextStyle(14)
     static let startOwner = TextStyle(15.5, .semibold)
     static let titleBar = TextStyle(12.5, .medium)
 

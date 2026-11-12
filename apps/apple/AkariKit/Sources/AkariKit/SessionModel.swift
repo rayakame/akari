@@ -878,6 +878,11 @@ public final class SessionModel {
         await changeMembership(of: thread, joins: false, from: location)
     }
 
+    /// "Follow" and "Following" under a forum post's first message.
+    public func setFollowing(_ follows: Bool, post: ChannelId) async {
+        await changeMembership(of: post, joins: follows, from: Self.postBarLocation)
+    }
+
     public func dismissMembershipError() {
         membershipError = nil
     }
@@ -895,18 +900,23 @@ public final class SessionModel {
                 try await account.leaveThread(threadId: thread, location: location)
             }
         } catch {
-            membershipError = Self.membershipError(error as? RequestError)
+            let parent = store.channel(id: thread)?.parentId.flatMap { store.channel(id: $0) }
+            membershipError = Self.membershipError(
+                error as? RequestError, post: parent?.opensForum == true)
         }
     }
+
+    static let postBarLocation = ThreadLocation.toolbarOverflow
 
     // TOO_MANY_THREAD_MEMBERS.
     private static let threadFull: UInt32 = 30033
 
-    private static func membershipError(_ error: RequestError?) -> MembershipError {
+    private static func membershipError(_ error: RequestError?, post: Bool) -> MembershipError {
         if case .Discord(_, threadFull, _)? = error {
+            let kind = post ? "post" : "thread"
             return MembershipError(
-                title: "Cannot join thread",
-                message: "This thread has reached the maximum possible number of members.")
+                title: "Cannot join \(kind)",
+                message: "This \(kind) has reached the maximum possible number of members.")
         }
         return MembershipError(title: "Error", message: "An error occurred, please try again.")
     }

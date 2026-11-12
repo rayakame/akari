@@ -212,6 +212,17 @@ public final class MessageListModel {
     public private(set) var messageJump: MessageJump?
     /// Who started the thread, by name, if the store or the loaded messages know them.
     public private(set) var threadOwner: String?
+    /// A forum post's action bar; `nil` in any other channel.
+    public private(set) var postBar: PostBar?
+    /// What a forum post's beginning shows; `nil` in any other channel.
+    public private(set) var postStart: PostStart?
+    /// What the post's "Copy Link" gives.
+    public var postLink: String? {
+        guard postBar != nil, let guildId else {
+            return nil
+        }
+        return PostBar.link(guild: guildId, post: channelId)
+    }
 
     private static let pageSize: UInt8 = 50
     // A trackpad's bounce or momentum at the bottom stays below it.
@@ -279,6 +290,7 @@ public final class MessageListModel {
         readOwner()
         readHiddenDownloads()
         reload(rereading: [])
+        readPost()
         if hasMessages {
             openedFrom = .window
         }
@@ -571,6 +583,38 @@ public final class MessageListModel {
             fromDisk = Set(rows.map(\.message.id))
         }
         composer.apply(batch)
+        if place == .forumPost {
+            readPost()
+        }
+    }
+
+    // After the rows and the composer: the first message and who may answer come from them.
+    private func readPost() {
+        guard place == .forumPost, let post = store.channel(id: channelId),
+            let info = post.thread
+        else {
+            return
+        }
+        let bar = PostBar(
+            post: MessageId(rawValue: channelId.rawValue), following: info.joined,
+            canFollow: !info.archived,
+            invites: composer.canSend == true && !composer.locked && info.ownerId != userId)
+        if bar != postBar {
+            postBar = bar
+        }
+        let forum = post.parentId.flatMap { store.channel(id: $0) }
+        let moderates =
+            forum.flatMap { store.permissions(channelId: $0.id) }?.contains(.manageThreads) == true
+        let available = forum?.forum?.tags ?? []
+        let tags = info.appliedTags.compactMap { applied in
+            available.first { $0.id == applied && (moderates || !$0.moderated) }
+        }
+        let start = PostStart(
+            tags: tags,
+            firstMessageDeleted: reachedOldest && !rows.contains { $0.id == bar.post })
+        if start != postStart {
+            postStart = start
+        }
     }
 
     // Mention names and the mentioned highlight come from these, not from the message.

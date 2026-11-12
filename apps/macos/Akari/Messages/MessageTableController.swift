@@ -8,6 +8,7 @@ struct MessageTableState: Equatable {
     var loading: MessageListModel.Load?
     var failedLoads: [MessageListModel.Load: RequestError] = [:]
     var start: ChannelStart?
+    var postBar: PostBar?
     var channelId: ChannelId?
     var lastLoad: LoadTrace?
     var openedAt: ContinuousClock.Instant?
@@ -550,7 +551,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             edges.insert(.newer)
         }
         return MessageTimeline(
-            rows: state.rows, calendar: calendar, edges: edges, newMessages: state.newMessages)
+            rows: state.rows, calendar: calendar, edges: edges, newMessages: state.newMessages,
+            postBar: state.postBar)
     }
 
     // A scroll before the newest page lands cancels following the bottom.
@@ -1014,6 +1016,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             return DayDividerCell.height
         case .newMessages:
             return NewMessagesDivider.height
+        case .postBar(let bar, let hasReplies):
+            return PostBarCell.height(bar, hasReplies: hasReplies)
         case .message(let row, let startsGroup):
             let message = row.shown
             let hasBox = row.threadBox != nil
@@ -1059,6 +1063,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         case .newMessages:
             return reuse(NewMessagesDivider.identifier) as? NewMessagesDivider
                 ?? NewMessagesDivider()
+        case .postBar(let bar, let hasReplies):
+            let cell = reuse(PostBarCell.identifier) as? PostBarCell ?? PostBarCell()
+            cell.onFollow = { [weak self] in self?.actions?.followPost($0) }
+            cell.onCopy = { [weak self] in self?.actions?.copyPostLink() }
+            cell.show(bar, hasReplies: hasReplies)
+            return cell
         case .message(let row, let startsGroup):
             let message = row.shown
             let groupTime = MessageFormat.groupTime(
@@ -2020,7 +2030,7 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
                 }
             case .newMessages:
                 break
-            case .edge, .day:
+            case .edge, .day, .postBar:
                 return nil
             }
             index -= 1

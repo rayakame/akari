@@ -131,6 +131,9 @@ struct SessionScreen: View {
                     session.openThreadForm(in: messages.channelId, from: $0, location: .message)
                 },
                 expressions: { [session] in session.expressionPopout($0, in: messages.channelId) },
+                followPost: { [session] follows in
+                    Task { await session.setFollowing(follows, post: messages.channelId) }
+                },
                 openGuild: { [session] in session.open(.guild($0)) },
                 markRead: { [session] in session.markRead(channel: messages.channelId) },
                 markServerRead: { [session] in session.markServerRead() },
