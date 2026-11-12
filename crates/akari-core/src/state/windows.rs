@@ -64,6 +64,18 @@ pub(crate) struct CachedWindow {
     // Milliseconds since the Unix epoch, so it orders against earlier sessions' windows.
     pub(crate) viewed_at: i64,
     pub(crate) messages: Vec<Arc<Message>>,
+    // What the messages' replies answer, by the target's channel and ID; not loaded ones are
+    // left out.
+    pub(crate) targets: CachedTargets,
+}
+
+pub(crate) type CachedTargets = HashMap<(ChannelId, MessageId), ReplyTarget>;
+
+// A window as the disk cache read it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CachedMessages {
+    pub(crate) messages: Vec<Arc<Message>>,
+    pub(crate) targets: CachedTargets,
 }
 
 /// A snapshot of a viewed channel's loaded messages.
@@ -616,11 +628,19 @@ impl Windows {
                     return None;
                 }
                 let skip = window.messages.len().saturating_sub(per_window);
+                let messages = window.messages[skip..].to_vec();
+                let targets = messages
+                    .iter()
+                    .filter_map(|message| message.replied_to())
+                    .map(|(channel, id)| ((channel, id), self.targets.get(channel, id)))
+                    .filter(|(_, target)| *target != ReplyTarget::NotLoaded)
+                    .collect();
                 Some((
                     *channel,
                     CachedWindow {
                         viewed_at: window.viewed_at,
-                        messages: window.messages[skip..].to_vec(),
+                        messages,
+                        targets,
                     },
                 ))
             })
@@ -1264,9 +1284,10 @@ impl Windows {
     pub(crate) fn fill_from_cache(
         &mut self,
         ticket: LoadTicket,
-        messages: Vec<Arc<Message>>,
+        cached: CachedMessages,
         events: &mut Vec<StoreEvent>,
     ) {
+        let CachedMessages { messages, targets } = cached;
         let channel_id = ticket.channel;
         let Some(window) = self.windows.get_mut(&channel_id).filter(|window| {
             window.generation == ticket.generation
@@ -1284,8 +1305,15 @@ impl Windows {
         window.messages.sort_by_key(|message| message.id);
         window.stale = true;
         window.from_disk = true;
+        // What this session learned since is newer than the file.
+        for ((channel, id), target) in targets {
+            if self.targets.get(channel, id) == ReplyTarget::NotLoaded {
+                self.targets.set(channel, id, target, events);
+            }
+        }
         added.push(channel_id, events);
         events.push(StoreEvent::MessagesStale { channel_id });
+        self.trim_targets(channel_id);
     }
 
     pub(crate) fn abort_load(&mut self, ticket: LoadTicket, events: &mut Vec<StoreEvent>) {

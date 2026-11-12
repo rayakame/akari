@@ -81,6 +81,7 @@ fn same<T: PartialEq>(a: &Arc<T>, b: &Arc<T>) -> bool {
 
 fn same_window(a: &CachedWindow, b: &CachedWindow) -> bool {
     a.viewed_at == b.viewed_at
+        && a.targets == b.targets
         && a.messages.len() == b.messages.len()
         && a.messages.iter().zip(&b.messages).all(|(a, b)| same(a, b))
 }
@@ -177,6 +178,26 @@ fn read_state_changes(
     Ok(counts)
 }
 
+fn pin_ack_changes(
+    old: &ReadStates,
+    new: &ReadStates,
+    writer: &mut Writer<'_>,
+) -> rusqlite::Result<(usize, usize)> {
+    let mut counts = (0, 0);
+    let (old, new) = (old.pin_acks(), new.pin_acks());
+    for (channel, acked) in new {
+        if old.get(channel) != Some(acked) {
+            writer.put_pin_ack(*channel, *acked)?;
+            counts.0 += 1;
+        }
+    }
+    for channel in old.keys().filter(|channel| !new.contains_key(channel)) {
+        writer.delete_pin_ack(*channel)?;
+        counts.1 += 1;
+    }
+    Ok(counts)
+}
+
 // `written` follows only once the transaction committed, so a failed write is retried in full.
 pub(crate) fn flush(
     cache: &mut Cache,
@@ -246,6 +267,9 @@ pub(crate) fn flush(
         let (put, deleted) = read_state_changes(&old.read_states, &new.read_states, writer)?;
         flushed.other += put;
         flushed.deleted += deleted;
+        let (put, deleted) = pin_ack_changes(&old.read_states, &new.read_states, writer)?;
+        flushed.other += put;
+        flushed.deleted += deleted;
         for (channel, window) in &next.windows {
             if written
                 .windows
@@ -256,7 +280,7 @@ pub(crate) fn flush(
             }
             let skip = window.messages.len().saturating_sub(MESSAGES_PER_CHANNEL);
             let messages: &[Arc<Message>] = &window.messages[skip..];
-            writer.put_window(*channel, window.viewed_at, messages)?;
+            writer.put_window(*channel, window.viewed_at, messages, &window.targets)?;
             flushed.windows += 1;
             flushed.messages += messages.len();
         }

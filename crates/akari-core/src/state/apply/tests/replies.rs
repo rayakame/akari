@@ -513,3 +513,87 @@ fn an_evicted_window_takes_its_targets() {
     assert!(state.messages(general).is_none());
     assert_eq!(state.windows.targets_len(general), 0);
 }
+
+// The disk cache's copy of a window brings what its replies answered; what this session
+// learned since stays.
+#[test]
+fn a_cached_window_brings_its_targets() {
+    use crate::state::{CachedMessages, ReplyPreview};
+
+    let mut state = viewing(GENERAL);
+    let general = Snowflake::new(GENERAL);
+    let convert = |value: Value| {
+        let wire = page(&[value]).remove(0);
+        Arc::new(Message::from_wire(wire, &mut |user| {
+            Arc::new(crate::state::User::from_wire(user))
+        }))
+    };
+    let cached_preview = |content: &str| {
+        ReplyTarget::Loaded(Arc::new(ReplyPreview::of(&convert(original(
+            GENERAL, content,
+        )))))
+    };
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(general, LoadKind::Latest, 1, &mut events)
+        .unwrap();
+    // Held: the window waits for its page, and the target is this session's.
+    state.windows.mark_stale(&mut Vec::new());
+    apply(
+        &mut state,
+        "MESSAGE_CREATE",
+        reply_to(9, GENERAL, 6, Some(original(GENERAL, "live"))),
+    );
+    assert!(state.messages(general).unwrap().messages.is_empty());
+
+    let cached = CachedMessages {
+        messages: vec![
+            convert(reply(10, GENERAL, None)),
+            convert(reply_to(11, GENERAL, 6, None)),
+        ],
+        targets: [
+            (
+                (general, Snowflake::new(TARGET)),
+                cached_preview("from the file"),
+            ),
+            (
+                (general, Snowflake::new(6)),
+                cached_preview("older than the session"),
+            ),
+        ]
+        .into(),
+    };
+    let mut events = Vec::new();
+    state.fill_from_cache(ticket, cached, &mut events);
+
+    assert_eq!(target(&state, GENERAL, TARGET), "from the file");
+    assert_eq!(target(&state, GENERAL, 6), "live");
+}
+
+#[test]
+fn a_window_is_cached_with_what_its_replies_answer() {
+    let mut state = viewing(GENERAL);
+    load(
+        &mut state,
+        GENERAL,
+        LoadKind::Latest,
+        &[
+            reply(10, GENERAL, Some(original(GENERAL, "kept"))),
+            reply_to(11, GENERAL, 6, Some(Value::Null)),
+            reply_to(12, GENERAL, 7, None),
+            message(13, GENERAL),
+        ],
+    );
+
+    let (_, windows) = state.cache_parts(50);
+
+    let general = Snowflake::new(GENERAL);
+    let (_, cached) = windows.iter().find(|(id, _)| *id == general).unwrap();
+    let mut targets: Vec<(u64, bool)> = cached
+        .targets
+        .iter()
+        .map(|((_, id), target)| (id.get(), matches!(target, ReplyTarget::Loaded(_))))
+        .collect();
+    targets.sort_unstable();
+    assert_eq!(targets, [(6, false), (TARGET, true)]);
+}

@@ -17,9 +17,9 @@ use crate::state::{
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
     ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings, ForumSort, ForumTag, Guild,
     GuildSettings, ImageHash, Member, Message, MessageReference, NotificationLevel,
-    PermissionOverwrite, Redaction, Role, RoleSubscription, SpoilerSetting, Sticker,
-    StickerAnimation, SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership, Unreads,
-    User, UserSettings,
+    PermissionOverwrite, Reaction, ReactionEmoji, Redaction, ReplyPreview, ReplyTarget, Role,
+    RoleSubscription, SpoilerSetting, Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching,
+    ThreadInfo, ThreadMembership, Unreads, User, UserSettings,
 };
 use crate::state::{CachedWindow, DEFAULT_LIMITS, ReadState, Store, StoreEvent};
 
@@ -157,7 +157,7 @@ pub(crate) fn channel(id: u64, guild: Option<u64>, name: &str) -> Channel {
         rate_limit_per_user: 30,
         default_auto_archive_duration: Some(10080),
         last_message_id: Some(Snowflake::new(id * 1000)),
-        last_pin_timestamp: None,
+        last_pin_timestamp: Some(time(1_700_000_300_000_123_000)),
         permission_overwrites: vec![PermissionOverwrite {
             id: Snowflake::new(guild.unwrap_or(0) + 1),
             kind: OverwriteType::Role,
@@ -303,6 +303,21 @@ pub(crate) fn message(channel: u64, id: u64, content: &str) -> Message {
     }
 }
 
+fn preview() -> Arc<ReplyPreview> {
+    Arc::new(ReplyPreview {
+        kind: MessageType::Default,
+        author: Arc::new(user(21, "Noa")),
+        webhook: true,
+        content: "the original".into(),
+        edited: true,
+        flags: Message::IS_VOICE_MESSAGE,
+        has_attachments: true,
+        has_embeds: true,
+        has_sticker: true,
+        forwarded: true,
+    })
+}
+
 fn full_message() -> Message {
     Message {
         kind: MessageType::Reply,
@@ -383,6 +398,33 @@ fn full_message() -> Message {
             format: StickerFormatType::Apng,
         }]
         .into(),
+        reactions: Some(
+            vec![
+                Reaction {
+                    emoji: ReactionEmoji {
+                        id: None,
+                        name: Some("👍".into()),
+                        animated: false,
+                    },
+                    normal: 3,
+                    burst: 1,
+                    me: true,
+                    me_burst: false,
+                },
+                Reaction {
+                    emoji: ReactionEmoji {
+                        id: Some(Snowflake::new(700)),
+                        name: None,
+                        animated: true,
+                    },
+                    normal: 0,
+                    burst: 2,
+                    me: false,
+                    me_burst: true,
+                },
+            ]
+            .into(),
+        ),
         reference: Some(Box::new(MessageReference {
             kind: MessageReferenceType::Default,
             message_id: Some(Snowflake::new(499)),
@@ -434,6 +476,9 @@ fn write_entities(cache: &mut Cache, entities: &Entities) {
             }
             for (guild, settings) in &entities.settings.guilds {
                 writer.put_guild_settings(*guild, settings)?;
+            }
+            for (channel, acked) in entities.read_states.pin_acks() {
+                writer.put_pin_ack(*channel, *acked)?;
             }
             writer.put_folders(entities.settings.folders.as_deref())?;
             writer.put_notification_flags(entities.settings.notification_flags)?;
@@ -530,10 +575,13 @@ fn every_state_type_round_trips_through_its_row() {
     let mut cache = open(&dir);
     let entities = entities();
     let sent = full_message();
+    let targets = [(sent.replied_to().unwrap(), ReplyTarget::Loaded(preview()))].into();
 
     write_entities(&mut cache, &entities);
     cache
-        .write(|writer| writer.put_window(Snowflake::new(10), 42, &[Arc::new(sent.clone())]))
+        .write(|writer| {
+            writer.put_window(Snowflake::new(10), 42, &[Arc::new(sent.clone())], &targets)
+        })
         .unwrap();
     drop(cache);
     let cache = open(&dir);
@@ -543,7 +591,8 @@ fn every_state_type_round_trips_through_its_row() {
     assert!(read.value == entities);
     let window = cache.read_window(Snowflake::new(10)).unwrap();
     assert_eq!(window.skipped, 0);
-    assert_eq!(window.value, vec![Arc::new(sent)]);
+    assert_eq!(window.value.messages, vec![Arc::new(sent)]);
+    assert_eq!(window.value.targets, targets);
 }
 
 #[test]
@@ -587,10 +636,14 @@ fn a_window_reads_oldest_first_and_shares_its_authors() {
         .into();
 
     cache
-        .write(|writer| writer.put_window(Snowflake::new(10), 42, &messages))
+        .write(|writer| writer.put_window(Snowflake::new(10), 42, &messages, &Default::default()))
         .unwrap();
 
-    let read = cache.read_window(Snowflake::new(10)).unwrap().value;
+    let read = cache
+        .read_window(Snowflake::new(10))
+        .unwrap()
+        .value
+        .messages;
     let ids: Vec<u64> = read.iter().map(|message| message.id.get()).collect();
     assert_eq!(ids, [501, 502, 503]);
     assert!(Arc::ptr_eq(&read[0].author, &read[2].author));
@@ -599,6 +652,7 @@ fn a_window_reads_oldest_first_and_shares_its_authors() {
             .read_window(Snowflake::new(11))
             .unwrap()
             .value
+            .messages
             .is_empty()
     );
 }
@@ -719,16 +773,16 @@ fn the_settings_tables_exist() {
     drop(open(&dir));
 
     let tables = stored_names(&dir.file(ME));
-    for table in ["guild_settings", "user_settings", "read_states"] {
+    for table in ["guild_settings", "user_settings", "read_states", "pin_acks"] {
         assert!(tables.contains(&table.to_owned()), "{tables:?}");
     }
 }
 
 // Their attachments (before 6) and embeds (before 7) have no scan version, which would cover
-// their media as pending scans.
+// their media as pending scans; before 8 a reply has no line and a message no reactions.
 #[test]
 fn files_from_before_media_kept_their_scans_are_discarded() {
-    for version in [4, 5, 6] {
+    for version in [4, 5, 6, 7] {
         let dir = TempDir::new();
         let mut cache = open(&dir);
         write_entities(&mut cache, &entities());
@@ -867,7 +921,12 @@ fn snowflakes_round_trip_as_integers() {
     cache
         .write(|writer| {
             writer.put_guild(&stored)?;
-            writer.put_window(Snowflake::new(big), 1, std::slice::from_ref(&sent))
+            writer.put_window(
+                Snowflake::new(big),
+                1,
+                std::slice::from_ref(&sent),
+                &Default::default(),
+            )
         })
         .unwrap();
 
@@ -879,7 +938,11 @@ fn snowflakes_round_trip_as_integers() {
     let read = cache.read_entities().unwrap().value;
     assert_eq!(*read.guilds[&Snowflake::new(big - 1)], stored);
     assert_eq!(
-        cache.read_window(Snowflake::new(big)).unwrap().value,
+        cache
+            .read_window(Snowflake::new(big))
+            .unwrap()
+            .value
+            .messages,
         vec![sent]
     );
 }
@@ -888,6 +951,7 @@ fn window(viewed_at: i64, messages: Vec<Arc<Message>>) -> CachedWindow {
     CachedWindow {
         viewed_at,
         messages,
+        targets: Default::default(),
     }
 }
 
@@ -1120,6 +1184,7 @@ async fn the_cache_keeps_the_newest_fifty_of_the_fifty_latest_channels() {
         .read_window(Snowflake::new(60))
         .await
         .unwrap()
+        .messages
         .iter()
         .map(|message| message.id.get())
         .collect();
@@ -1219,7 +1284,12 @@ async fn a_window_left_out_of_a_snapshot_keeps_its_rows() {
     thread.flush(snapshot([])).await.unwrap();
 
     assert_eq!(
-        thread.read_window(Snowflake::new(10)).await.unwrap().len(),
+        thread
+            .read_window(Snowflake::new(10))
+            .await
+            .unwrap()
+            .messages
+            .len(),
         3
     );
 }
@@ -1244,6 +1314,7 @@ async fn pending_and_failed_messages_are_never_written() {
         .read_window(Snowflake::new(10))
         .await
         .unwrap()
+        .messages
         .iter()
         .map(|message| message.id.get())
         .collect();
@@ -1275,6 +1346,7 @@ async fn a_removed_channel_loses_its_messages() {
             .read_window(Snowflake::new(10))
             .await
             .unwrap()
+            .messages
             .is_empty()
     );
     assert!(stored_ids(&dir.file(ME), "SELECT channel_id FROM windows").is_empty());
@@ -1555,6 +1627,171 @@ async fn a_changed_read_state_writes_only_its_row() {
             ..Flushed::default()
         }
     );
+}
+
+#[tokio::test]
+async fn pin_acks_survive_a_restart_and_write_only_their_rows() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let mut state = entities();
+    let acked = time(1_700_000_400_000_123_000);
+    state.read_states.ack_pins(Snowflake::new(10), acked);
+    state.read_states.ack_pins(Snowflake::new(13), acked);
+    thread.flush(snapshot_of(state.clone())).await.unwrap();
+
+    let mut later = state.clone();
+    later
+        .read_states
+        .ack_pins(Snowflake::new(10), time(1_700_000_500_000_000_000));
+    let changed = thread.flush(snapshot_of(later.clone())).await.unwrap();
+    let mut gone = later.clone();
+    gone.read_states = crate::state::ReadStates::default();
+    gone.read_states
+        .ack_pins(Snowflake::new(10), time(1_700_000_500_000_000_000));
+    let deleted = thread.flush(snapshot_of(gone.clone())).await.unwrap();
+    drop(thread);
+
+    assert_eq!(
+        changed,
+        Flushed {
+            other: 1,
+            ..Flushed::default()
+        }
+    );
+    assert_eq!(
+        deleted,
+        Flushed {
+            deleted: 1,
+            ..Flushed::default()
+        }
+    );
+    let read = open(&dir).read_entities().unwrap();
+    assert_eq!(read.skipped, 0);
+    assert_eq!(read.value.read_states, gone.read_states);
+    assert_eq!(
+        read.value.read_states.pins_acked(Snowflake::new(10)),
+        Some(time(1_700_000_500_000_000_000))
+    );
+}
+
+fn reply(channel: u64, id: u64, target: u64) -> Arc<Message> {
+    Arc::new(Message {
+        kind: MessageType::Reply,
+        reference: Some(Box::new(MessageReference {
+            kind: MessageReferenceType::Default,
+            message_id: Some(Snowflake::new(target)),
+            channel_id: Some(Snowflake::new(channel)),
+            guild_id: None,
+        })),
+        ..message(channel, id, "a reply")
+    })
+}
+
+// A cached reply shows its line before any page comes: the row keeps what the store knew of
+// the message it answers.
+#[tokio::test]
+async fn a_cached_reply_keeps_what_it_answers() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let key = |target: u64| (Snowflake::new(10), Snowflake::new(target));
+    let cached = CachedWindow {
+        viewed_at: 5,
+        messages: vec![
+            reply(10, 501, 401),
+            reply(10, 502, 402),
+            reply(10, 503, 403),
+        ],
+        targets: [
+            (key(401), ReplyTarget::Loaded(preview())),
+            (key(402), ReplyTarget::Deleted),
+        ]
+        .into(),
+    };
+
+    thread
+        .flush(snapshot([(10, cached.clone())]))
+        .await
+        .unwrap();
+    let read = thread.read_window(Snowflake::new(10)).await.unwrap();
+
+    assert_eq!(read.messages, cached.messages);
+    assert_eq!(
+        read.targets, cached.targets,
+        "a target not loaded has no row"
+    );
+    let ReplyTarget::Loaded(restored) = &read.targets[&key(401)] else {
+        panic!("expected the preview");
+    };
+    assert_eq!(&*restored.content, "the original");
+}
+
+// The target's edit or deletion changes no message, only what the reply's row keeps.
+#[tokio::test]
+async fn a_changed_target_rewrites_its_window() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let key = (Snowflake::new(10), Snowflake::new(401));
+    let cached = |target: ReplyTarget| CachedWindow {
+        viewed_at: 5,
+        messages: vec![reply(10, 501, 401)],
+        targets: [(key, target)].into(),
+    };
+    let loaded = cached(ReplyTarget::Loaded(preview()));
+    thread
+        .flush(snapshot([(10, loaded.clone())]))
+        .await
+        .unwrap();
+
+    let same = thread.flush(snapshot([(10, loaded)])).await.unwrap();
+    let deleted = thread
+        .flush(snapshot([(10, cached(ReplyTarget::Deleted))]))
+        .await
+        .unwrap();
+
+    assert_eq!(same.windows, 0);
+    assert_eq!(deleted.windows, 1);
+    let read = thread.read_window(Snowflake::new(10)).await.unwrap();
+    assert_eq!(read.targets[&key], ReplyTarget::Deleted);
+}
+
+// Rows hold the cache's own types: no wire names, and nothing a message without them pays for.
+#[tokio::test]
+async fn message_rows_keep_reactions_and_targets_only_when_there_are_some() {
+    let dir = TempDir::new();
+    let thread = started(&dir).await;
+    let plain = Arc::new(message(10, 500, "plain"));
+    let full = Arc::new(Message {
+        id: Snowflake::new(501),
+        ..full_message()
+    });
+    let cached = CachedWindow {
+        viewed_at: 5,
+        messages: vec![plain, full.clone()],
+        targets: [(full.replied_to().unwrap(), ReplyTarget::Loaded(preview()))].into(),
+    };
+    thread.flush(snapshot([(10, cached)])).await.unwrap();
+    drop(thread);
+
+    let conn = raw(&dir.file(ME));
+    let mut statement = conn
+        .prepare("SELECT data FROM messages ORDER BY id")
+        .unwrap();
+    let rows: Vec<String> = statement
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+
+    assert!(
+        !rows[0].contains("reactions") && !rows[0].contains("target"),
+        "{}",
+        rows[0]
+    );
+    assert!(rows[1].contains(r#""reactions":[{"name":"👍","normal":3,"burst":1,"me":true}"#));
+    assert!(rows[1].contains(r#""target":{"Loaded":{"#), "{}", rows[1]);
+    for wire in ["count_details", "referenced_message", "me_burst\":false"] {
+        assert!(!rows[1].contains(wire), "{wire}");
+    }
 }
 
 fn fixture_entities(edit: impl FnOnce(&mut serde_json::Value)) -> (Entities, DispatchEvent) {

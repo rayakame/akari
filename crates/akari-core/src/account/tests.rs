@@ -2867,6 +2867,7 @@ mod cache {
                     crate::state::CachedWindow {
                         viewed_at: 1,
                         messages: stored(window),
+                        targets: Default::default(),
                     },
                 )]
                 .into(),
@@ -3144,7 +3145,14 @@ mod cache {
             .await
             .unwrap();
         account.flush_cache().await;
-        assert!(thread.read_window(general()).await.unwrap().is_empty());
+        assert!(
+            thread
+                .read_window(general())
+                .await
+                .unwrap()
+                .messages
+                .is_empty()
+        );
 
         let _connection = online(&mut fake, &account).await;
 
@@ -3202,7 +3210,10 @@ mod cache {
         account.view_channel(general());
         account.flush_cache().await;
 
-        assert_eq!(thread.read_window(general()).await.unwrap().len(), 50);
+        assert_eq!(
+            thread.read_window(general()).await.unwrap().messages.len(),
+            50
+        );
     }
 
     #[tokio::test]
@@ -3238,7 +3249,14 @@ mod cache {
 
         assert!(account.store().messages(general()).is_none());
         account.flush_cache().await;
-        assert!(thread.read_window(general()).await.unwrap().is_empty());
+        assert!(
+            thread
+                .read_window(general())
+                .await
+                .unwrap()
+                .messages
+                .is_empty()
+        );
         loading.abort();
     }
 
@@ -3771,6 +3789,7 @@ mod cache {
                     crate::state::CachedWindow {
                         viewed_at: 1,
                         messages: stored(1..=50),
+                        targets: Default::default(),
                     },
                 )]
                 .into(),
@@ -3886,6 +3905,7 @@ mod cache {
                     crate::state::CachedWindow {
                         viewed_at: 1,
                         messages: vec![starter],
+                        targets: Default::default(),
                     },
                 )]
                 .into(),

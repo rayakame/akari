@@ -7,12 +7,12 @@ use tokio::sync::oneshot;
 use super::snapshot::{Flushed, Snapshot, Written, flush};
 use super::{Cache, CacheError, LOG, Opened, delete_files};
 use crate::model::{ChannelId, UserId};
-use crate::state::Message;
+use crate::state::CachedMessages;
 use crate::state::apply::Entities;
 
 enum Command {
     ReadEntities(oneshot::Sender<Entities>),
-    ReadWindow(ChannelId, oneshot::Sender<Vec<Arc<Message>>>),
+    ReadWindow(ChannelId, oneshot::Sender<CachedMessages>),
     Flush(Box<Snapshot>, oneshot::Sender<Option<Flushed>>),
     Delete(oneshot::Sender<()>),
     #[cfg(test)]
@@ -80,7 +80,7 @@ impl CacheThread {
         self.ask(Command::ReadEntities).await
     }
 
-    pub(crate) async fn read_window(&self, channel: ChannelId) -> Option<Vec<Arc<Message>>> {
+    pub(crate) async fn read_window(&self, channel: ChannelId) -> Option<CachedMessages> {
         self.ask(|reply| Command::ReadWindow(channel, reply)).await
     }
 
@@ -151,7 +151,7 @@ fn run(path: &std::path::Path, user: UserId, commands: &mpsc::Receiver<Command>)
                     Ok(read) => read.value,
                     Err(err) => {
                         tracing::info!(target: LOG, reason = kind(&err), "cache window not read");
-                        Vec::new()
+                        CachedMessages::default()
                     }
                 };
                 let _ = reply.send(messages);

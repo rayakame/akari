@@ -15,9 +15,9 @@ use crate::state::{
     DisplaySettings, Embed, EmbedAuthor, EmbedField, EmbedFooter, EmbedMedia, EmbedProvider,
     ExplicitContentFilter, ExplicitContentSettings, FolderEntry, ForumLayout, ForumSettings,
     ForumSort, ForumTag, Guild, GuildSettings, ImageHash, Member, Message, MessageReference,
-    NotificationLevel, PermissionOverwrite, ReadState, Redaction, Role, RoleSubscription,
-    SpoilerSetting, Sticker, StickerAnimation, SystemData, TagEmoji, TagMatching, ThreadInfo,
-    ThreadMembership, Unreads, User,
+    NotificationLevel, PermissionOverwrite, Reaction, ReactionEmoji, ReadState, Redaction,
+    ReplyPreview, ReplyTarget, Role, RoleSubscription, SpoilerSetting, Sticker, StickerAnimation,
+    SystemData, TagEmoji, TagMatching, ThreadInfo, ThreadMembership, Unreads, User,
 };
 
 fn is_false(value: &bool) -> bool {
@@ -480,6 +480,8 @@ pub(super) struct ChannelRow {
     default_auto_archive_duration: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_message_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_pin_timestamp: Option<i64>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     permission_overwrites: Vec<OverwriteRow>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -512,6 +514,7 @@ impl From<&Channel> for ChannelRow {
             rate_limit_per_user: channel.rate_limit_per_user,
             default_auto_archive_duration: channel.default_auto_archive_duration,
             last_message_id: id(channel.last_message_id),
+            last_pin_timestamp: channel.last_pin_timestamp.map(nanos),
             permission_overwrites: channel
                 .permission_overwrites
                 .iter()
@@ -564,7 +567,7 @@ impl ChannelRow {
             rate_limit_per_user: self.rate_limit_per_user,
             default_auto_archive_duration: self.default_auto_archive_duration,
             last_message_id: snowflake(self.last_message_id),
-            last_pin_timestamp: None,
+            last_pin_timestamp: self.last_pin_timestamp.map(timestamp),
             permission_overwrites: self
                 .permission_overwrites
                 .into_iter()
@@ -852,7 +855,90 @@ struct ReferenceRow {
     guild_id: Option<u64>,
 }
 
-// The referenced message isn't kept: the reference holds its ID, and a fresh page brings it.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct ReactionRow {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<Box<str>>,
+    #[serde(skip_serializing_if = "is_false")]
+    animated: bool,
+    normal: u32,
+    burst: u32,
+    #[serde(skip_serializing_if = "is_false")]
+    me: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    me_burst: bool,
+}
+
+// The message a reply answers, when the store knew it; a target not loaded has no row.
+#[derive(Serialize, Deserialize)]
+enum TargetRow {
+    Deleted,
+    Loaded(Box<PreviewRow>),
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+struct PreviewRow {
+    kind: u16,
+    author: UserRow,
+    #[serde(skip_serializing_if = "is_false")]
+    webhook: bool,
+    content: Box<str>,
+    #[serde(skip_serializing_if = "is_false")]
+    edited: bool,
+    flags: u64,
+    #[serde(skip_serializing_if = "is_false")]
+    attachments: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    embeds: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    sticker: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    forwarded: bool,
+}
+
+impl TargetRow {
+    fn of(target: &ReplyTarget) -> Option<Self> {
+        match target {
+            ReplyTarget::NotLoaded => None,
+            ReplyTarget::Deleted => Some(Self::Deleted),
+            ReplyTarget::Loaded(preview) => Some(Self::Loaded(Box::new(PreviewRow {
+                kind: preview.kind.into(),
+                author: UserRow::from(&*preview.author),
+                webhook: preview.webhook,
+                content: preview.content.clone(),
+                edited: preview.edited,
+                flags: preview.flags,
+                attachments: preview.has_attachments,
+                embeds: preview.has_embeds,
+                sticker: preview.has_sticker,
+                forwarded: preview.forwarded,
+            }))),
+        }
+    }
+
+    fn into_target(self, intern: &mut impl FnMut(UserRow) -> Arc<User>) -> ReplyTarget {
+        match self {
+            Self::Deleted => ReplyTarget::Deleted,
+            Self::Loaded(row) => ReplyTarget::Loaded(Arc::new(ReplyPreview {
+                kind: MessageType::from(row.kind),
+                author: intern(row.author),
+                webhook: row.webhook,
+                content: row.content,
+                edited: row.edited,
+                flags: row.flags,
+                has_attachments: row.attachments,
+                has_embeds: row.embeds,
+                has_sticker: row.sticker,
+                forwarded: row.forwarded,
+            })),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 pub(super) struct MessageRow {
@@ -881,8 +967,12 @@ pub(super) struct MessageRow {
     embeds: Vec<EmbedRow>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     stickers: Vec<StickerRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    reactions: Vec<ReactionRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reference: Option<ReferenceRow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<TargetRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     call: Option<CallRow>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -911,8 +1001,9 @@ struct RoleSubscriptionRow {
     is_renewal: bool,
 }
 
-impl From<&Message> for MessageRow {
-    fn from(message: &Message) -> Self {
+impl MessageRow {
+    // With what the store knows of the message it answers, so a cached reply shows its line.
+    pub(super) fn new(message: &Message, target: &ReplyTarget) -> Self {
         let system = message.system.as_deref();
         Self {
             kind: message.kind.into(),
@@ -964,12 +1055,26 @@ impl From<&Message> for MessageRow {
                     format: sticker.format.into(),
                 })
                 .collect(),
+            reactions: message
+                .reactions()
+                .iter()
+                .map(|reaction| ReactionRow {
+                    id: id(reaction.emoji.id),
+                    name: reaction.emoji.name.clone(),
+                    animated: reaction.emoji.animated,
+                    normal: reaction.normal,
+                    burst: reaction.burst,
+                    me: reaction.me,
+                    me_burst: reaction.me_burst,
+                })
+                .collect(),
             reference: message.reference.as_deref().map(|reference| ReferenceRow {
                 kind: reference.kind.into(),
                 message_id: id(reference.message_id),
                 channel_id: id(reference.channel_id),
                 guild_id: id(reference.guild_id),
             }),
+            target: TargetRow::of(target),
             call: system
                 .and_then(|system| system.call.as_ref())
                 .map(|call| CallRow {
@@ -999,7 +1104,7 @@ impl MessageRow {
         id: MessageId,
         channel_id: ChannelId,
         users: &mut HashMap<UserId, Arc<User>>,
-    ) -> Message {
+    ) -> (Message, Option<ReplyTarget>) {
         let mut intern = |row: UserRow| {
             let user = User::from(row);
             match users.get(&user.id) {
@@ -1011,7 +1116,24 @@ impl MessageRow {
                 }
             }
         };
-        Message {
+        let target = self.target.map(|target| target.into_target(&mut intern));
+        let reactions = self
+            .reactions
+            .into_iter()
+            .filter(|row| row.id.is_some() || row.name.is_some())
+            .map(|row| Reaction {
+                emoji: ReactionEmoji {
+                    id: snowflake(row.id),
+                    name: row.name,
+                    animated: row.animated,
+                },
+                normal: row.normal,
+                burst: row.burst,
+                me: row.me,
+                me_burst: row.me_burst,
+            })
+            .collect();
+        let message = Message {
             id,
             channel_id,
             kind: MessageType::from(self.kind),
@@ -1055,7 +1177,7 @@ impl MessageRow {
                     format: StickerFormatType::from(sticker.format),
                 })
                 .collect(),
-            reactions: None,
+            reactions: crate::state::shared_reactions(reactions),
             reference: self.reference.map(|reference| {
                 Box::new(MessageReference {
                     kind: MessageReferenceType::from(reference.kind),
@@ -1080,7 +1202,8 @@ impl MessageRow {
                 application_name: self.application_name,
             }
             .boxed(),
-        }
+        };
+        (message, target)
     }
 }
 

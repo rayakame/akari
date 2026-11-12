@@ -27,7 +27,7 @@ use super::types::{
 #[cfg(test)]
 use super::windows::DEFAULT_LIMITS;
 use super::windows::{
-    CachedWindow, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits,
+    CachedMessages, CachedWindow, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits,
 };
 use crate::backlog::Backlog;
 use crate::gateway::{DispatchEvent, GatewayGuild, Ready};
@@ -751,9 +751,9 @@ impl Store {
         restored
     }
 
-    pub(crate) fn fill_from_cache(&self, ticket: LoadTicket, messages: Vec<Arc<Message>>) {
+    pub(crate) fn fill_from_cache(&self, ticket: LoadTicket, cached: CachedMessages) {
         self.write("load", |inner, events| {
-            inner.state.fill_from_cache(ticket, messages, events);
+            inner.state.fill_from_cache(ticket, cached, events);
         });
     }
 

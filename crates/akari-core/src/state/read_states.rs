@@ -124,6 +124,10 @@ impl ReadStates {
         true
     }
 
+    pub(crate) fn pin_acks(&self) -> &HashMap<ChannelId, Timestamp> {
+        &self.pin_acks
+    }
+
     pub(crate) fn pins_acked(&self, channel: ChannelId) -> Option<Timestamp> {
         self.pin_acks.get(&channel).copied()
     }
