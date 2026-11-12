@@ -54,8 +54,8 @@ offers nothing: the client gives it no bar and no menu. For every other message:
 | `edit` | not the system DM; the user's own; a user message other than type 68; not a sticker alone (a sticker with text is edited); not a voice message; not a forward; writable; Send Messages, which in a locked thread only a moderator has. A message of attachments or embeds alone is edited |
 | `delete` | the user's own, or Manage Messages; writable; not an undeletable type; an AutoMod action (24) only with Manage Messages. A locked thread that is still active doesn't stop it |
 | `pin` / `unpin` | not the system DM; a user message; Pin Messages (bit 51) and Read Message History, both a private channel's; writable; not a voice or stage channel's chat; not a media channel's post. `pin` for a message that isn't pinned, `unpin` for one that is; never both. Manage Messages no longer pins |
-| `react` | a new emoji on the message: not the system DM; Add Reactions; writable; not a media channel's post. System messages take reactions like any other |
-| `toggle_reaction` | joining or leaving an emoji already on the message: not the system DM; writable; not a media channel's post; not silenced. No permission is asked: "Members can still react using reactions already added to messages without this permission." |
+| `react` | a new emoji on the message: not the system DM; Add Reactions and Read Message History; writable; not a media channel's post. System messages take reactions like any other |
+| `toggle_reaction` | joining or leaving an emoji already on the message: not the system DM; Read Message History; writable; not a media channel's post; not silenced. Add Reactions isn't asked: "Members can still react using reactions already added to messages without this permission." |
 | `remove_reactions` | others' reactions (one user's in the reactors list, one emoji's, all of them): Manage Messages; writable |
 | `mark_unread` | writable |
 | `copy_link` | always |
@@ -81,6 +81,8 @@ say:
   handler don't look at the ephemeral flag.*
 - *`edit` needs Send Messages. The official client offers Edit without it and opens an editor
   that is disabled.*
+- *`react` and `toggle_reaction` need Read Message History. The official client's reaction
+  checks don't look at it, and Discord's server refuses the reaction without it.*
 - *The owner and administrators count as not silenced, as in the permission computation. The
   official client's reply and reaction checks read the member's timeout alone.*
 - *`view_thread` doesn't wait for the message's "has a thread" flag: a thread the store knows

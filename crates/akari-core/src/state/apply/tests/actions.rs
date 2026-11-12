@@ -658,6 +658,12 @@ fn reacting_follows_discords_rules() {
             (false, true),
         ),
         (
+            "no history",
+            member(MEMBER & !HISTORY, plain),
+            sent(GENERAL, MIRA, 0),
+            (false, false),
+        ),
+        (
             "timed out",
             member(MEMBER, timeout),
             sent(GENERAL, MIRA, 0),
