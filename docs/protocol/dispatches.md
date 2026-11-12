@@ -478,7 +478,11 @@ edits and deletes. Nothing says whether Discord built the page before or after t
 and a count, unlike an edit, would be wrong applied twice: where the window already had the
 message and wasn't stale, its copy counted every reaction since and the page's copy takes that
 copy's reactions; else the reaction is applied to the page's copy, which is right when the
-page was built first. A reaction to the message a thread started from, while the thread's page
+page was built first and counts one too many, or one too few for a removal, when Discord built
+the page after it: accepted, until the message arrives whole again. The same holds where the
+window has the message but is stale, as a page that refreshes it replaces its counts. Each
+kept change is put only over the pages whose load was running when it came, so two loads that
+overlap never apply it twice. A reaction to the message a thread started from, while the thread's page
 loads, isn't replayed onto the copy that page brings.
 
 `akari-cli read` and `tail` print each message's reactions under it (emoji, count, `*` for

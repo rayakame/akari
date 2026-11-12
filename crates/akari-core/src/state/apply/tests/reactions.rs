@@ -649,6 +649,44 @@ fn a_reaction_during_a_reload_is_never_counted_twice() {
     }
 }
 
+// A reaction that came before a load began is in its page; only the loads already running
+// when it came may lack it.
+#[test]
+fn a_reaction_is_replayed_only_over_the_loads_that_ran_when_it_came() {
+    for add_it in [true, false] {
+        let mut state = viewing(GENERAL);
+        let general = Snowflake::new(GENERAL);
+        let mut events = Vec::new();
+        let around = state
+            .begin_load(general, LoadKind::Around(Snowflake::new(20)), 1, &mut events)
+            .unwrap();
+        let middle = page(&[message(10, GENERAL), message(20, GENERAL)]);
+        state.finish_load(around, middle, false, &mut events);
+        let older = state
+            .begin_load(general, LoadKind::Older, 2, &mut events)
+            .unwrap();
+
+        if add_it {
+            add(&mut state, GENERAL, 30, MIRA, UP);
+        } else {
+            remove(&mut state, GENERAL, 30, MIRA, UP);
+        }
+        let newer = state
+            .begin_load(general, LoadKind::Newer, 3, &mut events)
+            .unwrap();
+        state.finish_load(older, page(&[message(5, GENERAL)]), true, &mut events);
+        let fresh = with_reactions(message(30, GENERAL), json!([wire_reaction(UP, 1, false)]));
+        state.finish_load(newer, page(&[fresh]), true, &mut events);
+
+        assert_eq!(message_ids(&state, GENERAL), Some(vec![5, 10, 20, 30]));
+        assert_eq!(
+            reactions(&state, GENERAL, 30),
+            one(UP, 1, false),
+            "added: {add_it}"
+        );
+    }
+}
+
 // Messages are held by the hundred; a reaction list costs one pointer pair on those without any.
 #[test]
 fn a_message_stays_small() {
