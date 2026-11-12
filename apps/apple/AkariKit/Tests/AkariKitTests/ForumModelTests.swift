@@ -969,4 +969,47 @@ final class ForumModelTests {
             key: .attachment(channelId: id(41), messageId: id(41), attachmentId: id(raw)),
             display: display, cover: nil)
     }
+
+    // MARK: New messages
+
+    @Test
+    func anOpenedUnreadPostSaysHowManyMessagesAreNew() throws {
+        list([41, 42, 43, 44])
+        store.update { state in
+            state.unreadPosts = [id(41), id(42), id(43)]
+            state.postNewCounts = [id(41): 3, id(42): nil, id(43): 40]
+        }
+        let session = inForum()
+
+        let cards = try forum(session).posts
+
+        #expect(cards.map(\.newCount) == ["3", "1+", "25+", nil])
+        session.close()
+    }
+
+    @Test
+    func discordsWordingOfTheCount() {
+        #expect(ForumModel.Card.newCount(nil) == "1+")
+        #expect(ForumModel.Card.newCount(0) == "1+")
+        #expect(ForumModel.Card.newCount(1) == "1")
+        #expect(ForumModel.Card.newCount(24) == "24")
+        #expect(ForumModel.Card.newCount(25) == "25+")
+    }
+
+    @Test
+    func theCountsFollowTheirEvent() async throws {
+        list([41])
+        store.update { state in
+            state.unreadPosts = [id(41)]
+            state.postNewCounts = [id(41): nil]
+        }
+        let session = inForum()
+        #expect(try forum(session).posts.first?.newCount == "1+")
+
+        store.update { $0.postNewCounts = [id(41): 2] }
+        try forum(session).apply(EventBatch([.postCountsChanged(forumId: forumId)]))
+
+        #expect(try forum(session).posts.first?.newCount == "2")
+        session.close()
+    }
 }

@@ -25,6 +25,7 @@ final class CallLog: Sendable {
         case setBrowsing(ChannelId?)
         case createThread(ChannelId, MessageId?, String, isPrivate: Bool, CreateThreadLocation)
         case openForum(ChannelId?)
+        case createPost(ChannelId, String, [TagId], String)
         case refreshForum(ChannelId)
         case loadOlderPosts(ChannelId, ForumView)
         case searchPosts(ChannelId, String, ForumView)
@@ -57,6 +58,7 @@ final class CallLog: Sendable {
         case threadCreation(ChannelId)
         case canStartThread(ChannelId, MessageId)
         case threadSlowmode(ChannelId)
+        case postCreation(ChannelId)
         case messageLengthLimit
         case slowmode(ChannelId)
         case channelBadges([ChannelId])
@@ -68,6 +70,7 @@ final class CallLog: Sendable {
         case postPreview(ChannelId)
         case unreadPosts([ChannelId])
         case newPosts([ChannelId])
+        case postNewCounts([ChannelId])
     }
 
     private let state = Locked<(calls: [Call], offMainThread: Int)>(([], 0))

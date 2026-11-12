@@ -448,7 +448,7 @@ struct ForumCardFooter: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ForumCardCount(count: card.count, size: 14)
+            ForumCardCount(count: card.count, size: 14, newCount: card.newCount)
             Text("\u{2022}")
                 .foregroundStyle(Color(nsColor: Palette.borderSubtle))
             ForumTime(date: card.time, now: now)
@@ -466,15 +466,29 @@ struct ForumCardCount: View {
     let count: String
     let size: CGFloat
     var muted = false
+    /// "3" for "(3 New)" after the count, in the brand's text color.
+    var newCount: String?
+
+    /// "(3 New)", "(1+ New)", "(25+ New)", as Discord words them.
+    static func new(_ count: String) -> String {
+        "(\(count) New)"
+    }
 
     var body: some View {
+        // With new messages the gallery's count is as bright as the list's.
+        let dim = muted && newCount == nil
         HStack(spacing: 4) {
             Image(systemName: Self.symbol)
                 .font(.system(size: size - 2))
-                .foregroundStyle(Color(nsColor: muted ? Palette.textMuted : Palette.textDefault))
+                .foregroundStyle(Color(nsColor: dim ? Palette.textMuted : Palette.textDefault))
             Text(count)
                 .font(TypeScale.forumFooter.font)
-                .foregroundStyle(Color(nsColor: muted ? Palette.interactiveText : Palette.textDefault))
+                .foregroundStyle(Color(nsColor: dim ? Palette.interactiveText : Palette.textDefault))
+            if let newCount {
+                Text(Self.new(newCount))
+                    .font(TypeScale.forumNewCount.font)
+                    .foregroundStyle(Color(nsColor: Palette.textBrand))
+            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -628,7 +642,7 @@ struct ForumGalleryCard: View {
                         }
                     }
                     .padding(.bottom, Self.gap)
-                ForumCardCount(count: card.count, size: 16, muted: true)
+                ForumCardCount(count: card.count, size: 16, muted: true, newCount: card.newCount)
                     .padding(.horizontal, 12)
                     .frame(height: Self.footer)
             }

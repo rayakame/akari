@@ -3,6 +3,7 @@
 final class Drafts {
     private var texts: [ChannelId: String] = [:]
     var forms: [ChannelId: ThreadFormDraft] = [:]
+    var posts: [ChannelId: PostFormDraft] = [:]
 
     subscript(channel: ChannelId) -> String {
         get { texts[channel] ?? "" }

@@ -441,6 +441,18 @@ public final class SessionModel {
         updateReading()
     }
 
+    /// The post form's "Post": the new post joins the forum's list and opens beside it, unless
+    /// the user went elsewhere meanwhile.
+    public func submitPost() async {
+        guard let page = forum, let post = await page.form.create() else {
+            return
+        }
+        page.refresh()
+        if forum === page {
+            await openBeside(thread: post, from: page.forumId)
+        }
+    }
+
     /// The split view's X: closes it, and the channel forgets it.
     public func closeSplit() {
         guard let open = openChannelId, split != nil else {
@@ -906,7 +918,7 @@ public final class SessionModel {
         }
     }
 
-    static let postBarLocation = ThreadLocation.toolbarOverflow
+    static let postBarLocation = ThreadLocation.forumToolbar
 
     // TOO_MANY_THREAD_MEMBERS.
     private static let threadFull: UInt32 = 30033
@@ -1466,7 +1478,9 @@ public final class SessionModel {
     }
 
     private func forumPage(of id: ChannelId) -> ForumModel {
-        ForumModel(forumId: id, settings: forumSettings[id], store: store, account: account) {
+        ForumModel(
+            forumId: id, settings: forumSettings[id], store: store, account: account, drafts: drafts
+        ) {
             [weak self] settings in
             self?.forumSettings[id] = settings
         }

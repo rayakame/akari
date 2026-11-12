@@ -27,6 +27,8 @@ struct EventBatch {
     var forumsChanged: Set<ChannelId> = []
     // Posts whose first message arrived, changed or went.
     var previewsChanged: Set<ChannelId> = []
+    // Forums whose posts' new-message counts changed.
+    var postCountsChanged: Set<ChannelId> = []
     // Left or deleted, not down for an outage.
     var removedGuilds: Set<GuildId> = []
     var windowsChanged: Set<ChannelId> = []
@@ -88,6 +90,8 @@ struct EventBatch {
                 forumsChanged.insert(forum)
             case .postPreviewChanged(let post):
                 previewsChanged.insert(post)
+            case .postCountsChanged(let forum):
+                postCountsChanged.insert(forum)
             case .channelRemoved(let channel, let guild):
                 channelsChanged[guild, default: []].insert(channel)
                 removedChannels.insert(channel)

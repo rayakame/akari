@@ -211,4 +211,20 @@ final class ForumSplitTests {
         #expect(session.split == nil)
         session.close()
     }
+
+    // Discord's client names the bar as the place: "Forum Toolbar".
+    @Test
+    func followingFromTheBarJoinsAndLeavesThePost() async throws {
+        let session = inForum()
+        await session.openBeside(thread: id(41), from: forumId)
+
+        await session.setFollowing(true, post: id(41))
+        #expect(account.log.actions.last == .joinThread(id(41), .forumToolbar))
+        store.subscription.send(.channelUpdated(channelId: id(41), guildId: id(1)))
+        try await eventually { session.split?.postBar?.following == true }
+
+        await session.setFollowing(false, post: id(41))
+        #expect(account.log.actions.last == .leaveThread(id(41), .forumToolbar))
+        session.close()
+    }
 }

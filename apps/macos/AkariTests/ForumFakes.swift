@@ -39,8 +39,12 @@ nonisolated struct ForumFakes {
     var firstMessage: String?
     /// The posts, by index, whose cards show NEW.
     var new: Set<Int> = []
+    /// The posts, by index, with new messages counted for "(N New)".
+    var newCounts: [Int: UInt32] = [:]
     /// The first post's title, in place of its own.
     var firstTitle: String?
+    var canPost = true
+    var requiresTag = false
     private(set) var account: ForumAccount?
 
     @MainActor
@@ -198,6 +202,19 @@ nonisolated final class ForumStore: Store, @unchecked Sendable {
 
     override func unreadPosts(postIds: [ChannelId]) -> [ChannelId] {
         postIds.filter { post in fakes.unread.contains { ForumFakes.post($0) == post } }
+    }
+
+    override func postNewCounts(postIds: [ChannelId]) -> [PostNewCount] {
+        fakes.newCounts.compactMap { index, count in
+            let post = ForumFakes.post(index)
+            return postIds.contains(post) ? PostNewCount(postId: post, count: count) : nil
+        }
+    }
+
+    override func postCreation(forumId: ChannelId) -> PostCreation {
+        PostCreation(
+            allowed: fakes.canPost, tags: ForumFakes.tags.filter { !$0.moderated }.map(\.id),
+            requiresTag: fakes.requiresTag)
     }
 
     override func newPosts(postIds: [ChannelId]) -> [ChannelId] {

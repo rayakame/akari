@@ -34,6 +34,7 @@ final class FakeStore: Store, @unchecked Sendable {
         // Messages that can start a thread.
         var startable: Set<MessageId> = []
         var threadSlowmodes: [ChannelId: Slowmode] = [:]
+        var postCreations: [ChannelId: PostCreation] = [:]
         var ageGates: [ChannelId: AgeGate] = [:]
         var hidingDownloads: Set<ChannelId> = []
         // Each forum's page for a view; none: nothing listed, nothing loaded.
@@ -41,6 +42,8 @@ final class FakeStore: Store, @unchecked Sendable {
         var postPreviews: [ChannelId: PostPreview] = [:]
         var unreadPosts: Set<ChannelId> = []
         var newPosts: Set<ChannelId> = []
+        // `nil` inside: Discord hasn't said how many.
+        var postNewCounts: [ChannelId: UInt32?] = [:]
 
         mutating func add(_ guilds: Guild...) {
             for guild in guilds {
@@ -198,6 +201,12 @@ final class FakeStore: Store, @unchecked Sendable {
         read(.canStartThread(channelId, messageId)) { $0.startable.contains(messageId) }
     }
 
+    override func postCreation(forumId: ChannelId) -> PostCreation {
+        read(.postCreation(forumId)) { state in
+            state.postCreations[forumId] ?? PostCreation(allowed: false, tags: [], requiresTag: false)
+        }
+    }
+
     override func threadSlowmode(parentId: ChannelId) -> Slowmode? {
         read(.threadSlowmode(parentId)) { $0.threadSlowmodes[parentId] }
     }
@@ -258,6 +267,14 @@ final class FakeStore: Store, @unchecked Sendable {
 
     override func unreadPosts(postIds: [ChannelId]) -> [ChannelId] {
         read(.unreadPosts(postIds)) { state in postIds.filter(state.unreadPosts.contains) }
+    }
+
+    override func postNewCounts(postIds: [ChannelId]) -> [PostNewCount] {
+        read(.postNewCounts(postIds)) { state in
+            postIds.compactMap { post in
+                state.postNewCounts[post].map { PostNewCount(postId: post, count: $0) }
+            }
+        }
     }
 
     override func newPosts(postIds: [ChannelId]) -> [ChannelId] {

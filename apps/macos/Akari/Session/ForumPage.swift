@@ -18,7 +18,7 @@ struct ForumPage: View {
             ScrollViewReader { scroller in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        header
+                        header(height: proxy.size.height)
                             .id(Self.top)
                             .padding(.horizontal, ForumMeasures.inset)
                         sections(size: ForumMeasures.content(proxy.size))
@@ -70,14 +70,21 @@ struct ForumPage: View {
             ForumMeasures.galleryCardHeight(width: column, media: forum.isMedia))
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForumSearchRow(
+    private func header(height: CGFloat) -> some View {
+        let submit: () -> Void = { [session] in
+            Task { await session.submitPost() }
+        }
+        let create: (() -> Void)? =
+            forum.form.canCreate && !forum.form.isOpen ? { [forum] in forum.openForm() } : nil
+        return VStack(alignment: .leading, spacing: 0) {
+            ForumHeaderRow(
                 forum: forum,
                 guidelines: forum.channel?.topic?.isEmpty == false
                     ? { withAnimation(.easeInOut(duration: 0.3)) { guidelinesOpen.toggle() } }
                     : nil,
-                shiftEscape: session.markServerRead)
+                submit: submit,
+                shiftEscape: session.markServerRead,
+                messageMaxHeight: max(PostFormLayout.messageMin, height / 2))
             if guidelinesOpen, let topic = forum.channel?.topic, !topic.isEmpty {
                 ForumGuidelines(topic: topic) {
                     withAnimation(.easeInOut(duration: 0.3)) { guidelinesOpen = false }
@@ -87,7 +94,7 @@ struct ForumPage: View {
             }
             ForumTagsBar(forum: forum)
             if forum.isEmpty {
-                ForumEmptyState(channel: name, tags: forum.settings.tags.count)
+                ForumEmptyState(channel: name, tags: forum.settings.tags.count, create: create)
             }
         }
     }
@@ -170,105 +177,6 @@ struct ForumPage: View {
             return nil
         }
         return Task { await session.openBeside(thread: post, from: forum) }
-    }
-}
-
-/// The header row as search: the magnifying glass (a spinner while searching), the field, the
-/// guidelines button; the status row under it while a search runs or answered.
-struct ForumSearchRow: View {
-    let forum: ForumModel
-    let guidelines: (() -> Void)?
-    var shiftEscape: () -> Void = {}
-    @State private var query = ""
-    @FocusState private var focused: Bool
-
-    static let placeholder = "Search"
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Group {
-                    if forum.search == .searching {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color(nsColor: Palette.interactiveText))
-                    }
-                }
-                .frame(width: ForumMeasures.control, height: ForumMeasures.control)
-                .padding(.trailing, 8)
-                .accessibilityHidden(true)
-                TextField(
-                    "", text: $query,
-                    prompt: Text(Self.placeholder)
-                        .foregroundStyle(Color(nsColor: Palette.textMuted))
-                )
-                .textFieldStyle(.plain)
-                .font(TypeScale.forumField.font)
-                .foregroundStyle(Color(nsColor: Palette.textStrong))
-                .focused($focused)
-                .onExitCommand {
-                    if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
-                        shiftEscape()
-                    } else {
-                        query = ""
-                    }
-                }
-                .accessibilityLabel(Self.placeholder)
-                .padding(.trailing, 12)
-                if let guidelines {
-                    GuidelinesButton(action: guidelines)
-                }
-            }
-            .padding(8)
-            .background(Color(nsColor: Palette.inputBackground))
-            if let status = forum.status {
-                Rectangle()
-                    .fill(Color(nsColor: Palette.borderSubtle))
-                    .frame(height: 1)
-                HStack(spacing: 8) {
-                    Text(status)
-                        .font(TypeScale.forumStatus.font)
-                        .foregroundStyle(Color(nsColor: Palette.textDefault))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if forum.search == .found {
-                        Button("Clear") {
-                            query = ""
-                            forum.clearSearch()
-                        }
-                        .buttonStyle(.plain)
-                        .font(TypeScale.forumStatusAction.font)
-                        .foregroundStyle(Color(nsColor: Palette.textLink))
-                        .background(CursorArea(.pointingHand))
-                    }
-                }
-                .padding(.horizontal, 12)
-                .frame(height: ForumMeasures.control)
-                .background(Color(nsColor: Palette.inputBackground))
-            }
-        }
-        .background(Color(nsColor: Palette.panel))
-        .clipShape(RoundedRectangle(cornerRadius: ForumMeasures.radius))
-        .overlay {
-            RoundedRectangle(cornerRadius: ForumMeasures.radius)
-                .strokeBorder(
-                    Color(nsColor: focused ? Palette.brand : Palette.borderSubtle), lineWidth: 1)
-        }
-        .onChange(of: query) { _, text in
-            forum.setQuery(text)
-            // Past 100 characters the model's query stays: the field follows it.
-            if forum.query != text {
-                query = forum.query
-            }
-        }
-        .onChange(of: forum.query) { _, text in
-            if text != query {
-                query = text
-            }
-        }
-        .onAppear { query = forum.query }
     }
 }
 
@@ -672,6 +580,10 @@ struct ForumEmptyState: View {
     let channel: String
     /// The tag filter's size.
     let tags: Int
+    /// "Create a post", where the user may.
+    var create: (() -> Void)?
+
+    static let createTitle = "Create a post"
 
     static func words(channel: String, tags: Int) -> (title: String, text: String) {
         switch tags {
@@ -698,6 +610,10 @@ struct ForumEmptyState: View {
             Text(words.text)
                 .font(TypeScale.forumEmptyText.font)
                 .foregroundStyle(Color(nsColor: Palette.textDefault))
+            if let create {
+                BrandButton(title: Self.createTitle, size: .small, secondary: true, action: create)
+                    .padding(.top, 8)
+            }
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)

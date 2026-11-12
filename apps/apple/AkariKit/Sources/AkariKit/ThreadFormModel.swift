@@ -316,9 +316,12 @@ public final class ThreadFormModel {
             nameError = reason.isEmpty ? Self.blocked : reason
         case .NameRequired?:
             nameError = Self.nameRequired
+        case .MessageBlocked(let reason)?:
+            messageError = reason.isEmpty ? Self.blocked : reason
         case .Request(.RateLimited)?:
             alert = Alert(title: "Cannot create thread", message: "You are being rate limited.")
-        case .Request?, nil:
+        // A forum's rule: no thread's create answers it.
+        case .Request?, .TagRequired?, nil:
             alert = Alert(title: "Error", message: "An error occurred, please try again.")
         }
     }

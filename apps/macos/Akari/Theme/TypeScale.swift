@@ -147,6 +147,7 @@ nonisolated enum TypeScale {
     static let forumAuthor = TextStyle(15, .semibold, line: 18)
     static let forumMessage = TextStyle(15, .medium, line: 18)
     static let forumFooter = TextStyle(14, .medium, line: 18)
+    static let forumNewCount = TextStyle(14, .semibold, line: 18)
     static let forumTime = TextStyle(14, line: 18)
     static let forumStatus = TextStyle(12, line: 16)
     static let forumStatusAction = TextStyle(12, .semibold, line: 16)
