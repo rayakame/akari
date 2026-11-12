@@ -196,6 +196,31 @@ async fn a_reaction_reaches_the_subscription_and_the_read() {
 }
 
 #[tokio::test]
+async fn message_reactions_keeps_the_order_asked() {
+    let mut viewing = viewing().await;
+    let thumbs = json!([{"emoji": {"id": null, "name": "👍"}, "count": 1, "me": false}]);
+    let mut answer = reply();
+    answer["reactions"] = thumbs.clone();
+    viewing.dispatch("MESSAGE_CREATE", answer).await;
+    viewing.until(inserted(REPLY)).await;
+    let message = miras(|message| message["reactions"] = thumbs);
+    viewing.dispatch("MESSAGE_CREATE", message).await;
+    viewing.until(inserted(MESSAGE)).await;
+    let store = viewing.account.store();
+    let order = |asked: Vec<MessageId>| -> Vec<MessageId> {
+        store
+            .message_reactions(GENERAL, asked)
+            .iter()
+            .map(|read| read.message_id)
+            .collect()
+    };
+
+    assert_eq!(order(vec![MESSAGE, TARGET, REPLY]), [MESSAGE, REPLY]);
+    assert_eq!(order(vec![REPLY, MESSAGE]), [REPLY, MESSAGE]);
+    viewing.account.close();
+}
+
+#[tokio::test]
 async fn message_reactions_reads_many_messages_at_once() {
     let mut viewing = viewing().await;
     viewing.dispatch("MESSAGE_CREATE", reply()).await;
@@ -299,6 +324,40 @@ async fn a_reply_preview_carries_what_its_special_texts_need() {
     assert!(preview.has_attachments);
     assert!(preview.has_sticker);
     assert!(!preview.has_embeds);
+    viewing.account.close();
+}
+
+#[tokio::test]
+async fn a_command_result_and_a_forward_cross_as_what_they_are() {
+    let mut viewing = viewing().await;
+    let mut message = reply();
+    message["referenced_message"]["type"] = 20.into();
+    viewing.dispatch("MESSAGE_CREATE", message).await;
+    viewing.until(inserted(REPLY)).await;
+    let store = viewing.account.store();
+    let ReplyTarget::Loaded { preview } = store.reply_target(GENERAL, TARGET) else {
+        panic!("the target came with the reply");
+    };
+    assert_eq!(preview.kind, MessageType::ChatInputCommand);
+    assert!(!preview.forwarded);
+
+    let later = MessageId::new(REPLY.get() + 10);
+    let forward = MessageId::new(TARGET.get() + 10);
+    let mut message = reply();
+    message["id"] = later.get().to_string().into();
+    message["message_reference"]["message_id"] = forward.get().to_string().into();
+    let target = &mut message["referenced_message"];
+    target["id"] = forward.get().to_string().into();
+    target["message_reference"] = json!({
+        "type": 1, "channel_id": "300000000000000003", "message_id": "400000000000000009",
+    });
+    viewing.dispatch("MESSAGE_CREATE", message).await;
+    viewing.until(inserted(later)).await;
+    let ReplyTarget::Loaded { preview } = store.reply_target(GENERAL, forward) else {
+        panic!("the target came with the reply");
+    };
+    assert_eq!(preview.kind, MessageType::Default);
+    assert!(preview.forwarded);
     viewing.account.close();
 }
 
@@ -407,6 +466,77 @@ async fn unread_pins_reach_the_subscription_and_the_read() {
 
     assert!(!store.pins_unread(GENERAL));
     viewing.account.close();
+}
+
+// One action allowed at a time: each field crosses as itself and as nothing else.
+#[test]
+fn each_action_crosses_as_itself() {
+    use akari_core::state::MessageActions as Core;
+
+    type Allow = fn(&mut Core);
+    type Allowed = fn(&MessageActions) -> bool;
+    let fields: [(&str, Allow, Allowed); 14] = [
+        ("reply", |core| core.reply = true, |ours| ours.reply),
+        (
+            "reply_pings",
+            |core| core.reply_pings = true,
+            |ours| ours.reply_pings,
+        ),
+        (
+            "mention_toggle",
+            |core| core.mention_toggle = true,
+            |ours| ours.mention_toggle,
+        ),
+        ("edit", |core| core.edit = true, |ours| ours.edit),
+        ("delete", |core| core.delete = true, |ours| ours.delete),
+        ("pin", |core| core.pin = true, |ours| ours.pin),
+        ("unpin", |core| core.unpin = true, |ours| ours.unpin),
+        ("react", |core| core.react = true, |ours| ours.react),
+        (
+            "toggle_reaction",
+            |core| core.toggle_reaction = true,
+            |ours| ours.toggle_reaction,
+        ),
+        (
+            "remove_reactions",
+            |core| core.remove_reactions = true,
+            |ours| ours.remove_reactions,
+        ),
+        (
+            "mark_unread",
+            |core| core.mark_unread = true,
+            |ours| ours.mark_unread,
+        ),
+        (
+            "copy_link",
+            |core| core.copy_link = true,
+            |ours| ours.copy_link,
+        ),
+        (
+            "create_thread",
+            |core| core.create_thread = true,
+            |ours| ours.create_thread,
+        ),
+        (
+            "view_thread",
+            |core| core.view_thread = true,
+            |ours| ours.view_thread,
+        ),
+    ];
+
+    for (allowed, allow, _) in &fields {
+        let mut core = Core::default();
+        allow(&mut core);
+        let crossed = MessageActions::from(core);
+
+        for (field, _, is_allowed) in &fields {
+            assert_eq!(
+                is_allowed(&crossed),
+                field == allowed,
+                "{allowed} as {field}"
+            );
+        }
+    }
 }
 
 #[tokio::test]
