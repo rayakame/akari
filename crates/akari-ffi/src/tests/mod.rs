@@ -10,6 +10,7 @@ mod formatted;
 mod forum;
 mod images;
 mod login;
+mod message_data;
 mod messages;
 mod settings;
 mod support;
