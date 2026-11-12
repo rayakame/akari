@@ -16,7 +16,7 @@ use super::part::PartFile;
 use super::signed::{self, Refresher, Renewal};
 use super::sniff;
 use super::url::{Form, Planned, is_attachment_link};
-use super::{EmbedSlot, ImageError, ImageFile, ImageKey, ImageRequest, MAX_BODY};
+use super::{EmbedSlot, ImageError, ImageFile, ImageKey, ImageRequest, MAX_BODY, MAX_STREAMED};
 use crate::DiscordClient;
 use crate::backoff;
 use crate::model::UserId;
@@ -50,6 +50,16 @@ struct FlightKey {
     needed: u32,
 }
 
+impl FlightKey {
+    fn of(planned: &Planned) -> Self {
+        Self {
+            disk: planned.disk.clone(),
+            form: planned.form,
+            needed: planned.needed,
+        }
+    }
+}
+
 struct Flight {
     id: u64,
     waiters: usize,
@@ -76,8 +86,10 @@ pub(crate) struct Images {
     flights: Mutex<Flights>,
     // Keys Discord answered "no such image" for, this session.
     missing: Mutex<HashSet<String>>,
-    // Asks that ended over the cap this session: the same ask would again.
-    oversized: Mutex<HashSet<FlightKey>>,
+    // Asks that ended over the cap or as no image this session: the same ask would again.
+    refused: Mutex<HashMap<FlightKey, ImageError>>,
+    // One heavy file streams at a time: an ask for the same one waits for the file it keeps.
+    streaming: tokio::sync::Mutex<()>,
     // Renewed links by path, beside the store: a renewal never reloads a row.
     renewed: Mutex<HashMap<String, Url>>,
 }
@@ -131,7 +143,8 @@ impl Images {
             runtime: runtime.clone(),
             flights: Mutex::default(),
             missing: Mutex::default(),
-            oversized: Mutex::default(),
+            refused: Mutex::default(),
+            streaming: tokio::sync::Mutex::default(),
             renewed: Mutex::default(),
         })
     }
@@ -262,7 +275,12 @@ impl Images {
             tracing::debug!(target: LOG, key = %planned.disk, "no image directory");
             return Err(ImageError::Unavailable);
         };
-        if let Some(entry) = tier.find(&planned.disk, planned.form, planned.needed).await {
+        let mut kept = tier.find(&planned.disk, planned.form, planned.needed).await;
+        // A GIF over the cap kept as the proxy's WebP, only for a host that plays WebP.
+        if kept.is_none() && planned.webp.is_some() {
+            kept = tier.find(&planned.disk, Form::WebP, planned.needed).await;
+        }
+        if let Some(entry) = kept {
             return Ok(ImageFile {
                 path: entry.path,
                 width: entry.width,
@@ -271,9 +289,9 @@ impl Images {
                 from_disk: true,
             });
         }
-        if lock(&self.oversized).contains(&flight) {
-            tracing::debug!(target: LOG, key = %planned.disk, "image known to be over the cap");
-            return Err(ImageError::TooLarge);
+        if let Some(err) = lock(&self.refused).get(&flight).copied() {
+            tracing::debug!(target: LOG, key = %planned.disk, reason = error_name(err), "image known not to show");
+            return Err(err);
         }
         if matches!(self.store.connection(), ConnectionState::Offline) {
             tracing::debug!(target: LOG, key = %planned.disk, "offline, image not on disk");
@@ -415,7 +433,7 @@ impl Images {
         let outcome = loop {
             attempts += 1;
             match self.media.fetch(&url, MAX_BODY).await {
-                Fetched::Body(bytes) => break self.keep(&planned, bytes).await,
+                Fetched::Body(bytes) => break self.keep(&planned, planned.form, bytes).await,
                 Fetched::Status(403 | 404)
                     if planned.signed.is_some()
                         && !renewed_after_denial
@@ -458,7 +476,11 @@ impl Images {
                         cap = MAX_BODY,
                         "image over the display cap"
                     );
-                    break Err(ImageError::TooLarge);
+                    break if planned.form == Form::Gif {
+                        self.heavy(&planned).await
+                    } else {
+                        Err(ImageError::TooLarge)
+                    };
                 }
                 Fetched::Refused => break Err(ImageError::Unsupported),
                 Fetched::RateLimited if attempts < ATTEMPTS => {}
@@ -485,22 +507,158 @@ impl Images {
             "image downloaded"
         );
         if outcome == Err(ImageError::TooLarge) {
-            let mut oversized = lock(&self.oversized);
-            if oversized.len() >= RENEWED_LIMIT {
-                oversized.clear();
-            }
-            oversized.insert(flight);
+            self.refuse(flight, ImageError::TooLarge);
         }
         outcome
     }
 
-    async fn keep(&self, planned: &Planned, bytes: Vec<u8>) -> Answer {
-        let inspected = sniff::inspect(&bytes).ok_or(ImageError::NotAnImage)?;
-        if u64::from(inspected.width) * u64::from(inspected.height) > MAX_PIXELS {
-            tracing::debug!(target: LOG, key = %planned.disk, width = inspected.width, height = inspected.height, "image over the pixel cap");
+    // Whether to ask again after `fetched`, once the wait is over.
+    async fn retried(fetched: &Fetched, attempts: u32) -> bool {
+        if attempts >= ATTEMPTS {
+            return false;
+        }
+        match fetched {
+            Fetched::RateLimited => true,
+            Fetched::Status(500..) | Fetched::Transport(_) => {
+                tokio::time::sleep(retry_wait(attempts)).await;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn refuse(&self, flight: FlightKey, err: ImageError) {
+        let mut refused = lock(&self.refused);
+        if refused.len() >= RENEWED_LIMIT {
+            refused.clear();
+        }
+        refused.insert(flight, err);
+    }
+
+    // A GIF no form of which fits the display cap: the proxy's animated WebP at the box's size
+    // where the host plays it, else the file streamed to disk.
+    async fn heavy(&self, planned: &Planned) -> Answer {
+        let signature = self.signed(planned, false, false).await?;
+        // A WebP that failed might fit next time: then nothing is remembered as too large.
+        let mut webp_may_fit = false;
+        if let Some(webp) = &planned.webp {
+            let url = resigned(planned, webp, &signature);
+            let mut attempts = 0;
+            let fetched = loop {
+                attempts += 1;
+                let fetched = self.media.fetch(&url, MAX_BODY).await;
+                if !Self::retried(&fetched, attempts).await {
+                    break fetched;
+                }
+            };
+            webp_may_fit = matches!(
+                fetched,
+                Fetched::RateLimited | Fetched::Status(500..) | Fetched::Transport(_)
+            );
+            if let Fetched::Body(bytes) = fetched {
+                let plays = sniff::inspect(&bytes).is_some_and(|inspected| {
+                    inspected.animated && inspected.format == sniff::Format::WebP
+                });
+                if plays {
+                    match self.keep(planned, Form::WebP, bytes).await {
+                        Ok(file) => {
+                            tracing::debug!(target: LOG, key = %planned.disk, "heavy GIF kept as the proxy's WebP");
+                            return Ok(file);
+                        }
+                        Err(ImageError::TooLarge) => {}
+                        Err(_) => webp_may_fit = true,
+                    }
+                }
+            }
+            tracing::debug!(target: LOG, key = %planned.disk, "no WebP of a heavy GIF, the file streamed");
+        }
+        match self.streamed(planned, signature).await {
+            Err(ImageError::TooLarge) if webp_may_fit => Err(ImageError::Unavailable),
+            answer => answer,
+        }
+    }
+
+    async fn streamed(&self, planned: &Planned, mut signature: Url) -> Answer {
+        let _one = self.streaming.lock().await;
+        let tier = self
+            .tier()
+            .await
+            .filter(|tier| !tier.is_deleted())
+            .ok_or(ImageError::Unavailable)?;
+        // Another box's stream of the same file may have kept it meanwhile.
+        if let Some(entry) = tier.find(&planned.disk, planned.form, planned.needed).await {
+            return Ok(ImageFile {
+                path: entry.path,
+                width: entry.width,
+                height: entry.height,
+                animated: entry.animated,
+                from_disk: true,
+            });
+        }
+        let source = planned.upload.as_ref().unwrap_or(&planned.url);
+        let mut url = resigned(planned, source, &signature);
+        if tokio::fs::create_dir_all(tier.temporary()).await.is_err() {
+            return Err(ImageError::Io);
+        }
+        let part = PartFile::new(tier.temporary_file());
+        let mut renewed_after_denial = false;
+        let mut attempts = 0;
+        let length = loop {
+            attempts += 1;
+            match self.media.stream(&url, part.path(), MAX_STREAMED).await {
+                Fetched::File(length) => break length,
+                Fetched::TooLarge => {
+                    tracing::debug!(target: LOG, key = %planned.disk, cap = MAX_STREAMED, "image over the streamed cap");
+                    return Err(ImageError::TooLarge);
+                }
+                Fetched::Status(403 | 404)
+                    if planned.signed.is_some()
+                        && !renewed_after_denial
+                        && signed::expires(&url).is_none_or(|ex| ex <= self.now_seconds()) =>
+                {
+                    renewed_after_denial = true;
+                    signature = self.signed(planned, true, false).await?;
+                    url = resigned(planned, source, &signature);
+                }
+                Fetched::Status(403 | 404 | 410) => return Err(ImageError::NotFound),
+                Fetched::Status(415) | Fetched::NotAnImage => return Err(ImageError::NotAnImage),
+                Fetched::Refused => return Err(ImageError::Unsupported),
+                Fetched::Io => return Err(ImageError::Io),
+                fetched => {
+                    if !Self::retried(&fetched, attempts).await {
+                        return Err(ImageError::Unavailable);
+                    }
+                    tracing::debug!(target: LOG, key = %planned.disk, attempts, "image stream retried");
+                }
+            }
+        };
+        let path = part.path().to_path_buf();
+        let inspected = tokio::task::spawn_blocking(move || sniff::inspect_file(&path))
+            .await
+            .map_err(|_| ImageError::Io)?
+            .map_err(|_| ImageError::Io)?;
+        let Some(inspected) = inspected else {
+            // The same bytes would come again: not streamed twice in a session.
+            self.refuse(FlightKey::of(planned), ImageError::NotAnImage);
+            return Err(ImageError::NotAnImage);
+        };
+        if !inspected.animated {
+            tracing::debug!(target: LOG, key = %planned.disk, "heavy file is a still, not kept");
             return Err(ImageError::TooLarge);
         }
-        if planned.form != Form::Still && !inspected.animated {
+        if over_pixels(planned, inspected) {
+            return Err(ImageError::TooLarge);
+        }
+        self.index(planned, planned.form, inspected, part, length)
+            .await
+    }
+
+    async fn keep(&self, planned: &Planned, form: Form, bytes: Vec<u8>) -> Answer {
+        let inspected = sniff::inspect(&bytes).ok_or(ImageError::NotAnImage)?;
+        if over_pixels(planned, inspected) {
+            return Err(ImageError::TooLarge);
+        }
+        if form != Form::Still && !inspected.animated {
             tracing::debug!(target: LOG, key = %planned.disk, "animation asked for, the file is a still");
         }
         let tier = self
@@ -519,6 +677,23 @@ impl Images {
         if written.is_err() {
             return Err(ImageError::Io);
         }
+        self.index(planned, form, inspected, part, length).await
+    }
+
+    // Moves a downloaded file into the account's directory, under `form`.
+    async fn index(
+        &self,
+        planned: &Planned,
+        form: Form,
+        inspected: sniff::Inspected,
+        part: PartFile,
+        length: u64,
+    ) -> Answer {
+        let tier = self
+            .tier()
+            .await
+            .filter(|tier| !tier.is_deleted())
+            .ok_or(ImageError::Unavailable)?;
         let longest = inspected.width.max(inspected.height);
         let full = planned.full
             || match planned.source {
@@ -529,7 +704,7 @@ impl Images {
         let entry = tier
             .insert(NewFile {
                 key: planned.disk.clone(),
-                form: planned.form,
+                form,
                 width: inspected.width,
                 height: inspected.height,
                 animated: inspected.animated,
@@ -681,7 +856,7 @@ impl Images {
 
     pub(crate) async fn clear(&self) {
         lock(&self.missing).clear();
-        lock(&self.oversized).clear();
+        lock(&self.refused).clear();
         if let Some(tier) = self.tier().await {
             tier.clear().await;
         }
@@ -693,6 +868,23 @@ impl Drop for Images {
         if let Some(owner) = self.owner {
             self.client.release_images(owner);
         }
+    }
+}
+
+fn over_pixels(planned: &Planned, inspected: sniff::Inspected) -> bool {
+    let over = u64::from(inspected.width) * u64::from(inspected.height) > MAX_PIXELS;
+    if over {
+        tracing::debug!(target: LOG, key = %planned.disk, width = inspected.width, height = inspected.height, "image over the pixel cap");
+    }
+    over
+}
+
+// `target` with the plan's current signature; a link Discord doesn't sign stays as it is.
+fn resigned(planned: &Planned, target: &Url, signature: &Url) -> Url {
+    if planned.signed.is_some() {
+        signed::resign(target, signature)
+    } else {
+        target.clone()
     }
 }
 

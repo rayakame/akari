@@ -40,6 +40,10 @@ pub(crate) enum Fetched {
     /// The host isn't one of Discord's image hosts.
     Refused,
     Transport(TransportErrorKind),
+    /// `stream` wrote the body to its file: this many bytes.
+    File(u64),
+    /// `stream` couldn't write its file.
+    Io,
 }
 
 pub(crate) struct MediaClient {
@@ -129,23 +133,19 @@ impl MediaClient {
             .insert(Self::host(url), Instant::now() + wait);
     }
 
-    /// One request for an image of at most `cap` bytes.
-    pub(crate) async fn fetch(&self, url: &Url, cap: usize) -> Fetched {
-        if !self.hosts.allows(url) {
-            return Fetched::Refused;
-        }
-        let _permit = self.slot_for(&self.permits, url).await;
-        let mut response = match self.http.get(url.clone()).send().await {
+    // The answer to a request for an image of at most `cap` bytes, its body unread.
+    async fn begin(&self, url: &Url, cap: usize) -> Result<reqwest::Response, Fetched> {
+        let response = match self.http.get(url.clone()).send().await {
             Ok(response) => response,
-            Err(err) => return Fetched::Transport(TransportError::from_reqwest(err).kind()),
+            Err(err) => return Err(Fetched::Transport(TransportError::from_reqwest(err).kind())),
         };
         let status = response.status().as_u16();
         if status == 429 {
             self.pause(url, response.headers());
-            return Fetched::RateLimited;
+            return Err(Fetched::RateLimited);
         }
         if status != 200 {
-            return Fetched::Status(status);
+            return Err(Fetched::Status(status));
         }
         let image = response
             .headers()
@@ -153,14 +153,27 @@ impl MediaClient {
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.trim_start().starts_with("image/"));
         if !image {
-            return Fetched::NotAnImage;
+            return Err(Fetched::NotAnImage);
         }
         if response
             .content_length()
             .is_some_and(|length| length > cap as u64)
         {
-            return Fetched::TooLarge;
+            return Err(Fetched::TooLarge);
         }
+        Ok(response)
+    }
+
+    /// One request for an image of at most `cap` bytes.
+    pub(crate) async fn fetch(&self, url: &Url, cap: usize) -> Fetched {
+        if !self.hosts.allows(url) {
+            return Fetched::Refused;
+        }
+        let _permit = self.slot_for(&self.permits, url).await;
+        let mut response = match self.begin(url, cap).await {
+            Ok(response) => response,
+            Err(failed) => return failed,
+        };
         let mut body = Vec::new();
         loop {
             match response.chunk().await {
@@ -174,6 +187,42 @@ impl MediaClient {
                 Err(err) => return Fetched::Transport(TransportError::from_reqwest(err).kind()),
             }
         }
+    }
+
+    /// As `fetch`, the body written to `file` as it arrives, on one of the saves' slots: a
+    /// heavy file never stalls a row. The caller deletes a file that isn't whole.
+    pub(crate) async fn stream(&self, url: &Url, file: &Path, cap: usize) -> Fetched {
+        if !self.hosts.allows(url) {
+            return Fetched::Refused;
+        }
+        let _permit = self.slot_for(&self.saves, url).await;
+        let mut response = match self.begin(url, cap).await {
+            Ok(response) => response,
+            Err(failed) => return failed,
+        };
+        let Ok(mut file) = tokio::fs::File::create(file).await else {
+            return Fetched::Io;
+        };
+        let mut written = 0;
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    if written + chunk.len() > cap {
+                        return Fetched::TooLarge;
+                    }
+                    if file.write_all(&chunk).await.is_err() {
+                        return Fetched::Io;
+                    }
+                    written += chunk.len();
+                }
+                Ok(None) => break,
+                Err(err) => return Fetched::Transport(TransportError::from_reqwest(err).kind()),
+            }
+        }
+        if file.flush().await.is_err() {
+            return Fetched::Io;
+        }
+        Fetched::File(written as u64)
     }
 
     /// Streams `url` into a file beside `destination`, whatever its size and type, and moves it

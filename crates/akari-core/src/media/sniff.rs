@@ -1,5 +1,12 @@
 // What a downloaded file is, from its first bytes: Akari keeps only images it can name.
 
+use std::fs::File;
+use std::io::{BufRead, BufReader, Cursor, ErrorKind, Read, Seek};
+use std::path::Path;
+
+// Past any header: a JPEG's size comes after its metadata.
+const HEAD: usize = 256 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Format {
     Png,
@@ -38,6 +45,18 @@ pub(crate) fn inspect(bytes: &[u8]) -> Option<Inspected> {
         jpeg(bytes)
     } else {
         None
+    }
+}
+
+/// What a file too heavy to hold in memory is: a GIF's blocks are walked on disk, any other
+/// format is named by the file's first 256 KB. An error is a read that failed.
+pub(crate) fn inspect_file(path: &Path) -> std::io::Result<Option<Inspected>> {
+    let mut reader = BufReader::with_capacity(HEAD, File::open(path)?);
+    let head = reader.fill_buf()?;
+    if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
+        gif_blocks(&mut reader)
+    } else {
+        Ok(inspect(head))
     }
 }
 
@@ -97,47 +116,83 @@ fn png(bytes: &[u8]) -> Option<Inspected> {
 
 // Counts frames by walking the blocks; a cut-off file counts what it has.
 fn gif(bytes: &[u8]) -> Option<Inspected> {
-    let (width, height) = (le16(bytes, 6)?, le16(bytes, 8)?);
-    let flags = *bytes.get(10)?;
-    let mut at = 13;
+    gif_blocks(&mut Cursor::new(bytes)).ok().flatten()
+}
+
+// `None` for a file that ends where it mustn't; an error for a read that failed.
+fn gif_blocks(reader: &mut (impl BufRead + Seek)) -> std::io::Result<Option<Inspected>> {
+    let mut header = [0; 11];
+    if !filled(reader, &mut header)? {
+        return Ok(None);
+    }
+    let (Some(width), Some(height)) = (le16(&header, 6), le16(&header, 8)) else {
+        return Ok(None);
+    };
+    let flags = header[10];
+    reader.seek_relative(2)?;
     if flags & 0x80 != 0 {
-        at += 3 << ((flags & 7) + 1);
+        reader.seek_relative(3 << ((flags & 7) + 1))?;
     }
     let mut frames = 0;
-    while let Some(&block) = bytes.get(at) {
+    while let Some(block) = next_byte(reader)? {
         match block {
-            0x21 => at = skip_sub_blocks(bytes, at + 2)?,
+            0x21 => {
+                reader.seek_relative(1)?;
+                if !skip_sub_blocks(reader)? {
+                    return Ok(None);
+                }
+            }
             0x2c => {
                 frames += 1;
                 if frames > 1 {
                     break;
                 }
-                let local = *bytes.get(at + 9)?;
-                at += 10;
-                if local & 0x80 != 0 {
-                    at += 3 << ((local & 7) + 1);
+                let mut descriptor = [0; 9];
+                if !filled(reader, &mut descriptor)? {
+                    return Ok(None);
                 }
-                at = skip_sub_blocks(bytes, at + 1)?;
+                let local = descriptor[8];
+                if local & 0x80 != 0 {
+                    reader.seek_relative(3 << ((local & 7) + 1))?;
+                }
+                reader.seek_relative(1)?;
+                if !skip_sub_blocks(reader)? {
+                    return Ok(None);
+                }
             }
             _ => break,
         }
     }
-    Some(Inspected {
+    Ok(Some(Inspected {
         format: Format::Gif,
         width,
         height,
         animated: frames > 1,
-    })
+    }))
 }
 
-fn skip_sub_blocks(bytes: &[u8], mut at: usize) -> Option<usize> {
+// Whether `buffer` was filled before the end.
+fn filled(reader: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<bool> {
+    match reader.read_exact(buffer) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == ErrorKind::UnexpectedEof => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+fn next_byte(reader: &mut impl Read) -> std::io::Result<Option<u8>> {
+    let mut byte = [0];
+    Ok(filled(reader, &mut byte)?.then_some(byte[0]))
+}
+
+// Whether the blocks ended with their terminator.
+fn skip_sub_blocks(reader: &mut (impl BufRead + Seek)) -> std::io::Result<bool> {
     loop {
-        let length = usize::from(*bytes.get(at)?);
-        at += 1;
-        if length == 0 {
-            return Some(at);
+        match next_byte(reader)? {
+            None => return Ok(false),
+            Some(0) => return Ok(true),
+            Some(length) => reader.seek_relative(i64::from(length))?,
         }
-        at += length;
     }
 }
 
@@ -303,6 +358,120 @@ pub(crate) mod tests {
 
         assert_eq!((inspected.width, inspected.height), (32, 32));
         assert!(inspected.animated);
+    }
+
+    // A comment of `size` bytes, as sub-blocks.
+    fn comment(size: usize) -> Vec<u8> {
+        let mut bytes = vec![0x21, 0xfe];
+        for block in vec![b'.'; size].chunks(255) {
+            bytes.push(block.len() as u8);
+            bytes.extend(block);
+        }
+        bytes.push(0);
+        bytes
+    }
+
+    fn file_with(bytes: &[u8]) -> (crate::cache::tests::TempDir, std::path::PathBuf) {
+        let dir = crate::cache::tests::TempDir::new();
+        let path = dir.path().join("image");
+        std::fs::write(&path, bytes).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn a_file_reads_as_its_bytes_do() {
+        for bytes in [
+            png_bytes(300, 200, true),
+            webp_bytes(300, 200, true),
+            gif_bytes(1),
+            gif_bytes(3),
+            jpeg_bytes(),
+            b"<html>".to_vec(),
+            Vec::new(),
+        ] {
+            let (_dir, path) = file_with(&bytes);
+
+            assert_eq!(inspect_file(&path).unwrap(), inspect(&bytes), "{bytes:?}");
+        }
+        assert!(inspect_file(std::path::Path::new("/nowhere/at/all")).is_err());
+    }
+
+    // The second frame megabytes in: found without the file in memory.
+    #[test]
+    fn a_files_frames_are_found_however_far_in() {
+        let frames = gif_bytes(2);
+        let mut bytes = frames[..19].to_vec();
+        bytes.extend(comment(3 << 20));
+        let first_frame = 19 + 8 + 10 + 5;
+        bytes.extend(&frames[19..first_frame]);
+        bytes.extend(comment(3 << 20));
+        bytes.extend(&frames[first_frame..]);
+        let (_dir, path) = file_with(&bytes);
+
+        let inspected = inspect_file(&path).unwrap().unwrap();
+
+        assert!(inspected.animated);
+        assert_eq!((inspected.width, inspected.height), (300, 200));
+        assert_eq!(Some(inspected), inspect(&bytes));
+    }
+
+    #[test]
+    fn a_cut_off_file_reads_as_its_bytes_do() {
+        let gif = gif_bytes(3);
+        for end in 0..gif.len() {
+            let (_dir, path) = file_with(&gif[..end]);
+
+            assert_eq!(inspect_file(&path).unwrap(), inspect(&gif[..end]), "{end}");
+        }
+    }
+
+    // Fails every read from `after` bytes on.
+    struct Failing {
+        bytes: Cursor<Vec<u8>>,
+        after: u64,
+    }
+
+    impl Read for Failing {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if self.bytes.position() >= self.after {
+                return Err(std::io::Error::other("the disk failed"));
+            }
+            let most = (self.after - self.bytes.position()) as usize;
+            let most = most.min(buffer.len());
+            self.bytes.read(&mut buffer[..most])
+        }
+    }
+
+    impl Seek for Failing {
+        fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.bytes.seek(to)
+        }
+    }
+
+    // A read that failed isn't the file's end: nothing is known about its frames.
+    #[test]
+    fn a_failed_read_names_nothing() {
+        let gif = gif_bytes(3);
+        let first_frame = 19 + 23;
+        for after in [first_frame, first_frame + 4] {
+            let mut reader = BufReader::with_capacity(
+                8,
+                Failing {
+                    bytes: Cursor::new(gif.clone()),
+                    after: after as u64,
+                },
+            );
+
+            assert!(gif_blocks(&mut reader).is_err(), "{after}");
+        }
+        let mut whole = BufReader::with_capacity(
+            8,
+            Failing {
+                bytes: Cursor::new(gif.clone()),
+                after: gif.len() as u64 + 1,
+            },
+        );
+        assert_eq!(gif_blocks(&mut whole).unwrap(), inspect(&gif));
     }
 
     #[test]

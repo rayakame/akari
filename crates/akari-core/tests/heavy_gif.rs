@@ -9,7 +9,7 @@ use akari_core::media::{AnimatedFormat, EmbedSlot, ImageError, ImageKey, ImageRe
 use akari_core::model::Snowflake;
 use akari_core::{DiscordClient, Endpoints, MessageLoad, Token};
 use serde_json::{Value, json};
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::support::gateway::Logs;
@@ -20,6 +20,8 @@ const LINKED: u64 = 400_000_000_000_000_091;
 const ATTACHED: u64 = 400_000_000_000_000_092;
 const ATTACHMENT: u64 = 400_000_000_000_000_093;
 const ELSEWHERE: u64 = 400_000_000_000_000_094;
+const ELSEWHERE_AS_WEBP: u64 = 400_000_000_000_000_095;
+const ELSEWHERE_TOO_HEAVY: u64 = 400_000_000_000_000_096;
 const TOKEN: &str = "heavy-gif-test-token.secret";
 
 // A GIF that never played: 10 159 614 bytes (286 MB decoded), which the media proxy gave back
@@ -31,6 +33,11 @@ const UPLOAD: Shape = Shape {
     bytes: 10_159_614,
 };
 const PROXY_COPY: usize = 33_532_759;
+// The proxy's animated WebP of it: 3.6 KB over the cap at its full size, 7.2 MB at 512 × 384.
+const WEBP_FULL: usize = 16 * 1024 * 1024 + 3_686;
+const WEBP_SMALL: usize = 7_200_000;
+// A byte past what Akari streams to disk.
+const TOO_HEAVY: usize = 64 * 1024 * 1024 + 1;
 
 fn now() -> i64 {
     SystemTime::now()
@@ -56,10 +63,24 @@ fn gif_answer(bytes: Vec<u8>) -> ResponseTemplate {
         .set_body_bytes(bytes)
 }
 
+fn webp_answer(width: u32, height: u32, bytes: usize) -> ResponseTemplate {
+    let mut body = b"RIFF\0\0\0\0WEBPVP8X".to_vec();
+    body.extend(10u32.to_le_bytes());
+    body.extend([0x12, 0, 0, 0]);
+    body.extend(&(width - 1).to_le_bytes()[..3]);
+    body.extend(&(height - 1).to_le_bytes()[..3]);
+    body.resize(bytes, 0);
+    ResponseTemplate::new(200)
+        .insert_header("content-type", "image/webp")
+        .set_body_bytes(body)
+}
+
 // As an attachment and as a posted link, asked as the list and the viewer do (800 and 4096
-// pixels) at the caps the app runs with; another site's GIF has no upload to fall back to.
+// pixels) at the caps the app runs with. Another site's GIF has no upload to fall back to: it
+// plays from the proxy's WebP at the box's size where WebP plays and that fits, else from the
+// proxy's copy streamed to disk.
 #[tokio::test]
-async fn a_gif_the_proxy_makes_too_heavy_plays_from_its_upload() {
+async fn a_gif_the_proxy_makes_too_heavy_plays() {
     let logs = Logs::capture();
     let cdn = MockServer::start().await;
     let media = MockServer::start().await;
@@ -72,6 +93,8 @@ async fn a_gif_the_proxy_makes_too_heavy_plays_from_its_upload() {
     );
     let file = format!("/attachments/{CHANNEL}/{ATTACHMENT}/secret-file-name.gif");
     let external = "/external/abc/https/example.com/secret-file-name.gif";
+    let external_as_webp = "/external/def/https/example.com/secret-file-name.gif";
+    let external_too_heavy = "/external/ghi/https/example.com/secret-file-name.gif";
     let ex = now() + 86_400;
     let query = format!("ex={ex:x}&is={:x}&hm=5ec2e75160a7a7e2e&", ex - 86_400);
     let link = format!("{}{file}?{query}", cdn.uri());
@@ -105,6 +128,26 @@ async fn a_gif_the_proxy_makes_too_heavy_plays_from_its_upload() {
                               "width": UPLOAD.width, "height": UPLOAD.height}
             }])
         ),
+        message(
+            ELSEWHERE_AS_WEBP,
+            json!([]),
+            json!([{
+                "type": "image", "url": "https://example.com/secret-file-name.gif",
+                "thumbnail": {"url": "https://example.com/secret-file-name.gif",
+                              "proxy_url": format!("{}{external_as_webp}", media.uri()),
+                              "width": UPLOAD.width, "height": UPLOAD.height}
+            }])
+        ),
+        message(
+            ELSEWHERE_TOO_HEAVY,
+            json!([]),
+            json!([{
+                "type": "image", "url": "https://example.com/secret-file-name.gif",
+                "thumbnail": {"url": "https://example.com/secret-file-name.gif",
+                              "proxy_url": format!("{}{external_too_heavy}", media.uri()),
+                              "width": UPLOAD.width, "height": UPLOAD.height}
+            }])
+        ),
     ]);
     Mock::given(path(format!("/api/v9/channels/{CHANNEL}/messages")))
         .respond_with(ResponseTemplate::new(200).set_body_json(page))
@@ -115,7 +158,27 @@ async fn a_gif_the_proxy_makes_too_heavy_plays_from_its_upload() {
         .respond_with(gif_answer(upload.clone()))
         .mount(&cdn)
         .await;
-    for copied in [file.as_str(), external] {
+    Mock::given(method("GET"))
+        .and(path(external_as_webp))
+        .and(query_param("format", "webp"))
+        .and(query_param("animated", "true"))
+        .and(query_param("width", "512"))
+        .respond_with(webp_answer(512, 384, WEBP_SMALL))
+        .mount(&media)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(external_as_webp))
+        .and(query_param("format", "webp"))
+        .and(query_param("animated", "true"))
+        .respond_with(webp_answer(540, 405, WEBP_FULL))
+        .mount(&media)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(external_too_heavy))
+        .respond_with(gif_answer(gif::heavier(&upload, TOO_HEAVY - upload.len())))
+        .mount(&media)
+        .await;
+    for copied in [file.as_str(), external, external_as_webp] {
         Mock::given(method("GET"))
             .and(path(copied))
             .respond_with(gif_answer(copy.clone()))
@@ -173,7 +236,42 @@ async fn a_gif_the_proxy_makes_too_heavy_plays_from_its_upload() {
             answers.push((answer, kept));
         }
     }
+    let read = |answer: &Result<akari_core::media::ImageFile, ImageError>| {
+        answer
+            .as_ref()
+            .ok()
+            .and_then(|file| std::fs::read(&file.path).ok())
+    };
     let elsewhere = account.image(playing(&thumbnail(ELSEWHERE), 800)).await;
+    let streamed = read(&elsewhere);
+    let as_webp = |width: u32, height: u32| ImageRequest {
+        key: thumbnail(ELSEWHERE_AS_WEBP),
+        width,
+        height,
+        animated: Some(AnimatedFormat::WebP),
+    };
+    let small = account.image(as_webp(512, 384)).await;
+    let small_weighs = read(&small).map(|bytes| bytes.len());
+    let small_again = account.image(as_webp(512, 384)).await;
+    let full = account.image(as_webp(4096, 3072)).await;
+    let full_streamed = read(&full);
+    let full_again = account.image(as_webp(4096, 3072)).await;
+    let too_heavy = account
+        .image(playing(&thumbnail(ELSEWHERE_TOO_HEAVY), 800))
+        .await;
+    let asked_as_webp = media
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| {
+            request.url.path() == external_as_webp
+                && request
+                    .url
+                    .query()
+                    .is_some_and(|query| query.contains("format=webp"))
+        })
+        .count();
     account.close();
     let _ = std::fs::remove_dir_all(&directory);
 
@@ -185,7 +283,33 @@ async fn a_gif_the_proxy_makes_too_heavy_plays_from_its_upload() {
         assert_eq!((file.width, file.height), (540, 405));
         assert!(kept.as_ref() == Some(&upload), "the upload, byte for byte");
     }
-    assert_eq!(elsewhere, Err(ImageError::TooLarge));
+    let elsewhere = elsewhere.unwrap_or_else(|err| panic!("the copy plays: {err} {}", logs.text()));
+    assert!(elsewhere.animated);
+    assert!(
+        streamed.as_ref() == Some(&copy),
+        "the proxy's copy, byte for byte"
+    );
+    let small = small.unwrap_or_else(|err| panic!("the WebP plays: {err} {}", logs.text()));
+    assert!(small.animated);
+    assert_eq!((small.width, small.height), (512, 384));
+    assert_eq!(small_weighs, Some(WEBP_SMALL));
+    assert_eq!(small_again.map(|file| file.from_disk), Ok(true));
+    let full = full.unwrap_or_else(|err| panic!("the copy plays: {err} {}", logs.text()));
+    assert_eq!((full.width, full.height), (540, 405));
+    assert!(
+        full_streamed.as_ref() == Some(&copy),
+        "the WebP is over the cap too"
+    );
+    assert_eq!(full_again.map(|file| file.from_disk), Ok(true));
+    assert_eq!(too_heavy, Err(ImageError::TooLarge));
+    assert_eq!(asked_as_webp, 2, "each box asks its own WebP");
+    assert!(
+        logs.text()
+            .lines()
+            .any(|line| line.contains("image over the streamed cap")),
+        "{}",
+        logs.text()
+    );
     let fetched = cdn.received_requests().await.unwrap_or_default();
     let uploads: Vec<_> = fetched
         .iter()
@@ -208,6 +332,17 @@ async fn a_gif_the_proxy_makes_too_heavy_plays_from_its_upload() {
             .any(|line| line.contains("image over the display cap")
                 && line.contains("copy=\"proxy\"")
                 && line.contains("has_original=false")),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("heavy GIF kept as the proxy's WebP").count(),
+        1,
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("no WebP of a heavy GIF, the file streamed")
+            .count(),
+        1,
         "{text}"
     );
     for secret in [
