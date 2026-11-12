@@ -122,6 +122,18 @@ impl Before {
 struct Manual {
     mentions: u32,
     token: u64,
+    // Discord's MESSAGE_ACK for it came before its answer.
+    echoed: bool,
+}
+
+// What a manual MESSAGE_ACK is to the queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Echo {
+    // The channel was marked unread on another device.
+    Elsewhere,
+    // Discord's answer to Akari's own mark; `superseded` when a later ack or mark of Akari's
+    // for the channel is pending, on its way or went out.
+    Own { superseded: bool },
 }
 
 pub(crate) type Marked = oneshot::Receiver<Result<(), RequestError>>;
@@ -224,6 +236,8 @@ struct Queue {
     bodies: HashMap<ChannelId, AckBody>,
     // Who waits for each channel's Mark Unread, by its token.
     marks: HashMap<ChannelId, (u64, Waiter)>,
+    // Each channel's mark Discord took, until its MESSAGE_ACK comes.
+    marked: HashMap<ChannelId, MessageId>,
 }
 
 impl Queue {
@@ -369,6 +383,7 @@ impl Queue {
                 manual: Some(Manual {
                     mentions,
                     token: order,
+                    echoed: false,
                 }),
             },
         );
@@ -488,9 +503,12 @@ impl Queue {
     // What READY may already have overtaken isn't remembered as Discord's.
     fn confirmed(&mut self) {
         for (channel, wanted) in std::mem::take(&mut self.flight).entries {
-            if wanted.manual.is_some() {
+            if let Some(manual) = wanted.manual {
                 // The position went back: the next ack goes out even if it isn't newer.
                 self.sent.remove(&channel);
+                if !manual.echoed {
+                    self.marked.insert(channel, wanted.id);
+                }
             } else if !wanted.unchecked() {
                 self.sent.insert(channel, wanted.id);
             }
@@ -541,7 +559,10 @@ impl Queue {
         let mut refused = Vec::new();
         let mut waiter = None;
         for (channel, mut wanted) in flight.entries {
+            // With something newer pending the mark is no longer what the user wants: its
+            // refusal is nobody's error, and `settle` answers it.
             if let Some(manual) = wanted.manual
+                && !self.wanted.contains_key(&channel)
                 && self
                     .marks
                     .get(&channel)
@@ -604,6 +625,7 @@ impl Queue {
     // could undo that.
     fn forget(&mut self, channel: ChannelId) {
         self.sent.remove(&channel);
+        self.marked.remove(&channel);
         let queued = self.wanted.remove(&channel).is_some();
         let flying = self.flight.entries.len();
         self.flight.entries.retain(|(id, _)| *id != channel);
@@ -614,6 +636,36 @@ impl Queue {
                 "pending ack dropped: Discord's position was set elsewhere"
             );
         }
+    }
+
+    // A manual MESSAGE_ACK at the position of Akari's mark on its way, or of the one Discord
+    // just took, is that mark's echo and drops nothing; any other was made elsewhere.
+    fn echo(&mut self, channel: ChannelId, id: MessageId) -> Echo {
+        let flying = self
+            .flight
+            .entries
+            .iter_mut()
+            .filter(|(flying, wanted)| *flying == channel && wanted.id == id)
+            .find_map(|(_, wanted)| wanted.manual.as_mut());
+        if let Some(manual) = flying {
+            manual.echoed = true;
+            return Echo::Own {
+                superseded: self.wanted.contains_key(&channel),
+            };
+        }
+        if self.marked.get(&channel) != Some(&id) {
+            self.forget(channel);
+            return Echo::Elsewhere;
+        }
+        self.marked.remove(&channel);
+        let superseded = self.wanted.contains_key(&channel)
+            || self
+                .flight
+                .entries
+                .iter()
+                .any(|(flying, _)| *flying == channel)
+            || self.sent.get(&channel).is_some_and(|sent| *sent > id);
+        Echo::Own { superseded }
     }
 
     fn forget_all(&mut self) {
@@ -671,6 +723,7 @@ impl Queue {
         self.closed = true;
         self.wanted = HashMap::new();
         self.flight = Flight::default();
+        self.marked = HashMap::new();
         for (_, (_, waiter)) in self.marks.drain() {
             let _ = waiter.send(Err(RequestError::Closed));
         }
@@ -775,10 +828,11 @@ impl Wants {
         refused
     }
 
-    fn forget(&self, channel: ChannelId) {
+    fn echo(&self, channel: ChannelId, id: MessageId) -> Echo {
         let mut queue = self.lock();
-        queue.forget(channel);
+        let echo = queue.echo(channel, id);
         queue.settle();
+        echo
     }
 
     fn forget_all(&self) {
@@ -926,10 +980,11 @@ impl AckSender {
         id
     }
 
-    // Discord set the channel's position on its own, maybe behind what was sent (a mark as unread
-    // elsewhere): what's pending for it is dropped; the next ack goes out even if it isn't newer.
-    pub(crate) fn forget(&self, channel: ChannelId) {
-        self.wants.forget(channel);
+    // A manual MESSAGE_ACK came. Made elsewhere, Discord set the channel's position on its own,
+    // maybe behind what was sent: what's pending for it is dropped, and the next ack goes out
+    // even if it isn't newer. The echo of Akari's own mark drops nothing.
+    pub(crate) fn echo(&self, channel: ChannelId, id: MessageId) -> Echo {
+        self.wants.echo(channel, id)
     }
 
     // A READY is coming: its read states are Discord's, whatever was sent before. What's pending
