@@ -378,7 +378,9 @@ rebuilt under it only if another write came in between.
 
 A deleted channel or thread, a channel a repeated GUILD_CREATE no longer lists, and every
 channel of a guild the user leaves lose their read state, in memory and, with the next flush,
-in the cache. An outage keeps them: the guild's GUILD_CREATE brings no read states back.
+in the cache; the pin time the user acknowledged goes with it. An outage keeps them: the
+guild's GUILD_CREATE brings no read states back. Leaving a guild while it is down takes them
+too.
 
 ## Threads
 
