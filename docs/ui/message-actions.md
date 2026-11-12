@@ -95,3 +95,19 @@ say:
   which the client asks before a reaction) and lurking. Discord refuses what such a row
   offers.*
 - *Forward, Publish, Bookmark, Report and the join line's Configure are not offered.*
+
+## A thread's starter row
+
+A thread started from a message begins with a row of type 21 that points back at it, and the
+official client renders that row as the original message itself (the bar and the menu get the
+original, which lives in the parent channel). So does the core: asked with the thread's ID
+and the row's ID, `Store::message_actions` and `Store::reactions` both answer for the original
+once it is loaded (`Store::starter_message` is `Loaded`): its type, flags and author, and the
+parent channel's permissions. The thread's own state doesn't count: an archived or locked
+thread withholds nothing from the message it started from. `view_thread` is false on that
+row, since the thread it would open is the one the row is in. While the original is loading,
+gone or failed, both answer for the row itself, a type-21 system message of the thread.
+
+Requests never take the row's IDs. `Store::shown_message(channel, row)` gives the channel and
+ID of the message a row shows: the original's for such a starter row, the row's own for every
+other; a reaction, a reply, a pin or a delete from the row goes there.

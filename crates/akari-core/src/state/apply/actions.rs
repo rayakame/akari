@@ -22,10 +22,29 @@ impl State {
         message: MessageId,
         now_millis: i64,
     ) -> MessageActions {
+        if let Some(original) = self.windows.shown_by_row(channel, message) {
+            let actions = self.message_actions_of(&original, now_millis);
+            return MessageActions {
+                // The thread it would view is the one the row is in.
+                view_thread: actions.view_thread && original.id.cast() != channel,
+                ..actions
+            };
+        }
         self.acted_on(channel, message)
             .map_or_else(MessageActions::default, |found| {
                 self.message_actions_of(&found, now_millis)
             })
+    }
+
+    pub(crate) fn shown_message(
+        &self,
+        channel: ChannelId,
+        row: MessageId,
+    ) -> Option<(ChannelId, MessageId)> {
+        self.windows
+            .shown_by_row(channel, row)
+            .or_else(|| self.acted_on(channel, row))
+            .map(|message| (message.channel_id, message.id))
     }
 
     pub(crate) fn message_actions_of(&self, message: &Message, now_millis: i64) -> MessageActions {
@@ -85,10 +104,8 @@ impl State {
             && writable
             && !voice
             && !media_post;
-        let reactions = !system_dm
-            && writable
-            && !media_post
-            && can(Permissions::READ_MESSAGE_HISTORY);
+        let reactions =
+            !system_dm && writable && !media_post && can(Permissions::READ_MESSAGE_HISTORY);
 
         MessageActions {
             reply,

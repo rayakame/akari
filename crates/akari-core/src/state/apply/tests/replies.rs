@@ -742,7 +742,10 @@ fn a_target_a_refresh_finds_deleted_says_so_on_its_replies() {
         &[message(10, GENERAL), reply_to(12, GENERAL, 11, None)],
     );
 
-    assert!(events.contains(&"MessageDeleted(11)".to_owned()), "{events:?}");
+    assert!(
+        events.contains(&"MessageDeleted(11)".to_owned()),
+        "{events:?}"
+    );
     assert!(events.contains(&changed(GENERAL, 11)), "{events:?}");
     assert_eq!(target(&state, GENERAL, 11), "deleted");
 }

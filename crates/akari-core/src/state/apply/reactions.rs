@@ -2,25 +2,18 @@ use std::sync::{Arc, LazyLock};
 
 use super::State;
 use crate::gateway::{MessageReaction, MessageReactionAddMany};
-use crate::model::{ChannelId, ChannelType, MessageId, MessageType, ReactionType};
+use crate::model::{ChannelId, ChannelType, MessageId, ReactionType};
 use crate::state::events::StoreEvent;
 use crate::state::reactions::{self, Reaction, ReactionChange, ReactionEmoji};
-use crate::state::types::StarterMessage;
 
 static NONE: LazyLock<Arc<[Reaction]>> = LazyLock::new(|| Arc::new([]));
 
 impl State {
     pub(crate) fn reactions(&self, channel: ChannelId, id: MessageId) -> Arc<[Reaction]> {
-        let row = self.windows.message(channel, id).map(|row| {
-            if row.kind != MessageType::ThreadStarterMessage {
-                return row;
-            }
-            match self.windows.starter_message(channel) {
-                Some(StarterMessage::Loaded(starter)) => starter,
-                _ => row,
-            }
-        });
-        row.or_else(|| self.windows.shown(channel, id))
+        self.windows
+            .shown_by_row(channel, id)
+            .or_else(|| self.windows.message(channel, id))
+            .or_else(|| self.windows.shown(channel, id))
             .or_else(|| self.preview_message(channel, id))
             .or_else(|| {
                 self.latest
