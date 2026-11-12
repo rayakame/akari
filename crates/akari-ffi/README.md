@@ -145,6 +145,13 @@ Discord refuses can bring a channel's badge back (`BadgeChanged`). The host
 decides when the user is reading; the core never infers it
 ([read-states.md](../../docs/protocol/read-states.md#how-akari-acks)).
 
+`mark_unread(channel_id, message_id)` (async) marks a channel unread from a message on, where
+`MessageActions.mark_unread` allows it (`InvalidRequest` otherwise, before asking). The badge
+and the read position move at once (`BadgeChanged`), and the call resolves on Discord's answer,
+which can take as long as Discord is unreachable: a host doesn't wait on it. An error means the
+read state already went back. The channel isn't read again by `set_reading` naming it until the
+host leaves it out once, marks it read, or the user writes there.
+
 ## Formatted messages
 
 `Message.formatted` is the content as Discord formats it (`FormattedText`), flat so it maps
