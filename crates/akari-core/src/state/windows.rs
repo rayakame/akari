@@ -649,6 +649,7 @@ impl Windows {
             };
             if let Some(evicted) = self.order.remove(index) {
                 self.windows.remove(&evicted);
+                self.drop_starter(evicted);
                 self.prune_targets(evicted);
                 events.push(StoreEvent::MessagesCleared {
                     channel_id: evicted,
@@ -929,6 +930,16 @@ impl Windows {
         if self.targets.over_limit(channel) {
             let named = self.named_targets(channel);
             self.targets.trim(channel, |id| named.contains(&id));
+        }
+    }
+
+    fn drop_starter(&mut self, thread: ChannelId) {
+        let answered = match self.starters.remove(&thread) {
+            Some(Starter::Found(starter)) => starter.replied_to(),
+            _ => None,
+        };
+        if let Some((channel, _)) = answered {
+            self.prune_targets(channel);
         }
     }
 
@@ -1498,7 +1509,7 @@ impl Windows {
     }
 
     pub(crate) fn drop_channel(&mut self, channel: ChannelId) {
-        self.starters.remove(&channel);
+        self.drop_starter(channel);
         self.targets.drop_channel(channel);
         let generation = self.next_generation();
         let Some(window) = self.windows.get_mut(&channel) else {

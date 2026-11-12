@@ -693,3 +693,27 @@ fn a_page_with_the_same_starter_says_nothing_for_the_row() {
         "{events:?}"
     );
 }
+
+#[test]
+fn an_evicted_thread_takes_its_starter_and_that_messages_target() {
+    let mut state = viewing(THREAD);
+    let thread = Snowflake::new(THREAD);
+    let origin = reply_to(19, GENERAL, TARGET, Some(original(GENERAL, "answered")));
+    apply(&mut state, "MESSAGE_CREATE", starter_row(Some(origin)));
+    assert_eq!(state.windows.targets_len(Snowflake::new(GENERAL)), 1);
+
+    for other in 1..=10_u64 {
+        state.view_channel(Snowflake::new(900 + other), &mut Vec::new());
+    }
+    assert!(state.messages(thread).is_none());
+
+    assert_eq!(state.windows.targets_len(Snowflake::new(GENERAL)), 0);
+    state.view_channel(thread, &mut Vec::new());
+    apply(&mut state, "MESSAGE_CREATE", starter_row(None));
+    assert_eq!(
+        state.starter_message(thread),
+        Some(StarterMessage::Loading),
+        "asked for again"
+    );
+    assert!(state.wants_starter(thread));
+}
