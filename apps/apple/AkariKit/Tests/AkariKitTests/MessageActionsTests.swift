@@ -24,6 +24,7 @@ final class MessageActionsTests {
     var threadsCreated: [String] = []
     var threadsViewed: [String] = []
     var failures: [MessageActionsModel.Failure] = []
+    var marks: [String] = []
 
     init() {
         account = FakeAccount(store: store)
@@ -41,6 +42,10 @@ final class MessageActionsTests {
             retry: { _ in }, discard: { _ in },
             createThread: { [unowned self] in threadsCreated.append("\($0.rawValue) \($1.rawValue)") },
             viewThread: { [unowned self] in threadsViewed.append("\($0.rawValue) \($1.rawValue)") },
+            marking: { [unowned self] channel, message in
+                marks.append("mark \(channel.rawValue) \(message.rawValue)")
+                return { [unowned self] in marks.append("undo \(message.rawValue)") }
+            },
             failed: { [unowned self] in failures.append($0) })
     }
 
@@ -217,6 +222,7 @@ final class MessageActionsTests {
 
         #expect(store.log.calls.contains(.markUnread(id(11), id(100))))
         #expect(failures.isEmpty)
+        #expect(marks == ["mark 11 100"])
     }
 
     @Test
@@ -233,6 +239,7 @@ final class MessageActionsTests {
         await model().markUnread(from: row(100))
 
         #expect(failures.count == 1)
+        #expect(marks == ["mark 11 100", "undo 100"])
         #expect(failures.first?.title == "Couldn't Mark as Unread")
         #expect(failures.first?.message == "Akari couldn't reach Discord. Check your connection, then try again.")
     }
@@ -250,7 +257,8 @@ final class MessageActionsTests {
         let model = MessageActionsModel(
             channelId: id(100), store: store, account: account,
             copy: { [unowned self] in copied.append($0) }, retry: { _ in }, discard: { _ in },
-            createThread: { _, _ in }, viewThread: { _, _ in }, failed: { _ in })
+            createThread: { _, _ in }, viewThread: { _, _ in }, marking: { _, _ in nil },
+            failed: { _ in })
 
         #expect(model.bar(for: row, shift: true).map(\.action) == [.copyLink, .markUnread, .more])
         model.perform(.copyLink, on: row)
@@ -293,6 +301,31 @@ final class SessionMessageActionsTests {
         #expect(session.messageActionFailure?.message == "Discord had a problem. Try again in a moment.")
         session.dismissMessageActionFailure()
         #expect(session.messageActionFailure == nil)
+        session.close()
+    }
+
+    @Test
+    func aMarkMovesTheOpenListsLine() async throws {
+        store.update { state in
+            state.currentUser = user(1)
+            for raw in UInt64(100)...102 {
+                state.show(message(raw, in: 11, by: user(2)))
+            }
+            state.windows[id(11)] = window([100, 101, 102])
+            state.readStates[id(11)] = ReadState(acked: id(102), mentions: 0, estimated: false)
+            state.messageActions[id(101)] = allowed()
+        }
+        let list = try #require(session.messages)
+        list.apply(EventBatch([.messagesLoaded(channelId: id(11), first: id(100), last: id(102))]))
+        let row = try #require(list.rows.first { $0.id == id(101) })
+        #expect(list.newMessagesLine == nil)
+
+        await session.messageActions(for: list) { _ in }.markUnread(from: row)
+        #expect(list.newMessagesLine == id(101))
+
+        account.markUnreadError.withLock { $0 = .ServerError(status: 502) }
+        await session.messageActions(for: list) { _ in }.markUnread(from: try #require(list.rows.first))
+        #expect(list.newMessagesLine == id(101))
         session.close()
     }
 

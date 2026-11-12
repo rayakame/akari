@@ -66,6 +66,43 @@ struct NewMessagesLineTests {
         #expect(timeline(model).shape == ["day", "+1", "2", "new", "3", "4"])
     }
 
+    // Mark Unread: the line stands over the chosen message at once, the user's own too.
+    @Test
+    func aMarkPutsTheLineOverTheChosenMessage() {
+        store.update { [me] in $0.show(message(3, by: me)) }
+        shown([1, 2, 3, 4], readUpTo: 4)
+        let model = makeModel()
+        #expect(model.newMessagesLine == nil)
+
+        _ = model.markUnread(from: id(2))
+        #expect(model.newMessagesLine == id(2))
+        #expect(timeline(model).shape == ["day", "+1", "new", "2", "+3", "+4"])
+
+        _ = model.markUnread(from: id(3))
+        #expect(model.newMessagesLine == id(3))
+
+        model.endNewMessagesLine()
+        #expect(model.newMessagesLine == nil)
+    }
+
+    @Test
+    func aRefusedMarkPutsTheLineBack() {
+        shown([1, 2, 3, 4], readUpTo: 2)
+        let model = makeModel()
+        #expect(model.newMessagesLine == id(3))
+
+        let undo = model.markUnread(from: id(1))
+        #expect(model.newMessagesLine == id(1))
+        undo()
+        #expect(model.newMessagesLine == id(3))
+
+        // A second mark since isn't undone by the first one's refusal.
+        let first = model.markUnread(from: id(1))
+        _ = model.markUnread(from: id(4))
+        first()
+        #expect(model.newMessagesLine == id(4))
+    }
+
     @Test
     func theLineUsesTheReadPositionFromBeforeTheAck() async {
         shown([1, 2, 3, 4], readUpTo: 2)
