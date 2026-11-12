@@ -1358,6 +1358,14 @@ impl Store {
         self.read(|inner| inner.state.shown_message(channel, row))
     }
 
+    /// The link Copy Message Link copies for the row `row` of `channel`:
+    /// `https://discord.com/channels/{guild}/{channel}/{message}`, with `@me` outside a guild
+    /// and the IDs of [`Store::shown_message`], so a thread's starter row gives the link of the
+    /// message it shows in the parent channel.
+    pub fn message_link(&self, channel: ChannelId, row: MessageId) -> String {
+        self.read(|inner| inner.state.message_link(channel, row))
+    }
+
     /// [`Store::message_actions`] for a message the caller holds, which the store may have let
     /// go of: a pinned message of the pins list, a reply's target, a row a jump trimmed away.
     pub fn message_actions_of(&self, message: &Message) -> MessageActions {

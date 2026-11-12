@@ -1175,6 +1175,46 @@ fn a_starter_row_answers_for_the_message_it_shows() {
     );
 }
 
+fn link(state: &State, channel: u64, row: u64) -> String {
+    state.message_link(Snowflake::new(channel), Snowflake::new(row))
+}
+
+#[test]
+fn a_message_link_names_the_guild_or_the_dms() {
+    let state = load(owner(plain), GENERAL, &[sent(GENERAL, MIRA, 0)]);
+    assert_eq!(
+        link(&state, GENERAL, M),
+        format!("https://discord.com/channels/{G1}/{GENERAL}/{M}")
+    );
+
+    let state = load(owner(plain), DM, &[sent(DM, MIRA, 0)]);
+    assert_eq!(
+        link(&state, DM, M),
+        format!("https://discord.com/channels/@me/{DM}/{M}")
+    );
+}
+
+// As the official client's, which copies the link of the message the row renders.
+#[test]
+fn a_starter_rows_link_is_the_originals() {
+    let shown = load(
+        owner(plain),
+        THREAD,
+        &[starter(Some(message(THREAD, GENERAL)))],
+    );
+    assert_eq!(
+        link(&shown, THREAD, ROW),
+        format!("https://discord.com/channels/{G1}/{GENERAL}/{THREAD}")
+    );
+
+    let missing = load(owner(plain), THREAD, &[starter(None)]);
+    assert_eq!(
+        link(&missing, THREAD, ROW),
+        format!("https://discord.com/channels/{G1}/{THREAD}/{ROW}"),
+        "the row itself while its message isn't loaded"
+    );
+}
+
 // Marking unread from the row marks the thread, so the thread says whether it may be.
 #[test]
 fn a_starter_rows_mark_unread_is_its_threads() {
