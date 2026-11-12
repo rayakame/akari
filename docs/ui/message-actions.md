@@ -169,6 +169,9 @@ controller's pointer authority lights its buttons, and the rows track nothing
 ([message-list.md](message-list.md#selecting-text)). What the bar lists is read from the core when
 the hovered row or Shift changes and when the row's content changes, not on every move.*
 
+*Akari: the bar exists only over a hovered row, so VoiceOver's navigation doesn't reach it; the
+row's menu has the same actions.*
+
 ### The buttons, in order
 
 Each button shows only where `MessageActions` allows it. Without Shift:
@@ -256,14 +259,19 @@ keeps the channel unread while it stays open are in
   official client's row handler takes every Alt+click and stops the click's default.
 - *Akari: not on the row's buttons (media, a thread's box, Retry and Delete, the hover bar),
   which keep their click, and only with Option alone. Where the message can't be marked
-  (an archived, locked thread) the click does nothing at all.*
+  (an archived, locked thread, a message still sending) the click isn't taken: it is an
+  ordinary click with Option held. A click that is taken takes its drag and its release too.*
 - On a thread's starter row the thread is marked, from its start
   ([A thread's starter row](#a-threads-starter-row)).
 - The open list's new messages line goes over the chosen message, the user's own too, and
-  the channel isn't read again while it stays open: leaving it, marking it read (Escape) or
-  writing there ends that.
+  the channel isn't read again while it stays open: leaving it (another channel, the split
+  closed), marking it read (Escape) or writing there ends that. Scrolling, another window, the
+  Mac asleep or a lost connection don't: the channel is still open. Coming back to a channel
+  that was left reads it as always.
 - *Akari: the badge and the new messages line change at the click; the official client waits
   for Discord's answer. If Discord refuses, they go back and one alert says so ("Couldn't Mark as
-  Unread").*
+  Unread"). A mark that something later replaced before it counted (Escape right after, the
+  channel read or marked on another device, a new session with another position) takes its line
+  back without an alert: nothing failed.*
 - *Akari: the official client's Alt+Enter on a message with keyboard focus is left out with
   the other keys of a focused message.*
