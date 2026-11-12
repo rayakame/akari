@@ -343,6 +343,7 @@ impl Store {
     /// or the user's permissions change.
     /// A viewed thread's starter row (the thread's ID and the row's) answers for the message it
     /// shows, in the parent channel: requests take the IDs of `starter_message`'s message.
+    /// Its `mark_unread` alone is the thread's, and `Account.mark_unread` takes the row's IDs.
     pub fn message_actions(&self, channel_id: ChannelId, message_id: MessageId) -> MessageActions {
         self.core.message_actions(channel_id, message_id).into()
     }

@@ -282,6 +282,10 @@ message ID, count and body. It is refused without a request where the message's 
 offer it (`MessageActions::mark_unread`). The macOS app asks it from a message's menu, the
 Shift-held hover bar and an Option-click ([message-actions.md](../ui/message-actions.md#mark-unread)).
 
+- **A thread's starter row** marks the thread, with the row's own ID: nothing loaded is older,
+  so the position is the millisecond before it. The thread's state decides, not that of the
+  message the row shows
+  ([message-actions.md](../ui/message-actions.md#a-threads-starter-row)).
 - **Threads.** An archived thread is opened first with `PATCH /channels/{id}` and
   `{"archived":false}` (the documented Modify Channel; the client's own body wasn't read, not
   observed), an unjoined one joined with `location=Mark%20Unread`. If either fails, nothing is

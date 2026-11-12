@@ -259,10 +259,13 @@ for `message_actions` alike, and both answer for the message the row shows once
 `starter_message(thread_id)` is `Loaded`: that message's type, flags and author, and the
 permissions of the parent channel it is in, whatever the thread's archived or locked state
 (`view_thread` is false there, the row being in that thread). Until then both answer for the
-row itself. Requests (a reaction, a reply, a pin, a delete) never take the row's IDs: they go
-to the shown message, the `channel_id` and `id` of `starter_message`'s message. akari-core
-resolves any row the same way with `Store::shown_message(channel, row)`, which doesn't cross
-yet.
+row itself. `mark_unread` alone is always the thread's: `Account.mark_unread` takes the
+thread's ID and the row's and marks the thread from its start. Requests for the shown message
+(a reaction, a reply, a pin, a delete) never take the row's IDs: they go to the `channel_id`
+and `id` of `starter_message`'s message, which a link to it names too. akari-core resolves any row
+the same way with `Store::shown_message(channel, row)`, which doesn't cross: AkariKit's rows
+hold their `starter_message`
+([message-actions.md](../../docs/ui/message-actions.md#a-threads-starter-row)).
 
 ## Events
 
