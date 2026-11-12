@@ -819,3 +819,20 @@ fn a_sparse_reaction_keeps_its_message() {
     );
     assert!(party.me_burst);
 }
+
+#[test]
+fn an_emoji_with_a_broken_animated_flag_keeps_its_reaction() {
+    let mut value: Value = parse(include_str!("fixtures/message.json"));
+    value["reactions"] = json!([
+        {"emoji": {"id": "41771983429993937", "name": "wave", "animated": null}, "count": 1},
+        {"emoji": {"id": null, "name": "🔥", "animated": "no"}, "count": 2}
+    ]);
+
+    let message: Message = parse(&value.to_string());
+
+    let [wave, fire] = &message.reactions[..] else {
+        panic!("expected two reactions, got {:?}", message.reactions);
+    };
+    assert!(!wave.emoji.animated && !fire.emoji.animated);
+    assert_eq!((wave.count, fire.count), (1, 2));
+}
