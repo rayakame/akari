@@ -597,3 +597,99 @@ fn a_window_is_cached_with_what_its_replies_answer() {
     targets.sort_unstable();
     assert_eq!(targets, [(6, false), (TARGET, true)]);
 }
+
+fn starter_row(origin: Option<Value>) -> Value {
+    let mut starter = message(21, THREAD);
+    starter["type"] = 21.into();
+    starter["message_reference"] = json!({
+        "message_id": "19", "channel_id": GENERAL.to_string(),
+    });
+    if let Some(origin) = origin {
+        starter["referenced_message"] = origin;
+    }
+    starter
+}
+
+fn stored(value: Value) -> Arc<Message> {
+    let wire = page(&[value]).remove(0);
+    Arc::new(Message::from_wire(wire, &mut |user| {
+        Arc::new(crate::state::User::from_wire(user))
+    }))
+}
+
+// The row itself is the same in the file and in the page: only what it shows changed.
+#[test]
+fn a_page_that_brings_a_cached_rows_starter_says_so_for_the_row() {
+    use crate::state::CachedMessages;
+
+    let mut state = viewing(THREAD);
+    let thread = Snowflake::new(THREAD);
+    let mut events = Vec::new();
+    let ticket = state
+        .begin_load(thread, LoadKind::Latest, 1, &mut events)
+        .unwrap();
+    let cached = CachedMessages {
+        messages: vec![stored(starter_row(None))],
+        ..CachedMessages::default()
+    };
+    state.fill_from_cache(ticket, cached, &mut events);
+    assert_eq!(state.starter_message(thread), Some(StarterMessage::Loading));
+
+    let mut events = Vec::new();
+    let fresh = starter_row(Some(message(19, GENERAL)));
+    state.finish_load(ticket, page(&[fresh]), true, &mut events);
+
+    let events: Vec<String> = events.iter().map(describe).collect();
+    assert!(
+        events.contains(&"MessageUpdated(21)".to_owned()),
+        "{events:?}"
+    );
+    assert!(matches!(
+        state.starter_message(thread),
+        Some(StarterMessage::Loaded(_))
+    ));
+}
+
+#[test]
+fn a_refresh_that_finds_the_starter_gone_says_so_for_the_row() {
+    let mut state = viewing(THREAD);
+    let thread = Snowflake::new(THREAD);
+    load(
+        &mut state,
+        THREAD,
+        LoadKind::Latest,
+        &[starter_row(Some(message(19, GENERAL)))],
+    );
+    state.windows.mark_stale(&mut Vec::new());
+
+    let events = load(
+        &mut state,
+        THREAD,
+        LoadKind::Refresh,
+        &[starter_row(Some(Value::Null))],
+    );
+
+    assert!(
+        events.contains(&"MessageUpdated(21)".to_owned()),
+        "{events:?}"
+    );
+    assert_eq!(
+        state.starter_message(thread),
+        Some(StarterMessage::Unavailable)
+    );
+}
+
+#[test]
+fn a_page_with_the_same_starter_says_nothing_for_the_row() {
+    let mut state = viewing(THREAD);
+    let row = starter_row(Some(message(19, GENERAL)));
+    load(&mut state, THREAD, LoadKind::Latest, &[row.clone()]);
+    state.windows.mark_stale(&mut Vec::new());
+
+    let events = load(&mut state, THREAD, LoadKind::Refresh, &[row]);
+
+    assert!(
+        !events.contains(&"MessageUpdated(21)".to_owned()),
+        "{events:?}"
+    );
+}
