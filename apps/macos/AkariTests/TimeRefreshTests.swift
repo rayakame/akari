@@ -193,6 +193,39 @@ final class TimeRefreshTests {
         #expect(table.rect(ofRow: index(of: 21)).minY - clip.bounds.minY == place)
     }
 
+    // As a page that lands during a gesture at the bottom: pinning waits until the user lets go.
+    @Test
+    func aRelativeTimeDuringABouncePastTheBottomMovesNothing() throws {
+        let due = seconds(clock.now) + 61
+        var rows = (1...60).map { raw in
+            row(UInt64(raw), by: author(UInt64(raw % 2 + 1)), at: clock.now + Double(raw) * 30)
+        }
+        rows[57] = row(58, by: author(2), at: clock.now + 1740, content: "soon <t:\(due):R>")
+        show(rows)
+        let clip = controller.scrollView.contentView
+        let bottom = clip.bounds.origin
+        let live = { (name: Notification.Name) in
+            NotificationCenter.default.post(name: name, object: self.controller.scrollView)
+        }
+
+        live(NSScrollView.willStartLiveScrollNotification)
+        clip.scroll(to: NSPoint(x: bottom.x, y: bottom.y + 40))
+        live(NSScrollView.didLiveScrollNotification)
+        let bounced = clip.bounds.origin
+        #expect(bounced.y == bottom.y + 40)
+        clock.now += 2
+        timers.fire()
+
+        #expect(clip.bounds.origin == bounced)
+        #expect(body(ofRow: controller.timeline.items.firstIndex { $0.id == .message(MessageId(rawValue: 58)) } ?? 0).contains("in 59 seconds"))
+
+        clip.scroll(to: bottom)
+        live(NSScrollView.didEndLiveScrollNotification)
+        window.layoutIfNeeded()
+        #expect(controller.isPinnedToBottom)
+        #expect(clip.bounds.origin == bottom)
+    }
+
     // The timer is stopped while no relative time is on screen; a reveal builds the text anew.
     @Test
     func aRevealThatRewrapsARowAboveTheReaderMovesNoViews() throws {

@@ -729,12 +729,18 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         if let place {
             anchor = place
         }
+        let bottomBefore = tableView.contentHeight
         ownChanges += 1
         defer { ownChanges -= 1 }
         change()
         measureRows()
         if pinsToBottom {
-            scrollToBottom()
+            // As in apply: pinning moves the content, so it waits until the user lets go.
+            if !isLiveScrolling {
+                scrollToBottom()
+            } else if heldPinBottom == nil {
+                heldPinBottom = bottomBefore
+            }
         } else {
             restoreAnchor()
         }
