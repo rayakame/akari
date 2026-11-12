@@ -95,6 +95,11 @@ pub(crate) struct Planned {
     /// A GIF as uploaded (an attachment that fits the display cap, or an embedded attachment
     /// link): the media proxy's copy can weigh several times as much, encoded again.
     pub(crate) original: Option<Url>,
+    /// A GIF as the proxy's animated WebP at the box's size, for a host that plays WebP: asked
+    /// when the GIF is over the display cap.
+    pub(crate) webp: Option<Url>,
+    /// A GIF as uploaded, whatever it weighs: streamed to disk when nothing fits the cap.
+    pub(crate) upload: Option<Url>,
 }
 
 /// Discord's image hosts: the CDN and the media proxy as the endpoints name them, and the
@@ -181,6 +186,8 @@ impl Hosts {
                     url,
                     signed: None,
                     original: None,
+                    webp: None,
+                    upload: None,
                 })
             }
             ImageKey::Emoji {
@@ -203,6 +210,8 @@ impl Hosts {
                 url: join(&self.cdn, &format!("embed/avatars/{index}.png"))?,
                 signed: None,
                 original: None,
+                webp: None,
+                upload: None,
             }),
             ImageKey::DefaultAvatar { .. } => Err(ImageError::UnknownKey),
             ImageKey::Sticker { id, format } => self.sticker(id.get(), *format, size, animated),
@@ -326,6 +335,8 @@ impl Hosts {
             url,
             signed: None,
             original: None,
+            webp: None,
+            upload: None,
         }
     }
 
@@ -364,6 +375,8 @@ impl Hosts {
             url,
             signed: None,
             original: None,
+            webp: None,
+            upload: None,
         })
     }
 
@@ -398,9 +411,8 @@ impl Hosts {
             (AttachmentKind::Image, Some(_)) if attachment.is_animated() => Form::WebP,
             _ => Form::Still,
         };
-        let original = signed
-            .clone()
-            .filter(|_| form == Form::Gif && attachment.size <= MAX_BODY as u64);
+        let upload = signed.clone().filter(|_| form == Form::Gif);
+        let webp = Self::webp(&proxy, (width, height), wanted, form, animated);
         let mut planned = Self::proxied(
             proxy,
             format!("attachment/{}", attachment.id.get()),
@@ -410,7 +422,11 @@ impl Hosts {
             &extension,
             signed,
         );
-        planned.original = original;
+        planned.original = upload
+            .clone()
+            .filter(|_| attachment.size <= MAX_BODY as u64);
+        planned.webp = webp;
+        planned.upload = upload;
         Ok(planned)
     }
 
@@ -458,8 +474,32 @@ impl Hosts {
             &extension,
             signed,
         );
+        planned.webp = Self::webp(&proxy, (width, height), wanted, form, animated);
+        planned.upload = original.clone();
         planned.original = original;
         Ok(planned)
+    }
+
+    // A GIF's animated WebP from the proxy, where the host plays WebP.
+    fn webp(
+        proxy: &Url,
+        source: (u32, u32),
+        wanted: (u32, u32),
+        form: Form,
+        animated: Option<AnimatedFormat>,
+    ) -> Option<Url> {
+        (form == Form::Gif && animated == Some(AnimatedFormat::WebP)).then(|| {
+            Self::proxied(
+                proxy.clone(),
+                String::new(),
+                source,
+                wanted,
+                Form::WebP,
+                "gif",
+                None,
+            )
+            .url
+        })
     }
 
     /// An embed's author or footer icon, as Discord gives it.
@@ -477,6 +517,8 @@ impl Hosts {
             signed: Some(url.clone()).filter(is_attachment_link),
             url,
             original: None,
+            webp: None,
+            upload: None,
         })
     }
 
@@ -540,6 +582,8 @@ impl Hosts {
             url,
             signed,
             original: None,
+            webp: None,
+            upload: None,
         }
     }
 }

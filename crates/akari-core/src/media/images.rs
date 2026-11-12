@@ -16,7 +16,7 @@ use super::part::PartFile;
 use super::signed::{self, Refresher, Renewal};
 use super::sniff;
 use super::url::{Form, Planned, is_attachment_link};
-use super::{EmbedSlot, ImageError, ImageFile, ImageKey, ImageRequest, MAX_BODY};
+use super::{EmbedSlot, ImageError, ImageFile, ImageKey, ImageRequest, MAX_BODY, MAX_STREAMED};
 use crate::DiscordClient;
 use crate::backoff;
 use crate::model::UserId;
@@ -262,7 +262,12 @@ impl Images {
             tracing::debug!(target: LOG, key = %planned.disk, "no image directory");
             return Err(ImageError::Unavailable);
         };
-        if let Some(entry) = tier.find(&planned.disk, planned.form, planned.needed).await {
+        let mut kept = tier.find(&planned.disk, planned.form, planned.needed).await;
+        // A GIF over the cap kept as the proxy's WebP, only for a host that plays WebP.
+        if kept.is_none() && planned.webp.is_some() {
+            kept = tier.find(&planned.disk, Form::WebP, planned.needed).await;
+        }
+        if let Some(entry) = kept {
             return Ok(ImageFile {
                 path: entry.path,
                 width: entry.width,
@@ -415,7 +420,7 @@ impl Images {
         let outcome = loop {
             attempts += 1;
             match self.media.fetch(&url, MAX_BODY).await {
-                Fetched::Body(bytes) => break self.keep(&planned, bytes).await,
+                Fetched::Body(bytes) => break self.keep(&planned, planned.form, bytes).await,
                 Fetched::Status(403 | 404)
                     if planned.signed.is_some()
                         && !renewed_after_denial
@@ -458,7 +463,11 @@ impl Images {
                         cap = MAX_BODY,
                         "image over the display cap"
                     );
-                    break Err(ImageError::TooLarge);
+                    break if planned.form == Form::Gif {
+                        self.heavy(&planned).await
+                    } else {
+                        Err(ImageError::TooLarge)
+                    };
                 }
                 Fetched::Refused => break Err(ImageError::Unsupported),
                 Fetched::RateLimited if attempts < ATTEMPTS => {}
@@ -494,13 +503,93 @@ impl Images {
         outcome
     }
 
-    async fn keep(&self, planned: &Planned, bytes: Vec<u8>) -> Answer {
-        let inspected = sniff::inspect(&bytes).ok_or(ImageError::NotAnImage)?;
-        if u64::from(inspected.width) * u64::from(inspected.height) > MAX_PIXELS {
-            tracing::debug!(target: LOG, key = %planned.disk, width = inspected.width, height = inspected.height, "image over the pixel cap");
+    // Whether to ask again after `fetched`, once the wait is over.
+    async fn retried(fetched: &Fetched, attempts: u32) -> bool {
+        if attempts >= ATTEMPTS {
+            return false;
+        }
+        match fetched {
+            Fetched::RateLimited => true,
+            Fetched::Status(500..) | Fetched::Transport(_) => {
+                tokio::time::sleep(retry_wait(attempts)).await;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // A GIF no form of which fits the display cap: the proxy's animated WebP at the box's size
+    // where the host plays it, else the file streamed to disk, which the host plays a few
+    // frames at a time.
+    async fn heavy(&self, planned: &Planned) -> Answer {
+        let signature = self.signed(planned, false, false).await?;
+        if let Some(webp) = &planned.webp {
+            let url = signed::resign(webp, &signature);
+            let mut attempts = 0;
+            let fetched = loop {
+                attempts += 1;
+                let fetched = self.media.fetch(&url, MAX_BODY).await;
+                if !Self::retried(&fetched, attempts).await {
+                    break fetched;
+                }
+            };
+            if let Fetched::Body(bytes) = fetched
+                && sniff::inspect(&bytes).is_some_and(|inspected| inspected.animated)
+                && let Ok(file) = self.keep(planned, Form::WebP, bytes).await
+            {
+                tracing::debug!(target: LOG, key = %planned.disk, "heavy GIF kept as the proxy's WebP");
+                return Ok(file);
+            }
+            tracing::debug!(target: LOG, key = %planned.disk, "no WebP of a heavy GIF, the file streamed");
+        }
+        let url = signed::resign(planned.upload.as_ref().unwrap_or(&planned.url), &signature);
+        let tier = self
+            .tier()
+            .await
+            .filter(|tier| !tier.is_deleted())
+            .ok_or(ImageError::Unavailable)?;
+        if tokio::fs::create_dir_all(tier.temporary()).await.is_err() {
+            return Err(ImageError::Io);
+        }
+        let part = PartFile::new(tier.temporary_file());
+        let mut attempts = 0;
+        let length = loop {
+            attempts += 1;
+            match self.media.stream(&url, part.path(), MAX_STREAMED).await {
+                Fetched::File(length) => break length,
+                Fetched::TooLarge => {
+                    tracing::debug!(target: LOG, key = %planned.disk, cap = MAX_STREAMED, "image over the streamed cap");
+                    return Err(ImageError::TooLarge);
+                }
+                Fetched::Status(403 | 404 | 410) => return Err(ImageError::NotFound),
+                Fetched::Status(415) | Fetched::NotAnImage => return Err(ImageError::NotAnImage),
+                Fetched::Refused => return Err(ImageError::Unsupported),
+                Fetched::Io => return Err(ImageError::Io),
+                fetched => {
+                    if !Self::retried(&fetched, attempts).await {
+                        return Err(ImageError::Unavailable);
+                    }
+                    tracing::debug!(target: LOG, key = %planned.disk, attempts, "image stream retried");
+                }
+            }
+        };
+        let path = part.path().to_path_buf();
+        let inspected = tokio::task::spawn_blocking(move || sniff::inspect_file(&path))
+            .await
+            .ok()
+            .flatten()
+            .ok_or(ImageError::NotAnImage)?;
+        if !inspected.animated {
+            tracing::debug!(target: LOG, key = %planned.disk, "heavy file is a still, not kept");
             return Err(ImageError::TooLarge);
         }
-        if planned.form != Form::Still && !inspected.animated {
+        self.index(planned, planned.form, inspected, part, length)
+            .await
+    }
+
+    async fn keep(&self, planned: &Planned, form: Form, bytes: Vec<u8>) -> Answer {
+        let inspected = sniff::inspect(&bytes).ok_or(ImageError::NotAnImage)?;
+        if form != Form::Still && !inspected.animated {
             tracing::debug!(target: LOG, key = %planned.disk, "animation asked for, the file is a still");
         }
         let tier = self
@@ -519,6 +608,27 @@ impl Images {
         if written.is_err() {
             return Err(ImageError::Io);
         }
+        self.index(planned, form, inspected, part, length).await
+    }
+
+    // Moves a downloaded file into the account's directory, under `form`.
+    async fn index(
+        &self,
+        planned: &Planned,
+        form: Form,
+        inspected: sniff::Inspected,
+        part: PartFile,
+        length: u64,
+    ) -> Answer {
+        if u64::from(inspected.width) * u64::from(inspected.height) > MAX_PIXELS {
+            tracing::debug!(target: LOG, key = %planned.disk, width = inspected.width, height = inspected.height, "image over the pixel cap");
+            return Err(ImageError::TooLarge);
+        }
+        let tier = self
+            .tier()
+            .await
+            .filter(|tier| !tier.is_deleted())
+            .ok_or(ImageError::Unavailable)?;
         let longest = inspected.width.max(inspected.height);
         let full = planned.full
             || match planned.source {
@@ -529,7 +639,7 @@ impl Images {
         let entry = tier
             .insert(NewFile {
                 key: planned.disk.clone(),
-                form: planned.form,
+                form,
                 width: inspected.width,
                 height: inspected.height,
                 animated: inspected.animated,

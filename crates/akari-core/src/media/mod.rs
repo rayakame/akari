@@ -41,6 +41,13 @@ pub(crate) const MAX_BODY: usize = if cfg!(test) {
     16 * 1024 * 1024
 };
 
+// What a GIF streamed to disk may weigh, when no form of it fits `MAX_BODY`.
+pub(crate) const MAX_STREAMED: usize = if cfg!(test) {
+    1024 * 1024
+} else {
+    64 * 1024 * 1024
+};
+
 use crate::model::{
     AttachmentId, ChannelId, EmojiId, GuildId, MessageId, RoleId, StickerFormatType, StickerId,
     UserId,

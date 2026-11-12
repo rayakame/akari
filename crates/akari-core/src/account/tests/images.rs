@@ -1809,24 +1809,23 @@ async fn a_gif_whose_proxy_copy_is_over_the_cap_comes_from_the_original() {
     );
 }
 
+// An upload past what Akari streams: its length says so, and nothing of it is kept.
 #[tokio::test]
-async fn a_gif_too_large_both_ways_stays_too_large() {
+async fn a_gif_too_large_every_way_stays_too_large() {
     let online = connected().await;
-    let (cdn, proxy) = load_gif(&online, crate::media::MAX_BODY + 1, now_seconds() + 86_400).await;
-    serve(
-        &online.server,
-        &proxy,
-        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
-    )
-    .await;
+    let size = crate::media::MAX_STREAMED + 1;
+    let (cdn, proxy) = load_gif(&online, size, now_seconds() + 86_400).await;
+    serve(&online.server, &proxy, gif_answer(delta_gif(3, size))).await;
+    serve(&online.server, &cdn, gif_answer(delta_gif(3, size))).await;
 
     let file = online.account.image(playing(attachment_key())).await;
+    let again = online.account.image(playing(attachment_key())).await;
 
     assert_eq!(file, Err(ImageError::TooLarge));
-    assert!(
-        online.requests_to(&cdn).await.is_empty(),
-        "the original wouldn't fit either"
-    );
+    assert_eq!(again, Err(ImageError::TooLarge));
+    assert_eq!(online.requests_to(&proxy).await.len(), 1, "not asked again");
+    assert_eq!(online.requests_to(&cdn).await.len(), 1, "not asked again");
+    assert_eq!(parts_left(&online), 0);
 }
 
 // A denied original, its link past its expiry, is renewed as the original, not as the proxy's.
@@ -2024,12 +2023,13 @@ async fn an_embedded_gif_link_whose_proxy_copy_is_over_the_cap_comes_from_the_up
     assert!(again.from_disk);
 }
 
-// The embed doesn't say what the upload weighs: it's asked once, and remembered as too heavy.
+// The embed doesn't say what the upload weighs: it's asked for display, then streamed, and
+// remembered as too heavy.
 #[tokio::test]
-async fn an_embedded_gif_link_too_large_both_ways_stays_too_large() {
+async fn an_embedded_gif_link_too_large_every_way_stays_too_large() {
     let online = connected().await;
     let (cdn, proxy) = load_gif_link(&online, now_seconds() + 86_400).await;
-    let inflated = delta_gif(3, crate::media::MAX_BODY + 1);
+    let inflated = delta_gif(3, crate::media::MAX_STREAMED + 1);
     serve(&online.server, &proxy, gif_answer(inflated.clone())).await;
     serve(&online.server, &cdn, gif_answer(inflated)).await;
 
@@ -2037,11 +2037,12 @@ async fn an_embedded_gif_link_too_large_both_ways_stays_too_large() {
 
     assert_eq!(file, Err(ImageError::TooLarge));
     assert_eq!(online.requests_to(&proxy).await.len(), 1);
-    assert_eq!(online.requests_to(&cdn).await.len(), 1);
+    assert_eq!(online.requests_to(&cdn).await.len(), 2);
     let again = online.account.image(playing(thumbnail_key())).await;
     assert_eq!(again, Err(ImageError::TooLarge));
     assert_eq!(online.requests_to(&proxy).await.len(), 1, "not asked again");
-    assert_eq!(online.requests_to(&cdn).await.len(), 1, "not asked again");
+    assert_eq!(online.requests_to(&cdn).await.len(), 2, "not asked again");
+    assert_eq!(parts_left(&online), 0);
     let still = online
         .account
         .image(ImageRequest {
@@ -2052,13 +2053,11 @@ async fn an_embedded_gif_link_too_large_both_ways_stays_too_large() {
     assert_ne!(still, Err(ImageError::NotFound), "nothing marked missing");
 }
 
-// Akari fetches only from Discord: another site's GIF has no upload to fall back to.
-#[tokio::test]
-async fn another_sites_gif_over_the_cap_is_too_large() {
-    let online = connected().await;
+// Another site's GIF, `proxy` the path of the media proxy's copy.
+async fn load_external_gif(online: &Online, host: &str) -> &'static str {
     let proxy = "/external/abc/https/example.com/loop.gif";
-    let proxied = format!("{}{proxy}", online.uri());
-    load_message(&online, |message| {
+    let proxied = format!("{}{proxy}", host.trim_end_matches('/'));
+    load_message(online, |message| {
         message["embeds"] = json!([{
             "type": "image", "url": "https://example.com/loop.gif",
             "thumbnail": {"url": "https://example.com/loop.gif", "proxy_url": proxied,
@@ -2066,28 +2065,260 @@ async fn another_sites_gif_over_the_cap_is_too_large() {
         }]);
     })
     .await;
+    proxy
+}
+
+// Files of downloads that never made it into the index.
+fn parts_left(online: &Online) -> usize {
+    let Ok(runs) = std::fs::read_dir(online.image_directory().join("tmp")) else {
+        return 0;
+    };
+    runs.flatten()
+        .map(|run| std::fs::read_dir(run.path()).map_or(0, Iterator::count))
+        .sum()
+}
+
+fn playing_webp(key: ImageKey) -> ImageRequest {
+    ImageRequest {
+        animated: Some(AnimatedFormat::WebP),
+        ..playing(key)
+    }
+}
+
+async fn serve_webp(online: &Online, proxy: &str, bytes: Vec<u8>) {
+    Mock::given(method("GET"))
+        .and(path(proxy))
+        .and(query_param("format", "webp"))
+        .and(query_param("animated", "true"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/webp")
+                .set_body_bytes(bytes),
+        )
+        .mount(&online.server)
+        .await;
+}
+
+fn asked_as_webp(requests: &[Request]) -> usize {
+    requests
+        .iter()
+        .filter(|request| {
+            request
+                .url
+                .query()
+                .is_some_and(|query| query.contains("format=webp"))
+        })
+        .count()
+}
+
+// Akari fetches only from Discord: another site's GIF has no upload, so the proxy's copy is
+// streamed to disk.
+#[tokio::test]
+async fn another_sites_gif_over_the_cap_is_streamed_from_the_proxy() {
+    let online = connected().await;
+    let proxy = load_external_gif(&online, &online.uri()).await;
+    let copy = delta_gif(3, crate::media::MAX_BODY + 1);
+    serve(&online.server, proxy, gif_answer(copy.clone())).await;
+
+    let file = online
+        .account
+        .image(playing(thumbnail_key()))
+        .await
+        .unwrap();
+    let again = online
+        .account
+        .image(playing(thumbnail_key()))
+        .await
+        .unwrap();
+
+    assert!(file.animated);
+    assert_eq!((file.width, file.height), (4, 4));
+    assert_eq!(std::fs::read(&file.path).unwrap(), copy);
+    assert!(again.from_disk);
+    let asked = online.requests_to(proxy).await;
+    assert_eq!(asked.len(), 2, "for display, then streamed");
+    assert_eq!(asked_as_webp(&asked), 0, "this host plays GIFs");
+    assert_eq!(parts_left(&online), 0);
+}
+
+// Where animated WebP plays, the proxy's WebP at the box's size comes before any heavy file;
+// a host that plays GIFs never gets it.
+#[tokio::test]
+async fn a_gif_over_the_cap_plays_as_the_proxys_webp_where_webp_plays() {
+    let online = connected().await;
+    let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+    let fresh = now_seconds() + 86_400;
+    let (cdn, proxy) = load_gif(&online, upload.len(), fresh).await;
+    serve_webp(&online, &proxy, webp_bytes(4, 4, true)).await;
+    serve(&online.server, &proxy, gif_answer(upload.clone())).await;
+    serve(&online.server, &cdn, gif_answer(upload.clone())).await;
+
+    let file = online
+        .account
+        .image(playing_webp(attachment_key()))
+        .await
+        .unwrap();
+    let again = online
+        .account
+        .image(playing_webp(attachment_key()))
+        .await
+        .unwrap();
+
+    assert!(file.animated);
+    assert_eq!(std::fs::read(&file.path).unwrap(), webp_bytes(4, 4, true));
+    assert!(again.from_disk);
+    assert_eq!(again.path, file.path);
+    let asked = online.requests_to(&proxy).await;
+    assert_eq!(asked.len(), 2, "the GIF, then the WebP");
+    assert_eq!(
+        asked[1].url.query(),
+        Some(format!("{}&format=webp&animated=true", signature(fresh)).as_str())
+    );
+    assert!(online.requests_to(&cdn).await.is_empty());
+
+    let gif = online
+        .account
+        .image(playing(attachment_key()))
+        .await
+        .unwrap();
+
+    assert_eq!(std::fs::read(&gif.path).unwrap(), upload, "never the WebP");
+    assert_eq!(online.requests_to(&cdn).await.len(), 1);
+}
+
+// An upload over the display cap on a host that plays GIFs: streamed as uploaded, with its
+// signature.
+#[tokio::test]
+async fn a_gif_upload_over_the_cap_is_streamed_to_disk() {
+    let online = connected().await;
+    let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+    let fresh = now_seconds() + 86_400;
+    let (cdn, proxy) = load_gif(&online, upload.len(), fresh).await;
+    serve(
+        &online.server,
+        &proxy,
+        gif_answer(delta_gif(3, crate::media::MAX_BODY * 2)),
+    )
+    .await;
+    serve(&online.server, &cdn, gif_answer(upload.clone())).await;
+
+    let file = online
+        .account
+        .image(playing(attachment_key()))
+        .await
+        .unwrap();
+    let again = online
+        .account
+        .image(playing(attachment_key()))
+        .await
+        .unwrap();
+
+    assert!(file.animated);
+    assert_eq!((file.width, file.height), (4, 4));
+    assert_eq!(std::fs::read(&file.path).unwrap(), upload);
+    assert!(again.from_disk);
+    let asked = online.requests_to(&proxy).await;
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked_as_webp(&asked), 0);
+    let fetched = online.requests_to(&cdn).await;
+    assert_eq!(fetched.len(), 1);
+    assert_eq!(fetched[0].url.query(), Some(signature(fresh).as_str()));
+    assert_eq!(parts_left(&online), 0);
+}
+
+// The proxy's WebP over the cap too (16.78 MB for the GIF Chris reported, at its full size), or
+// answered as a still: the upload is streamed instead.
+#[tokio::test]
+async fn a_webp_that_doesnt_fit_or_play_gives_way_to_the_streamed_file() {
+    let mut heavy = webp_bytes(4, 4, true);
+    heavy.resize(crate::media::MAX_BODY + 1, 0);
+    for webp in [heavy, webp_bytes(4, 4, false)] {
+        let online = connected().await;
+        let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+        let (cdn, proxy) = load_gif(&online, upload.len(), now_seconds() + 86_400).await;
+        serve_webp(&online, &proxy, webp).await;
+        serve(&online.server, &proxy, gif_answer(upload.clone())).await;
+        serve(&online.server, &cdn, gif_answer(upload.clone())).await;
+
+        let file = online
+            .account
+            .image(playing_webp(attachment_key()))
+            .await
+            .unwrap();
+
+        assert!(file.animated);
+        assert_eq!(std::fs::read(&file.path).unwrap(), upload);
+        assert_eq!(asked_as_webp(&online.requests_to(&proxy).await), 1);
+        assert_eq!(parts_left(&online), 0);
+    }
+}
+
+// A heavy file with one frame has nothing to play: it isn't kept.
+#[tokio::test]
+async fn a_streamed_still_stays_too_large() {
+    let online = connected().await;
+    let proxy = load_external_gif(&online, &online.uri()).await;
     serve(
         &online.server,
         proxy,
-        gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)),
+        gif_answer(delta_gif(1, crate::media::MAX_BODY + 1)),
     )
     .await;
 
     let file = online.account.image(playing(thumbnail_key())).await;
 
     assert_eq!(file, Err(ImageError::TooLarge));
+    assert_eq!(parts_left(&online), 0);
+}
+
+#[tokio::test]
+async fn a_streamed_body_without_a_length_is_capped_while_it_streams() {
+    let cdn = chunked_cdn(crate::media::MAX_STREAMED + 1).await;
+    let online = connected_with(Some(cdn.clone()), TempDir::new()).await;
+    load_external_gif(&online, &cdn).await;
+
+    let file = online.account.image(playing(thumbnail_key())).await;
+
+    assert_eq!(file, Err(ImageError::TooLarge));
+    assert_eq!(parts_left(&online), 0);
+}
+
+// A stream that fails says nothing about the file's weight: the next ask tries again.
+#[tokio::test]
+async fn a_failed_stream_is_unavailable_and_asked_again() {
+    let online = connected().await;
+    let proxy = load_external_gif(&online, &online.uri()).await;
+    let copy = delta_gif(3, crate::media::MAX_BODY + 1);
+    Mock::given(method("GET"))
+        .and(path(proxy))
+        .respond_with(gif_answer(copy.clone()))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(proxy))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(3)
+        .with_priority(2)
+        .mount(&online.server)
+        .await;
+    serve(&online.server, proxy, gif_answer(copy.clone())).await;
+
+    let failed = online.account.image(playing(thumbnail_key())).await;
+    let after_failing = online.requests_to(proxy).await.len();
+    let later = online.account.image(playing(thumbnail_key())).await;
+
+    assert_eq!(failed, Err(ImageError::Unavailable));
     assert_eq!(
-        online
-            .server
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .filter(|request| request.method == wiremock::http::Method::GET
-                && request.url.path().ends_with(".gif"))
-            .count(),
-        1
+        after_failing, 4,
+        "for display, then three tries at the stream"
     );
+    assert_eq!(
+        later.map(|file| std::fs::read(file.path).unwrap()),
+        Ok(copy)
+    );
+    assert_eq!(parts_left(&online), 0);
 }
 
 // Discord won't sign the upload's link again while the proxy still has its copy: the upload is

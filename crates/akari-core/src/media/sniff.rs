@@ -1,5 +1,12 @@
 // What a downloaded file is, from its first bytes: Akari keeps only images it can name.
 
+use std::fs::File;
+use std::io::{BufRead, BufReader, Cursor, Read, Seek};
+use std::path::Path;
+
+// Past any header: a JPEG's size comes after its metadata.
+const HEAD: usize = 256 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Format {
     Png,
@@ -38,6 +45,17 @@ pub(crate) fn inspect(bytes: &[u8]) -> Option<Inspected> {
         jpeg(bytes)
     } else {
         None
+    }
+}
+
+/// As `inspect`, for a file too heavy to hold in memory: a GIF's blocks are walked on disk.
+pub(crate) fn inspect_file(path: &Path) -> Option<Inspected> {
+    let mut reader = BufReader::with_capacity(HEAD, File::open(path).ok()?);
+    let head = reader.fill_buf().ok()?;
+    if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
+        gif_blocks(&mut reader)
+    } else {
+        inspect(head)
     }
 }
 
@@ -97,27 +115,38 @@ fn png(bytes: &[u8]) -> Option<Inspected> {
 
 // Counts frames by walking the blocks; a cut-off file counts what it has.
 fn gif(bytes: &[u8]) -> Option<Inspected> {
-    let (width, height) = (le16(bytes, 6)?, le16(bytes, 8)?);
-    let flags = *bytes.get(10)?;
-    let mut at = 13;
+    gif_blocks(&mut Cursor::new(bytes))
+}
+
+fn gif_blocks(reader: &mut (impl BufRead + Seek)) -> Option<Inspected> {
+    let mut header = [0; 11];
+    reader.read_exact(&mut header).ok()?;
+    let (width, height) = (le16(&header, 6)?, le16(&header, 8)?);
+    let flags = header[10];
+    reader.seek_relative(2).ok()?;
     if flags & 0x80 != 0 {
-        at += 3 << ((flags & 7) + 1);
+        reader.seek_relative(3 << ((flags & 7) + 1)).ok()?;
     }
     let mut frames = 0;
-    while let Some(&block) = bytes.get(at) {
+    while let Some(block) = next_byte(reader) {
         match block {
-            0x21 => at = skip_sub_blocks(bytes, at + 2)?,
+            0x21 => {
+                reader.seek_relative(1).ok()?;
+                skip_sub_blocks(reader)?;
+            }
             0x2c => {
                 frames += 1;
                 if frames > 1 {
                     break;
                 }
-                let local = *bytes.get(at + 9)?;
-                at += 10;
+                let mut descriptor = [0; 9];
+                reader.read_exact(&mut descriptor).ok()?;
+                let local = descriptor[8];
                 if local & 0x80 != 0 {
-                    at += 3 << ((local & 7) + 1);
+                    reader.seek_relative(3 << ((local & 7) + 1)).ok()?;
                 }
-                at = skip_sub_blocks(bytes, at + 1)?;
+                reader.seek_relative(1).ok()?;
+                skip_sub_blocks(reader)?;
             }
             _ => break,
         }
@@ -130,14 +159,19 @@ fn gif(bytes: &[u8]) -> Option<Inspected> {
     })
 }
 
-fn skip_sub_blocks(bytes: &[u8], mut at: usize) -> Option<usize> {
+fn next_byte(reader: &mut impl Read) -> Option<u8> {
+    let mut byte = [0];
+    reader.read_exact(&mut byte).ok()?;
+    Some(byte[0])
+}
+
+fn skip_sub_blocks(reader: &mut (impl BufRead + Seek)) -> Option<()> {
     loop {
-        let length = usize::from(*bytes.get(at)?);
-        at += 1;
+        let length = next_byte(reader)?;
         if length == 0 {
-            return Some(at);
+            return Some(());
         }
-        at += length;
+        reader.seek_relative(i64::from(length)).ok()?;
     }
 }
 
@@ -303,6 +337,71 @@ pub(crate) mod tests {
 
         assert_eq!((inspected.width, inspected.height), (32, 32));
         assert!(inspected.animated);
+    }
+
+    // A comment of `size` bytes, as sub-blocks.
+    fn comment(size: usize) -> Vec<u8> {
+        let mut bytes = vec![0x21, 0xfe];
+        for block in vec![b'.'; size].chunks(255) {
+            bytes.push(block.len() as u8);
+            bytes.extend(block);
+        }
+        bytes.push(0);
+        bytes
+    }
+
+    fn file_with(bytes: &[u8]) -> (crate::cache::tests::TempDir, std::path::PathBuf) {
+        let dir = crate::cache::tests::TempDir::new();
+        let path = dir.path().join("image");
+        std::fs::write(&path, bytes).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn a_file_reads_as_its_bytes_do() {
+        for bytes in [
+            png_bytes(300, 200, true),
+            webp_bytes(300, 200, true),
+            gif_bytes(1),
+            gif_bytes(3),
+            jpeg_bytes(),
+            b"<html>".to_vec(),
+            Vec::new(),
+        ] {
+            let (_dir, path) = file_with(&bytes);
+
+            assert_eq!(inspect_file(&path), inspect(&bytes), "{bytes:?}");
+        }
+        assert_eq!(inspect_file(std::path::Path::new("/nowhere/at/all")), None);
+    }
+
+    // The second frame megabytes in: found without the file in memory.
+    #[test]
+    fn a_files_frames_are_found_however_far_in() {
+        let frames = gif_bytes(2);
+        let mut bytes = frames[..19].to_vec();
+        bytes.extend(comment(3 << 20));
+        let first_frame = 19 + 8 + 10 + 5;
+        bytes.extend(&frames[19..first_frame]);
+        bytes.extend(comment(3 << 20));
+        bytes.extend(&frames[first_frame..]);
+        let (_dir, path) = file_with(&bytes);
+
+        let inspected = inspect_file(&path).unwrap();
+
+        assert!(inspected.animated);
+        assert_eq!((inspected.width, inspected.height), (300, 200));
+        assert_eq!(Some(inspected), inspect(&bytes));
+    }
+
+    #[test]
+    fn a_cut_off_file_reads_as_its_bytes_do() {
+        let gif = gif_bytes(3);
+        for end in 0..gif.len() {
+            let (_dir, path) = file_with(&gif[..end]);
+
+            assert_eq!(inspect_file(&path), inspect(&gif[..end]), "{end}");
+        }
     }
 
     #[test]

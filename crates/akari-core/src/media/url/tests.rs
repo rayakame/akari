@@ -735,6 +735,94 @@ fn only_a_gif_that_fits_keeps_its_upload() {
     assert_eq!(too_large.original, None);
 }
 
+// A GIF's heavy forms: the proxy's animated WebP at the box's size for a host that plays it, and
+// the upload whatever it weighs, for the stream to disk.
+#[test]
+fn a_playing_gif_has_its_webp_and_its_upload() {
+    let gif = attachment("loop.gif", 540, 405);
+    let mut huge = attachment("loop.gif", 540, 405);
+    huge.size = MAX_BODY as u64 + 1;
+    let plan = |attachment: &Attachment, wanted, animated| {
+        hosts().attachment(attachment, wanted, animated).unwrap()
+    };
+    let webp = |planned: &Planned| planned.webp.as_ref().map(|url| query(url.as_str()));
+
+    let small = plan(&huge, (256, 192), Some(AnimatedFormat::WebP));
+    assert_eq!(small.form, Form::Gif);
+    assert_eq!(query(small.url.as_str()), "width=256&height=192");
+    assert_eq!(
+        webp(&small).as_deref(),
+        Some("format=webp&animated=true&width=256&height=192")
+    );
+    assert!(
+        small
+            .webp
+            .as_ref()
+            .is_some_and(|url| url.as_str().contains(SIGNATURE.trim_end_matches('&')))
+    );
+    assert_eq!(
+        webp(&plan(&gif, (540, 405), Some(AnimatedFormat::WebP))).as_deref(),
+        Some("format=webp&animated=true")
+    );
+    assert_eq!(
+        small.upload.as_ref().map(Url::as_str),
+        Some(huge.url.as_ref())
+    );
+    assert_eq!(small.original, None, "over the display cap");
+
+    let gif_host = plan(&huge, (256, 192), Some(AnimatedFormat::Gif));
+    assert_eq!(gif_host.webp, None);
+    assert_eq!(
+        gif_host.upload.as_ref().map(Url::as_str),
+        Some(huge.url.as_ref())
+    );
+    let still = plan(&huge, (256, 192), None);
+    assert_eq!((still.webp, still.upload), (None, None));
+    let animated_webp = plan(
+        &attachment("loop.webp", 540, 405),
+        (256, 192),
+        Some(AnimatedFormat::WebP),
+    );
+    assert_eq!((animated_webp.webp, animated_webp.upload), (None, None));
+}
+
+#[test]
+fn an_embedded_gif_has_its_webp_and_its_upload() {
+    let path = "attachments/1300000000000000001/1300000000000000003/loop.gif";
+    let upload = format!("https://cdn.discordapp.com/{path}?{SIGNATURE}");
+    let proxy = format!("https://media.discordapp.net/{path}?{SIGNATURE}");
+    let external = "https://images-ext-1.discordapp.net/external/abc/https/example.com/loop.gif";
+    let plan = |media: &EmbedMedia, animated| hosts().embed(media, (256, 192), animated).unwrap();
+
+    let linked = plan(&embedded(&upload, Some(&proxy)), Some(AnimatedFormat::WebP));
+    assert_eq!(
+        linked
+            .webp
+            .as_ref()
+            .map(|url| query(url.as_str()))
+            .as_deref(),
+        Some("format=webp&animated=true&width=256&height=192")
+    );
+    assert_eq!(
+        linked.upload.as_ref().map(Url::as_str),
+        Some(upload.as_str())
+    );
+    let elsewhere = plan(
+        &embedded("https://example.com/loop.gif", Some(external)),
+        Some(AnimatedFormat::WebP),
+    );
+    assert_eq!(
+        elsewhere.webp.as_ref().map(Url::as_str),
+        Some(format!("{external}?format=webp&animated=true&width=256&height=192").as_str())
+    );
+    assert_eq!(elsewhere.upload, None, "another site's");
+    let gif_host = plan(
+        &embedded("https://example.com/loop.gif", Some(external)),
+        Some(AnimatedFormat::Gif),
+    );
+    assert_eq!(gif_host.webp, None);
+}
+
 fn embedded(url: &str, proxy: Option<&str>) -> EmbedMedia {
     EmbedMedia {
         url: url.into(),

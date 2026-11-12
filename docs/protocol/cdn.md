@@ -59,7 +59,7 @@ backing scale (2 on Retina), rounded up. The host passes those pixels (`ImageReq
 | emoji | `emojis/{id}.webp?size=N` | animated: `&animated=true`, or `.gif?size=N` |
 | default avatar | `embed/avatars/{0–5}.png` | 256 × 256 PNGs; no query (size is ignored); 6 is a 404 |
 | sticker | `media…/stickers/{id}.{ext}?size=N` | PNG → `.webp` + `quality=lossless`; APNG `.png` (still: `&passthrough=false`); GIF `.gif` (still: `.webp`); Lottie unsupported |
-| attachment | its `proxy_url` with the signature, then `format=webp`, `quality=lossless` for `.png` and `.avif`, `width`, `height` | GIF animating: no `format`, and when the proxy's copy is over the cap and the upload's `size` fits, its CDN `url` (renewed) instead; animated WebP or AVIF (`IS_ANIMATED`): `format=webp&animated=true`; a video's poster: `format=webp` |
+| attachment | its `proxy_url` with the signature, then `format=webp`, `quality=lossless` for `.png` and `.avif`, `width`, `height` | GIF animating: no `format`, and when the proxy's copy is over the cap and the upload's `size` fits, its CDN `url` (renewed) instead; a GIF still over the cap: `format=webp&animated=true` with `width` and `height` where the host plays WebP, then the upload (else the proxy's copy) streamed to disk; animated WebP or AVIF (`IS_ANIMATED`): `format=webp&animated=true`; a video's poster: `format=webp` |
 | embed image, thumbnail | its `proxy_url`, sized as an attachment | |
 | embed author or footer icon | its `proxy_icon_url` as Discord gives it | |
 
@@ -89,6 +89,15 @@ the images'.
   rustls configuration as REST. Its connections are its own.
 - Only `image/*` answers whose bytes are PNG (APNG), GIF, WebP or JPEG are kept; the bytes give
   the size and whether it animates. At most 16 MB and 64 megapixels (`TooLarge`).
+- A GIF over the 16 MB in every form asked for display (the proxy's GIF, then the upload) has
+  two more: where the request's `AnimatedFormat` is WebP, the proxy's animated WebP at the box's
+  size (a 10 MB GIF of 540 × 405 measured 33.5 MB as the proxy's GIF, 16.78 MB as its WebP at
+  full size and 7.2 MB at 512 × 384), kept under the GIF's key as a WebP, which only a WebP ask
+  finds; else, or when that is over the cap, fails or is a still, the upload (the proxy's copy
+  where there is none) streamed into the account's directory, at most 64 MB, on one of the
+  saves' two slots, never held in memory: its frames are counted by walking the file's blocks
+  on disk. A streamed file with one frame isn't kept. Over 64 MB is `TooLarge`, remembered for
+  the session; a stream that failed is `Unavailable` and asked again.
 - At most 8 downloads run at once, the newest asked first: what's on screen now. Asks for the
   same image, form and size share one download; when the last asker goes, it's cancelled.
 - 5xx and network errors: 3 attempts in all, the waits doubling from 0.5–1 s with jitter, at
