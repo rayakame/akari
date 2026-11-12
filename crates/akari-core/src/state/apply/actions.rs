@@ -24,9 +24,13 @@ impl State {
     ) -> MessageActions {
         if let Some(original) = self.windows.shown_by_row(channel, message) {
             let actions = self.message_actions_of(&original, now_millis);
+            let row = self.message(channel, message);
             return MessageActions {
                 // The thread it would view is the one the row is in.
                 view_thread: actions.view_thread && original.id.cast() != channel,
+                // A mark from the row marks the thread, not the original's channel.
+                mark_unread: row
+                    .is_some_and(|row| self.message_actions_of(&row, now_millis).mark_unread),
                 ..actions
             };
         }

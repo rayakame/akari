@@ -1164,13 +1164,52 @@ fn a_starter_row_answers_for_the_message_it_shows() {
         actions,
         MessageActions {
             view_thread: false,
+            mark_unread: false,
             ..in_parent
         },
-        "the thread it would view is the one the row is in"
+        "the thread it would view and the thread a mark would mark are the one the row is in"
     );
     assert_eq!(
         state.shown_message(Snowflake::new(THREAD), Snowflake::new(ROW)),
         Some((Snowflake::new(GENERAL), Snowflake::new(THREAD)))
+    );
+}
+
+// Marking unread from the row marks the thread, so the thread says whether it may be.
+#[test]
+fn a_starter_rows_mark_unread_is_its_threads() {
+    let origin = || starter(Some(message(THREAD, GENERAL)));
+    let mut events = Vec::new();
+
+    let mut closed = load(owner(archived(true)), THREAD, &[origin()]);
+    let now = closed.now_millis();
+    assert!(!of_row(&closed).mark_unread);
+    assert_eq!(
+        closed.mark_unread(
+            Snowflake::new(THREAD),
+            Snowflake::new(ROW),
+            now,
+            &mut events
+        ),
+        None
+    );
+
+    let mut open = load(owner(plain), THREAD, &[origin()]);
+    let now = open.now_millis();
+    assert!(of_row(&open).mark_unread);
+    let marked = open
+        .mark_unread(
+            Snowflake::new(THREAD),
+            Snowflake::new(ROW),
+            now,
+            &mut events,
+        )
+        .unwrap();
+    let row: MessageId = Snowflake::new(ROW);
+    assert_eq!(
+        marked.position,
+        MessageId::from_unix_millis(row.unix_millis() - 1, 0),
+        "from the thread's start"
     );
 }
 

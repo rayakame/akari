@@ -546,6 +546,80 @@ async fn a_thread_is_marked_with_the_same_body() {
     assert!(badge(&online.account, THREAD).unread);
 }
 
+// THREAD's list: its starter row, with the message of GENERAL it shows, and one message after it.
+async fn showing_starter_row(online: &Online) -> u64 {
+    let row = THREAD_NEWEST - 1;
+    let mut messages = page(&[row, THREAD_NEWEST]);
+    for message in messages.as_array_mut().unwrap() {
+        message["channel_id"] = THREAD.to_string().into();
+    }
+    let mut original = message(0, THREAD)["d"].clone();
+    original.as_object_mut().unwrap().remove("nonce");
+    let starter = &mut messages[1];
+    starter["type"] = 21.into();
+    starter["mentions"] = json!([]);
+    starter["message_reference"] = json!({
+        "message_id": THREAD.to_string(), "channel_id": GENERAL.to_string(),
+    });
+    starter["referenced_message"] = original;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v9/channels/{THREAD}/messages")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(messages))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    online
+        .account
+        .load_messages(id(THREAD), MessageLoad::Latest { limit: 50 })
+        .await
+        .unwrap();
+    assert_eq!(
+        online.account.store().shown_message(id(THREAD), msg(row)),
+        Some((general(), msg(THREAD)))
+    );
+    row
+}
+
+#[tokio::test]
+async fn a_starter_row_marks_its_thread_from_the_start() {
+    let online = acking(|_| {}).await;
+    let row = showing_starter_row(&online).await;
+
+    online
+        .account
+        .mark_unread(id(THREAD), msg(row))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sent(&online.server, 1).await,
+        [Sent::Ack(THREAD, millisecond_before(row))]
+    );
+    assert_eq!(
+        bodies(&online).await,
+        [json!({"manual": true, "mention_count": 1})]
+    );
+    assert!(badge(&online.account, THREAD).unread);
+}
+
+// The message the row shows is in GENERAL, which is never closed; the thread decides.
+#[tokio::test]
+async fn a_starter_row_of_a_closed_thread_is_refused_without_a_request() {
+    let online = acking(|ready| {
+        let metadata = &mut ready["guilds"][0]["threads"][0]["thread_metadata"];
+        metadata["archived"] = true.into();
+        metadata["locked"] = true.into();
+    })
+    .await;
+    let row = showing_starter_row(&online).await;
+
+    let refused = online.account.mark_unread(id(THREAD), msg(row)).await;
+
+    assert!(matches!(refused, Err(RequestError::InvalidRequest)));
+    assert!(other_requests(&online.server).await.is_empty());
+}
+
 async fn other_requests(server: &MockServer) -> Vec<String> {
     server
         .received_requests()
