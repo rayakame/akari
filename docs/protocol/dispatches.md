@@ -481,6 +481,10 @@ copy's reactions; else the reaction is applied to the page's copy, which is righ
 page was built first. A reaction to the message a thread started from, while the thread's page
 loads, isn't replayed onto the copy that page brings.
 
+`akari-cli read` and `tail` print each message's reactions under it (emoji, count, `*` for
+the user's own, the super reactions among them) and what a reply answers, and `tail` prints
+every `MessageReactionsChanged` and `ReplyTargetChanged` of its channel as a line of its own.
+
 ## Pins
 
 From the code read of canary 671549, not observed:

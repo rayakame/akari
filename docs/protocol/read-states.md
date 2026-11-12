@@ -45,7 +45,8 @@ pin time the user acknowledged, compared by milliseconds.
   (`GuildSettingsChanged`, `ChannelUpdated`). A pin time alone is no `ChannelUpdated` at READY,
   like a newest message.
 - Akari doesn't ack pins yet (`POST /channels/{id}/pins/ack`, sent by the official client only
-  from its open pins popout); another client's ack arrives as CHANNEL_PINS_ACK.
+  from its open pins popout: from the code read of canary 671549, not observed); another
+  client's ack arrives as CHANNEL_PINS_ACK.
 
 ## The unread rule
 
@@ -464,10 +465,11 @@ after READY.
 `akari-cli read-state <channel_id>` shows where a channel's badge comes from:
 - READY's raw read state entry and the channel's fields;
 - what Akari holds after READY, and with `--cache <file>` what a copy of the app's cache held;
-- the badges, permissions and opt-in flags;
+- the badges, the newest pin's time and whether the pins are unread, permissions and opt-in
+  flags;
 - how the newest 100 messages over REST compare with the read position.
 
-`--watch` then follows new messages and badge changes. It prints IDs, flags and counts, never
+`--watch` then follows new messages, badge changes and the pins dot. It prints IDs, flags and counts, never
 names or message content.
 
 ## Open points
