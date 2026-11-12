@@ -390,8 +390,14 @@ The official client asks the list as the tag filter leaves it and again on every
 Akari asks the whole active list. FORUM_UNREADS
 `{channel_id, threads: [{thread_id, missing?, count?}], permission_denied?}` answers: an answer
 with `permission_denied` is dropped, a thread without a `count` stays asked and uncounted,
-`missing` is read by nothing. Answers come in the order asked, so a post asked again with a newer
-ack takes only the answer to its newest ask: the ones before it are dropped. Afterwards a
+`missing` is read by nothing. Akari takes the gateway to answer each frame once, a refusal
+included, in the order asked, and keeps the unanswered frames: an answer is for the forum's
+oldest frame that names its posts (the forum's frames before that one count as never answered),
+and a post's count is taken only if that frame is the post's newest ask and names the ack the
+post still has. So a post asked again with a newer ack takes only the answer to its newest ask,
+an answer that refuses or leaves a post out holds up no later one, and an answer without a
+frame is dropped. Frames still unanswered at RESUMED went into the dead connection (a resume
+replays the missed answers first): their posts are asked again. Afterwards a
 MESSAGE_CREATE in a post with a count adds 1 (one replayed by a resume adds nothing), and a
 post created while its forum is open (THREAD_CREATE with `newly_created`) starts at 0. Where the
 official client's count only follows another session's MESSAGE_ACK (so it drifts upward after

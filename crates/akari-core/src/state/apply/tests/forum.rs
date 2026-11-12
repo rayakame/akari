@@ -2014,8 +2014,22 @@ fn a_count_is_never_above_the_posts_messages() {
     apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(40))]));
     assert_eq!(new_counts(&state), [(OLD, Some(9))]);
 
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
     apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(0))]));
     assert_eq!(new_counts(&state), [(OLD, None)], "1+");
+}
+
+// Every answer has its frame: one that was never asked for says nothing.
+#[test]
+fn an_answer_nobody_asked_for_is_dropped() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(7))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
 }
 
 #[test]
@@ -2276,6 +2290,81 @@ fn a_frame_that_never_left_leaves_no_answer_to_wait_for() {
     apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
 
     assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+// Discord answers each frame once, also when it refuses: nothing is left to wait for, and the
+// post's next ask is answered as any.
+#[test]
+fn a_refused_answer_blocks_no_later_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    let mut refused = unreads(&[]);
+    refused["permission_denied"] = true.into();
+    apply(&mut state, "FORUM_UNREADS", refused);
+    assert_eq!(new_counts(&state), [(OLD, None)]);
+    assert_eq!(asked(&mut state), [], "once a connection");
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(2))]);
+}
+
+#[test]
+fn an_answer_that_leaves_a_post_out_blocks_no_later_count() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[]));
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+
+    assert_eq!(new_counts(&state), [(OLD, Some(2))]);
+}
+
+// A resume replays what was missed before RESUMED: a frame without its answer by then went
+// into the dead connection.
+#[test]
+fn a_frame_unanswered_at_a_resume_is_asked_again() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+
+    apply(&mut state, "RESUMED", json!({}));
+
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(3))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(3))]);
+}
+
+#[test]
+fn an_answered_post_is_not_asked_again_after_a_resume() {
+    let mut state = forum_with_an_opened_unread_post();
+    asked(&mut state);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, None)]));
+
+    apply(&mut state, "RESUMED", json!({}));
+
+    assert_eq!(asked(&mut state), []);
+}
+
+// An answer belongs to the oldest frame that names its posts: a frame before it that doesn't
+// was never answered and takes no later answer for its own.
+#[test]
+fn an_answer_skips_a_frame_that_names_none_of_its_posts() {
+    let mut state = forum_with_an_opened_unread_post();
+    assert_eq!(asked(&mut state), [(OLD, OLD + 2)]);
+    apply(&mut state, "MESSAGE_CREATE", message(MIDDLE + 100, MIDDLE));
+    assert_eq!(asked(&mut state), [(MIDDLE, MIDDLE + 5)]);
+
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(MIDDLE, Some(1))]));
+    assert_eq!(new_counts(&state), [(OLD, None), (MIDDLE, Some(1))]);
+
+    apply(&mut state, "MESSAGE_ACK", read_ack(OLD, OLD + 3));
+    assert_eq!(asked(&mut state), [(OLD, OLD + 3)]);
+    apply(&mut state, "FORUM_UNREADS", unreads(&[(OLD, Some(2))]));
+    assert_eq!(new_counts(&state), [(OLD, Some(2)), (MIDDLE, Some(1))]);
 }
 
 // Only a count that changed, or a post that may now show one, is worth a read.

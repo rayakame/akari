@@ -892,7 +892,8 @@ impl State {
             E::ThreadMembersUpdate(update) => self.thread_members_update(*update, events),
             E::ThreadListSync(sync) => self.thread_list_sync(*sync, events),
             E::ForumUnreads(unreads) => self.forum_unreads(&unreads),
-            E::Resumed | E::Other(_) => {}
+            E::Resumed => self.forget_unanswered_forum_unreads(),
+            E::Other(_) => {}
         }
     }
 

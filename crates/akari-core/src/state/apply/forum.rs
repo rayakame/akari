@@ -90,19 +90,12 @@ pub(super) struct ForumList {
 #[cfg_attr(test, derive(PartialEq))]
 pub(super) struct PostCounts {
     counts: HashMap<ChannelId, u32>,
-    // Asked in this connection.
-    asked: HashMap<ChannelId, Asked>,
+    // The ack each post was asked with in this connection, until its ack moves on.
+    asked: HashMap<ChannelId, MessageId>,
+    // The frames Discord hasn't answered, oldest first: it answers each once, in the order asked.
+    unanswered: VecDeque<ForumUnreadsAsk>,
     // Forums whose posts' counts the current write changed.
     changed: BTreeSet<ChannelId>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Asked {
-    // The ack the newest ask named; `None` once the post's ack moved on from it.
-    ack: Option<MessageId>,
-    // Asks Discord hasn't answered: answers come in the order asked, so only the last one's
-    // count is for `ack`.
-    unanswered: u32,
 }
 
 /// An op 28 to send: posts of the open forum with the acks to count from.
@@ -859,11 +852,7 @@ impl State {
         let mut posts: Vec<(u64, ChannelId, MessageId)> = self
             .listable_posts(forum)
             .filter(|post| {
-                !counts.counts.contains_key(&post.id)
-                    && counts
-                        .asked
-                        .get(&post.id)
-                        .is_none_or(|asked| asked.ack.is_none())
+                !counts.counts.contains_key(&post.id) && !counts.asked.contains_key(&post.id)
             })
             .filter_map(|post| Some((newest(post), post.id, self.counted_from(post)?)))
             .collect();
@@ -876,62 +865,92 @@ impl State {
             .into_iter()
             .map(|(_, post, ack)| (post, ack))
             .collect();
-        for (post, ack) in &threads {
-            let asked = self.post_counts.asked.entry(*post).or_insert(Asked {
-                ack: None,
-                unanswered: 0,
-            });
-            asked.ack = Some(*ack);
-            asked.unanswered += 1;
-        }
-        Some(ForumUnreadsAsk {
+        self.post_counts.asked.extend(threads.iter().copied());
+        let ask = ForumUnreadsAsk {
             guild,
             forum,
             threads,
-        })
+        };
+        self.post_counts.unanswered.push_back(ask.clone());
+        Some(ask)
     }
 
     /// The frame never left: its posts may be asked again.
     pub(crate) fn forget_forum_unreads(&mut self, threads: &[(ChannelId, MessageId)]) {
+        let frames = &mut self.post_counts.unanswered;
+        if let Some(at) = frames.iter().rposition(|ask| ask.threads == threads) {
+            frames.remove(at);
+        }
+        self.forget_asked(threads);
+    }
+
+    // A resume replays the answers missed before RESUMED: the frames still unanswered went into
+    // the dead connection.
+    pub(super) fn forget_unanswered_forum_unreads(&mut self) {
+        for ask in std::mem::take(&mut self.post_counts.unanswered) {
+            self.forget_asked(&ask.threads);
+        }
+    }
+
+    fn forget_asked(&mut self, threads: &[(ChannelId, MessageId)]) {
         for (post, ack) in threads {
-            let Some(asked) = self.post_counts.asked.get_mut(post) else {
-                continue;
-            };
-            asked.unanswered = asked.unanswered.saturating_sub(1);
-            if asked.ack == Some(*ack) {
-                asked.ack = None;
-            }
-            if asked.ack.is_none() && asked.unanswered == 0 {
+            if self.post_counts.asked.get(post) == Some(ack) {
                 self.post_counts.asked.remove(post);
             }
         }
     }
 
-    // Module 474399 keeps every count; here only the answer to the newest ask, and only while
-    // the post still has the ack that ask named.
+    // The answer's frame: the oldest of the forum's that names the answer's posts. The forum's
+    // frames before it were never answered.
+    fn answered_frame(&mut self, unreads: &ForumUnreads) -> Option<ForumUnreadsAsk> {
+        let frames = &mut self.post_counts.unanswered;
+        let names = |ask: &ForumUnreadsAsk| {
+            unreads.threads.iter().all(|thread| {
+                ask.threads
+                    .iter()
+                    .any(|(post, _)| *post == thread.thread_id)
+            })
+        };
+        let of_forum = |ask: &ForumUnreadsAsk| ask.forum == unreads.channel_id;
+        let at = frames
+            .iter()
+            .position(|ask| of_forum(ask) && names(ask))
+            .or_else(|| frames.iter().position(of_forum))?;
+        let frame = frames.remove(at)?;
+        let mut before = 0;
+        frames.retain(|ask| {
+            before += 1;
+            before > at || !of_forum(ask)
+        });
+        Some(frame)
+    }
+
+    // Module 474399 keeps every count; here only the answer to the post's newest ask, and only
+    // while the post still has the ack that ask named.
     pub(super) fn forum_unreads(&mut self, unreads: &ForumUnreads) {
+        // A refusal answers its frame too.
+        let Some(frame) = self.answered_frame(unreads) else {
+            return;
+        };
         if unreads.permission_denied {
             return;
         }
         for thread in &unreads.threads {
             let post = thread.thread_id;
-            let Some(asked) = self.post_counts.asked.get_mut(&post) else {
+            let named = frame
+                .threads
+                .iter()
+                .find(|(asked, _)| *asked == post)
+                .map(|(_, ack)| *ack);
+            let (Some(count), Some(named)) = (thread.count, named) else {
                 continue;
             };
-            asked.unanswered = asked.unanswered.saturating_sub(1);
-            let Asked { ack, unanswered } = *asked;
-            if ack.is_none() && unanswered == 0 {
-                self.post_counts.asked.remove(&post);
-            }
             let current = self
                 .entities
                 .read_states
                 .get(post)
                 .and_then(|state| state.acked);
-            let (Some(count), true) = (thread.count, unanswered == 0 && ack.is_some()) else {
-                continue;
-            };
-            if ack != current {
+            if self.post_counts.asked.get(&post) != Some(&named) || current != Some(named) {
                 continue;
             }
             self.post_counts.counts.insert(post, count);
@@ -996,12 +1015,7 @@ impl State {
 
     // The answers still on their way are for an ack the post no longer has.
     fn leave_asked_ack(&mut self, post: ChannelId) {
-        if let Some(asked) = self.post_counts.asked.get_mut(&post) {
-            asked.ack = None;
-            if asked.unanswered == 0 {
-                self.post_counts.asked.remove(&post);
-            }
-        }
+        self.post_counts.asked.remove(&post);
     }
 
     // A post that left the store.
