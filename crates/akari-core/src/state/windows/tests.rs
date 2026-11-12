@@ -1434,7 +1434,10 @@ fn viewing_again_moves_the_viewed_time() {
 impl Harness {
     fn fill(&mut self, ticket: LoadTicket, ids: &[u64]) -> Vec<String> {
         let mut events = Vec::new();
-        let cached = ids.iter().map(|id| stored(*id)).collect();
+        let cached = CachedMessages {
+            messages: ids.iter().map(|id| stored(*id)).collect(),
+            targets: HashMap::new(),
+        };
         self.windows.fill_from_cache(ticket, cached, &mut events);
         describe(&events)
     }

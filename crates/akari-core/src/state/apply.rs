@@ -22,7 +22,8 @@ use super::types::{
     ThreadMembership, User,
 };
 use super::windows::{
-    CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, StarterFetch, WindowLimits, Windows,
+    CachedMessages, CachedWindow, Cursor, LoadKind, LoadTicket, MessageWindow, StarterFetch,
+    WindowLimits, Windows,
 };
 use crate::gateway::{
     AvailableGuild, ChannelDelete, ChannelUpdate, DispatchEvent, GatewayGuild, GuildDelete,
@@ -1675,10 +1676,10 @@ impl State {
     pub(crate) fn fill_from_cache(
         &mut self,
         ticket: LoadTicket,
-        messages: Vec<Arc<Message>>,
+        cached: CachedMessages,
         events: &mut Vec<StoreEvent>,
     ) {
-        self.windows.fill_from_cache(ticket, messages, events);
+        self.windows.fill_from_cache(ticket, cached, events);
     }
 
     pub(crate) fn stale_channels(&self) -> Vec<ChannelId> {

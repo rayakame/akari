@@ -437,11 +437,11 @@ impl Shared {
             // when the page failed, e.g. offline.
             Some(cache) => {
                 let fill = async {
-                    if let Some(messages) = cache.read_window(channel).await
-                        && !messages.is_empty()
+                    if let Some(cached) = cache.read_window(channel).await
+                        && !cached.messages.is_empty()
                     {
-                        self.prepare(messages.clone(), &mut prepared).await;
-                        self.store.fill_from_cache(ticket, messages);
+                        self.prepare(cached.messages.clone(), &mut prepared).await;
+                        self.store.fill_from_cache(ticket, cached);
                     }
                 };
                 let mut request = std::pin::pin!(request);

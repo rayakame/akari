@@ -32,6 +32,7 @@ pub use expressions::{
 pub(crate) use media::AgeAgreements;
 pub use media::{AgeGate, AttachmentDisplay, MediaCover, ShownAttachment};
 pub use order::display_order;
+pub(crate) use reactions::shared as shared_reactions;
 pub use reactions::{Reaction, ReactionEmoji};
 pub use read_states::ReadState;
 pub(crate) use read_states::{Ack, AckBody, ReadStates};
@@ -50,5 +51,6 @@ pub(crate) use store::{deadline_reads, deadline_reads_reset};
 pub use types::*;
 pub use windows::MessageWindow;
 pub(crate) use windows::{
-    CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket, StarterFetch, WindowLimits,
+    CachedMessages, CachedTargets, CachedWindow, Cursor, DEFAULT_LIMITS, LoadKind, LoadTicket,
+    StarterFetch, WindowLimits,
 };

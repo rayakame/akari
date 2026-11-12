@@ -24,11 +24,11 @@ use self::rows::{
 };
 pub(crate) use self::snapshot::Snapshot;
 pub(crate) use self::thread::CacheThread;
-use crate::model::{ChannelId, GuildId, Snowflake, UserId};
+use crate::model::{ChannelId, GuildId, Snowflake, Timestamp, UserId};
 use crate::state::apply::Entities;
 use crate::state::{
-    AgeAgreements, Channel, CurrentUser, Delivery, DisplaySettings, FolderEntry, Guild,
-    GuildSettings, Member, Message, ReadState, User,
+    AgeAgreements, CachedMessages, CachedTargets, Channel, CurrentUser, Delivery, DisplaySettings,
+    FolderEntry, Guild, GuildSettings, Member, Message, ReadState, ReplyTarget, User,
 };
 
 const LOG: &str = "akari_core::cache";
@@ -284,6 +284,18 @@ impl Cache {
                 .insert(ChannelId::new(id), row.into_read_state());
             Some(())
         })?;
+        let mut statement = self
+            .conn
+            .prepare("SELECT channel_id, acked FROM pin_acks")?;
+        let rows =
+            statement.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?;
+        for row in rows {
+            let (channel, acked) = row?;
+            entities.read_states.ack_pins(
+                ChannelId::new(row_id(channel)),
+                Timestamp::from_unix_nanos(acked),
+            );
+        }
         let mut statement = self.conn.prepare("SELECT key, data FROM user_settings")?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -322,12 +334,12 @@ impl Cache {
     pub(crate) fn read_window(
         &self,
         channel: ChannelId,
-    ) -> Result<Read<Vec<Arc<Message>>>, CacheError> {
+    ) -> Result<Read<CachedMessages>, CacheError> {
         let mut statement = self
             .conn
             .prepare("SELECT id, data FROM messages WHERE channel_id = ?1 ORDER BY id")?;
         let mut users = HashMap::new();
-        let mut messages = Vec::new();
+        let mut cached = CachedMessages::default();
         let mut skipped = 0;
         let rows = statement.query_map([sql_id(channel.get())], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
@@ -335,16 +347,19 @@ impl Cache {
         for row in rows {
             let (id, data) = row?;
             match serde_json::from_str::<MessageRow>(&data) {
-                Ok(row) => messages.push(Arc::new(row.into_message(
-                    Snowflake::new(row_id(id)),
-                    channel,
-                    &mut users,
-                ))),
+                Ok(row) => {
+                    let (message, target) =
+                        row.into_message(Snowflake::new(row_id(id)), channel, &mut users);
+                    if let (Some(named), Some(target)) = (message.replied_to(), target) {
+                        cached.targets.insert(named, target);
+                    }
+                    cached.messages.push(Arc::new(message));
+                }
                 Err(_) => skipped += 1,
             }
         }
         Ok(Read {
-            value: messages,
+            value: cached,
             skipped,
         })
     }
@@ -530,6 +545,23 @@ impl Writer<'_> {
         )
     }
 
+    pub(crate) fn put_pin_ack(
+        &mut self,
+        channel: ChannelId,
+        acked: Timestamp,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pin_acks (channel_id, acked) VALUES (?1, ?2)",
+            params![sql_id(channel.get()), acked.unix_nanos()],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn delete_pin_ack(&mut self, channel: ChannelId) -> rusqlite::Result<()> {
+        self.delete("DELETE FROM pin_acks WHERE channel_id = ?1", channel.get())?;
+        Ok(())
+    }
+
     pub(crate) fn delete_read_state(&mut self, channel: ChannelId) -> rusqlite::Result<()> {
         self.delete(
             "DELETE FROM read_states WHERE channel_id = ?1",
@@ -642,6 +674,7 @@ impl Writer<'_> {
         channel: ChannelId,
         viewed_at: i64,
         messages: &[Arc<Message>],
+        targets: &CachedTargets,
     ) -> rusqlite::Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO windows (channel_id, viewed_at) VALUES (?1, ?2)",
@@ -655,10 +688,14 @@ impl Writer<'_> {
             .iter()
             .filter(|message| message.delivery == Delivery::Sent)
         {
+            let target = message
+                .replied_to()
+                .and_then(|named| targets.get(&named))
+                .unwrap_or(&ReplyTarget::NotLoaded);
             insert.execute(params![
                 sql_id(channel.get()),
                 sql_id(message.id.get()),
-                json(&MessageRow::from(&**message))?
+                json(&MessageRow::new(message, target))?
             ])?;
         }
         Ok(())
