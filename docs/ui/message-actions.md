@@ -158,7 +158,8 @@ A row of small buttons over the hovered message's top right corner. From the cod
   clicks on the bar never reach the row under it.
 - A message that is still **sending** and an **ephemeral** one have no bar, and neither has a
   row that allows nothing. A **failed** send's bar is Retry and Delete (Delete not red, no
-  question asked); the "Not sent." line under the message keeps its own Retry and Delete.
+  question asked; in the bar as in the menu only where the core offers it, which it does for
+  every failed send); the "Not sent." line under the message keeps its own Retry and Delete.
 - The row stays lit, with its bar, while a menu of it is open (a right click, the More button),
   whatever the pointer does meanwhile; no other row hovers then. When the menu closes the list
   goes back to where the pointer is. With a menu open Shift doesn't change the bar.

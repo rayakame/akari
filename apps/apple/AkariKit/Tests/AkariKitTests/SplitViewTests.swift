@@ -86,6 +86,7 @@ final class SplitViewTests {
         #expect(opens.last == [id(31)])
         #expect(!opens.contains([]), "nothing was left on the way but what closed")
         #expect(!opens.dropFirst(3).contains { !$0.contains(id(31)) }, "the thread stayed open")
+        #expect(zip(opens, opens.dropFirst()).allSatisfy { $0 != $1 }, "told once per change")
         session.close()
     }
 

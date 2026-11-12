@@ -54,6 +54,15 @@ public final class MessageActionsModel {
         case notEditable
         /// More gives way to Delete in the Shift row.
         case withoutDelete
+
+        func fits(editable: Bool, deletable: Bool) -> Bool {
+            switch self {
+            case .always: true
+            case .editable: editable
+            case .notEditable: !editable
+            case .withoutDelete: !deletable
+            }
+        }
     }
 
     struct Slot {
@@ -123,7 +132,7 @@ public final class MessageActionsModel {
     public func bar(for row: MessageListModel.Row, shift: Bool) -> [MessageActionItem] {
         let offer = offer(for: row)
         if offer.failed {
-            return Self.failedBarOrder.map { Self.item($0, in: .bar, failed: true) }
+            return Self.failedBarOrder.filter(offer.has).map { Self.item($0, in: .bar, failed: true) }
         }
         guard offer.allowsAnything else {
             return []
@@ -131,13 +140,7 @@ public final class MessageActionsModel {
         let slots = shift ? Self.shiftBarOrder : Self.barOrder
         let hasDelete = slots.contains { $0.action == .delete } && offer.has(.delete)
         return slots.compactMap { slot in
-            let fits =
-                switch slot.when {
-                case .always: true
-                case .editable: offer.has(.edit)
-                case .notEditable: !offer.has(.edit)
-                case .withoutDelete: !hasDelete
-                }
+            let fits = slot.when.fits(editable: offer.has(.edit), deletable: hasDelete)
             return fits && offer.has(slot.action) ? Self.item(slot.action, in: .bar) : nil
         }
     }

@@ -15,6 +15,14 @@ func allowed(
         viewThread: viewThread)
 }
 
+private enum MarkAlert {
+    static let network = "Akari couldn't reach Discord. Check your connection, then try again."
+    static let permission = "You don't have permission to do that here."
+    static let slowDown = "Discord is asking Akari to slow down. Try again in a moment."
+    static let notConnected = "Akari isn't connected. Reconnect, then try again."
+    static let problem = "Discord had a problem. Try again in a moment."
+}
+
 // Channel 11 in guild 1 with messages 100 (another's) and 101 (the user's); DM 20.
 @MainActor @Suite(.timeLimit(.minutes(1)))
 final class MessageActionsTests {
@@ -113,6 +121,25 @@ final class MessageActionsTests {
     }
 
     @Test
+    func deleteIsOnlyWhereTheCoreAllowsIt() {
+        let kept = row(
+            100, allowed(markUnread: false, copyLink: false), content: "x", delivery: .failed)
+
+        #expect(bar(kept) == [.retry])
+        #expect(bar(kept, shift: true) == [.retry])
+        #expect(menu(kept) == [[.copyText, .retry]])
+    }
+
+    // Deleting a sent message isn't built yet: only a failed send has it.
+    @Test
+    func aSentMessageHasNoDeleteYet() {
+        let sent = row(100, allowed(delete: true), content: "x")
+
+        #expect(bar(sent, shift: true) == [.copyLink, .markUnread, .more])
+        #expect(menu(sent) == [[.copyText, .markUnread, .copyLink]])
+    }
+
+    @Test
     func aSystemLineHasTheSameBar() {
         let join = row(100, allowed(), kind: .userJoin)
 
@@ -171,9 +198,35 @@ final class MessageActionsTests {
                     [.removeReactions, .removeAllReactions, .delete],
                     [.copyId],
                 ])
+        #expect(
+            MessageActionsModel.barOrder.map(\.when)
+                == [.always, .notEditable, .always, .always, .always, .always])
+        #expect(
+            MessageActionsModel.shiftBarOrder.map(\.when)
+                == [
+                    .always, .always, .always, .always, .always, .editable, .always, .notEditable,
+                    .always, .always, .always, .always, .withoutDelete,
+                ])
         let listed = Set(MessageActionsModel.menuOrder.joined())
             .union(MessageActionsModel.shiftBarOrder.map(\.action))
         #expect(listed == Set(MessageAction.allCases))
+    }
+
+    // Reply stands in the first row unless the message can be edited, then in the Shift row;
+    // More gives way to Delete.
+    @Test
+    func aSlotsRuleSaysWhenItFits() {
+        typealias When = MessageActionsModel.When
+        func fits(_ when: When) -> [Bool] {
+            [(false, false), (true, false), (false, true), (true, true)].map {
+                when.fits(editable: $0.0, deletable: $0.1)
+            }
+        }
+
+        #expect(fits(.always) == [true, true, true, true])
+        #expect(fits(.editable) == [false, true, false, true])
+        #expect(fits(.notEditable) == [true, false, true, false])
+        #expect(fits(.withoutDelete) == [true, true, false, false])
     }
 
     @Test
@@ -214,6 +267,26 @@ final class MessageActionsTests {
     }
 
     @Test
+    func aStarterRowsThreadActionsNameTheOriginal() {
+        let model = model()
+
+        model.perform(.createThread, on: starterRow())
+        model.perform(.viewThread, on: starterRow())
+
+        #expect(threadsCreated == ["11 100"])
+        #expect(threadsViewed == ["100 11"])
+    }
+
+    @Test
+    func theMarkUnreadItemMarks() async throws {
+        model().perform(.markUnread, on: row(100))
+
+        try await eventually { self.store.log.calls.contains(.markUnread(id(11), id(100))) }
+        #expect(marks == ["mark 11 100"])
+        #expect(failures.isEmpty)
+    }
+
+    @Test
     func markUnreadAsksTheAccount() async {
         let model = model()
 
@@ -231,16 +304,22 @@ final class MessageActionsTests {
         #expect(!store.log.calls.contains(.markUnread(id(11), id(100))))
     }
 
-    @Test
-    func aRefusedMarkSaysSoOnce() async {
-        account.markUnreadError.withLock { $0 = .Network(kind: .connect) }
+    @Test(arguments: [
+        (RequestError.Network(kind: .connect), MarkAlert.network),
+        (.Discord(status: 403, code: 50001, message: "Missing Access"), MarkAlert.permission),
+        (.Discord(status: 400, code: 50013, message: "Missing Permissions"), MarkAlert.permission),
+        (.Discord(status: 404, code: 10008, message: "Unknown Message"), MarkAlert.problem),
+        (.RateLimited(retryAfter: 2), MarkAlert.slowDown),
+        (.Closed, MarkAlert.notConnected),
+        (.ServerError(status: 502), MarkAlert.problem),
+    ])
+    func aRefusedMarkSaysSoOnce(error: RequestError, text: String) async {
+        account.markUnreadError.withLock { $0 = error }
 
         await model().markUnread(from: row(100))
 
-        #expect(failures.count == 1)
         #expect(marks == ["mark 11 100", "undo 100"])
-        #expect(failures.first?.title == "Couldn't Mark as Unread")
-        #expect(failures.first?.message == "Akari couldn't reach Discord. Check your connection, then try again.")
+        #expect(failures == [.init(title: "Couldn't Mark as Unread", message: text)])
     }
 
     // An ack, another mark, another device or a READY took its place: nothing for the user to do.
@@ -254,9 +333,10 @@ final class MessageActionsTests {
         #expect(failures.isEmpty)
     }
 
-    func starterRow() -> MessageListModel.Row {
-        let original = message(100, in: 11, content: "the start")
-        let starter = message(300, in: 100, kind: .threadStarterMessage)
+    // As Discord sends it, the row's own message has no text.
+    func starterRow(showing text: String = "the start", own: String = "") -> MessageListModel.Row {
+        let original = message(100, in: 11, content: text)
+        let starter = message(300, in: 100, content: own, kind: .threadStarterMessage)
         return MessageListModel.Row(id: id(300), message: starter, starter: .loaded(original))
     }
 
@@ -279,6 +359,16 @@ final class MessageActionsTests {
         let asked = store.reads.filter { if case .messageActions = $0 { true } else { false } }
         #expect(!asked.isEmpty)
         #expect(asked.allSatisfy { $0 == .messageActions(id(100), id(300)) })
+    }
+
+    @Test
+    func aStarterRowCopiesTheTextItShows() {
+        store.update { $0.allow(allowed(), message: 300, in: 100) }
+        let empty = starterRow(showing: "", own: "never shown")
+        let model = model()
+
+        #expect(model.menu(for: empty).map { $0.map(\.action) } == [[.markUnread, .copyLink]])
+        #expect(model.menu(for: starterRow()).first?.first?.action == .copyText)
     }
 
     @Test
@@ -406,11 +496,49 @@ final class SessionMessageActionsTests {
         let model = session.messageActions(for: list) { _ in }
         let failed = MessageListModel.Row(id: id(100), message: message(100, in: 11, delivery: .failed))
 
+        model.perform(.delete, on: MessageListModel.Row(id: id(101), message: message(101, in: 11)))
+        #expect(!store.log.calls.contains(.discard(id(11), id(101))), "a sent message stays")
         model.perform(.delete, on: failed)
         model.perform(.retry, on: failed)
         try await eventually { self.store.log.calls.contains(.retry(id(11), id(100))) }
 
         #expect(store.log.calls.contains(.discard(id(11), id(100))))
+        session.close()
+    }
+
+    @Test
+    func theThreadItemsReachTheSession() async throws {
+        store.update { state in
+            state.channels[id(101)] = thread(101, in: 11)
+            state.threadCreations[id(11)] = ThreadCreation(public: true, private: false)
+            state.startable = [id(100)]
+            state.show(message(100, in: 11), message(101, in: 11, hasThread: true))
+        }
+        let list = try #require(session.messages)
+        let model = session.messageActions(for: list) { _ in }
+
+        model.perform(.createThread, on: MessageListModel.Row(id: id(100), message: message(100, in: 11)))
+        #expect(session.threadForm?.parentId == id(11))
+        #expect(session.threadForm?.source?.id == id(100))
+        #expect(session.threadForm?.location == .message)
+
+        let parent = message(101, in: 11, hasThread: true)
+        model.perform(.viewThread, on: MessageListModel.Row(id: id(101), message: parent))
+        try await eventually { self.session.split?.channelId == id(101) }
+        session.close()
+    }
+
+    // A row of another channel, as a list still showing while the session moved on.
+    @Test
+    func aMarkInAnotherChannelLeavesTheLine() async throws {
+        let list = try unreadFrom101()
+        store.update { $0.allow(allowed(), message: 101, in: 12) }
+
+        await session.messageActions(for: list) { _ in }
+            .markUnread(from: MessageListModel.Row(id: id(101), message: message(101, in: 12)))
+
+        #expect(store.log.calls.contains(.markUnread(id(12), id(101))))
+        #expect(list.newMessagesLine == nil)
         session.close()
     }
 }
