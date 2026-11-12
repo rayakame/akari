@@ -159,6 +159,86 @@ messages apart from the replies, as the official client's ReferencedMessageStore
 - Other kinds with a reference (a pin's line, "started a thread", a crosspost, a forward) have
   no target.
 
+### Sending a reply
+
+Every wire shape here is from the code read of canary 671549 (module 138399 `_sendMessage`,
+963852 `createMessage`), not observed.
+
+`Account::send_message` and `queue_message` take `reply: Option<ReplyTo { message, mention }>`.
+A reply is the ordinary `POST /channels/{channel_id}/messages` with two more fields, between
+`tts` and `flags` as the official client orders them:
+
+```json
+{
+  "content": "hello",
+  "nonce": "1213141516171819200",
+  "tts": false,
+  "message_reference": {
+    "guild_id": "200000000000000001",
+    "channel_id": "300000000000000002",
+    "message_id": "400000000000000003"
+  },
+  "flags": 0
+}
+```
+
+- `message_reference` has exactly these three fields. `guild_id` is left out in DMs and group
+  DMs; `channel_id` is the channel the reply goes to (a thread's own ID inside a thread). The
+  official client sends no `type` (the server's default is 0, a reply; 1 is a forward) and no
+  `fail_if_not_exists`, which occurs nowhere in its bundle, so the server's default applies.
+- **The ping on**: no `allowed_mentions` at all. The server pings the target's author and puts
+  them into the reply's `mentions`.
+- **The ping off**: `"allowed_mentions": {"parse": ["users", "roles", "everyone"],
+  "replied_user": false}`. All three parse types stay allowed, so mentions typed into the text
+  still ping; only the reply's own ping is off. The official client sets no other
+  `allowed_mentions` field.
+- A message that is no reply sends neither field.
+
+**The pending row** is the official client's optimistic message: type 19 (`Reply`), its
+reference (`kind` default, the target's ID, the channel, the guild in a guild channel) and, with
+the ping on, the target's author as its only entry in `mentions`, so
+`Store::reply_mentions_author` is true and the preview has its "@" before Discord answers.
+With the ping off `mentions` is empty. The row has no copy of the target: queueing it makes the
+target `Loaded` in the target store from the window's message (`ReplyTargetChanged` when that
+changes the answer, then `MessageInserted`), and the outbox keeps the target past the bound for
+as long as the row is pending or failed.
+
+**Retry.** `retry_message` sends the same body again: the reference, the ping as it was queued
+(kept beside the outbox, since a non-pinging row's `mentions` can't say it) and the nonce. The
+official client does the same from its store of each optimistic message's send options.
+
+**What may be answered.** `queue_message` refuses with `InvalidRequest`, before anything is
+queued or sent, a target that isn't a loaded message of the channel the reply goes to or whose
+`Store::message_actions` has no `reply` (the type, Send Messages and Read Message History, a
+timeout, a pending, failed or ephemeral row). *Akari:* a thread's starter row isn't answered
+from inside its thread. The row shows a message of the parent channel, the official client's
+composer only builds references to the channel it sends in, and whether its server takes a
+reference into the parent isn't known; `message_actions(thread, row).reply` is false.
+
+**Failure.** The official client tells no reply error apart: every refusal leaves the row
+failed with its type and reference and shows its generic "Your message could not be
+delivered." A target deleted before the send is the UI's to clear (the official client drops
+the pending reply on the target's MESSAGE_DELETE, not on MESSAGE_DELETE_BULK); the server sees
+a deleted target only inside that race.
+
+- *Akari:* `RequestError::ReplyTargetDeleted` for Discord's refusal of the reference: HTTP 400,
+  code 50035 with `errors.message_reference._errors[].code` `REPLIES_UNKNOWN_MESSAGE` (what the
+  public API documents for a reference to a message that is gone while `fail_if_not_exists` is
+  at its default), and, for a reply only, code 10008 Unknown Message. **Neither answer is
+  observed.** The failed row stays with its text and its reference, and its target becomes
+  `Deleted`, so its preview says so. Any other error on `message_reference` stays
+  `RequestError::Discord`.
+- A target deleted while the request is in flight: MESSAGE_DELETE makes the target `Deleted`
+  and leaves the pending row alone. If Discord still creates the reply, the confirmed message
+  replaces the row and keeps its reference to the deleted target (the answer may carry
+  `referenced_message: null`, or no key; both leave `Deleted`). Whether the POST's answer
+  carries `referenced_message` at all isn't known.
+- Editing a reply that didn't ping must send the same `allowed_mentions` again, or the edit
+  would add the ping (module 138399 `editMessage`); that is the edit's part.
+
+`akari-cli send --reply <message_id> [--no-mention] <channel_id> <text>` sends a reply: it
+loads the page around the target first, since the core answers only a message it holds.
+
 ## A thread's starter message
 
 A thread started from a message begins with a `THREAD_STARTER_MESSAGE` (21): no content, only
