@@ -236,6 +236,8 @@ public final class MessageListModel {
     @ObservationIgnored private var readUpTo: MessageId?
     // Whether `readUpTo` came from the store or a mark as read, not from the first rows shown.
     @ObservationIgnored private var readUpToKnown = false
+    // The message a Mark Unread named: the line may stand over the user's own.
+    @ObservationIgnored private var markedFrom: MessageId?
     // The read positions whose line the view said was out of sight, and on screen; the line of a
     // later position starts unplaced.
     @ObservationIgnored private var hiddenLineFrom: MessageId?
@@ -520,8 +522,26 @@ public final class MessageListModel {
             hidesDownloads: store.hidesMediaDownloads(channelId: shown.channelId), account: account)
     }
 
+    /// Mark Unread from `message` was asked: the new messages line stands over it at once, the
+    /// user's own message too. What it returns puts the line back, for a mark Discord refuses.
+    func markUnread(from message: MessageId) -> () -> Void {
+        let before = (readUpTo, readUpToKnown, markedFrom)
+        readUpTo = MessageId(rawValue: message.rawValue == 0 ? 0 : message.rawValue - 1)
+        readUpToKnown = true
+        markedFrom = message
+        placeNewMessagesLine()
+        return { [weak self] in
+            guard let self, markedFrom == message else {
+                return
+            }
+            (readUpTo, readUpToKnown, markedFrom) = before
+            placeNewMessagesLine()
+        }
+    }
+
     // Marked read or a send: only a message newer than what is known now starts the next line.
     func endNewMessagesLine() {
+        markedFrom = nil
         // A latest load would overtake a running jump too, but at the present none runs.
         if aroundLoadRunning {
             supersedeJumps()
@@ -787,7 +807,8 @@ public final class MessageListModel {
         }
         let line = readUpTo.flatMap { readUpTo in
             rows.first { row in
-                row.message.id > readUpTo && row.message.author.id != userId
+                row.message.id > readUpTo
+                    && (row.message.author.id != userId || row.message.id == markedFrom)
                     && row.message.delivery == .sent
             }?.id
         }

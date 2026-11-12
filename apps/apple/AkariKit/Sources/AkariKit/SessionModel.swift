@@ -923,6 +923,9 @@ public final class SessionModel {
             viewThread: { [weak self] thread, parent in
                 Task { await self?.openBeside(thread: thread, from: parent) }
             },
+            marking: { [weak list] channel, message in
+                list?.channelId == channel ? list?.markUnread(from: message) : nil
+            },
             failed: { [weak self] in self?.messageActionFailure = $0 })
     }
 
