@@ -138,11 +138,15 @@ final class BarList {
     }
 
     func click(_ flags: NSEvent.ModifierFlags, at point: NSPoint) throws -> NSEvent {
+        try mouse(.leftMouseDown, flags, at: point)
+    }
+
+    func mouse(_ type: NSEvent.EventType, _ flags: NSEvent.ModifierFlags, at point: NSPoint) throws -> NSEvent {
         try #require(
             NSEvent.mouseEvent(
-                with: .leftMouseDown, location: table.convert(point, to: nil), modifierFlags: flags,
+                with: type, location: table.convert(point, to: nil), modifierFlags: flags,
                 timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-                clickCount: 1, pressure: 1))
+                clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
     }
 }
 
@@ -287,6 +291,56 @@ struct HoverBarTests {
         #expect(!first.isHovered && !more.isHovered && !list.bar.isPointerInside)
         let own = (first.trackingAreas + list.bar.trackingAreas).filter { $0.owner === first || $0.owner === list.bar }
         #expect(own.isEmpty, "\((first.trackingAreas + list.bar.trackingAreas).map { String(describing: $0.owner) })")
+    }
+
+    // Rows with the same buttons share the bar's views: a lit one mustn't travel with the bar.
+    @Test
+    func aLitButtonGoesOutWhenTheBarMovesToAnotherRow() throws {
+        let list = BarList()
+        list.showGroups()
+        try list.hover(2)
+        let more = try #require(list.bar.button(.more))
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: more))
+        #expect(more.isHovered)
+
+        try list.hover(3)
+
+        #expect(list.bar.button(.more) === more, "the same buttons")
+        #expect(!list.bar.buttons.contains { $0.isHovered })
+        #expect(more.contentTintColor == Palette.interactiveText)
+        #expect(try list.barOwner() == 3)
+    }
+
+    // The list scrolls under a still pointer and the bar goes to the row that comes under it:
+    // only a button the pointer is over is lit, wherever the bar lands.
+    @Test
+    func aScrollLightsOnlyTheButtonUnderThePointer() throws {
+        let list = BarList(height: 300)
+        list.show(list.many(40))
+        try list.hover(39)
+        let more = try #require(list.bar.button(.more))
+        list.move(to: list.table.convert(NSPoint(x: 14, y: 14), from: more))
+        #expect(more.isHovered)
+        var owners: Set<UInt64> = []
+        var away = 0
+
+        for _ in 1...12 {
+            list.clip.scroll(to: NSPoint(x: 0, y: list.clip.bounds.minY - 17))
+            list.controller.scrollView.reflectScrolledClipView(list.clip)
+            list.controller.pointerMoved()
+
+            let point = list.table.convert(try #require(list.pointer.location), from: nil)
+            let under = list.bar.buttons.filter { list.table.convert($0.bounds, from: $0).contains(point) }
+            #expect(list.bar.buttons.filter(\.isHovered) == under)
+            #expect(list.bar.isPointerInside == list.bar.frame.contains(point))
+            away += under.isEmpty ? 1 : 0
+            if let owner = try list.barOwner() {
+                owners.insert(owner)
+            }
+        }
+
+        #expect(owners.count > 1, "the bar changed rows")
+        #expect(away > 0, "and lay away from the pointer")
     }
 
     @Test
@@ -628,6 +682,30 @@ struct HoverBarTests {
         NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: menu)
     }
 
+    // More's menu is open when its row goes: the button of the next bar isn't the one that opened it.
+    @Test
+    func aRowRemovedUnderMoresMenuLeavesMoreUnlit() throws {
+        let list = BarList()
+        list.showGroups()
+        var open: NSMenu?
+        list.controller.popUp = { menu, _, _ in
+            NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+            open = menu
+        }
+        try list.hover(2)
+        try #require(list.bar.button(.more)).performClick(nil)
+        #expect(list.bar.button(.more)?.isSelected == true)
+        var rows = list.rows
+
+        rows.remove(at: 1)
+        list.show(rows)
+        NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: try #require(open))
+        try list.hover(3)
+
+        #expect(try list.barOwner() == 3)
+        #expect(list.bar.button(.more)?.isSelected == false)
+    }
+
     // The split view: two lists in one window under one pointer, each with its own bar.
     @Test
     func eachPaneHasItsOwnBar() throws {
@@ -815,7 +893,9 @@ struct OptionClickTests {
             row(2, by: author(2, "Ray"), at: list.noon + 10, content: "second"),
             row(3, by: author(4, "Kim"), at: list.noon + 700, kind: .userJoin),
             row(4, at: list.noon + 800, delivery: .failed),
+            row(5, by: author(2, "Ray"), at: list.noon + 900, content: "an ephemeral answer"),
         ])
+        list.actions.marksUnread = [1, 2, 3]
         list.pointer.location = NSPoint(x: 10, y: 10)
     }
 
@@ -877,6 +957,33 @@ struct OptionClickTests {
         #expect(!list.controller.optionClick(try list.click(.option, at: onBar)))
 
         #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+    }
+
+    // A message that can't be marked: the click is an ordinary click with Option held.
+    @Test
+    func whereTheMarkIsNotOfferedTheClickPassesThrough() throws {
+        let point = try middle(of: 5)
+
+        #expect(!list.controller.monitored(try list.click(.option, at: point)))
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseDragged, .option, at: point)))
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseUp, .option, at: point)))
+
+        #expect(!list.actions.calls.contains { $0.hasPrefix("mark unread") })
+    }
+
+    // The button's release would reach whatever is under the pointer without its press.
+    @Test
+    func aTakenClicksDragAndReleaseAreTakenToo() throws {
+        let point = try middle(of: 2)
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseUp, [], at: point)), "no press was taken")
+
+        #expect(list.controller.monitored(try list.click(.option, at: point)))
+        #expect(list.controller.monitored(try list.mouse(.leftMouseDragged, .option, at: point)))
+        #expect(list.controller.monitored(try list.mouse(.leftMouseUp, [], at: point)), "Option let go first")
+
+        #expect(!list.controller.monitored(try list.mouse(.leftMouseUp, [], at: point)), "the next click's")
+        #expect(!list.controller.monitored(try list.click([], at: point)))
+        #expect(list.actions.calls.filter { $0.hasPrefix("mark unread") } == ["mark unread 2"])
     }
 
     // Behind another window, or while the window isn't key, the list takes no click.

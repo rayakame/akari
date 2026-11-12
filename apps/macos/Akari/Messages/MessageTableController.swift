@@ -152,6 +152,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     private var selected: MessageTimeline.ItemId?
     private weak var moreMenu: NSMenu?
     private var moreSelected = false
+    // The press of an Option-click was taken: its drag and release are too.
+    private var optionClickTaken = false
     /// The modifier keys held now, and at a click.
     var modifiers: () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
     /// Shows the More button's menu at a point of a view; tests record it instead.
@@ -1397,12 +1399,13 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
     }
 
     @objc private func menuClosed(_ notification: Notification) {
+        // Also when its row went meanwhile and let go of `selected`.
+        moreSelected = false
+        hoverBar.button(.more)?.isSelected = false
         guard selected != nil else {
             return
         }
         selected = nil
-        moreSelected = false
-        hoverBar.button(.more)?.isSelected = false
         updatePointer()
     }
 
@@ -1607,7 +1610,10 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             }
             perform(action, on: row, from: button)
         }
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .leftMouseDown]) {
+        let monitoredEvents: NSEvent.EventTypeMask = [
+            .flagsChanged, .leftMouseDown, .leftMouseDragged, .leftMouseUp,
+        ]
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: monitoredEvents) {
             [weak self] event in
             guard let self else {
                 return event
@@ -2024,6 +2030,8 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
             hoverBar.show(actions.messageBar(for: row, shift: shift))
             barShown = (hovered, shift)
             barStale = false
+            // Rows with the same buttons keep the bar's views: the lit one would stay lit.
+            hoveredBarButton?.isHovered = false
             hoveredBarButton = nil
             hoverBar.button(.more)?.isSelected = moreSelected
         }
@@ -2066,20 +2074,32 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         }
     }
 
-    // Shift shows the longer bar at once, the pointer still; an Option-click marks unread.
+    // Shift shows the longer bar at once, the pointer still; an Option-click marks unread, and
+    // its drag and release go with it: without their press they would act on what is under them.
     func monitored(_ event: NSEvent) -> Bool {
         guard let window = tableView.window, event.window === window else {
             return false
         }
-        if event.type == .flagsChanged {
+        switch event.type {
+        case .flagsChanged:
             updatePointer()
             return false
+        case .leftMouseDown:
+            optionClickTaken = optionClick(event)
+            return optionClickTaken
+        case .leftMouseDragged:
+            return optionClickTaken
+        case .leftMouseUp:
+            defer { optionClickTaken = false }
+            return optionClickTaken
+        default:
+            return false
         }
-        return optionClick(event)
     }
 
     /// An Option-click in a message's box, outside its buttons, marks the channel unread from
-    /// that message and does nothing else; `true` when the click was taken.
+    /// that message and does nothing else; `true` when the click was taken. A message that
+    /// can't be marked keeps its click.
     func optionClick(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection([.option, .shift, .control, .command])
         guard event.type == .leftMouseDown, flags == .option, pointer() != nil,
@@ -2099,11 +2119,12 @@ final class MessageTableController: NSObject, NSTableViewDataSource, NSTableView
         guard timeline.items.indices.contains(index), case .message(let row, _) = timeline.items[index],
             let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
                 as? MessageMenuRow,
-            cell.box.contains(cell.convert(point, from: tableView))
+            cell.box.contains(cell.convert(point, from: tableView)),
+            let actions, actions.messageMenu(for: row).joined().contains(where: { $0.action == .markUnread })
         else {
             return false
         }
-        actions?.markUnread(from: row)
+        actions.markUnread(from: row)
         return true
     }
 
