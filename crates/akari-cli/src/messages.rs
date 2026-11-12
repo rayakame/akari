@@ -8,7 +8,7 @@ use akari_core::state::{
     Channel, ConnectionState, Delivery, Message, Reaction, ReplyTarget, Store, StoreEvent,
     display_order,
 };
-use akari_core::{DiscordClient, MessageLoad, RequestError};
+use akari_core::{DiscordClient, MessageLoad, ReplyTo, RequestError};
 use clap::Subcommand;
 use tokio::signal::unix::{Signal, SignalKind, signal};
 
@@ -34,11 +34,17 @@ pub enum SessionCommand {
         #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u8).range(1..=100))]
         limit: u8,
     },
-    /// Send a message.
+    /// Send a message, as a reply with `--reply`.
     Send {
         // Checks that Discord ignores a repeated nonce, which retrying after a 502 relies on.
-        #[arg(long, hide = true)]
+        #[arg(long, hide = true, conflicts_with = "reply")]
         repeat_nonce: bool,
+        /// Answer this message of the channel; its author is pinged.
+        #[arg(long, value_name = "MESSAGE_ID")]
+        reply: Option<u64>,
+        /// With `--reply`: don't ping the author.
+        #[arg(long, requires = "reply")]
+        no_mention: bool,
         channel_id: u64,
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         text: Vec<String>,
@@ -78,6 +84,8 @@ pub async fn run<S: Accounts>(
         }
         SessionCommand::Send {
             repeat_nonce,
+            reply,
+            no_mention,
             channel_id,
             text,
         } => {
@@ -85,7 +93,8 @@ pub async fn run<S: Accounts>(
             if repeat_nonce {
                 send_twice(&session, channel, text.join(" ")).await
             } else {
-                send(&session, channel, text.join(" ")).await
+                let reply = reply_to(reply, no_mention);
+                send(&session, channel, text.join(" "), reply).await
             }
         }
         SessionCommand::Tail {
@@ -176,15 +185,49 @@ async fn read(session: &Session, channel: ChannelId, limit: u8) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-async fn send(session: &Session, channel: ChannelId, text: String) -> ExitCode {
+fn reply_to(message: Option<u64>, no_mention: bool) -> Option<ReplyTo> {
+    message.map(|message| ReplyTo {
+        message: Snowflake::new(message),
+        mention: !no_mention,
+    })
+}
+
+fn send_error(err: &RequestError, reply: bool) -> String {
+    match err {
+        RequestError::InvalidRequest if reply => "Couldn't send: Akari refused the reply: the \
+            message isn't in this channel, or may not be answered (a system line, or missing \
+            Send Messages or Read Message History)."
+            .to_owned(),
+        err => format!("Couldn't send: {}", report(err)),
+    }
+}
+
+async fn send(
+    session: &Session,
+    channel: ChannelId,
+    text: String,
+    reply: Option<ReplyTo>,
+) -> ExitCode {
+    let account = &session.account;
+    if let Some(reply) = reply {
+        // The core answers only a message it holds.
+        let around = MessageLoad::Around {
+            id: reply.message,
+            limit: 1,
+        };
+        if let Err(err) = account.load_messages(channel, around).await {
+            eprintln!("Couldn't load the message to answer: {}", report(&err));
+            return ExitCode::FAILURE;
+        }
+    }
     println!("Sending…");
-    match session.account.send_message(channel, text, None).await {
+    match account.send_message(channel, text, reply).await {
         Ok(id) => {
             println!("Sent: {}", id.get());
             ExitCode::SUCCESS
         }
         Err(err) => {
-            eprintln!("Couldn't send: {}", report(&err));
+            eprintln!("{}", send_error(&err, reply.is_some()));
             ExitCode::FAILURE
         }
     }
@@ -894,6 +937,42 @@ mod tests {
         assert_eq!(utc_minute(0), "1970-01-01 00:00");
         assert_eq!(utc_minute(1_700_000_000_000), "2023-11-14 22:13");
         assert_eq!(utc_minute(951_782_400_000), "2000-02-29 00:00");
+    }
+
+    #[test]
+    fn a_reply_pings_unless_told_not_to() {
+        assert_eq!(reply_to(None, false), None);
+        assert_eq!(
+            reply_to(Some(7), false),
+            Some(ReplyTo {
+                message: Snowflake::new(7),
+                mention: true
+            })
+        );
+        assert_eq!(
+            reply_to(Some(7), true),
+            Some(ReplyTo {
+                message: Snowflake::new(7),
+                mention: false
+            })
+        );
+    }
+
+    #[test]
+    fn a_refused_reply_says_what_to_check() {
+        assert_eq!(
+            send_error(&RequestError::InvalidRequest, true),
+            "Couldn't send: Akari refused the reply: the message isn't in this channel, or may \
+             not be answered (a system line, or missing Send Messages or Read Message History)."
+        );
+        assert_eq!(
+            send_error(&RequestError::ReplyTargetDeleted, true),
+            "Couldn't send: the message replied to was deleted"
+        );
+        assert_eq!(
+            send_error(&RequestError::InvalidRequest, false),
+            "Couldn't send: invalid request"
+        );
     }
 
     #[test]
