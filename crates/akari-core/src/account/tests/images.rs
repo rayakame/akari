@@ -1083,18 +1083,27 @@ async fn a_429_holds_back_other_downloads_from_that_host() {
 
 // Answers every request with a chunked body of `bytes`, so no Content-Length tells its size.
 async fn chunked_cdn(bytes: usize) -> String {
+    let mut body = webp_bytes(80, 80, false);
+    body.resize(bytes, 0);
+    chunked_cdn_with("image/webp", body).await
+}
+
+// Answers every request with `body`, chunked: no length ahead of it.
+async fn chunked_cdn_with(content_type: &'static str, body: Vec<u8>) -> String {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         while let Ok((mut stream, _)) = listener.accept().await {
+            let body = body.clone();
             tokio::spawn(async move {
                 let mut request = [0; 4096];
                 let _ = stream.read(&mut request).await;
-                let mut body = webp_bytes(80, 80, false);
-                body.resize(bytes, 0);
-                let mut answer = b"HTTP/1.1 200 OK\r\ncontent-type: image/webp\r\ntransfer-encoding: chunked\r\n\r\n".to_vec();
+                let mut answer = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ntransfer-encoding: chunked\r\n\r\n"
+                )
+                .into_bytes();
                 for chunk in body.chunks(16 * 1024) {
                     answer.extend(format!("{:x}\r\n", chunk.len()).as_bytes());
                     answer.extend(chunk);
@@ -1750,13 +1759,18 @@ fn delta_gif(frames: usize, padding: usize) -> Vec<u8> {
 // A GIF attachment whose CDN link is `/attachments/…` and whose proxy link is `/proxy/…`, so the
 // test server tells them apart.
 async fn load_gif(online: &Online, size: usize, fresh: i64) -> (String, String) {
+    load_gif_of(online, size, fresh, 4).await
+}
+
+// As `load_gif`, the GIF `side` pixels square.
+async fn load_gif_of(online: &Online, size: usize, fresh: i64, side: u32) -> (String, String) {
     let original = format!("/attachments/{GENERAL}/{ATTACHMENT}/loop.gif");
     let proxied = format!("/proxy{original}");
     let link = |at: &str| format!("{}{at}?{}&", online.uri(), signature(fresh));
     let attachment = json!({
         "id": ATTACHMENT.to_string(), "filename": "loop.gif", "size": size,
         "url": link(&original), "proxy_url": link(&proxied),
-        "width": 4, "height": 4, "content_type": "image/gif",
+        "width": side, "height": side, "content_type": "image/gif",
     });
     load_message(online, |message| {
         message["attachments"] = json!([attachment])
@@ -2273,7 +2287,7 @@ async fn a_streamed_still_stays_too_large() {
 
 #[tokio::test]
 async fn a_streamed_body_without_a_length_is_capped_while_it_streams() {
-    let cdn = chunked_cdn(crate::media::MAX_STREAMED + 1).await;
+    let cdn = chunked_cdn_with("image/gif", delta_gif(3, crate::media::MAX_STREAMED + 1)).await;
     let online = connected_with(Some(cdn.clone()), TempDir::new()).await;
     load_external_gif(&online, &cdn).await;
 
@@ -2420,4 +2434,668 @@ async fn a_file_kept_since_answers_an_ask_that_was_over_the_cap() {
         again.map(|file| (file.width, file.from_disk)),
         Ok((1024, true))
     );
+}
+
+// `gif` with a header that says `side` pixels square.
+fn sized(mut gif: Vec<u8>, side: u16) -> Vec<u8> {
+    gif[6..8].copy_from_slice(&side.to_le_bytes());
+    gif[8..10].copy_from_slice(&side.to_le_bytes());
+    gif
+}
+
+fn asking(key: ImageKey, side: u32, animated: AnimatedFormat) -> ImageRequest {
+    ImageRequest {
+        key,
+        width: side,
+        height: side,
+        animated: Some(animated),
+    }
+}
+
+// Another site's GIF whose proxy copy is over the display cap when asked for display; what the
+// stream gets is mounted by the test.
+async fn load_heavy_external_gif(online: &Online) -> &'static str {
+    let proxy = load_external_gif(online, &online.uri()).await;
+    Mock::given(method("GET"))
+        .and(path(proxy))
+        .respond_with(gif_answer(delta_gif(3, crate::media::MAX_BODY + 1)))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    proxy
+}
+
+fn html(content_type: &str) -> ResponseTemplate {
+    ResponseTemplate::new(200)
+        .insert_header("content-type", content_type)
+        .set_body_bytes(b"<html>not here</html>".to_vec())
+}
+
+#[tokio::test]
+async fn a_streamed_files_weight_is_what_the_directory_counts() {
+    let online = connected().await;
+    let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+    let (cdn, proxy) = load_gif(&online, upload.len(), now_seconds() + 86_400).await;
+    serve(&online.server, &proxy, gif_answer(upload.clone())).await;
+    serve(&online.server, &cdn, gif_answer(upload.clone())).await;
+
+    online
+        .account
+        .image(playing(attachment_key()))
+        .await
+        .unwrap();
+
+    let index = rusqlite::Connection::open(online.image_directory().join("index.sqlite")).unwrap();
+    let counted: i64 = index
+        .query_row("SELECT sum(bytes) FROM images", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(counted, upload.len() as i64);
+}
+
+// The stream gets a GIF with more pixels than Akari decodes.
+#[tokio::test]
+async fn a_streamed_gif_over_the_pixel_cap_stays_too_large() {
+    let online = connected().await;
+    let proxy = load_heavy_external_gif(&online).await;
+    let huge = sized(delta_gif(3, crate::media::MAX_BODY + 1), 9000);
+    serve(&online.server, proxy, gif_answer(huge)).await;
+
+    let file = online.account.image(playing(thumbnail_key())).await;
+    let again = online.account.image(playing(thumbnail_key())).await;
+
+    assert_eq!(file, Err(ImageError::TooLarge));
+    assert_eq!(again, Err(ImageError::TooLarge));
+    assert_eq!(online.requests_to(proxy).await.len(), 2, "not asked again");
+    assert_eq!(parts_left(&online), 0);
+}
+
+#[tokio::test]
+async fn a_streamed_answer_that_is_gone_is_not_found_and_marks_nothing() {
+    let online = connected().await;
+    let proxy = load_heavy_external_gif(&online).await;
+    Mock::given(method("GET"))
+        .and(path(proxy))
+        .and(query_param("format", "webp"))
+        .respond_with(png(4, 4))
+        .mount(&online.server)
+        .await;
+    serve(&online.server, proxy, ResponseTemplate::new(404)).await;
+
+    let file = online.account.image(playing(thumbnail_key())).await;
+    let still = online
+        .account
+        .image(ImageRequest {
+            animated: None,
+            ..playing(thumbnail_key())
+        })
+        .await;
+
+    assert_eq!(file, Err(ImageError::NotFound));
+    assert!(still.is_ok(), "{still:?}");
+    assert_eq!(parts_left(&online), 0);
+}
+
+// Not an image by its type costs only its headers; not one by its bytes was streamed whole, and
+// isn't streamed again this session.
+#[tokio::test]
+async fn a_streamed_answer_that_isnt_an_image_is_not_an_image() {
+    for (content_type, asks) in [("text/html", 3), ("image/gif", 2)] {
+        let online = connected().await;
+        let proxy = load_heavy_external_gif(&online).await;
+        serve(&online.server, proxy, html(content_type)).await;
+
+        let file = online.account.image(playing(thumbnail_key())).await;
+        let again = online.account.image(playing(thumbnail_key())).await;
+
+        assert_eq!(file, Err(ImageError::NotAnImage), "{content_type}");
+        assert_eq!(again, Err(ImageError::NotAnImage), "{content_type}");
+        assert_eq!(
+            online.requests_to(proxy).await.len(),
+            asks,
+            "{content_type}"
+        );
+        assert_eq!(parts_left(&online), 0);
+    }
+}
+
+#[tokio::test]
+async fn a_429_during_a_stream_waits_and_tries_again() {
+    let online = connected().await;
+    let proxy = load_heavy_external_gif(&online).await;
+    let copy = delta_gif(3, crate::media::MAX_BODY + 1);
+    Mock::given(method("GET"))
+        .and(path(proxy))
+        .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0.1"))
+        .up_to_n_times(1)
+        .with_priority(2)
+        .mount(&online.server)
+        .await;
+    serve(&online.server, proxy, gif_answer(copy.clone())).await;
+
+    let file = online.account.image(playing(thumbnail_key())).await;
+
+    assert_eq!(file.map(|file| std::fs::read(file.path).unwrap()), Ok(copy));
+    assert_eq!(online.requests_to(proxy).await.len(), 3);
+}
+
+// The WebP ask's own failures: gone, failing three times, failing once, not an image.
+#[tokio::test]
+async fn a_webp_that_fails_gives_way_to_the_streamed_file() {
+    let failing = |status: u16, times: u64| {
+        Mock::given(method("GET"))
+            .and(query_param("format", "webp"))
+            .respond_with(ResponseTemplate::new(status))
+            .up_to_n_times(times)
+            .with_priority(1)
+    };
+    for (case, asked, kept_as_webp) in [
+        ("gone", 1, false),
+        ("down", 3, false),
+        ("down once", 2, true),
+        ("html", 1, false),
+    ] {
+        let online = connected().await;
+        let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+        let (cdn, proxy) = load_gif(&online, upload.len(), now_seconds() + 86_400).await;
+        match case {
+            "gone" => failing(404, 1).mount(&online.server).await,
+            "down" => failing(503, 3).mount(&online.server).await,
+            "down once" => failing(503, 1).mount(&online.server).await,
+            _ => {
+                Mock::given(method("GET"))
+                    .and(query_param("format", "webp"))
+                    .respond_with(html("text/html"))
+                    .with_priority(1)
+                    .mount(&online.server)
+                    .await;
+            }
+        }
+        serve_webp(&online, &proxy, webp_bytes(4, 4, true)).await;
+        serve(&online.server, &proxy, gif_answer(upload.clone())).await;
+        serve(&online.server, &cdn, gif_answer(upload.clone())).await;
+
+        let file = online
+            .account
+            .image(playing_webp(attachment_key()))
+            .await
+            .unwrap_or_else(|err| panic!("{case}: {err}"));
+
+        let expected = if kept_as_webp {
+            webp_bytes(4, 4, true)
+        } else {
+            upload
+        };
+        assert!(std::fs::read(&file.path).unwrap() == expected, "{case}");
+        assert_eq!(
+            asked_as_webp(&online.requests_to(&proxy).await),
+            asked,
+            "{case}"
+        );
+    }
+}
+
+// A GIF answered where the WebP was asked for is no WebP to keep.
+#[tokio::test]
+async fn a_gif_answered_for_the_webp_isnt_kept_as_one() {
+    let online = connected().await;
+    let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+    let (cdn, proxy) = load_gif(&online, upload.len(), now_seconds() + 86_400).await;
+    Mock::given(method("GET"))
+        .and(path(proxy.clone()))
+        .and(query_param("format", "webp"))
+        .respond_with(gif_answer(delta_gif(3, 0)))
+        .mount(&online.server)
+        .await;
+    serve(&online.server, &proxy, gif_answer(upload.clone())).await;
+    serve(&online.server, &cdn, gif_answer(upload.clone())).await;
+
+    let file = online
+        .account
+        .image(playing_webp(attachment_key()))
+        .await
+        .unwrap();
+
+    assert_eq!(std::fs::read(&file.path).unwrap(), upload);
+}
+
+// The WebP might have fitted: the upload being too heavy says nothing for the session.
+#[tokio::test]
+async fn a_failed_webp_and_an_upload_too_heavy_are_asked_again() {
+    let online = connected().await;
+    let size = crate::media::MAX_STREAMED + 1;
+    let (cdn, proxy) = load_gif(&online, size, now_seconds() + 86_400).await;
+    Mock::given(method("GET"))
+        .and(path(proxy.clone()))
+        .and(query_param("format", "webp"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(3)
+        .with_priority(1)
+        .mount(&online.server)
+        .await;
+    serve_webp(&online, &proxy, webp_bytes(4, 4, true)).await;
+    serve(&online.server, &proxy, gif_answer(delta_gif(3, size))).await;
+    serve(&online.server, &cdn, gif_answer(delta_gif(3, size))).await;
+
+    let first = online.account.image(playing_webp(attachment_key())).await;
+    let later = online.account.image(playing_webp(attachment_key())).await;
+
+    assert_eq!(first, Err(ImageError::Unavailable));
+    assert_eq!(
+        later.map(|file| std::fs::read(file.path).unwrap()),
+        Ok(webp_bytes(4, 4, true))
+    );
+}
+
+// What was too large for one box says nothing about a smaller one, whose WebP fits.
+#[tokio::test]
+async fn a_smaller_box_plays_after_a_larger_one_was_too_large() {
+    let online = connected().await;
+    let size = crate::media::MAX_STREAMED + 1;
+    let (cdn, proxy) = load_gif_of(&online, size, now_seconds() + 86_400, 2048).await;
+    Mock::given(method("GET"))
+        .and(path(proxy.clone()))
+        .and(query_param("format", "webp"))
+        .and(query_param("width", "128"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/webp")
+                .set_body_bytes(webp_bytes(128, 128, true)),
+        )
+        .mount(&online.server)
+        .await;
+    let mut heavy = webp_bytes(2048, 2048, true);
+    heavy.resize(crate::media::MAX_BODY + 1, 0);
+    serve_webp(&online, &proxy, heavy).await;
+    serve(&online.server, &proxy, gif_answer(delta_gif(3, size))).await;
+    serve(&online.server, &cdn, gif_answer(delta_gif(3, size))).await;
+    let ask = |side| asking(attachment_key(), side, AnimatedFormat::WebP);
+
+    let large = online.account.image(ask(2048)).await;
+    let asked = online.server.received_requests().await.unwrap().len();
+    let small = online.account.image(ask(128)).await;
+    let large_again = online.account.image(ask(2048)).await;
+
+    assert_eq!(large, Err(ImageError::TooLarge));
+    assert_eq!(
+        small.map(|file| (file.width, file.animated)),
+        Ok((128, true))
+    );
+    assert_eq!(large_again, Err(ImageError::TooLarge));
+    assert_eq!(
+        online.server.received_requests().await.unwrap().len(),
+        asked + 2,
+        "the small box's GIF and WebP, nothing for the large one again"
+    );
+}
+
+// The list's box and the viewer's ask for the same heavy GIF at once: one stream, and the
+// second is answered by the file the first kept.
+#[tokio::test]
+async fn asks_at_two_sizes_share_one_stream() {
+    let online = connected().await;
+    let upload = sized(delta_gif(3, crate::media::MAX_BODY + 1), 2048);
+    let (cdn, proxy) = load_gif_of(&online, upload.len(), now_seconds() + 86_400, 2048).await;
+    serve(&online.server, &proxy, gif_answer(upload.clone())).await;
+    serve(
+        &online.server,
+        &cdn,
+        gif_answer(upload.clone()).set_delay(Duration::from_millis(300)),
+    )
+    .await;
+    let ask = |side| asking(attachment_key(), side, AnimatedFormat::Gif);
+
+    let (small, large) = tokio::join!(
+        online.account.image(ask(128)),
+        online.account.image(ask(2048))
+    );
+
+    for file in [small, large] {
+        assert_eq!(std::fs::read(file.unwrap().path).unwrap(), upload);
+    }
+    assert_eq!(online.requests_to(&cdn).await.len(), 1);
+}
+
+// A link due for a new signature gets it once, for the WebP and for the stream.
+#[tokio::test]
+async fn a_heavy_gifs_due_link_is_renewed_for_the_webp_and_the_stream() {
+    let online = connected().await;
+    let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+    let due = now_seconds() + 60;
+    let fresh = now_seconds() + 86_400;
+    let (cdn, proxy) = load_gif(&online, upload.len(), due).await;
+    let renewed = format!("{}{cdn}?{}&", online.uri(), signature(fresh));
+    Mock::given(method("POST"))
+        .and(path(REFRESH))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let asked = body["attachment_urls"][0].as_str().unwrap().to_owned();
+            ResponseTemplate::new(200).set_body_json(
+                json!({"refreshed_urls": [{"original": asked, "refreshed": renewed}]}),
+            )
+        })
+        .mount(&online.server)
+        .await;
+    let mut heavy = webp_bytes(4, 4, true);
+    heavy.resize(crate::media::MAX_BODY + 1, 0);
+    serve_webp(&online, &proxy, heavy).await;
+    serve(&online.server, &proxy, gif_answer(upload.clone())).await;
+    serve(&online.server, &cdn, gif_answer(upload.clone())).await;
+
+    let file = online.account.image(playing_webp(attachment_key())).await;
+
+    assert!(file.is_ok(), "{file:?}");
+    let signed = format!("ex={fresh:x}");
+    let asked: Vec<Request> = online
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| request.url.path().ends_with(".gif"))
+        .collect();
+    assert_eq!(asked.len(), 3, "the GIF, the WebP, the upload");
+    for request in &asked {
+        assert!(
+            request
+                .url
+                .query()
+                .is_some_and(|query| query.contains(&signed)),
+            "{}",
+            request.url.path()
+        );
+    }
+    assert_eq!(online.requests_to(REFRESH).await.len(), 1);
+}
+
+// A denied stream, its link past its expiry (a skewed clock), is renewed once and streamed.
+#[tokio::test]
+async fn a_denied_stream_past_its_expiry_is_renewed_once() {
+    let online = connected().await;
+    let past = now_seconds() - 600;
+    let fresh = now_seconds() + 86_400;
+    let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+    let (cdn, proxy) = load_gif(&online, upload.len(), past).await;
+    let renewals = Arc::new(Mutex::new(0));
+    let counted = renewals.clone();
+    let uri = online.uri();
+    let renewed_path = cdn.clone();
+    Mock::given(method("POST"))
+        .and(path(REFRESH))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let asked = body["attachment_urls"][0].as_str().unwrap().to_owned();
+            let mut renewals = counted.lock().unwrap();
+            *renewals += 1;
+            let ex = if *renewals < 3 {
+                past + *renewals
+            } else {
+                fresh
+            };
+            let refreshed = format!("{uri}{renewed_path}?{}&", signature(ex));
+            ResponseTemplate::new(200).set_body_json(
+                json!({"refreshed_urls": [{"original": asked, "refreshed": refreshed}]}),
+            )
+        })
+        .mount(&online.server)
+        .await;
+    serve(&online.server, &proxy, gif_answer(upload.clone())).await;
+    Mock::given(method("GET"))
+        .and(path(cdn.clone()))
+        .and(query_param("ex", format!("{fresh:x}")))
+        .respond_with(gif_answer(upload.clone()))
+        .mount(&online.server)
+        .await;
+    serve(&online.server, &cdn, ResponseTemplate::new(403)).await;
+
+    let file = online.account.image(playing(attachment_key())).await;
+
+    assert_eq!(
+        file.map(|file| std::fs::read(file.path).unwrap()),
+        Ok(upload)
+    );
+    assert_eq!(*renewals.lock().unwrap(), 3);
+    assert_eq!(online.requests_to(&cdn).await.len(), 2);
+}
+
+// Discord won't sign the link again before the stream: the heavy GIF is gone, the still isn't.
+#[tokio::test]
+async fn a_refused_renewal_before_a_stream_marks_nothing_missing() {
+    let online = connected().await;
+    let past = now_seconds() - 600;
+    let upload = delta_gif(3, crate::media::MAX_BODY + 1);
+    let (cdn, proxy) = load_gif(&online, upload.len(), past).await;
+    let renewals = Arc::new(Mutex::new(0));
+    let counted = renewals.clone();
+    let uri = online.uri();
+    let renewed_path = cdn.clone();
+    Mock::given(method("POST"))
+        .and(path(REFRESH))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let asked = body["attachment_urls"][0].as_str().unwrap().to_owned();
+            let mut renewals = counted.lock().unwrap();
+            *renewals += 1;
+            let refreshed = match *renewals {
+                1 => format!("{uri}{renewed_path}?{}&", signature(past + 1)),
+                2 => {
+                    return ResponseTemplate::new(200).set_body_json(json!({"refreshed_urls": []}));
+                }
+                _ => format!("{uri}{renewed_path}?{}&", signature(now_seconds() + 86_400)),
+            };
+            ResponseTemplate::new(200).set_body_json(
+                json!({"refreshed_urls": [{"original": asked, "refreshed": refreshed}]}),
+            )
+        })
+        .mount(&online.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(proxy.clone()))
+        .and(query_param("format", "webp"))
+        .respond_with(png(4, 4))
+        .mount(&online.server)
+        .await;
+    serve(&online.server, &proxy, gif_answer(upload)).await;
+
+    let playing_file = online.account.image(playing(attachment_key())).await;
+    let still = online
+        .account
+        .image(ImageRequest {
+            animated: None,
+            ..playing(attachment_key())
+        })
+        .await;
+
+    assert_eq!(playing_file, Err(ImageError::NotFound));
+    assert!(still.is_ok(), "{still:?}");
+    assert!(online.requests_to(&cdn).await.is_empty());
+}
+
+// Notes when each request arrived; avatars take two seconds, the GIF's display answer (too
+// heavy) a moment, its stream none.
+#[derive(Clone, Default)]
+struct SlowAvatars(Arc<Mutex<Vec<(String, std::time::Instant)>>>);
+
+impl Respond for SlowAvatars {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let at = request.url.path().to_owned();
+        let mut arrivals = self.0.lock().unwrap();
+        let gifs = arrivals
+            .iter()
+            .filter(|(path, _)| path.ends_with(".gif"))
+            .count();
+        arrivals.push((at.clone(), std::time::Instant::now()));
+        if !at.ends_with(".gif") {
+            webp(80).set_delay(Duration::from_secs(2))
+        } else if gifs == 0 {
+            gif_answer(delta_gif(3, crate::media::MAX_BODY + 1))
+                .set_delay(Duration::from_millis(400))
+        } else {
+            gif_answer(delta_gif(3, crate::media::MAX_BODY + 1))
+        }
+    }
+}
+
+// Every image slot is taken while the GIF's display answer is on its way: its stream goes out
+// anyway, on a slot of its own.
+#[tokio::test]
+async fn a_stream_isnt_held_back_by_the_image_downloads() {
+    let online = connected().await;
+    load_external_gif(&online, &online.uri()).await;
+    let arrivals = SlowAvatars::default();
+    Mock::given(method("GET"))
+        .respond_with(arrivals.clone())
+        .mount(&online.server)
+        .await;
+    let account = Arc::new(online.account);
+    let gif = {
+        let account = account.clone();
+        tokio::spawn(async move { account.image(playing(thumbnail_key())).await })
+    };
+    while arrivals.0.lock().unwrap().is_empty() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let avatars = {
+        let account = account.clone();
+        tokio::spawn(async move {
+            futures_util::future::join_all((0..8).map(|n| {
+                account.image(request(
+                    ImageKey::Avatar {
+                        user: Snowflake::new(AUTHOR + n),
+                        hash: ImageHash::parse(HASH),
+                    },
+                    80,
+                ))
+            }))
+            .await
+        })
+    };
+
+    let file = gif.await.unwrap();
+
+    assert!(file.is_ok(), "{file:?}");
+    let (first_avatar, stream) = {
+        let arrivals = arrivals.0.lock().unwrap();
+        let first_avatar = arrivals
+            .iter()
+            .filter(|(path, _)| !path.ends_with(".gif"))
+            .map(|(_, at)| *at)
+            .min()
+            .unwrap();
+        let stream = arrivals
+            .iter()
+            .filter(|(path, _)| path.ends_with(".gif"))
+            .map(|(_, at)| *at)
+            .max()
+            .unwrap();
+        (first_avatar, stream)
+    };
+    // No image slot frees before the first avatar's two seconds are over.
+    assert!(
+        stream < first_avatar + Duration::from_secs(2),
+        "the stream waited {:?} for an image slot",
+        stream - first_avatar
+    );
+    assert!(avatars.await.unwrap().iter().all(Result::is_ok));
+}
+
+// Answers every request with a GIF that never ends, 16 KB every 20 ms, and counts them.
+async fn endless_cdn() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = asked.clone();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let counted = counted.clone();
+            tokio::spawn(async move {
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request).await;
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let head = b"HTTP/1.1 200 OK\r\ncontent-type: image/gif\r\ntransfer-encoding: chunked\r\n\r\n";
+                let mut chunk = b"4000\r\n".to_vec();
+                chunk.extend([b'.'; 0x4000]);
+                chunk.extend(b"\r\n");
+                if stream.write_all(head).await.is_err() {
+                    return;
+                }
+                while stream.write_all(&chunk).await.is_ok() {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            });
+        }
+    });
+    (format!("http://{address}/"), asked)
+}
+
+async fn until(what: &str, mut holds: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !holds() {
+        assert!(std::time::Instant::now() < deadline, "never: {what}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn the_last_waiter_gone_cancels_the_stream() {
+    use std::sync::atomic::Ordering;
+
+    let (cdn, asked) = endless_cdn().await;
+    let online = connected_with(Some(cdn.clone()), TempDir::new()).await;
+    load_external_gif(&online, &cdn).await;
+    let account = Arc::new(online.account);
+    let ask = || {
+        let account = account.clone();
+        tokio::spawn(async move { account.image(playing(thumbnail_key())).await })
+    };
+    let parts = || {
+        std::fs::read_dir(online.dir.path().join(ME.to_string()).join("tmp")).map_or(0, |runs| {
+            runs.flatten()
+                .map(|run| std::fs::read_dir(run.path()).map_or(0, Iterator::count))
+                .sum()
+        })
+    };
+    let first = ask();
+    until("the stream writes its file", || parts() == 1).await;
+
+    first.abort();
+    let _ = first.await;
+
+    until("the part file goes", || parts() == 0).await;
+    let streams = asked.load(Ordering::SeqCst);
+    let second = ask();
+    until("a new stream, not the cancelled one", || {
+        asked.load(Ordering::SeqCst) >= streams + 2
+    })
+    .await;
+    second.abort();
+}
+
+#[tokio::test]
+async fn forgetting_the_account_mid_stream_leaves_nothing_behind() {
+    let (cdn, _asked) = endless_cdn().await;
+    let online = connected_with(Some(cdn.clone()), TempDir::new()).await;
+    load_external_gif(&online, &cdn).await;
+    let directory = online.image_directory();
+    let account = Arc::new(online.account);
+    let streaming = {
+        let account = account.clone();
+        tokio::spawn(async move { account.image(playing(thumbnail_key())).await })
+    };
+    until("the stream writes its file", || {
+        std::fs::read_dir(directory.join("tmp")).is_ok_and(|runs| {
+            runs.flatten()
+                .any(|run| std::fs::read_dir(run.path()).is_ok_and(|parts| parts.count() > 0))
+        })
+    })
+    .await;
+    let client = account.shared.rest.client().clone();
+
+    client.forget_account(Snowflake::new(ME)).await.unwrap();
+    let late = streaming.await.unwrap();
+
+    assert!(late.is_err(), "{late:?}");
+    assert!(!directory.exists());
 }

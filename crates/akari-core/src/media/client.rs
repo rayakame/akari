@@ -189,9 +189,8 @@ impl MediaClient {
         }
     }
 
-    /// One request for an image of at most `cap` bytes, written to `file` as it arrives, on
-    /// one of the saves' slots: a heavy file never stalls a row. The caller deletes a file
-    /// that isn't whole.
+    /// As `fetch`, the body written to `file` as it arrives, on one of the saves' slots: a
+    /// heavy file never stalls a row. The caller deletes a file that isn't whole.
     pub(crate) async fn stream(&self, url: &Url, file: &Path, cap: usize) -> Fetched {
         if !self.hosts.allows(url) {
             return Fetched::Refused;

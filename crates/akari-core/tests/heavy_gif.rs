@@ -21,6 +21,7 @@ const ATTACHED: u64 = 400_000_000_000_000_092;
 const ATTACHMENT: u64 = 400_000_000_000_000_093;
 const ELSEWHERE: u64 = 400_000_000_000_000_094;
 const ELSEWHERE_AS_WEBP: u64 = 400_000_000_000_000_095;
+const ELSEWHERE_TOO_HEAVY: u64 = 400_000_000_000_000_096;
 const TOKEN: &str = "heavy-gif-test-token.secret";
 
 // A GIF that never played: 10 159 614 bytes (286 MB decoded), which the media proxy gave back
@@ -35,6 +36,8 @@ const PROXY_COPY: usize = 33_532_759;
 // The proxy's animated WebP of it: 3.6 KB over the cap at its full size, 7.2 MB at 512 × 384.
 const WEBP_FULL: usize = 16 * 1024 * 1024 + 3_686;
 const WEBP_SMALL: usize = 7_200_000;
+// A byte past what Akari streams to disk.
+const TOO_HEAVY: usize = 64 * 1024 * 1024 + 1;
 
 fn now() -> i64 {
     SystemTime::now()
@@ -91,6 +94,7 @@ async fn a_gif_the_proxy_makes_too_heavy_plays() {
     let file = format!("/attachments/{CHANNEL}/{ATTACHMENT}/secret-file-name.gif");
     let external = "/external/abc/https/example.com/secret-file-name.gif";
     let external_as_webp = "/external/def/https/example.com/secret-file-name.gif";
+    let external_too_heavy = "/external/ghi/https/example.com/secret-file-name.gif";
     let ex = now() + 86_400;
     let query = format!("ex={ex:x}&is={:x}&hm=5ec2e75160a7a7e2e&", ex - 86_400);
     let link = format!("{}{file}?{query}", cdn.uri());
@@ -134,6 +138,16 @@ async fn a_gif_the_proxy_makes_too_heavy_plays() {
                               "width": UPLOAD.width, "height": UPLOAD.height}
             }])
         ),
+        message(
+            ELSEWHERE_TOO_HEAVY,
+            json!([]),
+            json!([{
+                "type": "image", "url": "https://example.com/secret-file-name.gif",
+                "thumbnail": {"url": "https://example.com/secret-file-name.gif",
+                              "proxy_url": format!("{}{external_too_heavy}", media.uri()),
+                              "width": UPLOAD.width, "height": UPLOAD.height}
+            }])
+        ),
     ]);
     Mock::given(path(format!("/api/v9/channels/{CHANNEL}/messages")))
         .respond_with(ResponseTemplate::new(200).set_body_json(page))
@@ -157,6 +171,11 @@ async fn a_gif_the_proxy_makes_too_heavy_plays() {
         .and(query_param("format", "webp"))
         .and(query_param("animated", "true"))
         .respond_with(webp_answer(540, 405, WEBP_FULL))
+        .mount(&media)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(external_too_heavy))
+        .respond_with(gif_answer(gif::heavier(&upload, TOO_HEAVY - upload.len())))
         .mount(&media)
         .await;
     for copied in [file.as_str(), external, external_as_webp] {
@@ -236,6 +255,23 @@ async fn a_gif_the_proxy_makes_too_heavy_plays() {
     let small_again = account.image(as_webp(512, 384)).await;
     let full = account.image(as_webp(4096, 3072)).await;
     let full_streamed = read(&full);
+    let full_again = account.image(as_webp(4096, 3072)).await;
+    let too_heavy = account
+        .image(playing(&thumbnail(ELSEWHERE_TOO_HEAVY), 800))
+        .await;
+    let asked_as_webp = media
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| {
+            request.url.path() == external_as_webp
+                && request
+                    .url
+                    .query()
+                    .is_some_and(|query| query.contains("format=webp"))
+        })
+        .count();
     account.close();
     let _ = std::fs::remove_dir_all(&directory);
 
@@ -263,6 +299,16 @@ async fn a_gif_the_proxy_makes_too_heavy_plays() {
     assert!(
         full_streamed.as_ref() == Some(&copy),
         "the WebP is over the cap too"
+    );
+    assert_eq!(full_again.map(|file| file.from_disk), Ok(true));
+    assert_eq!(too_heavy, Err(ImageError::TooLarge));
+    assert_eq!(asked_as_webp, 2, "each box asks its own WebP");
+    assert!(
+        logs.text()
+            .lines()
+            .any(|line| line.contains("image over the streamed cap")),
+        "{}",
+        logs.text()
     );
     let fetched = cdn.received_requests().await.unwrap_or_default();
     let uploads: Vec<_> = fetched

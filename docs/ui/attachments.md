@@ -69,8 +69,9 @@ Discord's numbers, from sizes alone, so a row is as tall before its media loads 
   text (an image embed) the same way. A GIF no such file of which fits (an upload over 16 MB,
   another site's GIF, which has no upload on Discord's CDN) plays from the proxy's animated
   WebP at the box's size on a Mac that plays animated WebP right; where it doesn't, or that
-  WebP is over 16 MB too, the file (the upload, else the proxy's copy) is streamed to disk, up
-  to 64 MB, and played from there four frames at a time. Past 64 MB it stays a still.*
+  WebP is over 16 MB too, fails or comes back a still, the file (the upload, else the proxy's
+  copy) is streamed to disk, up to 64 MB and one at a time, and played from there four frames
+  at a time. Past 64 MB it stays a still.*
 - A video shows its poster (the proxy's still) with Discord's Play button in the middle: a black
   48 pt circle with its symbol nudged 1 right, both at 60 % together (a gray symbol over a dark
   video), at 80 % while the pointer is over the video, fading in 0.25 s.
