@@ -159,8 +159,8 @@ final class ReadingTests {
         #expect(opens == [[general], []])
     }
 
-    // What finding the channel read again after a reconnect looked like: the hold is the core's,
-    // and the session never tells it the channel was left.
+    // The hold is the core's: the session never says the channel was left, so naming it again
+    // after a reconnect reads nothing.
     @Test
     func aChannelMarkedUnreadStaysUnreadAcrossAReconnect() async throws {
         let session = readingSession()

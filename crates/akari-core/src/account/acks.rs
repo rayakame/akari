@@ -1000,9 +1000,8 @@ impl AckSender {
         id
     }
 
-    // A manual MESSAGE_ACK came. Made elsewhere, Discord set the channel's position on its own,
-    // maybe behind what was sent: what's pending for it is dropped, and the next ack goes out
-    // even if it isn't newer. The echo of Akari's own mark drops nothing.
+    // A manual MESSAGE_ACK. Made elsewhere, it may be behind what was sent: what's pending is
+    // dropped, and the next ack goes out even if it isn't newer. Akari's own echo drops nothing.
     pub(crate) fn echo(&self, channel: ChannelId, id: MessageId) -> Echo {
         self.wants.echo(channel, id)
     }
