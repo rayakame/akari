@@ -12,6 +12,7 @@ impl Permissions {
     pub const NONE: Self = Self(0);
     pub const ALL: Self = Self(u64::MAX);
     pub const ADMINISTRATOR: Self = Self(1 << 3);
+    pub const ADD_REACTIONS: Self = Self(1 << 6);
     pub const VIEW_CHANNEL: Self = Self(1 << 10);
     pub const SEND_MESSAGES: Self = Self(1 << 11);
     pub const SEND_TTS_MESSAGES: Self = Self(1 << 12);
@@ -20,11 +21,13 @@ impl Permissions {
     pub const ATTACH_FILES: Self = Self(1 << 15);
     pub const READ_MESSAGE_HISTORY: Self = Self(1 << 16);
     pub const MENTION_EVERYONE: Self = Self(1 << 17);
+    pub const USE_EXTERNAL_EMOJIS: Self = Self(1 << 18);
     pub const CHANGE_NICKNAME: Self = Self(1 << 26);
     pub const MANAGE_THREADS: Self = Self(1 << 34);
     pub const CREATE_PUBLIC_THREADS: Self = Self(1 << 35);
     pub const CREATE_PRIVATE_THREADS: Self = Self(1 << 36);
     pub const SEND_MESSAGES_IN_THREADS: Self = Self(1 << 38);
+    pub const PIN_MESSAGES: Self = Self(1 << 51);
     pub const BYPASS_SLOWMODE: Self = Self(1 << 52);
 
     /// Whether every bit of `other` is set.

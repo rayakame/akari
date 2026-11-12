@@ -21,6 +21,41 @@ const SEND_EXTRAS: Permissions = Permissions(
         | Permissions::EMBED_LINKS.0,
 );
 
+// A DM or group DM: Discord's client asks no permission there to reply, react or pin, and
+// lets nobody delete another's message.
+pub(crate) const PRIVATE: Permissions = Permissions(
+    Permissions::VIEW_CHANNEL.0
+        | Permissions::SEND_MESSAGES.0
+        | Permissions::READ_MESSAGE_HISTORY.0
+        | Permissions::ADD_REACTIONS.0
+        | Permissions::USE_EXTERNAL_EMOJIS.0
+        | Permissions::PIN_MESSAGES.0,
+);
+
+fn granted(guild: &Guild, member: &Member) -> Permissions {
+    let role = |id| guild.roles.iter().find(|role| role.id == id);
+    let mut permissions = role(guild.id.cast()).map_or(Permissions::NONE, |role| role.permissions);
+    for id in &member.roles {
+        if let Some(role) = role(*id) {
+            permissions |= role.permissions;
+        }
+    }
+    permissions
+}
+
+fn timed_out(member: &Member, now_millis: i64) -> bool {
+    member
+        .communication_disabled_until
+        .is_some_and(|until| until.unix_millis() > now_millis)
+}
+
+// A timeout or AutoMod's quarantine, which the owner and administrators are exempt from.
+pub(crate) fn silenced(guild: &Guild, user: UserId, member: &Member, now_millis: i64) -> bool {
+    guild.owner_id != Some(user)
+        && !granted(guild, member).contains(Permissions::ADMINISTRATOR)
+        && (member.flags & QUARANTINED != 0 || timed_out(member, now_millis))
+}
+
 // A thread passes its parent, whose overwrites it inherits. In a thread, SEND_MESSAGES
 // stands for SEND_MESSAGES_IN_THREADS, so callers check one bit everywhere.
 pub(crate) fn compute(
@@ -36,13 +71,7 @@ pub(crate) fn compute(
     if guild.owner_id == Some(user) {
         return Permissions::ALL;
     }
-    let role = |id| guild.roles.iter().find(|role| role.id == id);
-    let mut permissions = role(guild.id.cast()).map_or(Permissions::NONE, |role| role.permissions);
-    for id in &member.roles {
-        if let Some(role) = role(*id) {
-            permissions |= role.permissions;
-        }
-    }
+    let mut permissions = granted(guild, member);
     if permissions.contains(Permissions::ADMINISTRATOR) {
         return Permissions::ALL;
     }
@@ -67,14 +96,11 @@ pub(crate) fn compute(
         permissions |= own.allow;
     }
 
-    let timed_out = member
-        .communication_disabled_until
-        .is_some_and(|until| until.unix_millis() > now_millis);
     if member.flags & QUARANTINED != 0 {
         permissions &= Permissions::VIEW_CHANNEL
             | Permissions::READ_MESSAGE_HISTORY
             | Permissions::CHANGE_NICKNAME;
-    } else if timed_out {
+    } else if timed_out(member, now_millis) {
         permissions &= Permissions::VIEW_CHANNEL | Permissions::READ_MESSAGE_HISTORY;
     }
 
@@ -474,6 +500,45 @@ mod tests {
         );
 
         assert_eq!(permissions, Permissions::ALL);
+    }
+
+    #[test]
+    fn a_timeout_or_quarantine_silences_all_but_the_owner_and_administrators() {
+        let now = noon().unix_millis() - HOUR;
+        let me = Snowflake::new(USER);
+        let plain = guild(VIEW, &[(ROLE_A, Permissions::ADMINISTRATOR)]);
+        let mut owned = guild(VIEW, &[]);
+        owned.owner_id = Some(me);
+        let mut timed_out = member(&[]);
+        timed_out.communication_disabled_until = Some(noon());
+        let mut quarantined = member(&[]);
+        quarantined.flags = 1 << 7;
+        let mut administrator = member(&[ROLE_A]);
+        administrator.communication_disabled_until = Some(noon());
+
+        assert!(!silenced(&plain, me, &member(&[]), now));
+        assert!(silenced(&plain, me, &timed_out, now));
+        assert!(!silenced(&plain, me, &timed_out, now + 2 * HOUR));
+        assert!(silenced(&plain, me, &quarantined, now));
+        assert!(!silenced(&plain, me, &administrator, now));
+        assert!(!silenced(&owned, me, &timed_out, now));
+    }
+
+    #[test]
+    fn a_private_channel_grants_what_messages_ask_and_no_moderation() {
+        for granted in [
+            VIEW,
+            SEND,
+            HISTORY,
+            Permissions::ADD_REACTIONS,
+            Permissions::USE_EXTERNAL_EMOJIS,
+            Permissions::PIN_MESSAGES,
+        ] {
+            assert!(PRIVATE.contains(granted), "{granted:?}");
+        }
+        for withheld in [Permissions::MANAGE_MESSAGES, Permissions::MANAGE_THREADS] {
+            assert!(!PRIVATE.contains(withheld), "{withheld:?}");
+        }
     }
 
     #[test]
