@@ -1330,7 +1330,9 @@ impl Store {
     /// locked state. Nothing for a message the store doesn't have. Read again when the message,
     /// its channel or the user's permissions change. A viewed thread's starter row (the
     /// thread's ID and the row's) answers for the message it shows, in that message's channel:
-    /// requests take the IDs of [`Store::shown_message`].
+    /// requests take the IDs of [`Store::shown_message`]. Its `mark_unread` alone is the
+    /// thread's, which [`Account::mark_unread`](crate::Account::mark_unread) marks with the
+    /// row's own IDs.
     pub fn message_actions(&self, channel: ChannelId, message: MessageId) -> MessageActions {
         let now = self.now_millis();
         self.read(|inner| inner.state.message_actions(channel, message, now))
