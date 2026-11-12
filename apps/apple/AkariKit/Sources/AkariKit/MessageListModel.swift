@@ -1008,23 +1008,7 @@ public final class MessageListModel {
             noticeContext: noticeContext(for: shown),
             authorName: shown.fromWebhook ? shown.author.displayName : name(of: shown.author),
             threadBox: ThreadBox.of(message, in: store, name: name(of:)),
-            reply: replyLine(of: shown))
-    }
-
-    private func replyLine(of shown: Message) -> ReplyLine? {
-        guard let answered = shown.repliedTo else {
-            return nil
-        }
-        let target = store.replyTarget(
-            channelId: answered.channelId, targetId: answered.messageId)
-        var authorName: String?
-        if case .loaded(let preview) = target {
-            authorName =
-                preview.fromWebhook ? preview.author.displayName : name(of: preview.author)
-        }
-        return ReplyLine(
-            channelId: answered.channelId, messageId: answered.messageId, target: target,
-            mentionsAuthor: answered.mentionsAuthor, authorName: authorName)
+            reply: ReplyLine.of(shown, in: store))
     }
 
     private func row(_ id: MessageId, _ message: Message, from held: Row) -> Row {

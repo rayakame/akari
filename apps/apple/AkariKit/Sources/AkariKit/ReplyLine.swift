@@ -30,6 +30,24 @@ public struct ReplyLine: Equatable, Sendable {
         self.authorName = authorName
     }
 
+    /// The line over `message`, with what the store has of the message it answers; `nil` for a
+    /// message that answers none.
+    @MainActor
+    public static func of(_ message: Message, in store: Store) -> ReplyLine? {
+        guard let answered = message.repliedTo else {
+            return nil
+        }
+        let target = store.replyTarget(
+            channelId: answered.channelId, targetId: answered.messageId)
+        var authorName: String?
+        if case .loaded(let preview) = target {
+            authorName = preview.author.displayName
+        }
+        return ReplyLine(
+            channelId: answered.channelId, messageId: answered.messageId, target: target,
+            mentionsAuthor: answered.mentionsAuthor, authorName: authorName)
+    }
+
     private var preview: ReplyPreview? {
         if case .loaded(let preview) = target { preview } else { nil }
     }

@@ -457,6 +457,28 @@ final class SessionMessageJumpTests {
         session.close()
     }
 
+    // The New Thread form shows its source message as the list does, the line included.
+    @Test
+    func aThreadFormsSourceHasItsLineAndFollowsItsTarget() async throws {
+        store.update { state in
+            state.show(reply(2, to: 1, in: 11, mentionsAuthor: true))
+            state.threadCreations[id(11)] = ThreadCreation(public: true, private: true)
+            state.startable = [id(2)]
+        }
+        let session = session()
+
+        session.openThreadForm(in: id(11), from: id(2), location: .message)
+
+        let form = try #require(session.threadForm)
+        #expect(form.sourceReply?.messageId == id(1))
+        #expect(form.sourceReply?.name == "@Ray")
+
+        store.update { $0.replyTargets[id(1)] = .deleted }
+        session.apply(EventBatch([.replyTargetChanged(channelId: id(11), targetId: id(1))]))
+        #expect(form.sourceReply?.target == .deleted)
+        session.close()
+    }
+
     @Test
     func aMessageInAChannelThatIsNotOpenOpensItAndJumps() async throws {
         let session = session()

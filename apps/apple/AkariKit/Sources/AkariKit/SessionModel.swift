@@ -778,6 +778,11 @@ public final class SessionModel {
             {
                 form.follow(edited)
             }
+            if let line = form.sourceReply,
+                batch.replyTargetsChanged[line.channelId]?.contains(line.messageId) == true
+            {
+                form.readSourceReply()
+            }
         }
         let permissions =
             batch.everythingChanged || !batch.guildsChanged.isEmpty
